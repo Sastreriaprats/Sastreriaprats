@@ -34,8 +34,8 @@ export const listAppointments = protectedAction<{
   }
 )
 
-const CALENDAR_EDIT_PERMISSIONS = ['calendar.edit', 'calendar.update'] as const
-const CALENDAR_CANCEL_PERMISSIONS = ['calendar.edit', 'calendar.update', 'calendar.delete'] as const
+const CALENDAR_EDIT_PERMISSIONS = ['calendar.edit', 'calendar.update'] as string[]
+const CALENDAR_CANCEL_PERMISSIONS = ['calendar.edit', 'calendar.update', 'calendar.delete'] as string[]
 
 export const createAppointment = protectedAction<Record<string, unknown>, unknown>(
   {
