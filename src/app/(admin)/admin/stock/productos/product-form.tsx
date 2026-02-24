@@ -81,7 +81,7 @@ export function ProductForm({
   const [basico, setBasico] = useState({
     name: '',
     sku: '',
-    product_type: 'boutique' as const,
+    product_type: 'boutique' as string,
     category_id: '',
     brand: 'Prats',
     collection: '',
@@ -307,7 +307,7 @@ export function ProductForm({
   const buildPayload = () => {
     const finalPrice = basePriceCalculated !== null
       ? basePriceCalculated
-      : ((basico.product_type as string) === 'tailoring_fabric' ? 0 : null)
+      : (basico.product_type === 'tailoring_fabric' ? 0 : null)
     if (finalPrice === null) return null
     return {
       ...basico,
