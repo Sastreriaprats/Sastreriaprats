@@ -1,0 +1,26 @@
+{
+  "name": "Sastrería Prats — Gestión",
+  "short_name": "Prats",
+  "description": "Plataforma de gestión integral para Sastrería Prats",
+  "start_url": "/admin/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#1a2744",
+  "background_color": "#f5f0e8",
+  "categories": ["business", "productivity"],
+  "lang": "es",
+  "dir": "ltr",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Dashboard", "url": "/admin/dashboard" },
+    { "name": "TPV", "url": "/pos/caja" },
+    { "name": "Nuevo pedido", "url": "/admin/pedidos/nuevo" },
+    { "name": "Calendario", "url": "/admin/calendario" }
+  ],
+  "related_applications": [],
+  "prefer_related_applications": false
+}

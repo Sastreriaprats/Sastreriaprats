@@ -1,0 +1,14 @@
+---
+description: Indicar ruta del script SQL en lugar de pegar el código en el chat
+alwaysApply: true
+---
+
+# SQL para ejecutar en Supabase
+
+Cuando haya SQL que el usuario deba ejecutar en Supabase (SQL Editor), **no pegues el contenido completo en el chat**. Indica únicamente la **ruta del archivo** para que la abra él mismo.
+
+Ejemplo de respuesta:
+- "Ejecuta en Supabase el script que está en: `scripts/seed-fabric-and-service-categories.sql`"
+- "La migración está en: `supabase/migrations/022_products_fabric_meters_used.sql`"
+
+Si hace falta más de un archivo, lista las rutas. No des por hecho que el usuario ya ejecutó nada; si algo debe ejecutarse, dale siempre la ruta.

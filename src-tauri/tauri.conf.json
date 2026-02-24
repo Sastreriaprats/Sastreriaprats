@@ -1,0 +1,52 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicokant/tauri-v2-nightly-schema/main/tauri.conf.json",
+  "build": {
+    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "npm run dev",
+    "devPath": "http://localhost:3000",
+    "distDir": "../.next"
+  },
+  "package": {
+    "productName": "Sastrería Prats",
+    "version": "1.0.0"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": false,
+      "shell": { "all": false, "open": true },
+      "dialog": { "all": true },
+      "fs": { "all": false, "readFile": true, "writeFile": true, "scope": ["$APPDATA/**"] },
+      "window": { "all": true },
+      "notification": { "all": true }
+    },
+    "bundle": {
+      "active": true,
+      "icon": [
+        "icons/32x32.png",
+        "icons/128x128.png",
+        "icons/128x128@2x.png",
+        "icons/icon.icns",
+        "icons/icon.ico"
+      ],
+      "identifier": "es.sastreriaprats.app",
+      "targets": ["msi", "dmg", "appimage"],
+      "category": "Business",
+      "shortDescription": "Sastrería Prats — Gestión integral",
+      "longDescription": "Plataforma de gestión integral para Sastrería Prats. Incluye TPV, pedidos, clientes, stock, contabilidad y más."
+    },
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "title": "Sastrería Prats",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 768,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ]
+  }
+}
