@@ -22,9 +22,9 @@ const statusConfig: Record<string, { label: string; color: string; icon?: React.
 }
 
 const sourceIcons: Record<string, React.ReactNode> = {
-  online: <Globe className="h-3 w-3 text-blue-500" title="Online" />,
-  phone: <Phone className="h-3 w-3 text-green-600" title="Teléfono" />,
-  admin: <Settings className="h-3 w-3 text-gray-400" title="Panel" />,
+  online: <Globe className="h-3 w-3 text-blue-500" aria-label="Online" />,
+  phone: <Phone className="h-3 w-3 text-green-600" aria-label="Teléfono" />,
+  admin: <Settings className="h-3 w-3 text-gray-400" aria-label="Panel" />,
 }
 
 export function ClientAppointmentsTab({ clientId }: { clientId: string }) {
