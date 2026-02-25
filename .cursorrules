@@ -1,0 +1,55 @@
+# Reglas del Proyecto - Sastrería Prats
+
+## Server Actions (archivos con "use server")
+
+1. SIEMPRE envolver toda la lógica en try/catch. En el catch: console.error y devolver { error: 'mensaje' } o failure('mensaje')
+2. NUNCA usar redirect() ni requirePermission() en server actions que se llaman desde el cliente. En su lugar, verificar permisos con checkUserPermission() y devolver { error: 'Sin permisos' }
+3. NUNCA devolver objetos Date, undefined, funciones ni valores no serializables. Usar serializeForServerAction() de lib/server/serialize.ts para los datos antes de devolverlos
+4. Todas las server actions deben devolver siempre un objeto JSON serializable, tanto en éxito como en error
+
+## Queries a Supabase
+
+5. NUNCA usar select('*') en listas o tablas. Siempre especificar las columnas necesarias: select('id, name, email, ...')
+6. SIEMPRE añadir .limit() en queries que devuelven listas (100 para listas de detalle, 500 para selectores)
+7. NUNCA hacer queries dentro de bucles (N+1). Usar .in() para obtener todos los datos de golpe y agrupar en JS
+8. Preferir los hooks de use-cached-queries.ts (useGarmentTypes, useStores, useRolesAndPermissions, useCurrentProfile) en vez de hacer queries directas repetidas
+
+## React y useEffect
+
+9. NUNCA crear supabase con createClient() sin memoizar. Siempre: const supabase = useMemo(() => createClient(), [])
+10. Todo .then() sobre server actions o fetches DEBE tener .catch() con: console.error, setIsLoading(false), y opcionalmente toast.error()
+11. Si una función se usa como dependencia de useEffect, envolverla en useCallback
+12. NUNCA usar Math.random(), Date.now() ni valores variables en el renderizado de componentes SSR (causa hydration mismatch)
+
+## React Query
+
+13. Para datos que se repiten en varios componentes, crear un hook con useQuery en use-cached-queries.ts
+14. El QueryClient ya tiene staleTime: 30s y refetchOnWindowFocus: false configurados globalmente
+
+## Next.js
+
+15. NUNCA usar redirect() en funciones que pueden ser llamadas desde componentes cliente. Solo usar redirect() en server components y middleware
+16. Cuando crees componentes Image, siempre definir width Y height proporcionalmente, o usar style={{ width: 'auto', height: 'auto' }}
+
+## NORMA CRÍTICA: Borrar caché y reiniciar después de CADA cambio
+
+Después de CUALQUIER modificación de archivo en este proyecto, sin excepción, el asistente DEBE hacer lo siguiente por su cuenta (sin que el usuario lo pida):
+
+1. Liberar el puerto 3000 y detener procesos Node si hace falta
+2. Ejecutar: `Remove-Item -Recurse -Force .next` (o en bash: `rm -rf .next`) en la carpeta del proyecto
+3. Ejecutar: `npm run dev`
+4. Confirmar que el servidor arranca correctamente
+
+Esta norma aplica a TODOS los cambios futuros. No hay ningún cambio tan pequeño que no requiera este proceso. Si no se sigue, el servidor puede servir HTML o código cacheado y el usuario verá versiones antiguas. El usuario no debe tener que recordar pedir "next y reiniciar" cada vez.
+
+## Base de datos (Supabase)
+
+17. Las vistas deben usar security_invoker = on (no security_definer)
+18. Las funciones de PostgreSQL deben tener SET search_path = public
+19. Las RLS policies de INSERT deben usar WITH CHECK (auth.uid() IS NOT NULL) en vez de WITH CHECK (true), excepto para tablas públicas (como contact_requests)
+
+## General
+
+20. NUNCA dejar console.log de debug en el código. Solo console.error en catches
+21. Antes de hacer cambios, mostrar un resumen de lo que se va a cambiar y esperar confirmación
+22. Después de aplicar cambios, ejecutar npm run build para verificar que compila sin errores

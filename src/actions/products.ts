@@ -27,6 +27,22 @@ export const listProducts = protectedAction<ListParams, ListResult<any>>(
   }
 )
 
+/** Listado solo lectura para panel sastre (products.view). Incluye categoría, stock y campos para telas. */
+export const listProductsForSastre = protectedAction<ListParams, ListResult<any>>(
+  { permission: 'products.view', auditModule: 'stock' },
+  async (ctx, params) => {
+    const result = await queryList('products', {
+      ...params,
+      searchFields: ['sku', 'name', 'brand', 'barcode'],
+    }, `
+      id, sku, name, base_price, category_id, product_type, material, fabric_meters_used,
+      product_categories!products_category_id_fkey(name),
+      product_variants(id, stock_levels(quantity))
+    `)
+    return success(result)
+  }
+)
+
 export const getProduct = protectedAction<string, any>(
   { permission: 'products.view', auditModule: 'stock' },
   async (ctx, productId) => {
@@ -276,98 +292,109 @@ export const getStockDashboardStats = protectedAction<void, { totalProducts: num
 )
 
 export const listPhysicalWarehouses = protectedAction<void, any[]>(
-  { permission: 'products.view', auditModule: 'stock' },
+  { permission: ['products.view', 'stock.view'], auditModule: 'stock' },
   async (ctx) => {
-    const { data: stores } = await ctx.adminClient
-      .from('stores')
-      .select('id, name, code')
-      .eq('store_type', 'physical')
-      .eq('is_active', true)
+    try {
+      const { data: stores } = await ctx.adminClient
+        .from('stores')
+        .select('id, name, code')
+        .eq('store_type', 'physical')
+        .eq('is_active', true)
 
-    if (!stores?.length) return success([])
+      if (!stores?.length) return success([])
 
-    const storeIds = stores.map((s: any) => s.id)
-    const { data: warehouses } = await ctx.adminClient
-      .from('warehouses')
-      .select('id, name, code, store_id')
-      .eq('is_active', true)
-      .in('store_id', storeIds)
-      .order('name')
+      const storeIds = stores.map((s: any) => s.id)
+      const { data: warehouses, error: whError } = await ctx.adminClient
+        .from('warehouses')
+        .select('id, name, code, store_id')
+        .eq('is_active', true)
+        .in('store_id', storeIds)
+        .order('name')
 
-    if (!warehouses?.length) return success([])
+      if (whError) return failure(whError.message || 'Error al cargar almacenes', 'INTERNAL')
+      if (!warehouses?.length) return success([])
 
-    const storeMap = Object.fromEntries(stores.map((s: any) => [s.id, s.name || s.code]))
-    return success(warehouses.map((w: any) => ({
-      id: w.id,
-      name: w.name || w.code,
-      code: w.code,
-      storeName: storeMap[w.store_id] || '',
-    })))
+      const storeMap = Object.fromEntries(stores.map((s: any) => [s.id, s.name || s.code]))
+      return success(warehouses.map((w: any) => ({
+        id: w.id,
+        name: w.name || w.code,
+        code: w.code,
+        storeName: storeMap[w.store_id] || '',
+      })))
+    } catch (err: any) {
+      return failure(err?.message || 'Error al cargar almacenes', 'INTERNAL')
+    }
   }
 )
 
 export const listStockByWarehouse = protectedAction<{ warehouseId?: string; search?: string }, any[]>(
-  { permission: 'products.view', auditModule: 'stock' },
+  { permission: ['products.view', 'stock.view'], auditModule: 'stock' },
   async (ctx, { warehouseId, search }) => {
-    // Fetch stock_levels con admin client (salta RLS)
-    let slQuery = ctx.adminClient
-      .from('stock_levels')
-      .select('id, quantity, reserved, warehouse_id, product_variant_id')
-      .order('quantity', { ascending: false })
+    try {
+      let slQuery = ctx.adminClient
+        .from('stock_levels')
+        .select('id, quantity, reserved, warehouse_id, product_variant_id')
+        .order('quantity', { ascending: false })
 
-    if (warehouseId && warehouseId !== 'all') {
-      slQuery = slQuery.eq('warehouse_id', warehouseId)
-    }
-
-    const { data: slData, error: slError } = await slQuery
-    if (slError || !slData?.length) return success([])
-
-    const variantIds = [...new Set(slData.map((sl: any) => sl.product_variant_id))]
-    const { data: variantsData } = await ctx.adminClient
-      .from('product_variants')
-      .select('id, variant_sku, size, color, product_id')
-      .in('id', variantIds)
-
-    if (!variantsData?.length) return success([])
-
-    const productIds = [...new Set(variantsData.map((v: any) => v.product_id))]
-    const { data: productsData } = await ctx.adminClient
-      .from('products')
-      .select('id, sku, name, product_type, main_image_url, supplier_id, suppliers(name)')
-      .in('id', productIds)
-
-    if (!productsData?.length) return success([])
-
-    const variantMap = Object.fromEntries(variantsData.map((v: any) => [v.id, v]))
-    const productMap = Object.fromEntries(productsData.map((p: any) => [p.id, p]))
-    const s = search?.toLowerCase() ?? ''
-
-    const rows: any[] = []
-    for (const sl of slData) {
-      const v = variantMap[sl.product_variant_id]
-      if (!v) continue
-      const p = productMap[v.product_id]
-      if (!p) continue
-      if (s) {
-        const haystack = `${p.name} ${p.sku} ${v.variant_sku}`.toLowerCase()
-        if (!haystack.includes(s)) continue
+      if (warehouseId && warehouseId !== 'all') {
+        slQuery = slQuery.eq('warehouse_id', warehouseId)
       }
-      rows.push({
-        product_id: p.id,
-        product_name: p.name,
-        product_sku: p.sku,
-        product_type: p.product_type,
-        main_image_url: p.main_image_url,
-        supplier_name: (p.suppliers as any)?.name ?? null,
-        variant_sku: v.variant_sku,
-        size: v.size,
-        color: v.color,
-        quantity: sl.quantity || 0,
-        reserved: sl.reserved || 0,
-        available: (sl.quantity || 0) - (sl.reserved || 0),
-      })
-    }
 
-    return success(rows)
+      const { data: slData, error: slError } = await slQuery
+      if (slError) return failure(slError.message || 'Error al cargar stock', 'INTERNAL')
+      if (!slData?.length) return success([])
+
+      const variantIds = [...new Set(slData.map((sl: any) => sl.product_variant_id))]
+      const { data: variantsData } = await ctx.adminClient
+        .from('product_variants')
+        .select('id, variant_sku, size, color, product_id')
+        .in('id', variantIds)
+
+      if (!variantsData?.length) return success([])
+
+      const productIds = [...new Set(variantsData.map((v: any) => v.product_id))]
+      const { data: productsData } = await ctx.adminClient
+        .from('products')
+        .select('id, sku, name, product_type, main_image_url, supplier_id, suppliers(name)')
+        .in('id', productIds)
+
+      if (!productsData?.length) return success([])
+
+      const variantMap = Object.fromEntries(variantsData.map((v: any) => [v.id, v]))
+      const productMap = Object.fromEntries(productsData.map((p: any) => [p.id, p]))
+      const s = search?.toLowerCase() ?? ''
+
+      const rows: any[] = []
+      for (const sl of slData) {
+        const v = variantMap[sl.product_variant_id]
+        if (!v) continue
+        const p = productMap[v.product_id]
+        if (!p) continue
+        if (s) {
+          const haystack = `${p.name} ${p.sku} ${v.variant_sku}`.toLowerCase()
+          if (!haystack.includes(s)) continue
+        }
+        const qty = Number(sl.quantity) || 0
+        const res = Number(sl.reserved) || 0
+        rows.push({
+          product_id: p.id,
+          product_name: p.name,
+          product_sku: p.sku,
+          product_type: p.product_type,
+          main_image_url: p.main_image_url,
+          supplier_name: (p.suppliers as any)?.name ?? null,
+          variant_sku: v.variant_sku,
+          size: v.size,
+          color: v.color,
+          quantity: qty,
+          reserved: res,
+          available: qty - res,
+        })
+      }
+
+      return success(rows)
+    } catch (err: any) {
+      return failure(err?.message || 'Error al cargar stock', 'INTERNAL')
+    }
   }
 )

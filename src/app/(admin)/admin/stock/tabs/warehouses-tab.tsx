@@ -10,6 +10,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2, Search, Warehouse, Image as ImageIcon, X, SlidersHorizontal } from 'lucide-react'
+import { toast } from 'sonner'
 
 const productTypeLabels: Record<string, string> = {
   boutique: 'Boutique', tailoring_fabric: 'Tejido', accessory: 'Complemento', service: 'Servicio',
@@ -39,6 +40,7 @@ export function WarehousesTab({ outOfStockFilter = false, onClearOutOfStockFilte
   const [rows, setRows] = useState<StockRow[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isLoadingWarehouses, setIsLoadingWarehouses] = useState(true)
+  const [warehousesError, setWarehousesError] = useState<string | null>(null)
 
   // Filtros de columna
   const [stockFilter, setStockFilter] = useState<StockFilterValue>('all')
@@ -53,12 +55,24 @@ export function WarehousesTab({ outOfStockFilter = false, onClearOutOfStockFilte
   }, [outOfStockFilter])
 
   useEffect(() => {
-    listPhysicalWarehouses().then(result => {
-      if (result.success && result.data) {
-        setWarehouses(result.data as WarehouseInfo[])
-      }
-      setIsLoadingWarehouses(false)
-    })
+    setWarehousesError(null)
+    listPhysicalWarehouses()
+      .then(result => {
+        if (result.success && result.data) {
+          setWarehouses(result.data as WarehouseInfo[])
+          setWarehousesError(null)
+        } else {
+          const msg = (result as { error?: string }).error ?? 'Error al cargar almacenes'
+          setWarehousesError(msg)
+        }
+        setIsLoadingWarehouses(false)
+      })
+      .catch(err => {
+        console.error('[WarehousesTab] listPhysicalWarehouses:', err)
+        toast.error('Error al cargar almacenes')
+        setWarehousesError('Error al cargar almacenes')
+        setIsLoadingWarehouses(false)
+      })
   }, [])
 
   const loadStock = useCallback(async () => {
@@ -73,6 +87,10 @@ export function WarehousesTab({ outOfStockFilter = false, onClearOutOfStockFilte
       } else {
         setRows([])
       }
+    } catch (err) {
+      console.error('[WarehousesTab] listStockByWarehouse:', err)
+      toast.error('Error al cargar stock')
+      setRows([])
     } finally {
       setIsLoading(false)
     }
@@ -129,6 +147,8 @@ export function WarehousesTab({ outOfStockFilter = false, onClearOutOfStockFilte
         <div className="flex flex-wrap gap-2 items-center">
           {isLoadingWarehouses ? (
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          ) : warehousesError ? (
+            <p className="text-sm text-destructive">{warehousesError}</p>
           ) : (
             <>
               <Button

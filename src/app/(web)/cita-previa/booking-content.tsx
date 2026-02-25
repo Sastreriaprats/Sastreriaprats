@@ -59,10 +59,15 @@ export function BookingContent({ stores, client }: BookingContentProps) {
   }, [stores])
 
   useEffect(() => {
-    getClientAppointmentsWeb().then(r => {
-      if (r.success) setMyAppointments(r.data as any[])
-      setLoadingAppts(false)
-    })
+    getClientAppointmentsWeb()
+      .then(r => {
+        if (r.success) setMyAppointments(r.data as any[])
+        setLoadingAppts(false)
+      })
+      .catch(err => {
+        console.error('[booking] getClientAppointmentsWeb:', err)
+        setLoadingAppts(false)
+      })
   }, [])
 
   useEffect(() => {
@@ -88,8 +93,9 @@ export function BookingContent({ stores, client }: BookingContentProps) {
     if (result.success) {
       setBookedAppointment(result.data)
       setStep('done')
-      // Recargar mis citas
-      getClientAppointmentsWeb().then(r => { if (r.success) setMyAppointments(r.data as any[]) })
+      getClientAppointmentsWeb()
+        .then(r => { if (r.success) setMyAppointments(r.data as any[]) })
+        .catch(() => {})
     } else {
       toast.error(result.error || 'No se pudo crear la cita')
     }
@@ -99,7 +105,9 @@ export function BookingContent({ stores, client }: BookingContentProps) {
     const result = await cancelClientAppointment(id)
     if (result.success) {
       toast.success('Cita cancelada')
-      getClientAppointmentsWeb().then(r => { if (r.success) setMyAppointments(r.data as any[]) })
+      getClientAppointmentsWeb()
+        .then(r => { if (r.success) setMyAppointments(r.data as any[]) })
+        .catch(() => {})
     } else {
       toast.error(result.error || 'No se pudo cancelar')
     }

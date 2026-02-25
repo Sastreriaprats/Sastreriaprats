@@ -3,6 +3,7 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { success, failure } from '@/lib/errors'
+import { serializeForServerAction } from '@/lib/server/serialize'
 
 export async function bookAppointment(input: {
   date: string
@@ -11,9 +12,10 @@ export async function bookAppointment(input: {
   type: string
   notes?: string
 }) {
-  const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return failure('Debes iniciar sesión para reservar una cita')
+  try {
+    const supabase = await createServerSupabaseClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return failure('Debes iniciar sesión para reservar una cita')
 
   const admin = createAdminClient()
 
@@ -73,12 +75,17 @@ export async function bookAppointment(input: {
     .select()
     .single()
 
-  if (error) return failure(error.message)
-  return success(data)
+    if (error) return failure(error.message)
+    return success(serializeForServerAction(data))
+  } catch (err) {
+    console.error('[bookAppointment]', err)
+    return failure(err instanceof Error ? err.message : 'Error al reservar cita')
+  }
 }
 
 export async function cancelClientAppointment(appointmentId: string) {
-  const supabase = await createServerSupabaseClient()
+  try {
+    const supabase = await createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return failure('Debes iniciar sesión')
 
@@ -115,31 +122,40 @@ export async function cancelClientAppointment(appointmentId: string) {
     })
     .eq('id', appointmentId)
 
-  if (error) return failure(error.message)
-  return success({ cancelled: true })
+    if (error) return failure(error.message)
+    return success({ cancelled: true })
+  } catch (err) {
+    console.error('[cancelClientAppointment]', err)
+    return failure(err instanceof Error ? err.message : 'Error al cancelar')
+  }
 }
 
 export async function getClientAppointmentsWeb() {
-  const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return failure('Debes iniciar sesión')
+  try {
+    const supabase = await createServerSupabaseClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return failure('Debes iniciar sesión')
 
-  const admin = createAdminClient()
+    const admin = createAdminClient()
 
-  const { data: client } = await admin
-    .from('clients')
-    .select('id')
-    .eq('profile_id', user.id)
-    .single()
+    const { data: client } = await admin
+      .from('clients')
+      .select('id')
+      .eq('profile_id', user.id)
+      .single()
 
-  if (!client) return success([])
+    if (!client) return success([])
 
-  const { data, error } = await admin
-    .from('appointments')
-    .select('id, type, title, date, start_time, end_time, status, notes, stores(name)')
-    .eq('client_id', client.id)
-    .order('date', { ascending: false })
+    const { data, error } = await admin
+      .from('appointments')
+      .select('id, type, title, date, start_time, end_time, status, notes, stores(name)')
+      .eq('client_id', client.id)
+      .order('date', { ascending: false })
 
-  if (error) return failure(error.message)
-  return success(data || [])
+    if (error) return failure(error.message)
+    return success(serializeForServerAction(data || []))
+  } catch (err) {
+    console.error('[getClientAppointmentsWeb]', err)
+    return failure(err instanceof Error ? err.message : 'Error al cargar citas')
+  }
 }

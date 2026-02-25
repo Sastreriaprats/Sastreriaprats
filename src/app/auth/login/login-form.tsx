@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -15,7 +15,7 @@ interface LoginFormProps {
 }
 
 export function LoginForm({ redirectTo, mode }: LoginFormProps) {
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const [isLoading, setIsLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [email, setEmail] = useState('')
@@ -70,14 +70,24 @@ export function LoginForm({ redirectTo, mode }: LoginFormProps) {
       }
       setLastEmailNotConfirmed(false)
 
-      // Redirigir según el modo
+      // Redirigir según el modo y el rol (roles desde Supabase para evitar sesión no propagada a /api/auth/me)
       let destination: string
       if (mode === 'pos') {
         destination = '/pos/caja'
       } else if (mode === 'client') {
         destination = redirectTo || '/mi-cuenta'
       } else {
-        destination = '/admin/dashboard'
+        const { data: rolesData } = await supabase
+          .from('user_roles')
+          .select('roles(name)')
+          .eq('user_id', data.user.id)
+        const roleNames: string[] = (rolesData ?? []).flatMap((ur: { roles?: { name: string } | { name: string }[] | null }) => {
+          if (!ur.roles) return []
+          return Array.isArray(ur.roles) ? ur.roles.map((r: { name: string }) => r.name) : [ur.roles.name]
+        })
+        const isSastre = roleNames.some((r) => r === 'sastre' || r === 'sastre_plus')
+        const isVendedor = roleNames.some((r) => r === 'vendedor_basico' || r === 'vendedor_avanzado')
+        destination = isSastre ? '/sastre' : isVendedor ? '/vendedor' : '/admin/dashboard'
       }
       window.location.href = destination
     } catch (err: any) {

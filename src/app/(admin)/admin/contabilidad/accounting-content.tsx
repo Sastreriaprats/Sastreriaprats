@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -159,10 +159,16 @@ function SummaryTab() {
 
   useEffect(() => {
     setLoading(true)
-    getAccountingSummary({ year }).then(r => {
-      setData(r.success && 'data' in r ? r.data : null)
-      setLoading(false)
-    })
+    getAccountingSummary({ year })
+      .then(r => {
+        setData(r.success && 'data' in r ? r.data : null)
+        setLoading(false)
+      })
+      .catch(err => {
+        console.error('[accounting] getAccountingSummary:', err)
+        toast.error('Error al cargar resumen contable')
+        setLoading(false)
+      })
   }, [year])
 
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i)
@@ -183,7 +189,9 @@ function SummaryTab() {
         </Select>
         <Button variant="outline" size="sm" onClick={() => {
           setLoading(true)
-          getAccountingSummary({ year }).then(r => { setData(r.success && 'data' in r ? r.data : null); setLoading(false) })
+          getAccountingSummary({ year })
+            .then(r => { setData(r.success && 'data' in r ? r.data : null); setLoading(false) })
+            .catch(err => { console.error('[accounting] getAccountingSummary:', err); toast.error('Error al cargar resumen'); setLoading(false) })
         }}><RefreshCw className="h-3.5 w-3.5 mr-1" /> Actualizar</Button>
       </div>
 
@@ -548,7 +556,7 @@ function InvoicesTab() {
 }
 
 function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () => void }) {
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const [loadingPdf, setLoadingPdf] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -800,6 +808,7 @@ function EstimateTableRow ({
 }
 
 function EstimatesTab() {
+  const supabase = useMemo(() => createClient(), [])
   const [rows, setRows] = useState<EstimateRow[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -887,13 +896,12 @@ function EstimatesTab() {
   }
 
   const convertToInvoice = async (est: EstimateRow) => {
-    const supabase = createClient()
     const year = new Date().getFullYear()
     const { count } = await supabase.from('invoices').select('*', { count: 'exact', head: true }).like('invoice_number', `F${year}-%`)
     const seq = String((count ?? 0) + 1).padStart(4, '0')
     const invoice_number = `F${year}-${seq}`
 
-    const { data: lines } = await supabase.from('estimate_lines').select('*').eq('estimate_id', est.id)
+    const { data: lines } = await supabase.from('estimate_lines').select('description, quantity, unit_price, tax_rate, total').eq('estimate_id', est.id)
 
     const { data: inv, error } = await supabase.from('invoices').insert({
       invoice_number, invoice_series: 'F', invoice_type: 'issued',
@@ -1244,10 +1252,15 @@ function VatTab() {
 
   useEffect(() => {
     setLoading(true)
-    getVatQuarterly({ year }).then(r => {
-      if (r.success) { setQuarters(r.data.quarters); setTotRep(r.data.totalRepercutido); setTotSop(r.data.totalSoportado) }
-      setLoading(false)
-    })
+    getVatQuarterly({ year })
+      .then(r => {
+        if (r.success) { setQuarters(r.data.quarters); setTotRep(r.data.totalRepercutido); setTotSop(r.data.totalSoportado) }
+        setLoading(false)
+      })
+      .catch(err => {
+        console.error('[accounting] getVatQuarterly:', err)
+        setLoading(false)
+      })
   }, [year])
 
   const baseSalesTotal  = quarters.reduce((s, q) => s + q.baseImponibleSales, 0)

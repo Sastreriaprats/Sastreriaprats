@@ -278,7 +278,7 @@ export const getVatQuarterly = protectedAction<
 export const getClientsForInvoice = protectedAction<void, { id: string; full_name: string; email: string | null }[]>(
   { permission: 'accounting.edit', auditModule: 'accounting' },
   async (ctx) => {
-    const { data } = await ctx.adminClient.from('clients').select('id, first_name, last_name, full_name, email').order('last_name')
+    const { data } = await ctx.adminClient.from('clients').select('id, first_name, last_name, full_name, email').order('last_name').limit(500)
     return success((data || []).map((c: Record<string, unknown>) => {
       const fn = (c as any).full_name ?? `${(c as any).first_name ?? ''} ${(c as any).last_name ?? ''}`.trim()
       return { id: String(c.id), full_name: String(fn || 'Sin nombre'), email: (c.email as string) ?? null }

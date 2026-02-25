@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -19,7 +19,7 @@ import { formatCurrency, formatDateTime } from '@/lib/utils'
 
 export function ReturnsContent() {
   const router = useRouter()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const { activeStoreId } = useAuth()
 
   const [ticketSearch, setTicketSearch] = useState('')

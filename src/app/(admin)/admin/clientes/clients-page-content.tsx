@@ -32,7 +32,7 @@ const categoryColors: Record<string, string> = {
   ambassador: 'bg-prats-navy/10 text-prats-navy',
 }
 
-export function ClientsPageContent() {
+export function ClientsPageContent({ basePath = '/admin' }: { basePath?: string }) {
   const router = useRouter()
   const { can } = usePermissions()
   const [showCreateDialog, setShowCreateDialog] = useState(false)
@@ -163,7 +163,7 @@ export function ClientsPageContent() {
               <TableRow
                 key={client.id}
                 className={`cursor-pointer hover:bg-muted/50 ${!client.is_active ? 'opacity-50' : ''}`}
-                onClick={() => router.push(`/admin/clientes/${client.id}`)}
+                onClick={() => router.push(`${basePath}/clientes/${client.id}`)}
               >
                 <TableCell>
                   <div className="flex items-center gap-3">
@@ -203,11 +203,11 @@ export function ClientsPageContent() {
                       <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => router.push(`/admin/clientes/${client.id}`)}>
+                      <DropdownMenuItem onClick={() => router.push(`${basePath}/clientes/${client.id}`)}>
                         <Eye className="mr-2 h-4 w-4" /> Ver ficha
                       </DropdownMenuItem>
                       {can('clients.edit') && (
-                        <DropdownMenuItem onClick={() => router.push(`/admin/clientes/${client.id}?tab=datos`)}>
+                        <DropdownMenuItem onClick={() => router.push(`${basePath}/clientes/${client.id}?tab=datos`)}>
                           <Pencil className="mr-2 h-4 w-4" /> Editar
                         </DropdownMenuItem>
                       )}

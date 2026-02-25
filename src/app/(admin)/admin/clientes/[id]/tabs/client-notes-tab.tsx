@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -28,7 +28,7 @@ const noteTypeColors: Record<string, string> = {
 }
 
 export function ClientNotesTab({ clientId }: { clientId: string }) {
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const { can } = usePermissions()
   const [notes, setNotes] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -44,6 +44,7 @@ export function ClientNotesTab({ clientId }: { clientId: string }) {
         .eq('client_id', clientId)
         .order('is_pinned', { ascending: false })
         .order('created_at', { ascending: false })
+        .limit(100)
       if (data) setNotes(data)
     } catch (err) {
       console.error('[ClientNotesTab] fetchNotes error:', err)
@@ -131,7 +132,7 @@ export function ClientNotesTab({ clientId }: { clientId: string }) {
                   <span className="text-xs text-muted-foreground">{formatDateTime(note.created_at)}</span>
                 </div>
                 <p className="text-sm mt-2">{note.content}</p>
-                <p className="text-xs text-muted-foreground mt-2">Por: {note.author_name}</p>
+                <p className="text-xs text-muted-foreground mt-2">Por: {note.created_by_name ?? note.author_name ?? '—'}</p>
               </CardContent>
             </Card>
           ))}

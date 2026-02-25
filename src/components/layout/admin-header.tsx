@@ -1,18 +1,17 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import {
-  Search, Bell, Store, Menu, LogOut, User, ChevronRight, PanelLeftClose, PanelLeft, Settings,
+  Bell, Menu, LogOut, User, ChevronRight, PanelLeftClose, PanelLeft, Settings,
   LayoutDashboard, Users, Scissors, CreditCard, Package, Truck, BookOpen, Calendar, Shirt,
 } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
@@ -26,7 +25,7 @@ const breadcrumbLabels: Record<string, string> = {
   admin: '', dashboard: 'Dashboard', clientes: 'Clientes', pedidos: 'Pedidos',
   stock: 'Stock', proveedores: 'Proveedores', contabilidad: 'Contabilidad',
   calendario: 'Calendario', configuracion: 'Configuración', perfil: 'Mi perfil',
-  nuevo: 'Nuevo', devoluciones: 'Devoluciones',
+  nuevo: 'Nuevo', devoluciones: 'Devoluciones', auditoria: 'Seguimiento', cobros: 'Cobros pendientes',
 }
 
 const mobileNavItems = [
@@ -78,11 +77,11 @@ export function AdminHeader({
 }) {
   const pathname = usePathname()
   const router = useRouter()
-  const { profile, stores, activeStoreId, setActiveStoreId } = useAuth()
+  const { profile } = useAuth()
   const [showNotifications, setShowNotifications] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
   const [alertsCount, setAlertsCount] = useState(0)
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
 
   useEffect(() => {
     const fetchCount = async () => {
@@ -112,23 +111,10 @@ export function AdminHeader({
     return { label, href }
   }).filter(b => b.label)
 
-  const activeStore = stores?.find(s => s.storeId === activeStoreId)
-
   const handleLogout = async () => {
     await logoutAction()
     router.push('/auth/login')
   }
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault()
-        document.getElementById('cmd-search')?.focus()
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [])
 
   return (
     <header className="flex items-center justify-between h-16 px-4 border-b bg-white flex-shrink-0">
@@ -161,33 +147,6 @@ export function AdminHeader({
       </div>
 
       <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" className="hidden md:flex gap-2 text-muted-foreground h-8" asChild>
-          <Link href="/admin/dashboard" id="cmd-search">
-            <Search className="h-3 w-3" /> Buscar...
-            <kbd className="ml-2 text-[10px] bg-muted px-1 rounded">⌘K</kbd>
-          </Link>
-        </Button>
-
-        {stores && stores.length > 1 && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-2 h-8">
-                <Store className="h-3 w-3" />
-                <span className="max-w-[100px] truncate text-xs">{activeStore?.storeName ?? 'Tienda'}</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {stores.map(s => (
-                <DropdownMenuItem key={s.storeId} onClick={() => setActiveStoreId(s.storeId)}
-                  className={s.storeId === activeStoreId ? 'bg-muted font-medium' : ''}>
-                  <Store className="mr-2 h-3 w-3" /> {s.storeName}
-                  {s.isPrimary && <Badge variant="outline" className="ml-auto text-[10px]">Principal</Badge>}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-
         <Button variant="ghost" size="icon" className="h-10 w-10 relative" onClick={() => setShowNotifications(true)} title="Alertas y notificaciones">
           <Bell className="h-5 w-5" />
           {totalAlertBadge > 0 && (

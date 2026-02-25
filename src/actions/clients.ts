@@ -27,7 +27,7 @@ export const getClient = protectedAction<string, any>(
   async (ctx, clientId) => {
     const client = await queryById('clients', clientId, `
       *,
-      client_notes ( id, note_type, title, content, is_pinned, created_at, author_name ),
+      client_notes ( id, note_type, title, content, is_pinned, created_at, created_by_name ),
       boutique_alterations ( id, description, cost, status, created_at )
     `)
     if (!client) return failure('Cliente no encontrado', 'NOT_FOUND')
@@ -44,23 +44,81 @@ export const createClientAction = protectedAction<any, any>(
     revalidate: ['/admin/clientes'],
   },
   async (ctx, input) => {
-    const parsed = createClientSchema.safeParse(input)
-    if (!parsed.success) return failure(parsed.error.issues[0].message, 'VALIDATION')
+    try {
+      const parsed = createClientSchema.safeParse(input)
+      if (!parsed.success) return failure(parsed.error.issues[0].message, 'VALIDATION')
 
-    const clientCode = await getNextNumber('clients', 'client_code', 'CLI')
+      const clientCode = await getNextNumber('clients', 'client_code', 'CLI')
+      const email = parsed.data.email?.trim()?.toLowerCase() || null
+      const hasValidEmail = email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 
-    const { data: client, error } = await ctx.adminClient
-      .from('clients')
-      .insert({
+      let profileId: string | null = null
+      const defaultPassword = process.env.CLIENT_DEFAULT_PASSWORD
+
+      if (hasValidEmail && defaultPassword) {
+        const fullName = `${parsed.data.first_name || ''} ${parsed.data.last_name || ''}`.trim()
+        const { data: authData, error: authError } = await ctx.adminClient.auth.admin.createUser({
+          email,
+          password: defaultPassword,
+          email_confirm: true,
+          user_metadata: {
+            full_name: fullName || email,
+            first_name: parsed.data.first_name || '',
+            last_name: parsed.data.last_name || '',
+          },
+        })
+
+        if (authError) {
+          const msg = authError.message || ''
+          const alreadyExists = /already|exists|registered|duplicate/i.test(msg)
+          if (alreadyExists) {
+            console.error('[createClientAction] auth user already exists for', email, authError)
+            // Crear cliente sin cuenta; el email ya tiene usuario
+          } else {
+            console.error('[createClientAction] createUser:', authError)
+            return failure('No se pudo crear la cuenta de acceso: ' + (msg || authError.message))
+          }
+        } else if (authData?.user?.id) {
+          profileId = authData.user.id
+
+          const { data: clientRole } = await ctx.adminClient
+            .from('roles')
+            .select('id')
+            .eq('name', 'client')
+            .single()
+
+          if (clientRole) {
+            const { error: roleErr } = await ctx.adminClient.from('user_roles').insert({
+              user_id: profileId,
+              role_id: clientRole.id,
+            })
+            if (roleErr) console.error('[createClientAction] user_roles:', roleErr)
+          }
+        }
+      }
+
+      const insertPayload: Record<string, unknown> = {
         ...parsed.data,
         client_code: clientCode,
         created_by: ctx.userId,
-      })
-      .select()
-      .single()
+      }
+      delete (insertPayload as Record<string, unknown>).full_name
+      if (profileId) insertPayload.profile_id = profileId
 
-    if (error) return failure(error.message)
-    return success(client)
+      const { data: client, error } = await ctx.adminClient
+        .from('clients')
+        .insert(insertPayload)
+        .select()
+        .single()
+
+      if (error) return failure(error.message)
+
+      const result = { ...client, accountCreated: !!profileId }
+      return success(result)
+    } catch (e) {
+      console.error('[createClientAction] unexpected:', e)
+      return failure('Error inesperado al crear el cliente')
+    }
   }
 )
 
@@ -77,12 +135,7 @@ export const updateClientAction = protectedAction<{ id: string; data: any }, any
     if (!parsed.success) return failure(parsed.error.issues[0].message, 'VALIDATION')
 
     const updateData: any = { ...parsed.data }
-    if (parsed.data.first_name || parsed.data.last_name) {
-      const existing = await queryById<any>('clients', id, 'first_name, last_name')
-      if (existing) {
-        updateData.full_name = `${parsed.data.first_name || existing.first_name} ${parsed.data.last_name || existing.last_name}`
-      }
-    }
+    delete updateData.full_name
 
     const { data: client, error } = await ctx.adminClient
       .from('clients')
@@ -131,8 +184,8 @@ export const addClientNote = protectedAction<any, any>(
       .from('client_notes')
       .insert({
         ...parsed.data,
-        author_id: ctx.userId,
-        author_name: ctx.userName,
+        created_by: ctx.userId,
+        created_by_name: ctx.userName,
       })
       .select()
       .single()

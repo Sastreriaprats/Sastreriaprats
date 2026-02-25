@@ -66,33 +66,39 @@ export function ReportsContent() {
 
   const fetchAll = useCallback(async () => {
     setIsLoading(true)
-    const { start, end } = dateRange
+    try {
+      const { start, end } = dateRange
 
-    const startD = new Date(start)
-    const endD = new Date(end)
-    const diff = endD.getTime() - startD.getTime()
-    const prevEnd = new Date(startD.getTime() - 86400000)
-    const prevStart = new Date(prevEnd.getTime() - diff)
+      const startD = new Date(start)
+      const endD = new Date(end)
+      const diff = endD.getTime() - startD.getTime()
+      const prevEnd = new Date(startD.getTime() - 86400000)
+      const prevStart = new Date(prevEnd.getTime() - diff)
 
-    const [salesRes, compareRes, productsRes, tailorRes, clientsRes] = await Promise.all([
-      getSalesReport({ start_date: start, end_date: end, store_id: activeStoreId || undefined, group_by: groupBy }),
-      getComparePeriods({
-        current_start: start, current_end: end,
-        previous_start: prevStart.toISOString().split('T')[0],
-        previous_end: prevEnd.toISOString().split('T')[0],
-        store_id: activeStoreId || undefined,
-      }),
-      getTopProducts({ start_date: start, end_date: end, limit: 10 }),
-      getTailorPerformance({ start_date: start, end_date: end }),
-      getClientsAnalytics({ start_date: start, end_date: end }),
-    ])
+      const [salesRes, compareRes, productsRes, tailorRes, clientsRes] = await Promise.all([
+        getSalesReport({ start_date: start, end_date: end, store_id: activeStoreId || undefined, group_by: groupBy }),
+        getComparePeriods({
+          current_start: start, current_end: end,
+          previous_start: prevStart.toISOString().split('T')[0],
+          previous_end: prevEnd.toISOString().split('T')[0],
+          store_id: activeStoreId || undefined,
+        }),
+        getTopProducts({ start_date: start, end_date: end, limit: 10 }),
+        getTailorPerformance({ start_date: start, end_date: end }),
+        getClientsAnalytics({ start_date: start, end_date: end }),
+      ])
 
-    if (salesRes.success) setSalesData(salesRes.data)
-    if (compareRes.success) setCompareData(compareRes.data)
-    if (productsRes.success) setTopProducts(productsRes.data)
-    if (tailorRes.success) setTailorData(productsRes.success ? tailorRes.data : [])
-    if (clientsRes.success) setClientsData(clientsRes.data)
-    setIsLoading(false)
+      if (salesRes.success) setSalesData(salesRes.data)
+      if (compareRes.success) setCompareData(compareRes.data)
+      if (productsRes.success) setTopProducts(productsRes.data)
+      if (tailorRes.success) setTailorData(tailorRes.data)
+      if (clientsRes.success) setClientsData(clientsRes.data)
+    } catch (err) {
+      console.error('[ReportsContent fetchAll]', err)
+      toast.error('Error al cargar los informes')
+    } finally {
+      setIsLoading(false)
+    }
   }, [dateRange, groupBy, activeStoreId])
 
   useEffect(() => { fetchAll() }, [fetchAll])

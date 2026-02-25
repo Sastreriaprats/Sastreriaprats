@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -28,13 +28,47 @@ const ACTION_BADGES: Record<string, string> = {
   delete: 'bg-red-100 text-red-700',
   login:  'bg-purple-100 text-purple-700',
   logout: 'bg-gray-100 text-gray-700',
+  state_change: 'bg-amber-100 text-amber-700',
+  payment: 'bg-emerald-100 text-emerald-700',
+  refund: 'bg-orange-100 text-orange-700',
+  export: 'bg-slate-100 text-slate-700',
+  import: 'bg-slate-100 text-slate-700',
+}
+
+const ACTION_LABELS: Record<string, string> = {
+  create: 'Crear',
+  update: 'Editar',
+  delete: 'Eliminar',
+  state_change: 'Cambio estado',
+  payment: 'Pago',
+  refund: 'Devolución',
+  export: 'Exportar',
+  import: 'Importar',
 }
 
 const ENTITY_LABELS: Record<string, string> = {
-  client: 'Cliente', order: 'Pedido', product: 'Producto',
-  stock_movement: 'Stock', user: 'Usuario', config: 'Configuración',
-  appointment: 'Cita', sale: 'Venta', supplier: 'Proveedor',
-  cms_page: 'Página CMS', blog_post: 'Blog',
+  client: 'Cliente',
+  client_measurements: 'Medidas',
+  client_note: 'Nota cliente',
+  order: 'Pedido',
+  orders: 'Pedidos',
+  product: 'Producto',
+  product_variant: 'Variante',
+  stock: 'Stock',
+  stock_movement: 'Stock',
+  user: 'Usuario',
+  config: 'Configuración',
+  appointment: 'Cita',
+  sale: 'Venta',
+  supplier: 'Proveedor',
+  cms_page: 'Página CMS',
+  blog_post: 'Blog',
+  clients: 'Clientes',
+  orders: 'Pedidos',
+  stock: 'Stock',
+  calendar: 'Agenda',
+  tailoring_order: 'Pedido',
+  fitting: 'Prueba',
 }
 
 export function AuditoriaContent() {
@@ -90,7 +124,7 @@ export function AuditoriaContent() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Auditoría</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Seguimiento</h1>
           <p className="text-muted-foreground">Registro completo de actividad — {count} eventos</p>
         </div>
         <Button variant="outline" size="sm" className="gap-2" onClick={load} disabled={loading}>
@@ -102,15 +136,13 @@ export function AuditoriaContent() {
       <Card>
         <CardContent className="pt-4 pb-3">
           <div className="flex flex-wrap gap-3">
-            <Select value={filterAction} onValueChange={v => { setFilterAction(v); setPage(1) }}>
+                <Select value={filterAction} onValueChange={v => { setFilterAction(v); setPage(1) }}>
               <SelectTrigger className="w-40 h-8 text-sm"><SelectValue placeholder="Acción" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todas las acciones</SelectItem>
                 <SelectItem value="create">Crear</SelectItem>
-                <SelectItem value="update">Modificar</SelectItem>
+                <SelectItem value="update">Editar</SelectItem>
                 <SelectItem value="delete">Eliminar</SelectItem>
-                <SelectItem value="login">Login</SelectItem>
-                <SelectItem value="logout">Logout</SelectItem>
               </SelectContent>
             </Select>
             <Select value={filterEntity} onValueChange={v => { setFilterEntity(v); setPage(1) }}>
@@ -161,13 +193,13 @@ export function AuditoriaContent() {
               </TableHeader>
               <TableBody>
                 {logs.map(log => (
-                  <>
-                    <TableRow key={log.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setExpandedId(expandedId === log.id ? null : log.id)}>
+                  <React.Fragment key={log.id}>
+                    <TableRow className="cursor-pointer hover:bg-muted/50" onClick={() => setExpandedId(expandedId === log.id ? null : log.id)}>
                       <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDateTime(log.created_at)}</TableCell>
                       <TableCell className="text-sm font-medium">{log.user_name}</TableCell>
                       <TableCell>
                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${ACTION_BADGES[log.action] ?? 'bg-gray-100 text-gray-700'}`}>
-                          {log.action}
+                          {ACTION_LABELS[log.action] ?? log.action}
                         </span>
                       </TableCell>
                       <TableCell className="text-sm">{ENTITY_LABELS[log.entity_type] ?? log.entity_type}</TableCell>
@@ -184,7 +216,7 @@ export function AuditoriaContent() {
                         </TableCell>
                       </TableRow>
                     )}
-                  </>
+                  </React.Fragment>
                 ))}
               </TableBody>
             </Table>

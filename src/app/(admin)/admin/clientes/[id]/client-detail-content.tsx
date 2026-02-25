@@ -68,14 +68,14 @@ function ClientSummaryTab({ client }: { client: any }) {
   )
 }
 
-export function ClientDetailContent({ client, initialTab }: { client: any; initialTab: string }) {
+export function ClientDetailContent({ client, initialTab, basePath = '/admin' }: { client: any; initialTab: string; basePath?: string }) {
   const router = useRouter()
   const { can } = usePermissions()
 
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => router.push('/admin/clientes')}>
+        <Button variant="ghost" size="icon" onClick={() => router.push(`${basePath}/clientes`)}>
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <div className="flex flex-1 items-center justify-between">

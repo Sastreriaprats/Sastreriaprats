@@ -83,11 +83,11 @@ function ChartSkeleton() {
               {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-2 w-12" />)}
             </div>
             <div className="flex-1 flex items-end gap-[3px] h-[176px]">
-              {Array.from({ length: 20 }).map((_, i) => (
+              {[80, 120, 55, 140, 95, 65, 110, 130, 45, 100, 75, 135, 80, 120, 55, 140, 95, 65, 110, 130].map((h, i) => (
                 <Skeleton
                   key={i}
                   className="flex-1 rounded-t"
-                  style={{ height: `${20 + Math.random() * 120}px` }}
+                  style={{ height: `${h}px` }}
                 />
               ))}
             </div>

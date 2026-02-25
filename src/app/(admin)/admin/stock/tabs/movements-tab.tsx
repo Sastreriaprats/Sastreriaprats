@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -21,7 +21,7 @@ const movementTypeLabels: Record<string, string> = {
 }
 
 export function MovementsTab() {
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const [movements, setMovements] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [page, setPage] = useState(0)

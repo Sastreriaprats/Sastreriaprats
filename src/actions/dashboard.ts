@@ -208,40 +208,65 @@ export const getStoresWithStats = protectedAction<void, StoreStats[]>(
     const { data: stores } = await admin.from('stores').select('id, code, name').eq('is_active', true).order('name')
     if (!stores?.length) return success([])
 
-    const result: StoreStats[] = []
-    for (const store of stores) {
-      const [salesTodayRes, salesMonthRes, warehousesRes] = await Promise.all([
-        admin.from('sales').select('total').eq('store_id', store.id).gte('created_at', `${today}T00:00:00`).eq('status', 'completed'),
-        admin.from('sales').select('total').eq('store_id', store.id).gte('created_at', `${monthStart}T00:00:00`).eq('status', 'completed'),
-        admin.from('warehouses').select('id').eq('store_id', store.id),
-      ])
+    const storeIds = stores.map((s: { id: string }) => s.id)
 
-      const warehouseIds = (warehousesRes.data || []).map((w: { id: string }) => w.id)
-      let totalStock = 0
-      let lowStock = 0
-      if (warehouseIds.length > 0) {
-        const { data: levels } = await admin.from('stock_levels').select('quantity, available, min_stock').in('warehouse_id', warehouseIds)
-        for (const l of levels || []) {
-          const q = (l as { quantity?: number }).quantity ?? 0
-          const min = (l as { min_stock?: number }).min_stock
-          totalStock += q
-          if (min != null && ((l as { available?: number }).available ?? 0) <= min) lowStock += 1
-        }
-      }
+    const [
+      salesTodayRes,
+      salesMonthRes,
+      warehousesRes,
+    ] = await Promise.all([
+      admin.from('sales').select('store_id, total').in('store_id', storeIds).gte('created_at', `${today}T00:00:00`).eq('status', 'completed'),
+      admin.from('sales').select('store_id, total').in('store_id', storeIds).gte('created_at', `${monthStart}T00:00:00`).eq('status', 'completed'),
+      admin.from('warehouses').select('id, store_id').in('store_id', storeIds),
+    ])
 
-      const salesToday = (salesTodayRes.data || []).reduce((s: number, r: { total?: number }) => s + (r.total || 0), 0)
-      const salesThisMonth = (salesMonthRes.data || []).reduce((s: number, r: { total?: number }) => s + (r.total || 0), 0)
+    const warehouses = (warehousesRes.data || []) as { id: string; store_id: string }[]
+    const warehouseIds = warehouses.map((w) => w.id)
+    const warehouseToStore = Object.fromEntries(warehouses.map((w) => [w.id, w.store_id]))
 
-      result.push({
-        id: store.id,
-        code: store.code,
-        name: store.name,
-        salesToday,
-        salesThisMonth,
-        totalStockUnits: totalStock,
-        lowStockCount: lowStock,
-      })
+    let levelsData: { warehouse_id: string; quantity?: number; available?: number; min_stock?: number }[] = []
+    if (warehouseIds.length > 0) {
+      const { data: levels } = await admin.from('stock_levels').select('warehouse_id, quantity, available, min_stock').in('warehouse_id', warehouseIds)
+      levelsData = (levels || []) as typeof levelsData
     }
+
+    const salesTodayByStore: Record<string, number> = {}
+    const salesMonthByStore: Record<string, number> = {}
+    for (const s of stores as { id: string }[]) {
+      salesTodayByStore[s.id] = 0
+      salesMonthByStore[s.id] = 0
+    }
+    for (const r of (salesTodayRes.data || []) as { store_id: string; total?: number }[]) {
+      if (r.store_id) salesTodayByStore[r.store_id] = (salesTodayByStore[r.store_id] ?? 0) + (r.total ?? 0)
+    }
+    for (const r of (salesMonthRes.data || []) as { store_id: string; total?: number }[]) {
+      if (r.store_id) salesMonthByStore[r.store_id] = (salesMonthByStore[r.store_id] ?? 0) + (r.total ?? 0)
+    }
+
+    const stockByStore: Record<string, { total: number; low: number }> = {}
+    for (const s of stores as { id: string }[]) {
+      stockByStore[s.id] = { total: 0, low: 0 }
+    }
+    for (const l of levelsData) {
+      const storeId = warehouseToStore[l.warehouse_id]
+      if (!storeId) continue
+      const q = l.quantity ?? 0
+      const min = l.min_stock
+      const available = l.available ?? 0
+      stockByStore[storeId].total += q
+      if (min != null && available <= min) stockByStore[storeId].low += 1
+    }
+
+    const result: StoreStats[] = (stores as { id: string; code: string; name: string }[]).map((store) => ({
+      id: store.id,
+      code: store.code,
+      name: store.name,
+      salesToday: salesTodayByStore[store.id] ?? 0,
+      salesThisMonth: salesMonthByStore[store.id] ?? 0,
+      totalStockUnits: stockByStore[store.id]?.total ?? 0,
+      lowStockCount: stockByStore[store.id]?.low ?? 0,
+    }))
+
     return success(result)
   }
 )

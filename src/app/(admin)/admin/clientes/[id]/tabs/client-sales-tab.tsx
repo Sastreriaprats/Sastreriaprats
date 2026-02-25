@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -12,7 +12,7 @@ const saleTypeLabels: Record<string, string> = {
 }
 
 export function ClientSalesTab({ clientId }: { clientId: string }) {
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const [sales, setSales] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
@@ -25,6 +25,7 @@ export function ClientSalesTab({ clientId }: { clientId: string }) {
           .select('id, ticket_number, sale_type, total, payment_method, status, is_tax_free, created_at, stores(name)')
           .eq('client_id', clientId)
           .order('created_at', { ascending: false })
+          .limit(100)
         if (!cancelled && data) setSales(data)
       } catch (err) {
         console.error('[ClientSalesTab] load error:', err)

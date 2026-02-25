@@ -41,12 +41,17 @@ export function StockDashboard() {
   }
 
   useEffect(() => {
-    getStockDashboardStats().then(result => {
-      if (result.success && result.data) {
-        setStats(result.data)
-      }
-      setIsLoading(false)
-    })
+    getStockDashboardStats()
+      .then(result => {
+        if (result.success && result.data) {
+          setStats(result.data)
+        }
+        setIsLoading(false)
+      })
+      .catch(err => {
+        console.error('[StockDashboard] getStockDashboardStats:', err)
+        setIsLoading(false)
+      })
   }, [])
 
   return (

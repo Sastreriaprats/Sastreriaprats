@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -15,6 +15,7 @@ import {
   Tabs, TabsContent, TabsList, TabsTrigger,
 } from '@/components/ui/tabs'
 import { Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { useAction } from '@/hooks/use-action'
 import { createClientAction } from '@/actions/clients'
 
@@ -66,6 +67,7 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess }: CreateClie
   const [form, setForm] = useState({
     first_name: '', last_name: '', email: '', phone: '', phone_secondary: '',
     date_of_birth: '', gender: 'male' as 'male' | 'female',
+    birth_day: '', birth_month: '', birth_year: '',
     client_type: 'individual', category: 'standard',
     document_type: 'DNI', document_number: '',
     company_name: '', company_nif: '',
@@ -78,13 +80,22 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess }: CreateClie
   })
 
   const { execute, isLoading } = useAction(createClientAction, {
-    successMessage: 'Cliente creado correctamente',
-    onSuccess: () => { onOpenChange(false); resetForm(); onSuccess() },
+    onSuccess: (data) => {
+      if (data?.accountCreated) {
+        toast.success('Cliente creado con cuenta de acceso (puede entrar en Mi cuenta con su email y la contraseña por defecto)')
+      } else {
+        toast.success('Cliente creado correctamente')
+      }
+      onOpenChange(false)
+      resetForm()
+      onSuccess()
+    },
   })
 
   const resetForm = () => setForm({
     first_name: '', last_name: '', email: '', phone: '', phone_secondary: '',
-    date_of_birth: '', gender: 'male', client_type: 'individual', category: 'standard',
+    date_of_birth: '', gender: 'male', birth_day: '', birth_month: '', birth_year: '',
+    client_type: 'individual', category: 'standard',
     document_type: 'DNI', document_number: '', company_name: '', company_nif: '',
     address: '', city: 'Madrid', postal_code: '', province: 'Madrid', country: 'España',
     nationality: 'Española', source: '', discount_percentage: 0,
@@ -94,25 +105,18 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess }: CreateClie
 
   const set = (field: string, value: any) => setForm(prev => ({ ...prev, [field]: value }))
 
-  const { birthDay, birthMonth, birthYear } = useMemo(() => {
-    if (!form.date_of_birth || form.date_of_birth.length < 10) {
-      return { birthDay: '', birthMonth: '', birthYear: '' }
-    }
-    const [y, m, d] = form.date_of_birth.split('-')
-    return { birthDay: d, birthMonth: m, birthYear: y }
-  }, [form.date_of_birth])
-
-  const setBirthDate = (day: string, month: string, year: string) => {
-    const hasDay = day != null && String(day).trim() !== ''
-    const hasMonth = month != null && String(month).trim() !== ''
-    const hasYear = year != null && String(year).trim() !== ''
-    if (hasDay && hasMonth && hasYear) {
-      const d = String(day).padStart(2, '0')
-      const m = String(month).padStart(2, '0')
-      set('date_of_birth', `${year}-${m}-${d}`)
-    } else {
-      set('date_of_birth', null as unknown as string)
-    }
+  const setBirthDatePart = (part: 'birth_day' | 'birth_month' | 'birth_year', value: string) => {
+    setForm(prev => {
+      const next = { ...prev, [part]: value }
+      const day = part === 'birth_day' ? value : prev.birth_day
+      const month = part === 'birth_month' ? value : prev.birth_month
+      const year = part === 'birth_year' ? value : prev.birth_year
+      const hasAll = day && month && year
+      return {
+        ...next,
+        date_of_birth: hasAll ? `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}` : '',
+      }
+    })
   }
 
   return (
@@ -157,7 +161,7 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess }: CreateClie
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2"><Label>Fecha nacimiento</Label>
                 <div className="flex gap-2">
-                  <Select value={birthDay} onValueChange={(v) => setBirthDate(v, birthMonth, birthYear)}>
+                  <Select value={form.birth_day} onValueChange={(v) => setBirthDatePart('birth_day', v)}>
                     <SelectTrigger className="flex-1"><SelectValue placeholder="Día" /></SelectTrigger>
                     <SelectContent>
                       {Array.from({ length: 31 }, (_, i) => {
@@ -166,13 +170,13 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess }: CreateClie
                       })}
                     </SelectContent>
                   </Select>
-                  <Select value={birthMonth} onValueChange={(v) => setBirthDate(birthDay, v, birthYear)}>
+                  <Select value={form.birth_month} onValueChange={(v) => setBirthDatePart('birth_month', v)}>
                     <SelectTrigger className="flex-1"><SelectValue placeholder="Mes" /></SelectTrigger>
                     <SelectContent>
                       {MONTHS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                  <Select value={birthYear} onValueChange={(v) => setBirthDate(birthDay, birthMonth, v)}>
+                  <Select value={form.birth_year} onValueChange={(v) => setBirthDatePart('birth_year', v)}>
                     <SelectTrigger className="flex-1"><SelectValue placeholder="Año" /></SelectTrigger>
                     <SelectContent>
                       {YEARS.map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}

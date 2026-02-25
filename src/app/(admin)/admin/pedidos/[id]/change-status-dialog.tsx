@@ -33,7 +33,6 @@ export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus,
   const allStatuses = allStatusesByType[orderType] || allStatusesByType.artesanal
   const allowedStatuses = allStatuses.filter(s => s !== currentStatus)
 
-  console.log('ChangeStatusDialog:', { orderType, currentStatus, allowedStatuses })
 
   const { execute, isLoading } = useAction(changeOrderStatus, {
     successMessage: 'Estado actualizado',

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ChevronLeft, ChevronRight, Loader2, Plus } from 'lucide-react'
@@ -56,6 +56,7 @@ const typeLabels: Record<string, string> = {
 }
 
 export function CalendarContent() {
+  const supabase = useMemo(() => createClient(), [])
   const { activeStoreId } = useAuth()
   const { can } = usePermissions()
   const [view, setView] = useState<'month' | 'week' | 'day'>('week')
@@ -72,7 +73,6 @@ export function CalendarContent() {
     let cancelled = false
     async function loadTailors() {
       try {
-        const supabase = createClient()
         const { data } = await supabase
           .from('user_roles')
           .select('user_id, roles!inner(name)')

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useGarmentTypes } from '@/hooks/use-cached-queries'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -140,8 +141,9 @@ export function ClientMeasurementsTab({ clientId }: { clientId: string }) {
   const supabase = useMemo(() => createClient(), [])
   const { can } = usePermissions()
   const canEdit = can('clients.edit')
+  const { data: garmentTypesData, isLoading: garmentTypesLoading } = useGarmentTypes()
 
-  const [bodyGarmentTypeId, setBodyGarmentTypeId] = useState<string | null | undefined>(undefined)
+  const bodyGarmentTypeId = garmentTypesData ? (garmentTypesData.find(g => g.code === 'body')?.id ?? null) : undefined
   const [garmentGroups, setGarmentGroups] = useState<GarmentGroup[]>([])
   const [values, setValues] = useState<Record<string, string>>({})
   const [history, setHistory] = useState<any[]>([])
@@ -187,56 +189,39 @@ export function ClientMeasurementsTab({ clientId }: { clientId: string }) {
   }, [normalizeValues])
 
   useEffect(() => {
+    if (!garmentTypesData || garmentTypesLoading) return
     let cancelled = false
+    const groupGarments = garmentTypesData
+      .filter(g => GARMENT_NAMES.includes(g.name))
+      .sort((a, b) => a.sort_order - b.sort_order)
+    const bodyId = garmentTypesData.find(g => g.code === 'body')?.id ?? null
+
     async function init() {
       setIsLoading(true)
       try {
-        // Carga en paralelo: tipo "body" (para guardar) + grupos Americana/Pantalón/Chaleco
-        const [bodyRes, garmentsRes] = await Promise.all([
-          supabase
-            .from('garment_types')
-            .select('id')
-            .eq('code', 'body')
-            .eq('is_active', true)
-            .maybeSingle(),
-          supabase
-            .from('garment_types')
-            .select('id, name, sort_order')
-            .in('name', GARMENT_NAMES)
-            .eq('is_active', true)
-            .order('sort_order'),
-        ])
-        if (cancelled) return
-
-        const bodyId = bodyRes.data?.id ?? null
-        setBodyGarmentTypeId(bodyId)
-
-        const garments = garmentsRes.data ?? []
-        if (garments.length > 0) {
-          const ids = garments.map((g: any) => g.id)
+        if (groupGarments.length > 0) {
+          const ids = groupGarments.map(g => g.id)
           const { data: fields } = await supabase
             .from('measurement_fields')
             .select('id, garment_type_id, code, name, field_type, unit, sort_order, field_group, is_required, options')
             .in('garment_type_id', ids)
             .eq('is_active', true)
             .order('sort_order')
-
           if (!cancelled) {
             const fieldsByGarment: Record<string, MeasurementField[]> = {}
             for (const f of fields ?? []) {
               if (!fieldsByGarment[f.garment_type_id]) fieldsByGarment[f.garment_type_id] = []
               fieldsByGarment[f.garment_type_id].push(f as MeasurementField)
             }
-            setGarmentGroups(garments.map((g: any) => ({
-              ...g,
+            setGarmentGroups(groupGarments.map(g => ({
+              id: g.id,
+              name: g.name,
+              sort_order: g.sort_order,
               fields: fieldsByGarment[g.id] ?? [],
             })))
           }
         }
-
-        if (!cancelled && bodyId) {
-          await loadMeasurements(bodyId)
-        }
+        if (!cancelled && bodyId) await loadMeasurements(bodyId)
       } catch (err) {
         console.error('[ClientMeasurementsTab] init error:', err)
       } finally {
@@ -245,7 +230,11 @@ export function ClientMeasurementsTab({ clientId }: { clientId: string }) {
     }
     init()
     return () => { cancelled = true }
-  }, [clientId, supabase, loadMeasurements])
+  }, [garmentTypesData, garmentTypesLoading, supabase, loadMeasurements])
+
+  useEffect(() => {
+    if (!garmentTypesLoading && !garmentTypesData) setIsLoading(false)
+  }, [garmentTypesLoading, garmentTypesData])
 
   const set = (code: string, val: string) => {
     setValues(prev => ({ ...prev, [code]: val }))
@@ -272,8 +261,9 @@ export function ClientMeasurementsTab({ clientId }: { clientId: string }) {
   }
 
   // ── Estados de carga / error ──────────────────────────────────────────────
+  const showLoading = garmentTypesLoading || isLoading
 
-  if (bodyGarmentTypeId === undefined || isLoading) {
+  if (showLoading) {
     return (
       <div className="flex justify-center py-12">
         <Loader2 className="h-6 w-6 animate-spin text-prats-navy" />

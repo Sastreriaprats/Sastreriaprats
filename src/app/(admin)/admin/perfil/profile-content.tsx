@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -15,7 +15,7 @@ import { getInitials } from '@/lib/utils'
 
 export function ProfileContent() {
   const { profile, stores } = useAuth()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const [isSaving, setIsSaving] = useState(false)
   const [showChangePassword, setShowChangePassword] = useState(false)
   const [passwords, setPasswords] = useState({ current: '', new_password: '', confirm: '' })

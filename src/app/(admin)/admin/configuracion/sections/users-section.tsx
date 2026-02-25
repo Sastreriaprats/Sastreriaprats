@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -11,7 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Switch } from '@/components/ui/switch'
 import { Loader2, UserPlus, KeyRound, Pencil, Copy, Check } from 'lucide-react'
-import { listAdminUsers, createAdminUser, updateAdminUser, listRoles, listStores, type UserRow } from '@/actions/users'
+import { listAdminUsers, createAdminUser, updateAdminUser, type UserRow } from '@/actions/users'
+import { useStores, useRolesAndPermissions } from '@/hooks/use-cached-queries'
 import { formatDateTime } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -24,25 +25,26 @@ const ROLE_COLORS: Record<string, string> = {
 }
 
 export function UsersSection() {
+  const { data: storesData } = useStores()
+  const { data: rolesAndPerms } = useRolesAndPermissions()
+  const stores = (storesData ?? []).map(s => ({ id: s.id, name: s.name }))
+  const roles = (rolesAndPerms?.roles ?? []).filter(r => r.name?.toLowerCase() !== 'client').map(r => ({ id: r.id, name: r.name, display_name: r.display_name }))
+
   const [users, setUsers] = useState<UserRow[]>([])
-  const [roles, setRoles] = useState<{ id: string; name: string; display_name: string | null }[]>([])
-  const [stores, setStores] = useState<{ id: string; name: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [createOpen, setCreateOpen] = useState(false)
   const [editUser, setEditUser] = useState<UserRow | null>(null)
   const [tempPassword, setTempPassword] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true)
-    const [u, r, s] = await Promise.all([listAdminUsers(), listRoles(), listStores()])
+    const u = await listAdminUsers()
     if (u.data) setUsers(u.data)
-    if (r.data) setRoles(r.data.filter(role => role.name?.toLowerCase() !== 'client'))
-    if (s.data) setStores(s.data)
     setLoading(false)
-  }
+  }, [])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [load])
 
   return (
     <div className="space-y-4">

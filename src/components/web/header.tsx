@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import Image from 'next/image'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { usePathname } from 'next/navigation'
 import { ShoppingBag, User, Menu } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -19,15 +19,15 @@ const navItems = [
 
 export function WebHeader() {
   const pathname = usePathname()
+  const supabase = useMemo(() => createClient(), [])
   const [isOpen, setIsOpen] = useState(false)
   const [cartCount, setCartCount] = useState(0)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
 
   useEffect(() => {
-    const supabase = createClient()
-    supabase.auth.getSession().then(({ data }) => {
-      setIsLoggedIn(!!data.session)
-    })
+    supabase.auth.getSession()
+      .then(({ data }) => { setIsLoggedIn(!!data.session) })
+      .catch(() => {})
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
       setIsLoggedIn(!!session)
     })

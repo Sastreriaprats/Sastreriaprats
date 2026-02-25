@@ -117,19 +117,26 @@ export function ProductForm({
   const [images, setImages] = useState<string[]>([])
   const [isUploadingImage, setIsUploadingImage] = useState(false)
 
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const metrosInicialesRef = useRef<number>(0)
 
   useEffect(() => {
     let cancelled = false
-    listPhysicalWarehouses().then(result => {
-      if (!cancelled && result.success && result.data?.length) {
-        setWarehouses(result.data as any[])
-        if (!initialStockWarehouseId) {
-          setInitialStockWarehouseId(result.data[0].id)
+    listPhysicalWarehouses()
+      .then(result => {
+        if (!cancelled && result.success && result.data?.length) {
+          setWarehouses(result.data as any[])
+          if (!initialStockWarehouseId) {
+            setInitialStockWarehouseId(result.data[0].id)
+          }
         }
-      }
-    })
+      })
+      .catch(err => {
+        if (!cancelled) {
+          console.error('[product-form] listPhysicalWarehouses:', err)
+          toast.error('Error al cargar almacenes')
+        }
+      })
     return () => { cancelled = true }
   }, [])
 

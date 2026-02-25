@@ -55,25 +55,37 @@ export const upsertBlogPost = protectedAction<Record<string, unknown>, unknown>(
 )
 
 export async function getPublicBlogPosts(limit: number = 10) {
-  const { createAdminClient } = await import('@/lib/supabase/admin')
-  const admin = createAdminClient()
-  const { data } = await admin
-    .from('blog_posts')
-    .select('id, slug, title_es, title_en, excerpt_es, excerpt_en, featured_image_url, category, tags, published_at, profiles!blog_posts_author_id_fkey(full_name)')
-    .eq('status', 'published')
-    .order('published_at', { ascending: false })
-    .limit(limit)
-  return data || []
+  try {
+    const { createAdminClient } = await import('@/lib/supabase/admin')
+    const { serializeForServerAction } = await import('@/lib/server/serialize')
+    const admin = createAdminClient()
+    const { data } = await admin
+      .from('blog_posts')
+      .select('id, slug, title_es, title_en, excerpt_es, excerpt_en, featured_image_url, category, tags, published_at, profiles!blog_posts_author_id_fkey(full_name)')
+      .eq('status', 'published')
+      .order('published_at', { ascending: false })
+      .limit(limit)
+    return serializeForServerAction(data || [])
+  } catch (err) {
+    console.error('[getPublicBlogPosts]', err)
+    return []
+  }
 }
 
 export async function getPublicBlogPost(slug: string) {
-  const { createAdminClient } = await import('@/lib/supabase/admin')
-  const admin = createAdminClient()
-  const { data } = await admin
-    .from('blog_posts')
-    .select('*, profiles!blog_posts_author_id_fkey(full_name)')
-    .eq('slug', slug)
-    .eq('status', 'published')
-    .single()
-  return data
+  try {
+    const { createAdminClient } = await import('@/lib/supabase/admin')
+    const { serializeForServerAction } = await import('@/lib/server/serialize')
+    const admin = createAdminClient()
+    const { data } = await admin
+      .from('blog_posts')
+      .select('*, profiles!blog_posts_author_id_fkey(full_name)')
+      .eq('slug', slug)
+      .eq('status', 'published')
+      .single()
+    return data ? serializeForServerAction(data) : null
+  } catch (err) {
+    console.error('[getPublicBlogPost]', err)
+    return null
+  }
 }

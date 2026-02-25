@@ -119,10 +119,12 @@ async function seed() {
   // 3b. USUARIOS DE PRUEBA POR ROL
   // ==========================================
   const testUsers = [
+    { email: 'joaquin@sastreriaprats.com',     role: 'sastre',           firstName: 'Joaquín', lastName: 'Prats' },
     { email: 'sastre@sastreriaprats.com',    role: 'sastre',           firstName: 'Pedro',    lastName: 'Sastre' },
     { email: 'sastreplus@sastreriaprats.com', role: 'sastre_plus',      firstName: 'María',    lastName: 'Ruiz' },
     { email: 'vendedor1@sastreriaprats.com',  role: 'vendedor_basico',  firstName: 'Luis',     lastName: 'Pérez' },
-    { email: 'vendedor2@sastreriaprats.com',  role: 'vendedor_avanzado',firstName: 'Carmen',   lastName: 'Gómez' },
+    { email: 'vendedor1@vendedorcasico.com',   role: 'vendedor_basico',   firstName: 'Vendedor', lastName: 'Básico' },
+    { email: 'vendedor2@sastreriaprats.com',  role: 'vendedor_avanzado', firstName: 'Carmen',   lastName: 'Gómez' },
   ]
 
   for (const tu of testUsers) {

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useGarmentTypes } from '@/hooks/use-cached-queries'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
@@ -35,49 +36,46 @@ interface MeasurementField {
 
 export function GarmentTypesSection() {
   const supabase = useMemo(() => createClient(), [])
+  const { data: garmentTypesData, isLoading: garmentTypesLoading } = useGarmentTypes()
+  const groupGarments = useMemo(
+    () => (garmentTypesData ?? []).filter(g => CLIENT_GARMENT_NAMES.includes(g.name)).sort((a, b) => a.sort_order - b.sort_order),
+    [garmentTypesData],
+  )
   const [garments, setGarments] = useState<GarmentType[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const [fieldsLoading, setFieldsLoading] = useState(false)
   const [editingGroup, setEditingGroup] = useState<string | null>(null)
   const [savingField, setSavingField] = useState<string | null>(null)
 
-  const fetchData = useCallback(async () => {
-    setIsLoading(true)
-    try {
-      const { data: garmentData, error: gErr } = await supabase
-        .from('garment_types')
-        .select('id, name, sort_order')
-        .in('name', CLIENT_GARMENT_NAMES)
-        .order('sort_order')
-
-      if (gErr) throw gErr
-
-      if (garmentData && garmentData.length > 0) {
-        const ids = garmentData.map((g: any) => g.id)
-        const { data: allFields, error: fErr } = await supabase
-          .from('measurement_fields')
-          .select('id, garment_type_id, code, name, field_type, unit, sort_order, field_group, is_required, is_active')
-          .in('garment_type_id', ids)
-          .order('sort_order')
-
-        if (fErr) throw fErr
-
+  useEffect(() => {
+    if (!groupGarments.length) {
+      setGarments([])
+      return
+    }
+    let cancelled = false
+    setFieldsLoading(true)
+    const ids = groupGarments.map(g => g.id)
+    supabase
+      .from('measurement_fields')
+      .select('id, garment_type_id, code, name, field_type, unit, sort_order, field_group, is_required, is_active')
+      .in('garment_type_id', ids)
+      .order('sort_order')
+      .then(({ data: allFields, error: fErr }) => {
+        if (cancelled || fErr) return
         const fieldsByGarment: Record<string, MeasurementField[]> = {}
         for (const f of allFields ?? []) {
           if (!fieldsByGarment[f.garment_type_id]) fieldsByGarment[f.garment_type_id] = []
           fieldsByGarment[f.garment_type_id].push(f as MeasurementField)
         }
-        setGarments(garmentData.map((g: any) => ({ ...g, fields: fieldsByGarment[g.id] ?? [] })))
-      } else {
-        setGarments([])
-      }
-    } catch (err) {
-      console.error('[GarmentTypesSection] fetchData error:', err)
-    } finally {
-      setIsLoading(false)
-    }
-  }, [supabase])
+        setGarments(groupGarments.map(g => ({ id: g.id, name: g.name, sort_order: g.sort_order, fields: fieldsByGarment[g.id] ?? [] })))
+      })
+      .then(
+        () => { if (!cancelled) setFieldsLoading(false) },
+        () => { if (!cancelled) setFieldsLoading(false) },
+      )
+    return () => { cancelled = true }
+  }, [groupGarments, supabase])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  const isLoading = garmentTypesLoading || fieldsLoading
 
   const handleToggleField = async (fieldId: string, currentActive: boolean) => {
     setSavingField(fieldId)

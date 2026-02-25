@@ -3,7 +3,21 @@ import { createAdminClient } from '@/lib/supabase/admin'
 
 export async function PUT(request: NextRequest) {
   const body = await request.json()
-  const { client_id, first_name, last_name, phone, address, city, postal_code, province } = body
+  const {
+    client_id,
+    first_name,
+    last_name,
+    phone,
+    address,
+    city,
+    postal_code,
+    province,
+    shipping_address,
+    shipping_city,
+    shipping_postal_code,
+    shipping_province,
+    shipping_country,
+  } = body
 
   if (!client_id) return NextResponse.json({ error: 'client_id required' }, { status: 400 })
 
@@ -16,6 +30,11 @@ export async function PUT(request: NextRequest) {
     city: city || null,
     postal_code: postal_code || null,
     province: province || null,
+    shipping_address: shipping_address ?? null,
+    shipping_city: shipping_city ?? null,
+    shipping_postal_code: shipping_postal_code ?? null,
+    shipping_province: shipping_province ?? null,
+    shipping_country: shipping_country ?? null,
   }).eq('id', client_id)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

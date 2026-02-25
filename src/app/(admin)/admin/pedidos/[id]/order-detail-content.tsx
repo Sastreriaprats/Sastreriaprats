@@ -17,6 +17,7 @@ import { OrderHistoryTab } from './tabs/order-history-tab'
 import { OrderFittingsTab } from './tabs/order-fittings-tab'
 import { OrderPaymentsTab } from './tabs/order-payments-tab'
 import { ChangeStatusDialog } from './change-status-dialog'
+import { PaymentHistory } from '@/components/payments/payment-history'
 
 export function OrderDetailContent({ order }: { order: any }) {
   const router = useRouter()
@@ -93,7 +94,16 @@ export function OrderDetailContent({ order }: { order: any }) {
           <TabsContent value="prendas"><OrderGarmentsTab order={order} /></TabsContent>
           <TabsContent value="historial"><OrderHistoryTab history={order.tailoring_order_state_history || []} /></TabsContent>
           <TabsContent value="pruebas"><OrderFittingsTab orderId={order.id} fittings={order.tailoring_fittings || []} storeId={order.store_id} /></TabsContent>
-          <TabsContent value="pagos"><OrderPaymentsTab order={order} /></TabsContent>
+          <TabsContent value="pagos">
+            <div className="space-y-8">
+              <PaymentHistory
+                entityType="tailoring_order"
+                entityId={order.id}
+                total={order.total ?? 0}
+              />
+              <OrderPaymentsTab order={order} />
+            </div>
+          </TabsContent>
         </div>
       </Tabs>
 

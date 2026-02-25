@@ -32,7 +32,42 @@ export async function GET() {
 
     const isStaff = roleNames.some(n => STAFF_ROLES.includes(n))
 
-    return NextResponse.json({ isStaff, isAuthenticated: true, roles: roleNames })
+    const { data: clientRow } = await admin
+      .from('clients')
+      .select(`
+        id,
+        first_name, last_name, email, phone,
+        address, city, postal_code, province, country,
+        shipping_address, shipping_city, shipping_postal_code, shipping_province, shipping_country
+      `)
+      .eq('profile_id', user.id)
+      .maybeSingle()
+
+    const clientProfile = clientRow ? {
+      id: clientRow.id,
+      first_name: clientRow.first_name,
+      last_name: clientRow.last_name,
+      email: clientRow.email ?? user.email,
+      phone: clientRow.phone,
+      address: clientRow.address,
+      city: clientRow.city,
+      postal_code: clientRow.postal_code,
+      province: clientRow.province,
+      country: clientRow.country ?? 'ES',
+      shipping_address: clientRow.shipping_address,
+      shipping_city: clientRow.shipping_city,
+      shipping_postal_code: clientRow.shipping_postal_code,
+      shipping_province: clientRow.shipping_province,
+      shipping_country: clientRow.shipping_country,
+    } : null
+
+    return NextResponse.json({
+      isStaff,
+      isAuthenticated: true,
+      roles: roleNames,
+      clientId: clientRow?.id ?? null,
+      clientProfile,
+    })
   } catch (e) {
     console.error('[api/auth/me]', e)
     return NextResponse.json({ isStaff: false, isAuthenticated: false })

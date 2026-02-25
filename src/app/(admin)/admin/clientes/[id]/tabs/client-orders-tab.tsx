@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Badge } from '@/components/ui/badge'
@@ -11,7 +11,7 @@ import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel } 
 
 export function ClientOrdersTab({ clientId }: { clientId: string }) {
   const router = useRouter()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const [orders, setOrders] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
@@ -24,6 +24,7 @@ export function ClientOrdersTab({ clientId }: { clientId: string }) {
           .select('id, order_number, order_type, status, order_date, estimated_delivery_date, total, total_paid, total_pending, stores(name)')
           .eq('client_id', clientId)
           .order('order_date', { ascending: false })
+          .limit(100)
         if (!cancelled && data) setOrders(data)
       } catch (err) {
         console.error('[ClientOrdersTab] load error:', err)

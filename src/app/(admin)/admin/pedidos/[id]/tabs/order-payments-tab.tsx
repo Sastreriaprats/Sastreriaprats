@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -11,7 +11,7 @@ import { formatCurrency, formatDateTime } from '@/lib/utils'
 const saleTypeLabels: Record<string, string> = { tailoring_deposit: 'Señal', tailoring_final: 'Pago final' }
 
 export function OrderPaymentsTab({ order }: { order: any }) {
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const [sales, setSales] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
@@ -24,6 +24,7 @@ export function OrderPaymentsTab({ order }: { order: any }) {
           .select('id, ticket_number, sale_type, total, payment_method, status, created_at')
           .eq('tailoring_order_id', order.id)
           .order('created_at', { ascending: false })
+          .limit(100)
         if (!cancelled && data) setSales(data)
       } catch (err) {
         console.error('[OrderPaymentsTab] load error:', err)

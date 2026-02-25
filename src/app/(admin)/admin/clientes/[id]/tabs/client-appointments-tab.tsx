@@ -32,12 +32,17 @@ export function ClientAppointmentsTab({ clientId }: { clientId: string }) {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    listClientAppointments({ client_id: clientId }).then(result => {
-      if (result.success && result.data) {
-        setAppointments(result.data as any[])
-      }
-      setIsLoading(false)
-    })
+    listClientAppointments({ client_id: clientId })
+      .then(result => {
+        if (result.success && result.data) {
+          setAppointments(result.data as any[])
+        }
+        setIsLoading(false)
+      })
+      .catch(err => {
+        console.error('[ClientAppointmentsTab] listClientAppointments:', err)
+        setIsLoading(false)
+      })
   }, [clientId])
 
   if (isLoading) {

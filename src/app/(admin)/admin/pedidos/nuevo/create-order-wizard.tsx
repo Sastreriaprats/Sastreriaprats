@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAction } from '@/hooks/use-action'
+import { useGarmentTypes } from '@/hooks/use-cached-queries'
 import { useAuth } from '@/components/providers/auth-provider'
 import { createOrderAction } from '@/actions/orders'
 import { formatCurrency } from '@/lib/utils'
@@ -84,7 +85,7 @@ function getTotalSteps(orderType: OrderType): number {
 export function CreateOrderWizard() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const { activeStoreId } = useAuth()
   const clientIdFromUrl = searchParams.get('clientId')
 
@@ -126,7 +127,8 @@ export function CreateOrderWizard() {
   const [isSearchingFactory, setIsSearchingFactory] = useState(false)
 
   const [lines, setLines] = useState<OrderLine[]>([])
-  const [garmentTypes, setGarmentTypes] = useState<any[]>([])
+  const { data: garmentTypesData } = useGarmentTypes()
+  const garmentTypes = garmentTypesData ? garmentTypesData.filter(g => g.code !== 'body') : []
   const [fabrics, setFabrics] = useState<any[]>([])
   const [showAddLine, setShowAddLine] = useState(false)
   const [lineForm, setLineForm] = useState<Partial<OrderLine>>({
@@ -141,11 +143,9 @@ export function CreateOrderWizard() {
   const [isSearchingLineOfficial, setIsSearchingLineOfficial] = useState(false)
 
   useEffect(() => {
-    supabase.from('garment_types').select('id, code, name, category').eq('is_active', true).neq('code', 'body').order('sort_order')
-      .then(({ data }) => { if (data) setGarmentTypes(data) })
     supabase.from('fabrics').select('id, fabric_code, name, composition, color_name, price_per_meter, supplier_id')
-      .eq('status', 'available').order('name')
-      .then(({ data }) => { if (data) setFabrics(data) })
+      .eq('status', 'available').order('name').limit(200)
+      .then(({ data }) => { if (data) setFabrics(data) }, err => { console.error('[create-order-wizard] fabrics:', err) })
   }, [supabase])
 
   useEffect(() => {
@@ -155,13 +155,16 @@ export function CreateOrderWizard() {
       .eq('id', clientIdFromUrl)
       .eq('is_active', true)
       .maybeSingle()
-      .then(({ data }) => {
-        if (data) {
-          setSelectedClient(data)
-          setOrderType('artesanal')
-          setStep(1)
-        }
-      })
+      .then(
+        ({ data }) => {
+          if (data) {
+            setSelectedClient(data)
+            setOrderType('artesanal')
+            setStep(1)
+          }
+        },
+        err => { console.error('[create-order-wizard] client by id:', err) }
+      )
   }, [clientIdFromUrl, supabase])
 
   useEffect(() => {
@@ -217,7 +220,6 @@ export function CreateOrderWizard() {
         .ilike('name', `%${lineOfficialSearch}%`)
         .eq('is_active', true)
         .limit(10)
-      console.log('LINE OFFICIAL SEARCH:', { data, error, search: lineOfficialSearch })
       if (data) setLineOfficialResults(data)
       setIsSearchingLineOfficial(false)
     }, 300)
@@ -234,7 +236,6 @@ export function CreateOrderWizard() {
         .ilike('name', `%${factorySearch}%`)
         .eq('is_active', true)
         .limit(10)
-      console.log('FACTORY SEARCH:', { data, error, search: factorySearch })
       if (data) setFactoryResults(data)
       setIsSearchingFactory(false)
     }, 300)

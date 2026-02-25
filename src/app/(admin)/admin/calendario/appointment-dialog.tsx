@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -68,7 +68,7 @@ interface AppointmentDialogProps {
 export function AppointmentDialog({
   open, onOpenChange, selectedSlot, selectedEvent, tailors, onSaved,
 }: AppointmentDialogProps) {
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const { activeStoreId } = useAuth()
   const { can } = usePermissions()
   const isEditing = !!selectedEvent

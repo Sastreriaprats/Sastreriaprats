@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -38,7 +38,7 @@ const typeColors: Record<string, string> = {
 
 export function NotificationsPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const router = useRouter()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const { profile } = useAuth()
   const [notifications, setNotifications] = useState<any[]>([])
   const [alerts, setAlerts] = useState<{ ordersOverdue: number; overduePayments: number; lowStockCount: number } | null>(null)
@@ -50,7 +50,7 @@ export function NotificationsPanel({ open, onOpenChange }: { open: boolean; onOp
     try {
       const [alertsRes, { data }] = await Promise.all([
         getDashboardAlerts(),
-        supabase.from('notifications').select('*').eq('user_id', profile.id).order('created_at', { ascending: false }).limit(50),
+        supabase.from('notifications').select('id, type, is_read, link, title, message, created_at, user_id').eq('user_id', profile.id).order('created_at', { ascending: false }).limit(50),
       ])
       if (alertsRes.success) setAlerts(alertsRes.data)
       if (data) setNotifications(data)

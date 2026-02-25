@@ -2,28 +2,54 @@
 
 import { useState, useEffect } from 'react'
 import Image from 'next/image'
+import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
-import { CreditCard, Loader2, Lock, ShoppingBag, Truck } from 'lucide-react'
+import { CreditCard, Loader2, Lock, ShoppingBag, Truck, Store, AlertCircle, FlaskConical } from 'lucide-react'
 import { useCart } from '@/components/providers/cart-provider'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { trackBeginCheckout } from '@/lib/analytics/events'
 
+type ClientProfile = {
+  first_name: string
+  last_name: string
+  email: string | null
+  phone: string | null
+  address: string | null
+  city: string | null
+  postal_code: string | null
+  province: string | null
+  country: string | null
+  shipping_address: string | null
+  shipping_city: string | null
+  shipping_postal_code: string | null
+  shipping_province: string | null
+  shipping_country: string | null
+}
+
 export function CheckoutContent() {
-  const { items, subtotal } = useCart()
+  const { items, subtotal, clearCart } = useCart()
+  const enableDemoPayment = process.env.NEXT_PUBLIC_ENABLE_DEMO_PAYMENT !== 'false'
   const [isProcessing, setIsProcessing] = useState(false)
-  const [paymentMethod, setPaymentMethod] = useState<'stripe' | 'redsys'>('stripe')
+  const [paymentMethod, setPaymentMethod] = useState<'stripe' | 'redsys' | 'demo'>(
+    enableDemoPayment ? 'demo' : 'stripe'
+  )
+  const [deliveryMethod, setDeliveryMethod] = useState<'home' | 'store'>('home')
+  const [clientProfile, setClientProfile] = useState<ClientProfile | null>(null)
+  const [profileLoaded, setProfileLoaded] = useState(false)
 
   const [form, setForm] = useState({
     first_name: '', last_name: '', email: '', phone: '',
     address: '', city: '', postal_code: '', province: '', country: 'ES',
   })
 
-  const freeShipping = subtotal >= 200
-  const shippingCost = freeShipping ? 0 : 9.90
+  const freeShippingByAmount = subtotal >= 200
+  const isStorePickup = deliveryMethod === 'store'
+  const shippingCost = isStorePickup ? 0 : (freeShippingByAmount ? 0 : 9.90)
+  const freeShipping = shippingCost === 0
   const taxAmount = Math.round(subtotal * 0.21 * 100) / 100
   const total = subtotal + shippingCost
 
@@ -31,14 +57,61 @@ export function CheckoutContent() {
     if (subtotal > 0) trackBeginCheckout(subtotal)
   }, [subtotal])
 
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/auth/me')
+      .then(res => res.json())
+      .then((data: { clientProfile?: ClientProfile | null }) => {
+        if (cancelled || !data.clientProfile) return
+        const p = data.clientProfile
+        const hasShipping = !!(p.shipping_address || p.shipping_city || p.shipping_postal_code)
+        const addr = hasShipping
+          ? {
+              address: p.shipping_address ?? '',
+              city: p.shipping_city ?? '',
+              postal_code: p.shipping_postal_code ?? '',
+              province: p.shipping_province ?? '',
+              country: p.shipping_country ?? 'ES',
+            }
+          : {
+              address: p.address ?? '',
+              city: p.city ?? '',
+              postal_code: p.postal_code ?? '',
+              province: p.province ?? '',
+              country: p.country ?? 'ES',
+            }
+        setClientProfile(p)
+        setForm(prev => ({
+          ...prev,
+          first_name: p.first_name ?? '',
+          last_name: p.last_name ?? '',
+          email: p.email ?? '',
+          phone: p.phone ?? '',
+          ...addr,
+        }))
+      })
+      .finally(() => setProfileLoaded(true))
+    return () => { cancelled = true }
+  }, [])
+
   const formatPrice = (p: number) =>
     new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(p)
 
   const handlePay = async () => {
-    if (!form.first_name || !form.last_name || !form.email || !form.address || !form.city || !form.postal_code) {
-      toast.error('Completa todos los campos obligatorios')
+    if (!form.first_name || !form.last_name || !form.email) {
+      toast.error('Completa los datos de contacto')
       return
     }
+    if (deliveryMethod === 'home') {
+      if (!form.address?.trim() || !form.city?.trim() || !form.postal_code?.trim()) {
+        toast.error('Falta información de envío. Complétala arriba o añádela en Mi perfil.')
+        return
+      }
+    }
+
+    const customerPayload = deliveryMethod === 'store'
+      ? { ...form, address: 'Recoger en tienda', city: '', postal_code: '', province: '' }
+      : form
 
     setIsProcessing(true)
     try {
@@ -52,15 +125,17 @@ export function CheckoutContent() {
             unit_price: i.unit_price,
             product_name: i.product_name,
           })),
-          customer: form,
+          customer: customerPayload,
           payment_method: paymentMethod,
           shipping_cost: shippingCost,
+          delivery_method: deliveryMethod,
           locale: 'es',
         }),
       })
       const data = await res.json()
 
       if (data.checkout_url) {
+        clearCart()
         window.location.href = data.checkout_url
       } else if (data.error) {
         toast.error(data.error)
@@ -86,6 +161,39 @@ export function CheckoutContent() {
 
       <div className="grid gap-10 lg:grid-cols-5">
         <div className="lg:col-span-3 space-y-8">
+          {/* Delivery method */}
+          <section>
+            <h2 className="text-lg font-semibold text-prats-navy mb-4 flex items-center gap-2">
+              <Truck className="h-5 w-5" />Tipo de entrega
+            </h2>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setDeliveryMethod('home')}
+                className={cn(
+                  'p-4 rounded-xl border-2 text-left transition-all',
+                  deliveryMethod === 'home' ? 'border-prats-navy bg-prats-navy/5' : 'border-gray-200 hover:border-gray-300'
+                )}
+              >
+                <Truck className="h-5 w-5 text-prats-navy mb-2" />
+                <p className="text-sm font-medium">Envío a domicilio</p>
+                <p className="text-xs text-gray-400">Recibe tu pedido en casa</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDeliveryMethod('store')}
+                className={cn(
+                  'p-4 rounded-xl border-2 text-left transition-all',
+                  deliveryMethod === 'store' ? 'border-prats-navy bg-prats-navy/5' : 'border-gray-200 hover:border-gray-300'
+                )}
+              >
+                <Store className="h-5 w-5 text-prats-navy mb-2" />
+                <p className="text-sm font-medium">Recoger en tienda</p>
+                <p className="text-xs text-gray-400">Sin coste de envío</p>
+              </button>
+            </div>
+          </section>
+
           {/* Contact */}
           <section>
             <h2 className="text-lg font-semibold text-prats-navy mb-4">Contacto</h2>
@@ -126,11 +234,24 @@ export function CheckoutContent() {
             </div>
           </section>
 
-          {/* Shipping */}
+          {/* Shipping - only for home delivery */}
+          {deliveryMethod === 'home' && (
           <section>
             <h2 className="text-lg font-semibold text-prats-navy mb-4 flex items-center gap-2">
               <Truck className="h-5 w-5" />Dirección de envío
             </h2>
+            {profileLoaded && clientProfile && !form.address?.trim() && !form.city?.trim() && !form.postal_code?.trim() && (
+              <div className="mb-4 flex gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                <AlertCircle className="h-4 w-4 flex-shrink-0 text-amber-600" />
+                <p>
+                  Falta información de envío en tu perfil. Añádela en{' '}
+                  <Link href="/mi-cuenta/datos" className="font-medium text-prats-navy underline">
+                    Mi perfil
+                  </Link>
+                  {' '}o complétala a continuación para este pedido.
+                </p>
+              </div>
+            )}
             <div className="space-y-4">
               <div className="space-y-1">
                 <Label className="text-xs">Dirección *</Label>
@@ -168,13 +289,14 @@ export function CheckoutContent() {
               </div>
             </div>
           </section>
+          )}
 
           {/* Payment method */}
           <section>
             <h2 className="text-lg font-semibold text-prats-navy mb-4 flex items-center gap-2">
               <CreditCard className="h-5 w-5" />Método de pago
             </h2>
-            <div className="grid grid-cols-2 gap-3">
+            <div className={cn('grid gap-3', enableDemoPayment ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-2')}>
               <button
                 onClick={() => setPaymentMethod('stripe')}
                 className={cn(
@@ -199,6 +321,20 @@ export function CheckoutContent() {
                 <p className="text-sm font-medium">TPV Virtual (Redsys)</p>
                 <p className="text-xs text-gray-400">Tarjetas españolas</p>
               </button>
+              {enableDemoPayment && (
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod('demo')}
+                  className={cn(
+                    'p-4 rounded-xl border-2 text-left transition-all border-amber-200 bg-amber-50/50',
+                    paymentMethod === 'demo' ? 'border-amber-500 bg-amber-100 ring-2 ring-amber-500/30' : 'hover:border-amber-300'
+                  )}
+                >
+                  <FlaskConical className="h-5 w-5 text-amber-600 mb-2" />
+                  <p className="text-sm font-medium text-amber-800">Modo demo</p>
+                  <p className="text-xs text-amber-600">Sin cobro real, para pruebas</p>
+                </button>
+              )}
             </div>
           </section>
         </div>

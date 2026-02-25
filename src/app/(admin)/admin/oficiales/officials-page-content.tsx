@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -65,7 +65,7 @@ const emptyForm = {
 }
 
 export function OfficialsPageContent() {
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const { can } = usePermissions()
   const canEdit = can('officials.edit')
   const canCreate = can('officials.create')
@@ -77,12 +77,12 @@ export function OfficialsPageContent() {
   const [form, setForm] = useState(emptyForm)
   const [isSaving, setIsSaving] = useState(false)
 
-  const fetchOfficials = async () => {
+  const fetchOfficials = useCallback(async () => {
     setIsLoading(true)
     try {
       const { data, error } = await supabase
         .from('officials')
-        .select('*')
+        .select('id, name, legal_name, nif_cif, phone, email, specialty, price_per_garment, address, city, postal_code, province, country, bank_iban, payment_terms, internal_notes, is_active')
         .order('name', { ascending: true })
       if (error) throw error
       setOfficials(data ?? [])
@@ -93,11 +93,11 @@ export function OfficialsPageContent() {
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [supabase])
 
   useEffect(() => {
     fetchOfficials()
-  }, [])
+  }, [fetchOfficials])
 
   const openCreate = () => {
     setEditingId(null)
@@ -164,7 +164,6 @@ export function OfficialsPageContent() {
     } else {
       const { error } = await supabase.from('officials').insert(payload)
       if (error) {
-        console.log('INSERT ERROR:', JSON.stringify(error))
         toast.error(error.message)
       } else {
         toast.success('Oficial creado')

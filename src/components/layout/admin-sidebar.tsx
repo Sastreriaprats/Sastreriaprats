@@ -10,9 +10,13 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   LayoutDashboard, Users, Scissors, Truck, UserCheck,
   CreditCard, BookOpen, Calendar, Settings, Shirt, Database,
-  Store, ShoppingBag, BarChart3, Mail, ScrollText,
+  Store, ShoppingBag, BarChart3, Mail, ScrollText, CircleDollarSign,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useState, useEffect, useRef } from 'react'
+import { getOverduePaymentsCount } from '@/actions/payments'
+
+const COBROS_LAST_VISIT_KEY = 'cobros_last_visit'
 
 interface NavItem {
   label: string
@@ -48,6 +52,7 @@ const navItems: NavItem[] = [
   { label: 'Oficiales',    href: '/admin/oficiales',    icon: UserCheck,    permission: 'officials.view' },
   { label: 'Calendario',   href: '/admin/calendario',   icon: Calendar,     permission: 'calendar.view' },
   { label: 'Contabilidad', href: '/admin/contabilidad', icon: BookOpen,     permission: 'accounting.view' },
+  { label: 'Cobros pendientes',       href: '/admin/cobros',       icon: CircleDollarSign, permission: 'orders.view' },
   { label: 'Informes',     href: '/admin/reporting',    icon: BarChart3,    permission: 'reports.view' },
   {
     label: 'Tiendas',   href: '/admin/tiendas',        icon: Store,
@@ -75,13 +80,47 @@ const navItems: NavItem[] = [
     ],
   },
   { label: 'Migración',    href: '/admin/migracion',    icon: Database,     permission: 'migration.access' },
-  { label: 'Auditoría',    href: '/admin/auditoria',    icon: ScrollText,   permission: 'audit.view' },
+  { label: 'Seguimiento',   href: '/admin/auditoria',    icon: ScrollText,   permission: 'audit.view' },
 ]
 
 export function AdminSidebar({ collapsed = false }: { collapsed?: boolean }) {
   const pathname = usePathname()
   const { can } = usePermissions()
   const { profile, isLoading } = useAuth()
+  const [overdueCount, setOverdueCount] = useState(0)
+  const prevPathRef = useRef<string | null>(null)
+
+  // Carga el conteo de pagos vencidos filtrando por la última visita a /admin/cobros
+  const fetchOverdueCount = useRef(async () => {
+    try {
+      const since = localStorage.getItem(COBROS_LAST_VISIT_KEY) ?? undefined
+      const result = await getOverduePaymentsCount({ since })
+      if (result.success) setOverdueCount(result.data)
+    } catch (e) {
+      console.error('[AdminSidebar] overdueCount:', e)
+    }
+  })
+
+  useEffect(() => {
+    fetchOverdueCount.current()
+  }, [])
+
+  // Detecta cuando el usuario entra en /admin/cobros para resetear el badge
+  useEffect(() => {
+    const isCobros = pathname === '/admin/cobros'
+    const wasNotCobros = prevPathRef.current !== '/admin/cobros'
+
+    if (isCobros && wasNotCobros) {
+      // Guardar hoy como última visita y limpiar badge
+      localStorage.setItem(COBROS_LAST_VISIT_KEY, new Date().toISOString().split('T')[0])
+      setOverdueCount(0)
+    } else if (!isCobros && prevPathRef.current === '/admin/cobros') {
+      // Al salir de cobros, refrescar para mostrar nuevos vencidos desde hoy en adelante
+      fetchOverdueCount.current()
+    }
+
+    prevPathRef.current = pathname
+  }, [pathname])
 
   const isActive = (href: string) => {
     if (href === '/admin/dashboard') return pathname === href
@@ -104,11 +143,11 @@ export function AdminSidebar({ collapsed = false }: { collapsed?: boolean }) {
       )}>
         {collapsed ? (
           <div className="h-8 w-8 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0">
-            <Image src="/logo-prats.png" alt="Prats" width={28} height={20} style={{ objectFit: 'contain', filter: 'invert(1) brightness(2)', height: 20, width: 'auto' }} priority />
+            <Image src="/logo-prats.png" alt="Prats" width={28} height={20} style={{ objectFit: 'contain', filter: 'invert(1) brightness(2)' }} priority />
           </div>
         ) : (
           <div className="flex flex-col items-start min-w-0">
-            <Image src="/logo-prats.png" alt="Prats" width={88} height={44} style={{ objectFit: 'contain', filter: 'invert(1) brightness(2)', height: 44, width: 'auto' }} priority />
+            <Image src="/logo-prats.png" alt="Prats" width={88} height={44} style={{ objectFit: 'contain', filter: 'invert(1) brightness(2)' }} priority />
             <p className="text-[10px] text-white/50 tracking-[0.2em] uppercase mt-1">Panel de gestión</p>
           </div>
         )}
@@ -119,6 +158,8 @@ export function AdminSidebar({ collapsed = false }: { collapsed?: boolean }) {
           {visibleItems.map((item) => {
             const active = isActive(item.href)
             const Icon = item.icon
+            const isCobrosItem = item.href === '/admin/cobros'
+            const badgeCount = isCobrosItem ? overdueCount : (item.badge ?? 0)
             return (
               <div key={item.href}>
                 <Link
@@ -134,8 +175,8 @@ export function AdminSidebar({ collapsed = false }: { collapsed?: boolean }) {
                   {!collapsed && (
                     <>
                       <span className="flex-1 truncate">{item.label}</span>
-                      {item.badge != null && item.badge > 0 && (
-                        <Badge variant="destructive" className="h-5 min-w-[20px] px-1 text-[10px]">{item.badge}</Badge>
+                      {badgeCount > 0 && (
+                        <Badge variant="destructive" className="h-5 min-w-[20px] px-1 text-[10px]">{badgeCount}</Badge>
                       )}
                     </>
                   )}

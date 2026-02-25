@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -11,7 +11,7 @@ const statusLabels: Record<string, string> = { pending: 'Pendiente', in_progress
 const statusColors: Record<string, string> = { pending: 'bg-gray-100 text-gray-700', in_progress: 'bg-amber-100 text-amber-700', completed: 'bg-green-100 text-green-700', delivered: 'bg-blue-100 text-blue-700' }
 
 export function ClientAlterationsTab({ clientId }: { clientId: string }) {
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const [alterations, setAlterations] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
@@ -24,6 +24,7 @@ export function ClientAlterationsTab({ clientId }: { clientId: string }) {
           .select('*')
           .eq('client_id', clientId)
           .order('created_at', { ascending: false })
+          .limit(100)
         if (!cancelled && data) setAlterations(data)
       } catch (err) {
         console.error('[ClientAlterationsTab] load error:', err)

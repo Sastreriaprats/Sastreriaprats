@@ -14,6 +14,7 @@ const STAFF_ROLES = [
   'administrador', 'sastre', 'sastre_plus', 'vendedor_basico', 'vendedor_avanzado',
   'super_admin', 'admin', 'accountant', 'tailor', 'salesperson', 'web_manager', 'manager',
 ]
+const SASTRE_ROLES = ['sastre', 'sastre_plus']
 
 export default async function LoginPage({
   searchParams,
@@ -26,6 +27,7 @@ export default async function LoginPage({
 
   let displayName: string | null = null
   let isStaff = false
+  let isSastre = false
 
   if (user) {
     const admin = createAdminClient()
@@ -39,6 +41,7 @@ export default async function LoginPage({
       return Array.isArray(ur.roles) ? ur.roles.map((r: { name: string }) => r.name) : [ur.roles.name]
     })
     isStaff = roleNames.some((n: string) => STAFF_ROLES.includes(n))
+    isSastre = roleNames.some((n: string) => SASTRE_ROLES.includes(n))
   }
 
   return (
@@ -76,12 +79,12 @@ export default async function LoginPage({
                   <Link
                     href={
                       isStaff
-                        ? '/admin/dashboard'
+                        ? (isSastre ? '/sastre' : '/admin/dashboard')
                         : (params.redirectTo && params.redirectTo.startsWith('/') ? params.redirectTo : '/mi-cuenta')
                     }
                   >
                     {isStaff
-                      ? 'Ir al panel'
+                      ? (isSastre ? 'Ir al panel del sastre' : 'Ir al panel')
                       : params.redirectTo === '/reservar'
                         ? 'Continuar a reservar cita'
                         : 'Ir a mi cuenta'}

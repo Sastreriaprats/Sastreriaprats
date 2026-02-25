@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { Search, Loader2, ShoppingBag } from 'lucide-react'
+import { Search, Loader2, ShoppingBag, Heart } from 'lucide-react'
 import { trackAddToCart } from '@/lib/analytics/events'
 import { useCart } from '@/components/providers/cart-provider'
 import { toast } from 'sonner'
@@ -16,6 +16,18 @@ export function CatalogContent() {
   const [isLoading, setIsLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState('newest')
+  const [clientId, setClientId] = useState<string | null>(null)
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set())
+  const [wishlistLoading, setWishlistLoading] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.clientId) setClientId(data.clientId)
+      })
+      .catch(() => {})
+  }, [])
 
   const fetchProducts = useCallback(async () => {
     setIsLoading(true)
@@ -31,6 +43,29 @@ export function CatalogContent() {
   }, [page, sort, search])
 
   useEffect(() => { fetchProducts() }, [fetchProducts])
+
+  const handleAddToWishlist = async (e: React.MouseEvent, productId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!clientId) {
+      toast.error('Inicia sesión para guardar favoritos')
+      return
+    }
+    setWishlistLoading(productId)
+    const res = await fetch('/api/public/wishlist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ product_id: productId }),
+    })
+    setWishlistLoading(null)
+    const data = await res.json().catch(() => ({}))
+    if (res.ok) {
+      setFavoriteIds((prev) => new Set(prev).add(productId))
+      toast.success('Añadido a favoritos')
+    } else {
+      toast.error(data.error || 'Error al añadir')
+    }
+  }
 
   const handleQuickAdd = (product: Record<string, unknown>) => {
     const variants = product.product_variants as Record<string, unknown>[] | undefined
@@ -121,10 +156,25 @@ export function CatalogContent() {
                 .map((v) => ({ color: v.color as string, hex: v.color_hex as string }))
                 .filter((v, i, arr) => arr.findIndex(a => a.hex === v.hex) === i)
 
+              const productId = product.id as string
+              const isFavorite = favoriteIds.has(productId)
+
               return (
-                <div key={product.id as string} className="group">
+                <div key={productId} className="group">
                   <Link href={`/boutique/${product.slug || product.web_slug}`}>
                     <div className="aspect-[3/4] overflow-hidden relative bg-gray-100">
+                      <button
+                        type="button"
+                        onClick={(e) => handleAddToWishlist(e, productId)}
+                        className="absolute top-2 right-2 z-10 h-8 w-8 rounded-full bg-white/90 flex items-center justify-center text-gray-400 hover:text-red-500 transition-colors shadow-sm"
+                        title={clientId ? (isFavorite ? 'En favoritos' : 'Añadir a favoritos') : 'Inicia sesión para guardar favoritos'}
+                      >
+                        {wishlistLoading === productId ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Heart className={`h-4 w-4 ${isFavorite ? 'fill-red-500 text-red-500' : ''}`} />
+                        )}
+                      </button>
                       {product.main_image_url ? (
                         <img
                           src={product.main_image_url as string}

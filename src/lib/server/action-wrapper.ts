@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import type { ActionResult } from '@/lib/errors'
 import { failure } from '@/lib/errors'
 import { checkUserPermission, checkUserAnyPermission } from '@/actions/auth'
+import { serializeForServerAction } from '@/lib/server/serialize'
 
 export interface ActionContext {
   userId: string
@@ -94,6 +95,14 @@ export function protectedAction<TInput, TOutput>(
         options.revalidate.forEach(path => revalidatePath(path))
       }
 
+      if (result.success && result.data !== undefined) {
+        try {
+          return { ...result, data: serializeForServerAction(result.data) as TOutput }
+        } catch (serializeErr) {
+          console.error('[Action serialize]', serializeErr)
+          return failure('Error al serializar la respuesta', 'INTERNAL')
+        }
+      }
       return result
     } catch (error: any) {
       console.error(`[Action Error] ${options.auditModule}.${options.auditAction}:`, error)

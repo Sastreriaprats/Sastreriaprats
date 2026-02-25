@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useStores } from '@/hooks/use-cached-queries'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -21,10 +22,11 @@ import { toast } from 'sonner'
 import { createStoreAction, updateStoreAction, createWarehouseAction } from '@/actions/config'
 
 export function StoresSection() {
-  const supabase = createClient()
-  const [stores, setStores] = useState<any[]>([])
+  const supabase = useMemo(() => createClient(), [])
+  const { data: storesData, refetch: refetchStores } = useStores()
+  const stores = storesData ?? []
   const [warehouses, setWarehouses] = useState<any[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const [warehousesLoading, setWarehousesLoading] = useState(true)
   const [showStoreDialog, setShowStoreDialog] = useState(false)
   const [showWarehouseDialog, setShowWarehouseDialog] = useState(false)
   const [editingStore, setEditingStore] = useState<any>(null)
@@ -49,24 +51,22 @@ export function StoresSection() {
     { key: 'sun', label: 'Domingo' },
   ]
 
-  const fetchData = useCallback(async () => {
-    setIsLoading(true)
+  const fetchWarehouses = useCallback(async () => {
+    setWarehousesLoading(true)
     try {
-      const [s, w] = await Promise.all([
-        supabase.from('stores').select('*').order('name'),
-        supabase.from('warehouses').select('*, stores(name)').order('name'),
-      ])
-      if (s.data) setStores(s.data)
-      if (w.data) setWarehouses(w.data)
+      const { data } = await supabase.from('warehouses').select('*, stores(name)').order('name')
+      if (data) setWarehouses(data)
     } catch (err) {
-      console.error('[StoresSection] fetchData error:', err)
-      toast.error('Error al cargar tiendas y almacenes')
+      console.error('[StoresSection] fetchWarehouses error:', err)
+      toast.error('Error al cargar almacenes')
     } finally {
-      setIsLoading(false)
+      setWarehousesLoading(false)
     }
   }, [supabase])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  useEffect(() => { fetchWarehouses() }, [fetchWarehouses])
+
+  const isLoading = warehousesLoading
 
   const handleSaveStore = async () => {
     setIsSaving(true)
@@ -94,7 +94,7 @@ export function StoresSection() {
       : await createStoreAction(payload)
 
     if (result.error) toast.error(result.error)
-    else { toast.success(editingStore ? 'Tienda actualizada' : 'Tienda creada con almacén'); setShowStoreDialog(false); fetchData() }
+    else { toast.success(editingStore ? 'Tienda actualizada' : 'Tienda creada con almacén'); setShowStoreDialog(false); refetchStores(); fetchWarehouses() }
     setIsSaving(false)
   }
 
@@ -288,7 +288,7 @@ export function StoresSection() {
             <Button onClick={async () => {
               const res = await createWarehouseAction(warehouseForm)
               if (res.error) toast.error(res.error)
-              else { toast.success('Almacén creado'); setShowWarehouseDialog(false); fetchData() }
+              else { toast.success('Almacén creado'); setShowWarehouseDialog(false); fetchWarehouses() }
             }} disabled={!warehouseForm.code || !warehouseForm.name} className="bg-prats-navy hover:bg-prats-navy-light">
               Crear almacén
             </Button>

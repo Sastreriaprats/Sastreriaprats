@@ -39,6 +39,84 @@ export async function checkUserAnyPermission(userId: string, permissionCodes: st
   return false
 }
 
+function toSerializableDate(v: unknown): string | null {
+  if (v == null) return null
+  if (typeof v === 'string') return v
+  if (v instanceof Date) return v.toISOString()
+  return String(v)
+}
+
+/** Perfil actual + tiendas para useCurrentProfile (cliente). Devuelve null si no hay sesión. */
+export async function getCurrentProfileAction(): Promise<{
+  profile: UserWithRoles
+  stores: Array<{ storeId: string; storeName: string; storeCode: string; isPrimary: boolean }>
+} | null> {
+  try {
+    const supabase = await createServerSupabaseClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return null
+
+    const admin = createAdminClient()
+    const [profileRes, userRolesRes] = await Promise.all([
+      admin.from('profiles').select('id, email, full_name, first_name, last_name, avatar_url, phone, preferred_locale, dark_mode, is_active, status, last_login_at, created_at, updated_at').eq('id', user.id).single(),
+      admin.from('user_roles').select('roles(id, name, display_name, color, icon)').eq('user_id', user.id),
+    ])
+    if (profileRes.error || !profileRes.data) return null
+
+    const roles = (userRolesRes.data ?? []).map((ur: { roles?: unknown }) => {
+      const r = ur.roles as { id: string; name: string; display_name: string | null; color: string | null; icon: string | null } | null
+      return r ? { roleId: r.id, roleName: r.name, displayName: r.display_name, color: r.color, icon: r.icon } : null
+    }).filter(Boolean) as UserWithRoles['roles']
+
+    const roleIds = roles.map(r => r.roleId)
+    const [rpRes, storesRes] = await Promise.all([
+      roleIds.length > 0
+        ? admin.from('role_permissions').select('permissions(code)').in('role_id', roleIds)
+        : Promise.resolve({ data: [] }),
+      admin.from('user_stores').select('store_id, is_primary, stores(id, name, code)').eq('user_id', user.id),
+    ])
+
+    const permissions = [...new Set(
+      (rpRes.data ?? []).flatMap((rp: { permissions?: { code: string } | { code: string }[] | null }) => {
+        if (!rp.permissions) return []
+        if (Array.isArray(rp.permissions)) return rp.permissions.map((p: { code: string }) => p.code)
+        return [rp.permissions.code]
+      })
+    )] as string[]
+
+    const stores = (storesRes.data ?? []).map((us: { store_id: string; is_primary: boolean; stores?: unknown }) => {
+      const s = us.stores as { id: string; name: string; code: string } | null
+      return { storeId: us.store_id, storeName: s?.name ?? '', storeCode: s?.code ?? '', isPrimary: us.is_primary }
+    })
+
+    const pd = profileRes.data as Record<string, unknown>
+    const profile: UserWithRoles = {
+      id: pd.id as string,
+      email: pd.email as string,
+      fullName: (pd.full_name as string) ?? '',
+      firstName: (pd.first_name as string | null) ?? null,
+      lastName: (pd.last_name as string | null) ?? null,
+      avatarUrl: (pd.avatar_url as string | null) ?? null,
+      phone: (pd.phone as string | null) ?? null,
+      preferredLocale: (pd.preferred_locale as string | null) ?? null,
+      darkMode: (pd.dark_mode as boolean | null) ?? null,
+      isActive: (pd.is_active as boolean) ?? true,
+      status: (pd.status as string) ?? 'active',
+      lastLoginAt: toSerializableDate(pd.last_login_at),
+      createdAt: toSerializableDate(pd.created_at) ?? '',
+      updatedAt: toSerializableDate(pd.updated_at) ?? '',
+      roles,
+      stores: stores.map(s => s.storeName),
+      permissions,
+    }
+
+    return { profile, stores }
+  } catch (err) {
+    console.error('[getCurrentProfileAction]', err)
+    return null
+  }
+}
+
 // ==========================================
 // SCHEMAS DE VALIDACIÓN
 // ==========================================
@@ -266,12 +344,13 @@ export async function pinLoginAction(formData: FormData) {
 // ==========================================
 
 export async function createUserAction(data: z.infer<typeof createUserSchema>) {
-  const supabase = await createServerSupabaseClient()
-  const { data: { user: currentUser } } = await supabase.auth.getUser()
+  try {
+    const supabase = await createServerSupabaseClient()
+    const { data: { user: currentUser } } = await supabase.auth.getUser()
 
-  if (!currentUser) {
-    return { error: 'No autenticado' }
-  }
+    if (!currentUser) {
+      return { error: 'No autenticado' }
+    }
 
   const adminClient = createAdminClient()
   const hasPerm = await checkUserPermission(currentUser.id, 'config.users')
@@ -357,8 +436,12 @@ export async function createUserAction(data: z.infer<typeof createUserSchema>) {
     p_description: `Creado usuario ${fullName} (${email})`,
   })
 
-  revalidatePath('/admin/configuracion')
-  return { success: true, userId: newUserId }
+    revalidatePath('/admin/configuracion')
+    return { success: true, userId: newUserId }
+  } catch (err) {
+    console.error('[createUserAction]', err)
+    return { error: err instanceof Error ? err.message : 'Error al crear usuario' }
+  }
 }
 
 // ==========================================
@@ -366,46 +449,50 @@ export async function createUserAction(data: z.infer<typeof createUserSchema>) {
 // ==========================================
 
 export async function toggleUserActiveAction(userId: string, isActive: boolean) {
-  const supabase = await createServerSupabaseClient()
-  const { data: { user: currentUser } } = await supabase.auth.getUser()
+  try {
+    const supabase = await createServerSupabaseClient()
+    const { data: { user: currentUser } } = await supabase.auth.getUser()
 
-  if (!currentUser) return { error: 'No autenticado' }
+    if (!currentUser) return { error: 'No autenticado' }
 
-  const adminClient = createAdminClient()
-  const hasPerm = await checkUserPermission(currentUser.id, 'config.users')
+    const adminClient = createAdminClient()
+    const hasPerm = await checkUserPermission(currentUser.id, 'config.users')
+    if (!hasPerm) return { error: 'Sin permisos' }
 
-  if (!hasPerm) return { error: 'Sin permisos' }
+    if (userId === currentUser.id) {
+      return { error: 'No puedes desactivarte a ti mismo' }
+    }
 
-  if (userId === currentUser.id) {
-    return { error: 'No puedes desactivarte a ti mismo' }
-  }
+    await adminClient
+      .from('profiles')
+      .update({
+        is_active: isActive,
+        status: isActive ? 'active' : 'inactive',
+        deactivated_at: isActive ? null : new Date().toISOString(),
+      })
+      .eq('id', userId)
 
-  await adminClient
-    .from('profiles')
-    .update({
-      is_active: isActive,
-      status: isActive ? 'active' : 'inactive',
-      deactivated_at: isActive ? null : new Date().toISOString(),
+    if (!isActive) {
+      await adminClient.auth.admin.updateUserById(userId, { ban_duration: '876000h' })
+    } else {
+      await adminClient.auth.admin.updateUserById(userId, { ban_duration: 'none' })
+    }
+
+    await adminClient.rpc('log_audit', {
+      p_user_id: currentUser.id,
+      p_action: 'update',
+      p_module: 'config',
+      p_entity_type: 'user',
+      p_entity_id: userId,
+      p_description: isActive ? 'Usuario reactivado' : 'Usuario desactivado',
     })
-    .eq('id', userId)
 
-  if (!isActive) {
-    await adminClient.auth.admin.updateUserById(userId, { ban_duration: '876000h' })
-  } else {
-    await adminClient.auth.admin.updateUserById(userId, { ban_duration: 'none' })
+    revalidatePath('/admin/configuracion')
+    return { success: true }
+  } catch (err) {
+    console.error('[toggleUserActiveAction]', err)
+    return { error: err instanceof Error ? err.message : 'Error al actualizar usuario' }
   }
-
-  await adminClient.rpc('log_audit', {
-    p_user_id: currentUser.id,
-    p_action: 'update',
-    p_module: 'config',
-    p_entity_type: 'user',
-    p_entity_id: userId,
-    p_description: isActive ? 'Usuario reactivado' : 'Usuario desactivado',
-  })
-
-  revalidatePath('/admin/configuracion')
-  return { success: true }
 }
 
 // ==========================================
@@ -468,12 +555,16 @@ const STAFF_ROLES = ['administrador', 'sastre', 'sastre_plus', 'vendedor_basico'
   'super_admin', 'admin', 'accountant', 'tailor', 'salesperson', 'web_manager']
 
 export async function isStaffUser(): Promise<boolean> {
-  const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return false
-  const profile = await getServerProfile(user.id)
-  if (!profile) return false
-  return profile.roles.some((r) => STAFF_ROLES.includes(r.roleName))
+  try {
+    const supabase = await createServerSupabaseClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return false
+    const profile = await getServerProfile(user.id)
+    if (!profile) return false
+    return profile.roles.some((r) => STAFF_ROLES.includes(r.roleName))
+  } catch {
+    return false
+  }
 }
 
 // ==========================================
@@ -481,9 +572,10 @@ export async function isStaffUser(): Promise<boolean> {
 // ==========================================
 
 export async function getServerProfile(userId: string): Promise<UserWithRoles | null> {
-  const adminClient = createAdminClient()
+  try {
+    const adminClient = createAdminClient()
 
-  const { data: profile, error: profileError } = await adminClient
+    const { data: profile, error: profileError } = await adminClient
     .from('profiles')
     .select('*')
     .eq('id', userId)
@@ -533,23 +625,27 @@ export async function getServerProfile(userId: string): Promise<UserWithRoles | 
     return s?.name ?? ''
   })
 
-  return {
-    id: profile.id,
-    email: profile.email,
-    fullName: profile.full_name ?? '',
-    firstName: profile.first_name ?? null,
-    lastName: profile.last_name ?? null,
-    avatarUrl: profile.avatar_url ?? null,
-    phone: profile.phone ?? null,
-    preferredLocale: profile.preferred_locale ?? null,
-    darkMode: profile.dark_mode ?? null,
-    isActive: profile.is_active ?? true,
-    status: profile.status ?? 'active',
-    lastLoginAt: profile.last_login_at ?? null,
-    createdAt: profile.created_at,
-    updatedAt: profile.updated_at,
-    roles,
-    stores,
-    permissions: permissionCodes,
+    return {
+      id: profile.id,
+      email: profile.email,
+      fullName: profile.full_name ?? '',
+      firstName: profile.first_name ?? null,
+      lastName: profile.last_name ?? null,
+      avatarUrl: profile.avatar_url ?? null,
+      phone: profile.phone ?? null,
+      preferredLocale: profile.preferred_locale ?? null,
+      darkMode: profile.dark_mode ?? null,
+      isActive: profile.is_active ?? true,
+      status: profile.status ?? 'active',
+      lastLoginAt: toSerializableDate(profile.last_login_at),
+      createdAt: toSerializableDate(profile.created_at) ?? '',
+      updatedAt: toSerializableDate(profile.updated_at) ?? '',
+      roles,
+      stores,
+      permissions: permissionCodes,
+    }
+  } catch (err) {
+    console.error('[getServerProfile]', err)
+    return null
   }
 }

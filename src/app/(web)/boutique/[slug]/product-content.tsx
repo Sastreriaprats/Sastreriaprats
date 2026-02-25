@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
-  ArrowLeft, ShoppingBag, Minus, Plus, Check, Truck, Shield, Ruler, Loader2,
+  ArrowLeft, ShoppingBag, Minus, Plus, Check, Truck, Shield, Ruler, Loader2, Heart,
 } from 'lucide-react'
 import { useCart } from '@/components/providers/cart-provider'
 import { toast } from 'sonner'
@@ -26,6 +26,16 @@ export function ProductContent({ slug }: { slug: string }) {
   const [activeImage, setActiveImage] = useState(0)
   const [justAdded, setJustAdded] = useState(false)
   const [sizeGuideOpen, setSizeGuideOpen] = useState(false)
+  const [clientId, setClientId] = useState<string | null>(null)
+  const [isInWishlist, setIsInWishlist] = useState(false)
+  const [wishlistLoading, setWishlistLoading] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((r) => r.json())
+      .then((data) => { if (data.clientId) setClientId(data.clientId) })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     fetch(`/api/public/catalog/${slug}`)
@@ -84,6 +94,28 @@ export function ProductContent({ slug }: { slug: string }) {
   const stock = (selectedVariant?.total_stock as number) || 0
   const canAdd = selectedVariant && stock > 0 && (sizes.length === 0 || selectedSize)
 
+  const handleAddToWishlist = async () => {
+    if (!product?.id) return
+    if (!clientId) {
+      toast.error('Inicia sesión para guardar favoritos')
+      return
+    }
+    setWishlistLoading(true)
+    const res = await fetch('/api/public/wishlist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ product_id: product.id }),
+    })
+    setWishlistLoading(false)
+    const data = await res.json().catch(() => ({}))
+    if (res.ok) {
+      setIsInWishlist(true)
+      toast.success('Añadido a favoritos')
+    } else {
+      toast.error(data.error || 'Error al añadir')
+    }
+  }
+
   const handleAddToCart = () => {
     if (!canAdd || !selectedVariant) return
     addItem({
@@ -107,7 +139,6 @@ export function ProductContent({ slug }: { slug: string }) {
   const formatPrice = (p: number) =>
     new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(p)
 
-  console.log('product images:', product.images, 'main_image_url:', product.main_image_url)
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -250,21 +281,48 @@ export function ProductContent({ slug }: { slug: string }) {
             </div>
           </div>
 
-          <Button
-            size="lg"
-            className={cn(
-              'w-full h-14 text-sm tracking-wide uppercase transition-all',
-              justAdded ? 'bg-green-600 hover:bg-green-700' : 'bg-prats-navy hover:bg-prats-navy-light'
+          <div className="flex gap-3">
+            <Button
+              size="lg"
+              className={cn(
+                'flex-1 h-14 text-sm tracking-wide uppercase transition-all',
+                justAdded ? 'bg-green-600 hover:bg-green-700' : 'bg-prats-navy hover:bg-prats-navy-light'
+              )}
+              disabled={!canAdd}
+              onClick={handleAddToCart}
+            >
+              {justAdded ? (
+                <><Check className="h-4 w-4 mr-2" />¡Añadido!</>
+              ) : (
+                <><ShoppingBag className="h-4 w-4 mr-2" />{canAdd ? 'Añadir al carrito' : stock <= 0 ? 'Agotado' : 'Selecciona una talla'}</>
+              )}
+            </Button>
+            {clientId && (
+              <Button
+                type="button"
+                variant="outline"
+                size="lg"
+                className="h-14 px-4 border-prats-navy text-prats-navy hover:bg-prats-navy/5"
+                disabled={wishlistLoading}
+                onClick={handleAddToWishlist}
+                title={isInWishlist ? 'En favoritos' : 'Añadir a favoritos'}
+              >
+                {wishlistLoading ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <Heart className={cn('h-5 w-5', isInWishlist && 'fill-red-500 text-red-500')} />
+                )}
+              </Button>
             )}
-            disabled={!canAdd}
-            onClick={handleAddToCart}
-          >
-            {justAdded ? (
-              <><Check className="h-4 w-4 mr-2" />¡Añadido!</>
-            ) : (
-              <><ShoppingBag className="h-4 w-4 mr-2" />{canAdd ? 'Añadir al carrito' : stock <= 0 ? 'Agotado' : 'Selecciona una talla'}</>
-            )}
-          </Button>
+          </div>
+          {!clientId && (
+            <p className="text-xs text-gray-400 mt-2">
+              <Link href={`/auth/login?mode=client&redirectTo=${encodeURIComponent(`/boutique/${slug}`)}`} className="text-prats-gold hover:underline">
+                Inicia sesión
+              </Link>
+              {' '}para guardar productos en favoritos.
+            </p>
+          )}
 
           <Separator className="my-8" />
 

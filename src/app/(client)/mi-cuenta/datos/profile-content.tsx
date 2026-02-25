@@ -1,12 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import { Save, Loader2, User, MapPin, Key } from 'lucide-react'
+import { Save, Loader2, User, MapPin, Key, Truck } from 'lucide-react'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 
@@ -14,7 +14,7 @@ export function ProfileContent({ client, userEmail }: {
   client: Record<string, unknown> | null
   userEmail: string
 }) {
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const [isSaving, setIsSaving] = useState(false)
   const [form, setForm] = useState({
     first_name: (client?.first_name as string) || '',
@@ -24,6 +24,11 @@ export function ProfileContent({ client, userEmail }: {
     city: (client?.city as string) || '',
     postal_code: (client?.postal_code as string) || '',
     province: (client?.province as string) || '',
+    shipping_address: (client?.shipping_address as string) || '',
+    shipping_city: (client?.shipping_city as string) || '',
+    shipping_postal_code: (client?.shipping_postal_code as string) || '',
+    shipping_province: (client?.shipping_province as string) || '',
+    shipping_country: (client?.shipping_country as string) || 'ES',
   })
   const [passwords, setPasswords] = useState({ new_password: '', confirm: '' })
   const [showPassword, setShowPassword] = useState(false)
@@ -34,7 +39,21 @@ export function ProfileContent({ client, userEmail }: {
       const res = await fetch('/api/public/update-client', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ client_id: client?.id, ...form }),
+        body: JSON.stringify({
+          client_id: client?.id,
+          first_name: form.first_name,
+          last_name: form.last_name,
+          phone: form.phone,
+          address: form.address,
+          city: form.city,
+          postal_code: form.postal_code,
+          province: form.province,
+          shipping_address: form.shipping_address,
+          shipping_city: form.shipping_city,
+          shipping_postal_code: form.shipping_postal_code,
+          shipping_province: form.shipping_province,
+          shipping_country: form.shipping_country,
+        }),
       })
       if (res.ok) toast.success('Datos actualizados')
       else toast.error('Error al guardar')
@@ -149,6 +168,62 @@ export function ProfileContent({ client, userEmail }: {
                 className="h-11"
               />
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Truck className="h-4 w-4" />Dirección de envío
+          </CardTitle>
+          <p className="text-xs text-gray-500 font-normal">
+            Necesaria para recibir pedidos a domicilio. Si está vacía, se usará la dirección anterior.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-1">
+            <Label className="text-xs">Dirección</Label>
+            <Input
+              value={form.shipping_address}
+              onChange={e => setForm(p => ({ ...p, shipping_address: e.target.value }))}
+              className="h-11"
+              placeholder="Ej. Calle Mayor 1"
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="space-y-1">
+              <Label className="text-xs">Ciudad</Label>
+              <Input
+                value={form.shipping_city}
+                onChange={e => setForm(p => ({ ...p, shipping_city: e.target.value }))}
+                className="h-11"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">C.P.</Label>
+              <Input
+                value={form.shipping_postal_code}
+                onChange={e => setForm(p => ({ ...p, shipping_postal_code: e.target.value }))}
+                className="h-11"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Provincia</Label>
+              <Input
+                value={form.shipping_province}
+                onChange={e => setForm(p => ({ ...p, shipping_province: e.target.value }))}
+                className="h-11"
+              />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">País</Label>
+            <Input
+              value={form.shipping_country}
+              onChange={e => setForm(p => ({ ...p, shipping_country: e.target.value }))}
+              className="h-11"
+            />
           </div>
         </CardContent>
       </Card>

@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, useCallback, useRef, us
 import { createClient } from '@/lib/supabase/client'
 import type { User, Session } from '@supabase/supabase-js'
 import type { UserWithRoles } from '@/lib/types/auth'
+import { useCurrentProfile } from '@/hooks/use-cached-queries'
 
 export interface StoreInfo {
   storeId: string
@@ -80,7 +81,6 @@ export function AuthProvider({
     return null
   })
   const hasSetInitialStore = useRef(false)
-  const backgroundFetchRef = useRef<AbortController | null>(null)
 
   const setActiveStoreId = useCallback((id: string | null) => {
     setActiveStoreIdState(id)
@@ -107,140 +107,47 @@ export function AuthProvider({
     }
   }, [])
 
-  const fetchProfileFull = useCallback(async (userId: string, signal?: AbortSignal): Promise<{ profile: UserWithRoles; stores: StoreInfo[] } | null> => {
-    try {
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single()
+  const { data: profileData, refetch: refetchProfileQuery } = useCurrentProfile(user?.id ?? null)
 
-      if (profileError || !profileData) return null
-      if (signal?.aborted) return null
-
-      // Fetch permissions with 8s timeout
-      let roles: { roleId: string; roleName: string; displayName: string | null; color: string | null; icon: string | null }[] = []
-      let userPermissions: string[] = []
-      let storeList: StoreInfo[] = []
-
-      try {
-        const controller = new AbortController()
-        const timer = setTimeout(() => controller.abort(), 8000)
-
-        const res = await fetch('/api/auth/permissions', { signal: controller.signal })
-        clearTimeout(timer)
-
-        if (res.ok && !signal?.aborted) {
-          const data = await res.json()
-          roles = (data.roles ?? []).map((r: { roleId?: string; roleName?: string; displayName?: string; color?: string; icon?: string }) => ({
-            roleId: r.roleId ?? '', roleName: r.roleName ?? '',
-            displayName: r.displayName ?? null, color: r.color ?? null, icon: r.icon ?? null,
-          }))
-          userPermissions = data.permissions ?? []
-          storeList = (data.stores ?? []).map((s: { storeId?: string; storeName?: string; storeCode?: string; isPrimary?: boolean }) => ({
-            storeId: s.storeId ?? '', storeName: s.storeName ?? '',
-            storeCode: s.storeCode ?? '', isPrimary: s.isPrimary ?? false,
-          }))
-        }
-      } catch (e) {
-        console.warn('Permissions fetch failed:', e)
-      }
-
-      if (signal?.aborted) return null
-
-      const builtProfile: UserWithRoles = {
-        id: profileData.id,
-        email: profileData.email,
-        fullName: profileData.full_name ?? '',
-        firstName: profileData.first_name ?? null,
-        lastName: profileData.last_name ?? null,
-        avatarUrl: profileData.avatar_url ?? null,
-        phone: profileData.phone ?? null,
-        preferredLocale: profileData.preferred_locale ?? null,
-        darkMode: profileData.dark_mode ?? null,
-        isActive: profileData.is_active ?? true,
-        status: profileData.status ?? 'active',
-        lastLoginAt: profileData.last_login_at ?? null,
-        createdAt: profileData.created_at,
-        updatedAt: profileData.updated_at,
-        roles,
-        stores: storeList.map(s => s.storeName),
-        permissions: userPermissions,
-      }
-
-      return { profile: builtProfile, stores: storeList }
-    } catch (error) {
-      console.error('Error fetching profile:', error)
-      return null
+  useEffect(() => {
+    if (user?.id && profileData) {
+      setProfile(profileData.profile)
+      const storeList: StoreInfo[] = profileData.stores.map(s => ({ storeId: s.storeId, storeName: s.storeName, isPrimary: s.isPrimary }))
+      applyStores(storeList)
+      saveCachedAuth(user.id, { profile: profileData.profile, stores: storeList })
     }
-  }, [supabase])
+  }, [user?.id, profileData, applyStores])
 
   const refreshProfile = useCallback(async () => {
     if (!user) return
-    const result = await fetchProfileFull(user.id)
-    if (result) {
-      setProfile(result.profile)
-      applyStores(result.stores)
-      saveCachedAuth(user.id, result)
-    }
-  }, [user, fetchProfileFull, applyStores])
+    await refetchProfileQuery()
+  }, [user, refetchProfileQuery])
 
   useEffect(() => {
-    let cancelled = false
-
-    const handleUserSession = async (userId: string, isInitial: boolean) => {
-      if (isInitial) {
-        // Restore from cache immediately so UI renders without any loading state
-        const cached = loadCachedAuth(userId)
-        if (cached) {
-          setProfile(cached.profile)
-          applyStores(cached.stores)
-        }
-      }
-
-      // Cancel any in-flight background fetch
-      if (backgroundFetchRef.current) {
-        backgroundFetchRef.current.abort()
-      }
-      const ctrl = new AbortController()
-      backgroundFetchRef.current = ctrl
-
-      // Fetch fresh data in background (non-blocking for initial, blocking for sign-in)
-      const result = await fetchProfileFull(userId, ctrl.signal)
-      if (cancelled || ctrl.signal.aborted) return
-
-      if (result) {
-        setProfile(result.profile)
-        applyStores(result.stores)
-        saveCachedAuth(userId, result)
-      }
-    }
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, newSession) => {
-        if (cancelled) return
         setSession(newSession)
         setUser(newSession?.user ?? null)
 
         if (newSession?.user) {
           const isInitial = event === 'INITIAL_SESSION'
-          if (!isInitial) hasSetInitialStore.current = false
-          await handleUserSession(newSession.user.id, isInitial)
+          if (isInitial) {
+            const cached = loadCachedAuth(newSession.user.id)
+            if (cached) {
+              setProfile(cached.profile)
+              applyStores(cached.stores)
+            }
+          } else {
+            hasSetInitialStore.current = false
+          }
         } else {
           setProfile(null)
           setStores([])
         }
       }
     )
-
-    return () => {
-      cancelled = true
-      subscription.unsubscribe()
-      if (backgroundFetchRef.current) {
-        backgroundFetchRef.current.abort()
-      }
-    }
-  }, [supabase, fetchProfileFull, applyStores])
+    return () => subscription.unsubscribe()
+  }, [supabase, applyStores])
 
   const hasPermission = useCallback((code: string): boolean => permissions.has(code), [profile?.permissions])
   const hasAnyPermission = useCallback((codes: string[]): boolean => codes.some((code) => permissions.has(code)), [profile?.permissions])

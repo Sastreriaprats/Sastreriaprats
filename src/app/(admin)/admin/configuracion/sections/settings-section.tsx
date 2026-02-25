@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,7 +17,7 @@ interface ConfigItem {
 }
 
 export function SettingsSection() {
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const [configs, setConfigs] = useState<ConfigItem[]>([])
   const [editedValues, setEditedValues] = useState<Record<string, any>>({})
   const [isLoading, setIsLoading] = useState(true)

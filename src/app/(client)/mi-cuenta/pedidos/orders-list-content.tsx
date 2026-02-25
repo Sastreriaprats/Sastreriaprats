@@ -24,6 +24,35 @@ const statusColors: Record<string, string> = {
   adjustments: 'bg-amber-100 text-amber-700', finished: 'bg-green-100 text-green-700',
 }
 
+type TailoringLine = {
+  garment_types?: { name?: string } | null
+  fabric_description?: string | null
+  fabrics?: { name?: string | null; fabric_code?: string | null } | null
+}
+
+type OnlineOrderLine = {
+  product_name?: string | null
+  quantity?: number | null
+}
+
+function getOnlineOrderTitle(lines: OnlineOrderLine[] | undefined, fallback: string): string {
+  if (!lines?.length) return fallback
+  if (lines.length === 1) return lines[0].product_name ?? fallback
+  return lines.map(l => l.product_name).filter(Boolean).join(', ')
+}
+
+function getTailoringOrderSummary(lines: TailoringLine[] | undefined): string {
+  if (!lines?.length) return ''
+  return lines
+    .map((line) => {
+      const prenda = line.garment_types?.name
+      const material = line.fabric_description ?? line.fabrics?.name ?? line.fabrics?.fabric_code ?? ''
+      return [prenda, material].filter(Boolean).join(' · ')
+    })
+    .filter(Boolean)
+    .join(' — ')
+}
+
 export function OrdersListContent({ onlineOrders, tailoringOrders }: {
   onlineOrders: Record<string, unknown>[]
   tailoringOrders: Record<string, unknown>[]
@@ -81,7 +110,13 @@ export function OrdersListContent({ onlineOrders, tailoringOrders }: {
                       : <Scissors className="h-5 w-5 text-purple-500" />}
                   </div>
                   <div>
-                    <p className="font-medium font-mono text-sm">{order.order_number as string}</p>
+                    <p className="font-medium text-sm leading-tight">
+                      {order.type === 'online'
+                        ? getOnlineOrderTitle(order.online_order_lines as OnlineOrderLine[] | undefined, order.order_number as string)
+                        : (getTailoringOrderSummary(order.tailoring_order_lines as TailoringLine[] | undefined) || (order.order_number as string))
+                      }
+                    </p>
+                    <p className="text-[11px] text-gray-400 font-mono mt-0.5">{order.order_number as string}</p>
                     <div className="flex items-center gap-2 mt-0.5">
                       <Badge className={`text-[10px] ${statusColors[order.status as string] || ''}`}>
                         {statusLabels[order.status as string] || (order.status as string)}

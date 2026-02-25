@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useRolesAndPermissions } from '@/hooks/use-cached-queries'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -30,39 +31,25 @@ interface Permission {
 }
 
 export function RolesSection() {
-  const supabase = createClient()
-  const [roles, setRoles] = useState<Role[]>([])
-  const [permissions, setPermissions] = useState<Permission[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const supabase = useMemo(() => createClient(), [])
+  const { data: rolesAndPerms, isLoading, refetch: refetchRolesAndPerms } = useRolesAndPermissions()
+  const roles: Role[] = (rolesAndPerms?.roles ?? []).map(r => ({
+    id: r.id,
+    name: r.name,
+    display_name: r.display_name ?? '',
+    description: r.description ?? null,
+    role_type: r.role_type,
+    hierarchy_level: r.hierarchy_level,
+    is_active: r.is_active,
+    color: r.color ?? '',
+    permissionCount: r.permissionCount,
+  }))
+  const permissions: Permission[] = (rolesAndPerms?.permissions ?? []) as Permission[]
+
   const [selectedRole, setSelectedRole] = useState<Role | null>(null)
   const [selectedPermIds, setSelectedPermIds] = useState<Set<string>>(new Set())
   const [isSheetOpen, setIsSheetOpen] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
-
-  const fetchData = useCallback(async () => {
-    setIsLoading(true)
-    try {
-      const [rolesRes, permsRes] = await Promise.all([
-        supabase.from('roles').select('*').order('hierarchy_level'),
-        supabase.from('permissions').select('*').order('category, sort_order'),
-      ])
-
-      if (rolesRes.data) {
-        const { data: allRP } = await supabase.from('role_permissions').select('role_id')
-        const countMap: Record<string, number> = {}
-        allRP?.forEach((rp: any) => { countMap[rp.role_id] = (countMap[rp.role_id] || 0) + 1 })
-        setRoles(rolesRes.data.map((r: any) => ({ ...r, permissionCount: countMap[r.id] || 0 })))
-      }
-      if (permsRes.data) setPermissions(permsRes.data as Permission[])
-    } catch (err) {
-      console.error('[RolesSection] fetchData error:', err)
-      toast.error('Error al cargar roles y permisos')
-    } finally {
-      setIsLoading(false)
-    }
-  }, [supabase])
-
-  useEffect(() => { fetchData() }, [fetchData])
 
   const grouped = permissions.reduce((acc, p) => {
     if (!acc[p.category]) acc[p.category] = []
@@ -100,7 +87,7 @@ export function RolesSection() {
     setIsSaving(true)
     const result = await updateRolePermissionsAction(selectedRole.id, Array.from(selectedPermIds))
     if (result.error) toast.error(result.error)
-    else { toast.success(`Permisos de "${selectedRole.display_name}" actualizados`); setIsSheetOpen(false); fetchData() }
+    else { toast.success(`Permisos de "${selectedRole.display_name}" actualizados`); setIsSheetOpen(false); refetchRolesAndPerms() }
     setIsSaving(false)
   }
 

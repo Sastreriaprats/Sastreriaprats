@@ -17,14 +17,19 @@ export function PosMainContent() {
 
   useEffect(() => {
     if (!activeStoreId) return
-    getCurrentSession(activeStoreId).then((result) => {
-      if (result.success && result.data) {
-        setSession(result.data)
-        setView('sale')
-      } else {
+    getCurrentSession(activeStoreId)
+      .then((result) => {
+        if (result.success && result.data) {
+          setSession(result.data)
+          setView('sale')
+        } else {
+          setView('open_cash')
+        }
+      })
+      .catch((err) => {
+        console.error('[pos-main] getCurrentSession:', err)
         setView('open_cash')
-      }
-    })
+      })
   }, [activeStoreId])
 
   const handleCashOpened = (newSession: any) => {

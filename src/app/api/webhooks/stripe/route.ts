@@ -1,5 +1,3 @@
-// Código de Stripe comentado — mantener como referencia. Webhook activo: Redsys.
-/*
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createOnlineOrderJournalEntry } from '@/actions/accounting-triggers'
@@ -33,23 +31,64 @@ export async function POST(request: NextRequest) {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session
-        const orderId = session.metadata?.order_id
-        const orderNumber = session.metadata?.order_number
+        const meta = session.metadata || {}
+        const orderNumber = meta.order_number
+        const orderId = meta.order_id
 
-        if (orderId && orderNumber) {
-          await admin.from('online_orders').update({
+        if (meta.order_lines && orderNumber) {
+          const clientId = meta.client_id || null
+          const customer = meta.customer ? (JSON.parse(meta.customer) as Record<string, unknown>) : {}
+          const orderLines = JSON.parse(meta.order_lines) as Array<{
+            variant_id: string
+            product_name: string
+            variant_sku: string
+            quantity: number
+            unit_price: number
+            total: number
+          }>
+          const shippingCost = parseFloat(meta.shipping_cost || '0')
+          const taxAmount = parseFloat(meta.tax_amount || '0')
+          const total = parseFloat(meta.total || '0')
+          const subtotal = total - shippingCost
+
+          const { data: order, error: orderError } = await admin.from('online_orders').insert({
+            order_number: orderNumber,
+            client_id: clientId || null,
             status: 'paid',
+            subtotal,
+            tax_amount: taxAmount,
+            shipping_cost: shippingCost,
+            total,
+            payment_method: 'stripe',
+            shipping_address: customer,
             paid_at: new Date().toISOString(),
             stripe_session_id: session.id,
-            stripe_payment_intent: session.payment_intent as string,
-          }).eq('id', orderId)
+            stripe_payment_intent: (session.payment_intent as string) || null,
+          }).select('id').single()
 
-          createOnlineOrderJournalEntry(orderId).catch(() => {})
+          if (orderError) {
+            console.error('[Stripe webhook] create order', orderError)
+            return NextResponse.json({ error: orderError.message }, { status: 500 })
+          }
+
+          for (const line of orderLines) {
+            await admin.from('online_order_lines').insert({
+              order_id: order.id,
+              variant_id: line.variant_id,
+              product_name: line.product_name,
+              variant_sku: line.variant_sku,
+              quantity: line.quantity,
+              unit_price: line.unit_price,
+              total: line.total,
+            })
+          }
+
+          await createOnlineOrderJournalEntry(order.id).catch(() => {})
 
           const { data: lines } = await admin
             .from('online_order_lines')
             .select('variant_id, quantity')
-            .eq('order_id', orderId)
+            .eq('order_id', order.id)
 
           for (const line of lines || []) {
             if (!line.variant_id) continue
@@ -83,7 +122,7 @@ export async function POST(request: NextRequest) {
               await fetch('https://api.resend.com/emails', {
                 method: 'POST',
                 headers: {
-                  'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+                  Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
                   'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
@@ -96,7 +135,66 @@ export async function POST(request: NextRequest) {
                     <p>Un saludo,<br>Sastrería Prats</p>`,
                 }),
               })
-            } catch { // silent
+            } catch {
+              // silent
+            }
+          }
+        } else if (orderId && orderNumber) {
+          await admin.from('online_orders').update({
+            status: 'paid',
+            paid_at: new Date().toISOString(),
+            stripe_session_id: session.id,
+            stripe_payment_intent: session.payment_intent as string,
+          }).eq('id', orderId)
+
+          await createOnlineOrderJournalEntry(orderId).catch(() => {})
+
+          const { data: lines } = await admin
+            .from('online_order_lines')
+            .select('variant_id, quantity')
+            .eq('order_id', orderId)
+
+          for (const line of lines || []) {
+            if (!line.variant_id) continue
+            const { data: sl } = await admin
+              .from('stock_levels')
+              .select('id, quantity, warehouse_id')
+              .eq('product_variant_id', line.variant_id)
+              .limit(1)
+              .single()
+
+            if (sl) {
+              const newQty = Math.max(0, sl.quantity - line.quantity)
+              await admin.from('stock_levels').update({ quantity: newQty }).eq('id', sl.id)
+              await admin.from('stock_movements').insert({
+                product_variant_id: line.variant_id,
+                warehouse_id: sl.warehouse_id,
+                movement_type: 'sale',
+                quantity: -line.quantity,
+                stock_before: sl.quantity,
+                stock_after: newQty,
+                reason: `Pedido online ${orderNumber}`,
+              })
+            }
+          }
+
+          if (process.env.RESEND_API_KEY && session.customer_email) {
+            try {
+              await fetch('https://api.resend.com/emails', {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  from: process.env.RESEND_FROM_EMAIL || 'noreply@sastreriaprats.com',
+                  to: session.customer_email,
+                  subject: `Pedido confirmado — ${orderNumber}`,
+                  html: `<h2>¡Gracias por tu compra!</h2><p>Tu pedido <strong>${orderNumber}</strong> ha sido confirmado.</p><p>Un saludo,<br>Sastrería Prats</p>`,
+                }),
+              })
+            } catch {
+              // silent
             }
           }
         } else if (session.metadata?.order_id) {
@@ -138,14 +236,4 @@ export async function POST(request: NextRequest) {
     console.error('[Stripe Webhook Error]', message)
     return NextResponse.json({ error: message }, { status: 500 })
   }
-}
-*/
-
-import { NextResponse } from 'next/server'
-
-export async function POST() {
-  return NextResponse.json(
-    { error: 'Stripe webhook disabled — using Redsys' },
-    { status: 410 }
-  )
 }
