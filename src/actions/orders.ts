@@ -124,7 +124,7 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
     auditModule: 'orders',
     auditAction: 'create',
     auditEntity: 'tailoring_order',
-    revalidate: ['/admin/pedidos'],
+    revalidate: ['/admin/pedidos', '/sastre/pedidos'],
   },
   async (ctx, { order: orderInput, lines: linesInput }) => {
     const parsedOrder = createTailoringOrderSchema.safeParse(orderInput)
@@ -188,7 +188,17 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
       changed_by_name: ctx.userName,
     })
 
-    return success(order)
+    let clientName = 'Sin cliente'
+    if (order.client_id) {
+      const { data: client } = await ctx.adminClient
+        .from('clients')
+        .select('full_name, first_name, last_name')
+        .eq('id', order.client_id)
+        .single()
+      if (client) clientName = (client as any).full_name || [ (client as any).first_name, (client as any).last_name ].filter(Boolean).join(' ') || 'Sin nombre'
+    }
+    const auditDescription = `Pedido ${orderNumber} · Cliente: ${clientName}`
+    return success({ ...order, auditDescription })
   }
 )
 

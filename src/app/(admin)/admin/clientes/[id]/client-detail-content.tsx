@@ -8,15 +8,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   ArrowLeft, Phone, Mail,
-  Ruler, StickyNote, Scissors, Shirt, ShoppingBag, History, Pencil, CalendarDays,
+  Ruler, StickyNote, Scissors, Shirt, ShoppingBag, History, Pencil, CalendarDays, Receipt,
 } from 'lucide-react'
 import { usePermissions } from '@/hooks/use-permissions'
 import { getInitials, formatCurrency, formatDate } from '@/lib/utils'
 import { ClientDataTab } from './tabs/client-data-tab'
 import { ClientMeasurementsTab } from './tabs/client-measurements-tab'
+import { ClientCamiseriaTab } from './tabs/client-camiseria-tab'
 import { ClientNotesTab } from './tabs/client-notes-tab'
 import { ClientOrdersTab } from './tabs/client-orders-tab'
 import { ClientSalesTab } from './tabs/client-sales-tab'
+import { ClientTicketsTab } from './tabs/client-tickets-tab'
 import { ClientAlterationsTab } from './tabs/client-alterations-tab'
 import { ClientAppointmentsTab } from './tabs/client-appointments-tab'
 
@@ -143,11 +145,15 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
           <TabsTrigger value="resumen" className="gap-1"><History className="h-4 w-4" /> Resumen</TabsTrigger>
           <TabsTrigger value="datos" className="gap-1"><Pencil className="h-4 w-4" /> Datos</TabsTrigger>
           {can('clients.view') && (
-            <TabsTrigger value="medidas" className="gap-1"><Ruler className="h-4 w-4" /> Medidas</TabsTrigger>
+            <>
+              <TabsTrigger value="medidas" className="gap-1"><Ruler className="h-4 w-4" /> Medidas</TabsTrigger>
+              <TabsTrigger value="camiseria" className="gap-1"><Shirt className="h-4 w-4" /> Camisería</TabsTrigger>
+            </>
           )}
           <TabsTrigger value="notas" className="gap-1"><StickyNote className="h-4 w-4" /> Notas</TabsTrigger>
           <TabsTrigger value="pedidos" className="gap-1"><Scissors className="h-4 w-4" /> Pedidos</TabsTrigger>
           <TabsTrigger value="ventas" className="gap-1"><ShoppingBag className="h-4 w-4" /> Ventas</TabsTrigger>
+          <TabsTrigger value="tickets" className="gap-1"><Receipt className="h-4 w-4" /> Tickets</TabsTrigger>
           <TabsTrigger value="arreglos" className="gap-1"><Shirt className="h-4 w-4" /> Arreglos</TabsTrigger>
           <TabsTrigger value="citas" className="gap-1"><CalendarDays className="h-4 w-4" /> Citas</TabsTrigger>
         </TabsList>
@@ -162,6 +168,9 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
           <TabsContent value="medidas">
             <ClientMeasurementsTab clientId={client.id} />
           </TabsContent>
+          <TabsContent value="camiseria">
+            <ClientCamiseriaTab clientId={client.id} />
+          </TabsContent>
           <TabsContent value="notas">
             <ClientNotesTab clientId={client.id} />
           </TabsContent>
@@ -170,6 +179,9 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
           </TabsContent>
           <TabsContent value="ventas">
             <ClientSalesTab clientId={client.id} />
+          </TabsContent>
+          <TabsContent value="tickets">
+            <ClientTicketsTab clientId={client.id} />
           </TabsContent>
           <TabsContent value="arreglos">
             <ClientAlterationsTab clientId={client.id} />

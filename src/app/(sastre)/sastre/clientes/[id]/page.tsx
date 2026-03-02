@@ -51,24 +51,24 @@ export default async function SastreClientePage({
               </div>
               <div className="min-w-0 flex-1">
                 <h1 className="font-serif text-2xl text-white mb-3">{fullName}</h1>
-                {client.email && (
+                {client.email != null && String(client.email).trim() !== '' ? (
                   <p className="flex items-center gap-2 text-white/80 text-sm">
                     <Mail className="h-4 w-4 text-[#c9a96e] shrink-0" />
                     {String(client.email)}
                   </p>
-                )}
-                {client.phone && (
+                ) : null}
+                {client.phone != null && String(client.phone).trim() !== '' ? (
                   <p className="flex items-center gap-2 text-white/80 text-sm mt-1">
                     <Phone className="h-4 w-4 text-[#c9a96e] shrink-0" />
                     {String(client.phone)}
                   </p>
-                )}
-                {client.address && (
+                ) : null}
+                {client.address != null && String(client.address).trim() !== '' ? (
                   <p className="flex items-center gap-2 text-white/70 text-sm mt-1">
                     <MapPin className="h-4 w-4 text-[#c9a96e] shrink-0" />
                     {String(client.address)}
                   </p>
-                )}
+                ) : null}
               </div>
             </div>
           </div>

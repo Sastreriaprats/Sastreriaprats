@@ -4,26 +4,31 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/components/providers/auth-provider'
+import { usePermissions } from '@/hooks/use-permissions'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { LayoutDashboard, Users, Package, CircleDollarSign, ShoppingCart } from 'lucide-react'
+import { LayoutDashboard, Users, Package, CircleDollarSign, ShoppingCart, Tag } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
   { label: 'Dashboard', href: '/vendedor', icon: LayoutDashboard },
   { label: 'Clientes', href: '/vendedor/clientes', icon: Users },
   { label: 'Productos y Stock', href: '/vendedor/stock', icon: Package },
-  { label: 'Cobros pendientes', href: '/vendedor/cobros', icon: CircleDollarSign },
+  { label: 'Cobros', href: '/vendedor/cobros', icon: CircleDollarSign },
   { label: 'Caja TPV', href: '/vendedor/caja', icon: ShoppingCart },
+  { label: 'Etiquetas y códigos', href: '/admin/stock/codigos-barras', icon: Tag, permission: 'barcodes.manage' as const },
 ]
 
 export function VendedorSidebar({ collapsed = false }: { collapsed?: boolean }) {
   const pathname = usePathname()
   const { profile } = useAuth()
+  const { can } = usePermissions()
 
   const isActive = (href: string) => {
     if (href === '/vendedor') return pathname === href || pathname === '/vendedor'
     return pathname.startsWith(href)
   }
+
+  const visibleItems = navItems.filter((item) => !('permission' in item) || can((item as { permission?: string }).permission!))
 
   return (
     <aside className={cn(
@@ -32,23 +37,23 @@ export function VendedorSidebar({ collapsed = false }: { collapsed?: boolean }) 
     )}>
       <div className={cn(
         'flex items-center border-b flex-shrink-0 bg-[#1a2744]',
-        collapsed ? 'justify-center px-2 h-16' : 'gap-3 px-4 h-20'
+        collapsed ? 'justify-center px-2 h-16' : 'flex-col gap-1 px-4 py-4 min-h-[5.5rem] justify-center items-start'
       )}>
         {collapsed ? (
           <div className="h-8 w-8 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0">
             <Image src="/logo-prats.png" alt="Prats" width={28} height={20} style={{ objectFit: 'contain', filter: 'invert(1) brightness(2)' }} priority />
           </div>
         ) : (
-          <div className="flex flex-col items-start min-w-0">
-            <Image src="/logo-prats.png" alt="Prats" width={88} height={44} style={{ objectFit: 'contain', filter: 'invert(1) brightness(2)' }} priority />
-            <p className="text-[10px] text-white/50 tracking-[0.2em] uppercase mt-1">Panel vendedor</p>
-          </div>
+          <>
+            <Image src="/logo-prats.png" alt="Prats" width={80} height={36} style={{ objectFit: 'contain', filter: 'invert(1) brightness(2)' }} priority className="flex-shrink-0" />
+            <span className="text-[11px] font-medium text-white/70 tracking-widest uppercase">Panel vendedor</span>
+          </>
         )}
       </div>
 
       <ScrollArea className="flex-1 py-2">
         <nav className="space-y-0.5 px-2">
-          {navItems.map((item) => {
+          {visibleItems.map((item) => {
             const active = isActive(item.href)
             const Icon = item.icon
             return (

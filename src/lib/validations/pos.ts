@@ -39,6 +39,7 @@ export const salePaymentSchema = z.object({
   amount: z.number().min(0),
   reference: z.string().optional().nullable(),
   voucher_id: z.string().uuid().optional().nullable(),
+  next_payment_date: z.string().optional().nullable(), // fecha próximo cobro (pago parcial)
 })
 
 export type OpenCashSessionInput = z.infer<typeof openCashSessionSchema>

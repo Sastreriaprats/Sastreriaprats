@@ -4,7 +4,7 @@ export const createProductSchema = z.object({
   sku: z.string().min(1, 'SKU requerido'),
   name: z.string().min(1, 'Nombre requerido'),
   description: z.string().optional().nullable(),
-  product_type: z.enum(['boutique', 'tailoring_fabric', 'accessory', 'service']).default('boutique'),
+  product_type: z.enum(['boutique', 'tailoring_fabric', 'accessory', 'service', 'alteration']).default('boutique'),
   category_id: z.string().uuid().optional().nullable(),
   brand: z.string().optional().nullable(),
   collection: z.string().optional().nullable(),

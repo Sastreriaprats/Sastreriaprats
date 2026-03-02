@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -12,12 +11,23 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import {
   Mail, FileText, Send, Plus, Loader2, Eye, Pencil,
-  CheckCircle, XCircle, Clock, Megaphone,
+  CheckCircle, XCircle, Clock, Megaphone, ChevronLeft, ChevronRight,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { listEmailTemplates, listCampaigns, getEmailLogs, createCampaign, sendCampaign } from '@/actions/emails'
+import {
+  listEmailTemplates,
+  listCampaigns,
+  getEmailLogs,
+  getEmailTemplate,
+  getCampaign,
+  createCampaign,
+  sendCampaign,
+  updateEmailCampaign,
+  upsertEmailTemplate,
+} from '@/actions/emails'
 import { formatDate, formatDateTime } from '@/lib/utils'
 
 const statusColors: Record<string, string> = {
@@ -37,38 +47,178 @@ const segmentLabels: Record<string, string> = {
   web_registered: 'Registrados web',
 }
 
+const categoryOptions: { value: string; label: string }[] = [
+  { value: 'transactional', label: 'Transaccional' },
+  { value: 'marketing', label: 'Marketing' },
+  { value: 'notification', label: 'Notificación' },
+]
+
+const LOGS_PAGE_SIZE = 50
+
 type Template = Record<string, unknown>
 type Campaign = Record<string, unknown>
 type LogEntry = Record<string, unknown>
 
+function slugFrom(str: string): string {
+  return str
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_]/g, '')
+}
+
 export function EmailsContent() {
-  const router = useRouter()
   const [templates, setTemplates] = useState<Template[]>([])
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
-  const [logs, setLogs] = useState<{ logs: LogEntry[]; total: number }>({ logs: [], total: 0 })
+  const [logs, setLogs] = useState<{ logs: LogEntry[]; total: number; page: number }>({ logs: [], total: 0, page: 1 })
   const [isLoading, setIsLoading] = useState(true)
   const [showNewCampaign, setShowNewCampaign] = useState(false)
   const [showPreview, setShowPreview] = useState<string | null>(null)
+  const [showTemplateModal, setShowTemplateModal] = useState<string | 'new' | null>(null)
+  const [showEditCampaign, setShowEditCampaign] = useState<string | null>(null)
   const [sendingId, setSendingId] = useState<string | null>(null)
+  const [logsPage, setLogsPage] = useState(1)
 
   const [campaignForm, setCampaignForm] = useState({
     name: '', subject: '', segment: 'all', template_id: '', body_html: '',
   })
 
+  const [templateForm, setTemplateForm] = useState({
+    id: '',
+    name: '',
+    code: '',
+    category: 'transactional',
+    subject_es: '',
+    subject_en: '',
+    body_html_es: '',
+    body_html_en: '',
+    variables_text: '',
+    is_active: true,
+  })
+
+  const [campaignEditForm, setCampaignEditForm] = useState({
+    id: '',
+    subject: '',
+    body_html: '',
+    segment: 'all',
+    template_id: '',
+  })
+
+  const loadTemplates = useCallback(async () => {
+    const res = await listEmailTemplates()
+    if (res.success) setTemplates(res.data ?? [])
+  }, [])
+
+  const loadCampaigns = useCallback(async () => {
+    const res = await listCampaigns()
+    if (res.success) setCampaigns(res.data ?? [])
+  }, [])
+
+  const loadLogs = useCallback(async (page: number) => {
+    const res = await getEmailLogs({ page })
+    if (res.success) setLogs(res.data ?? { logs: [], total: 0, page: 1 })
+  }, [])
+
   useEffect(() => {
     const load = async () => {
-      const [tRes, cRes, lRes] = await Promise.all([
-        listEmailTemplates(),
-        listCampaigns(),
-        getEmailLogs({ page: 1 }),
+      setIsLoading(true)
+      await Promise.all([
+        loadTemplates(),
+        loadCampaigns(),
       ])
-      if (tRes.success) setTemplates(tRes.data)
-      if (cRes.success) setCampaigns(cRes.data)
-      if (lRes.success) setLogs(lRes.data)
       setIsLoading(false)
     }
     load()
-  }, [])
+  }, [loadTemplates, loadCampaigns])
+
+  useEffect(() => {
+    loadLogs(logsPage)
+  }, [logsPage, loadLogs])
+
+  const openNewTemplate = () => {
+    setTemplateForm({
+      id: '',
+      name: '',
+      code: '',
+      category: 'transactional',
+      subject_es: '',
+      subject_en: '',
+      body_html_es: '',
+      body_html_en: '',
+      variables_text: '',
+      is_active: true,
+    })
+    setShowTemplateModal('new')
+  }
+
+  const openEditTemplate = async (template: Template) => {
+    const id = template.id as string
+    const res = await getEmailTemplate(id)
+    if (!res.success || !res.data) {
+      toast.error('No se pudo cargar la plantilla')
+      return
+    }
+    const t = res.data
+    const vars = (t.variables as string[] | null) ?? []
+    setTemplateForm({
+      id,
+      name: (t.name as string) ?? '',
+      code: (t.code as string) ?? '',
+      category: (t.category as string) ?? 'transactional',
+      subject_es: (t.subject_es as string) ?? '',
+      subject_en: (t.subject_en as string) ?? '',
+      body_html_es: (t.body_html_es as string) ?? '',
+      body_html_en: (t.body_html_en as string) ?? '',
+      variables_text: vars.join(', '),
+      is_active: Boolean(t.is_active),
+    })
+    setShowTemplateModal(id)
+  }
+
+  const handleSaveTemplate = async () => {
+    const { name, code, subject_es, body_html_es } = templateForm
+    if (!name?.trim()) {
+      toast.error('El nombre es obligatorio')
+      return
+    }
+    if (!code?.trim()) {
+      toast.error('El código es obligatorio')
+      return
+    }
+    if (!subject_es?.trim()) {
+      toast.error('El asunto (ES) es obligatorio')
+      return
+    }
+    if (!body_html_es?.trim()) {
+      toast.error('El cuerpo HTML (ES) es obligatorio')
+      return
+    }
+    const variables = templateForm.variables_text
+      .split(',')
+      .map((v) => v.trim().replace(/^\{\{|\}\}$/g, ''))
+      .filter(Boolean)
+    const payload: Record<string, unknown> = {
+      name: templateForm.name.trim(),
+      code: templateForm.code.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''),
+      category: templateForm.category,
+      subject_es: templateForm.subject_es.trim(),
+      subject_en: templateForm.subject_en.trim() || null,
+      body_html_es: templateForm.body_html_es.trim(),
+      body_html_en: templateForm.body_html_en.trim() || null,
+      variables,
+      is_active: templateForm.is_active,
+    }
+    if (templateForm.id) payload.id = templateForm.id
+
+    const res = await upsertEmailTemplate(payload)
+    if (res.success) {
+      toast.success(templateForm.id ? 'Plantilla actualizada' : 'Plantilla creada')
+      setShowTemplateModal(null)
+      loadTemplates()
+    } else {
+      toast.error(res.error ?? 'Error al guardar')
+    }
+  }
 
   const handleCreateCampaign = async () => {
     if (!campaignForm.name || !campaignForm.subject) {
@@ -77,16 +227,50 @@ export function EmailsContent() {
     }
     const res = await createCampaign({
       ...campaignForm,
-      template_id: campaignForm.template_id || undefined,
+      template_id: campaignForm.template_id && campaignForm.template_id !== 'none' ? campaignForm.template_id : undefined,
     })
     if (res.success) {
-      toast.success(`Campaña creada — ${res.data.recipients} destinatarios`)
+      toast.success(`Campaña creada — ${res.data?.recipients ?? 0} destinatarios`)
       setShowNewCampaign(false)
       setCampaignForm({ name: '', subject: '', segment: 'all', template_id: '', body_html: '' })
-      const cRes = await listCampaigns()
-      if (cRes.success) setCampaigns(cRes.data)
+      loadCampaigns()
     } else {
-      toast.error(res.error || 'Error al crear')
+      toast.error(res.error ?? 'Error al crear')
+    }
+  }
+
+  const openEditCampaign = async (campaignId: string) => {
+    const res = await getCampaign(campaignId)
+    if (!res.success || !res.data) {
+      toast.error('No se pudo cargar la campaña')
+      return
+    }
+    const c = res.data
+    setCampaignEditForm({
+      id: campaignId,
+      subject: (c.subject as string) ?? '',
+      body_html: (c.body_html as string) ?? '',
+      segment: (c.segment as string) ?? 'all',
+      template_id: (c.template_id as string) || 'none',
+    })
+    setShowEditCampaign(campaignId)
+  }
+
+  const handleUpdateCampaign = async () => {
+    if (!campaignEditForm.id) return
+    const res = await updateEmailCampaign({
+      id: campaignEditForm.id,
+      subject: campaignEditForm.subject.trim(),
+      body_html: campaignEditForm.body_html,
+      segment: campaignEditForm.segment,
+      template_id: campaignEditForm.template_id && campaignEditForm.template_id !== 'none' ? campaignEditForm.template_id : null,
+    })
+    if (res.success) {
+      toast.success('Campaña actualizada')
+      setShowEditCampaign(null)
+      loadCampaigns()
+    } else {
+      toast.error(res.error ?? 'Error al actualizar')
     }
   }
 
@@ -94,17 +278,17 @@ export function EmailsContent() {
     setSendingId(id)
     const res = await sendCampaign(id)
     if (res.success) {
-      toast.success(`Enviados ${res.data.sent} de ${res.data.total} emails`)
-      const cRes = await listCampaigns()
-      if (cRes.success) setCampaigns(cRes.data)
+      toast.success(`Enviados ${res.data?.sent ?? 0} de ${res.data?.total ?? 0} emails`)
+      loadCampaigns()
     } else {
-      toast.error(res.error || 'Error al enviar')
+      toast.error(res.error ?? 'Error al enviar')
     }
     setSendingId(null)
   }
 
   const totalSent = campaigns.reduce((s, c) => s + ((c.sent_count as number) || 0), 0)
   const totalOpened = campaigns.reduce((s, c) => s + ((c.opened_count as number) || 0), 0)
+  const totalLogsPages = Math.max(1, Math.ceil(logs.total / LOGS_PAGE_SIZE))
 
   return (
     <div className="space-y-6">
@@ -169,21 +353,24 @@ export function EmailsContent() {
                     <TableHead>Segmento</TableHead>
                     <TableHead className="text-right">Destinatarios</TableHead>
                     <TableHead className="text-right">Enviados</TableHead>
+                    <TableHead className="text-right">Entregados</TableHead>
+                    <TableHead className="text-right">Abiertos</TableHead>
+                    <TableHead className="text-right">Clics</TableHead>
                     <TableHead>Estado</TableHead>
                     <TableHead>Fecha</TableHead>
-                    <TableHead className="w-24" />
+                    <TableHead className="w-32" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="h-32 text-center">
+                      <TableCell colSpan={10} className="h-32 text-center">
                         <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                       </TableCell>
                     </TableRow>
                   ) : campaigns.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
+                      <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
                         Sin campañas creadas
                       </TableCell>
                     </TableRow>
@@ -195,34 +382,63 @@ export function EmailsContent() {
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className="text-xs">
-                          {segmentLabels[c.segment as string] || (c.segment as string)}
+                          {segmentLabels[c.segment as string] ?? (c.segment as string)}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right text-sm">{(c.total_recipients as number) || 0}</TableCell>
-                      <TableCell className="text-right text-sm">{(c.sent_count as number) || 0}</TableCell>
+                      <TableCell className="text-right text-sm">{(c.total_recipients as number) ?? 0}</TableCell>
+                      <TableCell className="text-right text-sm">{(c.sent_count as number) ?? 0}</TableCell>
+                      <TableCell className="text-right text-sm">{(c.delivered_count as number) ?? 0}</TableCell>
+                      <TableCell className="text-right text-sm">
+                        {(() => {
+                          const sent = (c.sent_count as number) ?? 0
+                          const opened = (c.opened_count as number) ?? 0
+                          if (sent === 0) return '—'
+                          return `${Math.round((opened / sent) * 100)}%`
+                        })()}
+                      </TableCell>
+                      <TableCell className="text-right text-sm">
+                        {(() => {
+                          const sent = (c.sent_count as number) ?? 0
+                          const clicked = (c.clicked_count as number) ?? 0
+                          if (sent === 0) return '—'
+                          return `${Math.round((clicked / sent) * 100)}%`
+                        })()}
+                      </TableCell>
                       <TableCell>
-                        <Badge className={`text-xs ${statusColors[c.status as string] || ''}`}>
+                        <Badge className={`text-xs ${statusColors[c.status as string] ?? ''}`}>
                           {c.status as string}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
-                        {formatDate((c.sent_at || c.created_at) as string)}
+                        {formatDate((c.sent_at ?? c.created_at) as string)}
                       </TableCell>
                       <TableCell>
-                        {(c.status as string) === 'draft' && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="gap-1 text-xs"
-                            disabled={sendingId === (c.id as string)}
-                            onClick={() => handleSendCampaign(c.id as string)}
-                          >
-                            {sendingId === (c.id as string)
-                              ? <Loader2 className="h-3 w-3 animate-spin" />
-                              : <Send className="h-3 w-3" />}
-                            Enviar
-                          </Button>
-                        )}
+                        <div className="flex items-center gap-1">
+                          {(c.status as string) === 'draft' && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="gap-1 text-xs"
+                                onClick={() => openEditCampaign(c.id as string)}
+                              >
+                                <Pencil className="h-3 w-3" /> Editar
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="gap-1 text-xs"
+                                disabled={sendingId === (c.id as string)}
+                                onClick={() => handleSendCampaign(c.id as string)}
+                              >
+                                {sendingId === (c.id as string)
+                                  ? <Loader2 className="h-3 w-3 animate-spin" />
+                                  : <Send className="h-3 w-3" />}
+                                Enviar
+                              </Button>
+                            </>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -233,6 +449,11 @@ export function EmailsContent() {
 
           {/* TEMPLATES */}
           <TabsContent value="templates">
+            <div className="flex justify-end mb-4">
+              <Button onClick={openNewTemplate} className="gap-2 bg-prats-navy hover:bg-prats-navy/90">
+                <Plus className="h-4 w-4" /> Nueva plantilla
+              </Button>
+            </div>
             <div className="rounded-lg border">
               <Table>
                 <TableHeader>
@@ -243,7 +464,7 @@ export function EmailsContent() {
                     <TableHead>Asunto (ES)</TableHead>
                     <TableHead>Estado</TableHead>
                     <TableHead>Actualizado</TableHead>
-                    <TableHead className="w-10" />
+                    <TableHead className="w-24" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -266,14 +487,26 @@ export function EmailsContent() {
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">{formatDate(t.updated_at as string)}</TableCell>
                       <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => setShowPreview(t.id as string)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            title="Vista previa"
+                            onClick={() => setShowPreview(t.id as string)}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            title="Editar"
+                            onClick={() => openEditTemplate(t)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -333,6 +566,31 @@ export function EmailsContent() {
                 </TableBody>
               </Table>
             </div>
+            {logs.total > LOGS_PAGE_SIZE && (
+              <div className="flex items-center justify-between mt-4">
+                <p className="text-sm text-muted-foreground">
+                  Página {logs.page} de {totalLogsPages}
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={logs.page <= 1}
+                    onClick={() => setLogsPage((p) => Math.max(1, p - 1))}
+                  >
+                    <ChevronLeft className="h-4 w-4" /> Anterior
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={logs.page >= totalLogsPages}
+                    onClick={() => setLogsPage((p) => Math.min(totalLogsPages, p + 1))}
+                  >
+                    Siguiente <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </TabsContent>
         </div>
       </Tabs>
@@ -404,37 +662,230 @@ export function EmailsContent() {
         </DialogContent>
       </Dialog>
 
-      {/* Template Preview Dialog */}
+      {/* Edit Campaign Dialog (draft only) */}
+      <Dialog open={!!showEditCampaign} onOpenChange={(open) => !open && setShowEditCampaign(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Editar campaña</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Asunto del email *</Label>
+              <Input
+                value={campaignEditForm.subject}
+                onChange={e => setCampaignEditForm(p => ({ ...p, subject: e.target.value }))}
+                placeholder="Asunto"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Segmento de clientes</Label>
+              <Select value={campaignEditForm.segment} onValueChange={v => setCampaignEditForm(p => ({ ...p, segment: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(segmentLabels).map(([k, v]) => (
+                    <SelectItem key={k} value={k}>{v}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Plantilla base</Label>
+              <Select value={campaignEditForm.template_id || 'none'} onValueChange={v => setCampaignEditForm(p => ({ ...p, template_id: v }))}>
+                <SelectTrigger><SelectValue placeholder="Seleccionar plantilla (opcional)" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Sin plantilla</SelectItem>
+                  {templates.filter(t => t.is_active).map(t => (
+                    <SelectItem key={t.id as string} value={t.id as string}>{t.name as string}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Contenido HTML</Label>
+              <Textarea
+                value={campaignEditForm.body_html}
+                onChange={e => setCampaignEditForm(p => ({ ...p, body_html: e.target.value }))}
+                rows={6}
+                className="font-mono text-xs"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditCampaign(null)}>Cancelar</Button>
+            <Button onClick={handleUpdateCampaign} className="bg-prats-navy hover:bg-prats-navy/90">
+              Guardar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Template Create/Edit Modal */}
+      <Dialog open={!!showTemplateModal} onOpenChange={(open) => !open && setShowTemplateModal(null)}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{templateForm.id ? 'Editar plantilla' : 'Nueva plantilla'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Nombre *</Label>
+                <Input
+                  value={templateForm.name}
+                  onChange={e => {
+                    setTemplateForm(p => ({ ...p, name: e.target.value }))
+                    if (!templateForm.id && !templateForm.code) {
+                      setTemplateForm(p => ({ ...p, code: slugFrom(e.target.value) }))
+                    }
+                  }}
+                  placeholder="Ej: Bienvenida cliente"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Código único (slug) *</Label>
+                <Input
+                  value={templateForm.code}
+                  onChange={e => setTemplateForm(p => ({ ...p, code: e.target.value }))}
+                  placeholder="bienvenida_cliente"
+                  className="font-mono"
+                />
+                <p className="text-xs text-muted-foreground">Solo letras minúsculas, números y _</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Categoría</Label>
+              <Select value={templateForm.category} onValueChange={v => setTemplateForm(p => ({ ...p, category: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {categoryOptions.map(opt => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Asunto (ES) *</Label>
+                <Input
+                  value={templateForm.subject_es}
+                  onChange={e => setTemplateForm(p => ({ ...p, subject_es: e.target.value }))}
+                  placeholder="Asunto en español"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Asunto (EN)</Label>
+                <Input
+                  value={templateForm.subject_en}
+                  onChange={e => setTemplateForm(p => ({ ...p, subject_en: e.target.value }))}
+                  placeholder="Subject in English"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Cuerpo HTML (ES) *</Label>
+              <Textarea
+                value={templateForm.body_html_es}
+                onChange={e => setTemplateForm(p => ({ ...p, body_html_es: e.target.value }))}
+                rows={8}
+                placeholder="<h2>Hola {{client_name}}</h2><p>...</p>"
+                className="font-mono text-xs"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Cuerpo HTML (EN)</Label>
+              <Textarea
+                value={templateForm.body_html_en}
+                onChange={e => setTemplateForm(p => ({ ...p, body_html_en: e.target.value }))}
+                rows={4}
+                className="font-mono text-xs"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Variables disponibles (separadas por comas)</Label>
+              <Input
+                value={templateForm.variables_text}
+                onChange={e => setTemplateForm(p => ({ ...p, variables_text: e.target.value }))}
+                placeholder="client_name, order_number, total"
+              />
+              <p className="text-xs text-muted-foreground">Se usarán como {'{{nombre}}'} en el HTML</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                id="template-active"
+                checked={templateForm.is_active}
+                onCheckedChange={v => setTemplateForm(p => ({ ...p, is_active: v }))}
+              />
+              <Label htmlFor="template-active">Plantilla activa</Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowTemplateModal(null)}>Cancelar</Button>
+            <Button onClick={handleSaveTemplate} className="bg-prats-navy hover:bg-prats-navy/90">
+              {templateForm.id ? 'Guardar' : 'Crear plantilla'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Template Preview Dialog (iframe + metadata + Editar) */}
       <Dialog open={!!showPreview} onOpenChange={() => setShowPreview(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Vista previa de plantilla</DialogTitle></DialogHeader>
-          {showPreview && <TemplatePreview templateId={showPreview} />}
+          {showPreview && (
+            <TemplatePreviewModal
+              templateId={showPreview}
+              onClose={() => setShowPreview(null)}
+              onEdit={() => {
+                setShowPreview(null)
+                openEditTemplate({ id: showPreview } as Template)
+              }}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>
   )
 }
 
-function TemplatePreview({ templateId }: { templateId: string }) {
+function TemplatePreviewModal({
+  templateId,
+  onClose,
+  onEdit,
+}: {
+  templateId: string
+  onClose: () => void
+  onEdit: () => void
+}) {
   const [template, setTemplate] = useState<Record<string, unknown> | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const load = async () => {
-      const { getEmailTemplate } = await import('@/actions/emails')
       const res = await getEmailTemplate(templateId)
-      if (res.success) setTemplate(res.data)
+      if (res.success) setTemplate(res.data ?? null)
       setLoading(false)
     }
     load()
   }, [templateId])
 
-  if (loading) return <div className="py-12 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin" /></div>
-  if (!template) return <p className="py-12 text-center text-muted-foreground">Plantilla no encontrada</p>
+  if (loading) {
+    return (
+      <div className="py-12 text-center">
+        <Loader2 className="mx-auto h-6 w-6 animate-spin" />
+      </div>
+    )
+  }
+  if (!template) {
+    return <p className="py-12 text-center text-muted-foreground">Plantilla no encontrada</p>
+  }
+
+  const html = (template.body_html_es as string) || ''
+  const vars = (template.variables as string[]) ?? []
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4 text-sm">
+        <div>
+          <Label className="text-muted-foreground">Nombre</Label>
+          <p className="font-medium">{template.name as string}</p>
+        </div>
         <div>
           <Label className="text-muted-foreground">Código</Label>
           <p className="font-mono">{template.code as string}</p>
@@ -445,29 +896,35 @@ function TemplatePreview({ templateId }: { templateId: string }) {
         </div>
         <div>
           <Label className="text-muted-foreground">Asunto (ES)</Label>
-          <p>{template.subject_es as string}</p>
-        </div>
-        <div>
-          <Label className="text-muted-foreground">Asunto (EN)</Label>
-          <p>{(template.subject_en as string) || '—'}</p>
+          <p>{(template.subject_es as string) || '—'}</p>
         </div>
       </div>
-      {template.variables && (template.variables as string[]).length > 0 ? (
+      {vars.length > 0 && (
         <div>
           <Label className="text-muted-foreground">Variables</Label>
           <div className="flex flex-wrap gap-1 mt-1">
-            {(template.variables as string[]).map(v => (
+            {vars.map(v => (
               <Badge key={v} variant="secondary" className="text-xs font-mono">{`{{${v}}}`}</Badge>
             ))}
           </div>
         </div>
-      ) : null}
+      )}
       <div>
-        <Label className="text-muted-foreground">Vista previa HTML</Label>
-        <div
-          className="mt-2 rounded-lg border bg-white p-4 text-sm"
-          dangerouslySetInnerHTML={{ __html: (template.body_html_es as string) || '' }}
-        />
+        <Label className="text-muted-foreground">Vista previa (HTML renderizado)</Label>
+        <div className="mt-2 rounded-lg border bg-white overflow-hidden">
+          <iframe
+            title="Preview"
+            srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;padding:16px;font-family:system-ui,sans-serif;">${html}</body></html>`}
+            className="w-full min-h-[300px] border-0"
+            sandbox="allow-same-origin"
+          />
+        </div>
+      </div>
+      <div className="flex justify-end gap-2 pt-2">
+        <Button variant="outline" onClick={onClose}>Cerrar</Button>
+        <Button onClick={onEdit} className="bg-prats-navy hover:bg-prats-navy/90">
+          <Pencil className="h-4 w-4 mr-2" /> Editar
+        </Button>
       </div>
     </div>
   )

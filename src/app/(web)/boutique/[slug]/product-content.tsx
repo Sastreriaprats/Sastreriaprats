@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -159,10 +160,13 @@ export function ProductContent({ slug }: { slug: string }) {
         <div>
           <div className="aspect-[3/4] bg-gray-50 rounded-2xl overflow-hidden mb-3 relative">
             {images[activeImage]?.url ? (
-              <img
+              <Image
                 src={images[activeImage].url}
                 alt={images[activeImage].alt_text || (product.name as string)}
-                className="absolute inset-0 h-full w-full object-cover"
+                fill
+                className="object-cover"
+                sizes="(max-width: 1024px) 100vw, 50vw"
+                priority
               />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-gray-300">
@@ -182,7 +186,7 @@ export function ProductContent({ slug }: { slug: string }) {
                     i === activeImage ? 'border-prats-navy' : 'border-transparent hover:border-gray-300'
                   )}
                 >
-                  <img src={img.url} alt="" className="absolute inset-0 h-full w-full object-cover" />
+                  <Image src={img.url} alt="" width={80} height={80} className="object-cover" />
                 </button>
               ))}
             </div>

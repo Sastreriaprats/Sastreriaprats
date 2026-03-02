@@ -35,8 +35,8 @@ import { createClient } from '@/lib/supabase/client'
 
 const PRODUCT_TYPES = [
   { value: 'boutique', label: 'Boutique' },
-  { value: 'tailoring_fabric', label: 'Tejido' },
-  { value: 'accessory', label: 'Complemento' },
+  { value: 'tailoring_fabric', label: 'Tela' },
+  { value: 'alteration', label: 'Arreglo' },
   { value: 'service', label: 'Servicio' },
 ] as const
 

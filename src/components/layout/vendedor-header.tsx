@@ -15,14 +15,14 @@ import { cn } from '@/lib/utils'
 import { LayoutDashboard, Users, Package, CircleDollarSign, ShoppingCart } from 'lucide-react'
 
 const breadcrumbLabels: Record<string, string> = {
-  vendedor: '', clientes: 'Clientes', stock: 'Productos y Stock', cobros: 'Cobros pendientes', caja: 'Caja TPV',
+  vendedor: '', clientes: 'Clientes', stock: 'Productos y Stock', cobros: 'Cobros', caja: 'Caja TPV',
 }
 
 const mobileNavItems = [
   { label: 'Dashboard', href: '/vendedor', icon: LayoutDashboard },
   { label: 'Clientes', href: '/vendedor/clientes', icon: Users },
   { label: 'Productos y Stock', href: '/vendedor/stock', icon: Package },
-  { label: 'Cobros pendientes', href: '/vendedor/cobros', icon: CircleDollarSign },
+  { label: 'Cobros', href: '/vendedor/cobros', icon: CircleDollarSign },
   { label: 'Caja TPV', href: '/vendedor/caja', icon: ShoppingCart },
 ]
 
@@ -30,9 +30,9 @@ function MobileSidebar() {
   const pathname = usePathname()
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-3 px-4 h-16 border-b bg-[#1a2744]">
+      <div className="flex items-center gap-3 px-4 py-3 border-b bg-[#1a2744]">
         <Image src="/logo-prats.png" alt="Prats" width={72} height={36} style={{ objectFit: 'contain', height: 36, width: 'auto', filter: 'invert(1) brightness(2)' }} priority />
-        <p className="text-[10px] text-white/50 tracking-[0.2em] uppercase">Panel vendedor</p>
+        <span className="text-[11px] font-medium text-white/70 tracking-widest uppercase">Panel vendedor</span>
       </div>
       <nav className="flex-1 p-2 space-y-0.5">
         {mobileNavItems.map(item => {

@@ -5,6 +5,99 @@ import { queryList, queryById } from '@/lib/server/query-helpers'
 import { createProductSchema, updateProductSchema, createVariantSchema } from '@/lib/validations/products'
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
+import { generateEAN13, validateEAN13 } from '@/lib/barcode/ean13'
+
+/** Listado por variante (producto + talla) para códigos de barras. Cada variante tiene su propio EAN-13. */
+export const listVariantsForBarcodes = protectedAction<ListParams, ListResult<any>>(
+  { permission: 'products.view', auditModule: 'stock' },
+  async (ctx, params) => {
+    const admin = ctx.adminClient
+    const page = params.page || 1
+    const pageSize = Math.min(params.pageSize || 50, 100)
+    const from = (page - 1) * pageSize
+    const to = from + pageSize - 1
+    const search = params.search?.trim()
+    const sortBy = params.sortBy || 'product_name'
+    const sortOrder = params.sortOrder === 'asc' ? true : false
+
+    let query = admin
+      .from('product_variants')
+      .select(`
+        id,
+        variant_sku,
+        size,
+        color,
+        barcode,
+        price_override,
+        product_id,
+        products!inner(id, sku, name, base_price, is_active)
+      `, { count: 'exact' })
+      .eq('products.is_active', true)
+      .eq('is_active', true)
+
+    if (search) {
+      query = query.or(
+        `barcode.ilike.%${search}%,variant_sku.ilike.%${search}%,products.sku.ilike.%${search}%,products.name.ilike.%${search}%`
+      )
+    }
+
+    if (sortBy === 'product_name') {
+      query = query.order('product_id', { ascending: sortOrder })
+    } else if (sortBy === 'sku' || sortBy === 'variant_sku') {
+      query = query.order('variant_sku', { ascending: sortOrder })
+    } else if (sortBy === 'size') {
+      query = query.order('size', { ascending: sortOrder })
+    } else {
+      query = query.order('product_id', { ascending: true })
+    }
+
+    query = query.range(from, to)
+
+    const { data, count, error } = await query
+
+    if (error) {
+      console.error('[listVariantsForBarcodes]', error)
+      return success({ data: [], total: 0, page, pageSize, totalPages: 0 })
+    }
+
+    const rows = (data || []).map((v: any) => {
+      const p = v.products || {}
+      const price = v.price_override != null ? Number(v.price_override) : Number(p.base_price ?? 0)
+      return {
+        id: v.id,
+        product_id: v.product_id,
+        variant_sku: v.variant_sku,
+        size: v.size,
+        color: v.color,
+        barcode: v.barcode,
+        name: p.name,
+        sku: p.sku,
+        base_price: price,
+      }
+    })
+
+    const total = count ?? 0
+    return success({
+      data: rows,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    })
+  }
+)
+
+/** Listado ligero para página de códigos de barras (id, sku, name, barcode, base_price). @deprecated Use listVariantsForBarcodes */
+export const listProductsForBarcodes = protectedAction<ListParams, ListResult<any>>(
+  { permission: 'products.view', auditModule: 'stock' },
+  async (ctx, params) => {
+    const result = await queryList('products', {
+      ...params,
+      searchFields: ['sku', 'name', 'barcode'],
+    }, 'id, sku, name, barcode, barcode_generated_at, base_price, is_active')
+    return success(result)
+  }
+)
 
 export const listProducts = protectedAction<ListParams, ListResult<any>>(
   { permission: 'products.view', auditModule: 'stock' },
@@ -200,7 +293,22 @@ export const adjustStock = protectedAction<{
       .single()
 
     if (error) return failure(error.message)
-    return success(movement)
+    const { data: variant } = await ctx.adminClient
+      .from('product_variants')
+      .select('id, product_id')
+      .eq('id', variantId)
+      .single()
+    let productName = 'Producto'
+    if (variant?.product_id) {
+      const { data: product } = await ctx.adminClient
+        .from('products')
+        .select('name')
+        .eq('id', variant.product_id)
+        .single()
+      if (product) productName = (product as any).name ?? productName
+    }
+    const auditDescription = `Stock: ${productName} · Cantidad: ${delta >= 0 ? '+' : ''}${delta}`
+    return success({ ...movement, auditDescription })
   }
 )
 
@@ -229,24 +337,40 @@ export const moveStockBetweenWarehouses = protectedAction<
     if (!fromLevel) return failure('No hay stock en el almacén de origen')
     if (fromLevel.quantity < quantity) return failure(`Solo hay ${fromLevel.quantity} unidades en el almacén de origen`)
 
-    const { data: toLevel } = await ctx.adminClient
+    const { data: toLevelExisting } = await ctx.adminClient
       .from('stock_levels')
       .select('id, quantity')
       .eq('product_variant_id', variantId)
       .eq('warehouse_id', toWarehouseId)
       .single()
-    if (!toLevel) return failure('El almacén de destino no tiene registro para esta variante')
+
+    let toLevel: { id: string; quantity: number }
+    if (toLevelExisting) {
+      toLevel = toLevelExisting
+    } else {
+      const { data: newLevel, error: insertLevelError } = await ctx.adminClient
+        .from('stock_levels')
+        .insert({
+          product_variant_id: variantId,
+          warehouse_id: toWarehouseId,
+          quantity: 0,
+          reserved: 0,
+        })
+        .select('id, quantity')
+        .single()
+      if (insertLevelError || !newLevel) {
+        return failure(insertLevelError?.message || 'No se pudo crear el registro de stock en el almacén de destino')
+      }
+      toLevel = newLevel
+    }
 
     const fromBefore = fromLevel.quantity
     const fromAfter = fromBefore - quantity
     const toBefore = toLevel.quantity
     const toAfter = toBefore + quantity
 
-    await ctx.adminClient.from('stock_levels').update({ quantity: fromAfter, last_movement_at: new Date().toISOString() }).eq('id', fromLevel.id)
-    await ctx.adminClient.from('stock_levels').update({ quantity: toAfter, last_movement_at: new Date().toISOString() }).eq('id', toLevel.id)
-
     const reasonText = reason?.trim() || 'Traspaso entre almacenes'
-    await ctx.adminClient.from('stock_movements').insert([
+    const { error: insertError } = await ctx.adminClient.from('stock_movements').insert([
       {
         product_variant_id: variantId,
         warehouse_id: fromWarehouseId,
@@ -268,6 +392,13 @@ export const moveStockBetweenWarehouses = protectedAction<
         created_by: ctx.userId,
       },
     ])
+    if (insertError) {
+      console.error('[moveStockBetweenWarehouses] stock_movements insert:', insertError)
+      return failure(insertError.message || 'Error al registrar el movimiento de stock')
+    }
+
+    await ctx.adminClient.from('stock_levels').update({ quantity: fromAfter, last_movement_at: new Date().toISOString() }).eq('id', fromLevel.id)
+    await ctx.adminClient.from('stock_levels').update({ quantity: toAfter, last_movement_at: new Date().toISOString() }).eq('id', toLevel.id)
 
     return success({ fromAfter, toAfter })
   }
@@ -288,6 +419,39 @@ export const getStockDashboardStats = protectedAction<void, { totalProducts: num
       outOfStock: outOfStock.count || 0,
       pendingOrders: pendingOrders.count || 0,
     })
+  }
+)
+
+/** Listado de movimientos de almacén para la pestaña Movimientos (usa admin para evitar RLS en joins). */
+export const listStockMovements = protectedAction<
+  { page?: number; pageSize?: number; typeFilter?: string },
+  { data: any[]; total: number }
+>(
+  { permission: 'products.view', auditModule: 'stock' },
+  async (ctx, { page = 0, pageSize = 30, typeFilter = 'all' }) => {
+    const from = page * pageSize
+    const to = from + pageSize - 1
+    let query = ctx.adminClient
+      .from('stock_movements')
+      .select(
+        `
+        id, product_variant_id, warehouse_id, movement_type, quantity, stock_before, stock_after,
+        reason, notes, created_by, created_at,
+        product_variants ( variant_sku, products ( name ) ),
+        warehouses ( name, code ),
+        profiles!created_by ( full_name )
+        `,
+        { count: 'exact' }
+      )
+      .order('created_at', { ascending: false })
+      .range(from, to)
+    if (typeFilter !== 'all') query = query.eq('movement_type', typeFilter)
+    const { data, count, error } = await query
+    if (error) {
+      console.error('[listStockMovements]', error)
+      return failure(error.message || 'Error al cargar movimientos', 'INTERNAL')
+    }
+    return success({ data: data ?? [], total: count ?? 0 })
   }
 )
 
@@ -396,5 +560,359 @@ export const listStockByWarehouse = protectedAction<{ warehouseId?: string; sear
     } catch (err: any) {
       return failure(err?.message || 'Error al cargar stock', 'INTERNAL')
     }
+  }
+)
+
+// ─── Códigos de barras EAN-13 ─────────────────────────────────────────────────
+
+/** Genera EAN-13 para todas las variantes que no tienen barcode (cada talla tiene su propio código). */
+export const generateBarcodesForAllVariants = protectedAction<void, { generated: number; errors: string[] }>(
+  { permission: 'products.edit', auditModule: 'stock', auditAction: 'update', auditEntity: 'product' },
+  async (ctx) => {
+    const { data: activeProductIds } = await ctx.adminClient
+      .from('products')
+      .select('id')
+      .eq('is_active', true)
+    const ids = (activeProductIds ?? []).map((p: { id: string }) => p.id)
+    if (!ids.length) return success({ generated: 0, errors: [] })
+
+    const { data: variants } = await ctx.adminClient
+      .from('product_variants')
+      .select('id, variant_sku, product_id, products!inner(sku, name)')
+      .in('product_id', ids)
+      .or('barcode.is.null,barcode.eq.')
+      .eq('is_active', true)
+
+    if (!variants?.length) return success({ generated: 0, errors: [] })
+
+    const used = new Set<string>()
+    const errors: string[] = []
+    let generated = 0
+
+    for (const v of variants) {
+      const p = (v as any).products || {}
+      const label = `${p.sku || ''} ${v.variant_sku || ''}`.trim()
+      let code: string
+      let attempts = 0
+      do {
+        code = generateEAN13()
+        if (attempts++ > 50) {
+          errors.push(`${label}: no se pudo generar código único`)
+          break
+        }
+      } while (used.has(code))
+
+      if (!code || used.has(code)) continue
+      used.add(code)
+
+      const { error } = await ctx.adminClient
+        .from('product_variants')
+        .update({ barcode: code })
+        .eq('id', v.id)
+
+      if (error) errors.push(`${label}: ${error.message}`)
+      else generated++
+    }
+
+    return success({ generated, errors })
+  }
+)
+
+/** Genera EAN-13 para todos los productos que no tienen barcode. @deprecated Use generateBarcodesForAllVariants */
+export const generateBarcodesForAllProducts = protectedAction<void, { generated: number; errors: string[] }>(
+  { permission: 'products.edit', auditModule: 'stock', auditAction: 'update', auditEntity: 'product' },
+  async (ctx) => {
+    const { data: products } = await ctx.adminClient
+      .from('products')
+      .select('id, sku, name')
+      .or('barcode.is.null,barcode.eq.')
+      .eq('is_active', true)
+
+    if (!products?.length) return success({ generated: 0, errors: [] })
+
+    const used = new Set<string>()
+    const errors: string[] = []
+    let generated = 0
+
+    for (const p of products) {
+      let code: string
+      let attempts = 0
+      do {
+        code = generateEAN13()
+        if (attempts++ > 50) {
+          errors.push(`${p.sku}: no se pudo generar código único`)
+          break
+        }
+      } while (used.has(code))
+
+      if (!code || used.has(code)) continue
+      used.add(code)
+
+      const { error } = await ctx.adminClient
+        .from('products')
+        .update({ barcode: code, barcode_generated_at: new Date().toISOString() })
+        .eq('id', p.id)
+
+      if (error) errors.push(`${p.sku}: ${error.message}`)
+      else generated++
+    }
+
+    return success({ generated, errors })
+  }
+)
+
+/** Busca por código de barras: primero en variantes (cada talla tiene su código), luego en producto legacy. Devuelve variante con stock para TPV. */
+export const getProductByBarcode = protectedAction<
+  { barcode: string; storeId?: string },
+  { id: string; name: string; sku: string; base_price: number; variant: any; stock: number } | null
+>(
+  { permission: ['products.view', 'pos.access'], auditModule: 'stock' },
+  async (ctx, { barcode, storeId }) => {
+    const trimmed = barcode?.trim()
+    if (!trimmed) return success(null)
+
+    let warehouseId: string | null = null
+    if (storeId) {
+      const { data: wh } = await ctx.adminClient
+        .from('warehouses')
+        .select('id')
+        .eq('store_id', storeId)
+        .eq('is_main', true)
+        .single()
+      warehouseId = wh?.id ?? null
+    }
+
+    // 1) Buscar por variante (cada talla tiene su propio código)
+    const { data: variantRow } = await ctx.adminClient
+      .from('product_variants')
+      .select(`
+        id, variant_sku, size, color, price_override, product_id, is_active,
+        products!inner(id, sku, name, base_price, tax_rate, main_image_url, cost_price, is_active),
+        stock_levels(quantity, available, warehouse_id)
+      `)
+      .eq('barcode', trimmed)
+      .eq('is_active', true)
+      .eq('products.is_active', true)
+      .single()
+
+    if (variantRow) {
+      const variant = variantRow as any
+      const product = variant.products
+      const stockLevels = variant.stock_levels || []
+      const level = warehouseId
+        ? stockLevels.find((sl: any) => sl.warehouse_id === warehouseId)
+        : stockLevels[0]
+      const available = level?.available ?? level?.quantity ?? 0
+      const price = variant.price_override != null ? Number(variant.price_override) : Number(product?.base_price ?? 0)
+      return success({
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        base_price: price,
+        variant: {
+          id: variant.id,
+          variant_sku: variant.variant_sku,
+          size: variant.size,
+          color: variant.color,
+          price_override: variant.price_override,
+          products: product,
+          stock_levels: stockLevels,
+        },
+        stock: Number(available) || 0,
+      })
+    }
+
+    // 2) Fallback: buscar por producto (legacy, un código por producto)
+    const { data: product } = await ctx.adminClient
+      .from('products')
+      .select('id, sku, name, base_price, tax_rate, cost_price, main_image_url')
+      .eq('barcode', trimmed)
+      .eq('is_active', true)
+      .single()
+
+    if (!product) return success(null)
+
+    const { data: variants } = await ctx.adminClient
+      .from('product_variants')
+      .select(`
+        id, variant_sku, size, color, price_override, is_active,
+        products!inner(id, sku, name, base_price, tax_rate, main_image_url, cost_price),
+        stock_levels(quantity, available, warehouse_id)
+      `)
+      .eq('product_id', product.id)
+      .eq('is_active', true)
+
+    if (!variants?.length) return success(null)
+
+    const v = variants[0] as any
+    const stockLevels = v.stock_levels || []
+    const level = warehouseId
+      ? stockLevels.find((sl: any) => sl.warehouse_id === warehouseId)
+      : stockLevels[0]
+    const available = level?.available ?? level?.quantity ?? 0
+
+    return success({
+      id: product.id,
+      name: product.name,
+      sku: product.sku,
+      base_price: product.base_price,
+      variant: {
+        id: v.id,
+        variant_sku: v.variant_sku,
+        size: v.size,
+        color: v.color,
+        price_override: v.price_override,
+        products: v.products,
+        stock_levels: stockLevels,
+      },
+      stock: Number(available) || 0,
+    })
+  }
+)
+
+/** Actualiza el barcode de una variante (producto + talla). */
+export const updateVariantBarcode = protectedAction<{ variantId: string; barcode: string }, any>(
+  {
+    permission: 'products.edit',
+    auditModule: 'stock',
+    auditAction: 'update',
+    auditEntity: 'product',
+    revalidate: ['/admin/stock', '/admin/stock/codigos-barras'],
+  },
+  async (ctx, { variantId, barcode }) => {
+    const trimmed = barcode?.trim()
+    if (trimmed && !validateEAN13(trimmed)) return failure('Código EAN-13 no válido (13 dígitos)', 'VALIDATION')
+
+    const { data, error } = await ctx.adminClient
+      .from('product_variants')
+      .update({ barcode: trimmed || null })
+      .eq('id', variantId)
+      .select()
+      .single()
+
+    if (error) return failure(error.message)
+    return success(data)
+  }
+)
+
+/** Actualiza el barcode de un producto manualmente. @deprecated Use updateVariantBarcode por variante/talla */
+export const updateProductBarcode = protectedAction<{ productId: string; barcode: string }, any>(
+  {
+    permission: 'products.edit',
+    auditModule: 'stock',
+    auditAction: 'update',
+    auditEntity: 'product',
+    revalidate: ['/admin/stock', '/admin/stock/codigos-barras'],
+  },
+  async (ctx, { productId, barcode }) => {
+    const trimmed = barcode?.trim()
+    if (trimmed && !validateEAN13(trimmed)) return failure('Código EAN-13 no válido (13 dígitos)', 'VALIDATION')
+
+    const { data, error } = await ctx.adminClient
+      .from('products')
+      .update({
+        barcode: trimmed || null,
+        barcode_generated_at: trimmed ? new Date().toISOString() : null,
+      })
+      .eq('id', productId)
+      .select()
+      .single()
+
+    if (error) return failure(error.message)
+    return success(data)
+  }
+)
+
+/** Importa códigos de barras por SKU (desde archivo externo). */
+export const importProductBarcodes = protectedAction<
+  { data: { sku: string; barcode: string }[] },
+  { updated: number; errors: string[] }
+>(
+  {
+    permission: 'products.edit',
+    auditModule: 'stock',
+    auditAction: 'update',
+    auditEntity: 'product',
+    revalidate: ['/admin/stock', '/admin/stock/codigos-barras'],
+  },
+  async (ctx, { data: rows }) => {
+    const errors: string[] = []
+    let updated = 0
+
+    for (const row of rows) {
+      const barcode = row.barcode?.trim()
+      if (!barcode) continue
+      if (!validateEAN13(barcode)) {
+        errors.push(`${row.sku}: código no válido`)
+        continue
+      }
+
+      const { data: product, error: findErr } = await ctx.adminClient
+        .from('products')
+        .select('id')
+        .eq('sku', row.sku)
+        .single()
+
+      if (findErr || !product) {
+        errors.push(`${row.sku}: producto no encontrado`)
+        continue
+      }
+
+      const { error: updateErr } = await ctx.adminClient
+        .from('products')
+        .update({ barcode, barcode_generated_at: new Date().toISOString() })
+        .eq('id', product.id)
+
+      if (updateErr) errors.push(`${row.sku}: ${updateErr.message}`)
+      else updated++
+    }
+
+    return success({ updated, errors })
+  }
+)
+
+/** Obtiene variantes por IDs para impresión de etiquetas (por talla; cada variante con su barcode). */
+export const getVariantsByIdsForLabels = protectedAction<
+  string[],
+  { id: string; variant_sku: string; size: string | null; color: string | null; sku: string; name: string; barcode: string | null; base_price: number }[]
+>(
+  { permission: 'products.view', auditModule: 'stock' },
+  async (ctx, variantIds) => {
+    if (!variantIds.length) return success([])
+    const { data } = await ctx.adminClient
+      .from('product_variants')
+      .select('id, variant_sku, size, color, barcode, price_override, product_id, products!inner(sku, name, base_price)')
+      .in('id', variantIds)
+      .eq('is_active', true)
+    const list = (data || []).map((v: any) => {
+      const p = v.products || {}
+      const price = v.price_override != null ? Number(v.price_override) : Number(p.base_price ?? 0)
+      return {
+        id: v.id,
+        variant_sku: v.variant_sku,
+        size: v.size,
+        color: v.color,
+        sku: p.sku,
+        name: p.name,
+        barcode: v.barcode,
+        base_price: price,
+      }
+    }).filter((x: any) => x.barcode)
+    return success(list)
+  }
+)
+
+/** Obtiene productos por IDs para impresión de etiquetas (id, sku, name, barcode, base_price). @deprecated Use getVariantsByIdsForLabels */
+export const getProductsByIdsForLabels = protectedAction<string[], { id: string; sku: string; name: string; barcode: string | null; base_price: number }[]>(
+  { permission: 'products.view', auditModule: 'stock' },
+  async (ctx, ids) => {
+    if (!ids.length) return success([])
+    const { data } = await ctx.adminClient
+      .from('products')
+      .select('id, sku, name, barcode, base_price')
+      .in('id', ids)
+      .eq('is_active', true)
+    const list = (data || []).filter((p: any) => p.barcode)
+    return success(list)
   }
 )

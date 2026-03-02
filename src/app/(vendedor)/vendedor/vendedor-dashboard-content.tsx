@@ -3,19 +3,25 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
-import { Users, Package, CircleDollarSign, ShoppingCart } from 'lucide-react'
+import { Users, Package, CircleDollarSign, ShoppingCart, Tag, Calendar } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
+import { usePermissions } from '@/hooks/use-permissions'
 
 const quickLinks = [
   { label: 'Clientes', href: '/vendedor/clientes', icon: Users, description: 'Ver y gestionar clientes' },
   { label: 'Productos y Stock', href: '/vendedor/stock', icon: Package, description: 'Consultar productos y existencias' },
-  { label: 'Cobros pendientes', href: '/vendedor/cobros', icon: CircleDollarSign, description: 'Cobros pendientes' },
+  { label: 'Cobros', href: '/vendedor/cobros', icon: CircleDollarSign, description: 'Cobros pendientes' },
   { label: 'Caja TPV', href: '/vendedor/caja', icon: ShoppingCart, description: 'Abrir caja / TPV' },
+  { label: 'Calendario', href: '/admin/calendario', icon: Calendar, description: 'Citas y agenda', permission: 'calendar.view' as const },
+  { label: 'Etiquetas y Códigos', href: '/admin/stock/codigos-barras', icon: Tag, description: 'Códigos de barras e imprimir etiquetas', permission: 'barcodes.manage' as const },
 ]
 
 export function VendedorDashboardContent() {
   const router = useRouter()
   const { profile } = useAuth()
+  const { can } = usePermissions()
+
+  const visibleLinks = quickLinks.filter((item) => !('permission' in item) || can((item as { permission?: string }).permission!))
 
   return (
     <div className="space-y-6">
@@ -29,7 +35,7 @@ export function VendedorDashboardContent() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {quickLinks.map((item) => {
+        {visibleLinks.map((item) => {
           const Icon = item.icon
           return (
             <Card

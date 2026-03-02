@@ -42,7 +42,8 @@ export const openCashSession = protectedAction<any, any>(
       .single()
 
     if (error) return failure(error.message)
-    return success(session)
+    const description = `Apertura de caja — Fondo inicial: ${Number(parsed.data.opening_amount).toFixed(2)} €`
+    return success({ ...session, auditDescription: description })
   }
 )
 
@@ -90,7 +91,8 @@ export const closeCashSession = protectedAction<any, any>(
       .single()
 
     if (error) return failure(error.message)
-    return success(closed)
+    const description = `Cierre de caja — Efectivo contado: ${Number(parsed.data.counted_cash).toFixed(2)} €`
+    return success({ ...closed, auditDescription: description })
   }
 )
 
@@ -108,6 +110,21 @@ export const getCurrentSession = protectedAction<string, any>(
   }
 )
 
+/** Lista de todas las tiendas físicas (con caja) para el selector de caja. No depende de la asignación del usuario. */
+export const getPhysicalStoresForCaja = protectedAction<void, Array<{ storeId: string; storeName: string }>>(
+  { permission: 'pos.access', auditModule: 'pos' },
+  async (ctx) => {
+    const { data: stores } = await ctx.adminClient
+      .from('stores')
+      .select('id, name')
+      .eq('is_active', true)
+      .eq('store_type', 'physical')
+      .order('name')
+    const list = (stores ?? []).map((s: { id: string; name: string }) => ({ storeId: s.id, storeName: s.name || s.id }))
+    return success(list)
+  }
+)
+
 export const createSale = protectedAction<{
   sale: any; lines: any[]; payments: any[]
 }, any>(
@@ -122,7 +139,7 @@ export const createSale = protectedAction<{
     const parsedSale = createSaleSchema.safeParse(saleInput)
     if (!parsedSale.success) return failure(parsedSale.error.issues[0].message)
 
-    const ticketNumber = await getNextNumber('sales', 'ticket_number', 'TK')
+    const ticketNumber = await getNextNumber('sales', 'ticket_number', 'TICK')
 
     let subtotal = 0
     const processedLines = linesInput.map((line: any) => {
@@ -162,8 +179,23 @@ export const createSale = protectedAction<{
     const saleLines = processedLines.map((line: any) => ({ ...line, sale_id: sale.id }))
     await ctx.adminClient.from('sale_lines').insert(saleLines)
 
-    const salePayments = paymentsInput.map((p: any) => ({ ...p, sale_id: sale.id }))
+    const totalPaid = paymentsInput.reduce((sum: number, p: any) => sum + Number(p.amount), 0)
+    const paymentStatus = totalPaid >= total ? 'paid' : totalPaid > 0 ? 'partial' : 'pending'
+
+    const salePayments = paymentsInput.map((p: any) => ({
+      sale_id: sale.id,
+      payment_method: p.payment_method,
+      amount: p.amount,
+      reference: p.reference ?? null,
+      voucher_id: p.voucher_id ?? null,
+      next_payment_date: p.next_payment_date ?? null,
+    }))
     await ctx.adminClient.from('sale_payments').insert(salePayments)
+
+    await ctx.adminClient
+      .from('sales')
+      .update({ amount_paid: totalPaid, payment_status: paymentStatus })
+      .eq('id', sale.id)
 
     // Asiento contable automático por venta completada
     createSaleJournalEntry(sale.id).catch(() => {})
@@ -233,7 +265,174 @@ export const createSale = protectedAction<{
       }
     }
 
-    return success(sale)
+    let clientName = 'Sin cliente'
+    if (sale.client_id) {
+      const { data: client } = await ctx.adminClient
+        .from('clients')
+        .select('full_name, first_name, last_name')
+        .eq('id', sale.client_id)
+        .single()
+      if (client) clientName = (client as any).full_name || [ (client as any).first_name, (client as any).last_name ].filter(Boolean).join(' ') || 'Sin nombre'
+    }
+    const auditDescription = `Venta #${ticketNumber} · Cliente: ${clientName} · Total: ${Number(total).toFixed(2)}€`
+    return success({
+      ...sale,
+      amount_paid: totalPaid,
+      payment_status: paymentStatus,
+      auditDescription,
+    })
+  }
+)
+
+/** Datos de una venta para generar ticket PDF (admin o ficha cliente). */
+export const getSaleForTicket = protectedAction<string, {
+  sale: any
+  lines: any[]
+  payments: any[]
+  clientName: string | null
+  clientCode: string | null
+} | null>(
+  { permission: 'pos.access', auditModule: 'pos' },
+  async (ctx, saleId) => {
+    const { data: sale, error } = await ctx.adminClient
+      .from('sales')
+      .select(`
+        id, ticket_number, created_at, client_id, subtotal, discount_amount, discount_percentage,
+        tax_amount, total, payment_method, is_tax_free, status
+      `)
+      .eq('id', saleId)
+      .single()
+    if (error || !sale) return success(null)
+
+    const { data: lines } = await ctx.adminClient
+      .from('sale_lines')
+      .select('description, quantity, unit_price, discount_percentage, line_total')
+      .eq('sale_id', saleId)
+    const { data: payments } = await ctx.adminClient
+      .from('sale_payments')
+      .select('payment_method, amount')
+      .eq('sale_id', saleId)
+
+    let clientName: string | null = null
+    let clientCode: string | null = null
+    if (sale.client_id) {
+      const { data: client } = await ctx.adminClient
+        .from('clients')
+        .select('full_name, client_code')
+        .eq('id', sale.client_id)
+        .single()
+      if (client) {
+        clientName = client.full_name ?? null
+        clientCode = client.client_code ?? null
+      }
+    }
+
+    return success({
+      sale,
+      lines: lines ?? [],
+      payments: payments ?? [],
+      clientName,
+      clientCode,
+    })
+  }
+)
+
+export const listTickets = protectedAction<{
+  page?: number
+  pageSize?: number
+  clientSearch?: string
+  dateFrom?: string
+  dateTo?: string
+  productSearch?: string
+}, { data: any[]; total: number; page: number; pageSize: number; totalPages: number }>(
+  { permission: 'pos.access', auditModule: 'pos' },
+  async (ctx, { page = 1, pageSize = 20, clientSearch, dateFrom, dateTo, productSearch }) => {
+    let query = ctx.adminClient
+      .from('sales')
+      .select('id, ticket_number, created_at, total, payment_method, status, client_id, stores(name)', { count: 'exact' })
+      .order('created_at', { ascending: false })
+
+    if (dateFrom) query = query.gte('created_at', dateFrom + 'T00:00:00')
+    if (dateTo) query = query.lte('created_at', dateTo + 'T23:59:59')
+
+    let saleIds: string[] | null = null
+    if (clientSearch && clientSearch.trim()) {
+      const q = clientSearch.trim()
+      const { data: clients } = await ctx.adminClient
+        .from('clients')
+        .select('id')
+        .or(`full_name.ilike.%${q}%,client_code.ilike.%${q}%`)
+        .limit(500)
+      const ids = (clients ?? []).map((c: any) => c.id)
+      if (ids.length === 0) return success({ data: [], total: 0, page, pageSize, totalPages: 0 })
+      query = query.in('client_id', ids)
+    }
+
+    if (productSearch && productSearch.trim()) {
+      const { data: lines } = await ctx.adminClient
+        .from('sale_lines')
+        .select('sale_id')
+        .ilike('description', '%' + productSearch.trim() + '%')
+        .limit(1000)
+      const ids = [...new Set((lines ?? []).map((l: any) => l.sale_id))]
+      if (ids.length === 0) return success({ data: [], total: 0, page, pageSize, totalPages: 0 })
+      query = query.in('id', ids)
+    }
+
+    const from = (page - 1) * pageSize
+    const to = from + pageSize - 1
+    const { data: sales, count, error } = await query.range(from, to)
+
+    if (error) return failure(error.message)
+
+    const total = count ?? 0
+    const list = (sales ?? []) as any[]
+
+    if (list.length === 0) return success({ data: [], total, page, pageSize, totalPages: Math.ceil(total / pageSize) })
+
+    const clientIds = [...new Set(list.map((s: any) => s.client_id).filter(Boolean))]
+    let clientsMap: Record<string, { full_name: string; client_code: string }> = {}
+    if (clientIds.length > 0) {
+      const { data: clients } = await ctx.adminClient
+        .from('clients')
+        .select('id, full_name, client_code')
+        .in('id', clientIds)
+      for (const c of clients ?? []) {
+        clientsMap[c.id] = { full_name: c.full_name ?? '', client_code: c.client_code ?? '' }
+      }
+    }
+
+    const saleIdsForLines = list.map((s: any) => s.id)
+    const { data: allLines } = await ctx.adminClient
+      .from('sale_lines')
+      .select('sale_id, description')
+      .in('sale_id', saleIdsForLines)
+    const linesBySale: Record<string, string[]> = {}
+    for (const l of allLines ?? []) {
+      if (!linesBySale[l.sale_id]) linesBySale[l.sale_id] = []
+      linesBySale[l.sale_id].push(l.description)
+    }
+
+    const data = list.map((s: any) => ({
+      id: s.id,
+      ticket_number: s.ticket_number,
+      created_at: s.created_at,
+      total: s.total,
+      payment_method: s.payment_method,
+      status: s.status,
+      store_name: (s.stores as any)?.name,
+      client_name: s.client_id ? (clientsMap[s.client_id]?.full_name ?? '') : null,
+      client_code: s.client_id ? (clientsMap[s.client_id]?.client_code ?? '') : null,
+      products_summary: (linesBySale[s.id] ?? []).slice(0, 3).join(' · ') || '—',
+    }))
+
+    return success({
+      data,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    })
   }
 )
 
@@ -275,6 +474,84 @@ export const cashWithdrawal = protectedAction<{
     }
 
     return success(withdrawal)
+  }
+)
+
+/** Busca la venta completada más reciente que contiene una línea con el código de barras dado (para devoluciones por escáner/etiqueta). */
+export const findSaleByBarcode = protectedAction<
+  { barcode: string; storeId?: string },
+  { sale: any } | null
+>(
+  { permission: 'pos.access', auditModule: 'pos' },
+  async (ctx, { barcode, storeId }) => {
+    const trimmed = (barcode ?? '').trim()
+    if (!trimmed) return success(null)
+
+    // 1) Obtener variant id por código de barras (variantes por talla)
+    const { data: variantRow } = await ctx.adminClient
+      .from('product_variants')
+      .select('id')
+      .eq('barcode', trimmed)
+      .eq('is_active', true)
+      .single()
+
+    let variantId: string | null = variantRow?.id ?? null
+
+    if (!variantId) {
+      const { data: productRow } = await ctx.adminClient
+        .from('products')
+        .select('id')
+        .eq('barcode', trimmed)
+        .eq('is_active', true)
+        .single()
+      if (productRow) {
+        const { data: firstVariant } = await ctx.adminClient
+          .from('product_variants')
+          .select('id')
+          .eq('product_id', productRow.id)
+          .eq('is_active', true)
+          .limit(1)
+          .single()
+        variantId = firstVariant?.id ?? null
+      }
+    }
+
+    if (!variantId) return success(null)
+
+    // 2) Buscar líneas de venta con esa variante (traer venta para filtrar completadas y ordenar)
+    const { data: linesWithSale } = await ctx.adminClient
+      .from('sale_lines')
+      .select('sale_id, sales!inner(created_at, status)')
+      .eq('product_variant_id', variantId)
+
+    if (!linesWithSale?.length) return success(null)
+
+    type LineWithSale = { sale_id: string; sales: { created_at: string; status: string }[] | { created_at: string; status: string } }
+    const completed = (linesWithSale as LineWithSale[])
+      .filter((row) => {
+        const s = Array.isArray(row.sales) ? row.sales[0] : row.sales
+        return s?.status === 'completed'
+      })
+    if (!completed.length) return success(null)
+
+    // Quedarnos con la venta más reciente (por created_at)
+    const ordered = [...completed].sort(
+      (a, b) => {
+        const sa = Array.isArray(a.sales) ? a.sales[0] : a.sales
+        const sb = Array.isArray(b.sales) ? b.sales[0] : b.sales
+        return new Date(sb?.created_at ?? 0).getTime() - new Date(sa?.created_at ?? 0).getTime()
+      }
+    )
+    const saleId = ordered[0].sale_id
+
+    // 3) Devolver la venta completa con líneas y cliente
+    const { data: sale } = await ctx.adminClient
+      .from('sales')
+      .select('*, sale_lines(*), clients(full_name)')
+      .eq('id', saleId)
+      .single()
+
+    return success(sale ? { sale } : null)
   }
 )
 
@@ -402,25 +679,33 @@ export const searchProductsForPos = protectedAction<{
 }, any[]>(
   { permission: 'pos.access', auditModule: 'pos' },
   async (ctx, { query, storeId }) => {
+    const q = (query || '').trim()
+    if (!q) return success([])
+    if (!storeId) {
+      console.error('[searchProductsForPos] storeId vacío')
+      return success([])
+    }
+
     const { data: warehouse } = await ctx.adminClient
       .from('warehouses').select('id')
       .eq('store_id', storeId).eq('is_main', true).single()
 
-    if (!warehouse) return success([])
+    if (!warehouse) {
+      console.error('[searchProductsForPos] sin almacén principal para tienda', storeId)
+      return success([])
+    }
 
-    const { data } = await ctx.adminClient
-      .from('product_variants')
-      .select(`
-        id, variant_sku, size, color, barcode, price_override, is_active,
-        products!inner ( id, sku, name, base_price, price_with_tax, tax_rate, main_image_url, product_type, brand, cost_price ),
-        stock_levels!inner ( quantity, available, warehouse_id )
-      `)
-      .eq('is_active', true)
-      .eq('stock_levels.warehouse_id', warehouse.id)
-      .or(`variant_sku.ilike.%${query}%,barcode.ilike.%${query}%,products.name.ilike.%${query}%,products.sku.ilike.%${query}%`)
-      .limit(20)
+    const { data, error } = await ctx.adminClient.rpc('search_pos_products', {
+      p_query: q,
+      p_warehouse_id: warehouse.id,
+      p_limit: 20,
+    })
 
-    return success(data || [])
+    if (error) {
+      console.error('[searchProductsForPos] error RPC:', error.message, error.code)
+      return success([])
+    }
+    return success(Array.isArray(data) ? data : [])
   }
 )
 

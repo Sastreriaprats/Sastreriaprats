@@ -3,12 +3,14 @@
 import { useState } from 'react'
 import { AdminSidebar } from './admin-sidebar'
 import { AdminHeader } from './admin-header'
+import { AdminDataPrefetcher } from './admin-data-prefetcher'
 
 export function AdminLayoutClient({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false)
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
+      <AdminDataPrefetcher />
       <div className="hidden lg:block">
         <AdminSidebar collapsed={collapsed} />
       </div>

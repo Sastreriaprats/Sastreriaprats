@@ -10,14 +10,24 @@ import type { UserWithRoles } from '@/lib/types/auth'
 // ==========================================
 // HELPER: consulta directa de permiso (sin RPC)
 // ==========================================
+const FULL_ADMIN_ROLES = ['administrador', 'super_admin']
+
 export async function checkUserPermission(userId: string, permissionCode: string): Promise<boolean> {
   const admin = createAdminClient()
   const { data: userRoles } = await admin
     .from('user_roles')
-    .select('role_id')
+    .select('role_id, roles!inner(name)')
     .eq('user_id', userId)
 
   if (!userRoles || userRoles.length === 0) return false
+
+  // Administrador tiene acceso a todo sin necesidad de que el permiso esté en la BD
+  const isFullAdmin = userRoles.some(ur => {
+    const r = ur.roles as { name?: string } | null
+    return r?.name && FULL_ADMIN_ROLES.includes(r.name)
+  })
+  if (isFullAdmin) return true
+
   const roleIds = userRoles.map(ur => ur.role_id)
 
   const { data: perms } = await admin
@@ -49,7 +59,7 @@ function toSerializableDate(v: unknown): string | null {
 /** Perfil actual + tiendas para useCurrentProfile (cliente). Devuelve null si no hay sesión. */
 export async function getCurrentProfileAction(): Promise<{
   profile: UserWithRoles
-  stores: Array<{ storeId: string; storeName: string; storeCode: string; isPrimary: boolean }>
+  stores: Array<{ storeId: string; storeName: string; storeCode: string; isPrimary: boolean; storeType?: string }>
 } | null> {
   try {
     const supabase = await createServerSupabaseClient()
@@ -65,44 +75,44 @@ export async function getCurrentProfileAction(): Promise<{
 
     const roles = (userRolesRes.data ?? []).map((ur: { roles?: unknown }) => {
       const r = ur.roles as { id: string; name: string; display_name: string | null; color: string | null; icon: string | null } | null
-      return r ? { roleId: r.id, roleName: r.name, displayName: r.display_name, color: r.color, icon: r.icon } : null
+      return r ? { roleId: r.id, roleName: r.name, displayName: r.display_name ?? null, color: r.color ?? null, icon: r.icon ?? null } : null
     }).filter(Boolean) as UserWithRoles['roles']
 
-    const roleIds = roles.map(r => r.roleId)
+    const roleIds = roles.map(r => r.roleId).filter(Boolean)
     const [rpRes, storesRes] = await Promise.all([
       roleIds.length > 0
         ? admin.from('role_permissions').select('permissions(code)').in('role_id', roleIds)
-        : Promise.resolve({ data: [] }),
-      admin.from('user_stores').select('store_id, is_primary, stores(id, name, code)').eq('user_id', user.id),
+        : Promise.resolve({ data: [] as { permissions?: { code: string } | { code: string }[] | null }[] }),
+      admin.from('user_stores').select('store_id, is_primary, stores(id, name, code, store_type)').eq('user_id', user.id),
     ])
 
     const permissions = [...new Set(
       (rpRes.data ?? []).flatMap((rp: { permissions?: { code: string } | { code: string }[] | null }) => {
         if (!rp.permissions) return []
-        if (Array.isArray(rp.permissions)) return rp.permissions.map((p: { code: string }) => p.code)
-        return [rp.permissions.code]
+        if (Array.isArray(rp.permissions)) return rp.permissions.map((p: { code: string }) => p.code).filter(Boolean)
+        return typeof (rp.permissions as { code?: string }).code === 'string' ? [(rp.permissions as { code: string }).code] : []
       })
-    )] as string[]
+    )].filter(Boolean) as string[]
 
     const stores = (storesRes.data ?? []).map((us: { store_id: string; is_primary: boolean; stores?: unknown }) => {
-      const s = us.stores as { id: string; name: string; code: string } | null
-      return { storeId: us.store_id, storeName: s?.name ?? '', storeCode: s?.code ?? '', isPrimary: us.is_primary }
+      const s = us.stores as { id: string; name: string; code: string; store_type?: string } | null
+      return { storeId: us.store_id, storeName: s?.name ?? '', storeCode: s?.code ?? '', isPrimary: !!us.is_primary, storeType: s?.store_type ?? 'physical' }
     })
 
     const pd = profileRes.data as Record<string, unknown>
     const profile: UserWithRoles = {
-      id: pd.id as string,
-      email: pd.email as string,
-      fullName: (pd.full_name as string) ?? '',
-      firstName: (pd.first_name as string | null) ?? null,
-      lastName: (pd.last_name as string | null) ?? null,
-      avatarUrl: (pd.avatar_url as string | null) ?? null,
-      phone: (pd.phone as string | null) ?? null,
-      preferredLocale: (pd.preferred_locale as string | null) ?? null,
-      darkMode: (pd.dark_mode as boolean | null) ?? null,
-      isActive: (pd.is_active as boolean) ?? true,
-      status: (pd.status as string) ?? 'active',
-      lastLoginAt: toSerializableDate(pd.last_login_at),
+      id: String(pd.id ?? ''),
+      email: String(pd.email ?? ''),
+      fullName: String(pd.full_name ?? ''),
+      firstName: pd.first_name != null ? String(pd.first_name) : null,
+      lastName: pd.last_name != null ? String(pd.last_name) : null,
+      avatarUrl: pd.avatar_url != null ? String(pd.avatar_url) : null,
+      phone: pd.phone != null ? String(pd.phone) : null,
+      preferredLocale: pd.preferred_locale != null ? String(pd.preferred_locale) : null,
+      darkMode: pd.dark_mode == null ? null : Boolean(pd.dark_mode),
+      isActive: pd.is_active === false ? false : true,
+      status: typeof pd.status === 'string' ? pd.status : 'active',
+      lastLoginAt: toSerializableDate(pd.last_login_at) ?? null,
       createdAt: toSerializableDate(pd.created_at) ?? '',
       updatedAt: toSerializableDate(pd.updated_at) ?? '',
       roles,
@@ -110,7 +120,8 @@ export async function getCurrentProfileAction(): Promise<{
       permissions,
     }
 
-    return { profile, stores }
+    const out = { profile, stores }
+    return JSON.parse(JSON.stringify(out)) as { profile: UserWithRoles; stores: Array<{ storeId: string; storeName: string; storeCode: string; isPrimary: boolean; storeType?: string }> }
   } catch (err) {
     console.error('[getCurrentProfileAction]', err)
     return null
@@ -524,14 +535,16 @@ export async function requirePermission(permissionCode: string) {
   const admin = createAdminClient()
   const { data: match } = await admin
     .from('user_roles')
-    .select('role_id, roles!inner(role_permissions!inner(permissions!inner(code)))')
+    .select('role_id, roles!inner(name, role_permissions!inner(permissions!inner(code)))')
     .eq('user_id', user.id)
     .limit(100)
 
-  // Extraer todos los códigos de permiso del usuario
+  // Extraer todos los códigos de permiso del usuario y los nombres de rol
   const codes = new Set<string>()
+  const roleCodes = new Set<string>()
   for (const ur of match ?? []) {
-    const roles = ur.roles as unknown as { role_permissions: { permissions: { code: string } }[] }
+    const roles = ur.roles as unknown as { name?: string; role_permissions: { permissions: { code: string } }[] }
+    if (roles?.name) roleCodes.add(roles.name)
     if (roles?.role_permissions) {
       for (const rp of roles.role_permissions) {
         if (rp.permissions?.code) codes.add(rp.permissions.code)
@@ -539,7 +552,10 @@ export async function requirePermission(permissionCode: string) {
     }
   }
 
-  if (!codes.has(permissionCode)) {
+  const hasPermission = codes.has(permissionCode)
+  const isFullAdmin = roleCodes.has('administrador') || roleCodes.has('super_admin')
+
+  if (!hasPermission && !isFullAdmin) {
     redirect('/admin/sin-permisos')
   }
 

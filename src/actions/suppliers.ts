@@ -5,6 +5,7 @@ import { queryList, queryById, getNextNumber } from '@/lib/server/query-helpers'
 import { createSupplierSchema, updateSupplierSchema } from '@/lib/validations/suppliers'
 import { success, failure } from '@/lib/errors'
 import { createPurchaseJournalEntry } from '@/actions/accounting-triggers'
+import { checkUserPermission } from '@/actions/auth'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 
 export const listSuppliers = protectedAction<ListParams, ListResult<any>>(
@@ -29,7 +30,7 @@ export const getSupplier = protectedAction<string, any>(
       *,
       supplier_contacts (*),
       fabrics ( id, fabric_code, name, composition, price_per_meter, stock_meters, status ),
-      supplier_orders ( id, order_number, status, total, created_at ),
+      supplier_orders ( id, order_number, status, total, order_date, estimated_delivery_date, created_at ),
       supplier_due_dates ( id, due_date, amount, is_paid, alert_sent )
     `)
     if (!supplier) return failure('Proveedor no encontrado', 'NOT_FOUND')
@@ -113,5 +114,104 @@ export const updateSupplierOrderStatusAction = protectedAction<
     }
 
     return success(order)
+  }
+)
+
+export type CreateSupplierOrderInput = {
+  supplier_id: string
+  total: number
+  payment_due_date: string
+  estimated_delivery_date: string
+  notes?: string | null
+  alert_on_payment?: boolean
+  alert_on_delivery?: boolean
+}
+
+export const createSupplierOrderAction = protectedAction<
+  CreateSupplierOrderInput,
+  { id: string; order_number: string; ap_invoice_id?: string }
+>(
+  {
+    permission: 'suppliers.create_order',
+    auditModule: 'suppliers',
+    auditAction: 'create',
+    auditEntity: 'supplier_order',
+    revalidate: ['/admin/proveedores', '/admin/contabilidad/facturas-proveedores'],
+  },
+  async (ctx, { supplier_id, total, payment_due_date, estimated_delivery_date, notes, alert_on_payment, alert_on_delivery }) => {
+    if (!supplier_id?.trim()) return failure('Proveedor obligatorio', 'VALIDATION')
+    if (total == null || Number(total) < 0) return failure('El coste debe ser mayor o igual a 0', 'VALIDATION')
+    if (!payment_due_date?.trim()) return failure('Fecha de pago obligatoria', 'VALIDATION')
+    if (!estimated_delivery_date?.trim()) return failure('Fecha de entrega estimada obligatoria', 'VALIDATION')
+    const dueDate = new Date(payment_due_date)
+    const deliveryDate = new Date(estimated_delivery_date)
+    if (isNaN(dueDate.getTime())) return failure('Fecha de pago no válida', 'VALIDATION')
+    if (isNaN(deliveryDate.getTime())) return failure('Fecha de entrega no válida', 'VALIDATION')
+
+    const orderNumber = await getNextNumber('supplier_orders', 'order_number', 'PEDPROV')
+    const totalNum = Number(total)
+    const today = new Date().toISOString().slice(0, 10)
+
+    const { data: order, error: orderError } = await ctx.adminClient
+      .from('supplier_orders')
+      .insert({
+        order_number: orderNumber,
+        supplier_id: supplier_id.trim(),
+        status: 'draft',
+        order_date: today,
+        payment_due_date: payment_due_date.trim(),
+        estimated_delivery_date: estimated_delivery_date.trim(),
+        subtotal: totalNum,
+        tax_amount: 0,
+        total: totalNum,
+        internal_notes: notes?.trim() || null,
+        created_by: ctx.userId !== 'system' ? ctx.userId : null,
+        alert_on_delivery: alert_on_delivery !== false,
+      })
+      .select('id, order_number')
+      .single()
+
+    if (orderError || !order) return failure(orderError?.message ?? 'Error al crear el pedido')
+
+    let apInvoiceId: string | undefined
+    const canManageInvoices = await checkUserPermission(ctx.userId, 'supplier_invoices.manage').catch(() => false)
+    if (canManageInvoices && totalNum > 0) {
+      const { data: supplier } = await ctx.adminClient
+        .from('suppliers')
+        .select('name, legal_name, nif_cif')
+        .eq('id', supplier_id)
+        .single()
+
+      const supplierName = (supplier?.legal_name || supplier?.name || 'Proveedor').trim()
+      const supplierCif = supplier?.nif_cif?.trim() || null
+
+      const { data: inv, error: invError } = await ctx.adminClient
+        .from('ap_supplier_invoices')
+        .insert({
+          supplier_order_id: order.id,
+          supplier_name: supplierName,
+          supplier_cif: supplierCif,
+          invoice_number: orderNumber,
+          invoice_date: today,
+          due_date: payment_due_date.trim(),
+          amount: totalNum,
+          tax_amount: 0,
+          total_amount: totalNum,
+          status: 'pendiente',
+          notes: notes?.trim() || null,
+          created_by: ctx.userId !== 'system' ? ctx.userId : null,
+          alert_on_payment: alert_on_payment !== false,
+        })
+        .select('id')
+        .single()
+
+      if (!invError && inv?.id) apInvoiceId = String(inv.id)
+    }
+
+    return success({
+      id: String(order.id),
+      order_number: order.order_number,
+      ap_invoice_id: apInvoiceId,
+    })
   }
 )

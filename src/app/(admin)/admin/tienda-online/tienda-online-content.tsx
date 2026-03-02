@@ -10,10 +10,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge'
 import {
   ShoppingBag, Globe, FileText, Settings, Package, Mail,
-  Loader2, ExternalLink, RefreshCw,
+  Loader2, ExternalLink, RefreshCw, Layout,
 } from 'lucide-react'
 import { getOnlineOrdersList, type OnlineOrderRow } from '@/actions/online-orders'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { HomeContentEditor } from './home-content-editor'
 
 const STATUS_LABELS: Record<string, string> = {
   pending_payment: 'Pago pendiente',
@@ -54,6 +55,7 @@ export function TiendaOnlineContent() {
         <TabsList>
           <TabsTrigger value="dashboard" className="gap-1"><ShoppingBag className="h-4 w-4" /> Dashboard</TabsTrigger>
           <TabsTrigger value="pedidos" className="gap-1">Pedidos online</TabsTrigger>
+          <TabsTrigger value="contenido-web" className="gap-1"><Layout className="h-4 w-4" /> Contenido Web</TabsTrigger>
         </TabsList>
 
         <TabsContent value="dashboard" className="mt-6">
@@ -146,8 +148,16 @@ export function TiendaOnlineContent() {
                   </TableHeader>
                   <TableBody>
                     {orders.map((o) => (
-                      <TableRow key={o.id}>
-                        <TableCell className="font-mono text-sm">{o.order_number}</TableCell>
+                      <TableRow key={o.id} className="cursor-pointer hover:bg-muted/50" onClick={() => router.push(`/admin/tienda-online/pedidos/${o.id}`)}>
+                        <TableCell>
+                          <Link
+                            href={`/admin/tienda-online/pedidos/${o.id}`}
+                            className="font-mono text-sm text-prats-navy hover:underline"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {o.order_number}
+                          </Link>
+                        </TableCell>
                         <TableCell><Badge variant="outline">{STATUS_LABELS[o.status] ?? o.status}</Badge></TableCell>
                         <TableCell>{formatCurrency(o.total)}</TableCell>
                         <TableCell className="text-muted-foreground">{o.payment_method ?? '—'}</TableCell>
@@ -159,6 +169,10 @@ export function TiendaOnlineContent() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="contenido-web" className="mt-6">
+          <HomeContentEditor />
         </TabsContent>
       </Tabs>
     </div>

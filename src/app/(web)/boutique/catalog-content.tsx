@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 import { Search, Loader2, ShoppingBag, Heart } from 'lucide-react'
 import { trackAddToCart } from '@/lib/analytics/events'
 import { useCart } from '@/components/providers/cart-provider'
@@ -93,10 +94,13 @@ export function CatalogContent() {
     <div className="bg-white">
       {/* Hero */}
       <div className="relative h-56 overflow-hidden">
-        <img
+        <Image
           src="https://www.sastreriaprats.com/cdn/shop/files/AW25_-_DIEGO_MARTIN-191.jpg?v=1762421411&width=2000"
           alt="Boutique"
-          className="absolute inset-0 h-full w-full object-cover object-top"
+          fill
+          className="object-cover object-top"
+          sizes="100vw"
+          priority
         />
         <div className="absolute inset-0 bg-[#1a2744]/70" />
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
@@ -176,10 +180,12 @@ export function CatalogContent() {
                         )}
                       </button>
                       {product.main_image_url ? (
-                        <img
+                        <Image
                           src={product.main_image_url as string}
                           alt={product.name as string}
-                          className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                          fill
+                          className="object-cover transition-transform duration-700 group-hover:scale-105"
+                          sizes="(max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
                         />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-gray-300">

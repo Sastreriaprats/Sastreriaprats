@@ -63,7 +63,6 @@ async function getInitialAuthData(): Promise<{ session: Session | null; profile:
   try {
     const supabase = await createServerSupabaseClient()
 
-    // getUser verifica contra el servidor (fiable). getSession solo para hidratar AuthProvider en cliente.
     const [{ data: { user } }, { data: { session } }] = await Promise.all([
       supabase.auth.getUser(),
       supabase.auth.getSession(),
@@ -71,13 +70,33 @@ async function getInitialAuthData(): Promise<{ session: Session | null; profile:
 
     if (!user) return { session: null, profile: null }
 
+    // Serializar sesión para evitar "unexpected response" (objetos no serializables en RSC)
+    const sessionPlain = session
+      ? JSON.parse(JSON.stringify({
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+          expires_in: session.expires_in,
+          expires_at: session.expires_at,
+          token_type: session.token_type,
+          user: session.user ? {
+            id: session.user.id,
+            email: session.user.email,
+            app_metadata: session.user.app_metadata,
+            user_metadata: session.user.user_metadata,
+            aud: session.user.aud,
+            created_at: session.user.created_at,
+            updated_at: session.user.updated_at,
+          } : null,
+        })) as Session
+      : null
+
     const admin = createAdminClient()
     const [profileRes, userRolesRes] = await Promise.all([
       admin.from('profiles').select('*').eq('id', user.id).single(),
       admin.from('user_roles').select('roles(id, name, display_name, color, icon)').eq('user_id', user.id),
     ])
 
-    if (!profileRes.data) return { session, profile: null }
+    if (!profileRes.data) return { session: sessionPlain, profile: null }
 
     const roles = (userRolesRes.data ?? []).map((ur: { roles?: unknown }) => {
       const r = ur.roles as { id: string; name: string; display_name: string | null; color: string | null; icon: string | null } | null
@@ -106,15 +125,15 @@ async function getInitialAuthData(): Promise<{ session: Session | null; profile:
       darkMode: (pd.dark_mode as boolean | null) ?? null,
       isActive: (pd.is_active as boolean) ?? true,
       status: (pd.status as string) ?? 'active',
-      lastLoginAt: (pd.last_login_at as string | null) ?? null,
-      createdAt: pd.created_at as string,
-      updatedAt: pd.updated_at as string,
+      lastLoginAt: pd.last_login_at != null ? String(new Date(pd.last_login_at as string).toISOString()) : null,
+      createdAt: pd.created_at != null ? String(new Date(pd.created_at as string).toISOString()) : '',
+      updatedAt: pd.updated_at != null ? String(new Date(pd.updated_at as string).toISOString()) : '',
       roles,
       stores: [],
       permissions,
     }
 
-    return { session, profile }
+    return { session: sessionPlain, profile: JSON.parse(JSON.stringify(profile)) as UserWithRoles }
   } catch {
     return { session: null, profile: null }
   }

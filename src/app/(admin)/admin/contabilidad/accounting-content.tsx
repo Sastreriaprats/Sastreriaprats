@@ -18,6 +18,7 @@ import {
   TrendingUp, TrendingDown, Euro, Calculator, BookOpen, FileText,
   Loader2, Plus, Search, ChevronDown, ChevronRight, Eye,
   Send, CheckCircle, FileOutput, Trash2, RefreshCw, ArrowUpCircle, Download,
+  Receipt, ExternalLink, Package, ClipboardList, Pencil, Calendar,
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -28,15 +29,16 @@ import {
   getAccountingSummary, getInvoices, getEstimates,
   getJournalEntries, getVatQuarterly, getClientsForInvoice,
   getManualTransactions, createManualTransaction, deleteManualTransaction,
+  getAccountingMovements,
+  getProductsForInvoice, listTailoringOrdersForInvoice, getTailoringOrderLinesForInvoice,
   createInvoiceAction, updateInvoiceAction, issueInvoiceAction,
   createEstimateAction,
   getInvoiceLinesAction, updateJournalEntryDescriptionAction,
   generateInvoicePdfAction, generateEstimatePdfAction,
   type InvoiceRow, type EstimateRow, type JournalEntryRow, type VatQuarterRow,
-  type ManualTransaction, type AccountingSummary,
+  type ManualTransaction, type AccountingMovementRow, type AccountingSummary,
 } from '@/actions/accounting'
 import { createInvoiceJournalEntry } from '@/actions/accounting-triggers'
-import { Pencil, Calendar } from 'lucide-react'
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -279,6 +281,15 @@ function InvoicesTab() {
   const [clients, setClients] = useState<{ id: string; full_name: string }[]>([])
   const [saving, setSaving] = useState(false)
 
+  const [productDialogOpen, setProductDialogOpen] = useState(false)
+  const [productSearch, setProductSearch] = useState('')
+  const [productResults, setProductResults] = useState<{ id: string; name: string; sku: string; base_price: number }[]>([])
+  const [loadingProducts, setLoadingProducts] = useState(false)
+  const [orderDialogOpen, setOrderDialogOpen] = useState(false)
+  const [ordersList, setOrdersList] = useState<{ id: string; order_number: string; total: number; client_name: string }[]>([])
+  const [loadingOrders, setLoadingOrders] = useState(false)
+  const [loadingOrderLines, setLoadingOrderLines] = useState(false)
+
   // Form state
   const [form, setForm] = useState({
     client_id: '', client_name: '', client_nif: '',
@@ -308,6 +319,50 @@ function InvoicesTab() {
   const removeLine = (i: number) => setLines(l => l.filter((_, idx) => idx !== i))
   const updateLine = (i: number, field: keyof InvoiceLine, value: string | number) =>
     setLines(l => l.map((ln, idx) => idx === i ? { ...ln, [field]: value } : ln))
+
+  const openProductDialog = async () => {
+    setProductDialogOpen(true)
+    setLoadingProducts(true)
+    const r = await getProductsForInvoice({ search: productSearch.trim() || undefined })
+    if (r.success) setProductResults(r.data)
+    setLoadingProducts(false)
+  }
+  const searchProducts = async () => {
+    setLoadingProducts(true)
+    const r = await getProductsForInvoice({ search: productSearch.trim() || undefined })
+    if (r.success) setProductResults(r.data)
+    setLoadingProducts(false)
+  }
+  const addProductAsLine = (p: { name: string; sku: string; base_price: number }) => {
+    setLines(l => [...l, { description: p.name || p.sku || 'Producto', quantity: 1, unit_price: p.base_price, tax_rate: 21 }])
+    setProductDialogOpen(false)
+    setProductSearch('')
+  }
+  const openOrderDialog = async () => {
+    setOrderDialogOpen(true)
+    setLoadingOrders(true)
+    const r = await listTailoringOrdersForInvoice({ clientId: form.client_id || undefined })
+    if (r.success) setOrdersList(r.data)
+    setLoadingOrders(false)
+  }
+  const addOrderLines = async (orderId: string) => {
+    setLoadingOrderLines(true)
+    const r = await getTailoringOrderLinesForInvoice(orderId)
+    setLoadingOrderLines(false)
+    if (!r.success || !r.data.length) {
+      toast.error(!r.success && 'error' in r ? r.error : 'El pedido no tiene líneas')
+      return
+    }
+    const newLines: InvoiceLine[] = r.data.map(l => ({
+      description: l.description,
+      quantity: l.quantity,
+      unit_price: l.unit_price,
+      tax_rate: l.tax_rate,
+    }))
+    setLines(prev => [...prev, ...newLines])
+    toast.success(`${newLines.length} línea(s) añadida(s) desde el pedido`)
+    setOrderDialogOpen(false)
+  }
 
   const subtotal = lines.reduce((s, l) => s + l.quantity * l.unit_price, 0)
   const taxAmount = lines.reduce((s, l) => s + l.quantity * l.unit_price * (l.tax_rate / 100), 0)
@@ -493,17 +548,17 @@ function InvoicesTab() {
                     <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setForm(f => ({ ...f, due_date: addDays(f.invoice_date, 30) }))}>+30 días</Button>
                   </div>
                 </div>
-                <div className="space-y-1">
-                  <Label>IRPF %</Label>
-                  <Input type="number" min={0} max={25} value={form.irpf_rate} onChange={e => setForm(f => ({ ...f, irpf_rate: Number(e.target.value) }))} />
-                </div>
               </div>
 
-              {/* Lines */}
               <div>
-                <div className="flex items-center justify-between mb-2">
+                <div className="mb-2">
                   <Label className="text-sm font-semibold">Líneas</Label>
-                  <Button size="sm" variant="outline" onClick={addLine}><Plus className="h-3.5 w-3.5 mr-1" /> Añadir línea</Button>
+                  <p className="text-xs text-muted-foreground mt-0.5 mb-2">Añade líneas manualmente, escoge un producto del catálogo o carga las líneas de un pedido de sastrería.</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" onClick={addLine}><Plus className="h-3.5 w-3.5 mr-1" /> Añadir línea (texto libre)</Button>
+                    <Button size="sm" variant="default" onClick={openProductDialog}><Package className="h-3.5 w-3.5 mr-1" /> Escoger producto</Button>
+                    <Button size="sm" variant="outline" onClick={openOrderDialog}><ClipboardList className="h-3.5 w-3.5 mr-1" /> Escoger pedido</Button>
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <div className="grid grid-cols-12 gap-1 text-xs font-medium text-muted-foreground px-1">
@@ -532,7 +587,6 @@ function InvoicesTab() {
                 <div className="w-60 space-y-1 text-sm">
                   <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">IVA</span><span>{formatCurrency(taxAmount)}</span></div>
-                  {form.irpf_rate > 0 && <div className="flex justify-between text-red-600"><span>IRPF ({form.irpf_rate}%)</span><span>-{formatCurrency(irpfAmount)}</span></div>}
                   <div className="flex justify-between font-bold text-base border-t pt-1"><span>Total</span><span>{formatCurrency(total)}</span></div>
                 </div>
               </div>
@@ -551,6 +605,61 @@ function InvoicesTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Diálogo selección producto (Nueva factura) */}
+      <Dialog open={productDialogOpen} onOpenChange={setProductDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Añadir desde producto</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <Input placeholder="Buscar por nombre o SKU..." value={productSearch} onChange={e => setProductSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchProducts()} />
+              <Button variant="secondary" onClick={searchProducts} disabled={loadingProducts}>{loadingProducts ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}</Button>
+            </div>
+            <ScrollArea className="h-64 rounded border p-2">
+              {loadingProducts ? (
+                <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+              ) : productResults.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Sin resultados. Escribe para buscar.</p>
+              ) : (
+                <div className="space-y-1">
+                  {productResults.map(p => (
+                    <button key={p.id} type="button" className="w-full text-left rounded p-2 hover:bg-muted flex justify-between items-center" onClick={() => addProductAsLine(p)}>
+                      <span className="font-medium truncate">{p.name || p.sku}</span>
+                      <span className="text-sm text-muted-foreground shrink-0 ml-2">{formatCurrency(p.base_price)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Diálogo selección pedido (Nueva factura) */}
+      <Dialog open={orderDialogOpen} onOpenChange={setOrderDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Añadir líneas desde pedido</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">Se listan los pedidos de sastrería{form.client_id ? ' del cliente seleccionado' : ''}. Al elegir uno se añaden sus líneas a la factura.</p>
+          <ScrollArea className="h-72 rounded border p-2">
+            {loadingOrders ? (
+              <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+            ) : ordersList.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">No hay pedidos.</p>
+            ) : (
+              <div className="space-y-1">
+                {ordersList.map(o => (
+                  <button key={o.id} type="button" className="w-full text-left rounded p-3 hover:bg-muted border flex justify-between items-center gap-2" onClick={() => addOrderLines(o.id)} disabled={loadingOrderLines}>
+                    <span className="font-mono font-medium">{o.order_number}</span>
+                    <span className="text-sm text-muted-foreground truncate">{o.client_name}</span>
+                    <span className="font-semibold shrink-0">{formatCurrency(o.total)}</span>
+                    {loadingOrderLines ? <Loader2 className="h-4 w-4 animate-spin shrink-0" /> : null}
+                  </button>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -563,8 +672,17 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
   const s = INVOICE_STATUS[inv.status] ?? INVOICE_STATUS.draft
 
   // ── Estado del formulario de edición ──
-  const [form, setForm] = useState({ client_id: '', client_name: inv.client_name, client_nif: '', invoice_date: inv.invoice_date, due_date: '', notes: '', irpf_rate: 0, tax_rate: 21 })
+  const [form, setForm] = useState({ client_id: inv.client_id ?? '', client_name: inv.client_name, client_nif: '', invoice_date: inv.invoice_date, due_date: '', notes: '', irpf_rate: 0, tax_rate: 21 })
   const [lines, setLines] = useState<InvoiceLine[]>([])
+
+  const [productDialogOpen, setProductDialogOpen] = useState(false)
+  const [productSearch, setProductSearch] = useState('')
+  const [productResults, setProductResults] = useState<{ id: string; name: string; sku: string; base_price: number }[]>([])
+  const [loadingProducts, setLoadingProducts] = useState(false)
+  const [orderDialogOpen, setOrderDialogOpen] = useState(false)
+  const [ordersList, setOrdersList] = useState<{ id: string; order_number: string; total: number; client_name: string }[]>([])
+  const [loadingOrders, setLoadingOrders] = useState(false)
+  const [loadingOrderLines, setLoadingOrderLines] = useState(false)
 
   const openEdit = async () => {
     const r = await getInvoiceLinesAction(inv.id)
@@ -578,6 +696,42 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
   const removeLine = (i: number) => setLines(l => l.filter((_, idx) => idx !== i))
   const updateLine = (i: number, field: keyof InvoiceLine, value: string | number) =>
     setLines(l => l.map((ln, idx) => idx === i ? { ...ln, [field]: value } : ln))
+
+  const openProductDialogEdit = async () => {
+    setProductDialogOpen(true)
+    setLoadingProducts(true)
+    const r = await getProductsForInvoice({ search: productSearch.trim() || undefined })
+    if (r.success) setProductResults(r.data)
+    setLoadingProducts(false)
+  }
+  const searchProductsEdit = async () => {
+    setLoadingProducts(true)
+    const r = await getProductsForInvoice({ search: productSearch.trim() || undefined })
+    if (r.success) setProductResults(r.data)
+    setLoadingProducts(false)
+  }
+  const addProductAsLineEdit = (p: { name: string; sku: string; base_price: number }) => {
+    setLines(l => [...l, { description: p.name || p.sku || 'Producto', quantity: 1, unit_price: p.base_price, tax_rate: 21 }])
+    setProductDialogOpen(false)
+    setProductSearch('')
+  }
+  const openOrderDialogEdit = async () => {
+    setOrderDialogOpen(true)
+    setLoadingOrders(true)
+    const r = await listTailoringOrdersForInvoice({ clientId: form.client_id || undefined })
+    if (r.success) setOrdersList(r.data)
+    setLoadingOrders(false)
+  }
+  const addOrderLinesEdit = async (orderId: string) => {
+    setLoadingOrderLines(true)
+    const r = await getTailoringOrderLinesForInvoice(orderId)
+    setLoadingOrderLines(false)
+    if (!r.success || !r.data.length) { toast.error(!r.success && 'error' in r ? r.error : 'El pedido no tiene líneas'); return }
+    const newLines: InvoiceLine[] = r.data.map(l => ({ description: l.description, quantity: l.quantity, unit_price: l.unit_price, tax_rate: l.tax_rate }))
+    setLines(prev => [...prev, ...newLines])
+    toast.success(`${newLines.length} línea(s) añadida(s) desde el pedido`)
+    setOrderDialogOpen(false)
+  }
 
   const subtotal  = lines.reduce((s, l) => s + l.quantity * l.unit_price, 0)
   const taxAmount = lines.reduce((s, l) => s + l.quantity * l.unit_price * (l.tax_rate / 100), 0)
@@ -701,15 +855,16 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
                     <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setForm(f => ({ ...f, due_date: addDays(f.invoice_date, 30) }))}>+30 días</Button>
                   </div>
                 </div>
-                <div className="space-y-1">
-                  <Label>IRPF %</Label>
-                  <Input type="number" min={0} max={25} value={form.irpf_rate} onChange={e => setForm(f => ({ ...f, irpf_rate: Number(e.target.value) }))} />
-                </div>
               </div>
               <div>
-                <div className="flex items-center justify-between mb-2">
+                <div className="mb-2">
                   <Label className="font-semibold text-sm">Líneas</Label>
-                  <Button size="sm" variant="outline" onClick={addLine}><Plus className="h-3.5 w-3.5 mr-1" /> Añadir</Button>
+                  <p className="text-xs text-muted-foreground mt-0.5 mb-2">Añade líneas manualmente, escoge un producto o carga un pedido de sastrería.</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" onClick={addLine}><Plus className="h-3.5 w-3.5 mr-1" /> Añadir línea</Button>
+                    <Button size="sm" variant="default" onClick={openProductDialogEdit}><Package className="h-3.5 w-3.5 mr-1" /> Escoger producto</Button>
+                    <Button size="sm" variant="outline" onClick={openOrderDialogEdit}><ClipboardList className="h-3.5 w-3.5 mr-1" /> Escoger pedido</Button>
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <div className="grid grid-cols-12 gap-1 text-xs font-medium text-muted-foreground px-1">
@@ -733,7 +888,6 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
                 <div className="w-56 space-y-1 text-sm">
                   <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">IVA</span><span>{formatCurrency(taxAmount)}</span></div>
-                  {form.irpf_rate > 0 && <div className="flex justify-between text-red-600"><span>IRPF ({form.irpf_rate}%)</span><span>-{formatCurrency(irpfAmount)}</span></div>}
                   <div className="flex justify-between font-bold border-t pt-1"><span>Total</span><span>{formatCurrency(total)}</span></div>
                 </div>
               </div>
@@ -749,6 +903,49 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
               {saving && <Loader2 className="h-4 w-4 animate-spin mr-1" />} Guardar cambios
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={productDialogOpen} onOpenChange={setProductDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Añadir desde producto</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <Input placeholder="Buscar por nombre o SKU..." value={productSearch} onChange={e => setProductSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchProductsEdit()} />
+              <Button variant="secondary" onClick={searchProductsEdit} disabled={loadingProducts}>{loadingProducts ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}</Button>
+            </div>
+            <ScrollArea className="h-64 rounded border p-2">
+              {loadingProducts ? <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : productResults.length === 0 ? <p className="text-sm text-muted-foreground text-center py-8">Sin resultados.</p> : (
+                <div className="space-y-1">
+                  {productResults.map(p => (
+                    <button key={p.id} type="button" className="w-full text-left rounded p-2 hover:bg-muted flex justify-between items-center" onClick={() => addProductAsLineEdit(p)}>
+                      <span className="font-medium truncate">{p.name || p.sku}</span>
+                      <span className="text-sm text-muted-foreground shrink-0 ml-2">{formatCurrency(p.base_price)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={orderDialogOpen} onOpenChange={setOrderDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Añadir líneas desde pedido</DialogTitle></DialogHeader>
+          <ScrollArea className="h-72 rounded border p-2">
+            {loadingOrders ? <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : ordersList.length === 0 ? <p className="text-sm text-muted-foreground text-center py-8">No hay pedidos.</p> : (
+              <div className="space-y-1">
+                {ordersList.map(o => (
+                  <button key={o.id} type="button" className="w-full text-left rounded p-3 hover:bg-muted border flex justify-between items-center gap-2" onClick={() => addOrderLinesEdit(o.id)} disabled={loadingOrderLines}>
+                    <span className="font-mono font-medium">{o.order_number}</span>
+                    <span className="text-sm text-muted-foreground truncate">{o.client_name}</span>
+                    <span className="font-semibold shrink-0">{formatCurrency(o.total)}</span>
+                    {loadingOrderLines ? <Loader2 className="h-4 w-4 animate-spin shrink-0" /> : null}
+                  </button>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
         </DialogContent>
       </Dialog>
     </>
@@ -817,6 +1014,15 @@ function EstimatesTab() {
   const [clients, setClients] = useState<{ id: string; full_name: string }[]>([])
   const [saving, setSaving] = useState(false)
 
+  const [productDialogOpen, setProductDialogOpen] = useState(false)
+  const [productSearch, setProductSearch] = useState('')
+  const [productResults, setProductResults] = useState<{ id: string; name: string; sku: string; base_price: number }[]>([])
+  const [loadingProducts, setLoadingProducts] = useState(false)
+  const [orderDialogOpen, setOrderDialogOpen] = useState(false)
+  const [ordersList, setOrdersList] = useState<{ id: string; order_number: string; total: number; client_name: string }[]>([])
+  const [loadingOrders, setLoadingOrders] = useState(false)
+  const [loadingOrderLines, setLoadingOrderLines] = useState(false)
+
   const [form, setForm] = useState({
     client_id: '', client_name: '', client_nif: '',
     estimate_date: new Date().toISOString().split('T')[0],
@@ -845,6 +1051,42 @@ function EstimatesTab() {
   const removeLine = (i: number) => setLines(l => l.filter((_, idx) => idx !== i))
   const updateLine = (i: number, field: keyof EstimateLine, value: string | number) =>
     setLines(l => l.map((ln, idx) => idx === i ? { ...ln, [field]: value } : ln))
+
+  const openProductDialogEst = async () => {
+    setProductDialogOpen(true)
+    setLoadingProducts(true)
+    const r = await getProductsForInvoice({ search: productSearch.trim() || undefined })
+    if (r.success) setProductResults(r.data)
+    setLoadingProducts(false)
+  }
+  const searchProductsEst = async () => {
+    setLoadingProducts(true)
+    const r = await getProductsForInvoice({ search: productSearch.trim() || undefined })
+    if (r.success) setProductResults(r.data)
+    setLoadingProducts(false)
+  }
+  const addProductAsLineEst = (p: { name: string; sku: string; base_price: number }) => {
+    setLines(l => [...l, { description: p.name || p.sku || 'Producto', quantity: 1, unit_price: p.base_price, tax_rate: 21 }])
+    setProductDialogOpen(false)
+    setProductSearch('')
+  }
+  const openOrderDialogEst = async () => {
+    setOrderDialogOpen(true)
+    setLoadingOrders(true)
+    const r = await listTailoringOrdersForInvoice({ clientId: form.client_id || undefined })
+    if (r.success) setOrdersList(r.data)
+    setLoadingOrders(false)
+  }
+  const addOrderLinesEst = async (orderId: string) => {
+    setLoadingOrderLines(true)
+    const r = await getTailoringOrderLinesForInvoice(orderId)
+    setLoadingOrderLines(false)
+    if (!r.success || !r.data.length) { toast.error(!r.success && 'error' in r ? r.error : 'El pedido no tiene líneas'); return }
+    const newLines: EstimateLine[] = r.data.map(l => ({ description: l.description, quantity: l.quantity, unit_price: l.unit_price, tax_rate: l.tax_rate }))
+    setLines(prev => [...prev, ...newLines])
+    toast.success(`${newLines.length} línea(s) añadida(s) desde el pedido`)
+    setOrderDialogOpen(false)
+  }
 
   const subtotal = lines.reduce((s, l) => s + l.quantity * l.unit_price, 0)
   const taxAmount = lines.reduce((s, l) => s + l.quantity * l.unit_price * (l.tax_rate / 100), 0)
@@ -1022,16 +1264,17 @@ function EstimatesTab() {
                     <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setForm(f => ({ ...f, valid_until: addDays(f.estimate_date, 30) }))}>+30 días</Button>
                   </div>
                 </div>
-                <div className="space-y-1">
-                  <Label>IRPF %</Label>
-                  <Input type="number" min={0} max={25} value={form.irpf_rate} onChange={e => setForm(f => ({ ...f, irpf_rate: Number(e.target.value) }))} />
-                </div>
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-2">
+                <div className="mb-2">
                   <Label className="text-sm font-semibold">Líneas</Label>
-                  <Button size="sm" variant="outline" onClick={addLine}><Plus className="h-3.5 w-3.5 mr-1" /> Añadir línea</Button>
+                  <p className="text-xs text-muted-foreground mt-0.5 mb-2">Añade líneas manualmente, escoge un producto del catálogo o carga las líneas de un pedido de sastrería.</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" onClick={addLine}><Plus className="h-3.5 w-3.5 mr-1" /> Añadir línea (texto libre)</Button>
+                    <Button size="sm" variant="default" onClick={openProductDialogEst}><Package className="h-3.5 w-3.5 mr-1" /> Escoger producto</Button>
+                    <Button size="sm" variant="outline" onClick={openOrderDialogEst}><ClipboardList className="h-3.5 w-3.5 mr-1" /> Escoger pedido</Button>
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <div className="grid grid-cols-12 gap-1 text-xs font-medium text-muted-foreground px-1">
@@ -1057,7 +1300,6 @@ function EstimatesTab() {
                 <div className="w-60 space-y-1 text-sm">
                   <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">IVA</span><span>{formatCurrency(taxAmount)}</span></div>
-                  {form.irpf_rate > 0 && <div className="flex justify-between text-red-600"><span>IRPF ({form.irpf_rate}%)</span><span>-{formatCurrency(irpfAmount)}</span></div>}
                   <div className="flex justify-between font-bold text-base border-t pt-1"><span>Total</span><span>{formatCurrency(total)}</span></div>
                 </div>
               </div>
@@ -1074,6 +1316,50 @@ function EstimatesTab() {
               {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null} Crear presupuesto
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={productDialogOpen} onOpenChange={setProductDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Añadir desde producto</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <Input placeholder="Buscar por nombre o SKU..." value={productSearch} onChange={e => setProductSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchProductsEst()} />
+              <Button variant="secondary" onClick={searchProductsEst} disabled={loadingProducts}>{loadingProducts ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}</Button>
+            </div>
+            <ScrollArea className="h-64 rounded border p-2">
+              {loadingProducts ? <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : productResults.length === 0 ? <p className="text-sm text-muted-foreground text-center py-8">Sin resultados. Escribe para buscar.</p> : (
+                <div className="space-y-1">
+                  {productResults.map(p => (
+                    <button key={p.id} type="button" className="w-full text-left rounded p-2 hover:bg-muted flex justify-between items-center" onClick={() => addProductAsLineEst(p)}>
+                      <span className="font-medium truncate">{p.name || p.sku}</span>
+                      <span className="text-sm text-muted-foreground shrink-0 ml-2">{formatCurrency(p.base_price)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={orderDialogOpen} onOpenChange={setOrderDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Añadir líneas desde pedido</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">Se listan los pedidos de sastrería{form.client_id ? ' del cliente seleccionado' : ''}. Al elegir uno se añaden sus líneas al presupuesto.</p>
+          <ScrollArea className="h-72 rounded border p-2">
+            {loadingOrders ? <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : ordersList.length === 0 ? <p className="text-sm text-muted-foreground text-center py-8">No hay pedidos.</p> : (
+              <div className="space-y-1">
+                {ordersList.map(o => (
+                  <button key={o.id} type="button" className="w-full text-left rounded p-3 hover:bg-muted border flex justify-between items-center gap-2" onClick={() => addOrderLinesEst(o.id)} disabled={loadingOrderLines}>
+                    <span className="font-mono font-medium">{o.order_number}</span>
+                    <span className="text-sm text-muted-foreground truncate">{o.client_name}</span>
+                    <span className="font-semibold shrink-0">{formatCurrency(o.total)}</span>
+                    {loadingOrderLines ? <Loader2 className="h-4 w-4 animate-spin shrink-0" /> : null}
+                  </button>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
         </DialogContent>
       </Dialog>
     </div>
@@ -1349,7 +1635,7 @@ const TAX_RATES = [0, 4, 10, 21]
 const MONTHS_OPT = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 
 function MovimientosTab() {
-  const [rows, setRows] = useState<ManualTransaction[]>([])
+  const [rows, setRows] = useState<AccountingMovementRow[]>([])
   const [loading, setLoading] = useState(true)
   const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all')
   const [filterYear, setFilterYear] = useState(new Date().getFullYear())
@@ -1371,7 +1657,7 @@ function MovimientosTab() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const r = await getManualTransactions({
+    const r = await getAccountingMovements({
       type: filterType === 'all' ? undefined : filterType,
       year: filterYear,
       month: filterMonth || undefined,
@@ -1428,6 +1714,9 @@ function MovimientosTab() {
 
   return (
     <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        Se muestran todos los movimientos con impacto contable: tickets (TPV), facturas emitidas, compras a proveedores, pedidos online y movimientos manuales. Filtra por tipo, año y mes.
+      </p>
       {/* Filters */}
       <div className="flex flex-wrap gap-2 items-center">
         <Select value={filterType} onValueChange={v => setFilterType(v as 'all' | 'income' | 'expense')}>
@@ -1460,27 +1749,31 @@ function MovimientosTab() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Fecha</TableHead>
+                  <TableHead>Origen</TableHead>
                   <TableHead>Descripción</TableHead>
                   <TableHead>Categoría</TableHead>
                   <TableHead>Tipo</TableHead>
                   <TableHead className="text-right">Base</TableHead>
                   <TableHead className="text-right">IVA</TableHead>
                   <TableHead className="text-right">Total</TableHead>
-                  <TableHead className="w-20">Acciones</TableHead>
+                  <TableHead className="w-24">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-12 text-muted-foreground">
+                    <TableCell colSpan={9} className="text-center py-12 text-muted-foreground">
                       Sin movimientos para el periodo seleccionado
                     </TableCell>
                   </TableRow>
                 ) : rows.map(r => (
-                  <TableRow key={r.id}>
+                  <TableRow key={r.isManual ? `manual-${r.id}` : `je-${r.id}`}>
                     <TableCell className="text-muted-foreground whitespace-nowrap">{formatDate(r.date)}</TableCell>
+                    <TableCell>
+                      <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">{r.sourceLabel}</span>
+                    </TableCell>
                     <TableCell className="font-medium max-w-[200px] truncate">{r.description}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{r.category}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{r.category ?? '—'}</TableCell>
                     <TableCell>
                       <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
                         r.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
@@ -1488,17 +1781,34 @@ function MovimientosTab() {
                         {r.type === 'income' ? 'Ingreso' : 'Gasto'}
                       </span>
                     </TableCell>
-                    <TableCell className="text-right">{formatCurrency(r.amount)}</TableCell>
+                    <TableCell className="text-right">
+                      {r.tax_amount != null && r.tax_amount > 0 ? formatCurrency(r.amount) : (r.isManual ? formatCurrency(r.amount) : '—')}
+                    </TableCell>
                     <TableCell className="text-right text-muted-foreground">
-                      {r.tax_rate > 0 ? `${formatCurrency(r.tax_amount)} (${r.tax_rate}%)` : '-'}
+                      {r.tax_amount != null && r.tax_amount > 0 ? `${formatCurrency(r.tax_amount)}` : '—'}
                     </TableCell>
                     <TableCell className={`text-right font-semibold ${r.type === 'income' ? 'text-green-700' : 'text-red-700'}`}>
                       {formatCurrency(r.total)}
                     </TableCell>
                     <TableCell>
-                      <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleDelete(r.id)}>
-                        <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        {(r.source === 'sale' || r.source === 'invoice') && r.referenceId && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7"
+                            title={r.source === 'sale' ? 'Ver tickets' : 'Ver facturas'}
+                            onClick={() => window.open(r.source === 'invoice' ? '/admin/contabilidad' : '/admin/tickets', '_self')}
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        {r.isManual && (
+                          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleDelete(r.id)}>
+                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

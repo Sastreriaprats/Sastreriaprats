@@ -67,7 +67,7 @@ export const listCampaigns = protectedAction<void, Record<string, unknown>[]>(
   async (ctx) => {
     const { data } = await ctx.adminClient
       .from('email_campaigns')
-      .select('id, name, subject, status, segment, total_recipients, sent_count, opened_count, created_at, scheduled_at, sent_at')
+      .select('id, name, subject, status, segment, total_recipients, sent_count, delivered_count, opened_count, clicked_count, created_at, scheduled_at, sent_at')
       .order('created_at', { ascending: false })
     return success(data || [])
   }
@@ -114,6 +114,46 @@ export const createCampaign = protectedAction<
 
     if (error) return failure(error.message)
     return success({ id: data.id, recipients: recipientCount })
+  }
+)
+
+export const updateEmailCampaign = protectedAction<
+  { id: string; subject: string; body_html?: string; segment: string; template_id?: string | null },
+  { id: string }
+>(
+  {
+    permission: 'emails.send',
+    auditModule: 'emails',
+    auditAction: 'update',
+    auditEntity: 'email_campaign',
+    revalidate: ['/admin/emails'],
+  },
+  async (ctx, input) => {
+    const { data: existing } = await ctx.adminClient
+      .from('email_campaigns')
+      .select('id, status')
+      .eq('id', input.id)
+      .single()
+
+    if (!existing) return failure('Campaña no encontrada')
+    if ((existing.status as string) !== 'draft') return failure('Solo se pueden editar campañas en borrador')
+
+    const recipientCount = await countSegment(ctx.adminClient, input.segment, undefined)
+
+    const { error } = await ctx.adminClient
+      .from('email_campaigns')
+      .update({
+        subject: input.subject,
+        body_html: input.body_html ?? '',
+        segment: input.segment,
+        template_id: input.template_id || null,
+        total_recipients: recipientCount,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', input.id)
+
+    if (error) return failure(error.message)
+    return success({ id: input.id })
   }
 )
 
@@ -165,7 +205,7 @@ export const sendCampaign = protectedAction<string, { sent: number; total: numbe
             }
           )
 
-          await sendEmail({
+          const result = await sendEmail({
             to: recipient.email as string,
             subject: campaign.subject as string,
             html,
@@ -179,6 +219,7 @@ export const sendCampaign = protectedAction<string, { sent: number; total: numbe
             email_type: 'campaign',
             status: 'sent',
             sent_at: new Date().toISOString(),
+            resend_id: result?.id ?? null,
           })
 
           sentCount++

@@ -19,8 +19,10 @@ export default async function PosLayout({ children }: { children: React.ReactNod
 
   return (
     <AuthProvider>
-      <div className="h-screen w-screen overflow-hidden bg-gray-50">
-        {children}
+      <div className="h-screen w-screen flex flex-col bg-gray-50">
+        <div className="flex-1 min-h-0 overflow-auto">
+          {children}
+        </div>
       </div>
       <Toaster richColors position="top-center" />
     </AuthProvider>

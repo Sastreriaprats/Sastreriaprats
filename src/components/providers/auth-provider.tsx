@@ -10,6 +10,8 @@ export interface StoreInfo {
   storeId: string
   storeName: string
   isPrimary: boolean
+  /** 'physical' = tienda con caja; 'online' = tienda web, sin caja */
+  storeType?: string
 }
 
 interface CachedAuth {
@@ -112,7 +114,7 @@ export function AuthProvider({
   useEffect(() => {
     if (user?.id && profileData) {
       setProfile(profileData.profile)
-      const storeList: StoreInfo[] = profileData.stores.map(s => ({ storeId: s.storeId, storeName: s.storeName, isPrimary: s.isPrimary }))
+      const storeList: StoreInfo[] = profileData.stores.map(s => ({ storeId: s.storeId, storeName: s.storeName, isPrimary: s.isPrimary, storeType: (s as { storeType?: string }).storeType }))
       applyStores(storeList)
       saveCachedAuth(user.id, { profile: profileData.profile, stores: storeList })
     }

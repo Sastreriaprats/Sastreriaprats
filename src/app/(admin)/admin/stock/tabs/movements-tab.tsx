@@ -1,14 +1,13 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Search, Loader2, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, Minus } from 'lucide-react'
+import { Loader2, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, Minus } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
+import { listStockMovements } from '@/actions/products'
 
 const PAGE_SIZE = 30
 
@@ -21,37 +20,35 @@ const movementTypeLabels: Record<string, string> = {
 }
 
 export function MovementsTab() {
-  const supabase = useMemo(() => createClient(), [])
   const [movements, setMovements] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [page, setPage] = useState(0)
   const [total, setTotal] = useState(0)
   const [typeFilter, setTypeFilter] = useState('all')
-  const [searchFilter, setSearchFilter] = useState('')
 
   const fetchMovements = useCallback(async () => {
     setIsLoading(true)
     try {
-      let query = supabase.from('stock_movements')
-        .select(`
-          *, product_variants ( variant_sku, products(name) ),
-          warehouses ( name, code ),
-          profiles!created_by ( full_name )
-        `, { count: 'exact' })
-        .order('created_at', { ascending: false })
-        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
-
-      if (typeFilter !== 'all') query = query.eq('movement_type', typeFilter)
-
-      const { data, count } = await query
-      if (data) setMovements(data)
-      if (count !== null) setTotal(count)
+      const result = await listStockMovements({
+        page,
+        pageSize: PAGE_SIZE,
+        typeFilter,
+      })
+      if (result.success && result.data) {
+        setMovements(result.data.data)
+        setTotal(result.data.total)
+      } else {
+        setMovements([])
+        setTotal(0)
+      }
     } catch (err) {
       console.error('[MovementsTab] fetchMovements error:', err)
+      setMovements([])
+      setTotal(0)
     } finally {
       setIsLoading(false)
     }
-  }, [supabase, page, typeFilter])
+  }, [page, typeFilter])
 
   useEffect(() => { fetchMovements() }, [fetchMovements])
 

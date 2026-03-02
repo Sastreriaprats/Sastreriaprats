@@ -81,7 +81,12 @@ export function AdminHeader({
   const [showNotifications, setShowNotifications] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
   const [alertsCount, setAlertsCount] = useState(0)
+  const [mounted, setMounted] = useState(false)
   const supabase = useMemo(() => createClient(), [])
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   useEffect(() => {
     const fetchCount = async () => {
@@ -114,6 +119,24 @@ export function AdminHeader({
   const handleLogout = async () => {
     await logoutAction()
     router.push('/auth/login')
+  }
+
+  if (!mounted) {
+    return (
+      <header className="flex items-center justify-between h-16 px-4 border-b bg-white flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="h-8 w-8 hidden lg:block" />
+          <div className="h-8 w-8 lg:hidden rounded-md bg-muted" />
+          <nav className="hidden md:flex items-center gap-1 text-sm text-muted-foreground">
+            <span>…</span>
+          </nav>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="h-10 w-10 rounded-md bg-muted" />
+          <div className="h-8 w-8 rounded-full bg-muted" />
+        </div>
+      </header>
+    )
   }
 
   return (

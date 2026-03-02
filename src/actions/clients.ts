@@ -114,7 +114,8 @@ export const createClientAction = protectedAction<any, any>(
       if (error) return failure(error.message)
 
       const result = { ...client, accountCreated: !!profileId }
-      return success(result)
+      const auditDescription = `Cliente: ${parsed.data.first_name || ''} ${parsed.data.last_name || ''}`.trim() || 'Cliente (sin nombre)'
+      return success({ ...result, auditDescription })
     } catch (e) {
       console.error('[createClientAction] unexpected:', e)
       return failure('Error inesperado al crear el cliente')
@@ -218,7 +219,17 @@ export const saveClientMeasurements = protectedAction<any, any>(
       .single()
 
     if (error) return failure(error.message)
-    return success(measurement)
+    const clientName = await (async () => {
+      const { data: c } = await ctx.adminClient.from('clients').select('full_name, first_name, last_name').eq('id', measurement.client_id).single()
+      if (!c) return 'Cliente'
+      return (c as any).full_name || [ (c as any).first_name, (c as any).last_name ].filter(Boolean).join(' ') || 'Cliente'
+    })()
+    const garmentName = await (async () => {
+      const { data: g } = await ctx.adminClient.from('garment_types').select('name').eq('id', measurement.garment_type_id).single()
+      return (g as any)?.name ?? 'Prenda'
+    })()
+    const auditDescription = `Medidas de: ${clientName} · Prenda: ${garmentName}`
+    return success({ ...measurement, auditDescription })
   }
 )
 

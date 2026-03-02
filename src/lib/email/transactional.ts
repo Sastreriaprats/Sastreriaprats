@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import { sendEmail } from '@/lib/email/send'
 
 function wrapInLayout(content: string): string {
   return `<!DOCTYPE html>
@@ -26,18 +27,10 @@ async function send(to: string, subject: string, html: string) {
   if (!process.env.RESEND_API_KEY) return
   const admin = createAdminClient()
   try {
-    await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: process.env.RESEND_FROM_EMAIL || 'Sastrería Prats <no-reply@sastreriaprats.com>',
-        to,
-        subject,
-        html: wrapInLayout(html),
-      }),
+    const result = await sendEmail({
+      to,
+      subject,
+      html: wrapInLayout(html),
     })
     await admin.from('email_logs').insert({
       recipient_email: to,
@@ -45,6 +38,7 @@ async function send(to: string, subject: string, html: string) {
       status: 'sent',
       email_type: 'transactional',
       sent_at: new Date().toISOString(),
+      resend_id: result?.id ?? null,
     })
   } catch (e: unknown) {
     const errMsg = e instanceof Error ? e.message : 'Unknown error'

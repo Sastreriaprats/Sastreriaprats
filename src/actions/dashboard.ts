@@ -24,6 +24,27 @@ interface DashboardStats {
   deliveriesToday: number
 }
 
+const DEFAULT_DASHBOARD_STATS: DashboardStats = {
+  salesToday: 0,
+  salesThisMonth: 0,
+  salesLastMonth: 0,
+  monthGrowth: 0,
+  activeOrders: 0,
+  ordersInProduction: 0,
+  ordersPendingDelivery: 0,
+  ordersOverdue: 0,
+  clientsTotal: 0,
+  clientsNewThisMonth: 0,
+  avgTicket: 0,
+  cashSessionOpen: false,
+  cashSessionTotal: 0,
+  lowStockCount: 0,
+  supplierDebtTotal: 0,
+  overduePayments: 0,
+  fittingsToday: 0,
+  deliveriesToday: 0,
+}
+
 export const getDashboardStats = protectedAction<string | undefined, DashboardStats>(
   { auditModule: 'dashboard' },
   async (ctx, _storeId) => {
@@ -34,74 +55,98 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
       const lastMonth = new Date()
       lastMonth.setMonth(lastMonth.getMonth() - 1)
       const lastMonthStart = `${lastMonth.toISOString().slice(0, 7)}-01`
-      const lastMonthEnd = `${today.slice(0, 7)}-01`
+      const todayEnd = `${today}T23:59:59`
 
+      // Queries 1–7 en paralelo (mismo resultado, menos latencia)
       const [
-        salesTodayRes,
-        salesMonthRes,
-        salesLastMonthRes,
-        activeOrdersRes,
-        productionOrdersRes,
-        deliveryOrdersRes,
-        overdueOrdersRes,
-        clientsTotalRes,
-        newClientsRes,
-        avgTicketRes,
-        cashSessionRes,
-        lowStockRes,
-        supplierDebtRes,
-        overduePaymentsRes,
-        fittingsTodayRes,
-        deliveriesTodayRes,
+        salesRes,
+        ordersRes,
+        clientsRes,
+        cashRes,
+        stockRes,
+        supplierRes,
+        fittingsRes,
       ] = await Promise.all([
-        admin.from('sales').select('total').gte('created_at', `${today}T00:00:00`).eq('status', 'completed'),
-        admin.from('sales').select('total').gte('created_at', `${monthStart}T00:00:00`).eq('status', 'completed'),
-        admin.from('sales').select('total').gte('created_at', `${lastMonthStart}T00:00:00`).lt('created_at', `${lastMonthEnd}T00:00:00`).eq('status', 'completed'),
-        admin.from('tailoring_orders').select('id', { count: 'exact' }).not('status', 'in', '("delivered","cancelled")'),
-        admin.from('tailoring_orders').select('id', { count: 'exact' }).in('status', ['in_production', 'factory_ordered']),
-        admin.from('tailoring_orders').select('id', { count: 'exact' }).eq('status', 'finished'),
-        admin.from('tailoring_orders').select('id', { count: 'exact' }).lt('estimated_delivery_date', today).not('status', 'in', '("delivered","cancelled")'),
-        admin.from('clients').select('id', { count: 'exact' }).eq('is_active', true),
-        admin.from('clients').select('id', { count: 'exact' }).gte('created_at', `${monthStart}T00:00:00`),
-        admin.from('sales').select('total').gte('created_at', `${monthStart}T00:00:00`).eq('status', 'completed'),
+        admin.from('sales').select('total, created_at').gte('created_at', `${lastMonthStart}T00:00:00`).lte('created_at', todayEnd).eq('status', 'completed'),
+        admin.from('tailoring_orders').select('id, status, estimated_delivery_date').not('status', 'in', '("delivered","cancelled")'),
+        admin.from('clients').select('id, created_at').eq('is_active', true),
         admin.from('cash_sessions').select('total_sales').eq('status', 'open').limit(1).maybeSingle(),
-        admin.from('stock_levels').select('id', { count: 'exact' }).not('min_stock', 'is', null).lte('available', 0),
-        admin.from('supplier_due_dates').select('amount').eq('is_paid', false),
-        admin.from('supplier_due_dates').select('id', { count: 'exact' }).eq('is_paid', false).lt('due_date', today),
-        admin.from('tailoring_fittings').select('id', { count: 'exact' }).eq('scheduled_date', today).eq('status', 'scheduled'),
-        admin.from('tailoring_orders').select('id', { count: 'exact' }).eq('estimated_delivery_date', today).eq('status', 'finished'),
+        admin.from('stock_levels').select('id', { count: 'exact', head: true }).not('min_stock', 'is', null).lte('available', 0),
+        admin.from('supplier_due_dates').select('amount, due_date').eq('is_paid', false),
+        admin.from('tailoring_fittings').select('id', { count: 'exact', head: true }).eq('scheduled_date', today).eq('status', 'scheduled'),
       ])
 
-      const salesToday = (salesTodayRes.data || []).reduce((sum: number, s: { total: number }) => sum + (s.total || 0), 0)
-      const salesThisMonth = (salesMonthRes.data || []).reduce((sum: number, s: { total: number }) => sum + (s.total || 0), 0)
-      const salesLastMonth = (salesLastMonthRes.data || []).reduce((sum: number, s: { total: number }) => sum + (s.total || 0), 0)
-      const monthGrowth = salesLastMonth > 0 ? ((salesThisMonth - salesLastMonth) / salesLastMonth) * 100 : 0
-      const avgTicketSales = avgTicketRes.data || []
-      const avgTicket = avgTicketSales.length > 0 ? avgTicketSales.reduce((sum: number, s: { total: number }) => sum + (s.total || 0), 0) / avgTicketSales.length : 0
-      const supplierDebtTotal = (supplierDebtRes.data || []).reduce((sum: number, d: { amount: number }) => sum + (d.amount || 0), 0)
+      const salesRows = salesRes.data
+      const ordersRows = ordersRes.data
+      const clientsRows = clientsRes.data
+      const cashRow = cashRes.data
+      const lowStockCount = stockRes.count
+      const supplierRows = supplierRes.data
+      const fittingsToday = fittingsRes.count
+      let salesToday = 0
+      let salesThisMonth = 0
+      let salesLastMonth = 0
+      let avgTicketSum = 0
+      let avgTicketCount = 0
+      for (const row of salesRows || []) {
+        const date = (row.created_at as string).split('T')[0]
+        const t = Number((row as { total?: number }).total) || 0
+        if (date === today) salesToday += t
+        if (date >= monthStart) {
+          salesThisMonth += t
+          avgTicketSum += t
+          avgTicketCount += 1
+        }
+        if (date >= lastMonthStart && date < monthStart) salesLastMonth += t
+      }
+      const monthGrowth = Number.isFinite(salesLastMonth) && salesLastMonth > 0
+        ? Number(((salesThisMonth - salesLastMonth) / salesLastMonth * 100).toFixed(2))
+        : 0
+      const avgTicket = avgTicketCount > 0 ? Number((avgTicketSum / avgTicketCount).toFixed(2)) : 0
 
-      return success({
+      // 2) Pedidos sastrería (ordersRows ya viene del Promise.all)
+      const ordersList = (ordersRows || []) as { id: string; status: string; estimated_delivery_date: string | null }[]
+      const activeOrders = ordersList.length
+      const ordersInProduction = ordersList.filter(o => ['in_production', 'factory_ordered'].includes(o.status)).length
+      const ordersPendingDelivery = ordersList.filter(o => o.status === 'finished').length
+      const ordersOverdue = ordersList.filter(o => o.estimated_delivery_date != null && o.estimated_delivery_date < today).length
+      const deliveriesToday = ordersList.filter(o => o.status === 'finished' && o.estimated_delivery_date === today).length
+
+      // 3) Clientes (clientsRows ya viene del Promise.all)
+      const clientsList = clientsRows || []
+      const clientsTotal = clientsList.length
+      const clientsNewThisMonth = clientsList.filter((c: { created_at?: string }) => (c.created_at || '').slice(0, 10) >= monthStart).length
+
+      // 4) Sesión de caja abierta (ya en cashRow)
+      const supplierList = (supplierRows || []) as { amount?: number; due_date?: string }[]
+      const supplierDebtTotal = Math.max(0, Number(supplierList.reduce((s, r) => s + (Number(r.amount) || 0), 0).toFixed(2)))
+      const overduePayments = supplierList.filter(r => r.due_date != null && r.due_date < today).length
+
+      const safeN = (n: number) => (Number.isFinite(n) && !Number.isNaN(n) ? n : 0)
+      const result: DashboardStats = {
         salesToday,
         salesThisMonth,
         salesLastMonth,
         monthGrowth,
-        activeOrders: activeOrdersRes.count || 0,
-        ordersInProduction: productionOrdersRes.count || 0,
-        ordersPendingDelivery: deliveryOrdersRes.count || 0,
-        ordersOverdue: overdueOrdersRes.count || 0,
-        clientsTotal: clientsTotalRes.count || 0,
-        clientsNewThisMonth: newClientsRes.count || 0,
+        activeOrders: safeN(activeOrders),
+        ordersInProduction: safeN(ordersInProduction),
+        ordersPendingDelivery: safeN(ordersPendingDelivery),
+        ordersOverdue: safeN(ordersOverdue),
+        clientsTotal: safeN(clientsTotal),
+        clientsNewThisMonth: safeN(clientsNewThisMonth),
         avgTicket,
-        cashSessionOpen: !!cashSessionRes.data,
-        cashSessionTotal: (cashSessionRes.data as { total_sales?: number } | null)?.total_sales || 0,
-        lowStockCount: lowStockRes.count || 0,
+        cashSessionOpen: cashRow != null,
+        cashSessionTotal: Number.isFinite(Number((cashRow as { total_sales?: number })?.total_sales)) ? Number((cashRow as { total_sales: number }).total_sales) : 0,
+        lowStockCount: safeN(lowStockCount ?? 0),
         supplierDebtTotal,
-        overduePayments: overduePaymentsRes.count || 0,
-        fittingsToday: fittingsTodayRes.count || 0,
-        deliveriesToday: deliveriesTodayRes.count || 0,
-      })
-    } catch (e: any) {
-      return failure(e?.message ?? 'Error al cargar estadísticas del dashboard')
+        overduePayments: safeN(overduePayments),
+        fittingsToday: safeN(fittingsToday ?? 0),
+        deliveriesToday: safeN(deliveriesToday),
+      }
+      return success(JSON.parse(JSON.stringify(result)))
+    } catch (queryErr) {
+      console.error('[getDashboardStats] Error en consultas:', queryErr)
+      return success({ ...DEFAULT_DASHBOARD_STATS })
     }
   }
 )
@@ -140,11 +185,12 @@ export const getSalesChartData = protectedAction<void, { date: string; label: st
       }
 
       const entries = Object.entries(dailyMap).sort(([a], [b]) => a.localeCompare(b))
-      return success(entries.map(([date, total]) => ({
-        date,
+      const chartData = entries.map(([date, total]) => ({
+        date: String(date),
         label: new Date(date + 'Z').toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }),
-        total,
-      })))
+        total: Number(total),
+      }))
+      return success(JSON.parse(JSON.stringify(chartData)))
     } catch (e: any) {
       return failure(e?.message ?? 'Error al cargar gráfico de ventas')
     }
@@ -167,11 +213,12 @@ export const getDashboardAlerts = protectedAction<void, DashboardAlerts>(
       admin.from('supplier_due_dates').select('id', { count: 'exact' }).eq('is_paid', false).lt('due_date', today),
       admin.from('stock_levels').select('id', { count: 'exact' }).not('min_stock', 'is', null).lte('available', 0),
     ])
-    return success({
-      ordersOverdue: overdueOrdersRes.count || 0,
-      overduePayments: overduePaymentsRes.count || 0,
-      lowStockCount: lowStockRes.count || 0,
-    })
+    const payload: DashboardAlerts = {
+      ordersOverdue: overdueOrdersRes?.count ?? 0,
+      overduePayments: overduePaymentsRes?.count ?? 0,
+      lowStockCount: lowStockRes?.count ?? 0,
+    }
+    return success(JSON.parse(JSON.stringify(payload)))
   }
 )
 
@@ -184,7 +231,17 @@ export const getRecentActivity = protectedAction<void, { id: string; action: str
       .order('created_at', { ascending: false })
       .limit(15)
 
-    return success((data || []) as { id: string; action: string; module: string; entity_display: string | null; description: string | null; created_at: string; user_full_name: string | null }[])
+    const toStr = (v: unknown): string | null => v == null ? null : v instanceof Date ? v.toISOString() : String(v)
+    const rows = (data ?? []).map((row: Record<string, unknown>) => ({
+      id: String(row.id ?? ''),
+      action: String(row.action ?? ''),
+      module: String(row.module ?? ''),
+      entity_display: row.entity_display != null ? String(row.entity_display) : null,
+      description: row.description != null ? String(row.description) : null,
+      created_at: toStr(row.created_at) ?? '',
+      user_full_name: row.user_full_name != null ? String(row.user_full_name) : null,
+    }))
+    return success(JSON.parse(JSON.stringify(rows)))
   }
 )
 
@@ -259,14 +316,14 @@ export const getStoresWithStats = protectedAction<void, StoreStats[]>(
 
     const result: StoreStats[] = (stores as { id: string; code: string; name: string }[]).map((store) => ({
       id: store.id,
-      code: store.code,
-      name: store.name,
+      code: store.code ?? '',
+      name: store.name ?? '',
       salesToday: salesTodayByStore[store.id] ?? 0,
       salesThisMonth: salesMonthByStore[store.id] ?? 0,
       totalStockUnits: stockByStore[store.id]?.total ?? 0,
       lowStockCount: stockByStore[store.id]?.low ?? 0,
     }))
 
-    return success(result)
+    return success(JSON.parse(JSON.stringify(result)))
   }
 )

@@ -59,18 +59,25 @@ export async function listAdminUsers(): Promise<{ data?: UserRow[]; error?: stri
       .select('id, email, full_name, first_name, last_name, is_active, status, last_login_at, created_at')
       .order('created_at', { ascending: false })
 
-    const result: UserRow[] = []
-    for (const p of profiles || []) {
+    const userIds = (profiles || []).map((p: { id: string }) => p.id)
+    const rolesByUserId: Record<string, { id: string; name: string; display_name: string | null; color: string | null }[]> = {}
+    if (userIds.length > 0) {
       const { data: rolesData } = await admin
         .from('user_roles')
-        .select('roles(id, name, display_name, color)')
-        .eq('user_id', p.id)
+        .select('user_id, roles(id, name, display_name, color)')
+        .in('user_id', userIds)
+      for (const ur of rolesData || []) {
+        const uid = (ur as { user_id: string }).user_id
+        if (!rolesByUserId[uid]) rolesByUserId[uid] = []
+        const raw = (ur as unknown as { roles?: { id: string; name: string; display_name: string | null; color: string | null } | Array<{ id: string; name: string; display_name: string | null; color: string | null }> }).roles
+        const r = Array.isArray(raw) ? raw[0] : raw
+        if (r) rolesByUserId[uid].push({ id: r.id ?? '', name: r.name ?? '', display_name: r.display_name ?? null, color: r.color ?? null })
+      }
+    }
 
-      const roles = (rolesData || []).map((ur: { roles?: { id: string; name: string; display_name: string | null; color: string | null } | { id: string; name: string; display_name: string | null; color: string | null }[] | null }) => {
-        const r = Array.isArray(ur.roles) ? ur.roles[0] : ur.roles
-        return { id: r?.id ?? '', name: r?.name ?? '', display_name: r?.display_name ?? null, color: r?.color ?? null }
-      }).filter(r => r.id)
-
+    const result: UserRow[] = []
+    for (const p of profiles || []) {
+      const roles = rolesByUserId[p.id] ?? []
       if (isClientUser(roles)) continue
       result.push({ ...p, roles })
     }
@@ -270,14 +277,70 @@ export async function getAuditLogs(filters: {
   action?: string
   dateFrom?: string
   dateTo?: string
-} = {}): Promise<{ data?: { id: string; user_name: string; action: string; entity_type: string; entity_id: string | null; entity_label: string | null; changes: Record<string, unknown> | null; created_at: string }[]; count?: number; error?: string }> {
+} = {}): Promise<{ data?: { id: string; user_name: string; action: string; action_display: string; entity_type: string; entity_type_display: string; entity_id: string | null; entity_label: string | null; changes: Record<string, unknown> | null; created_at: string }[]; count?: number; error?: string }> {
+  // Traducción de acciones y entidades al español (columnas Acción y Entidad)
+  const ACTION_DISPLAY_ES: Record<string, string> = {
+    create: 'Crear',
+    update: 'Editar',
+    delete: 'Eliminar',
+    payment: 'Pago',
+    state_change: 'Cambio estado',
+    refund: 'Devolución',
+    export: 'Exportar',
+    import: 'Importar',
+  }
+  const ENTITY_TYPE_DISPLAY_ES: Record<string, string> = {
+    sale: 'Venta',
+    tailoring_order: 'Pedido',
+    order: 'Pedido',
+    orders: 'Pedidos',
+    client: 'Cliente',
+    invoice: 'Factura',
+    stock: 'Stock',
+    client_measurements: 'Medidas',
+    product_variant: 'Variante',
+    product: 'Producto',
+    client_note: 'Nota cliente',
+    stock_movement: 'Stock',
+    user: 'Usuario',
+    config: 'Configuración',
+    appointment: 'Cita',
+    supplier: 'Proveedor',
+    cms_page: 'Página CMS',
+    blog_post: 'Blog',
+    clients: 'Clientes',
+    calendar: 'Agenda',
+    fitting: 'Prueba',
+    cash_withdrawal: 'Arqueo',
+    return: 'Devolución',
+  }
+  const PAYMENT_METHOD_ES: Record<string, string> = {
+    cash: 'efectivo',
+    card: 'tarjeta',
+    transfer: 'transferencia',
+    check: 'cheque',
+    bizum: 'bizum',
+    voucher: 'vale',
+  }
   try {
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
 
-    const admin = createAdminClient()
-    const hasPerm = await checkUserPermission(user.id, 'audit.view')
+    let admin: Awaited<ReturnType<typeof createAdminClient>>
+    try {
+      admin = createAdminClient()
+    } catch (e) {
+      console.error('[getAuditLogs] createAdminClient', e)
+      return { error: 'Error de configuración del servidor' }
+    }
+    let hasPerm: boolean
+    try {
+      hasPerm = await checkUserPermission(user.id, 'audit.view')
+    } catch (e) {
+      console.error('[getAuditLogs] checkUserPermission', e)
+      return { error: 'Error al verificar permisos' }
+    }
     if (!hasPerm) return { error: 'Sin permisos' }
 
     const page  = filters.page ?? 1
@@ -328,13 +391,25 @@ export async function getAuditLogs(filters: {
           (changes as Record<string, unknown>)[k] = { old: (oldData as Record<string, unknown>)[k], new: (newData as Record<string, unknown>)[k] }
         }
       }
-      const entityLabel = row.entity_display ?? null
+      let entityLabel = row.description ?? row.entity_display ?? null
+      // Traducir descripciones en inglés guardadas por el wrapper (ej: "create sale" → "Crear Venta")
+      if (typeof entityLabel === 'string' && entityLabel.trim()) {
+        const entityTypeOrModule = row.entity_type ?? row.module ?? ''
+        const expectedEnglish = `${row.action} ${entityTypeOrModule}`.trim()
+        if (entityLabel.trim() === expectedEnglish) {
+          const actionEs = ACTION_DISPLAY_ES[row.action] ?? row.action
+          const entityEs = ENTITY_TYPE_DISPLAY_ES[entityTypeOrModule] ?? (entityTypeOrModule || '—')
+          entityLabel = `${actionEs} ${entityEs}`
+        }
+      }
       const needsResolution = !entityLabel || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(entityLabel).trim())
       return {
         id: row.id,
         user_name: row.user_full_name ?? row.user_email ?? 'Sistema',
         action: row.action,
+        action_display: ACTION_DISPLAY_ES[row.action] ?? row.action,
         entity_type: row.entity_type ?? row.module ?? '—',
+        entity_type_display: ENTITY_TYPE_DISPLAY_ES[row.entity_type ?? row.module ?? ''] ?? row.entity_type ?? row.module ?? '—',
         entity_id: row.entity_id,
         entity_label: entityLabel,
         _resolve: needsResolution && row.entity_id ? { entity_type: row.entity_type ?? row.module, action: row.action, entity_id: row.entity_id } : null,
@@ -383,14 +458,18 @@ export async function getAuditLogs(filters: {
             labels.set((o as any).id, `Pedido: ${(o as any).order_number}`)
           }
         } else if (entityType === 'orders' && action === 'payment') {
-          const { data: pays } = await admin.from('tailoring_order_payments').select('id, tailoring_order_id').in('id', uniqueIds)
+          const { data: pays } = await admin.from('tailoring_order_payments').select('id, tailoring_order_id, amount, payment_method').in('id', uniqueIds)
           const orderIds = [...new Set((pays ?? []).map((p: any) => p.tailoring_order_id).filter(Boolean))]
           const { data: orders } = orderIds.length > 0 ? await admin.from('tailoring_orders').select('id, order_number').in('id', orderIds) : { data: [] }
           const orderById = new Map<string, string>()
           for (const o of orders ?? []) orderById.set((o as any).id, (o as any).order_number)
           for (const p of pays ?? []) {
             const num = orderById.get((p as any).tailoring_order_id)
-            if (num != null) labels.set((p as any).id, `Pago pedido: ${num}`)
+            if (num != null) {
+              const amount = (p as any).amount != null ? Number((p as any).amount).toFixed(2) : ''
+              const method = PAYMENT_METHOD_ES[(p as any).payment_method] ?? (p as any).payment_method ?? ''
+              labels.set((p as any).id, amount && method ? `Pago ${amount}€ · Pedido ${num} · Método: ${method}` : `Pago pedido: ${num}`)
+            }
           }
         } else if (entityType === 'product') {
           const { data: products } = await admin.from('products').select('id, name').in('id', uniqueIds)
@@ -421,11 +500,27 @@ export async function getAuditLogs(filters: {
             const name = nameByVariantId.get((m as any).product_variant_id) ?? 'Stock'
             labels.set((m as any).id, `Stock: ${name}`)
           }
+        } else if (entityType === 'sale') {
+          const { data: sales } = await admin.from('sales').select('id, ticket_number, total, client_id').in('id', uniqueIds)
+          const clientIds = [...new Set((sales ?? []).map((s: any) => s.client_id).filter(Boolean))]
+          const { data: clients } = clientIds.length > 0 ? await admin.from('clients').select('id, full_name, first_name, last_name').in('id', clientIds) : { data: [] }
+          const nameByClientId = new Map<string, string>()
+          for (const c of clients ?? []) {
+            const name = (c as any).full_name || [ (c as any).first_name, (c as any).last_name ].filter(Boolean).join(' ') || 'Sin nombre'
+            nameByClientId.set((c as any).id, name)
+          }
+          for (const s of sales ?? []) {
+            const name = nameByClientId.get((s as any).client_id) ?? 'Sin cliente'
+            const total = (s as any).total ?? 0
+            const tick = (s as any).ticket_number ?? ''
+            labels.set((s as any).id, `Venta #${tick} · Cliente: ${name} · Total: ${Number(total).toFixed(2)}€`)
+          }
         } else if (entityType === 'invoice') {
-          const { data: invoices } = await admin.from('invoices').select('id, invoice_number, invoice_series').in('id', uniqueIds)
+          const { data: invoices } = await admin.from('invoices').select('id, invoice_number, invoice_series, total').in('id', uniqueIds)
           for (const inv of invoices ?? []) {
             const n = (inv as any).invoice_series && (inv as any).invoice_number ? `${(inv as any).invoice_series}-${(inv as any).invoice_number}` : (inv as any).invoice_number
-            labels.set((inv as any).id, `Factura: ${n}`)
+            const total = (inv as any).total != null ? Number((inv as any).total).toFixed(2) : ''
+            labels.set((inv as any).id, total ? `Factura F-${n} · ${total}€` : `Factura: ${n}`)
           }
         } else if (entityType === 'appointment') {
           const { data: apps } = await admin.from('appointments').select('id, client_id').in('id', uniqueIds)
@@ -454,6 +549,7 @@ export async function getAuditLogs(filters: {
     return { data: serializeForServerAction(list), count: count ?? 0 }
   } catch (err) {
     console.error('[getAuditLogs]', err)
-    return { error: err instanceof Error ? err.message : 'Error al cargar auditoría' }
+    const msg = err instanceof Error ? err.message : 'Error al cargar auditoría'
+    return { error: String(msg || 'Error al cargar auditoría') }
   }
 }

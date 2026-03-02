@@ -5,13 +5,15 @@ import { createClient } from '@/lib/supabase/client'
 import { useGarmentTypes } from '@/hooks/use-cached-queries'
 import { saveBodyMeasurements, getClientMeasurements } from '@/actions/clients'
 import { SastreHeader } from '../../../components/sastre-header'
-import { Loader2, Save, Clock, AlertCircle, PlusCircle } from 'lucide-react'
+import { Loader2, Save, Clock, AlertCircle, PlusCircle, Printer } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDateTime } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
+import { generateCamiseriaFichaPdf } from '@/lib/camiseria-ficha-pdf'
 
-const GARMENT_NAMES = ['Americana', 'Pantalón', 'Chaleco']
-/** Índice tab → zona silueta: 0=americana, 1=pantalon, 2=chaleco */
-const TAB_TO_ZONE = ['americana', 'pantalon', 'chaleco'] as const
+const GARMENT_NAMES = ['Americana', 'Pantalón', 'Chaleco', 'Camisería']
+/** Índice tab → zona silueta: 0=americana, 1=pantalon, 2=chaleco, 3=camiseria (sin zona en silueta) */
+const TAB_TO_ZONE = ['americana', 'pantalon', 'chaleco', 'camiseria'] as const
 
 function getGarmentPrefix(name: string): string {
   return name
@@ -94,6 +96,31 @@ export function MedidasPageContent({ clientId, clientName, sastreName }: Medidas
     [clientId, normalizeValues]
   )
 
+  const loadCamiseriaMeasurements = useCallback(
+    async (camiseriaGarmentTypeId: string) => {
+      const result = await getClientMeasurements({ clientId, garmentTypeId: camiseriaGarmentTypeId })
+      if (result.success && result.data && result.data.length > 0) {
+        const current = result.data.find((m: any) => m.is_current) ?? result.data[0]
+        const raw = normalizeValues(current.values)
+        const prefixed: Record<string, string> = {}
+        for (const [k, v] of Object.entries(raw)) prefixed[valueKey('camiseria', k)] = v
+        setValues((prev) => ({ ...prev, ...prefixed }))
+        setSelectedHistoryId(current.id)
+      } else {
+        setValues((prev) => {
+          const next = { ...prev }
+          const prefix = 'camiseria_'
+          for (const key of Object.keys(next)) {
+            if (key.startsWith(prefix)) delete next[key]
+          }
+          return next
+        })
+        setSelectedHistoryId(null)
+      }
+    },
+    [clientId, normalizeValues]
+  )
+
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true)
     try {
@@ -162,6 +189,10 @@ export function MedidasPageContent({ clientId, clientName, sastreName }: Medidas
     if (clientId) loadHistory()
   }, [clientId, loadHistory])
 
+  useEffect(() => {
+    if (currentGroup?.name === 'Camisería') loadCamiseriaMeasurements(currentGroup.id)
+  }, [currentGroup?.id, currentGroup?.name, loadCamiseriaMeasurements])
+
   const setValue = useCallback((key: string, val: string) => {
     setValues((prev) => ({ ...prev, [key]: val }))
   }, [])
@@ -170,27 +201,42 @@ export function MedidasPageContent({ clientId, clientName, sastreName }: Medidas
     if (!bodyGarmentTypeId) return
     setIsSaving(true)
     try {
-      // Enviar todas las claves que define el formulario (Americana, Chaleco, Pantalón)
-      // para que en admin no falten apartados como CUERPO aunque no se hayan tocado en sastre
-      const fullValues: Record<string, string> = {}
-      for (const g of garmentGroups) {
-        const p = getGarmentPrefix(g.name)
-        for (const f of g.fields) {
-          const vKey = valueKey(p, f.code)
-          fullValues[vKey] = values[vKey] ?? ''
+      if (currentGroup?.name === 'Camisería') {
+        const camiseriaValues: Record<string, string> = {}
+        for (const f of currentGroup.fields) {
+          camiseriaValues[f.code] = values[valueKey('camiseria', f.code)] ?? ''
         }
+        const result = await saveBodyMeasurements({
+          client_id: clientId,
+          garment_type_id: currentGroup.id,
+          values: camiseriaValues,
+        })
+        if (!result.success) {
+          toast.error((result as { error?: string }).error ?? 'Error al guardar')
+          return
+        }
+        toast.success('Medidas de camisería guardadas')
+        await loadCamiseriaMeasurements(currentGroup.id)
+      } else {
+        const fullValues: Record<string, string> = {}
+        for (const g of garmentGroups) {
+          const p = getGarmentPrefix(g.name)
+          for (const f of g.fields) {
+            fullValues[valueKey(p, f.code)] = values[valueKey(p, f.code)] ?? ''
+          }
+        }
+        const result = await saveBodyMeasurements({
+          client_id: clientId,
+          garment_type_id: bodyGarmentTypeId,
+          values: fullValues,
+        })
+        if (!result.success) {
+          toast.error((result as { error?: string }).error ?? 'Error al guardar')
+          return
+        }
+        toast.success('Medidas guardadas correctamente')
+        await loadMeasurements(bodyGarmentTypeId)
       }
-      const result = await saveBodyMeasurements({
-        client_id: clientId,
-        garment_type_id: bodyGarmentTypeId,
-        values: fullValues,
-      })
-      if (!result.success) {
-        toast.error((result as { error?: string }).error ?? 'Error al guardar')
-        return
-      }
-      toast.success('Medidas guardadas correctamente')
-      await loadMeasurements(bodyGarmentTypeId)
     } finally {
       setIsSaving(false)
     }
@@ -288,50 +334,196 @@ export function MedidasPageContent({ clientId, clientName, sastreName }: Medidas
           ) : (
             <div className="flex-1 overflow-y-auto space-y-6 pr-2">
               {currentGroup &&
-                (() => {
-                  const groupPrefix = getGarmentPrefix(currentGroup.name)
-                  const byGroup: Record<string, MeasurementField[]> = {}
-                  for (const f of currentGroup.fields) {
-                    const key = f.field_group || '__default__'
-                    if (!byGroup[key]) byGroup[key] = []
-                    byGroup[key].push(f)
-                  }
-                  return Object.entries(byGroup).map(([groupName, groupFields]) => (
-                    <div key={groupName}>
-                      {groupName !== '__default__' && (
-                        <h3 className="text-sm font-medium text-[#c9a96e] uppercase tracking-wide mb-3">{groupName}</h3>
-                      )}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {groupFields.map((f) => {
-                          const vKey = valueKey(groupPrefix, f.code)
-                          const unit = (f.unit || 'cm').toLowerCase()
+                (currentGroup.name === 'Camisería' ? (
+                  <>
+                    {/* MEDIDAS */}
+                    <div>
+                      <h3 className="text-sm font-medium text-[#c9a96e] uppercase tracking-wide mb-3">Medidas</h3>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                        {(currentGroup.fields.filter((f) => f.field_group === 'medidas') as MeasurementField[]).map((f) => {
+                          const vKey = valueKey('camiseria', f.code)
                           return (
-                            <div
-                              key={f.id}
-                              ref={(el) => {
-                                fieldRefsMap.current[f.code] = el
-                              }}
-                              className="space-y-1"
-                            >
+                            <div key={f.id} className="space-y-1">
                               <label className="block text-sm text-white/80">{f.name}</label>
                               <div className="flex items-center gap-2">
                                 <input
-                                  type={f.field_type === 'number' ? 'number' : 'text'}
-                                  step={f.field_type === 'number' ? '0.5' : undefined}
+                                  type="number"
+                                  step="0.5"
                                   value={values[vKey] ?? ''}
                                   onChange={(e) => setValue(vKey, e.target.value)}
-                                  className="flex-1 h-12 px-4 rounded-xl border border-[#c9a96e]/20 bg-[#1a2744] text-white placeholder:text-white/40 focus:outline-none focus:border-[#c9a96e]/60 transition-colors touch-manipulation"
+                                  className="flex-1 h-12 px-4 rounded-xl border border-[#c9a96e]/20 bg-[#1a2744] text-white placeholder:text-white/40 focus:outline-none focus:border-[#c9a96e]/60"
                                   placeholder="—"
                                 />
-                                <span className="text-white/50 text-sm w-8 shrink-0">{unit}</span>
+                                <span className="text-white/50 text-sm w-8 shrink-0">cm</span>
                               </div>
                             </div>
                           )
                         })}
                       </div>
                     </div>
-                  ))
-                })()}
+                    {/* CARACTERÍSTICAS */}
+                    <div>
+                      <h3 className="text-sm font-medium text-[#c9a96e] uppercase tracking-wide mb-3">Características</h3>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        {(currentGroup.fields.filter((f) => f.field_group === 'caracteristicas') as MeasurementField[]).map((f) => {
+                          const vKey = valueKey('camiseria', f.code)
+                          if (f.field_type === 'text') {
+                            return (
+                              <div key={f.id} className="space-y-1 sm:col-span-2">
+                                <label className="block text-sm text-white/80">{f.name}</label>
+                                <input
+                                  type="text"
+                                  value={values[vKey] ?? ''}
+                                  onChange={(e) => setValue(vKey, e.target.value)}
+                                  className="w-full h-10 px-3 rounded-xl border border-[#c9a96e]/20 bg-[#1a2744] text-white placeholder:text-white/40 focus:outline-none focus:border-[#c9a96e]/60"
+                                  placeholder="—"
+                                />
+                              </div>
+                            )
+                          }
+                          const checked = values[vKey] === 'true' || values[vKey] === '1'
+                          return (
+                            <label key={f.id} className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => setValue(vKey, e.target.checked ? 'true' : '')}
+                                className="rounded border-[#c9a96e]/40 bg-[#1a2744] text-[#c9a96e] focus:ring-[#c9a96e]/60"
+                              />
+                              <span className="text-sm text-white/80">{f.name}</span>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    </div>
+                    {/* PUÑO: solo uno seleccionable */}
+                    <div>
+                      <h3 className="text-sm font-medium text-[#c9a96e] uppercase tracking-wide mb-3">Puño</h3>
+                      <div className="flex flex-wrap gap-4">
+                        {['puno_sencillo', 'puno_gemelo', 'puno_mixto', 'puno_mosquetero', 'puno_otro'].map((code) => {
+                          const label = currentGroup.fields.find((x) => x.code === code)?.name ?? code
+                          const vKey = valueKey('camiseria', code)
+                          const isChecked = values[vKey] === 'true' || values[vKey] === '1'
+                          return (
+                            <label key={code} className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="radio"
+                                name="camiseria_puno"
+                                checked={isChecked}
+                                onChange={() => {
+                                  setValues((prev) => {
+                                    const next = { ...prev }
+                                    ;['puno_sencillo', 'puno_gemelo', 'puno_mixto', 'puno_mosquetero', 'puno_otro'].forEach((c) => {
+                                      next[valueKey('camiseria', c)] = c === code ? 'true' : ''
+                                    })
+                                    return next
+                                  })
+                                }}
+                                className="border-[#c9a96e]/40 text-[#c9a96e] focus:ring-[#c9a96e]/60"
+                              />
+                              <span className="text-sm text-white/80">{label}</span>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    </div>
+                    {/* TEJIDO */}
+                    <div>
+                      <h3 className="text-sm font-medium text-[#c9a96e] uppercase tracking-wide mb-3">Tejido</h3>
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-sm text-white/80 mb-1">Descripción del tejido</label>
+                          <textarea
+                            value={values[valueKey('camiseria', 'tejido')] ?? ''}
+                            onChange={(e) => setValue(valueKey('camiseria', 'tejido'), e.target.value)}
+                            rows={2}
+                            className="w-full px-4 py-2 rounded-xl border border-[#c9a96e]/20 bg-[#1a2744] text-white placeholder:text-white/40 focus:outline-none focus:border-[#c9a96e]/60 resize-none"
+                            placeholder="—"
+                          />
+                        </div>
+                        <div className="flex gap-6">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={values[valueKey('camiseria', 'derecho')] === 'true' || values[valueKey('camiseria', 'derecho')] === '1'}
+                              onChange={(e) => setValue(valueKey('camiseria', 'derecho'), e.target.checked ? 'true' : '')}
+                              className="rounded border-[#c9a96e]/40 bg-[#1a2744] text-[#c9a96e] focus:ring-[#c9a96e]/60"
+                            />
+                            <span className="text-sm text-white/80">Derecho</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={values[valueKey('camiseria', 'izquierdo')] === 'true' || values[valueKey('camiseria', 'izquierdo')] === '1'}
+                              onChange={(e) => setValue(valueKey('camiseria', 'izquierdo'), e.target.checked ? 'true' : '')}
+                              className="rounded border-[#c9a96e]/40 bg-[#1a2744] text-[#c9a96e] focus:ring-[#c9a96e]/60"
+                            />
+                            <span className="text-sm text-white/80">Izquierdo</span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                    {/* Imprimir ficha */}
+                    <div className="pt-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="gap-2 border-[#c9a96e]/40 text-[#c9a96e] hover:bg-[#c9a96e]/10"
+                        onClick={() => generateCamiseriaFichaPdf({ clientName, values: values, prefix: 'camiseria' })}
+                      >
+                        <Printer className="h-4 w-4" />
+                        Imprimir ficha
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {(() => {
+                      const groupPrefix = getGarmentPrefix(currentGroup.name)
+                      const byGroup: Record<string, MeasurementField[]> = {}
+                      for (const f of currentGroup.fields) {
+                        const key = f.field_group || '__default__'
+                        if (!byGroup[key]) byGroup[key] = []
+                        byGroup[key].push(f)
+                      }
+                      return Object.entries(byGroup).map(([groupName, groupFields]) => (
+                        <div key={groupName}>
+                          {groupName !== '__default__' && (
+                            <h3 className="text-sm font-medium text-[#c9a96e] uppercase tracking-wide mb-3">{groupName}</h3>
+                          )}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            {groupFields.map((f) => {
+                              const vKey = valueKey(groupPrefix, f.code)
+                              const unit = (f.unit || 'cm').toLowerCase()
+                              return (
+                                <div
+                                  key={f.id}
+                                  ref={(el) => {
+                                    fieldRefsMap.current[f.code] = el
+                                  }}
+                                  className="space-y-1"
+                                >
+                                  <label className="block text-sm text-white/80">{f.name}</label>
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type={f.field_type === 'number' ? 'number' : 'text'}
+                                      step={f.field_type === 'number' ? '0.5' : undefined}
+                                      value={values[vKey] ?? ''}
+                                      onChange={(e) => setValue(vKey, e.target.value)}
+                                      className="flex-1 h-12 px-4 rounded-xl border border-[#c9a96e]/20 bg-[#1a2744] text-white placeholder:text-white/40 focus:outline-none focus:border-[#c9a96e]/60 transition-colors touch-manipulation"
+                                      placeholder="—"
+                                    />
+                                    <span className="text-white/50 text-sm w-8 shrink-0">{unit}</span>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      ))
+                    })()}
+                  </>
+                ))}
             </div>
           )}
 

@@ -11,7 +11,9 @@ import {
   AlertTriangle, Calendar, Truck, RefreshCw, ArrowRight, ServerCrash,
 } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
+import { usePermissions } from '@/hooks/use-permissions'
 import { getDashboardStats, getSalesChartData, getRecentActivity } from '@/actions/dashboard'
+import { getOverdueSupplierInvoicesCount } from '@/actions/supplier-invoices'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 
 const actionLabelsEsPast: Record<string, string> = {
@@ -133,11 +135,13 @@ function ActivitySkeleton() {
 export function DashboardContent() {
   const router = useRouter()
   const { profile } = useAuth()
+  const { can } = usePermissions()
 
   const [stats, setStats] = useState<any>(null)
   const [chartData, setChartData] = useState<{ date: string; label: string; total: number }[]>([])
   const [chartFullMonth, setChartFullMonth] = useState(false)
   const [activity, setActivity] = useState<any[]>([])
+  const [overdueSupplierInvoicesCount, setOverdueSupplierInvoicesCount] = useState(0)
 
   const [statsLoading, setStatsLoading] = useState(true)
   const [chartLoading, setChartLoading] = useState(true)
@@ -176,7 +180,12 @@ export function DashboardContent() {
     loadStats()
     loadChart()
     loadActivity()
-  }, [loadStats, loadChart, loadActivity])
+    if (can('supplier_invoices.manage')) {
+      getOverdueSupplierInvoicesCount()
+        .then((r) => r?.success && typeof r.data === 'number' && setOverdueSupplierInvoicesCount(r.data))
+        .catch(() => {})
+    }
+  }, [loadStats, loadChart, loadActivity, can])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -224,33 +233,6 @@ export function DashboardContent() {
           <RefreshCw className="h-4 w-4" /> Actualizar
         </Button>
       </div>
-
-      {/* Banner de alertas rápidas (solo si stats cargado) */}
-      {stats && (stats.ordersOverdue > 0 || stats.overduePayments > 0 || stats.lowStockCount > 0) && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 flex items-center gap-4">
-          <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0" />
-          <div className="flex flex-wrap gap-3 text-sm">
-            {stats.ordersOverdue > 0 && (
-              <span className="text-amber-800 cursor-pointer hover:underline"
-                onClick={() => router.push('/admin/pedidos?status=overdue')}>
-                {stats.ordersOverdue} pedido{stats.ordersOverdue > 1 ? 's' : ''} con retraso
-              </span>
-            )}
-            {stats.overduePayments > 0 && (
-              <span className="text-amber-800 cursor-pointer hover:underline"
-                onClick={() => router.push('/admin/proveedores')}>
-                {stats.overduePayments} pago{stats.overduePayments > 1 ? 's' : ''} a proveedor vencido{stats.overduePayments > 1 ? 's' : ''}
-              </span>
-            )}
-            {stats.lowStockCount > 0 && (
-              <span className="text-amber-800 cursor-pointer hover:underline"
-                onClick={() => router.push('/admin/stock')}>
-                {stats.lowStockCount} producto{stats.lowStockCount > 1 ? 's' : ''} con stock bajo
-              </span>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Pruebas / entregas del día (solo si stats cargado) */}
       {stats && (stats.fittingsToday > 0 || stats.deliveriesToday > 0) && (
@@ -344,7 +326,7 @@ export function DashboardContent() {
             <p className="text-xs text-muted-foreground">Pedidos, pagos y stock que requieren atención</p>
           </CardHeader>
           <CardContent>
-            {stats.ordersOverdue === 0 && stats.overduePayments === 0 && stats.lowStockCount === 0 ? (
+            {stats.ordersOverdue === 0 && stats.overduePayments === 0 && stats.lowStockCount === 0 && overdueSupplierInvoicesCount === 0 ? (
               <p className="text-sm text-muted-foreground py-2">Ninguna alerta pendiente</p>
             ) : (
               <ul className="space-y-2">
@@ -362,6 +344,15 @@ export function DashboardContent() {
                     <button type="button" onClick={() => router.push('/admin/proveedores')}
                       className="text-sm text-amber-700 hover:underline flex items-center gap-2 w-full text-left">
                       <span className="font-medium">{stats.overduePayments} pago{stats.overduePayments > 1 ? 's' : ''} a proveedor vencido{stats.overduePayments > 1 ? 's' : ''}</span>
+                      <ArrowRight className="h-3 w-3 shrink-0" />
+                    </button>
+                  </li>
+                )}
+                {overdueSupplierInvoicesCount > 0 && (
+                  <li>
+                    <button type="button" onClick={() => router.push('/admin/contabilidad/facturas-proveedores')}
+                      className="text-sm text-red-700 hover:underline flex items-center gap-2 w-full text-left">
+                      <span className="font-medium">{overdueSupplierInvoicesCount} factura{overdueSupplierInvoicesCount > 1 ? 's' : ''} de proveedor vencida{overdueSupplierInvoicesCount > 1 ? 's' : ''}</span>
                       <ArrowRight className="h-3 w-3 shrink-0" />
                     </button>
                   </li>

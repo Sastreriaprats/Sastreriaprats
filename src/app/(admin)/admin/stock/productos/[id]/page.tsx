@@ -39,10 +39,12 @@ export default async function ProductDetailPage(props: { params: Promise<{ id: s
   ])
 
   if (!product) notFound()
+  const excludedCategorySlugs = ['punto', 'ceremonia', 'chaque', 'smoking']
+  const filteredCategories = (categories || []).filter((c: { slug: string }) => !excludedCategorySlugs.includes(c.slug))
   return (
     <ProductDetailContent
       product={product}
-      categories={categories || []}
+      categories={filteredCategories}
       suppliers={suppliers || []}
       physicalWarehouses={physicalWarehouses || []}
     />

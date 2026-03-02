@@ -43,7 +43,7 @@ export const createAppointment = protectedAction<Record<string, unknown>, unknow
     auditModule: 'calendar',
     auditAction: 'create',
     auditEntity: 'appointment',
-    revalidate: ['/admin/calendario'],
+    revalidate: ['/admin/calendario', '/sastre/calendario'],
   },
   async (ctx, input) => {
     const startTime = String(input.start_time || '10:00')
@@ -99,7 +99,7 @@ export const updateAppointment = protectedAction<{ id: string; data: Record<stri
     auditModule: 'calendar',
     auditAction: 'update',
     auditEntity: 'appointment',
-    revalidate: ['/admin/calendario'],
+    revalidate: ['/admin/calendario', '/sastre/calendario'],
   },
   async (ctx, { id, data: input }) => {
     const updateData: Record<string, unknown> = { ...input }
@@ -128,7 +128,7 @@ export const cancelAppointment = protectedAction<{ id: string; reason?: string }
     auditModule: 'calendar',
     auditAction: 'state_change',
     auditEntity: 'appointment',
-    revalidate: ['/admin/calendario'],
+    revalidate: ['/admin/calendario', '/sastre/calendario'],
   },
   async (ctx, { id, reason }) => {
     const { data, error } = await ctx.adminClient
@@ -159,7 +159,7 @@ export const moveAppointment = protectedAction<{
     auditModule: 'calendar',
     auditAction: 'update',
     auditEntity: 'appointment',
-    revalidate: ['/admin/calendario'],
+    revalidate: ['/admin/calendario', '/sastre/calendario'],
   },
   async (ctx, { id, new_date, new_start_time, new_tailor_id }) => {
     const { data: current } = await ctx.adminClient
@@ -235,7 +235,7 @@ export const markAttendance = protectedAction<{ id: string; status: 'completed' 
     auditModule: 'calendar',
     auditAction: 'state_change',
     auditEntity: 'appointment',
-    revalidate: ['/admin/calendario'],
+    revalidate: ['/admin/calendario', '/sastre/calendario'],
   },
   async (ctx, { id, status }) => {
     const { data, error } = await ctx.adminClient

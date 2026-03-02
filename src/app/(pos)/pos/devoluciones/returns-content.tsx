@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -10,11 +10,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { ArrowLeft, Search, Loader2, ArrowRightLeft, Ticket, ShoppingBag } from 'lucide-react'
+import { ArrowLeft, Search, Loader2, ArrowRightLeft, Ticket, ShoppingBag, Barcode } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/components/providers/auth-provider'
 import { useAction } from '@/hooks/use-action'
-import { createReturn } from '@/actions/pos'
+import { createReturn, findSaleByBarcode } from '@/actions/pos'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 
 export function ReturnsContent() {
@@ -23,18 +23,78 @@ export function ReturnsContent() {
   const { activeStoreId } = useAuth()
 
   const [ticketSearch, setTicketSearch] = useState('')
+  const [barcodeSearch, setBarcodeSearch] = useState('')
   const [foundSale, setFoundSale] = useState<any>(null)
   const [isSearching, setIsSearching] = useState(false)
   const [selectedLineIds, setSelectedLineIds] = useState<string[]>([])
   const [returnType, setReturnType] = useState<'exchange' | 'voucher'>('voucher')
   const [reason, setReason] = useState('')
+  const barcodeBufferRef = useRef({ digits: '', firstAt: 0 })
+  const barcodeInputRef = useRef<HTMLInputElement>(null)
+
+  const searchSaleByBarcode = useCallback(async (barcode?: string) => {
+    const code = (barcode ?? barcodeSearch).trim()
+    if (!code) return
+    setIsSearching(true)
+    setBarcodeSearch('')
+    try {
+      const result = await findSaleByBarcode({ barcode: code, storeId: activeStoreId ?? undefined })
+      if (!result?.success && result && 'error' in result) {
+        toast.error(result.error ?? 'Error al buscar')
+        return
+      }
+      if (result?.data?.sale) {
+        setFoundSale(result.data.sale)
+        setSelectedLineIds([])
+        setTicketSearch(result.data.sale.ticket_number ?? '')
+        toast.success(`Ticket ${result.data.sale.ticket_number} encontrado por código de barras`)
+      } else {
+        toast.error('No se encontró ninguna venta con ese código de barras')
+      }
+    } catch {
+      toast.error('Error al buscar por código de barras')
+    } finally {
+      setIsSearching(false)
+      barcodeInputRef.current?.focus()
+    }
+  }, [activeStoreId, barcodeSearch])
+
+  // Escáner de códigos de barras: 13 dígitos en menos de 200 ms → buscar venta por barcode (mismo criterio que en caja)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        const { digits, firstAt } = barcodeBufferRef.current
+        const elapsed = Date.now() - firstAt
+        if (digits.length === 13 && elapsed < 200) {
+          e.preventDefault()
+          e.stopPropagation()
+          barcodeBufferRef.current = { digits: '', firstAt: 0 }
+          searchSaleByBarcode(digits)
+          return
+        }
+        barcodeBufferRef.current = { digits: '', firstAt: 0 }
+        return
+      }
+      if (e.key.length === 1 && e.key >= '0' && e.key <= '9') {
+        const now = Date.now()
+        if (barcodeBufferRef.current.digits.length === 0) barcodeBufferRef.current.firstAt = now
+        barcodeBufferRef.current.digits += e.key
+        if (barcodeBufferRef.current.digits.length > 13) barcodeBufferRef.current.digits = barcodeBufferRef.current.digits.slice(-13)
+      } else {
+        barcodeBufferRef.current = { digits: '', firstAt: 0 }
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [activeStoreId, searchSaleByBarcode])
 
   const searchSale = async () => {
-    if (!ticketSearch) return
+    const search = ticketSearch.trim()
+    if (!search) return
     setIsSearching(true)
     const { data } = await supabase.from('sales')
       .select('*, sale_lines(*), clients(full_name)')
-      .or(`ticket_number.eq.${ticketSearch},id.eq.${ticketSearch}`)
+      .or(`ticket_number.eq.${search},id.eq.${search}`)
       .eq('status', 'completed')
       .single()
     if (data) { setFoundSale(data); setSelectedLineIds([]) }
@@ -54,7 +114,7 @@ export function ReturnsContent() {
     successMessage: returnType === 'voucher' ? 'Vale de devolución generado' : 'Cambio procesado',
     onSuccess: (data: any) => {
       if (data.voucher_code) toast.success(`Código del vale: ${data.voucher_code}`, { duration: 10000 })
-      setFoundSale(null); setSelectedLineIds([]); setReason(''); setTicketSearch('')
+      setFoundSale(null); setSelectedLineIds([]); setReason(''); setTicketSearch(''); setBarcodeSearch('')
     },
   })
 
@@ -69,17 +129,36 @@ export function ReturnsContent() {
         <div className="max-w-2xl mx-auto space-y-6">
           <Card>
             <CardHeader><CardTitle className="text-base">Buscar ticket original</CardTitle></CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input placeholder="Nº de ticket (ej: TK-2026-0001)" className="pl-9"
+                  <Input placeholder="Nº de ticket (ej: TICK-2026-0001)" className="pl-9"
                     value={ticketSearch} onChange={(e) => setTicketSearch(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && searchSale()} />
                 </div>
-                <Button onClick={searchSale} disabled={isSearching || !ticketSearch}>
+                <Button onClick={searchSale} disabled={isSearching || !ticketSearch.trim()}>
                   {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Buscar'}
                 </Button>
+              </div>
+              <div className="relative border-t pt-4">
+                <p className="text-xs text-muted-foreground mb-2">O escanee el código de barras del artículo a devolver</p>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Barcode className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      ref={barcodeInputRef}
+                      placeholder="Escanee o escriba código de barras (EAN-13)"
+                      className="pl-9"
+                      value={barcodeSearch}
+                      onChange={(e) => setBarcodeSearch(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && searchSaleByBarcode()}
+                    />
+                  </div>
+                  <Button onClick={() => searchSaleByBarcode()} disabled={isSearching || !barcodeSearch.trim()} variant="outline">
+                    {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Buscar'}
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>

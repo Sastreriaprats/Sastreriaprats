@@ -82,7 +82,7 @@ export function useRolesAndPermissions() {
 
 export type CurrentProfileResult = {
   profile: UserWithRoles
-  stores: Array<{ storeId: string; storeName: string; storeCode: string; isPrimary: boolean }>
+  stores: Array<{ storeId: string; storeName: string; storeCode: string; isPrimary: boolean; storeType?: string }>
 }
 
 export function useCurrentProfile(userId: string | null) {

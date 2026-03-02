@@ -15,7 +15,9 @@ type LogRow = {
   id: string
   user_name: string
   action: string
+  action_display?: string
   entity_type: string
+  entity_type_display?: string
   entity_id: string | null
   entity_label: string | null
   changes: Record<string, unknown> | null
@@ -45,6 +47,8 @@ const ACTION_LABELS: Record<string, string> = {
   export: 'Exportar',
   import: 'Importar',
 }
+// Fallback si el API no envía action_display
+const getActionLabel = (log: LogRow) => log.action_display ?? ACTION_LABELS[log.action] ?? log.action
 
 const ENTITY_LABELS: Record<string, string> = {
   client: 'Cliente',
@@ -64,18 +68,20 @@ const ENTITY_LABELS: Record<string, string> = {
   cms_page: 'Página CMS',
   blog_post: 'Blog',
   clients: 'Clientes',
-  orders: 'Pedidos',
-  stock: 'Stock',
   calendar: 'Agenda',
   tailoring_order: 'Pedido',
   fitting: 'Prueba',
+  invoice: 'Factura',
 }
+// Fallback si el API no envía entity_type_display
+const getEntityTypeLabel = (log: LogRow) => log.entity_type_display ?? ENTITY_LABELS[log.entity_type] ?? log.entity_type
 
 export function AuditoriaContent() {
   const [logs, setLogs] = useState<LogRow[]>([])
   const [count, setCount] = useState(0)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   const [filterAction, setFilterAction] = useState('all')
@@ -86,6 +92,7 @@ export function AuditoriaContent() {
 
   const load = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
     const res = await getAuditLogs({
       page,
       action: filterAction !== 'all' ? filterAction : undefined,
@@ -93,7 +100,8 @@ export function AuditoriaContent() {
       dateFrom: filterDateFrom || undefined,
       dateTo: filterDateTo ? filterDateTo + 'T23:59:59Z' : undefined,
     })
-    if (res.data) { setLogs(res.data); setCount(res.count ?? 0) }
+    if (res.error) setLoadError(res.error)
+    else if (res.data) { setLogs(res.data); setCount(res.count ?? 0) }
     setLoading(false)
   }, [page, filterAction, filterEntity, filterDateFrom, filterDateTo])
 
@@ -175,7 +183,12 @@ export function AuditoriaContent() {
 
       <Card>
         <CardContent className="p-0">
-          {loading ? (
+          {loadError ? (
+            <div className="flex flex-col items-center justify-center py-12 gap-2">
+              <p className="text-destructive text-sm">{loadError}</p>
+              <Button variant="outline" size="sm" onClick={load}>Reintentar</Button>
+            </div>
+          ) : loading ? (
             <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-prats-navy" /></div>
           ) : logs.length === 0 ? (
             <p className="text-center py-12 text-muted-foreground">Sin registros de auditoría</p>
@@ -199,10 +212,10 @@ export function AuditoriaContent() {
                       <TableCell className="text-sm font-medium">{log.user_name}</TableCell>
                       <TableCell>
                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${ACTION_BADGES[log.action] ?? 'bg-gray-100 text-gray-700'}`}>
-                          {ACTION_LABELS[log.action] ?? log.action}
+                          {getActionLabel(log)}
                         </span>
                       </TableCell>
-                      <TableCell className="text-sm">{ENTITY_LABELS[log.entity_type] ?? log.entity_type}</TableCell>
+                      <TableCell className="text-sm">{getEntityTypeLabel(log)}</TableCell>
                       <TableCell className="text-sm text-muted-foreground max-w-xs truncate">{log.entity_label ?? log.entity_id ?? '—'}</TableCell>
                       <TableCell>
                         {log.changes ? (expandedId === log.id ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />) : null}

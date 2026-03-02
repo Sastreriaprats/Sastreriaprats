@@ -680,7 +680,7 @@ export const supplierDueDates = pgTable('supplier_due_dates', {
 
 // ========== ENUMS 003 ==========
 
-export const productTypeEnum = pgEnum('product_type', ['boutique', 'tailoring_fabric', 'accessory', 'service'])
+export const productTypeEnum = pgEnum('product_type', ['boutique', 'tailoring_fabric', 'accessory', 'service', 'alteration'])
 export const stockMovementTypeEnum = pgEnum('stock_movement_type', [
   'purchase', 'sale', 'return', 'transfer_in', 'transfer_out',
   'adjustment_positive', 'adjustment_negative', 'inventory',

@@ -4,6 +4,7 @@ import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { generateInvoicePdf } from '@/lib/pdf/invoice-pdf'
 import { generateEstimatePdf } from '@/lib/pdf/estimate-pdf'
+import { createInvoiceJournalEntry } from '@/actions/accounting-triggers'
 
 export type AccountingSummary = {
   income: number
@@ -81,6 +82,7 @@ export const getAccountingSummary = protectedAction<{ year: number }, Accounting
 export type InvoiceRow = {
   id: string
   invoice_number: string
+  client_id: string | null
   client_name: string
   invoice_date: string
   total: number
@@ -97,7 +99,7 @@ export const getInvoices = protectedAction<
   async (ctx, { search, status, dateFrom, dateTo }) => {
     let q = ctx.adminClient
       .from('invoices')
-      .select('id, invoice_number, client_name, invoice_date, total, status, pdf_url, sent_to_client')
+      .select('id, invoice_number, client_id, client_name, invoice_date, total, status, pdf_url, sent_to_client')
       .eq('invoice_type', 'issued')
       .order('invoice_date', { ascending: false })
 
@@ -110,6 +112,7 @@ export const getInvoices = protectedAction<
     return success((data || []).map((r: Record<string, unknown>) => ({
       id: String(r.id),
       invoice_number: String(r.invoice_number ?? ''),
+      client_id: (r.client_id as string) ?? null,
       client_name: String(r.client_name ?? ''),
       invoice_date: String(r.invoice_date ?? ''),
       total: Number(r.total ?? 0),
@@ -240,6 +243,42 @@ export const getVatQuarterly = protectedAction<
 >(
   { permission: 'accounting.view', auditModule: 'accounting' },
   async (ctx, { year }) => {
+    const yearStart = `${year}-01-01T00:00:00`
+    const yearEnd = `${year}-12-31T23:59:59`
+
+    // 2 queries para todo el año (antes: 8 = 2 por trimestre)
+    const [salesRes, purchasesRes] = await Promise.all([
+      ctx.adminClient.from('sales').select('total, subtotal, tax_amount, created_at').gte('created_at', yearStart).lte('created_at', yearEnd).eq('status', 'completed'),
+      ctx.adminClient.from('supplier_orders').select('total, tax_amount, created_at').gte('created_at', yearStart).lte('created_at', yearEnd).in('status', ['received', 'partially_received']),
+    ])
+    const sales = (salesRes.data || []) as Array<{ total?: number; subtotal?: number; tax_amount?: number; created_at?: string }>
+    const purchases = (purchasesRes.data || []) as Array<{ total?: number; tax_amount?: number; created_at?: string }>
+
+    const quarterFromMonth = (m: number) => Math.ceil(m / 3) as 1 | 2 | 3 | 4
+    const byQuarter: Record<number, { baseSales: number; ivaRepercutido: number; basePurchases: number; ivaSoportado: number }> = { 1: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0 }, 2: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0 }, 3: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0 }, 4: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0 } }
+    for (const x of sales) {
+      const d = x.created_at
+      if (d) {
+        const month = Number(d.slice(5, 7))
+        const q = quarterFromMonth(month)
+        const base = Number(x.subtotal ?? x.total) || 0
+        const iva = Number(x.tax_amount) || 0
+        byQuarter[q].baseSales += base
+        byQuarter[q].ivaRepercutido += iva
+      }
+    }
+    for (const x of purchases) {
+      const d = x.created_at
+      if (d) {
+        const month = Number(d.slice(5, 7))
+        const q = quarterFromMonth(month)
+        const total = Number(x.total) || 0
+        const iva = Number(x.tax_amount) || 0
+        byQuarter[q].basePurchases += total - iva
+        byQuarter[q].ivaSoportado += iva
+      }
+    }
+
     const quarters: VatQuarterRow[] = []
     for (let q = 1; q <= 4; q++) {
       const startMonth = (q - 1) * 3 + 1
@@ -247,26 +286,15 @@ export const getVatQuarterly = protectedAction<
       const start = `${year}-${String(startMonth).padStart(2, '0')}-01`
       const endDate = new Date(year, endMonth, 0)
       const end = `${year}-${String(endMonth).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`
-
-      const [salesRes, purchasesRes] = await Promise.all([
-        ctx.adminClient.from('sales').select('total, subtotal, tax_amount, created_at').gte('created_at', `${start}T00:00:00`).lte('created_at', `${end}T23:59:59`).eq('status', 'completed'),
-        ctx.adminClient.from('supplier_orders').select('total, tax_amount, created_at').gte('created_at', `${start}T00:00:00`).lte('created_at', `${end}T23:59:59`).in('status', ['received', 'partially_received']),
-      ])
-      const sales = salesRes.data || []
-      const purchases = purchasesRes.data || []
-      const baseSales = sales.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).subtotal ?? (x as any).total) || 0), 0)
-      const ivaRepercutido = sales.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).tax_amount) || 0), 0)
-      const basePurchases = purchases.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).total) - Number((x as any).tax_amount || 0)), 0)
-      const ivaSoportado = purchases.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).tax_amount) || 0), 0)
-
+      const v = byQuarter[q]
       quarters.push({
         quarter: `T${q}`,
         period: `${start.slice(5, 7)}/${year} - ${end.slice(5, 7)}/${year}`,
-        baseImponibleSales: baseSales,
-        ivaRepercutido,
-        baseImponiblePurchases: basePurchases,
-        ivaSoportado,
-        resultado: ivaRepercutido - ivaSoportado,
+        baseImponibleSales: v.baseSales,
+        ivaRepercutido: v.ivaRepercutido,
+        baseImponiblePurchases: v.basePurchases,
+        ivaSoportado: v.ivaSoportado,
+        resultado: v.ivaRepercutido - v.ivaSoportado,
       })
     }
     const totalRepercutido = quarters.reduce((s, x) => s + x.ivaRepercutido, 0)
@@ -286,7 +314,259 @@ export const getClientsForInvoice = protectedAction<void, { id: string; full_nam
   }
 )
 
+/** Productos para añadir como líneas en factura/presupuesto (búsqueda por nombre o SKU). */
+export const getProductsForInvoice = protectedAction<
+  { search?: string },
+  { id: string; name: string; sku: string; base_price: number }[]
+>(
+  { permission: 'accounting.edit', auditModule: 'accounting' },
+  async (ctx, { search }) => {
+    let q = ctx.adminClient
+      .from('products')
+      .select('id, name, sku, base_price')
+      .eq('is_active', true)
+      .order('name')
+      .limit(50)
+    if (search && search.trim()) {
+      const term = `%${search.trim()}%`
+      q = q.or(`name.ilike.${term},sku.ilike.${term}`)
+    }
+    const { data } = await q
+    return success((data || []).map((p: Record<string, unknown>) => ({
+      id: String(p.id),
+      name: String((p as any).name ?? ''),
+      sku: String((p as any).sku ?? ''),
+      base_price: Number((p as any).base_price ?? 0),
+    })))
+  }
+)
+
+/** Pedidos de sastrería para cargar líneas en factura/presupuesto (opcionalmente por cliente). */
+export const listTailoringOrdersForInvoice = protectedAction<
+  { clientId?: string },
+  { id: string; order_number: string; total: number; client_name: string }[]
+>(
+  { permission: 'accounting.edit', auditModule: 'accounting' },
+  async (ctx, { clientId }) => {
+    let q = ctx.adminClient
+      .from('tailoring_orders')
+      .select('id, order_number, total, client_id, clients(full_name)')
+      .not('status', 'in', '("cancelled")')
+      .order('created_at', { ascending: false })
+      .limit(100)
+    if (clientId) q = q.eq('client_id', clientId)
+    const { data } = await q
+    return success((data || []).map((o: Record<string, unknown>) => ({
+      id: String(o.id),
+      order_number: String((o as any).order_number ?? ''),
+      total: Number((o as any).total ?? 0),
+      client_name: String((o as any).clients?.full_name ?? '') || '—',
+    })))
+  }
+)
+
+/** Líneas de un pedido formateadas para factura/presupuesto. */
+export const getTailoringOrderLinesForInvoice = protectedAction<
+  string,
+  { description: string; quantity: number; unit_price: number; tax_rate: number; line_total: number }[]
+>(
+  { permission: 'accounting.edit', auditModule: 'accounting' },
+  async (ctx, orderId) => {
+    const { data: orderLines } = await ctx.adminClient
+      .from('tailoring_order_lines')
+      .select(`
+        unit_price, discount_percentage, tax_rate, line_total,
+        garment_types ( name ),
+        fabrics ( name, fabric_code ),
+        fabric_description, model_name
+      `)
+      .eq('tailoring_order_id', orderId)
+      .order('sort_order')
+
+    const lines = (orderLines || []).map((l: Record<string, unknown>) => {
+      const gt = (l as any).garment_types
+      const fab = (l as any).fabrics
+      const parts = [
+        gt?.name ?? 'Prenda',
+        fab?.name || (l as any).fabric_description || '',
+        (l as any).model_name ? ` (${(l as any).model_name})` : '',
+      ].filter(Boolean)
+      const description = parts.join(' – ').trim() || 'Línea de pedido'
+      const unitPrice = Number((l as any).unit_price ?? 0)
+      const qty = 1
+      const taxRate = Number((l as any).tax_rate ?? 21)
+      const lineTotal = Number((l as any).line_total ?? unitPrice * qty * (1 + taxRate / 100))
+      return {
+        description,
+        quantity: qty,
+        unit_price: unitPrice,
+        tax_rate: taxRate,
+        line_total: lineTotal,
+      }
+    })
+    return success(lines)
+  }
+)
+
 // ─── Manual Transactions ─────────────────────────────────────────────────────
+
+export type AccountingMovementRow = {
+  id: string
+  source: 'sale' | 'invoice' | 'supplier_order' | 'online_order' | 'manual'
+  sourceLabel: string
+  date: string
+  description: string
+  type: 'income' | 'expense'
+  amount: number
+  tax_amount?: number
+  total: number
+  category?: string
+  referenceId?: string
+  referenceNumber?: string
+  isManual: boolean
+  journalEntryId?: string
+}
+
+export const getAccountingMovements = protectedAction<
+  { type?: 'income' | 'expense'; year?: number; month?: number },
+  AccountingMovementRow[]
+>(
+  { permission: 'accounting.view', auditModule: 'accounting' },
+  async (ctx, { type, year, month }) => {
+    const y = year ?? new Date().getFullYear()
+    const dateFrom = month
+      ? `${y}-${String(month).padStart(2, '0')}-01`
+      : `${y}-01-01`
+    const dateTo = month
+      ? new Date(y, month, 0).toISOString().split('T')[0]
+      : `${y}-12-31`
+
+    const rows: AccountingMovementRow[] = []
+
+    const { data: entries } = await ctx.adminClient
+      .from('journal_entries')
+      .select('id, entry_date, description, entry_type, reference_type, reference_id, total_debit, total_credit')
+      .gte('entry_date', dateFrom)
+      .lte('entry_date', dateTo)
+      .eq('status', 'posted')
+      .order('entry_date', { ascending: false })
+
+    const entriesList = (entries || []) as Array<{
+      id: string
+      entry_date: string
+      description: string
+      entry_type: string
+      reference_type: string | null
+      reference_id: string | null
+      total_debit: number
+      total_credit: number
+    }>
+
+    const saleIds = entriesList.filter(e => e.reference_type === 'sale').map(e => e.reference_id).filter(Boolean) as string[]
+    const invoiceIds = entriesList.filter(e => e.reference_type === 'invoice').map(e => e.reference_id).filter(Boolean) as string[]
+    const supplierOrderIds = entriesList.filter(e => e.reference_type === 'supplier_order').map(e => e.reference_id).filter(Boolean) as string[]
+    const onlineOrderIds = entriesList.filter(e => e.reference_type === 'online_order').map(e => e.reference_id).filter(Boolean) as string[]
+
+    let ticketBySaleId: Record<string, string> = {}
+    let numberByInvoiceId: Record<string, string> = {}
+    let numberByOrderId: Record<string, string> = {}
+    let numberByOnlineId: Record<string, string> = {}
+
+    // Una ronda de queries en paralelo para todas las referencias (antes: hasta 4 secuenciales)
+    const [salesRes, invsRes, ordersRes, onlinesRes] = await Promise.all([
+      saleIds.length > 0 ? ctx.adminClient.from('sales').select('id, ticket_number').in('id', saleIds) : Promise.resolve({ data: [] }),
+      invoiceIds.length > 0 ? ctx.adminClient.from('invoices').select('id, invoice_number').in('id', invoiceIds) : Promise.resolve({ data: [] }),
+      supplierOrderIds.length > 0 ? ctx.adminClient.from('supplier_orders').select('id, order_number').in('id', supplierOrderIds) : Promise.resolve({ data: [] }),
+      onlineOrderIds.length > 0 ? ctx.adminClient.from('online_orders').select('id, order_number').in('id', onlineOrderIds) : Promise.resolve({ data: [] }),
+    ])
+    for (const s of salesRes.data || []) {
+      ticketBySaleId[(s as { id: string }).id] = (s as { ticket_number: string }).ticket_number ?? ''
+    }
+    for (const inv of invsRes.data || []) {
+      numberByInvoiceId[(inv as { id: string }).id] = (inv as { invoice_number: string }).invoice_number ?? ''
+    }
+    for (const o of ordersRes.data || []) {
+      numberByOrderId[(o as { id: string }).id] = (o as { order_number?: string }).order_number ?? (o as { id: string }).id.slice(0, 8)
+    }
+    for (const o of onlinesRes.data || []) {
+      numberByOnlineId[(o as { id: string }).id] = (o as { order_number?: string }).order_number ?? (o as { id: string }).id.slice(0, 8)
+    }
+
+    const sourceLabels: Record<string, string> = {
+      sale: 'Ticket',
+      invoice: 'Factura',
+      supplier_order: 'Compra',
+      online_order: 'Pedido online',
+    }
+
+    for (const e of entriesList) {
+      const refType = e.reference_type || 'manual'
+      const refId = e.reference_id
+      let referenceNumber: string | undefined
+      if (refType === 'sale' && refId) referenceNumber = ticketBySaleId[refId]
+      else if (refType === 'invoice' && refId) referenceNumber = numberByInvoiceId[refId]
+      else if (refType === 'supplier_order' && refId) referenceNumber = numberByOrderId[refId]
+      else if (refType === 'online_order' && refId) referenceNumber = numberByOnlineId[refId]
+
+      const movementType = e.entry_type === 'purchase' ? 'expense' : 'income'
+      if (type && movementType !== type) continue
+
+      const total = Number(e.total_debit ?? e.total_credit ?? 0)
+      const sourceLabel = refType === 'manual'
+        ? 'Asiento contable'
+        : (referenceNumber ? `${sourceLabels[refType] || refType} ${referenceNumber}` : (sourceLabels[refType] || refType))
+      rows.push({
+        id: e.id,
+        source: (refType === 'manual' ? 'manual' : refType) as AccountingMovementRow['source'],
+        sourceLabel,
+        date: String(e.entry_date),
+        description: e.description,
+        type: movementType,
+        amount: total,
+        total,
+        referenceId: refId ?? undefined,
+        referenceNumber: referenceNumber ?? undefined,
+        isManual: false,
+        journalEntryId: e.id,
+      })
+    }
+
+    let q = ctx.adminClient
+      .from('manual_transactions')
+      .select('id, type, date, description, category, amount, tax_rate, tax_amount, total, notes, created_at')
+      .gte('date', dateFrom)
+      .lte('date', dateTo)
+      .order('date', { ascending: false })
+
+    if (type) q = q.eq('type', type)
+
+    const { data: manual } = await q
+    const manualList = (manual || []) as Array<Record<string, unknown>>
+    for (const r of manualList) {
+      rows.push({
+        id: String(r.id),
+        source: 'manual',
+        sourceLabel: r.type === 'income' ? 'Ingreso manual' : 'Gasto manual',
+        date: String(r.date),
+        description: String(r.description),
+        type: String(r.type) as 'income' | 'expense',
+        amount: Number(r.amount),
+        tax_amount: Number(r.tax_amount),
+        total: Number(r.total),
+        category: String(r.category),
+        isManual: true,
+      })
+    }
+
+    rows.sort((a, b) => {
+      const d = b.date.localeCompare(a.date)
+      if (d !== 0) return d
+      return b.id.localeCompare(a.id)
+    })
+
+    return success(rows)
+  }
+)
 
 export type ManualTransaction = {
   id: string
@@ -484,6 +764,137 @@ export const createInvoiceAction = protectedAction<CreateInvoiceInput, { id: str
       return failure(linesError.message ?? 'Error al crear las líneas de factura')
     }
 
+    const displayNumber = `F-${invoice_number}`
+    const auditDescription = `Factura ${displayNumber} · ${Number(input.total).toFixed(2)}€`
+    return success({ id: inv.id as string, invoice_number, auditDescription })
+  }
+)
+
+// ── Crear factura desde ticket/venta TPV ─────────────────────────────────────
+export const createInvoiceFromSaleAction = protectedAction<string, { id: string; invoice_number: string }>(
+  {
+    permission: 'accounting.manage_invoices',
+    auditModule: 'accounting',
+    auditAction: 'create',
+    auditEntity: 'invoice',
+  },
+  async (ctx, saleId) => {
+    const { data: sale, error: saleError } = await ctx.adminClient
+      .from('sales')
+      .select('id, subtotal, tax_amount, total, client_id, store_id')
+      .eq('id', saleId)
+      .single()
+
+    if (saleError || !sale) return failure('Venta no encontrada', 'NOT_FOUND')
+
+    const existing = await ctx.adminClient
+      .from('invoices')
+      .select('id, invoice_number')
+      .eq('sale_id', saleId)
+      .limit(1)
+      .maybeSingle()
+
+    if (existing.data?.id) {
+      return success({
+        id: existing.data.id as string,
+        invoice_number: (existing.data as { invoice_number: string }).invoice_number,
+      })
+    }
+
+    const { data: lines } = await ctx.adminClient
+      .from('sale_lines')
+      .select('description, quantity, unit_price, tax_rate, line_total')
+      .eq('sale_id', saleId)
+      .order('sort_order', { ascending: true })
+
+    const saleLines = lines ?? []
+    if (saleLines.length === 0) return failure('La venta no tiene líneas', 'VALIDATION')
+
+    let clientName = 'Consumidor final'
+    let clientNif: string | null = null
+    const clientId = (sale as { client_id?: string }).client_id ?? null
+    if (clientId) {
+      const { data: client } = await ctx.adminClient
+        .from('clients')
+        .select('full_name, company_name, company_nif, document_number')
+        .eq('id', clientId)
+        .single()
+      if (client) {
+        const c = client as { full_name?: string; company_name?: string; company_nif?: string; document_number?: string }
+        clientName = c.full_name || c.company_name || clientName
+        clientNif = c.company_nif || c.document_number || null
+      }
+    }
+
+    const year = new Date().getFullYear()
+    const { count } = await ctx.adminClient
+      .from('invoices')
+      .select('*', { count: 'exact', head: true })
+      .like('invoice_number', `F${year}-%`)
+    const seq = String((count ?? 0) + 1).padStart(4, '0')
+    const invoice_number = `F${year}-${seq}`
+
+    const subtotal = Number((sale as { subtotal?: number }).subtotal ?? 0)
+    const taxAmount = Number((sale as { tax_amount?: number }).tax_amount ?? 0)
+    const total = Number((sale as { total?: number }).total ?? 0)
+    const storeId = (sale as { store_id?: string }).store_id ?? null
+    const today = new Date().toISOString().slice(0, 10)
+    const dueDate = new Date()
+    dueDate.setDate(dueDate.getDate() + 15)
+
+    const { data: inv, error } = await ctx.adminClient
+      .from('invoices')
+      .insert({
+        invoice_number,
+        invoice_series: 'F',
+        invoice_type: 'issued',
+        client_id: clientId,
+        client_name: clientName,
+        client_nif: clientNif,
+        company_name: 'Sastrería Prats',
+        company_nif: 'B12345678',
+        company_address: 'Madrid, España',
+        invoice_date: today,
+        due_date: dueDate.toISOString().slice(0, 10),
+        subtotal,
+        tax_rate: 21,
+        tax_amount: taxAmount,
+        irpf_rate: 0,
+        irpf_amount: 0,
+        total,
+        status: 'issued',
+        sale_id: saleId,
+        store_id: storeId,
+        created_by: ctx.userId,
+      })
+      .select('id')
+      .single()
+
+    if (error || !inv) {
+      console.error('Error creating invoice from sale:', error)
+      return failure(error?.message ?? 'Error al crear la factura')
+    }
+
+    const { error: linesError } = await ctx.adminClient
+      .from('invoice_lines')
+      .insert(
+        saleLines.map((l: { description: string; quantity: number; unit_price: number; tax_rate?: number; line_total: number }, i: number) => ({
+          invoice_id: inv.id,
+          description: l.description,
+          quantity: l.quantity,
+          unit_price: l.unit_price,
+          tax_rate: l.tax_rate ?? 21,
+          line_total: Number(l.line_total),
+          sort_order: i,
+        }))
+      )
+
+    if (linesError) {
+      console.error('Error creating invoice lines from sale:', linesError)
+      return failure(linesError.message ?? 'Error al crear las líneas')
+    }
+
+    createInvoiceJournalEntry(inv.id as string).catch((e) => console.error('Journal entry from sale invoice:', e))
     return success({ id: inv.id as string, invoice_number })
   }
 )

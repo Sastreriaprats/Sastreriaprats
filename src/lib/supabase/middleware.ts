@@ -8,6 +8,23 @@ const STAFF_ROLES = [
   'super_admin', 'admin', 'accountant', 'tailor', 'salesperson', 'web_manager', 'manager',
 ]
 
+/** Copia todas las cookies de supabaseResponse al redirect para que la sesión se propague al cliente */
+function copySupabaseCookies(redirectResponse: NextResponse, supabaseResponse: NextResponse): NextResponse {
+  supabaseResponse.cookies.getAll().forEach((cookie) => {
+    redirectResponse.cookies.set(cookie.name, cookie.value, cookie)
+  })
+  return redirectResponse
+}
+
+/** Borra en la respuesta todas las cookies de Supabase (sb-*) para cerrar sesión */
+function clearSupabaseCookies(response: NextResponse, request: NextRequest): void {
+  request.cookies.getAll().forEach((cookie) => {
+    if (cookie.name.startsWith('sb-')) {
+      response.cookies.delete(cookie.name)
+    }
+  })
+}
+
 /** Obtiene los roles del usuario actual llamando al API (usa cookies de la request) */
 async function getUserRoles(request: NextRequest): Promise<string[]> {
   try {
@@ -49,11 +66,20 @@ export async function updateSession(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname
 
+  // Server Actions: POST con header Next-Action. No redirigir, solo refrescar sesión y dejar pasar.
+  const isServerAction = request.method === 'POST' && request.headers.has('Next-Action')
+  if (isServerAction) {
+    await supabase.auth.getUser()
+    setSecurityHeaders(supabaseResponse)
+    return supabaseResponse
+  }
+
   // Corregir URL con espacio "mi cuenta" → "mi-cuenta" (evita 404 y página offline)
   if (pathname.includes('mi cuenta')) {
     const url = request.nextUrl.clone()
     url.pathname = pathname.replace(/mi cuenta/g, 'mi-cuenta')
     const redirectRes = NextResponse.redirect(url)
+    copySupabaseCookies(redirectRes, supabaseResponse)
     setSecurityHeaders(redirectRes)
     return redirectRes
   }
@@ -66,7 +92,6 @@ export async function updateSession(request: NextRequest) {
   const isAuthRoute   = pathname.startsWith('/auth')
   const isLoginPage   = pathname === '/auth/login'
 
-  await supabase.auth.refreshSession()
   const { data: { user }, error } = await supabase.auth.getUser()
 
   // Rutas protegidas que requieren sesión
@@ -77,8 +102,8 @@ export async function updateSession(request: NextRequest) {
     const url = request.nextUrl.clone()
     url.pathname = '/auth/login'
     const redirectRes = NextResponse.redirect(url)
-    redirectRes.cookies.delete('sb-access-token')
-    redirectRes.cookies.delete('sb-refresh-token')
+    copySupabaseCookies(redirectRes, supabaseResponse)
+    clearSupabaseCookies(redirectRes, request)
     setSecurityHeaders(redirectRes)
     return redirectRes
   }
@@ -88,6 +113,7 @@ export async function updateSession(request: NextRequest) {
     const url = request.nextUrl.clone()
     url.pathname = '/auth/login'
     const redirectRes = NextResponse.redirect(url)
+    copySupabaseCookies(redirectRes, supabaseResponse)
     setSecurityHeaders(redirectRes)
     return redirectRes
   }
@@ -102,6 +128,7 @@ export async function updateSession(request: NextRequest) {
       const url = request.nextUrl.clone()
       url.pathname = '/sastre'
       const redirectRes = NextResponse.redirect(url)
+      copySupabaseCookies(redirectRes, supabaseResponse)
       setSecurityHeaders(redirectRes)
       return redirectRes
     }
@@ -109,6 +136,7 @@ export async function updateSession(request: NextRequest) {
       const url = request.nextUrl.clone()
       url.pathname = '/vendedor'
       const redirectRes = NextResponse.redirect(url)
+      copySupabaseCookies(redirectRes, supabaseResponse)
       setSecurityHeaders(redirectRes)
       return redirectRes
     }
@@ -116,6 +144,7 @@ export async function updateSession(request: NextRequest) {
       const url = request.nextUrl.clone()
       url.pathname = '/admin/dashboard'
       const redirectRes = NextResponse.redirect(url)
+      copySupabaseCookies(redirectRes, supabaseResponse)
       setSecurityHeaders(redirectRes)
       return redirectRes
     }
@@ -138,6 +167,7 @@ export async function updateSession(request: NextRequest) {
       url.pathname = '/mi-cuenta'
     }
     const redirectRes = NextResponse.redirect(url)
+    copySupabaseCookies(redirectRes, supabaseResponse)
     setSecurityHeaders(redirectRes)
     return redirectRes
   }
@@ -147,26 +177,33 @@ export async function updateSession(request: NextRequest) {
     const url = request.nextUrl.clone()
     url.pathname = '/admin/dashboard'
     const redirectRes = NextResponse.redirect(url)
+    copySupabaseCookies(redirectRes, supabaseResponse)
     setSecurityHeaders(redirectRes)
     return redirectRes
   }
 
   // Ruta /admin: si el usuario tiene solo rol sastre/sastre_plus → redirigir a /sastre; si solo vendedor → /vendedor
+  // Excepciones: vendedor_avanzado puede acceder a /admin/stock/codigos-barras; todos los vendedores a /admin/calendario
   if (user && isAdminRoute) {
     const roleNames = await getUserRoles(request)
     const hasSastreRole = roleNames.some((n: string) => SASTRE_ROLES.includes(n))
     const hasVendedorRole = roleNames.some((n: string) => VENDEDOR_ROLES.includes(n))
+    const isVendedorAvanzado = roleNames.includes('vendedor_avanzado')
+    const isCodigosBarrasRoute = pathname.startsWith('/admin/stock/codigos-barras')
+    const isCalendarioRoute = pathname.startsWith('/admin/calendario')
     if (hasSastreRole) {
       const url = request.nextUrl.clone()
       url.pathname = '/sastre'
       const redirectRes = NextResponse.redirect(url)
+      copySupabaseCookies(redirectRes, supabaseResponse)
       setSecurityHeaders(redirectRes)
       return redirectRes
     }
-    if (hasVendedorRole) {
+    if (hasVendedorRole && !(isVendedorAvanzado && isCodigosBarrasRoute) && !isCalendarioRoute) {
       const url = request.nextUrl.clone()
       url.pathname = '/vendedor'
       const redirectRes = NextResponse.redirect(url)
+      copySupabaseCookies(redirectRes, supabaseResponse)
       setSecurityHeaders(redirectRes)
       return redirectRes
     }
@@ -180,6 +217,7 @@ export async function updateSession(request: NextRequest) {
       const url = request.nextUrl.clone()
       url.pathname = '/auth/login'
       const redirectRes = NextResponse.redirect(url)
+      copySupabaseCookies(redirectRes, supabaseResponse)
       setSecurityHeaders(redirectRes)
       return redirectRes
     }
@@ -193,6 +231,7 @@ export async function updateSession(request: NextRequest) {
       const url = request.nextUrl.clone()
       url.pathname = '/auth/login'
       const redirectRes = NextResponse.redirect(url)
+      copySupabaseCookies(redirectRes, supabaseResponse)
       setSecurityHeaders(redirectRes)
       return redirectRes
     }

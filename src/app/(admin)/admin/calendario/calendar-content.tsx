@@ -76,9 +76,9 @@ export function CalendarContent() {
         const { data } = await supabase
           .from('user_roles')
           .select('user_id, roles!inner(name)')
-          .eq('roles.name', 'tailor')
+          .in('roles.name', ['tailor', 'sastre', 'sastre_plus'])
         if (cancelled || !data || data.length === 0) return
-        const userIds = data.map((ur: Record<string, unknown>) => ur.user_id as string)
+        const userIds = [...new Set(data.map((ur: Record<string, unknown>) => ur.user_id as string))]
         const { data: profiles } = await supabase
           .from('profiles')
           .select('id, full_name')

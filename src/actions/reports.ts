@@ -99,37 +99,78 @@ export const getComparePeriods = protectedAction<
 >(
   { permission: 'reports.view', auditModule: 'reports' },
   async (ctx, { current_start, current_end, previous_start, previous_end }) => {
-    const getTotal = async (start: string, end: string) => {
-      const { data: sl } = await ctx.adminClient.from('sale_lines')
+    const minStart = [current_start, previous_start].sort()[0]
+    const maxEnd = [current_end, previous_end].sort()[1]
+    const rangeEnd = maxEnd + 'T23:59:59'
+
+    const [
+      saleLinesRes,
+      onlineRes,
+      tailoringRes,
+      clientsRes,
+    ] = await Promise.all([
+      ctx.adminClient.from('sale_lines')
         .select('line_total, sales!inner(status, created_at)')
-        .gte('sales.created_at', start).lte('sales.created_at', end + 'T23:59:59')
-        .eq('sales.status', 'completed')
+        .gte('sales.created_at', minStart).lte('sales.created_at', rangeEnd)
+        .eq('sales.status', 'completed'),
+      ctx.adminClient.from('online_orders')
+        .select('total, created_at')
+        .gte('created_at', minStart).lte('created_at', rangeEnd)
+        .in('status', ['paid', 'processing', 'shipped', 'delivered']),
+      ctx.adminClient.from('tailoring_orders')
+        .select('total, created_at')
+        .gte('created_at', minStart).lte('created_at', rangeEnd)
+        .not('status', 'eq', 'cancelled'),
+      ctx.adminClient.from('clients')
+        .select('id, created_at')
+        .gte('created_at', minStart).lte('created_at', rangeEnd),
+    ])
 
-      const { data: online } = await ctx.adminClient.from('online_orders')
-        .select('total').gte('created_at', start).lte('created_at', end + 'T23:59:59')
-        .in('status', ['paid', 'processing', 'shipped', 'delivered'])
-
-      const { data: tailoring } = await ctx.adminClient.from('tailoring_orders')
-        .select('total').gte('created_at', start).lte('created_at', end + 'T23:59:59')
-        .not('status', 'eq', 'cancelled')
-
-      const { count: newClients } = await ctx.adminClient.from('clients')
-        .select('id', { count: 'exact' }).gte('created_at', start).lte('created_at', end + 'T23:59:59')
-
-      const { count: ordersCount } = await ctx.adminClient.from('tailoring_orders')
-        .select('id', { count: 'exact' }).gte('created_at', start).lte('created_at', end + 'T23:59:59')
-
-      const posTotal = (sl || []).reduce((s, l) => s + ((l.line_total as number) || 0), 0)
-      const onlineTotal = (online || []).reduce((s, o) => s + ((o.total as number) || 0), 0)
-      const tailoringTotal = (tailoring || []).reduce((s, o) => s + ((o.total as number) || 0), 0)
-
-      return { revenue: posTotal + onlineTotal + tailoringTotal, newClients: newClients || 0, ordersCount: ordersCount || 0 }
+    const inCurrent = (d: string) => d >= current_start && d <= current_end + 'T23:59:59'
+    const inPrevious = (d: string) => d >= previous_start && d <= previous_end + 'T23:59:59'
+    const dateOfSaleLine = (x: { created_at?: string; sales?: { created_at?: string } | Array<{ created_at?: string }> }) => {
+      const s = Array.isArray(x.sales) ? x.sales[0] : x.sales
+      return (s?.created_at ?? x.created_at ?? '').slice(0, 10)
     }
 
-    const [current, previous] = await Promise.all([
-      getTotal(current_start, current_end),
-      getTotal(previous_start, previous_end),
-    ])
+    let currentRevenue = 0
+    let previousRevenue = 0
+    for (const l of saleLinesRes.data || []) {
+      const d = dateOfSaleLine(l)
+      const v = (l.line_total as number) || 0
+      if (inCurrent(d)) currentRevenue += v
+      if (inPrevious(d)) previousRevenue += v
+    }
+    for (const o of onlineRes.data || []) {
+      const d = (o.created_at ?? '').slice(0, 10)
+      const v = (o.total as number) || 0
+      if (inCurrent(d)) currentRevenue += v
+      if (inPrevious(d)) previousRevenue += v
+    }
+    let currentOrders = 0
+    let previousOrders = 0
+    for (const t of tailoringRes.data || []) {
+      const d = (t.created_at ?? '').slice(0, 10)
+      const v = (t.total as number) || 0
+      if (inCurrent(d)) {
+        currentRevenue += v
+        currentOrders += 1
+      }
+      if (inPrevious(d)) {
+        previousRevenue += v
+        previousOrders += 1
+      }
+    }
+    let currentClients = 0
+    let previousClients = 0
+    for (const c of clientsRes.data || []) {
+      const d = (c.created_at ?? '').slice(0, 10)
+      if (inCurrent(d)) currentClients += 1
+      if (inPrevious(d)) previousClients += 1
+    }
+
+    const current = { revenue: currentRevenue, newClients: currentClients, ordersCount: currentOrders }
+    const previous = { revenue: previousRevenue, newClients: previousClients, ordersCount: previousOrders }
 
     const pct = (curr: number, prev: number) => prev === 0 ? (curr > 0 ? 100 : 0) : ((curr - prev) / prev) * 100
 

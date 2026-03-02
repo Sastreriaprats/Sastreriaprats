@@ -114,7 +114,16 @@ export const addOrderPayment = protectedAction<AddOrderPaymentInput, OrderPaymen
         }
       }
 
-      return success(serializeForServerAction(payment!))
+      const { data: orderRow } = await ctx.adminClient
+        .from('tailoring_orders')
+        .select('order_number')
+        .eq('id', input.tailoring_order_id)
+        .single()
+      const orderNumber = (orderRow as any)?.order_number ?? ''
+      const methodLabels: Record<string, string> = { cash: 'efectivo', card: 'tarjeta', transfer: 'transferencia', check: 'cheque', bizum: 'bizum', voucher: 'vale' }
+      const methodLabel = methodLabels[input.payment_method] ?? input.payment_method
+      const auditDescription = `Pago ${Number(input.amount).toFixed(2)}€ · Pedido ${orderNumber} · Método: ${methodLabel}`
+      return success(serializeForServerAction({ ...payment!, auditDescription }))
     } catch (e) {
       console.error('[addOrderPayment] unexpected:', e)
       return failure('Error al registrar pago')
@@ -271,17 +280,35 @@ export const getPendingPayments = protectedAction<
     try {
       const rows: PendingPaymentRow[] = []
       const today = new Date()
+      const searchTerm = (search ?? '').trim()
+
+      // Búsqueda por cliente: obtener IDs de clientes que coincidan por nombre/apellido
+      let clientIds: string[] = []
+      if (searchTerm.length >= 2) {
+        const { data: clients } = await ctx.adminClient
+          .from('clients')
+          .select('id')
+          .or(`full_name.ilike.%${searchTerm}%,first_name.ilike.%${searchTerm}%,last_name.ilike.%${searchTerm}%`)
+          .limit(200)
+        clientIds = (clients ?? []).map((c: { id: string }) => c.id)
+      }
 
       if (type === 'all' || type === 'orders') {
         let query = ctx.adminClient
           .from('tailoring_orders')
-          .select('id, order_number, total, total_paid, total_pending, created_at, clients(id, full_name), stores(name)')
+          .select('id, order_number, total, total_paid, total_pending, created_at, client_id, clients(id, full_name), stores(name)')
           .gt('total_pending', 0)
           .not('status', 'in', '("delivered","cancelled")')
-          .order('created_at', { ascending: true })
+          .order('created_at', { ascending: false })
           .limit(500)
 
-        if (search) query = query.ilike('order_number', `%${search}%`)
+        if (searchTerm) {
+          if (clientIds.length > 0) {
+            query = query.or(`order_number.ilike.%${searchTerm}%,client_id.in.(${clientIds.join(',')})`)
+          } else {
+            query = query.ilike('order_number', `%${searchTerm}%`)
+          }
+        }
 
         const { data: orders, error: ordErr } = await query
         if (ordErr) {
@@ -291,7 +318,6 @@ export const getPendingPayments = protectedAction<
             const client = Array.isArray(o.clients) ? o.clients[0] : o.clients
             const store = Array.isArray(o.stores) ? o.stores[0] : o.stores
 
-            // Último pago + próximo pago
             const { data: lastPay } = await ctx.adminClient
               .from('tailoring_order_payments')
               .select('payment_date, next_payment_date')
@@ -325,12 +351,18 @@ export const getPendingPayments = protectedAction<
       if (type === 'all' || type === 'sales') {
         let query = ctx.adminClient
           .from('sales')
-          .select('id, ticket_number, total, amount_paid, payment_status, created_at, clients(id, full_name), stores(name)')
+          .select('id, ticket_number, total, amount_paid, payment_status, created_at, client_id, clients(id, full_name), stores(name)')
           .in('payment_status', ['pending', 'partial'])
-          .order('created_at', { ascending: true })
+          .order('created_at', { ascending: false })
           .limit(500)
 
-        if (search) query = query.ilike('ticket_number', `%${search}%`)
+        if (searchTerm) {
+          if (clientIds.length > 0) {
+            query = query.or(`ticket_number.ilike.%${searchTerm}%,client_id.in.(${clientIds.join(',')})`)
+          } else {
+            query = query.ilike('ticket_number', `%${searchTerm}%`)
+          }
+        }
 
         const { data: sales, error: salErr } = await query
         if (salErr) {
@@ -344,7 +376,6 @@ export const getPendingPayments = protectedAction<
             const created = new Date(s.created_at)
             const days = Math.floor((today.getTime() - created.getTime()) / (1000 * 60 * 60 * 24))
 
-            // Último pago de venta
             const { data: lastSalePay } = await ctx.adminClient
               .from('sale_payments')
               .select('created_at, next_payment_date')
@@ -372,10 +403,112 @@ export const getPendingPayments = protectedAction<
         }
       }
 
+      // Orden único: más reciente primero (por created_at)
+      rows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
       return success(serializeForServerAction(rows))
     } catch (e) {
       console.error('[getPendingPayments] unexpected:', e)
       return failure('Error al obtener cobros pendientes')
+    }
+  }
+)
+
+/** Pendiente de cobro de un cliente (para aviso en TPV al asignar cliente). */
+export const getClientPendingDebt = protectedAction<
+  { client_id: string },
+  PendingPaymentRow[]
+>(
+  { permission: ['orders.view', 'sales.view'] },
+  async (ctx, { client_id }) => {
+    try {
+      const rows: PendingPaymentRow[] = []
+      const today = new Date()
+
+      const { data: orders } = await ctx.adminClient
+        .from('tailoring_orders')
+        .select('id, order_number, total, total_paid, total_pending, created_at, client_id, clients(id, full_name), stores(name)')
+        .eq('client_id', client_id)
+        .gt('total_pending', 0)
+        .not('status', 'in', '("delivered","cancelled")')
+        .order('created_at', { ascending: false })
+        .limit(50)
+
+      for (const o of orders ?? []) {
+        const client = Array.isArray(o.clients) ? o.clients[0] : o.clients
+        const store = Array.isArray(o.stores) ? o.stores[0] : o.stores
+        const { data: lastPay } = await ctx.adminClient
+          .from('tailoring_order_payments')
+          .select('payment_date, next_payment_date')
+          .eq('tailoring_order_id', o.id)
+          .order('payment_date', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        const created = new Date(o.created_at)
+        const days = Math.floor((today.getTime() - created.getTime()) / (1000 * 60 * 60 * 24))
+        rows.push({
+          id: o.id,
+          entity_type: 'tailoring_order',
+          reference: o.order_number,
+          client_name: client?.full_name ?? '—',
+          client_id: client?.id ?? '',
+          total: Number(o.total),
+          total_paid: Number(o.total_paid ?? 0),
+          total_pending: Number(o.total_pending ?? 0),
+          last_payment_date: lastPay?.payment_date ?? null,
+          next_payment_date: lastPay?.next_payment_date ?? null,
+          created_at: o.created_at,
+          days_since_creation: days,
+          store_name: store?.name ?? null,
+        })
+      }
+
+      const { data: sales } = await ctx.adminClient
+        .from('sales')
+        .select('id, ticket_number, total, amount_paid, payment_status, created_at, client_id, clients(id, full_name), stores(name)')
+        .eq('client_id', client_id)
+        .in('payment_status', ['pending', 'partial'])
+        .order('created_at', { ascending: false })
+        .limit(50)
+
+      for (const s of sales ?? []) {
+        const client = Array.isArray(s.clients) ? s.clients[0] : s.clients
+        const store = Array.isArray(s.stores) ? s.stores[0] : s.stores
+        const amountPaid = Number(s.amount_paid ?? 0)
+        const total = Number(s.total)
+        const totalPending = Math.max(0, total - amountPaid)
+        if (totalPending <= 0) continue
+        const { data: lastSalePay } = await ctx.adminClient
+          .from('sale_payments')
+          .select('created_at, next_payment_date')
+          .eq('sale_id', s.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        const created = new Date(s.created_at)
+        const days = Math.floor((today.getTime() - created.getTime()) / (1000 * 60 * 60 * 24))
+        rows.push({
+          id: s.id,
+          entity_type: 'sale',
+          reference: s.ticket_number ?? s.id.slice(0, 8),
+          client_name: client?.full_name ?? '—',
+          client_id: client?.id ?? '',
+          total,
+          total_paid: amountPaid,
+          total_pending: totalPending,
+          last_payment_date: lastSalePay?.created_at ?? null,
+          next_payment_date: lastSalePay?.next_payment_date ?? null,
+          created_at: s.created_at,
+          days_since_creation: days,
+          store_name: store?.name ?? null,
+        })
+      }
+
+      rows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      return success(serializeForServerAction(rows))
+    } catch (e) {
+      console.error('[getClientPendingDebt] unexpected:', e)
+      return failure('Error al obtener pendiente del cliente')
     }
   }
 )

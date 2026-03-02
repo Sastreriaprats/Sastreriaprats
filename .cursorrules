@@ -1,5 +1,14 @@
 # Reglas del Proyecto - Sastrería Prats
 
+## RULES CRÍTICAS (no negociables)
+
+- **Puerto 3000**: El proyecto se arranca SIEMPRE en el puerto 3000. Si no te digo lo contrario, usar `next dev -p 3000` (ya está en package.json). Liberar el puerto 3000 antes de iniciar si hace falta.
+- **Admin acceso total**: El rol administrador tiene acceso a todo; no puede depender de permisos de BD. En checks de permisos, hacer bypass para `administrador` y `super_admin`.
+- **Tras CUALQUIER cambio de código**: Borrar `.next`, liberar puerto 3000 si está ocupado, ejecutar `npm run dev` y confirmar que arranca en http://localhost:3000. Hacerlo en la misma respuesta en que se modifique código, sin que el usuario tenga que pedirlo.
+- **Server Actions**: Nunca devolver Date, undefined ni objetos no serializables. Usar `JSON.parse(JSON.stringify(...))` o `serializeForServerAction()` en respuestas para evitar "An unexpected response was received from the server".
+
+---
+
 ## Server Actions (archivos con "use server")
 
 1. SIEMPRE envolver toda la lógica en try/catch. En el catch: console.error y devolver { error: 'mensaje' } o failure('mensaje')
@@ -35,12 +44,14 @@
 
 Después de CUALQUIER modificación de archivo en este proyecto, sin excepción, el asistente DEBE hacer lo siguiente por su cuenta (sin que el usuario lo pida):
 
-1. Liberar el puerto 3000 y detener procesos Node si hace falta
+1. Liberar el puerto 3000 y detener procesos Node si hace falta (el servidor debe arrancar SIEMPRE en el puerto 3000)
 2. Ejecutar: `Remove-Item -Recurse -Force .next` (o en bash: `rm -rf .next`) en la carpeta del proyecto
-3. Ejecutar: `npm run dev`
-4. Confirmar que el servidor arranca correctamente
+3. Ejecutar: `npm run dev` (Next usará el puerto 3000 si está libre)
+4. Confirmar que el servidor arranca correctamente en http://localhost:3000
 
 Esta norma aplica a TODOS los cambios futuros. No hay ningún cambio tan pequeño que no requiera este proceso. Si no se sigue, el servidor puede servir HTML o código cacheado y el usuario verá versiones antiguas. El usuario no debe tener que recordar pedir "next y reiniciar" cada vez.
+
+IMPORTANTE: Aplicar esta norma en la misma respuesta en que se modifique código. No esperar a que el usuario pregunte "¿hiciste lo de las rules?" o "reinicia next". Hacerlo siempre por defecto.
 
 ## Base de datos (Supabase)
 

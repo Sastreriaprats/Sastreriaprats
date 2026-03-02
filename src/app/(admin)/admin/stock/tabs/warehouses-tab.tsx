@@ -13,7 +13,7 @@ import { Loader2, Search, Warehouse, Image as ImageIcon, X, SlidersHorizontal } 
 import { toast } from 'sonner'
 
 const productTypeLabels: Record<string, string> = {
-  boutique: 'Boutique', tailoring_fabric: 'Tejido', accessory: 'Complemento', service: 'Servicio',
+  boutique: 'Boutique', tailoring_fabric: 'Tejido', accessory: 'Complemento', service: 'Servicio', alteration: 'Arreglo',
 }
 
 type WarehouseInfo = { id: string; name: string; code: string; storeName: string }

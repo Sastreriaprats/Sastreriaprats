@@ -17,7 +17,7 @@ export default async function SupplierDetailPage(props: { params: Promise<{ id: 
       *,
       supplier_contacts (*),
       fabrics ( id, fabric_code, name, composition, color_name, price_per_meter, stock_meters, status ),
-      supplier_orders ( id, order_number, status, total, created_at, estimated_delivery_date ),
+      supplier_orders ( id, order_number, status, total, order_date, payment_due_date, created_at, estimated_delivery_date ),
       supplier_due_dates ( id, due_date, amount, is_paid, alert_sent, paid_at )
     `)
     .eq('id', params.id)

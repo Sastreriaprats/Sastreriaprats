@@ -12,5 +12,7 @@ export default async function NewProductPage() {
     admin.from('product_categories').select('id, name, slug, product_type').eq('is_active', true).order('sort_order').order('name'),
     admin.from('suppliers').select('id, name').eq('is_active', true).order('name'),
   ])
-  return <NewProductForm categories={categories || []} suppliers={suppliers || []} />
+  const excludedCategorySlugs = ['punto', 'ceremonia', 'chaque', 'smoking']
+  const filteredCategories = (categories || []).filter((c: { slug: string }) => !excludedCategorySlugs.includes(c.slug))
+  return <NewProductForm categories={filteredCategories} suppliers={suppliers || []} />
 }

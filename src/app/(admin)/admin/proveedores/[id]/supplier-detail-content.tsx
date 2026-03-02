@@ -1,17 +1,30 @@
 'use client'
 
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { updateSupplierOrderStatusAction } from '@/actions/suppliers'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { updateSupplierOrderStatusAction, createSupplierOrderAction } from '@/actions/suppliers'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
   ArrowLeft, User, Phone, Mail, MapPin, CreditCard, Truck,
-  AlertTriangle, ShoppingBag,
+  AlertTriangle, ShoppingBag, Plus, Loader2,
 } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { toast } from 'sonner'
+import { usePermissions } from '@/hooks/use-permissions'
 
 const orderStatusLabels: Record<string, string> = {
   draft: 'Borrador', sent: 'Enviado', confirmed: 'Confirmado',
@@ -27,6 +40,16 @@ const fabricStatusColors: Record<string, string> = { active: 'bg-green-100 text-
 
 export function SupplierDetailContent({ supplier }: { supplier: any }) {
   const router = useRouter()
+  const { can } = usePermissions()
+  const [newOrderOpen, setNewOrderOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [newOrderForm, setNewOrderForm] = useState({
+    total: '',
+    payment_due_date: '',
+    estimated_delivery_date: '',
+    notes: '',
+  })
+
   const contacts = supplier.supplier_contacts || []
   const fabrics = supplier.fabrics || []
   const orders = supplier.supplier_orders || []
@@ -141,21 +164,37 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
           </TabsContent>
 
           <TabsContent value="orders">
+            <div className="space-y-4">
+              {can('suppliers.create_order') && (
+                <div className="flex justify-end">
+                  <Button
+                    onClick={() => {
+                      const today = new Date().toISOString().slice(0, 10)
+                      setNewOrderForm({ total: '', payment_due_date: today, estimated_delivery_date: today, notes: '' })
+                      setNewOrderOpen(true)
+                    }}
+                    className="gap-2"
+                  >
+                    <Plus className="h-4 w-4" /> Nuevo pedido
+                  </Button>
+                </div>
+              )}
             <div className="rounded-lg border">
               <Table>
                 <TableHeader><TableRow>
                   <TableHead>N&ordm; Pedido</TableHead><TableHead>Estado</TableHead><TableHead>Total</TableHead>
-                  <TableHead>Fecha</TableHead><TableHead>Entrega est.</TableHead><TableHead className="w-28">Acciones</TableHead>
+                  <TableHead>Fecha</TableHead><TableHead>Fecha pago</TableHead><TableHead>Entrega est.</TableHead><TableHead className="w-28">Acciones</TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
                   {orders.length === 0 ? (
-                    <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">Sin pedidos</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">Sin pedidos</TableCell></TableRow>
                   ) : [...orders].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((o: any) => (
                     <TableRow key={o.id}>
                       <TableCell className="font-mono">{o.order_number}</TableCell>
                       <TableCell><Badge className={`text-xs ${orderStatusColors[o.status] || ''}`}>{orderStatusLabels[o.status] || o.status}</Badge></TableCell>
                       <TableCell className="font-medium">{formatCurrency(o.total)}</TableCell>
                       <TableCell className="text-sm">{formatDate(o.created_at)}</TableCell>
+                      <TableCell className="text-sm">{o.payment_due_date ? formatDate(o.payment_due_date) : '-'}</TableCell>
                       <TableCell className="text-sm">{formatDate(o.estimated_delivery_date)}</TableCell>
                       <TableCell>
                         {o.status !== 'received' && o.status !== 'cancelled' ? (
@@ -176,6 +215,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                   ))}
                 </TableBody>
               </Table>
+            </div>
             </div>
           </TabsContent>
 
@@ -210,6 +250,101 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
           </TabsContent>
         </div>
       </Tabs>
+
+      <Dialog open={newOrderOpen} onOpenChange={setNewOrderOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Truck className="h-5 w-5" /> Nuevo pedido a proveedor
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Se creará el pedido y, si tienes permiso de facturas proveedores, se generará la factura en Contabilidad → Facturas proveedores.
+          </p>
+          <div className="grid gap-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="new-order-total">Coste total (€) *</Label>
+              <Input
+                id="new-order-total"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="0,00"
+                value={newOrderForm.total}
+                onChange={(e) => setNewOrderForm((f) => ({ ...f, total: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new-order-payment">Fecha de pago al proveedor *</Label>
+              <Input
+                id="new-order-payment"
+                type="date"
+                value={newOrderForm.payment_due_date}
+                onChange={(e) => setNewOrderForm((f) => ({ ...f, payment_due_date: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new-order-delivery">Fecha de entrega estimada *</Label>
+              <Input
+                id="new-order-delivery"
+                type="date"
+                value={newOrderForm.estimated_delivery_date}
+                onChange={(e) => setNewOrderForm((f) => ({ ...f, estimated_delivery_date: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new-order-notes">Notas</Label>
+              <Textarea
+                id="new-order-notes"
+                rows={2}
+                className="resize-none"
+                placeholder="Opcional"
+                value={newOrderForm.notes}
+                onChange={(e) => setNewOrderForm((f) => ({ ...f, notes: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNewOrderOpen(false)}>Cancelar</Button>
+            <Button
+              disabled={creating || !newOrderForm.total || !newOrderForm.payment_due_date || !newOrderForm.estimated_delivery_date || Number(newOrderForm.total) < 0}
+              onClick={async () => {
+                const total = parseFloat(String(newOrderForm.total).replace(',', '.'))
+                if (total < 0) {
+                  toast.error('El coste debe ser mayor o igual a 0')
+                  return
+                }
+                setCreating(true)
+                const res = await createSupplierOrderAction({
+                  supplier_id: supplier.id,
+                  total,
+                  payment_due_date: newOrderForm.payment_due_date,
+                  estimated_delivery_date: newOrderForm.estimated_delivery_date,
+                  notes: newOrderForm.notes?.trim() || null,
+                  alert_on_payment: true,
+                  alert_on_delivery: true,
+                })
+                setCreating(false)
+                if (res?.success && res.data) {
+                  setNewOrderOpen(false)
+                  router.refresh()
+                  toast.success(res.data.ap_invoice_id
+                    ? 'Pedido creado. Factura generada en Facturas proveedores.'
+                    : 'Pedido creado.')
+                  if (res.data.ap_invoice_id) {
+                    // Opcional: enlace en el toast o dejamos que vaya a contabilidad
+                  }
+                } else {
+                  toast.error(res && 'error' in res ? res.error : 'Error al crear el pedido')
+                }
+              }}
+            >
+              {creating && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Crear pedido
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

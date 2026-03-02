@@ -36,29 +36,45 @@ export function protectedAction<TInput, TOutput>(
         return failure('No autenticado', 'UNAUTHORIZED')
       }
 
-      const adminClient = createAdminClient()
+      let adminClient: ReturnType<typeof createAdminClient>
+      try {
+        adminClient = createAdminClient()
+      } catch (adminErr: unknown) {
+        const msg = adminErr instanceof Error ? adminErr.message : 'Error al conectar con la base de datos'
+        console.error('[Action] createAdminClient:', adminErr)
+        return failure(msg, 'INTERNAL')
+      }
 
       if (options.permission && user) {
-        const codes = Array.isArray(options.permission) ? options.permission : [options.permission]
-        const hasPerm = codes.length === 1
-          ? await checkUserPermission(user.id, codes[0])
-          : await checkUserAnyPermission(user.id, codes)
-        if (!hasPerm) {
-          return failure('Sin permisos para esta acción', 'FORBIDDEN')
+        try {
+          const codes = Array.isArray(options.permission) ? options.permission : [options.permission]
+          const hasPerm = codes.length === 1
+            ? await checkUserPermission(user.id, codes[0])
+            : await checkUserAnyPermission(user.id, codes)
+          if (!hasPerm) {
+            return failure('Sin permisos para esta acción', 'FORBIDDEN')
+          }
+        } catch (permErr) {
+          console.error('[Action] permission check:', permErr)
+          return failure('Error al verificar permisos', 'INTERNAL')
         }
       }
 
       let userEmail = user?.email || 'system'
       let userName = 'System'
       if (user) {
-        const { data: profile } = await adminClient
-          .from('profiles')
-          .select('email, full_name')
-          .eq('id', user.id)
-          .single()
-        if (profile) {
-          userEmail = profile.email
-          userName = profile.full_name
+        try {
+          const { data: profile } = await adminClient
+            .from('profiles')
+            .select('email, full_name')
+            .eq('id', user.id)
+            .single()
+          if (profile) {
+            userEmail = profile.email
+            userName = profile.full_name
+          }
+        } catch {
+          // Ignorar error de perfil; usar valores por defecto
         }
       }
 
@@ -72,8 +88,25 @@ export function protectedAction<TInput, TOutput>(
       const result = await handler(ctx, input)
 
       if (result.success && options.auditAction && options.auditAction !== 'read' && user) {
-        const entityId = (result.data as any)?.id || undefined
-        const entityDisplay = (result.data as any)?.name || (result.data as any)?.full_name || (result.data as any)?.order_number || undefined
+        const data = result.data as Record<string, unknown> | undefined
+        const entityId = data?.id != null ? (data.id as string) : undefined
+        // Descripción legible: la acción puede devolver auditDescription y audit_entity_display (no se envían al cliente)
+        const auditDescription = data?.auditDescription ?? data?.audit_description
+        const auditEntityDisplay = data?.auditEntityDisplay ?? data?.audit_entity_display
+        const fallbackDisplay = data?.name ?? data?.full_name ?? data?.order_number ?? data?.ticket_number
+        const entityDisplay = typeof auditEntityDisplay === 'string'
+          ? auditEntityDisplay
+          : typeof fallbackDisplay === 'string'
+            ? `${options.auditEntity}: ${fallbackDisplay}`
+            : undefined
+        const description = typeof auditDescription === 'string'
+          ? auditDescription
+          : entityDisplay ?? (() => {
+              const actionEs: Record<string, string> = { create: 'Crear', update: 'Editar', delete: 'Eliminar', payment: 'Pago', state_change: 'Cambio estado', refund: 'Devolución', export: 'Exportar', import: 'Importar' }
+              const entityEs: Record<string, string> = { sale: 'Venta', tailoring_order: 'Pedido', order: 'Pedido', orders: 'Pedidos', client: 'Cliente', invoice: 'Factura', stock: 'Stock', client_measurements: 'Medidas', product_variant: 'Variante', product: 'Producto', appointment: 'Cita', cash_withdrawal: 'Arqueo', return: 'Devolución' }
+              const e = options.auditEntity || options.auditModule || ''
+              return `${actionEs[options.auditAction] ?? options.auditAction} ${entityEs[e] ?? e}`
+            })()
 
         try {
           await adminClient.rpc('log_audit', {
@@ -82,12 +115,18 @@ export function protectedAction<TInput, TOutput>(
             p_module: options.auditModule || 'unknown',
             p_entity_type: options.auditEntity || undefined,
             p_entity_id: entityId,
-            p_entity_display: entityDisplay ? `${options.auditEntity}: ${entityDisplay}` : undefined,
-            p_description: `${options.auditAction} ${options.auditEntity || options.auditModule}`,
+            p_entity_display: entityDisplay ?? undefined,
+            p_description: description,
             p_new_data: options.auditAction === 'create' ? input : undefined,
           })
         } catch (auditError) {
           console.error('[Audit Error]', auditError)
+        }
+
+        // Quitar campos de auditoría para no enviarlos al cliente
+        if (data && (data.auditDescription !== undefined || data.audit_description !== undefined || data.auditEntityDisplay !== undefined || data.audit_entity_display !== undefined)) {
+          const { auditDescription: _1, auditEntityDisplay: _2, audit_description: _3, audit_entity_display: _4, ...rest } = data
+          result.data = rest as TOutput
         }
       }
 
@@ -104,9 +143,10 @@ export function protectedAction<TInput, TOutput>(
         }
       }
       return result
-    } catch (error: any) {
-      console.error(`[Action Error] ${options.auditModule}.${options.auditAction}:`, error)
-      return failure(error.message || 'Error interno del servidor', 'INTERNAL')
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : typeof error === 'string' ? error : 'Error interno del servidor'
+      console.error(`[Action Error] ${options.auditModule ?? 'action'}:`, error)
+      return failure(message, 'INTERNAL')
     }
   }
 }

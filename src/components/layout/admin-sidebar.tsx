@@ -1,7 +1,6 @@
 'use client'
 
 import Link from 'next/link'
-import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { usePermissions } from '@/hooks/use-permissions'
 import { useAuth } from '@/components/providers/auth-provider'
@@ -10,11 +9,12 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   LayoutDashboard, Users, Scissors, Truck, UserCheck,
   CreditCard, BookOpen, Calendar, Settings, Shirt, Database,
-  Store, ShoppingBag, BarChart3, Mail, ScrollText, CircleDollarSign,
+  Store, ShoppingBag, BarChart3, Mail, ScrollText, CircleDollarSign, Receipt,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState, useEffect, useRef } from 'react'
 import { getOverduePaymentsCount } from '@/actions/payments'
+import { getOverdueSupplierInvoicesCount } from '@/actions/supplier-invoices'
 
 const COBROS_LAST_VISIT_KEY = 'cobros_last_visit'
 
@@ -25,7 +25,9 @@ interface NavItem {
   /** Si se especifica, el item solo aparece si el usuario tiene este permiso */
   permission?: string
   badge?: number
-  children?: { label: string; href: string; permission?: string }[]
+  /** Si true, no se muestra para roles vendedor_basico / vendedor_avanzado */
+  hideForVendedor?: boolean
+  children?: { label: string; href: string; permission?: string; hideForVendedor?: boolean }[]
 }
 
 const navItems: NavItem[] = [
@@ -39,19 +41,26 @@ const navItems: NavItem[] = [
     ],
   },
   { label: 'TPV / Caja',   href: '/pos/caja',           icon: CreditCard,   permission: 'pos.access' },
+  { label: 'Tickets',      href: '/admin/tickets',      icon: Receipt,       permission: 'pos.access' },
   {
     label: 'Productos y Stock', href: '/admin/stock',    icon: Shirt,        permission: 'products.view',
     children: [
       { label: 'Productos',    href: '/admin/stock' },
-      { label: 'Almacenes',    href: '/admin/stock?tab=almacenes' },
-      { label: 'Tejidos',      href: '/admin/stock?tab=tejidos' },
-      { label: 'Movimientos',  href: '/admin/stock?tab=movimientos' },
+      { label: 'Códigos de barras', href: '/admin/stock/codigos-barras', permission: 'barcodes.manage' },
+      { label: 'Almacenes',    href: '/admin/stock?tab=almacenes', hideForVendedor: true },
+      { label: 'Tejidos',      href: '/admin/stock?tab=tejidos', hideForVendedor: true },
+      { label: 'Movimientos',  href: '/admin/stock?tab=movimientos', hideForVendedor: true },
     ],
   },
   { label: 'Proveedores',  href: '/admin/proveedores',  icon: Truck,        permission: 'suppliers.view' },
   { label: 'Oficiales',    href: '/admin/oficiales',    icon: UserCheck,    permission: 'officials.view' },
   { label: 'Calendario',   href: '/admin/calendario',   icon: Calendar,     permission: 'calendar.view' },
-  { label: 'Contabilidad', href: '/admin/contabilidad', icon: BookOpen,     permission: 'accounting.view' },
+  { label: 'Contabilidad', href: '/admin/contabilidad', icon: BookOpen, permission: 'accounting.view',
+    children: [
+      { label: 'Facturas / Presupuestos / Movimientos', href: '/admin/contabilidad' },
+      { label: 'Facturas proveedores', href: '/admin/contabilidad/facturas-proveedores', permission: 'supplier_invoices.manage' },
+    ],
+  },
   { label: 'Cobros pendientes',       href: '/admin/cobros',       icon: CircleDollarSign, permission: 'orders.view' },
   { label: 'Informes',     href: '/admin/reporting',    icon: BarChart3,    permission: 'reports.view' },
   {
@@ -85,25 +94,41 @@ const navItems: NavItem[] = [
 
 export function AdminSidebar({ collapsed = false }: { collapsed?: boolean }) {
   const pathname = usePathname()
-  const { can } = usePermissions()
-  const { profile, isLoading } = useAuth()
+  const { can, isAdmin } = usePermissions()
+  const { profile, isLoading, hasRole } = useAuth()
+  const isVendedor = hasRole('vendedor_basico') || hasRole('vendedor_avanzado')
   const [overdueCount, setOverdueCount] = useState(0)
+  const [overdueSupplierInvoicesCount, setOverdueSupplierInvoicesCount] = useState(0)
   const prevPathRef = useRef<string | null>(null)
 
   // Carga el conteo de pagos vencidos filtrando por la última visita a /admin/cobros
   const fetchOverdueCount = useRef(async () => {
     try {
-      const since = localStorage.getItem(COBROS_LAST_VISIT_KEY) ?? undefined
+      const since = typeof localStorage !== 'undefined' ? localStorage.getItem(COBROS_LAST_VISIT_KEY) ?? undefined : undefined
       const result = await getOverduePaymentsCount({ since })
-      if (result.success) setOverdueCount(result.data)
-    } catch (e) {
-      console.error('[AdminSidebar] overdueCount:', e)
+      if (result && result.success && typeof result.data === 'number') setOverdueCount(result.data)
+    } catch {
+      // Respuesta inesperada o error de red: no mostrar badge, sin log para no alarmar
     }
   })
 
   useEffect(() => {
+    if (isLoading || !profile) return
     fetchOverdueCount.current()
-  }, [])
+  }, [isLoading, profile])
+
+  // Conteo de facturas de proveedores vencidas (solo si tiene permiso)
+  useEffect(() => {
+    if (isLoading || !profile) return
+    let cancelled = false
+    getOverdueSupplierInvoicesCount()
+      .then((r) => {
+        if (cancelled) return
+        if (r?.success && typeof r.data === 'number') setOverdueSupplierInvoicesCount(r.data)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [isLoading, profile])
 
   // Detecta cuando el usuario entra en /admin/cobros para resetear el badge
   useEffect(() => {
@@ -117,6 +142,13 @@ export function AdminSidebar({ collapsed = false }: { collapsed?: boolean }) {
     } else if (!isCobros && prevPathRef.current === '/admin/cobros') {
       // Al salir de cobros, refrescar para mostrar nuevos vencidos desde hoy en adelante
       fetchOverdueCount.current()
+    }
+
+    // Al entrar en facturas proveedores, refrescar conteo
+    if (pathname.startsWith('/admin/contabilidad/facturas-proveedores')) {
+      getOverdueSupplierInvoicesCount()
+        .then((r) => r?.success && typeof r.data === 'number' && setOverdueSupplierInvoicesCount(r.data))
+        .catch(() => {})
     }
 
     prevPathRef.current = pathname
@@ -143,11 +175,23 @@ export function AdminSidebar({ collapsed = false }: { collapsed?: boolean }) {
       )}>
         {collapsed ? (
           <div className="h-8 w-8 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0">
-            <Image src="/logo-prats.png" alt="Prats" width={28} height={20} style={{ objectFit: 'contain', filter: 'invert(1) brightness(2)' }} priority />
+            <img
+              src="/logo-prats.png"
+              alt="Prats"
+              width={28}
+              height={20}
+              style={{ height: '20px', width: 'auto', objectFit: 'contain', filter: 'invert(1) brightness(2)' }}
+            />
           </div>
         ) : (
           <div className="flex flex-col items-start min-w-0">
-            <Image src="/logo-prats.png" alt="Prats" width={88} height={44} style={{ objectFit: 'contain', filter: 'invert(1) brightness(2)' }} priority />
+            <img
+              src="/logo-prats.png"
+              alt="Prats"
+              width={88}
+              height={44}
+              style={{ height: '44px', width: 'auto', objectFit: 'contain', filter: 'invert(1) brightness(2)' }}
+            />
             <p className="text-[10px] text-white/50 tracking-[0.2em] uppercase mt-1">Panel de gestión</p>
           </div>
         )}
@@ -160,10 +204,11 @@ export function AdminSidebar({ collapsed = false }: { collapsed?: boolean }) {
             const Icon = item.icon
             const isCobrosItem = item.href === '/admin/cobros'
             const badgeCount = isCobrosItem ? overdueCount : (item.badge ?? 0)
+            const cobrosHref = isCobrosItem && badgeCount > 0 ? '/admin/cobros?vencidos=1' : item.href
             return (
               <div key={item.href}>
                 <Link
-                  href={item.href}
+                  href={cobrosHref}
                   className={cn(
                     'flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors',
                     active ? 'bg-prats-navy text-white' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
@@ -184,21 +229,31 @@ export function AdminSidebar({ collapsed = false }: { collapsed?: boolean }) {
                 {!collapsed && active && item.children && (
                   <div className="ml-7 mt-0.5 space-y-0.5 border-l pl-3">
                     {item.children
-                      .filter(c => !c.permission || can(c.permission))
-                      .map((child) => (
-                        <Link
-                          key={child.href}
-                          href={child.href}
-                          className={cn(
-                            'block text-xs py-1.5 px-2 rounded transition-colors',
-                            pathname === child.href.split('?')[0]
-                              ? 'text-prats-navy font-medium'
-                              : 'text-muted-foreground hover:text-foreground'
-                          )}
-                        >
-                          {child.label}
-                        </Link>
-                      ))
+                      .filter(c => {
+                        if (c.hideForVendedor && isVendedor) return false
+                        return !c.permission || can(c.permission) || (c.permission === 'barcodes.manage' && isAdmin)
+                      })
+                      .map((child) => {
+                        const isFacturasProveedores = child.href === '/admin/contabilidad/facturas-proveedores'
+                        const childBadge = isFacturasProveedores ? overdueSupplierInvoicesCount : 0
+                        return (
+                          <Link
+                            key={child.href}
+                            href={child.href}
+                            className={cn(
+                              'flex items-center justify-between gap-2 text-xs py-1.5 px-2 rounded transition-colors',
+                              pathname === child.href.split('?')[0]
+                                ? 'text-prats-navy font-medium'
+                                : 'text-muted-foreground hover:text-foreground'
+                            )}
+                          >
+                            <span>{child.label}</span>
+                            {childBadge > 0 && (
+                              <Badge variant="destructive" className="h-4 min-w-[18px] px-1 text-[10px]">{childBadge}</Badge>
+                            )}
+                          </Link>
+                        )
+                      })
                     }
                   </div>
                 )}

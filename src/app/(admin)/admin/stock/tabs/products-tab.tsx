@@ -24,10 +24,10 @@ import { listProducts } from '@/actions/products'
 import { formatCurrency } from '@/lib/utils'
 
 const productTypeLabels: Record<string, string> = {
-  boutique: 'Boutique', tailoring_fabric: 'Tejido', accessory: 'Complemento', service: 'Servicio',
+  boutique: 'Boutique', tailoring_fabric: 'Tejido', accessory: 'Complemento', service: 'Servicio', alteration: 'Arreglo',
 }
 const productTypeBadgeColors: Record<string, string> = {
-  boutique: '', tailoring_fabric: 'bg-amber-100 text-amber-800', accessory: 'bg-blue-100 text-blue-800', service: 'bg-purple-100 text-purple-800',
+  boutique: '', tailoring_fabric: 'bg-amber-100 text-amber-800', accessory: 'bg-blue-100 text-blue-800', service: 'bg-purple-100 text-purple-800', alteration: 'bg-sky-100 text-sky-800',
 }
 
 function getProductStockSummary(product: any): { total: number; warehouses: { name: string; qty: number }[] } {
@@ -142,8 +142,8 @@ export function ProductsTab() {
             <SelectContent>
               <SelectItem value="all">Todos los tipos</SelectItem>
               <SelectItem value="boutique">Boutique</SelectItem>
-              <SelectItem value="tailoring_fabric">Tejido</SelectItem>
-              <SelectItem value="accessory">Complemento</SelectItem>
+              <SelectItem value="tailoring_fabric">Tela</SelectItem>
+              <SelectItem value="alteration">Arreglo</SelectItem>
               <SelectItem value="service">Servicio</SelectItem>
             </SelectContent>
           </Select>
