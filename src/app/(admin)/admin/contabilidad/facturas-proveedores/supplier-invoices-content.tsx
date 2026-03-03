@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
+import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -387,19 +388,15 @@ export function SupplierInvoicesContent() {
           value={supplierSearch}
           onChange={(e) => setSupplierSearch(e.target.value)}
         />
-        <Input
-          type="date"
-          className="w-40"
-          placeholder="Desde"
+        <DatePickerPopover
+          containerClassName="w-40"
           value={dateFrom}
-          onChange={(e) => setDateFrom(e.target.value)}
+          onChange={(date) => setDateFrom(date)}
         />
-        <Input
-          type="date"
-          className="w-40"
-          placeholder="Hasta"
+        <DatePickerPopover
+          containerClassName="w-40"
           value={dateTo}
-          onChange={(e) => setDateTo(e.target.value)}
+          onChange={(date) => setDateTo(date)}
         />
         <Button variant="secondary" size="sm" onClick={() => { setDateFrom(''); setDateTo(''); setSupplierSearch(''); setStatusFilter('all') }}>
           Limpiar
@@ -510,19 +507,17 @@ export function SupplierInvoicesContent() {
               </div>
               <div>
                 <Label>Fecha factura *</Label>
-                <Input
-                  type="date"
+                <DatePickerPopover
                   value={form.invoice_date}
-                  onChange={(e) => setForm((f) => ({ ...f, invoice_date: e.target.value }))}
+                  onChange={(date) => setForm((f) => ({ ...f, invoice_date: date }))}
                 />
               </div>
               <div>
                 <Label>Fecha vencimiento *</Label>
                 <div className="flex gap-1">
-                  <Input
-                    type="date"
+                  <DatePickerPopover
                     value={form.due_date}
-                    onChange={(e) => setForm((f) => ({ ...f, due_date: e.target.value }))}
+                    onChange={(date) => setForm((f) => ({ ...f, due_date: date }))}
                   />
                   <Button type="button" size="sm" variant="outline" onClick={() => setForm((f) => ({ ...f, due_date: addDays(f.invoice_date, 15) }))}>
                     +15

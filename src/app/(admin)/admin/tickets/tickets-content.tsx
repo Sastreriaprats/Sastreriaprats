@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import {
   Table,
   TableBody,
@@ -155,20 +156,18 @@ export function TicketsContent() {
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs text-muted-foreground">Desde</label>
-            <Input
-              type="date"
+            <DatePickerPopover
+              containerClassName="w-40"
               value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="w-40"
+              onChange={(date) => setDateFrom(date)}
             />
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs text-muted-foreground">Hasta</label>
-            <Input
-              type="date"
+            <DatePickerPopover
+              containerClassName="w-40"
               value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="w-40"
+              onChange={(date) => setDateTo(date)}
             />
           </div>
           <div className="flex flex-col gap-1">

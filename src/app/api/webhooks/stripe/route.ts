@@ -119,7 +119,7 @@ export async function POST(request: NextRequest) {
 
           if (process.env.RESEND_API_KEY && session.customer_email) {
             try {
-              await fetch('https://api.resend.com/emails', {
+              const res = await fetch('https://api.resend.com/emails', {
                 method: 'POST',
                 headers: {
                   Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
@@ -135,8 +135,26 @@ export async function POST(request: NextRequest) {
                     <p>Un saludo,<br>Sastrería Prats</p>`,
                 }),
               })
-            } catch {
-              // silent
+              const data = res.ok ? await res.json().catch(() => null) : null
+              await admin.from('email_logs').insert({
+                recipient_email: session.customer_email,
+                subject: `Pedido confirmado — ${orderNumber}`,
+                email_type: 'transactional',
+                status: res.ok ? 'sent' : 'failed',
+                sent_at: new Date().toISOString(),
+                resend_id: (data as { id?: string } | null)?.id ?? null,
+                ...(res.ok ? {} : { error_message: `HTTP ${res.status}` }),
+              })
+              if (!res.ok) console.error('[Stripe webhook] Order confirmation email failed:', res.status)
+            } catch (e) {
+              console.error('[Stripe webhook] Order confirmation email error:', e)
+              await admin.from('email_logs').insert({
+                recipient_email: session.customer_email,
+                subject: `Pedido confirmado — ${orderNumber}`,
+                email_type: 'transactional',
+                status: 'failed',
+                error_message: e instanceof Error ? e.message : 'Unknown error',
+              })
             }
           }
         } else if (orderId && orderNumber) {
@@ -180,7 +198,7 @@ export async function POST(request: NextRequest) {
 
           if (process.env.RESEND_API_KEY && session.customer_email) {
             try {
-              await fetch('https://api.resend.com/emails', {
+              const res = await fetch('https://api.resend.com/emails', {
                 method: 'POST',
                 headers: {
                   Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
@@ -193,8 +211,26 @@ export async function POST(request: NextRequest) {
                   html: `<h2>¡Gracias por tu compra!</h2><p>Tu pedido <strong>${orderNumber}</strong> ha sido confirmado.</p><p>Un saludo,<br>Sastrería Prats</p>`,
                 }),
               })
-            } catch {
-              // silent
+              const data = res.ok ? await res.json().catch(() => null) : null
+              await admin.from('email_logs').insert({
+                recipient_email: session.customer_email,
+                subject: `Pedido confirmado — ${orderNumber}`,
+                email_type: 'transactional',
+                status: res.ok ? 'sent' : 'failed',
+                sent_at: new Date().toISOString(),
+                resend_id: (data as { id?: string } | null)?.id ?? null,
+                ...(res.ok ? {} : { error_message: `HTTP ${res.status}` }),
+              })
+              if (!res.ok) console.error('[Stripe webhook] Order confirmation email failed:', res.status)
+            } catch (e) {
+              console.error('[Stripe webhook] Order confirmation email error:', e)
+              await admin.from('email_logs').insert({
+                recipient_email: session.customer_email,
+                subject: `Pedido confirmado — ${orderNumber}`,
+                email_type: 'transactional',
+                status: 'failed',
+                error_message: e instanceof Error ? e.message : 'Unknown error',
+              })
             }
           }
         } else if (session.metadata?.order_id) {

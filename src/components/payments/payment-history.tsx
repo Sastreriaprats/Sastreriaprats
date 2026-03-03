@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -305,11 +306,10 @@ export function PaymentHistory({
             {entityType === 'tailoring_order' && (
               <div className="space-y-1.5">
                 <Label htmlFor="pay-date">Fecha</Label>
-                <Input
+                <DatePickerPopover
                   id="pay-date"
-                  type="date"
                   value={formDate}
-                  onChange={(e) => setFormDate(e.target.value)}
+                  onChange={(date) => setFormDate(date)}
                 />
               </div>
             )}
@@ -380,12 +380,11 @@ export function PaymentHistory({
                 Fecha próximo pago
                 <span className="text-muted-foreground font-normal text-xs">(opcional)</span>
               </Label>
-              <Input
+              <DatePickerPopover
                 id="pay-next-date"
-                type="date"
                 value={formNextPaymentDate}
                 min={formDate || today()}
-                onChange={(e) => setFormNextPaymentDate(e.target.value)}
+                onChange={(date) => setFormNextPaymentDate(date)}
               />
               <p className="text-[11px] text-muted-foreground">
                 Si hay saldo pendiente, indica cuándo se espera el siguiente pago.

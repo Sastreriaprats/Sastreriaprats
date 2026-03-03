@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -48,7 +49,7 @@ export function ClientDataTab({ client }: { client: any }) {
               <div className="space-y-2"><Label>Teléfono</Label><Input value={form.phone || ''} onChange={(e) => set('phone', e.target.value)} disabled={!canEdit} /></div>
             </div>
             <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-2"><Label>Nacimiento</Label><Input type="date" value={form.date_of_birth || ''} onChange={(e) => set('date_of_birth', e.target.value)} disabled={!canEdit} /></div>
+              <div className="space-y-2"><Label>Nacimiento</Label><DatePickerPopover value={form.date_of_birth || ''} onChange={(date) => set('date_of_birth', date)} disabled={!canEdit} /></div>
               <div className="space-y-2"><Label>Documento</Label>
                 <Select value={form.document_type || 'DNI'} onValueChange={(v) => set('document_type', v)} disabled={!canEdit}>
                   <SelectTrigger><SelectValue /></SelectTrigger>

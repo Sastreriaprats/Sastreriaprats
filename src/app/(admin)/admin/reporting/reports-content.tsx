@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
@@ -203,9 +204,9 @@ export function ReportsContent() {
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <Input type="date" value={dateRange.start} onChange={e => setDateRange(prev => ({ ...prev, start: e.target.value }))} className="h-8 w-36 text-xs" />
+          <DatePickerPopover containerClassName="w-36 h-8" value={dateRange.start} onChange={date => setDateRange(prev => ({ ...prev, start: date }))} />
           <span className="text-xs text-muted-foreground">a</span>
-          <Input type="date" value={dateRange.end} onChange={e => setDateRange(prev => ({ ...prev, end: e.target.value }))} className="h-8 w-36 text-xs" />
+          <DatePickerPopover containerClassName="w-36 h-8" value={dateRange.end} onChange={date => setDateRange(prev => ({ ...prev, end: date }))} />
         </div>
         <Select value={groupBy} onValueChange={(v: 'day' | 'week' | 'month') => setGroupBy(v)}>
           <SelectTrigger className="w-28 h-8 text-xs"><SelectValue /></SelectTrigger>

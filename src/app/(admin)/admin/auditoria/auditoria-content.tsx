@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -160,19 +161,15 @@ export function AuditoriaContent() {
                 {Object.entries(ENTITY_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
               </SelectContent>
             </Select>
-            <Input
-              placeholder="Desde..."
-              type="date"
+            <DatePickerPopover
+              containerClassName="w-40"
               value={filterDateFrom}
-              onChange={e => { setFilterDateFrom(e.target.value); setPage(1) }}
-              className="w-40 h-8 text-sm"
+              onChange={date => { setFilterDateFrom(date); setPage(1) }}
             />
-            <Input
-              placeholder="Hasta..."
-              type="date"
+            <DatePickerPopover
+              containerClassName="w-40"
               value={filterDateTo}
-              onChange={e => { setFilterDateTo(e.target.value); setPage(1) }}
-              className="w-40 h-8 text-sm"
+              onChange={date => { setFilterDateTo(date); setPage(1) }}
             />
             <Button variant="ghost" size="sm" onClick={() => { setFilterAction('all'); setFilterEntity('all'); setFilterDateFrom(''); setFilterDateTo(''); setPage(1) }}>
               Limpiar

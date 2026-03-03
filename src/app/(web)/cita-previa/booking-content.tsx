@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Loader2, CheckCircle2, CalendarDays, Clock, MapPin, X, ChevronLeft } from 'lucide-react'
+import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { toast } from 'sonner'
 import { bookAppointment, cancelClientAppointment, getClientAppointmentsWeb } from '@/actions/bookings'
 
@@ -245,13 +246,12 @@ export function BookingContent({ stores, client }: BookingContentProps) {
                 </span>
                 Selecciona la fecha
               </h2>
-              <input
-                type="date"
+              <DatePickerPopover
                 min={minDate}
                 max={maxDate}
                 value={selectedDate}
-                onChange={e => { setSelectedDate(e.target.value); setSelectedSlot('') }}
-                className="border rounded-lg px-3 py-2 text-sm w-full max-w-xs focus:outline-none focus:ring-2 focus:ring-prats-navy"
+                onChange={date => { setSelectedDate(date); setSelectedSlot('') }}
+                containerClassName="w-full max-w-xs"
               />
             </section>
           )}

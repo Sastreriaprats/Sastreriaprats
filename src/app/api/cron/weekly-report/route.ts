@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        from: process.env.RESEND_FROM_EMAIL || 'noreply@prats.es',
+        from: process.env.RESEND_FROM_EMAIL || 'Sastrería Prats <noreply@sastreriaprats.com>',
         to: adminEmails,
         subject: `Informe semanal Prats — ${fmt(total)}`,
         html: `

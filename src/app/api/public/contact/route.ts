@@ -3,6 +3,15 @@ import { createAdminClient } from '@/lib/supabase/admin'
 
 const TEAM_EMAIL = process.env.CONTACT_TEAM_EMAIL || process.env.RESEND_FROM_EMAIL || 'info@sastreriaprats.es'
 
+const MONTHS_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+function formatPreferredDate(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value?.trim() || '')
+  if (!match) return value?.trim() || ''
+  const [, y, m, d] = match
+  const month = MONTHS_ES[parseInt(m!, 10) - 1]
+  return `${parseInt(d!, 10)} de ${month} de ${y}`
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
@@ -44,8 +53,9 @@ export async function POST(request: NextRequest) {
     const fromEmail = process.env.RESEND_FROM_EMAIL
 
     if (apiKey && fromEmail) {
+      const teamSubject = `[Sastrería Prats] Nueva solicitud de contacto de ${name.trim()}`
       try {
-        await fetch('https://api.resend.com/emails', {
+        const res = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${apiKey}`,
@@ -54,24 +64,42 @@ export async function POST(request: NextRequest) {
           body: JSON.stringify({
             from: fromEmail,
             to: TEAM_EMAIL,
-            subject: `[Sastrería Prats] Nueva solicitud de contacto de ${name.trim()}`,
+            subject: teamSubject,
             html: `
               <h2>Nueva solicitud de contacto</h2>
               <p><strong>Nombre:</strong> ${name.trim()}</p>
               <p><strong>Email:</strong> ${email.trim()}</p>
               ${phone ? `<p><strong>Teléfono:</strong> ${phone}</p>` : ''}
               ${service ? `<p><strong>Servicio:</strong> ${service}</p>` : ''}
-              ${preferredDate ? `<p><strong>Fecha preferida:</strong> ${preferredDate}</p>` : ''}
+              ${preferredDate ? `<p><strong>Fecha preferida:</strong> ${formatPreferredDate(preferredDate)}</p>` : ''}
               ${message ? `<p><strong>Mensaje:</strong><br/>${message.replace(/\n/g, '<br/>')}</p>` : ''}
             `,
           }),
         })
+        const data = res.ok ? await res.json().catch(() => null) : null
+        await admin.from('email_logs').insert({
+          recipient_email: TEAM_EMAIL,
+          subject: teamSubject,
+          email_type: 'transactional',
+          status: res.ok ? 'sent' : 'failed',
+          sent_at: new Date().toISOString(),
+          resend_id: (data as { id?: string } | null)?.id ?? null,
+          ...(res.ok ? {} : { error_message: `HTTP ${res.status}` }),
+        })
       } catch (e) {
         console.error('[Contact API] Team notification email failed:', e)
+        await admin.from('email_logs').insert({
+          recipient_email: TEAM_EMAIL,
+          subject: teamSubject,
+          email_type: 'transactional',
+          status: 'failed',
+          error_message: e instanceof Error ? e.message : 'Unknown error',
+        })
       }
 
+      const userSubject = 'Hemos recibido tu mensaje — Sastrería Prats'
       try {
-        await fetch('https://api.resend.com/emails', {
+        const res = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${apiKey}`,
@@ -80,7 +108,7 @@ export async function POST(request: NextRequest) {
           body: JSON.stringify({
             from: fromEmail,
             to: email.trim(),
-            subject: 'Hemos recibido tu mensaje — Sastrería Prats',
+            subject: userSubject,
             html: `
               <h2>Gracias por contactar con Sastrería Prats</h2>
               <p>Estimado/a ${name.trim()},</p>
@@ -89,8 +117,25 @@ export async function POST(request: NextRequest) {
             `,
           }),
         })
+        const data = res.ok ? await res.json().catch(() => null) : null
+        await admin.from('email_logs').insert({
+          recipient_email: email.trim(),
+          subject: userSubject,
+          email_type: 'transactional',
+          status: res.ok ? 'sent' : 'failed',
+          sent_at: new Date().toISOString(),
+          resend_id: (data as { id?: string } | null)?.id ?? null,
+          ...(res.ok ? {} : { error_message: `HTTP ${res.status}` }),
+        })
       } catch (e) {
         console.error('[Contact API] Auto-reply email failed:', e)
+        await admin.from('email_logs').insert({
+          recipient_email: email.trim(),
+          subject: userSubject,
+          email_type: 'transactional',
+          status: 'failed',
+          error_message: e instanceof Error ? e.message : 'Unknown error',
+        })
       }
     }
 

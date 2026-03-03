@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import type { UserWithRoles } from '@/lib/types/auth'
+import { sendWelcomeEmail } from '@/lib/email/transactional'
 
 // ==========================================
 // HELPER: consulta directa de permiso (sin RPC)
@@ -324,6 +325,12 @@ export async function registerClientAction(formData: FormData) {
         console.error('[registerClient] clients insert:', clientErr)
         return { error: 'Error al crear el perfil de cliente. Inténtalo de nuevo o contacta con nosotros.' }
       }
+
+      try {
+        await sendWelcomeEmail({ name: fullName, email })
+      } catch (e) {
+        console.error('[registerClient] sendWelcomeEmail:', e)
+      }
     } catch (err) {
       console.error('[registerClient]', err)
       return { error: 'Error inesperado al completar el registro. Inténtalo de nuevo.' }
@@ -446,6 +453,24 @@ export async function createUserAction(data: z.infer<typeof createUserSchema>) {
     p_entity_display: `Usuario: ${fullName}`,
     p_description: `Creado usuario ${fullName} (${email})`,
   })
+
+  const { data: roleNames } = await adminClient
+    .from('roles')
+    .select('id, name')
+    .in('id', roleIds)
+    .limit(100)
+  const isClientRole = (roleNames ?? []).some((r: { name?: string }) => r.name === 'client')
+  if (isClientRole) {
+    try {
+      await sendWelcomeEmail({
+        name: fullName,
+        email,
+        password,
+      })
+    } catch (e) {
+      console.error('[createUserAction] sendWelcomeEmail:', e)
+    }
+  }
 
     revalidatePath('/admin/configuracion')
     return { success: true, userId: newUserId }

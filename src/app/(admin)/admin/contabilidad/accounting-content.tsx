@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -464,11 +465,11 @@ function InvoicesTab() {
           <div className="flex items-center gap-1.5 flex-wrap">
             <div className="flex items-center gap-1">
               <Label className="text-xs text-muted-foreground whitespace-nowrap">Desde</Label>
-              <Input type="date" className="w-36 h-9" value={customDateFrom} onChange={e => setCustomDateFrom(e.target.value)} />
+              <DatePickerPopover containerClassName="w-36" value={customDateFrom} onChange={date => setCustomDateFrom(date)} />
             </div>
             <div className="flex items-center gap-1">
               <Label className="text-xs text-muted-foreground whitespace-nowrap">Hasta</Label>
-              <Input type="date" className="w-36 h-9" value={customDateTo} onChange={e => setCustomDateTo(e.target.value)} />
+              <DatePickerPopover containerClassName="w-36" value={customDateTo} onChange={date => setCustomDateTo(date)} />
             </div>
           </div>
         )}
@@ -536,12 +537,12 @@ function InvoicesTab() {
                 </div>
                 <div className="space-y-1">
                   <Label>Fecha factura</Label>
-                  <Input type="date" value={form.invoice_date} onChange={e => setForm(f => ({ ...f, invoice_date: e.target.value }))} className="h-9" />
+                  <DatePickerPopover value={form.invoice_date} onChange={date => setForm(f => ({ ...f, invoice_date: date }))} />
                 </div>
                 <div className="space-y-1">
                   <Label>Fecha vencimiento</Label>
                   <div className="flex flex-wrap gap-2 items-center">
-                    <Input type="date" value={form.due_date} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} className="h-9 w-full sm:w-40" />
+                    <DatePickerPopover containerClassName="w-full sm:w-40" value={form.due_date} onChange={date => setForm(f => ({ ...f, due_date: date }))} />
                     <span className="text-xs text-muted-foreground">Rápido:</span>
                     <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setForm(f => ({ ...f, due_date: new Date().toISOString().slice(0, 10) }))}>Hoy</Button>
                     <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setForm(f => ({ ...f, due_date: addDays(f.invoice_date, 15) }))}>+15 días</Button>
@@ -843,12 +844,12 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
                 </div>
                 <div className="space-y-1">
                   <Label>Fecha factura</Label>
-                  <Input type="date" value={form.invoice_date} onChange={e => setForm(f => ({ ...f, invoice_date: e.target.value }))} className="h-9" />
+                  <DatePickerPopover value={form.invoice_date} onChange={date => setForm(f => ({ ...f, invoice_date: date }))} />
                 </div>
                 <div className="space-y-1">
                   <Label>Fecha vencimiento</Label>
                   <div className="flex flex-wrap gap-2 items-center">
-                    <Input type="date" value={form.due_date} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} className="h-9 w-full sm:w-40" />
+                    <DatePickerPopover containerClassName="w-full sm:w-40" value={form.due_date} onChange={date => setForm(f => ({ ...f, due_date: date }))} />
                     <span className="text-xs text-muted-foreground">Rápido:</span>
                     <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setForm(f => ({ ...f, due_date: new Date().toISOString().slice(0, 10) }))}>Hoy</Button>
                     <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setForm(f => ({ ...f, due_date: addDays(f.invoice_date, 15) }))}>+15 días</Button>
@@ -1252,12 +1253,12 @@ function EstimatesTab() {
                 </div>
                 <div className="space-y-1">
                   <Label>Fecha</Label>
-                  <Input type="date" value={form.estimate_date} onChange={e => setForm(f => ({ ...f, estimate_date: e.target.value }))} className="h-9" />
+                  <DatePickerPopover value={form.estimate_date} onChange={date => setForm(f => ({ ...f, estimate_date: date }))} />
                 </div>
                 <div className="space-y-1">
                   <Label>Válido hasta</Label>
                   <div className="flex flex-wrap gap-2 items-center">
-                    <Input type="date" value={form.valid_until} onChange={e => setForm(f => ({ ...f, valid_until: e.target.value }))} className="h-9 w-full sm:w-40" />
+                    <DatePickerPopover containerClassName="w-full sm:w-40" value={form.valid_until} onChange={date => setForm(f => ({ ...f, valid_until: date }))} />
                     <span className="text-xs text-muted-foreground">Rápido:</span>
                     <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setForm(f => ({ ...f, valid_until: new Date().toISOString().slice(0, 10) }))}>Hoy</Button>
                     <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setForm(f => ({ ...f, valid_until: addDays(f.estimate_date, 15) }))}>+15 días</Button>
@@ -1869,7 +1870,7 @@ function MovimientosTab() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label>Fecha *</Label>
-                <Input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+                <DatePickerPopover value={form.date} onChange={date => setForm(f => ({ ...f, date }))} />
               </div>
               <div className="space-y-1">
                 <Label>IVA %</Label>

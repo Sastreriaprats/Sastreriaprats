@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import {
   Select,
   SelectContent,
@@ -163,18 +164,14 @@ export function ContactContent() {
 
             <div className="space-y-2">
               <Label htmlFor="preferredDate">Fecha preferida</Label>
-              <Input
+              <DatePickerPopover
                 id="preferredDate"
-                name="preferredDate"
-                type="text"
                 value={formData.preferredDate}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    preferredDate: e.target.value,
-                  }))
+                onChange={(date) =>
+                  setFormData((prev) => ({ ...prev, preferredDate: date }))
                 }
-                placeholder="Ej: Semana del 15 de marzo"
+                min={new Date().toISOString().split('T')[0]}
+                placeholder="Seleccionar fecha"
               />
             </div>
 

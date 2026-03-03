@@ -5,6 +5,7 @@ import { queryList, queryById, getNextNumber } from '@/lib/server/query-helpers'
 import { createClientSchema, updateClientSchema, clientNoteSchema, clientMeasurementsSchema } from '@/lib/validations/clients'
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
+import { sendWelcomeEmail } from '@/lib/email/transactional'
 
 export const listClients = protectedAction<ListParams, ListResult<any>>(
   { permission: 'clients.view', auditModule: 'clients' },
@@ -112,6 +113,21 @@ export const createClientAction = protectedAction<any, any>(
         .single()
 
       if (error) return failure(error.message)
+
+      const clientEmail = (client as { email?: string } | null)?.email
+      if (clientEmail) {
+        const fullName = `${parsed.data.first_name || ''} ${parsed.data.last_name || ''}`.trim()
+        const firstName = parsed.data.first_name || ''
+        try {
+          await sendWelcomeEmail({
+            name: fullName || firstName || 'Cliente',
+            email: clientEmail,
+            password: profileId && defaultPassword ? defaultPassword : undefined,
+          })
+        } catch (emailError) {
+          console.error('[createClientAction] Error enviando welcome email:', emailError)
+        }
+      }
 
       const result = { ...client, accountCreated: !!profileId }
       const auditDescription = `Cliente: ${parsed.data.first_name || ''} ${parsed.data.last_name || ''}`.trim() || 'Cliente (sin nombre)'

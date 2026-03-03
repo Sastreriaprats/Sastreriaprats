@@ -5,6 +5,7 @@ import { queryList, queryById, getNextNumber } from '@/lib/server/query-helpers'
 import { createTailoringOrderSchema, tailoringOrderLineSchema, changeOrderStatusSchema } from '@/lib/validations/orders'
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
+import { sendOrderConfirmation, sendTailoringStatusUpdate } from '@/lib/email/transactional'
 
 const SELECT_ORDERS = `
   id, order_number, order_type, status, order_date,
@@ -181,6 +182,39 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
 
     if (linesError) return failure(linesError.message)
 
+    if (order.client_id) {
+      const { data: client } = await ctx.adminClient
+        .from('clients')
+        .select('email, full_name, first_name, last_name')
+        .eq('id', order.client_id)
+        .single()
+      const clientEmail = (client as { email?: string } | null)?.email
+      if (clientEmail) {
+        const { data: linesWithTypes } = await ctx.adminClient
+          .from('tailoring_order_lines')
+          .select('garment_types(name)')
+          .eq('tailoring_order_id', order.id)
+          .limit(100)
+        const items = (linesWithTypes ?? []).map((l: unknown) => {
+          const gt = (l as { garment_types?: { name?: string } | null }).garment_types
+          return (typeof gt === 'object' && gt && 'name' in gt ? gt.name : null) ?? 'Prenda'
+        })
+        const clientName = (client as { full_name?: string; first_name?: string; last_name?: string })?.full_name ||
+          [(client as { first_name?: string })?.first_name, (client as { last_name?: string })?.last_name].filter(Boolean).join(' ') || 'Cliente'
+        try {
+          await sendOrderConfirmation({
+            order_number: order.order_number,
+            client_name: clientName,
+            client_email: clientEmail,
+            total: Number(order.total),
+            items: items.length ? items : ['Pedido sastrería'],
+          })
+        } catch (e) {
+          console.error('[createOrderAction] sendOrderConfirmation:', e)
+        }
+      }
+    }
+
     await ctx.adminClient.from('tailoring_order_state_history').insert({
       tailoring_order_id: order.id,
       to_status: 'created',
@@ -257,6 +291,28 @@ export const changeOrderStatus = protectedAction<any, any>(
         changed_by: ctx.userId,
         changed_by_name: ctx.userName,
       })
+
+      const { data: orderWithClient } = await ctx.adminClient
+        .from('tailoring_orders')
+        .select('order_number, clients(email, full_name, first_name, last_name)')
+        .eq('id', order_id)
+        .single()
+      const client = (orderWithClient as { clients?: { email?: string; full_name?: string; first_name?: string; last_name?: string } | null } | null)?.clients
+      const clientEmail = client?.email
+      if (clientEmail && new_status === 'delivered') {
+        const clientName = client?.full_name || [client?.first_name, client?.last_name].filter(Boolean).join(' ') || 'Cliente'
+        try {
+          await sendTailoringStatusUpdate({
+            client_name: clientName,
+            client_email: clientEmail,
+            order_number: (orderWithClient as { order_number: string }).order_number,
+            new_status,
+            message: notes ?? undefined,
+          })
+        } catch (e) {
+          console.error('[changeOrderStatus] sendTailoringStatusUpdate:', e)
+        }
+      }
     }
 
     return success({ order_id, new_status })

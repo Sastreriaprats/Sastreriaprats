@@ -14,6 +14,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
+import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
@@ -974,12 +975,10 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
                       <CalendarClock className="h-4 w-4" />
                       Fecha próximo cobro (alarma si se pasa)
                     </Label>
-                    <Input
-                      type="date"
+                    <DatePickerPopover
                       value={nextPaymentDate}
-                      onChange={(e) => setNextPaymentDate(e.target.value)}
+                      onChange={(date) => setNextPaymentDate(date)}
                       min={new Date().toISOString().split('T')[0]}
-                      className="font-mono"
                     />
                   </div>
                 )}

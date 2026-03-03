@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -70,7 +71,7 @@ export function OrderFittingsTab({ orderId, fittings, storeId }: { orderId: stri
           <DialogHeader><DialogTitle>Programar prueba</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2"><Label>Fecha *</Label><Input type="date" value={form.date} onChange={(e) => setForm(p => ({ ...p, date: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>Fecha *</Label><DatePickerPopover value={form.date} onChange={(date) => setForm(p => ({ ...p, date }))} /></div>
               <div className="space-y-2"><Label>Hora *</Label><Input type="time" value={form.time} onChange={(e) => setForm(p => ({ ...p, time: e.target.value }))} /></div>
             </div>
             <div className="space-y-2"><Label>Notas</Label><Textarea value={form.notes} onChange={(e) => setForm(p => ({ ...p, notes: e.target.value }))} rows={2} /></div>

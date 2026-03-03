@@ -158,11 +158,11 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess }: CreateClie
                 </Select>
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-2"><Label>Fecha nacimiento</Label>
-                <div className="flex gap-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2 col-span-2"><Label>Fecha nacimiento</Label>
+                <div className="grid grid-cols-3 gap-2">
                   <Select value={form.birth_day} onValueChange={(v) => setBirthDatePart('birth_day', v)}>
-                    <SelectTrigger className="flex-1"><SelectValue placeholder="Día" /></SelectTrigger>
+                    <SelectTrigger className="w-full min-w-0"><SelectValue placeholder="Día" /></SelectTrigger>
                     <SelectContent>
                       {Array.from({ length: 31 }, (_, i) => {
                         const d = String(i + 1).padStart(2, '0')
@@ -171,13 +171,13 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess }: CreateClie
                     </SelectContent>
                   </Select>
                   <Select value={form.birth_month} onValueChange={(v) => setBirthDatePart('birth_month', v)}>
-                    <SelectTrigger className="flex-1"><SelectValue placeholder="Mes" /></SelectTrigger>
+                    <SelectTrigger className="w-full min-w-0"><SelectValue placeholder="Mes" /></SelectTrigger>
                     <SelectContent>
                       {MONTHS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
                   <Select value={form.birth_year} onValueChange={(v) => setBirthDatePart('birth_year', v)}>
-                    <SelectTrigger className="flex-1"><SelectValue placeholder="Año" /></SelectTrigger>
+                    <SelectTrigger className="w-full min-w-0"><SelectValue placeholder="Año" /></SelectTrigger>
                     <SelectContent>
                       {YEARS.map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
                     </SelectContent>
@@ -186,7 +186,7 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess }: CreateClie
               </div>
               <div className="space-y-2"><Label>Género</Label>
                 <Select value={form.gender} onValueChange={(v) => set('gender', v)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="w-full min-w-0"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="male">Masculino</SelectItem>
                     <SelectItem value="female">Femenino</SelectItem>
@@ -195,7 +195,7 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess }: CreateClie
               </div>
               <div className="space-y-2"><Label>Nacionalidad</Label>
                 <Select value={form.nationality} onValueChange={(v) => set('nationality', v)}>
-                  <SelectTrigger><SelectValue placeholder="Nacionalidad" /></SelectTrigger>
+                  <SelectTrigger className="w-full min-w-0"><SelectValue placeholder="Nacionalidad" /></SelectTrigger>
                   <SelectContent>
                     {NATIONALITIES.map(n => <SelectItem key={n} value={n}>{n}</SelectItem>)}
                   </SelectContent>

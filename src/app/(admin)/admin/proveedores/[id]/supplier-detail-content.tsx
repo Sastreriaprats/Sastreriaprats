@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { Textarea } from '@/components/ui/textarea'
 import { updateSupplierOrderStatusAction, createSupplierOrderAction } from '@/actions/suppliers'
 import { Badge } from '@/components/ui/badge'
@@ -276,20 +277,18 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
             </div>
             <div className="space-y-2">
               <Label htmlFor="new-order-payment">Fecha de pago al proveedor *</Label>
-              <Input
+              <DatePickerPopover
                 id="new-order-payment"
-                type="date"
                 value={newOrderForm.payment_due_date}
-                onChange={(e) => setNewOrderForm((f) => ({ ...f, payment_due_date: e.target.value }))}
+                onChange={(date) => setNewOrderForm((f) => ({ ...f, payment_due_date: date }))}
               />
             </div>
             <div className="space-y-2">
               <Label htmlFor="new-order-delivery">Fecha de entrega estimada *</Label>
-              <Input
+              <DatePickerPopover
                 id="new-order-delivery"
-                type="date"
                 value={newOrderForm.estimated_delivery_date}
-                onChange={(e) => setNewOrderForm((f) => ({ ...f, estimated_delivery_date: e.target.value }))}
+                onChange={(date) => setNewOrderForm((f) => ({ ...f, estimated_delivery_date: date }))}
               />
             </div>
             <div className="space-y-2">

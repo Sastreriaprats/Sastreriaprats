@@ -129,8 +129,22 @@ export async function sendTailoringStatusUpdate(order: {
   `)
 }
 
-export async function sendWelcomeEmail(client: { name: string; email: string }) {
+export async function sendWelcomeEmail(client: { name: string; email: string; password?: string }) {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://sastreriaprats.com'
+  const loginUrl = `${appUrl}/auth/login`
+  const credentialsBlock = client.password
+    ? `
+    <div style="background:#f0f9ff;border:1px solid #bfdbfe;border-radius:8px;padding:20px;margin:20px 0;">
+      <p style="font-size:14px;font-weight:bold;color:#1a2744;margin:0 0 12px;">Tus datos de acceso:</p>
+      <p style="color:#374151;margin:4px 0;"><strong>Email:</strong> ${client.email}</p>
+      <p style="color:#374151;margin:4px 0;"><strong>Contraseña temporal:</strong> ${client.password}</p>
+      <p style="color:#6b7280;font-size:13px;margin:12px 0 0;">Te recomendamos cambiar tu contraseña en tu primer acceso.</p>
+    </div>
+    <div style="text-align:center;margin:24px 0;">
+      <a href="${loginUrl}" style="background:#1a2744;color:#ffffff;padding:12px 32px;border-radius:8px;text-decoration:none;font-size:14px;letter-spacing:1px;">ACCEDER A MI CUENTA</a>
+    </div>
+  `
+    : ''
   await send(client.email, 'Bienvenido a Sastrería Prats', `
     <h2 style="color:#1a2744;margin:0 0 16px;">Bienvenido, ${client.name}</h2>
     <p style="color:#6b7280;">Gracias por crear tu cuenta en Sastrería Prats.</p>
@@ -141,6 +155,7 @@ export async function sendWelcomeEmail(client: { name: string; email: string }) 
       <li style="padding:4px 0;">Gestionar tu lista de favoritos</li>
       <li style="padding:4px 0;">Reservar citas online</li>
     </ul>
+    ${credentialsBlock}
     <div style="text-align:center;margin:30px 0;">
       <a href="${appUrl}/boutique" style="background:#1a2744;color:#ffffff;padding:12px 32px;border-radius:8px;text-decoration:none;font-size:14px;letter-spacing:1px;">DESCUBRIR COLECCIÓN</a>
     </div>

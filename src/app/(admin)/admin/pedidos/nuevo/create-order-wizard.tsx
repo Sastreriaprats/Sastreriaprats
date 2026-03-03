@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -680,7 +681,7 @@ export function CreateOrderWizard({
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label>Fecha estimada de entrega</Label>
-              <Input type="date" value={estimatedDelivery} onChange={(e) => setEstimatedDelivery(e.target.value)} />
+              <DatePickerPopover value={estimatedDelivery} onChange={(date) => setEstimatedDelivery(date)} />
               <div className="flex items-center gap-2 mt-2">
                 <Switch id="alert-art" checked={alertOnDelivery} onCheckedChange={setAlertOnDelivery} />
                 <Label htmlFor="alert-art" className="text-sm font-normal cursor-pointer">Alerta en fecha de entrega</Label>
@@ -1098,7 +1099,7 @@ export function CreateOrderWizard({
         <Card>
           <CardHeader><CardTitle>Detalles</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-2"><Label>Fecha estimada de entrega</Label><Input type="date" value={estimatedDelivery} onChange={(e) => setEstimatedDelivery(e.target.value)} /><div className="flex items-center gap-2 mt-2"><Switch id="alert-ind" checked={alertOnDelivery} onCheckedChange={setAlertOnDelivery} /><Label htmlFor="alert-ind" className="text-sm font-normal cursor-pointer">Alerta en fecha de entrega</Label></div></div>
+            <div className="space-y-2"><Label>Fecha estimada de entrega</Label><DatePickerPopover value={estimatedDelivery} onChange={(date) => setEstimatedDelivery(date)} /><div className="flex items-center gap-2 mt-2"><Switch id="alert-ind" checked={alertOnDelivery} onCheckedChange={setAlertOnDelivery} /><Label htmlFor="alert-ind" className="text-sm font-normal cursor-pointer">Alerta en fecha de entrega</Label></div></div>
             <div className="space-y-2">
               <Label>Fabricante *</Label>
               {selectedFactory ? (
@@ -1218,10 +1219,9 @@ export function CreateOrderWizard({
               </div>
               <div className="space-y-2">
                 <Label>Fecha de pago al proveedor *</Label>
-                <Input
-                  type="date"
+                <DatePickerPopover
                   value={paymentDueDate}
-                  onChange={(e) => setPaymentDueDate(e.target.value)}
+                  onChange={(date) => setPaymentDueDate(date)}
                 />
                 <div className="flex items-center gap-2 mt-2">
                   <Switch id="alert-payment" checked={alertOnPayment} onCheckedChange={setAlertOnPayment} />
@@ -1231,7 +1231,7 @@ export function CreateOrderWizard({
             </div>
             <div className="space-y-2">
               <Label>Fecha de entrega estimada *</Label>
-              <Input type="date" value={estimatedDelivery} onChange={(e) => setEstimatedDelivery(e.target.value)} />
+              <DatePickerPopover value={estimatedDelivery} onChange={(date) => setEstimatedDelivery(date)} />
               <div className="flex items-center gap-2 mt-2">
                 <Switch id="alert-prov" checked={alertOnDelivery} onCheckedChange={setAlertOnDelivery} />
                 <Label htmlFor="alert-prov" className="text-sm font-normal cursor-pointer">Alerta en fecha de entrega</Label>
@@ -1322,7 +1322,7 @@ export function CreateOrderWizard({
           <CardHeader><CardTitle>Detalles</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2"><Label>Prenda a confeccionar</Label><Input value={garmentDescription} onChange={(e) => setGarmentDescription(e.target.value)} placeholder="Ej: Traje completo, chaqueta..." /></div>
-            <div className="space-y-2"><Label>Fecha de entrega</Label><Input type="date" value={estimatedDelivery} onChange={(e) => setEstimatedDelivery(e.target.value)} /><div className="flex items-center gap-2 mt-2"><Switch id="alert-of" checked={alertOnDelivery} onCheckedChange={setAlertOnDelivery} /><Label htmlFor="alert-of" className="text-sm font-normal cursor-pointer">Alerta en fecha de entrega</Label></div></div>
+            <div className="space-y-2"><Label>Fecha de entrega</Label><DatePickerPopover value={estimatedDelivery} onChange={(date) => setEstimatedDelivery(date)} /><div className="flex items-center gap-2 mt-2"><Switch id="alert-of" checked={alertOnDelivery} onCheckedChange={setAlertOnDelivery} /><Label htmlFor="alert-of" className="text-sm font-normal cursor-pointer">Alerta en fecha de entrega</Label></div></div>
             <div className="space-y-2"><Label>Precio acordado (€)</Label><Input type="number" step="0.01" value={agreedPrice || ''} onChange={(e) => setAgreedPrice(parseFloat(e.target.value) || 0)} /></div>
             <div className="space-y-2"><Label>Notas</Label><Textarea value={internalNotes} onChange={(e) => setInternalNotes(e.target.value)} rows={2} /></div>
             <Button onClick={() => setStep(3)} className="w-full bg-prats-navy hover:bg-prats-navy-light">Siguiente: Confirmar</Button>
