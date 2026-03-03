@@ -186,7 +186,7 @@ export function ClientCamiseriaTab({ clientId }: { clientId: string }) {
         if (!cancelled && fieldsData) {
           setFields(fieldsData as MeasurementField[])
         }
-        if (!cancelled) await loadMeasurements(camiseriaTypeId)
+        if (!cancelled && camiseriaTypeId) await loadMeasurements(camiseriaTypeId)
       } catch (err) {
         console.error('[ClientCamiseriaTab] init error:', err)
       } finally {
