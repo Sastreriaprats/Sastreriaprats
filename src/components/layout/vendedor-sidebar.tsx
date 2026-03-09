@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation'
 import { useAuth } from '@/components/providers/auth-provider'
 import { usePermissions } from '@/hooks/use-permissions'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { LayoutDashboard, Users, Package, CircleDollarSign, ShoppingCart, Tag } from 'lucide-react'
+import { LayoutDashboard, Users, Package, CircleDollarSign, ShoppingCart, Tag, ClipboardList } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
@@ -15,6 +15,7 @@ const navItems = [
   { label: 'Productos y Stock', href: '/vendedor/stock', icon: Package },
   { label: 'Cobros', href: '/vendedor/cobros', icon: CircleDollarSign },
   { label: 'Caja TPV', href: '/vendedor/caja', icon: ShoppingCart },
+  { label: 'Albaranes', href: '/admin/almacen/albaranes', icon: ClipboardList },
   { label: 'Etiquetas y códigos', href: '/admin/stock/codigos-barras', icon: Tag, permission: 'barcodes.manage' as const },
 ]
 

@@ -5,16 +5,18 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Package, AlertTriangle, TrendingDown, Truck, Plus, Warehouse } from 'lucide-react'
+import { Package, AlertTriangle, TrendingDown, Truck, Plus, Warehouse, ArrowLeftRight, ClipboardList } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { usePermissions } from '@/hooks/use-permissions'
-import { getStockDashboardStats } from '@/actions/products'
+import { getStockDashboardStats, getPendingTransfersCount } from '@/actions/products'
 import { ProductsTab } from './tabs/products-tab'
 import { MovementsTab } from './tabs/movements-tab'
 import { FabricsTab } from './tabs/fabrics-tab'
 import { WarehousesTab } from './tabs/warehouses-tab'
+import { TransfersTab } from './tabs/transfers-tab'
+import { AlbaranesContent } from '../almacen/albaranes/albaranes-content'
 
-const VALID_TABS = ['productos', 'almacenes', 'tejidos', 'movimientos']
+const VALID_TABS = ['productos', 'almacenes', 'tejidos', 'movimientos', 'traspasos', 'albaranes']
 
 export function StockDashboard() {
   const router = useRouter()
@@ -25,6 +27,7 @@ export function StockDashboard() {
   const initialTab = VALID_TABS.includes(searchParams.get('tab') || '') ? searchParams.get('tab')! : 'productos'
   const [activeTab, setActiveTab] = useState(initialTab)
   const [stats, setStats] = useState({ totalProducts: 0, lowStock: 0, outOfStock: 0, pendingOrders: 0 })
+  const [pendingTransfersCount, setPendingTransfersCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   const [outOfStockFilter, setOutOfStockFilter] = useState(false)
 
@@ -54,8 +57,40 @@ export function StockDashboard() {
       })
   }, [])
 
+  useEffect(() => {
+    getPendingTransfersCount()
+      .then(r => { if (r?.success && typeof r.data === 'number') setPendingTransfersCount(r.data) })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    const onUpdate = () => {
+      getPendingTransfersCount()
+        .then(r => { if (r?.success && typeof r.data === 'number') setPendingTransfersCount(r.data) })
+        .catch(() => {})
+    }
+    window.addEventListener('stock-transfers-updated', onUpdate)
+    return () => window.removeEventListener('stock-transfers-updated', onUpdate)
+  }, [])
+
   return (
     <div className="space-y-6">
+      {pendingTransfersCount > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 flex items-center justify-between gap-4">
+          <p className="text-sm font-medium text-amber-900 flex items-center gap-2">
+            <ArrowLeftRight className="h-5 w-5 text-amber-600 shrink-0" />
+            Tienes {pendingTransfersCount} traspaso{pendingTransfersCount !== 1 ? 's' : ''} de almacén pendiente{pendingTransfersCount !== 1 ? 's' : ''} de aprobar
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0 border-amber-400 text-amber-800 hover:bg-amber-100"
+            onClick={() => handleTabChange('traspasos')}
+          >
+            Ver traspasos
+          </Button>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Stock y Productos</h1>
@@ -118,12 +153,20 @@ export function StockDashboard() {
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg>
             Movimientos
           </TabsTrigger>
+          <TabsTrigger value="traspasos" className="gap-1"><ArrowLeftRight className="h-4 w-4" /> Traspasos</TabsTrigger>
+          <TabsTrigger value="albaranes" className="gap-1"><ClipboardList className="h-4 w-4" /> Albaranes</TabsTrigger>
         </TabsList>
         <div className="mt-6">
           <TabsContent value="productos"><ProductsTab /></TabsContent>
           <TabsContent value="almacenes"><WarehousesTab outOfStockFilter={outOfStockFilter} onClearOutOfStockFilter={() => setOutOfStockFilter(false)} /></TabsContent>
           <TabsContent value="tejidos"><FabricsTab ref={fabricTabRef} /></TabsContent>
           <TabsContent value="movimientos"><MovementsTab /></TabsContent>
+          <TabsContent value="traspasos">
+            <TransfersTab />
+          </TabsContent>
+          <TabsContent value="albaranes">
+            <AlbaranesContent />
+          </TabsContent>
         </div>
       </Tabs>
     </div>

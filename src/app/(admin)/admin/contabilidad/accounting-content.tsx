@@ -19,7 +19,7 @@ import {
   TrendingUp, TrendingDown, Euro, Calculator, BookOpen, FileText,
   Loader2, Plus, Search, ChevronDown, ChevronRight, Eye,
   Send, CheckCircle, FileOutput, Trash2, RefreshCw, ArrowUpCircle, Download,
-  Receipt, ExternalLink, Package, ClipboardList, Pencil, Calendar,
+  Receipt, ExternalLink, Package, ClipboardList, Pencil, Calendar, XCircle,
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -33,13 +33,12 @@ import {
   getAccountingMovements,
   getProductsForInvoice, listTailoringOrdersForInvoice, getTailoringOrderLinesForInvoice,
   createInvoiceAction, updateInvoiceAction, issueInvoiceAction,
-  createEstimateAction,
+  createEstimateAction, updateEstimateAction, sendEstimateAction, acceptEstimateAction, rejectEstimateAction, convertEstimateToInvoiceAction,
   getInvoiceLinesAction, updateJournalEntryDescriptionAction,
   generateInvoicePdfAction, generateEstimatePdfAction,
   type InvoiceRow, type EstimateRow, type JournalEntryRow, type VatQuarterRow,
   type ManualTransaction, type AccountingMovementRow, type AccountingSummary,
 } from '@/actions/accounting'
-import { createInvoiceJournalEntry } from '@/actions/accounting-triggers'
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -779,7 +778,7 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
     try {
       const r = await fetch(url); const blob = await r.blob()
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
-      a.download = `factura-${inv.invoice_number}.pdf`; a.click(); URL.revokeObjectURL(a.href)
+      a.download = inv.status === 'draft' ? `factura-borrador-${inv.id.slice(0, 8)}.pdf` : `factura-${inv.invoice_number}.pdf`; a.click(); URL.revokeObjectURL(a.href)
     } catch { window.open(url, '_blank') }
   }
 
@@ -957,16 +956,16 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
 
 type EstimateLine = { description: string; quantity: number; unit_price: number; tax_rate: number }
 
-function EstimateTableRow ({
-  est,
-  onRefresh,
-  onConvertToInvoice,
-}: {
-  est: EstimateRow
-  onRefresh: () => void
-  onConvertToInvoice: (e: EstimateRow) => void
-}) {
+function EstimateTableRow ({ est, onRefresh }: { est: EstimateRow; onRefresh: () => void }) {
   const [loadingPdf, setLoadingPdf] = useState(false)
+  const [loadingInvoicePdf, setLoadingInvoicePdf] = useState(false)
+  const [loadingAction, setLoadingAction] = useState(false)
+  const [acceptDialogOpen, setAcceptDialogOpen] = useState(false)
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false)
+  const [convertDialogOpen, setConvertDialogOpen] = useState(false)
+  const [sendDialogOpen, setSendDialogOpen] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
+  const [quickAddEmail, setQuickAddEmail] = useState('')
   const s = ESTIMATE_STATUS[est.status] ?? ESTIMATE_STATUS.draft
 
   const openPdf = async () => {
@@ -981,38 +980,210 @@ function EstimateTableRow ({
     }
   }
 
+  const handleSend = async (emailToUse?: string) => {
+    setLoadingAction(true)
+    let email = est.client_email?.trim()
+    if (!email && emailToUse?.trim()) {
+      const upRes = await updateEstimateAction({ estimateId: est.id, client_email: emailToUse.trim() })
+      if (!upRes?.success) {
+        setLoadingAction(false)
+        toast.error(!upRes?.success && 'error' in upRes ? upRes.error : 'Error al guardar el email')
+        return
+      }
+      onRefresh()
+      email = emailToUse.trim()
+    }
+    const res = await sendEstimateAction({ estimateId: est.id })
+    setLoadingAction(false)
+    setSendDialogOpen(false)
+    setQuickAddEmail('')
+    if (res?.success) { toast.success('Presupuesto enviado al cliente'); onRefresh() }
+    else toast.error(!res?.success && 'error' in res ? res.error : 'Error')
+  }
+
+  const handleAccept = async () => {
+    setLoadingAction(true)
+    const res = await acceptEstimateAction({ estimateId: est.id })
+    setLoadingAction(false)
+    setAcceptDialogOpen(false)
+    if (res?.success) { toast.success('Presupuesto marcado como aceptado'); onRefresh() }
+    else toast.error(!res?.success && 'error' in res ? res.error : 'Error')
+  }
+
+  const handleReject = async () => {
+    setLoadingAction(true)
+    const res = await rejectEstimateAction({ estimateId: est.id, reason: rejectReason.trim() || undefined })
+    setLoadingAction(false)
+    setRejectDialogOpen(false)
+    setRejectReason('')
+    if (res?.success) { toast.success('Presupuesto rechazado'); onRefresh() }
+    else toast.error(!res?.success && 'error' in res ? res.error : 'Error')
+  }
+
+  const handleConvert = async () => {
+    setLoadingAction(true)
+    const res = await convertEstimateToInvoiceAction({ estimateId: est.id })
+    setLoadingAction(false)
+    setConvertDialogOpen(false)
+    if (res?.success) {
+      toast.success(`Factura ${res.data.invoice_number} creada`)
+      onRefresh()
+    } else {
+      toast.error(!res?.success && 'error' in res ? res.error : 'Error')
+    }
+  }
+
+  const openInvoicePdf = async () => {
+    if (!est.invoice_id) return
+    setLoadingInvoicePdf(true)
+    const res = await generateInvoicePdfAction(est.invoice_id)
+    setLoadingInvoicePdf(false)
+    if (res?.success && res.data?.url) {
+      window.open(res.data.url, '_blank', 'noopener,noreferrer')
+    } else toast.error(!res?.success && 'error' in res ? res.error : 'Error')
+  }
+
   return (
-    <TableRow>
-      <TableCell className="font-mono font-medium">{est.estimate_number}</TableCell>
-      <TableCell>{est.client_name}</TableCell>
-      <TableCell className="text-muted-foreground">{formatDate(est.estimate_date)}</TableCell>
-      <TableCell className="text-muted-foreground">{est.valid_until ? formatDate(est.valid_until) : '-'}</TableCell>
-      <TableCell className="text-right font-semibold">{formatCurrency(est.total)}</TableCell>
-      <TableCell><span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${s.className}`}>{s.label}</span></TableCell>
-      <TableCell>
-        <div className="flex gap-1 items-center">
-          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={openPdf} disabled={loadingPdf} title="Ver PDF">
-            {loadingPdf ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
-          </Button>
-          {est.status === 'accepted' && !est.invoice_id && (
-            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => onConvertToInvoice(est)}>
-              <FileText className="h-3.5 w-3.5 mr-1" /> Facturar
+    <>
+      <TableRow>
+        <TableCell className="font-mono font-medium">{est.estimate_number}</TableCell>
+        <TableCell className={!est.client_name?.trim() ? 'text-muted-foreground' : ''}>{est.client_name?.trim() || 'Sin cliente'}</TableCell>
+        <TableCell className="text-muted-foreground">{formatDate(est.estimate_date)}</TableCell>
+        <TableCell className="text-muted-foreground">{est.valid_until ? formatDate(est.valid_until) : '-'}</TableCell>
+        <TableCell className="text-right font-semibold">{formatCurrency(est.total)}</TableCell>
+        <TableCell>
+          <div className="flex flex-col gap-1">
+            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium w-fit ${s.className}`}>{s.label}</span>
+            {est.invoice_id && (
+              <Button variant="link" className="h-auto min-h-0 p-0 text-xs text-primary hover:underline" onClick={openInvoicePdf} disabled={loadingInvoicePdf}>
+                Ver factura →
+              </Button>
+            )}
+          </div>
+        </TableCell>
+        <TableCell>
+          <div className="flex flex-wrap gap-1 items-center min-h-[48px]">
+            <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" onClick={openPdf} disabled={loadingPdf} title="Ver PDF">
+              {loadingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
             </Button>
+            {est.status === 'draft' && (
+              <Button size="sm" variant="outline" className="h-9 min-h-[48px] text-xs border-green-500 text-green-700 hover:bg-green-50" onClick={() => setSendDialogOpen(true)} disabled={loadingAction}>
+                {loadingAction ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Send className="h-3.5 w-3.5 mr-1" />}
+                Enviar a cliente
+              </Button>
+            )}
+            {est.status === 'sent' && (
+              <>
+                <Button size="sm" variant="outline" className="h-9 min-h-[48px] text-xs border-green-500 text-green-700 hover:bg-green-50" onClick={() => setAcceptDialogOpen(true)} disabled={loadingAction}>
+                  {loadingAction ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <CheckCircle className="h-3.5 w-3.5 mr-1" />}
+                  Cliente acepta
+                </Button>
+                <Button size="sm" variant="outline" className="h-9 min-h-[48px] text-xs border-red-500 text-red-700 hover:bg-red-50" onClick={() => setRejectDialogOpen(true)} disabled={loadingAction}>
+                  {loadingAction ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <XCircle className="h-3.5 w-3.5 mr-1" />}
+                  Rechazar
+                </Button>
+              </>
+            )}
+            {est.status === 'accepted' && !est.invoice_id && (
+              <Button size="sm" variant="outline" className="h-9 min-h-[48px] text-xs" onClick={() => setConvertDialogOpen(true)} disabled={loadingAction}>
+                {loadingAction ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <FileText className="h-3.5 w-3.5 mr-1" />}
+                Facturar
+              </Button>
+            )}
+            {est.status === 'invoiced' && est.invoice_id && (
+              <Button size="sm" variant="outline" className="h-9 min-h-[48px] text-xs" onClick={openInvoicePdf} disabled={loadingInvoicePdf}>
+                {loadingInvoicePdf ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <ExternalLink className="h-3.5 w-3.5 mr-1" />}
+                Ver factura →
+              </Button>
+            )}
+          </div>
+        </TableCell>
+      </TableRow>
+
+      <Dialog open={sendDialogOpen} onOpenChange={(open) => { setSendDialogOpen(open); if (!open) setQuickAddEmail('') }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Enviar presupuesto</DialogTitle></DialogHeader>
+          {est.client_email?.trim() ? (
+            <p className="text-sm text-muted-foreground">
+              Se enviará el presupuesto {est.estimate_number} a <strong>{est.client_email}</strong>. ¿Confirmar?
+            </p>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-sm text-red-600 font-medium">
+                Este presupuesto no tiene email de cliente. Edita el presupuesto para añadir el email antes de enviarlo.
+              </p>
+              <div className="space-y-1">
+                <Label>Email del cliente</Label>
+                <Input type="email" value={quickAddEmail} onChange={e => setQuickAddEmail(e.target.value)} placeholder="email@ejemplo.com" />
+              </div>
+            </div>
           )}
-        </div>
-      </TableCell>
-    </TableRow>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSendDialogOpen(false)}>Cancelar</Button>
+            {est.client_email?.trim() ? (
+              <Button onClick={() => handleSend()} disabled={loadingAction}>
+                {loadingAction ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null} Enviar
+              </Button>
+            ) : (
+              <Button onClick={() => handleSend(quickAddEmail)} disabled={loadingAction || !quickAddEmail.trim()}>
+                {loadingAction ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null} Guardar email y enviar
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={acceptDialogOpen} onOpenChange={setAcceptDialogOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Cliente acepta</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            ¿Confirmar que el cliente ha aceptado el presupuesto {est.estimate_number}? Esta acción cambiará el estado a Aceptado.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAcceptDialogOpen(false)}>Cancelar</Button>
+            <Button onClick={handleAccept} disabled={loadingAction}>{loadingAction ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null} Confirmar aceptación</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={rejectDialogOpen} onOpenChange={(open) => { setRejectDialogOpen(open); if (!open) setRejectReason('') }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Rechazar presupuesto</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">¿El cliente ha rechazado el presupuesto?</p>
+          <div className="space-y-2">
+            <Label>Motivo (opcional)</Label>
+            <Input value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="Indica el motivo del rechazo..." />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejectDialogOpen(false)}>Cancelar</Button>
+            <Button variant="destructive" onClick={handleReject} disabled={loadingAction}>{loadingAction ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null} Confirmar rechazo</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={convertDialogOpen} onOpenChange={setConvertDialogOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Convertir a factura</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Se creará una factura en borrador con los datos del presupuesto {est.estimate_number}. Podrás editarla y emitirla desde la pestaña Facturas.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConvertDialogOpen(false)}>Cancelar</Button>
+            <Button onClick={handleConvert} disabled={loadingAction}>{loadingAction ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null} Facturar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
 function EstimatesTab() {
-  const supabase = useMemo(() => createClient(), [])
   const [rows, setRows] = useState<EstimateRow[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [clients, setClients] = useState<{ id: string; full_name: string }[]>([])
+  const [clients, setClients] = useState<{ id: string; full_name: string; email: string | null }[]>([])
   const [saving, setSaving] = useState(false)
 
   const [productDialogOpen, setProductDialogOpen] = useState(false)
@@ -1025,7 +1196,7 @@ function EstimatesTab() {
   const [loadingOrderLines, setLoadingOrderLines] = useState(false)
 
   const [form, setForm] = useState({
-    client_id: '', client_name: '', client_nif: '',
+    client_id: '', client_name: '', client_nif: '', client_email: '',
     estimate_date: new Date().toISOString().split('T')[0],
     valid_until: '', notes: '', irpf_rate: 0, tax_rate: 21,
   })
@@ -1095,14 +1266,15 @@ function EstimatesTab() {
   const total = subtotal + taxAmount - irpfAmount
 
   const handleSave = async () => {
-    if (!form.client_name) { toast.error('Indica el cliente'); return }
-    if (lines.some(l => !l.description)) { toast.error('Todas las líneas necesitan descripción'); return }
+    const hasValidLine = lines.some(l => (l.description?.trim() ?? '') && (l.unit_price ?? 0) > 0)
+    if (!hasValidLine) { toast.error('Añade al menos una línea con descripción y precio'); return }
     setSaving(true)
     try {
       const result = await createEstimateAction({
         client_id: form.client_id || null,
         client_name: form.client_name,
         client_nif: form.client_nif || null,
+        client_email: form.client_email?.trim() || null,
         estimate_date: form.estimate_date,
         valid_until: form.valid_until || null,
         subtotal,
@@ -1128,7 +1300,7 @@ function EstimatesTab() {
       toast.success(`Presupuesto ${result.data.estimate_number} creado`)
       setDialogOpen(false)
       setLines([{ description: '', quantity: 1, unit_price: 0, tax_rate: 21 }])
-      setForm({ client_id: '', client_name: '', client_nif: '', estimate_date: new Date().toISOString().split('T')[0], valid_until: '', notes: '', irpf_rate: 0, tax_rate: 21 })
+      setForm({ client_id: '', client_name: '', client_nif: '', client_email: '', estimate_date: new Date().toISOString().split('T')[0], valid_until: '', notes: '', irpf_rate: 0, tax_rate: 21 })
       load()
     } catch (error) {
       console.error('Error creating estimate:', error)
@@ -1136,48 +1308,6 @@ function EstimatesTab() {
     } finally {
       setSaving(false)
     }
-  }
-
-  const convertToInvoice = async (est: EstimateRow) => {
-    const year = new Date().getFullYear()
-    const { count } = await supabase.from('invoices').select('*', { count: 'exact', head: true }).like('invoice_number', `F${year}-%`)
-    const seq = String((count ?? 0) + 1).padStart(4, '0')
-    const invoice_number = `F${year}-${seq}`
-
-    const { data: lines } = await supabase.from('estimate_lines').select('description, quantity, unit_price, tax_rate, total').eq('estimate_id', est.id)
-
-    const { data: inv, error } = await supabase.from('invoices').insert({
-      invoice_number, invoice_series: 'F', invoice_type: 'issued',
-      client_name: est.client_name,
-      company_name: 'Sastrería Prats', company_nif: 'B12345678', company_address: 'Madrid, España',
-      invoice_date: new Date().toISOString().split('T')[0],
-      subtotal: est.total / 1.21, tax_rate: 21, tax_amount: est.total - est.total / 1.21,
-      irpf_rate: 0, irpf_amount: 0,
-      total: est.total, status: 'draft',
-    }).select('id').single()
-
-    if (error || !inv) { toast.error('Error al convertir'); return }
-
-    if (lines?.length) {
-      await supabase.from('invoice_lines').insert(
-        lines.map((l: Record<string, unknown>, i: number) => ({
-          invoice_id: inv.id,
-          description: String(l.description),
-          quantity: Number(l.quantity),
-          unit_price: Number(l.unit_price),
-          tax_rate: Number(l.tax_rate ?? 21),
-          line_total: Number(l.total),
-          sort_order: i,
-        }))
-      )
-    }
-
-    await supabase.from('estimates').update({ status: 'invoiced', invoice_id: inv.id, invoiced_at: new Date().toISOString() }).eq('id', est.id)
-
-    createInvoiceJournalEntry(inv.id).catch(() => {})
-
-    toast.success(`Factura ${invoice_number} creada desde presupuesto`)
-    load()
   }
 
   return (
@@ -1219,7 +1349,7 @@ function EstimatesTab() {
               {rows.length === 0 ? (
                 <TableRow><TableCell colSpan={7} className="text-center py-12 text-muted-foreground">Sin presupuestos</TableCell></TableRow>
               ) : rows.map(est => (
-                <EstimateTableRow key={est.id} est={est} onRefresh={load} onConvertToInvoice={convertToInvoice} />
+                <EstimateTableRow key={est.id} est={est} onRefresh={load} />
               ))}
             </TableBody>
           </Table>
@@ -1237,11 +1367,15 @@ function EstimatesTab() {
                   <Label>Cliente</Label>
                   <Select value={form.client_id} onValueChange={id => {
                     const c = clients.find(x => x.id === id)
-                    setForm(f => ({ ...f, client_id: id, client_name: c?.full_name ?? '' }))
+                    setForm(f => ({ ...f, client_id: id, client_name: c?.full_name ?? '', client_email: c?.email ?? '' }))
                   }}>
                     <SelectTrigger><SelectValue placeholder="Seleccionar cliente" /></SelectTrigger>
                     <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.full_name}</SelectItem>)}</SelectContent>
                   </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Email del cliente</Label>
+                  <Input type="email" value={form.client_email} onChange={e => setForm(f => ({ ...f, client_email: e.target.value }))} placeholder="email@ejemplo.com (opcional)" />
                 </div>
                 <div className="space-y-1">
                   <Label>Nombre presupuesto</Label>

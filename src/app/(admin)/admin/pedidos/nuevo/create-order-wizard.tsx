@@ -29,6 +29,7 @@ import { useAuth } from '@/components/providers/auth-provider'
 import { createOrderAction } from '@/actions/orders'
 import { getClientMeasurements } from '@/actions/clients'
 import { listSuppliers, createSupplierOrderAction } from '@/actions/suppliers'
+import { listFabricsBySupplier } from '@/actions/fabrics'
 import { formatCurrency } from '@/lib/utils'
 import { generateCamiseriaFichaPdf } from '@/lib/camiseria-ficha-pdf'
 
@@ -55,6 +56,16 @@ interface OrderLine {
   measurement_id: string | null
   official_id: string | null
   official_name: string
+}
+
+interface SupplierRequestLine {
+  item_type: 'fabric' | 'product' | ''
+  fabric_id: string | null
+  product_id: string | null
+  description: string
+  reference: string
+  quantity: number
+  unit: string
 }
 
 const TYPE_CARDS: { type: OrderType; label: string; description: string; bg: string; border: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -134,9 +145,13 @@ export function CreateOrderWizard({
   const [supplierResults, setSupplierResults] = useState<any[]>([])
   const [selectedSupplier, setSelectedSupplier] = useState<any>(null)
   const [isSearchingSupplier, setIsSearchingSupplier] = useState(false)
-  const [supplierOrderCost, setSupplierOrderCost] = useState('')
+  const [supplierFabrics, setSupplierFabrics] = useState<any[]>([])
+  const [supplierProducts, setSupplierProducts] = useState<any[]>([])
+  const [loadingSupplierItems, setLoadingSupplierItems] = useState(false)
+  const [supplierFabricsError, setSupplierFabricsError] = useState<string | null>(null)
   const [paymentDueDate, setPaymentDueDate] = useState('')
   const [orderDescription, setOrderDescription] = useState('')
+  const [supplierRequestLines, setSupplierRequestLines] = useState<SupplierRequestLine[]>([])
   const [fabricToSend, setFabricToSend] = useState('')
   const [measuresNotes, setMeasuresNotes] = useState('')
   const [garmentDescription, setGarmentDescription] = useState('')
@@ -254,6 +269,51 @@ export function CreateOrderWizard({
     return () => clearTimeout(t)
   }, [orderType, supplierSearch])
 
+  const loadSupplierCatalog = async (supplierId: string) => {
+    setLoadingSupplierItems(true)
+    setSupplierFabricsError(null)
+    const fabricsRes = await listFabricsBySupplier({ supplierId, limit: 300 })
+    if (fabricsRes.success) {
+      const rows = fabricsRes.data?.data || []
+      setSupplierFabrics(rows)
+      if (rows.length === 0) {
+        setSupplierFabricsError(`No se encontraron tejidos para este proveedor (ID: ${supplierId})`)
+      }
+    } else {
+      setSupplierFabrics([])
+      setSupplierFabricsError(`No se encontraron tejidos para este proveedor (ID: ${supplierId})`)
+      console.error('[create-order-wizard] listFabricsBySupplier fallo', {
+        supplierId,
+        error: (fabricsRes as any)?.error,
+      })
+    }
+
+    const { data: productsData } = await supabase
+      .from('products')
+      .select('id, sku, name, supplier_reference')
+      .eq('supplier_id', supplierId)
+      .eq('is_active', true)
+      .order('name', { ascending: true })
+      .limit(300)
+    setSupplierProducts(productsData || [])
+    setLoadingSupplierItems(false)
+  }
+
+  useEffect(() => {
+    if (!selectedSupplier?.id) {
+      setSupplierFabrics([])
+      setSupplierProducts([])
+      setSupplierFabricsError(null)
+      return
+    }
+    loadSupplierCatalog(selectedSupplier.id).catch(() => {
+      setSupplierFabrics([])
+      setSupplierProducts([])
+      setSupplierFabricsError(`No se encontraron tejidos para este proveedor (ID: ${selectedSupplier.id})`)
+      setLoadingSupplierItems(false)
+    })
+  }, [selectedSupplier?.id, supabase])
+
   useEffect(() => {
     if (officialSearch.length < 2) { setOfficialResults([]); return }
     const t = setTimeout(async () => {
@@ -321,12 +381,10 @@ export function CreateOrderWizard({
 
   useEffect(() => {
     if (orderType === 'proveedor' && step === 1 && !paymentDueDate) {
-      const today = new Date().toISOString().slice(0, 10)
       const in30 = new Date()
       in30.setDate(in30.getDate() + 30)
-      setPaymentDueDate(today)
       if (!estimatedDelivery) setEstimatedDelivery(in30.toISOString().slice(0, 10))
-      setAlertOnPayment(true)
+      setAlertOnPayment(false)
       setAlertOnDelivery(true)
     }
   }, [orderType, step])
@@ -384,6 +442,29 @@ export function CreateOrderWizard({
   }
 
   const removeLine = (idx: number) => setLines(prev => prev.filter((_, i) => i !== idx))
+
+  const addSupplierRequestLine = () => {
+    setSupplierRequestLines((prev) => [...prev, {
+      item_type: '',
+      fabric_id: null,
+      product_id: null,
+      description: '',
+      reference: '',
+      quantity: 1,
+      unit: '',
+    }])
+  }
+
+  const updateSupplierRequestLine = (idx: number, patch: Partial<SupplierRequestLine>) => {
+    setSupplierRequestLines((prev) => prev.map((line, i) => (i === idx ? { ...line, ...patch } : line)))
+  }
+
+  const removeSupplierRequestLine = (idx: number) => {
+    setSupplierRequestLines((prev) => {
+      const next = prev.filter((_, i) => i !== idx)
+      return next
+    })
+  }
 
   const { execute: submitOrder, isLoading: isSubmitting } = useAction(createOrderAction, {
     successMessage: 'Pedido creado correctamente',
@@ -521,28 +602,42 @@ export function CreateOrderWizard({
         toast.error('Selecciona un proveedor')
         return
       }
-      const cost = parseFloat(String(supplierOrderCost).replace(',', '.'))
-      if (cost < 0 || isNaN(cost)) {
-        toast.error('Indica un coste válido')
-        return
-      }
-      if (!paymentDueDate?.trim()) {
-        toast.error('Indica la fecha de pago al proveedor')
-        return
-      }
       if (!estimatedDelivery?.trim()) {
         toast.error('Indica la fecha de entrega estimada')
+        return
+      }
+      const cleanedLines = supplierRequestLines
+        .map((line) => ({
+          item_type: line.item_type,
+          fabric_id: line.item_type === 'fabric' ? line.fabric_id : null,
+          product_id: line.item_type === 'product' ? line.product_id : null,
+          description: line.description.trim(),
+          reference: line.reference.trim(),
+          quantity: Number(line.quantity),
+          unit: (line.unit || 'unidades').trim(),
+        }))
+        .filter((line) => line.item_type && line.description && Number.isFinite(line.quantity) && line.quantity > 0)
+      if (cleanedLines.length === 0) {
+        toast.error('Añade al menos un producto solicitado')
         return
       }
       const notes = [orderDescription, internalNotes].filter(Boolean).join('\n') || null
       submitSupplierOrder({
         supplier_id: selectedSupplier.id,
-        total: cost,
-        payment_due_date: paymentDueDate.trim(),
+        total: 0,
+        payment_due_date: paymentDueDate?.trim() || null,
         estimated_delivery_date: estimatedDelivery.trim(),
         notes,
         alert_on_payment: alertOnPayment,
         alert_on_delivery: alertOnDelivery,
+        lines: cleanedLines.map((line) => ({
+          fabric_id: line.fabric_id,
+          product_id: line.product_id,
+          description: line.description,
+          reference: line.reference,
+          quantity: line.quantity,
+          unit: line.unit,
+        })),
       })
       return
     }
@@ -1205,20 +1300,184 @@ export function CreateOrderWizard({
                 </div>
               )}
             </div>
+            <div className="rounded-lg border p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <Label>Productos solicitados *</Label>
+                <div className="flex items-center gap-2">
+                  {selectedSupplier?.id && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={loadingSupplierItems}
+                      onClick={() => loadSupplierCatalog(selectedSupplier.id)}
+                    >
+                      {loadingSupplierItems ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+                      Recargar
+                    </Button>
+                  )}
+                  <Button type="button" variant="outline" size="sm" onClick={addSupplierRequestLine}>
+                    <Plus className="h-3 w-3 mr-1" /> Añadir línea
+                  </Button>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Aquí registras lo que pides al proveedor. El coste se completa después, al recibir su albarán/factura.
+              </p>
+              {selectedSupplier?.id && !loadingSupplierItems && supplierFabrics.length === 0 ? (
+                <p className="text-xs text-amber-700">
+                  No hay tejidos activos vinculados a este proveedor. Si acabas de crear uno, pulsa en Recargar.
+                </p>
+              ) : null}
+              {supplierFabricsError ? (
+                <p className="text-xs text-destructive">{supplierFabricsError}</p>
+              ) : null}
+              <div className="space-y-2">
+                {supplierRequestLines.length === 0 ? (
+                  <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                    Aún no hay líneas. Pulsa en <strong>Añadir línea</strong> y elige si es <strong>Tela</strong> o <strong>Producto</strong>.
+                  </div>
+                ) : null}
+                {supplierRequestLines.map((line, idx) => (
+                  <div key={idx} className="grid grid-cols-12 gap-2 items-end border rounded-md p-2">
+                    <div className="col-span-12 sm:col-span-2 space-y-1">
+                      <Label className="text-xs">Tipo *</Label>
+                      <Select
+                        value={line.item_type || 'none'}
+                        onValueChange={(value) => {
+                          if (value === 'none') {
+                            updateSupplierRequestLine(idx, {
+                              item_type: '',
+                              fabric_id: null,
+                              product_id: null,
+                              description: '',
+                              reference: '',
+                              unit: '',
+                            })
+                            return
+                          }
+                          const isFabric = value === 'fabric'
+                          updateSupplierRequestLine(idx, {
+                            item_type: isFabric ? 'fabric' : 'product',
+                            fabric_id: null,
+                            product_id: null,
+                            description: '',
+                            reference: '',
+                            unit: '',
+                          })
+                        }}
+                      >
+                        <SelectTrigger><SelectValue placeholder="Elegir" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Seleccionar</SelectItem>
+                          <SelectItem value="fabric">Tela</SelectItem>
+                          <SelectItem value="product">Producto</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="col-span-12 sm:col-span-4 space-y-1">
+                      <Label className="text-xs">
+                        {line.item_type === 'fabric' ? 'Tejido' : line.item_type === 'product' ? 'Producto' : 'Elemento'}
+                      </Label>
+                      {line.item_type === 'fabric' ? (
+                        <Select
+                          value={line.fabric_id || 'none'}
+                          onValueChange={(value) => {
+                            if (value === 'none') {
+                              updateSupplierRequestLine(idx, { fabric_id: null })
+                              return
+                            }
+                            const fabric = supplierFabrics.find((f: any) => f.id === value)
+                            updateSupplierRequestLine(idx, {
+                              fabric_id: value,
+                              product_id: null,
+                              description: fabric ? `${fabric.name}${fabric.composition ? ` - ${fabric.composition}` : ''}` : line.description,
+                              reference: fabric?.fabric_code || line.reference,
+                              unit: line.unit || 'metros',
+                            })
+                          }}
+                        >
+                          <SelectTrigger><SelectValue placeholder="Selecciona tejido" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Sin seleccionar</SelectItem>
+                            {supplierFabrics.map((f: any) => (
+                              <SelectItem key={f.id} value={f.id}>
+                                {f.fabric_code} - {f.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : line.item_type === 'product' ? (
+                        <Select
+                          value={line.product_id || 'none'}
+                          onValueChange={(value) => {
+                            if (value === 'none') {
+                              updateSupplierRequestLine(idx, { product_id: null })
+                              return
+                            }
+                            const product = supplierProducts.find((p: any) => p.id === value)
+                            updateSupplierRequestLine(idx, {
+                              product_id: value,
+                              fabric_id: null,
+                              description: product?.name || line.description,
+                              reference: product?.supplier_reference || product?.sku || line.reference,
+                              unit: line.unit || 'unidades',
+                            })
+                          }}
+                        >
+                          <SelectTrigger><SelectValue placeholder="Selecciona producto" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Sin seleccionar</SelectItem>
+                            {supplierProducts.map((p: any) => (
+                              <SelectItem key={p.id} value={p.id}>
+                                {p.sku} - {p.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Input value="" disabled placeholder="Primero elige tipo" />
+                      )}
+                    </div>
+                    <div className="col-span-12 sm:col-span-3 space-y-1">
+                      <Label className="text-xs">Descripción *</Label>
+                      <Input
+                        value={line.description}
+                        onChange={(e) => updateSupplierRequestLine(idx, { description: e.target.value })}
+                        placeholder="Tela lino azul marino"
+                      />
+                    </div>
+                    <div className="col-span-6 sm:col-span-1 space-y-1">
+                      <Label className="text-xs">Cantidad *</Label>
+                      <Input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={line.quantity}
+                        onChange={(e) => updateSupplierRequestLine(idx, { quantity: parseFloat(e.target.value) || 0 })}
+                      />
+                    </div>
+                    <div className="col-span-4 sm:col-span-1 space-y-1">
+                      <Label className="text-xs">Unidad</Label>
+                      <Input
+                        value={line.unit}
+                        onFocus={(e) => e.currentTarget.select()}
+                        onChange={(e) => updateSupplierRequestLine(idx, { unit: e.target.value })}
+                        placeholder="Ej: metros"
+                      />
+                    </div>
+                    <div className="col-span-2 sm:col-span-1 flex justify-end">
+                      <Button type="button" variant="ghost" size="icon" onClick={() => removeSupplierRequestLine(idx)}>
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Coste total (€) *</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  placeholder="0,00"
-                  value={supplierOrderCost}
-                  onChange={(e) => setSupplierOrderCost(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Fecha de pago al proveedor *</Label>
+                <Label>Fecha de pago al proveedor</Label>
                 <DatePickerPopover
                   value={paymentDueDate}
                   onChange={(date) => setPaymentDueDate(date)}
@@ -1242,7 +1501,11 @@ export function CreateOrderWizard({
             <Button
               onClick={() => setStep(2)}
               className="w-full bg-prats-navy hover:bg-prats-navy-light"
-              disabled={!selectedSupplier?.id || !supplierOrderCost || !paymentDueDate || !estimatedDelivery || parseFloat(String(supplierOrderCost).replace(',', '.')) < 0}
+              disabled={
+                !selectedSupplier?.id
+                || !estimatedDelivery
+                || supplierRequestLines.filter((line) => line.item_type && line.description.trim() && Number(line.quantity) > 0).length === 0
+              }
             >
               Siguiente: Confirmar
             </Button>
@@ -1255,12 +1518,24 @@ export function CreateOrderWizard({
           <CardHeader><CardTitle>Confirmar y crear</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <p><strong>Proveedor:</strong> {selectedSupplier?.name ?? '—'}</p>
-            <p><strong>Coste:</strong> {supplierOrderCost ? formatCurrency(parseFloat(String(supplierOrderCost).replace(',', '.'))) : '—'}</p>
+            <div>
+              <p className="font-semibold mb-2">Productos solicitados</p>
+              <div className="rounded-md border divide-y">
+                {supplierRequestLines
+                  .filter((line) => line.description.trim() && Number(line.quantity) > 0)
+                  .map((line, idx) => (
+                    <div key={idx} className="flex items-center justify-between px-3 py-2 text-sm">
+                      <span>{line.description}</span>
+                      <span className="font-medium">{line.quantity} {line.unit || 'unidades'}</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
             <p><strong>Fecha de pago:</strong> {paymentDueDate || '—'}</p>
             <p><strong>Fecha de entrega estimada:</strong> {estimatedDelivery || '—'}</p>
             {orderDescription && <p><strong>Descripción:</strong> {orderDescription}</p>}
             {internalNotes && <p><strong>Notas:</strong> {internalNotes}</p>}
-            <p className="text-sm text-muted-foreground">Se creará el pedido y la factura en Contabilidad → Facturas proveedores.</p>
+            <p className="text-sm text-muted-foreground">Se crea el pedido con líneas de producto. El coste se registrará al recibir albarán/factura del proveedor.</p>
             <div className="flex gap-2 pt-4">
               <Button variant="outline" onClick={() => setStep(1)}><ArrowLeft className="h-4 w-4 mr-2" /> Anterior</Button>
               <Button
@@ -1268,7 +1543,7 @@ export function CreateOrderWizard({
                 disabled={isSubmittingSupplier}
                 className="gap-2 bg-prats-navy hover:bg-prats-navy-light"
               >
-                {isSubmittingSupplier ? <><Loader2 className="h-4 w-4 animate-spin" /> Creando...</> : <><Check className="h-4 w-4" /> Crear pedido y factura</>}
+                {isSubmittingSupplier ? <><Loader2 className="h-4 w-4 animate-spin" /> Creando...</> : <><Check className="h-4 w-4" /> Crear pedido</>}
               </Button>
             </div>
           </CardContent>

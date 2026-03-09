@@ -13,6 +13,7 @@ const PAGE_SIZE = 30
 
 const movementTypeLabels: Record<string, string> = {
   sale: 'Venta', return: 'Devolución', purchase: 'Compra proveedor',
+  purchase_receipt: 'Recepción pedido',
   adjustment_positive: 'Ajuste +', adjustment_negative: 'Ajuste -',
   transfer_in: 'Transferencia entrada', transfer_out: 'Transferencia salida',
   initial: 'Stock inicial', reservation: 'Reserva', reservation_release: 'Liberar reserva',

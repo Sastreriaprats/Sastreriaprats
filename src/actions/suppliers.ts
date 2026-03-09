@@ -85,6 +85,67 @@ export const updateSupplierAction = protectedAction<{ id: string; data: any }, a
 
 const SUPPLIER_ORDER_STATUSES = ['draft', 'sent', 'confirmed', 'partially_received', 'received', 'incident', 'cancelled'] as const
 
+function toNumber(value: unknown): number {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
+}
+
+async function pickWarehouseForReceipt(adminClient: any, order: any) {
+  if (order?.destination_warehouse_id) {
+    const { data: destinationWarehouse } = await adminClient
+      .from('warehouses')
+      .select('id')
+      .eq('id', order.destination_warehouse_id)
+      .eq('is_active', true)
+      .maybeSingle()
+    if (destinationWarehouse?.id) return destinationWarehouse.id as string
+  }
+
+  if (order?.destination_store_id) {
+    const { data: storeMainWarehouse } = await adminClient
+      .from('warehouses')
+      .select('id')
+      .eq('store_id', order.destination_store_id)
+      .eq('is_main', true)
+      .eq('is_active', true)
+      .maybeSingle()
+    if (storeMainWarehouse?.id) return storeMainWarehouse.id as string
+  }
+
+  const { data: fallbackWarehouse } = await adminClient
+    .from('warehouses')
+    .select('id')
+    .eq('is_active', true)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+  return (fallbackWarehouse?.id as string | undefined) ?? null
+}
+
+async function pickVariantForProduct(adminClient: any, productId: string): Promise<string | null> {
+  const withDefault = await adminClient
+    .from('product_variants')
+    .select('id')
+    .eq('product_id', productId)
+    .eq('is_default', true)
+    .limit(1)
+    .maybeSingle()
+
+  if (!withDefault.error && withDefault.data?.id) return String(withDefault.data.id)
+
+  const firstActive = await adminClient
+    .from('product_variants')
+    .select('id')
+    .eq('product_id', productId)
+    .eq('is_active', true)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (firstActive.error || !firstActive.data?.id) return null
+  return String(firstActive.data.id)
+}
+
 export const updateSupplierOrderStatusAction = protectedAction<
   { supplierOrderId: string; status: typeof SUPPLIER_ORDER_STATUSES[number] },
   any
@@ -110,21 +171,276 @@ export const updateSupplierOrderStatusAction = protectedAction<
     if (!order) return failure('Pedido no encontrado', 'NOT_FOUND')
 
     if (status === 'received') {
+      const stockUpdatedAt = (order as any).stock_updated_at as string | null | undefined
+      if (stockUpdatedAt) {
+        console.warn('[updateSupplierOrderStatusAction] stock ya actualizado previamente', { supplierOrderId, stockUpdatedAt })
+        return success({ ...order, stock_update_skipped: true, stock_warnings: 0 })
+      }
+
+      const warehouseId = await pickWarehouseForReceipt(ctx.adminClient, order)
+      if (!warehouseId) return failure('No hay almacén activo para registrar la recepción de stock', 'CONFLICT')
+
+      const { data: lines, error: linesError } = await ctx.adminClient
+        .from('supplier_order_lines')
+        .select('id, supplier_order_id, product_id, fabric_id, description, reference, quantity, quantity_received')
+        .eq('supplier_order_id', supplierOrderId)
+      if (linesError) return failure(linesError.message || 'Error al cargar líneas del pedido', 'INTERNAL')
+
+      const fabricCandidates = new Map<string, string>()
+      if ((lines || []).some((line: any) => line.fabric_id && !line.product_id)) {
+        const { data: supplierFabricProducts } = await ctx.adminClient
+          .from('products')
+          .select('id, name, sku, supplier_reference')
+          .eq('supplier_id', (order as any).supplier_id)
+          .eq('product_type', 'tailoring_fabric')
+          .eq('is_active', true)
+        for (const p of supplierFabricProducts || []) {
+          const nameKey = String((p as any).name || '').trim().toLowerCase()
+          const refKey = String((p as any).supplier_reference || '').trim().toLowerCase()
+          const skuKey = String((p as any).sku || '').trim().toLowerCase()
+          if (nameKey) fabricCandidates.set(`name:${nameKey}`, String((p as any).id))
+          if (refKey) fabricCandidates.set(`ref:${refKey}`, String((p as any).id))
+          if (skuKey) fabricCandidates.set(`sku:${skuKey}`, String((p as any).id))
+        }
+      }
+
+      let stockWarnings = 0
+      for (const line of lines || []) {
+        const qtyReceived = toNumber((line as any).quantity_received)
+        const qtyOrdered = toNumber((line as any).quantity)
+        const qtyToAddRaw = qtyReceived > 0 ? qtyReceived : qtyOrdered
+        if (!Number.isInteger(qtyToAddRaw)) {
+          stockWarnings += 1
+          console.warn('[supplier receipt] cantidad no entera, se omite línea de stock', {
+            supplierOrderId,
+            lineId: (line as any).id,
+            quantity: qtyToAddRaw,
+          })
+          continue
+        }
+        const qtyToAdd = qtyToAddRaw
+        if (qtyToAdd <= 0) continue
+
+        let productId = ((line as any).product_id ? String((line as any).product_id) : null) as string | null
+        if (!productId && (line as any).fabric_id) {
+          const byName = fabricCandidates.get(`name:${String((line as any).description || '').trim().toLowerCase()}`)
+          const byRef = fabricCandidates.get(`ref:${String((line as any).reference || '').trim().toLowerCase()}`)
+          const bySku = fabricCandidates.get(`sku:${String((line as any).reference || '').trim().toLowerCase()}`)
+          productId = byRef || bySku || byName || null
+          if (!productId) {
+            stockWarnings += 1
+            console.warn('[supplier receipt] línea de tejido sin producto/variante asociada', {
+              supplierOrderId,
+              lineId: (line as any).id,
+              description: (line as any).description,
+              reference: (line as any).reference,
+            })
+            continue
+          }
+        }
+
+        if (!productId) continue
+        const variantId = await pickVariantForProduct(ctx.adminClient, productId)
+        if (!variantId) {
+          stockWarnings += 1
+          console.warn('[supplier receipt] producto sin variante activa para recepción', {
+            supplierOrderId,
+            lineId: (line as any).id,
+            productId,
+          })
+          continue
+        }
+
+        const { data: currentLevel } = await ctx.adminClient
+          .from('stock_levels')
+          .select('id, quantity')
+          .eq('product_variant_id', variantId)
+          .eq('warehouse_id', warehouseId)
+          .maybeSingle()
+
+        const stockBefore = toNumber((currentLevel as any)?.quantity)
+        const stockAfter = stockBefore + qtyToAdd
+        if (currentLevel?.id) {
+          const { error: updateLevelError } = await ctx.adminClient
+            .from('stock_levels')
+            .update({
+              quantity: stockAfter,
+              updated_at: new Date().toISOString(),
+              last_movement_at: new Date().toISOString(),
+            })
+            .eq('id', currentLevel.id)
+          if (updateLevelError) return failure(updateLevelError.message || 'Error al actualizar stock de recepción', 'INTERNAL')
+        } else {
+          const { error: insertLevelError } = await ctx.adminClient
+            .from('stock_levels')
+            .insert({
+              product_variant_id: variantId,
+              warehouse_id: warehouseId,
+              quantity: qtyToAdd,
+              reserved: 0,
+              updated_at: new Date().toISOString(),
+              last_movement_at: new Date().toISOString(),
+            })
+          if (insertLevelError) return failure(insertLevelError.message || 'Error al crear stock de recepción', 'INTERNAL')
+        }
+
+        const { error: movementError } = await ctx.adminClient
+          .from('stock_movements')
+          .insert({
+            product_variant_id: variantId,
+            warehouse_id: warehouseId,
+            movement_type: 'purchase_receipt',
+            quantity: qtyToAdd,
+            stock_before: stockBefore,
+            stock_after: stockAfter,
+            reason: `Recepción pedido ${(order as any).order_number}`,
+            reference_type: 'supplier_order',
+            reference_id: supplierOrderId,
+            created_by: ctx.userId !== 'system' ? ctx.userId : null,
+            store_id: (order as any).destination_store_id || null,
+          })
+        if (movementError) return failure(movementError.message || 'Error al registrar movimiento de recepción', 'INTERNAL')
+      }
+
+      for (const line of lines || []) {
+        const lineQtyReceived = toNumber((line as any).quantity_received)
+        if (lineQtyReceived > 0) continue
+        const { error: updateLineErr } = await ctx.adminClient
+          .from('supplier_order_lines')
+          .update({
+            quantity_received: (line as any).quantity,
+            is_fully_received: true,
+            received_at: new Date().toISOString(),
+          })
+          .eq('id', (line as any).id)
+        if (updateLineErr) return failure(updateLineErr.message || 'Error al actualizar líneas recibidas', 'INTERNAL')
+      }
+
+      const { error: stockUpdatedAtErr } = await ctx.adminClient
+        .from('supplier_orders')
+        .update({ stock_updated_at: new Date().toISOString() })
+        .eq('id', supplierOrderId)
+      if (stockUpdatedAtErr) return failure(stockUpdatedAtErr.message || 'Error al marcar actualización de stock', 'INTERNAL')
+
       createPurchaseJournalEntry(supplierOrderId).catch(() => {})
+      return success({ ...order, stock_update_skipped: false, stock_warnings: stockWarnings })
     }
 
     return success(order)
   }
 )
 
+export const updateSupplierOrderFinanceAction = protectedAction<
+  { supplierOrderId: string; total: number; payment_due_date?: string | null; notes?: string | null; alert_on_payment?: boolean },
+  { id: string; ap_invoice_id?: string }
+>(
+  {
+    permission: 'suppliers.create_order',
+    auditModule: 'suppliers',
+    auditAction: 'update',
+    auditEntity: 'supplier_order',
+    revalidate: ['/admin/proveedores', '/admin/contabilidad/facturas-proveedores'],
+  },
+  async (ctx, { supplierOrderId, total, payment_due_date, notes, alert_on_payment }) => {
+    if (!supplierOrderId?.trim()) return failure('Pedido obligatorio', 'VALIDATION')
+    if (!Number.isFinite(Number(total)) || Number(total) < 0) return failure('El coste debe ser mayor o igual a 0', 'VALIDATION')
+    const paymentDue = payment_due_date?.trim() || null
+    if (paymentDue) {
+      const d = new Date(paymentDue)
+      if (isNaN(d.getTime())) return failure('Fecha de pago no válida', 'VALIDATION')
+    }
+
+    const totalNum = Number(total)
+    const { data: order, error: orderError } = await ctx.adminClient
+      .from('supplier_orders')
+      .update({
+        subtotal: totalNum,
+        tax_amount: 0,
+        total: totalNum,
+        payment_due_date: paymentDue,
+        internal_notes: notes?.trim() || null,
+      })
+      .eq('id', supplierOrderId)
+      .select('id, order_number, supplier_id')
+      .single()
+    if (orderError || !order) return failure(orderError?.message || 'Pedido no encontrado', 'NOT_FOUND')
+
+    let apInvoiceId: string | undefined
+    const canManageInvoices = await checkUserPermission(ctx.userId, 'supplier_invoices.manage').catch(() => false)
+    if (canManageInvoices && totalNum > 0 && paymentDue) {
+      const { data: existingInv } = await ctx.adminClient
+        .from('ap_supplier_invoices')
+        .select('id, status')
+        .eq('supplier_order_id', supplierOrderId)
+        .maybeSingle()
+
+      if (existingInv?.id) {
+        const payload: Record<string, unknown> = {
+          amount: totalNum,
+          tax_amount: 0,
+          total_amount: totalNum,
+          due_date: paymentDue,
+          notes: notes?.trim() || null,
+        }
+        if (existingInv.status !== 'pagada') payload.status = 'pendiente'
+        const { error: invUpErr } = await ctx.adminClient.from('ap_supplier_invoices').update(payload).eq('id', existingInv.id)
+        if (invUpErr) return failure(invUpErr.message || 'No se pudo actualizar factura de proveedor')
+        apInvoiceId = existingInv.id
+      } else {
+        const { data: supplier } = await ctx.adminClient
+          .from('suppliers')
+          .select('name, legal_name, nif_cif')
+          .eq('id', order.supplier_id)
+          .single()
+
+        const today = new Date().toISOString().slice(0, 10)
+        const supplierName = (supplier?.legal_name || supplier?.name || 'Proveedor').trim()
+        const supplierCif = supplier?.nif_cif?.trim() || null
+
+        const { data: inv, error: invErr } = await ctx.adminClient
+          .from('ap_supplier_invoices')
+          .insert({
+            supplier_order_id: supplierOrderId,
+            supplier_name: supplierName,
+            supplier_cif: supplierCif,
+            invoice_number: order.order_number,
+            invoice_date: today,
+            due_date: paymentDue,
+            amount: totalNum,
+            tax_amount: 0,
+            total_amount: totalNum,
+            status: 'pendiente',
+            notes: notes?.trim() || null,
+            created_by: ctx.userId !== 'system' ? ctx.userId : null,
+            alert_on_payment: alert_on_payment !== false,
+          })
+          .select('id')
+          .single()
+        if (invErr) return failure(invErr.message || 'No se pudo crear factura de proveedor')
+        apInvoiceId = inv?.id
+      }
+    }
+
+    return success({ id: order.id, ap_invoice_id: apInvoiceId })
+  }
+)
+
 export type CreateSupplierOrderInput = {
   supplier_id: string
-  total: number
-  payment_due_date: string
+  total?: number
+  payment_due_date?: string | null
   estimated_delivery_date: string
   notes?: string | null
   alert_on_payment?: boolean
   alert_on_delivery?: boolean
+  lines?: Array<{
+    fabric_id?: string | null
+    product_id?: string | null
+    description: string
+    reference?: string | null
+    quantity: number
+    unit?: string | null
+  }>
 }
 
 export const createSupplierOrderAction = protectedAction<
@@ -138,44 +454,100 @@ export const createSupplierOrderAction = protectedAction<
     auditEntity: 'supplier_order',
     revalidate: ['/admin/proveedores', '/admin/contabilidad/facturas-proveedores'],
   },
-  async (ctx, { supplier_id, total, payment_due_date, estimated_delivery_date, notes, alert_on_payment, alert_on_delivery }) => {
+  async (ctx, { supplier_id, total, payment_due_date, estimated_delivery_date, notes, alert_on_payment, alert_on_delivery, lines }) => {
     if (!supplier_id?.trim()) return failure('Proveedor obligatorio', 'VALIDATION')
-    if (total == null || Number(total) < 0) return failure('El coste debe ser mayor o igual a 0', 'VALIDATION')
-    if (!payment_due_date?.trim()) return failure('Fecha de pago obligatoria', 'VALIDATION')
     if (!estimated_delivery_date?.trim()) return failure('Fecha de entrega estimada obligatoria', 'VALIDATION')
-    const dueDate = new Date(payment_due_date)
+
+    const cleanedLines = (lines || [])
+      .map((l) => ({
+        fabric_id: l.fabric_id || null,
+        product_id: l.product_id || null,
+        description: String(l.description || '').trim(),
+        reference: l.reference || null,
+        quantity: Number(l.quantity),
+        unit: (l.unit || 'unidades').trim(),
+      }))
+      .filter((l) => l.description && Number.isFinite(l.quantity) && l.quantity > 0)
+
+    const hasLegacyTotal = total != null && Number.isFinite(Number(total)) && Number(total) >= 0
+    if (cleanedLines.length === 0 && !hasLegacyTotal) {
+      return failure('Añade al menos un producto solicitado', 'VALIDATION')
+    }
+
+    const paymentDue = payment_due_date?.trim() || null
+    const dueDate = paymentDue ? new Date(paymentDue) : null
     const deliveryDate = new Date(estimated_delivery_date)
-    if (isNaN(dueDate.getTime())) return failure('Fecha de pago no válida', 'VALIDATION')
+    if (dueDate && isNaN(dueDate.getTime())) return failure('Fecha de pago no válida', 'VALIDATION')
     if (isNaN(deliveryDate.getTime())) return failure('Fecha de entrega no válida', 'VALIDATION')
 
     const orderNumber = await getNextNumber('supplier_orders', 'order_number', 'PEDPROV')
-    const totalNum = Number(total)
+    const totalNum = Number.isFinite(Number(total)) && Number(total) >= 0 ? Number(total) : 0
     const today = new Date().toISOString().slice(0, 10)
 
-    const { data: order, error: orderError } = await ctx.adminClient
+    const baseOrderPayload: Record<string, unknown> = {
+      order_number: orderNumber,
+      supplier_id: supplier_id.trim(),
+      status: 'draft',
+      order_date: today,
+      payment_due_date: paymentDue,
+      estimated_delivery_date: estimated_delivery_date.trim(),
+      subtotal: totalNum,
+      tax_amount: 0,
+      total: totalNum,
+      internal_notes: notes?.trim() || null,
+      created_by: ctx.userId !== 'system' ? ctx.userId : null,
+      alert_on_delivery: alert_on_delivery !== false,
+    }
+
+    let order: { id: string; order_number: string } | null = null
+    let orderError: any = null
+
+    const firstInsert = await ctx.adminClient
       .from('supplier_orders')
-      .insert({
-        order_number: orderNumber,
-        supplier_id: supplier_id.trim(),
-        status: 'draft',
-        order_date: today,
-        payment_due_date: payment_due_date.trim(),
-        estimated_delivery_date: estimated_delivery_date.trim(),
-        subtotal: totalNum,
-        tax_amount: 0,
-        total: totalNum,
-        internal_notes: notes?.trim() || null,
-        created_by: ctx.userId !== 'system' ? ctx.userId : null,
-        alert_on_delivery: alert_on_delivery !== false,
-      })
+      .insert(baseOrderPayload)
       .select('id, order_number')
       .single()
 
+    order = firstInsert.data as any
+    orderError = firstInsert.error
+
+    // Compatibilidad con instalaciones donde aún no existe la columna alert_on_delivery.
+    if (orderError?.message?.includes('alert_on_delivery')) {
+      const fallbackPayload = { ...baseOrderPayload }
+      delete (fallbackPayload as any).alert_on_delivery
+      const fallbackInsert = await ctx.adminClient
+        .from('supplier_orders')
+        .insert(fallbackPayload)
+        .select('id, order_number')
+        .single()
+      order = fallbackInsert.data as any
+      orderError = fallbackInsert.error
+    }
+
     if (orderError || !order) return failure(orderError?.message ?? 'Error al crear el pedido')
+
+    if (cleanedLines.length > 0) {
+      const { error: linesError } = await ctx.adminClient
+        .from('supplier_order_lines')
+        .insert(
+          cleanedLines.map((line, idx) => ({
+            supplier_order_id: order.id,
+            fabric_id: line.fabric_id,
+            product_id: line.product_id,
+            description: line.description,
+            reference: line.reference,
+            quantity: line.quantity,
+            unit: line.unit || 'unidades',
+            unit_price: 0,
+            sort_order: idx,
+          }))
+        )
+      if (linesError) return failure(linesError.message || 'Pedido creado, pero hubo un error guardando las líneas')
+    }
 
     let apInvoiceId: string | undefined
     const canManageInvoices = await checkUserPermission(ctx.userId, 'supplier_invoices.manage').catch(() => false)
-    if (canManageInvoices && totalNum > 0) {
+    if (canManageInvoices && totalNum > 0 && paymentDue) {
       const { data: supplier } = await ctx.adminClient
         .from('suppliers')
         .select('name, legal_name, nif_cif')
@@ -193,7 +565,7 @@ export const createSupplierOrderAction = protectedAction<
           supplier_cif: supplierCif,
           invoice_number: orderNumber,
           invoice_date: today,
-          due_date: payment_due_date.trim(),
+          due_date: paymentDue,
           amount: totalNum,
           tax_amount: 0,
           total_amount: totalNum,

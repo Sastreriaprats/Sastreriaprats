@@ -1,11 +1,195 @@
 'use server'
 
 import { protectedAction } from '@/lib/server/action-wrapper'
-import { queryList, queryById } from '@/lib/server/query-helpers'
+import { queryList, queryById, getNextNumber } from '@/lib/server/query-helpers'
 import { createProductSchema, updateProductSchema, createVariantSchema } from '@/lib/validations/products'
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { generateEAN13, validateEAN13 } from '@/lib/barcode/ean13'
+import { generateSkuBase } from '@/lib/utils/sku'
+
+/** Obtiene el siguiente número correlativo para un SKU base. Cuenta productos con sku LIKE 'skuBase-%' y retorna (count+1) con pad 3. Si el SKU completo ya existe (race), reintenta con el siguiente. */
+export const getNextSkuNumber = protectedAction<
+  { skuBase: string },
+  { number: string }
+>(
+  { permission: 'products.view', auditModule: 'stock' },
+  async (ctx, { skuBase }) => {
+    const base = String(skuBase || '').trim()
+    if (!base) return failure('skuBase requerido', 'VALIDATION')
+    const pattern = `${base}-%`
+    const { count } = await ctx.adminClient
+      .from('products')
+      .select('id', { count: 'exact', head: true })
+      .like('sku', pattern)
+    let n = (count ?? 0) + 1
+    for (let i = 0; i < 20; i++) {
+      const numStr = String(n).padStart(3, '0')
+      const fullSku = `${base}-${numStr}`
+      const { data: existing } = await ctx.adminClient
+        .from('products')
+        .select('id')
+        .eq('sku', fullSku)
+        .maybeSingle()
+      if (!existing) return success({ number: numStr })
+      n++
+    }
+    return failure('No se pudo generar un SKU único', 'INTERNAL')
+  }
+)
+
+/** Genera un SKU completo automático para un producto. Combina generateSkuBase + getNextSkuNumber. */
+export const generateProductSkuAction = protectedAction<
+  { productType: string; productName: string },
+  { sku: string }
+>(
+  { permission: 'products.view', auditModule: 'stock' },
+  async (ctx, { productType, productName }) => {
+    const name = String(productName || '').trim()
+    if (!name) return failure('Escribe el nombre del producto primero', 'VALIDATION')
+    const skuBase = generateSkuBase(productType, name)
+    const pattern = `${skuBase}-%`
+    const { count } = await ctx.adminClient
+      .from('products')
+      .select('id', { count: 'exact', head: true })
+      .like('sku', pattern)
+    let n = (count ?? 0) + 1
+    for (let i = 0; i < 20; i++) {
+      const numStr = String(n).padStart(3, '0')
+      const fullSku = `${skuBase}-${numStr}`
+      const { data: existing } = await ctx.adminClient
+        .from('products')
+        .select('id')
+        .eq('sku', fullSku)
+        .maybeSingle()
+      if (!existing) return success({ sku: fullSku })
+      n++
+    }
+    return failure('No se pudo generar un SKU único', 'INTERNAL')
+  }
+)
+
+async function generateDeliveryNoteNumberSafe(adminClient: any): Promise<string> {
+  try {
+    const { data, error } = await adminClient.rpc('generate_delivery_note_number')
+    if (!error && typeof data === 'string' && data.trim()) return data
+  } catch {
+    // Fallback below
+  }
+  const year = new Date().getFullYear()
+  const { data: rows } = await adminClient
+    .from('delivery_notes')
+    .select('number')
+    .like('number', `ALB-${year}-%`)
+    .order('number', { ascending: false })
+    .limit(1)
+  let next = 1
+  const last = rows?.[0]?.number as string | undefined
+  if (last) {
+    const seq = Number(last.split('-').at(-1))
+    if (!Number.isNaN(seq)) next = seq + 1
+  }
+  return `ALB-${year}-${String(next).padStart(4, '0')}`
+}
+
+/** Listado agrupado por producto para códigos de barras. Devuelve productos con array de variantes. */
+export const getProductsWithVariantsForBarcodes = protectedAction<
+  { page?: number; pageSize?: number; search?: string; filter?: 'all' | 'with' | 'without' | 'partial' },
+  { data: any[]; total: number; page: number; pageSize: number; totalPages: number; withoutBarcodeCount: number }
+>(
+  { permission: 'products.view', auditModule: 'stock' },
+  async (ctx, params) => {
+    const admin = ctx.adminClient
+    const search = params.search?.trim()
+    const filter = params.filter || 'all'
+    const page = params.page || 1
+    const pageSize = Math.min(params.pageSize || 50, 100)
+
+    let query = admin
+      .from('product_variants')
+      .select(`
+        id, variant_sku, size, color, barcode, price_override, product_id,
+        products!inner(id, sku, name, base_price, tax_rate, is_active)
+      `)
+      .eq('products.is_active', true)
+      .eq('is_active', true)
+
+    if (search) {
+      query = query.or(
+        `barcode.ilike.%${search}%,variant_sku.ilike.%${search}%,products.sku.ilike.%${search}%,products.name.ilike.%${search}%`
+      )
+    }
+
+    const { data: raw, error } = await query.order('product_id', { ascending: true }).order('size', { ascending: true }).limit(5000)
+
+    if (error) {
+      console.error('[getProductsWithVariantsForBarcodes]', error)
+      return success({ data: [], total: 0, page, pageSize, totalPages: 0, withoutBarcodeCount: 0 })
+    }
+
+    const rows = raw || []
+    const byProduct = new Map<string, { product_id: string; product_name: string; product_sku: string; base_price: number; tax_rate_pct: number; variants: any[] }>()
+    let withoutBarcodeCount = 0
+
+    for (const v of rows) {
+      const p = v.products || {}
+      const productId = v.product_id
+      const priceOverride = v.price_override != null ? Number(v.price_override) : null
+      const basePrice = priceOverride ?? Number(p.base_price ?? 0)
+      const taxRatePct = Number(p.tax_rate ?? 21)
+      const priceWithTax = Math.round(basePrice * (1 + taxRatePct / 100) * 100) / 100
+      const hasBarcode = Boolean(v.barcode && String(v.barcode).trim())
+      if (!hasBarcode) withoutBarcodeCount++
+
+      const variant = {
+        variant_id: v.id,
+        variant_sku: v.variant_sku,
+        size: v.size,
+        color: v.color,
+        barcode: v.barcode,
+        price_with_tax: priceWithTax,
+        has_barcode: hasBarcode,
+      }
+
+      if (!byProduct.has(productId)) {
+        byProduct.set(productId, {
+          product_id: productId,
+          product_name: p.name || '',
+          product_sku: p.sku || '',
+          base_price: basePrice,
+          tax_rate_pct: taxRatePct,
+          variants: [],
+        })
+      }
+      byProduct.get(productId)!.variants.push(variant)
+    }
+
+    const products = Array.from(byProduct.values())
+    const filtered = products.filter((prod) => {
+      const allWith = prod.variants.every((v: any) => v.has_barcode)
+      const allWithout = prod.variants.every((v: any) => !v.has_barcode)
+      const partial = !allWith && !allWithout
+      if (filter === 'with') return allWith
+      if (filter === 'without') return allWithout
+      if (filter === 'partial') return partial
+      return true
+    })
+
+    filtered.sort((a, b) => a.product_name.localeCompare(b.product_name))
+    const total = filtered.length
+    const from = (page - 1) * pageSize
+    const paginated = filtered.slice(from, from + pageSize)
+
+    return success({
+      data: paginated,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+      withoutBarcodeCount,
+    })
+  }
+)
 
 /** Listado por variante (producto + talla) para códigos de barras. Cada variante tiene su propio EAN-13. */
 export const listVariantsForBarcodes = protectedAction<ListParams, ListResult<any>>(
@@ -171,6 +355,9 @@ export const createProductAction = protectedAction<any, any>(
     const data = { ...parsed.data, created_by: ctx.userId }
     if (data.category_id === '' || data.category_id == null) data.category_id = null
     if (data.supplier_id === '' || data.supplier_id == null) data.supplier_id = null
+    if (data.product_type === 'tailoring_fabric' && !data.supplier_id) {
+      return failure('Para crear una tela debes seleccionar un proveedor', 'VALIDATION')
+    }
 
     const { data: product, error } = await ctx.adminClient
       .from('products')
@@ -179,6 +366,45 @@ export const createProductAction = protectedAction<any, any>(
       .single()
 
     if (error) return failure(error.message)
+
+    if (product && data.product_type === 'tailoring_fabric' && data.supplier_id) {
+      const { data: existingFabric } = await ctx.adminClient
+        .from('fabrics')
+        .select('id')
+        .eq('fabric_code', product.sku)
+        .maybeSingle()
+
+      if (!existingFabric?.id) {
+        const { error: fabricError } = await ctx.adminClient
+          .from('fabrics')
+          .insert({
+            fabric_code: product.sku,
+            name: product.name,
+            description: product.description || null,
+            supplier_id: data.supplier_id,
+            supplier_reference: product.supplier_reference || null,
+            color_name: product.color || null,
+            composition: product.material || null,
+            price_per_meter: product.base_price ?? null,
+            status: product.is_active === false ? 'discontinued' : 'active',
+            is_active: product.is_active !== false,
+          })
+
+        if (fabricError) {
+          console.error('[createProductAction] Error creando registro en fabrics', {
+            productId: product.id,
+            sku: product.sku,
+            supplierId: data.supplier_id,
+            message: fabricError.message,
+            code: (fabricError as any)?.code,
+          })
+
+          await ctx.adminClient.from('products').delete().eq('id', product.id)
+          return failure('No se pudo sincronizar la tela en catálogo de tejidos', 'INTERNAL')
+        }
+      }
+    }
+
     return success(product)
   }
 )
@@ -400,6 +626,51 @@ export const moveStockBetweenWarehouses = protectedAction<
     await ctx.adminClient.from('stock_levels').update({ quantity: fromAfter, last_movement_at: new Date().toISOString() }).eq('id', fromLevel.id)
     await ctx.adminClient.from('stock_levels').update({ quantity: toAfter, last_movement_at: new Date().toISOString() }).eq('id', toLevel.id)
 
+    // Generar albarán automáticamente para traspaso directo.
+    // Si falla, no bloquea el movimiento de stock.
+    try {
+      const [{ data: fromWh }, { data: variant }] = await Promise.all([
+        ctx.adminClient.from('warehouses').select('id, store_id').eq('id', fromWarehouseId).single(),
+        ctx.adminClient
+          .from('product_variants')
+          .select('id, variant_sku, price_override, products!inner(name, sku, base_price)')
+          .eq('id', variantId)
+          .single(),
+      ])
+      const number = await generateDeliveryNoteNumberSafe(ctx.adminClient)
+      const { data: note, error: noteErr } = await ctx.adminClient
+        .from('delivery_notes')
+        .insert({
+          store_id: (fromWh as any)?.store_id || null,
+          number,
+          type: 'traspaso',
+          status: 'confirmado',
+          from_warehouse_id: fromWarehouseId,
+          to_warehouse_id: toWarehouseId,
+          notes: reasonText,
+          confirmed_at: new Date().toISOString(),
+          created_by: ctx.userId !== 'system' ? ctx.userId : null,
+        })
+        .select('id')
+        .single()
+      if (!noteErr && note?.id) {
+        await ctx.adminClient.from('delivery_note_lines').insert({
+          delivery_note_id: note.id,
+          product_variant_id: variantId,
+          product_name: (variant as any)?.products?.name ?? null,
+          sku: (variant as any)?.variant_sku ?? (variant as any)?.products?.sku ?? null,
+          quantity,
+          unit_price: (variant as any)?.price_override != null
+            ? Number((variant as any).price_override)
+            : Number((variant as any)?.products?.base_price || 0),
+          notes: null,
+          sort_order: 0,
+        })
+      }
+    } catch (e) {
+      console.error('[moveStockBetweenWarehouses] auto delivery note:', e)
+    }
+
     return success({ fromAfter, toAfter })
   }
 )
@@ -419,6 +690,402 @@ export const getStockDashboardStats = protectedAction<void, { totalProducts: num
       outOfStock: outOfStock.count || 0,
       pendingOrders: pendingOrders.count || 0,
     })
+  }
+)
+
+/** Número de traspasos con status = requested (pendientes de aprobar). Sin permiso explícito para que el badge del sidebar funcione. */
+export async function getPendingTransfersCount() {
+  try {
+    const { createServerSupabaseClient } = await import('@/lib/supabase/server')
+    const supabase = await createServerSupabaseClient()
+    const { count, error } = await supabase
+      .from('stock_transfers')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'requested')
+    if (error) return { success: false as const, data: 0 }
+    return { success: true as const, data: count ?? 0 }
+  } catch {
+    return { success: false as const, data: 0 }
+  }
+}
+
+export const listTransferCandidates = protectedAction<
+  { warehouseId: string; category?: 'all' | 'sastreria' | 'boutique' | 'tejidos'; search?: string; limit?: number },
+  any[]
+>(
+  { permission: ['products.view', 'stock.view'], auditModule: 'stock' },
+  async (ctx, { warehouseId, category = 'all', search, limit = 300 }) => {
+    if (!warehouseId) return failure('Almacén de origen obligatorio', 'VALIDATION')
+    const max = Math.min(Math.max(Number(limit) || 300, 1), 1500)
+
+    const { data: levels, error: levelsError } = await ctx.adminClient
+      .from('stock_levels')
+      .select('product_variant_id, quantity, reserved')
+      .eq('warehouse_id', warehouseId)
+      .gt('quantity', 0)
+
+    if (levelsError) return failure(levelsError.message || 'Error al cargar stock de origen', 'INTERNAL')
+    if (!levels?.length) return success([])
+
+    const stockMap = new Map<string, number>()
+    for (const l of levels) {
+      const available = Math.max(0, Number((l as any).quantity || 0) - Number((l as any).reserved || 0))
+      if (available > 0) stockMap.set(String((l as any).product_variant_id), available)
+    }
+    const variantIds = Array.from(stockMap.keys())
+    if (!variantIds.length) return success([])
+
+    const { data: variants, error: variantError } = await ctx.adminClient
+      .from('product_variants')
+      .select(`
+        id, variant_sku, product_id, is_active,
+        products!inner(id, sku, name, product_type, is_active)
+      `)
+      .in('id', variantIds)
+      .eq('is_active', true)
+      .eq('products.is_active', true)
+
+    if (variantError) return failure(variantError.message || 'Error al cargar variantes', 'INTERNAL')
+
+    const s = (search || '').trim().toLowerCase()
+    const rows = (variants || [])
+      .map((v: any) => ({
+        product_variant_id: v.id,
+        variant_sku: v.variant_sku || '',
+        product_id: v.product_id,
+        product_sku: v.products?.sku || '',
+        product_name: v.products?.name || '',
+        product_type: v.products?.product_type || '',
+        available: stockMap.get(String(v.id)) || 0,
+      }))
+      .filter((r: any) => r.available > 0)
+      .filter((r: any) => {
+        if (category === 'boutique') return r.product_type === 'boutique'
+        if (category === 'tejidos') return r.product_type === 'tailoring_fabric'
+        if (category === 'sastreria') return !['boutique', 'tailoring_fabric'].includes(r.product_type)
+        return true
+      })
+      .filter((r: any) => {
+        if (!s) return true
+        return `${r.product_name} ${r.product_sku} ${r.variant_sku}`.toLowerCase().includes(s)
+      })
+      .sort((a: any, b: any) => `${a.product_name} ${a.variant_sku}`.localeCompare(`${b.product_name} ${b.variant_sku}`))
+
+    return success(rows.slice(0, max))
+  }
+)
+
+export const createStockTransfer = protectedAction<
+  {
+    from_warehouse_id: string
+    to_warehouse_id: string
+    notes?: string | null
+    lines: Array<{ product_variant_id: string; quantity_requested: number }>
+  },
+  { id: string; transfer_number: string; lines: number }
+>(
+  {
+    permission: 'products.edit',
+    auditModule: 'stock',
+    auditAction: 'create',
+    auditEntity: 'stock_transfer',
+    revalidate: ['/admin/stock'],
+  },
+  async (ctx, input) => {
+    const fromWarehouseId = String(input.from_warehouse_id || '').trim()
+    const toWarehouseId = String(input.to_warehouse_id || '').trim()
+    if (!fromWarehouseId || !toWarehouseId) return failure('Debes seleccionar almacén origen y destino', 'VALIDATION')
+    if (fromWarehouseId === toWarehouseId) return failure('Origen y destino deben ser distintos', 'VALIDATION')
+
+    const grouped = new Map<string, number>()
+    for (const line of input.lines || []) {
+      const variantId = String(line.product_variant_id || '').trim()
+      const qty = Number(line.quantity_requested)
+      if (!variantId || !Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) continue
+      grouped.set(variantId, (grouped.get(variantId) || 0) + qty)
+    }
+    if (!grouped.size) return failure('Debes añadir al menos una línea válida', 'VALIDATION')
+
+    const { data: warehouses, error: whError } = await ctx.adminClient
+      .from('warehouses')
+      .select('id')
+      .in('id', [fromWarehouseId, toWarehouseId])
+      .eq('is_active', true)
+    if (whError) return failure(whError.message || 'Error al validar almacenes', 'INTERNAL')
+    if ((warehouses || []).length < 2) return failure('Almacén origen o destino no válido', 'VALIDATION')
+
+    const variantIds = Array.from(grouped.keys())
+    const { data: levels, error: levelsError } = await ctx.adminClient
+      .from('stock_levels')
+      .select('product_variant_id, quantity, reserved')
+      .eq('warehouse_id', fromWarehouseId)
+      .in('product_variant_id', variantIds)
+
+    if (levelsError) return failure(levelsError.message || 'Error al validar stock de origen', 'INTERNAL')
+
+    const availableMap = new Map<string, number>()
+    for (const row of levels || []) {
+      const available = Math.max(0, Number((row as any).quantity || 0) - Number((row as any).reserved || 0))
+      availableMap.set(String((row as any).product_variant_id), available)
+    }
+    for (const [variantId, requested] of grouped.entries()) {
+      const available = availableMap.get(variantId) || 0
+      if (available < requested) {
+        return failure(`Stock insuficiente para variante ${variantId}: disponible ${available}, solicitado ${requested}`, 'CONFLICT')
+      }
+    }
+
+    const transferNumber = await getNextNumber('stock_transfers', 'transfer_number', 'TRF')
+    const { data: transfer, error: transferError } = await ctx.adminClient
+      .from('stock_transfers')
+      .insert({
+        transfer_number: transferNumber,
+        from_warehouse_id: fromWarehouseId,
+        to_warehouse_id: toWarehouseId,
+        status: 'requested',
+        requested_by: ctx.userId,
+        notes: (input.notes || '').trim() || null,
+      })
+      .select('id, transfer_number')
+      .single()
+
+    if (transferError || !transfer?.id) {
+      return failure(transferError?.message || 'Error al crear el traspaso', 'INTERNAL')
+    }
+
+    const linesPayload = Array.from(grouped.entries()).map(([productVariantId, quantityRequested]) => ({
+      transfer_id: transfer.id,
+      product_variant_id: productVariantId,
+      quantity_requested: quantityRequested,
+      quantity_sent: 0,
+      quantity_received: 0,
+    }))
+    const { error: linesError } = await ctx.adminClient.from('stock_transfer_lines').insert(linesPayload)
+    if (linesError) {
+      await ctx.adminClient.from('stock_transfers').delete().eq('id', transfer.id)
+      return failure(linesError.message || 'Error al crear líneas de traspaso', 'INTERNAL')
+    }
+
+    return success({ id: transfer.id, transfer_number: transfer.transfer_number, lines: linesPayload.length })
+  }
+)
+
+/** Listado de traspasos para la pestaña Traspasos (filtro por status). */
+export const listStockTransfers = protectedAction<
+  { status?: string; page?: number; pageSize?: number },
+  { data: any[]; total: number }
+>(
+  { permission: 'products.view', auditModule: 'stock' },
+  async (ctx, { status = 'requested', page = 0, pageSize = 20 }) => {
+    const from = page * pageSize
+    const to = from + pageSize - 1
+    let query = ctx.adminClient
+      .from('stock_transfers')
+      .select(
+        `
+        id, transfer_number, from_warehouse_id, to_warehouse_id, status, requested_by, approved_by, approved_at, notes, created_at,
+        from_warehouse:warehouses!from_warehouse_id ( id, name, code ),
+        to_warehouse:warehouses!to_warehouse_id ( id, name, code ),
+        profiles!requested_by ( full_name ),
+        delivery_notes ( id )
+        `,
+        { count: 'exact' }
+      )
+      .order('created_at', { ascending: false })
+      .range(from, to)
+    if (status && status !== 'all') query = query.eq('status', status)
+    const { data, count, error } = await query
+    if (error) {
+      console.error('[listStockTransfers]', error)
+      return failure(error.message || 'Error al cargar traspasos', 'INTERNAL')
+    }
+    const rows = (data ?? []).map((t: any) => ({
+      ...t,
+      requested_by_name: t.profiles?.full_name,
+      delivery_note_id: t.delivery_notes?.[0]?.id ?? null,
+    }))
+    return success({ data: rows, total: count ?? 0 })
+  }
+)
+
+/** Aprobar un traspaso (status → approved). Mueve el stock y registra movimientos (transfer_out/transfer_in). */
+export const approveStockTransfer = protectedAction<{ id: string }, void>(
+  { permission: 'products.edit', auditModule: 'stock' },
+  async (ctx, { id }) => {
+    const profileId = ctx.userId
+    if (!profileId) return failure('No hay sesión', 'UNAUTHORIZED')
+    const { data: transfer, error: transferError } = await ctx.adminClient
+      .from('stock_transfers')
+      .select('id, requested_by, status, from_warehouse_id, to_warehouse_id, transfer_number, notes')
+      .eq('id', id)
+      .single()
+    if (transferError || !transfer) return failure('Traspaso no encontrado', 'NOT_FOUND')
+    if ((transfer as any).status !== 'requested') return failure('Este traspaso ya no está pendiente de aprobación', 'CONFLICT')
+    if ((transfer as any).requested_by === profileId) {
+      return failure('No puedes aprobar un traspaso solicitado por ti mismo', 'FORBIDDEN')
+    }
+    const fromWarehouseId = (transfer as any).from_warehouse_id
+    const toWarehouseId = (transfer as any).to_warehouse_id
+    const reasonText = ((transfer as any).notes || '').trim() || `Traspaso ${(transfer as any).transfer_number || id}`
+    const requestedBy = (transfer as any).requested_by ?? null
+
+    const { data: lines, error: linesError } = await ctx.adminClient
+      .from('stock_transfer_lines')
+      .select('product_variant_id, quantity_requested, quantity_sent')
+      .eq('transfer_id', id)
+    if (linesError || !lines?.length) return failure('No hay líneas en el traspaso', 'VALIDATION')
+
+    const variantIds = [...new Set((lines as any[]).map((l: any) => l.product_variant_id))]
+    const { data: fromLevels } = await ctx.adminClient
+      .from('stock_levels')
+      .select('product_variant_id, id, quantity')
+      .eq('warehouse_id', fromWarehouseId)
+      .in('product_variant_id', variantIds)
+    const fromMap = new Map((fromLevels || []).map((r: any) => [r.product_variant_id, { id: r.id, quantity: Number(r.quantity || 0) }]))
+
+    for (const line of lines as any[]) {
+      const qty = Number(line.quantity_sent) > 0 ? Number(line.quantity_sent) : Number(line.quantity_requested || 0)
+      if (qty <= 0) continue
+      const fromLevel = fromMap.get(line.product_variant_id)
+      if (!fromLevel) return failure(`Sin stock en origen para variante ${line.product_variant_id}`, 'CONFLICT')
+      if (fromLevel.quantity < qty) return failure(`Stock insuficiente en origen para variante ${line.product_variant_id}: disponible ${fromLevel.quantity}, solicitado ${qty}`, 'CONFLICT')
+    }
+
+    for (const line of lines as any[]) {
+      const variantId = (line as any).product_variant_id
+      const quantity = Number((line as any).quantity_sent) > 0 ? Number((line as any).quantity_sent) : Number((line as any).quantity_requested || 0)
+      if (quantity <= 0) continue
+
+      const fromLevel = fromMap.get(variantId)!
+      const { data: toLevelExisting } = await ctx.adminClient
+        .from('stock_levels')
+        .select('id, quantity')
+        .eq('product_variant_id', variantId)
+        .eq('warehouse_id', toWarehouseId)
+        .single()
+      let toLevel: { id: string; quantity: number }
+      if (toLevelExisting) {
+        toLevel = { id: (toLevelExisting as any).id, quantity: Number((toLevelExisting as any).quantity || 0) }
+      } else {
+        const { data: newLevel, error: insertErr } = await ctx.adminClient
+          .from('stock_levels')
+          .insert({ product_variant_id: variantId, warehouse_id: toWarehouseId, quantity: 0, reserved: 0 })
+          .select('id, quantity')
+          .single()
+        if (insertErr || !newLevel) return failure('Error al crear stock en almacén destino', 'INTERNAL')
+        toLevel = { id: (newLevel as any).id, quantity: 0 }
+      }
+
+      const fromBefore = fromLevel.quantity
+      const fromAfter = fromBefore - quantity
+      const toBefore = toLevel.quantity
+      const toAfter = toBefore + quantity
+
+      const { error: movError } = await ctx.adminClient.from('stock_movements').insert([
+        { product_variant_id: variantId, warehouse_id: fromWarehouseId, movement_type: 'transfer_out', quantity: -quantity, stock_before: fromBefore, stock_after: fromAfter, reason: reasonText, created_by: requestedBy },
+        { product_variant_id: variantId, warehouse_id: toWarehouseId, movement_type: 'transfer_in', quantity, stock_before: toBefore, stock_after: toAfter, reason: reasonText, created_by: profileId },
+      ])
+      if (movError) {
+        console.error('[approveStockTransfer] stock_movements:', movError)
+        return failure(movError.message || 'Error al registrar movimientos de stock', 'INTERNAL')
+      }
+      await ctx.adminClient.from('stock_levels').update({ quantity: fromAfter, last_movement_at: new Date().toISOString() }).eq('id', fromLevel.id)
+      await ctx.adminClient.from('stock_levels').update({ quantity: toAfter, last_movement_at: new Date().toISOString() }).eq('id', toLevel.id)
+      fromMap.set(variantId, { id: fromLevel.id, quantity: fromAfter })
+    }
+
+    const { error } = await ctx.adminClient
+      .from('stock_transfers')
+      .update({
+        status: 'approved',
+        approved_by: profileId,
+        approved_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('status', 'requested')
+    if (error) return failure(error.message || 'Error al aprobar traspaso', 'INTERNAL')
+
+    // Generar albarán automático al aprobar traspaso solicitado.
+    // Si falla, no revierte la aprobación.
+    try {
+      const { data: existing } = await ctx.adminClient
+        .from('delivery_notes')
+        .select('id')
+        .eq('stock_transfer_id', id)
+        .limit(1)
+        .maybeSingle()
+      if (!existing?.id) {
+        const { data: transferData } = await ctx.adminClient
+          .from('stock_transfers')
+          .select('id, from_warehouse_id, to_warehouse_id, notes, warehouses!from_warehouse_id(store_id)')
+          .eq('id', id)
+          .single()
+        if (transferData) {
+          const number = await generateDeliveryNoteNumberSafe(ctx.adminClient)
+          const { data: note, error: noteErr } = await ctx.adminClient
+            .from('delivery_notes')
+            .insert({
+              store_id: (transferData as any)?.warehouses?.store_id || null,
+              number,
+              type: 'traspaso',
+              status: 'confirmado',
+              from_warehouse_id: (transferData as any).from_warehouse_id,
+              to_warehouse_id: (transferData as any).to_warehouse_id,
+              stock_transfer_id: id,
+              notes: (transferData as any).notes || null,
+              confirmed_at: new Date().toISOString(),
+              created_by: ctx.userId !== 'system' ? ctx.userId : null,
+            })
+            .select('id')
+            .single()
+
+          if (!noteErr && note?.id) {
+            const { data: lines } = await ctx.adminClient
+              .from('stock_transfer_lines')
+              .select('product_variant_id, quantity_requested, quantity_sent, product_variants(variant_sku, products(name, sku, base_price), price_override)')
+              .eq('transfer_id', id)
+            if (lines?.length) {
+              const payload = lines
+                .map((l: any, idx: number) => ({
+                  delivery_note_id: note.id,
+                  product_variant_id: l.product_variant_id,
+                  product_name: l.product_variants?.products?.name ?? null,
+                  sku: l.product_variants?.variant_sku ?? l.product_variants?.products?.sku ?? null,
+                  quantity: Number(l.quantity_sent) > 0 ? Number(l.quantity_sent) : Number(l.quantity_requested || 0),
+                  unit_price: l.product_variants?.price_override != null
+                    ? Number(l.product_variants.price_override)
+                    : Number(l.product_variants?.products?.base_price || 0),
+                  sort_order: idx,
+                }))
+                .filter((x: any) => x.quantity > 0)
+              if (payload.length) await ctx.adminClient.from('delivery_note_lines').insert(payload)
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[approveStockTransfer] auto delivery note:', e)
+    }
+
+    return success(undefined)
+  }
+)
+
+/** Rechazar/cancelar un traspaso (status → cancelled). */
+export const rejectStockTransfer = protectedAction<{ id: string }, void>(
+  { permission: 'products.edit', auditModule: 'stock' },
+  async (ctx, { id }) => {
+    const { error } = await ctx.adminClient
+      .from('stock_transfers')
+      .update({
+        status: 'cancelled',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('status', 'requested')
+    if (error) return failure(error.message || 'Error al rechazar traspaso', 'INTERNAL')
+    return success(undefined)
   }
 )
 

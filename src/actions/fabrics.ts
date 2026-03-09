@@ -26,6 +26,46 @@ export const listFabrics = protectedAction<{ search?: string; limit?: number }, 
   }
 )
 
+/** Lista tejidos de un proveedor concreto (admin client, sin problemas de RLS en cliente). */
+export const listFabricsBySupplier = protectedAction<
+  { supplierId: string; limit?: number },
+  { data: any[] }
+>(
+  { permission: 'suppliers.create_order', auditModule: 'stock' },
+  async (ctx, { supplierId, limit = 300 }) => {
+    if (!supplierId?.trim()) return failure('Proveedor obligatorio', 'VALIDATION')
+    const normalizedSupplierId = supplierId.trim()
+    const { data, error } = await ctx.adminClient
+      .from('fabrics')
+      .select('id, fabric_code, name, composition, color_name, supplier_id, is_active, status')
+      .eq('supplier_id', normalizedSupplierId)
+      .eq('is_active', true)
+      .order('name', { ascending: true })
+      .limit(Math.min(limit, 500))
+    if (error) {
+      console.error('[listFabricsBySupplier] error', {
+        supplierId: normalizedSupplierId,
+        message: error.message,
+        code: (error as any)?.code,
+      })
+      return failure(error.message || 'No se pudieron cargar los tejidos')
+    }
+
+    if (!data || data.length === 0) {
+      const { count: totalForSupplier } = await ctx.adminClient
+        .from('fabrics')
+        .select('*', { count: 'exact', head: true })
+        .eq('supplier_id', normalizedSupplierId)
+      console.warn('[listFabricsBySupplier] sin resultados activos', {
+        supplierId: normalizedSupplierId,
+        totalForSupplier: totalForSupplier ?? 0,
+      })
+    }
+
+    return success({ data: data || [] })
+  }
+)
+
 /** Obtiene un tejido por id. */
 export const getFabric = protectedAction<string, any>(
   { permission: 'stock.view', auditModule: 'stock' },
@@ -67,6 +107,7 @@ export const createFabricAction = protectedAction<
     revalidate: ['/admin/stock'],
   },
   async (ctx, input) => {
+    if (!input.supplier_id?.trim()) return failure('Proveedor obligatorio', 'VALIDATION')
     const { data, error } = await ctx.adminClient
       .from('fabrics')
       .insert({
@@ -83,10 +124,19 @@ export const createFabricAction = protectedAction<
         min_stock_meters: input.min_stock_meters ?? null,
         warehouse_id: input.warehouse_id || null,
         status: input.status || 'active',
+        is_active: true,
       })
       .select()
       .single()
-    if (error) return failure(error.message)
+    if (error) {
+      console.error('[createFabricAction] error al crear tejido', {
+        supplier_id: input.supplier_id,
+        name: input.name,
+        message: error.message,
+        code: (error as any)?.code,
+      })
+      return failure(error.message)
+    }
     return success(data)
   }
 )

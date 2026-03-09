@@ -604,6 +604,7 @@ export const supplierOrders = pgTable('supplier_orders', {
   emailConfirmedAt: timestamp('email_confirmed_at', { withTimezone: true }),
   internalNotes: text('internal_notes'),
   supplierNotes: text('supplier_notes'),
+  stockUpdatedAt: timestamp('stock_updated_at', { withTimezone: true }),
   tailoringOrderId: uuid('tailoring_order_id'),
   createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -684,9 +685,12 @@ export const productTypeEnum = pgEnum('product_type', ['boutique', 'tailoring_fa
 export const stockMovementTypeEnum = pgEnum('stock_movement_type', [
   'purchase', 'sale', 'return', 'transfer_in', 'transfer_out',
   'adjustment_positive', 'adjustment_negative', 'inventory',
-  'reservation', 'reservation_release', 'initial',
+  'reservation', 'reservation_release', 'initial', 'purchase_receipt',
 ])
 export const transferStatusEnum = pgEnum('transfer_status', ['requested', 'approved', 'in_transit', 'received', 'cancelled'])
+export const deliveryNoteTypeEnum = pgEnum('delivery_note_type', ['traspaso', 'entrada_stock', 'salida_stock', 'ajuste'])
+export const deliveryNoteStatusEnum = pgEnum('delivery_note_status', ['borrador', 'confirmado', 'anulado'])
+export const supplierDeliveryNoteStatusEnum = pgEnum('supplier_delivery_note_status', ['pendiente', 'recibido', 'incidencia'])
 export const tailoringOrderTypeEnum = pgEnum('tailoring_order_type', ['artesanal', 'industrial'])
 export const tailoringOrderStatusEnum = pgEnum('tailoring_order_status', [
   'created', 'fabric_ordered', 'fabric_received', 'factory_ordered',
@@ -837,6 +841,62 @@ export const stockTransferLines = pgTable('stock_transfer_lines', {
   quantityReceived: integer('quantity_received').default(0),
   notes: text('notes'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const deliveryNotes = pgTable('delivery_notes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  storeId: uuid('store_id').references(() => stores.id, { onDelete: 'set null' }),
+  number: varchar('number', { length: 20 }).notNull().unique(),
+  type: deliveryNoteTypeEnum('type').notNull(),
+  status: deliveryNoteStatusEnum('status').default('borrador').notNull(),
+  fromWarehouseId: uuid('from_warehouse_id').references(() => warehouses.id, { onDelete: 'set null' }),
+  toWarehouseId: uuid('to_warehouse_id').references(() => warehouses.id, { onDelete: 'set null' }),
+  stockTransferId: uuid('stock_transfer_id').references(() => stockTransfers.id, { onDelete: 'set null' }),
+  notes: text('notes'),
+  confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+  createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const deliveryNoteLines = pgTable('delivery_note_lines', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  deliveryNoteId: uuid('delivery_note_id').notNull().references(() => deliveryNotes.id, { onDelete: 'cascade' }),
+  productVariantId: uuid('product_variant_id').references(() => productVariants.id, { onDelete: 'set null' }),
+  productName: varchar('product_name', { length: 200 }),
+  sku: varchar('sku', { length: 100 }),
+  quantity: integer('quantity').notNull(),
+  unitPrice: decimal('unit_price', { precision: 10, scale: 2 }),
+  notes: text('notes'),
+  sortOrder: integer('sort_order').default(0),
+})
+
+export const supplierDeliveryNotes = pgTable('supplier_delivery_notes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  storeId: uuid('store_id').references(() => stores.id, { onDelete: 'set null' }),
+  supplierId: uuid('supplier_id').references(() => suppliers.id, { onDelete: 'set null' }),
+  supplierOrderId: uuid('supplier_order_id').references(() => supplierOrders.id, { onDelete: 'set null' }),
+  supplierReference: varchar('supplier_reference', { length: 50 }),
+  deliveryDate: date('delivery_date'),
+  status: supplierDeliveryNoteStatusEnum('status').default('pendiente').notNull(),
+  attachmentUrl: text('attachment_url'),
+  notes: text('notes'),
+  createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const supplierDeliveryNoteLines = pgTable('supplier_delivery_note_lines', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  supplierDeliveryNoteId: uuid('supplier_delivery_note_id').notNull().references(() => supplierDeliveryNotes.id, { onDelete: 'cascade' }),
+  productId: uuid('product_id').references(() => products.id, { onDelete: 'set null' }),
+  fabricId: uuid('fabric_id').references(() => fabrics.id, { onDelete: 'set null' }),
+  productName: varchar('product_name', { length: 200 }),
+  reference: varchar('reference', { length: 100 }),
+  quantityOrdered: integer('quantity_ordered'),
+  quantityReceived: integer('quantity_received'),
+  unitPrice: decimal('unit_price', { precision: 10, scale: 2 }),
+  notes: text('notes'),
 })
 
 export const inventories = pgTable('inventories', {

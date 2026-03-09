@@ -183,13 +183,14 @@ export async function updateSession(request: NextRequest) {
   }
 
   // Ruta /admin: si el usuario tiene solo rol sastre/sastre_plus → redirigir a /sastre; si solo vendedor → /vendedor
-  // Excepciones: vendedor_avanzado puede acceder a /admin/stock/codigos-barras; todos los vendedores a /admin/calendario
+  // Excepciones: vendedor_avanzado puede acceder a /admin/stock/codigos-barras, /admin/stock/productos (crear/editar); todos los vendedores a /admin/calendario
   if (user && isAdminRoute) {
     const roleNames = await getUserRoles(request)
     const hasSastreRole = roleNames.some((n: string) => SASTRE_ROLES.includes(n))
     const hasVendedorRole = roleNames.some((n: string) => VENDEDOR_ROLES.includes(n))
     const isVendedorAvanzado = roleNames.includes('vendedor_avanzado')
     const isCodigosBarrasRoute = pathname.startsWith('/admin/stock/codigos-barras')
+    const isProductosRoute = pathname.startsWith('/admin/stock/productos')
     const isCalendarioRoute = pathname.startsWith('/admin/calendario')
     if (hasSastreRole) {
       const url = request.nextUrl.clone()
@@ -199,7 +200,7 @@ export async function updateSession(request: NextRequest) {
       setSecurityHeaders(redirectRes)
       return redirectRes
     }
-    if (hasVendedorRole && !(isVendedorAvanzado && isCodigosBarrasRoute) && !isCalendarioRoute) {
+    if (hasVendedorRole && !(isVendedorAvanzado && (isCodigosBarrasRoute || isProductosRoute)) && !isCalendarioRoute) {
       const url = request.nextUrl.clone()
       url.pathname = '/vendedor'
       const redirectRes = NextResponse.redirect(url)

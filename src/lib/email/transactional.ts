@@ -24,7 +24,7 @@ function wrapInLayout(content: string): string {
 }
 
 async function send(to: string, subject: string, html: string) {
-  if (!process.env.RESEND_API_KEY) return
+  if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY no configurada')
   const admin = createAdminClient()
   try {
     const result = await sendEmail({
@@ -42,14 +42,48 @@ async function send(to: string, subject: string, html: string) {
     })
   } catch (e: unknown) {
     const errMsg = e instanceof Error ? e.message : 'Unknown error'
-    await admin.from('email_logs').insert({
-      recipient_email: to,
-      subject,
-      status: 'failed',
-      email_type: 'transactional',
-      error_message: errMsg,
-    })
+    try {
+      await admin.from('email_logs').insert({
+        recipient_email: to,
+        subject,
+        status: 'failed',
+        email_type: 'transactional',
+        error_message: errMsg,
+      })
+    } catch { /* ignorar error de log */ }
+    throw e
   }
+}
+
+export async function sendEstimateEmail(params: {
+  to: string
+  clientName: string
+  estimateNumber: string
+  total: number
+  validUntil: string
+  pdfUrl: string | null
+  companyName: string
+}) {
+  const { to, clientName, estimateNumber, total, validUntil, pdfUrl, companyName } = params
+  const totalStr = total.toFixed(2).replace('.', ',')
+  const ctaBlock = pdfUrl
+    ? `
+    <div style="text-align:center;margin:30px 0;">
+      <a href="${pdfUrl}" style="background:#1a2744;color:#ffffff;padding:12px 32px;border-radius:8px;text-decoration:none;font-size:14px;letter-spacing:1px;">DESCARGAR PRESUPUESTO</a>
+    </div>
+    `
+    : `
+    <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:16px;margin:20px 0;">
+      <p style="color:#92400e;font-size:13px;margin:0;">El PDF del presupuesto se generará próximamente. Le contactaremos cuando esté disponible.</p>
+    </div>
+    `
+  await send(to, `Presupuesto ${estimateNumber} de ${companyName}`, `
+    <h2 style="color:#1a2744;margin:0 0 16px;">Presupuesto ${estimateNumber}</h2>
+    <p style="color:#6b7280;">Estimado/a ${clientName},</p>
+    <p style="color:#6b7280;">Le enviamos el presupuesto <strong style="color:#1a2744;">${estimateNumber}</strong> por un importe de <strong>${totalStr} €</strong>, válido hasta <strong>${validUntil}</strong>.</p>
+    ${ctaBlock}
+    <p style="color:#6b7280;">Si tiene alguna pregunta, no dude en contactarnos.</p>
+  `)
 }
 
 export async function sendOrderConfirmation(order: {

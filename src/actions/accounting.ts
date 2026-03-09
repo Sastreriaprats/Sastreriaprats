@@ -4,6 +4,7 @@ import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { generateInvoicePdf } from '@/lib/pdf/invoice-pdf'
 import { generateEstimatePdf } from '@/lib/pdf/estimate-pdf'
+import { sendEstimateEmail } from '@/lib/email/transactional'
 import { createInvoiceJournalEntry } from '@/actions/accounting-triggers'
 
 export type AccountingSummary = {
@@ -127,6 +128,7 @@ export type EstimateRow = {
   id: string
   estimate_number: string
   client_name: string
+  client_email: string | null
   estimate_date: string
   valid_until: string | null
   total: number
@@ -142,7 +144,7 @@ export const getEstimates = protectedAction<
   async (ctx, { search, status }) => {
     let q = ctx.adminClient
       .from('estimates')
-      .select('id, estimate_number, client_name, estimate_date, valid_until, total, status, invoice_id')
+      .select('id, estimate_number, client_name, client_email, estimate_date, valid_until, total, status, invoice_id')
       .order('estimate_date', { ascending: false })
 
     if (status && status !== 'all') q = q.eq('status', status)
@@ -153,6 +155,7 @@ export const getEstimates = protectedAction<
       id: String(r.id),
       estimate_number: String(r.estimate_number ?? ''),
       client_name: String(r.client_name ?? ''),
+      client_email: (r.client_email as string) ?? null,
       estimate_date: String(r.estimate_date ?? ''),
       valid_until: (r.valid_until as string) ?? null,
       total: Number(r.total ?? 0),
@@ -899,6 +902,185 @@ export const createInvoiceFromSaleAction = protectedAction<string, { id: string;
   }
 )
 
+// ── Crear factura desde pedido de sastrería ─────────────────────────────────
+export const createInvoiceFromTailoringOrderAction = protectedAction<
+  string,
+  { id: string; invoice_number: string }
+>(
+  {
+    permission: 'accounting.manage_invoices',
+    auditModule: 'accounting',
+    auditAction: 'create',
+    auditEntity: 'invoice',
+  },
+  async (ctx, orderId) => {
+    const existing = await ctx.adminClient
+      .from('invoices')
+      .select('id, invoice_number')
+      .eq('tailoring_order_id', orderId)
+      .limit(1)
+      .maybeSingle()
+
+    if (existing.data?.id) {
+      return success({
+        id: existing.data.id as string,
+        invoice_number: (existing.data as { invoice_number: string }).invoice_number,
+      })
+    }
+
+    const { data: order, error: orderError } = await ctx.adminClient
+      .from('tailoring_orders')
+      .select('id, client_id, total, store_id')
+      .eq('id', orderId)
+      .single()
+
+    if (orderError || !order) return failure('Pedido no encontrado', 'NOT_FOUND')
+
+    const orderTotal = Number((order as { total?: number }).total ?? 0)
+    if (orderTotal <= 0) return failure('El pedido no tiene importe', 'VALIDATION')
+
+    const { data: orderLines } = await ctx.adminClient
+      .from('tailoring_order_lines')
+      .select(`
+        unit_price, discount_percentage, tax_rate, line_total, quantity,
+        line_type, configuration,
+        garment_types ( name ),
+        fabrics ( name, fabric_code ),
+        fabric_description, model_name,
+        product_variants ( size, color, products ( name ) )
+      `)
+      .eq('tailoring_order_id', orderId)
+      .order('sort_order')
+
+    let camisaIdx = 0
+    const lines = (orderLines || []).map((l: Record<string, unknown>) => {
+      const gt = (l as any).garment_types
+      const fab = (l as any).fabrics
+      const lineType = (l as any).line_type ?? ''
+      const config = (l as any).configuration ?? {}
+      const pv = (l as any).product_variants
+      let description: string
+      if (lineType === 'camiseria') {
+        camisaIdx += 1
+        description = `Camisa ${camisaIdx}`
+      } else if (lineType === 'complemento') {
+        const productName = (config.product_name as string) ?? (pv?.products?.name ?? 'Complemento')
+        const parts = [productName]
+        if (pv?.size || pv?.color) parts.push([pv.size, pv.color].filter(Boolean).join(' / '))
+        description = parts.join(' · ')
+      } else {
+        const parts = [
+          gt?.name ?? 'Prenda',
+          fab?.name || (l as any).fabric_description || '',
+          (l as any).model_name ? ` (${(l as any).model_name})` : '',
+        ].filter(Boolean)
+        description = parts.join(' – ').trim() || 'Línea de pedido'
+      }
+      const unitPrice = Number((l as any).unit_price ?? 0)
+      const qty = Math.max(1, Number((l as any).quantity) ?? 1)
+      const taxRate = Number((l as any).tax_rate ?? 21)
+      const lineTotal = Number((l as any).line_total ?? unitPrice * qty * (1 + taxRate / 100))
+      const unitPriceNoTax = lineTotal / (1 + taxRate / 100) / qty
+      return {
+        description,
+        quantity: qty,
+        unit_price: unitPriceNoTax,
+        tax_rate: taxRate,
+        line_total: lineTotal,
+      }
+    })
+
+    if (lines.length === 0) return failure('El pedido no tiene líneas para facturar', 'VALIDATION')
+
+    let clientName = 'Consumidor final'
+    let clientNif: string | null = null
+    const clientId = (order as { client_id?: string }).client_id ?? null
+    if (clientId) {
+      const { data: client } = await ctx.adminClient
+        .from('clients')
+        .select('full_name, company_name, company_nif, document_number')
+        .eq('id', clientId)
+        .single()
+      if (client) {
+        const c = client as { full_name?: string; company_name?: string; company_nif?: string; document_number?: string }
+        clientName = c.full_name || c.company_name || clientName
+        clientNif = c.company_nif || c.document_number || null
+      }
+    }
+
+    const year = new Date().getFullYear()
+    const { count } = await ctx.adminClient
+      .from('invoices')
+      .select('*', { count: 'exact', head: true })
+      .like('invoice_number', `F${year}-%`)
+    const seq = String((count ?? 0) + 1).padStart(4, '0')
+    const invoice_number = `F${year}-${seq}`
+
+    const subtotal = lines.reduce((s, l) => s + l.quantity * l.unit_price, 0)
+    const taxAmount = lines.reduce((s, l) => s + (l.line_total - l.quantity * l.unit_price), 0)
+    const total = lines.reduce((s, l) => s + l.line_total, 0)
+    const storeId = (order as { store_id?: string }).store_id ?? null
+    const today = new Date().toISOString().slice(0, 10)
+    const dueDate = new Date()
+    dueDate.setDate(dueDate.getDate() + 15)
+
+    const { data: inv, error } = await ctx.adminClient
+      .from('invoices')
+      .insert({
+        invoice_number,
+        invoice_series: 'F',
+        invoice_type: 'issued',
+        client_id: clientId,
+        client_name: clientName,
+        client_nif: clientNif,
+        company_name: 'Sastrería Prats',
+        company_nif: 'B12345678',
+        company_address: 'Madrid, España',
+        invoice_date: today,
+        due_date: dueDate.toISOString().slice(0, 10),
+        subtotal,
+        tax_rate: 21,
+        tax_amount: taxAmount,
+        irpf_rate: 0,
+        irpf_amount: 0,
+        total,
+        status: 'issued',
+        tailoring_order_id: orderId,
+        store_id: storeId,
+        created_by: ctx.userId,
+      })
+      .select('id')
+      .single()
+
+    if (error || !inv) {
+      console.error('Error creating invoice from tailoring order:', error)
+      return failure(error?.message ?? 'Error al crear la factura')
+    }
+
+    const { error: linesError } = await ctx.adminClient
+      .from('invoice_lines')
+      .insert(
+        lines.map((l, i) => ({
+          invoice_id: inv.id,
+          description: l.description,
+          quantity: l.quantity,
+          unit_price: l.unit_price,
+          tax_rate: l.tax_rate ?? 21,
+          line_total: l.line_total,
+          sort_order: i,
+        }))
+      )
+
+    if (linesError) {
+      console.error('Error creating invoice lines from tailoring order:', linesError)
+      return failure(linesError.message ?? 'Error al crear las líneas')
+    }
+
+    createInvoiceJournalEntry(inv.id as string).catch((e) => console.error('Journal entry from tailoring order invoice:', e))
+    return success({ id: inv.id as string, invoice_number })
+  }
+)
+
 // ── Editar factura borrador ───────────────────────────────────────────────────
 export type UpdateInvoiceInput = CreateInvoiceInput & { id: string }
 
@@ -995,6 +1177,7 @@ export type CreateEstimateInput = {
   client_id: string | null
   client_name: string
   client_nif: string | null
+  client_email: string | null
   estimate_date: string
   valid_until: string | null
   subtotal: number
@@ -1035,8 +1218,9 @@ export const createEstimateAction = protectedAction<CreateEstimateInput, { id: s
         estimate_number,
         estimate_series: 'PRES',
         client_id: input.client_id || null,
-        client_name: input.client_name,
+        client_name: input.client_name?.trim() || '',
         client_nif: input.client_nif || null,
+        client_email: input.client_email?.trim() || null,
         company_name: 'Sastrería Prats',
         company_nif: 'B12345678',
         company_address: 'Madrid, España',
@@ -1081,6 +1265,204 @@ export const createEstimateAction = protectedAction<CreateEstimateInput, { id: s
     }
 
     return success({ id: est.id as string, estimate_number })
+  }
+)
+
+export const updateEstimateAction = protectedAction<
+  { estimateId: string; client_email?: string | null },
+  undefined
+>(
+  {
+    permission: 'accounting.edit',
+    auditModule: 'accounting',
+    auditAction: 'update',
+    auditEntity: 'estimate',
+    revalidate: ['/admin/contabilidad'],
+  },
+  async (ctx, { estimateId, client_email }) => {
+    const { data: est } = await ctx.adminClient.from('estimates').select('id').eq('id', estimateId).single()
+    if (!est) return failure('Presupuesto no encontrado')
+
+    const { error } = await ctx.adminClient
+      .from('estimates')
+      .update({ client_email: client_email?.trim() || null })
+      .eq('id', estimateId)
+    if (error) return failure(error.message)
+    return success(undefined)
+  }
+)
+
+// ── Presupuesto: enviar, aceptar, rechazar, convertir a factura ─────────────────
+
+export const sendEstimateAction = protectedAction<{ estimateId: string }, undefined>(
+  {
+    permission: 'accounting.edit',
+    auditModule: 'accounting',
+    auditAction: 'state_change',
+    auditEntity: 'estimate',
+    revalidate: ['/admin/contabilidad'],
+  },
+  async (ctx, { estimateId }) => {
+    const { data: est } = await ctx.adminClient
+      .from('estimates')
+      .select('id, status, estimate_number, client_name, client_email, total, valid_until, pdf_url, company_name')
+      .eq('id', estimateId)
+      .single()
+
+    if (!est) return failure('Presupuesto no encontrado')
+    if ((est as { status?: string }).status !== 'draft') return failure('Solo se pueden enviar presupuestos en borrador')
+
+    const email = (est as { client_email?: string }).client_email?.trim()
+    if (!email) {
+      return failure('El presupuesto no tiene email de cliente. Edita el presupuesto y añade el email antes de enviarlo.')
+    }
+
+    let pdfUrl = (est as { pdf_url?: string }).pdf_url
+    if (!pdfUrl) {
+      try {
+        pdfUrl = await generateEstimatePdf(estimateId)
+      } catch (e) {
+        console.error('[sendEstimateAction] Error generando PDF:', e)
+        pdfUrl = null
+      }
+    }
+
+    const total = Number((est as { total?: number }).total ?? 0)
+    const rawValidUntil = (est as { valid_until?: string }).valid_until
+    const validUntil = rawValidUntil
+      ? new Date(rawValidUntil).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      : '-'
+    const companyName = String((est as { company_name?: string }).company_name ?? 'Sastrería Prats')
+
+    try {
+      await sendEstimateEmail({
+        to: email,
+        clientName: String((est as { client_name?: string }).client_name ?? ''),
+        estimateNumber: String((est as { estimate_number?: string }).estimate_number ?? ''),
+        total,
+        validUntil,
+        pdfUrl: pdfUrl || null,
+        companyName,
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Error desconocido'
+      return failure('No se pudo enviar el email: ' + msg)
+    }
+
+    const { error } = await ctx.adminClient.from('estimates').update({ status: 'sent' }).eq('id', estimateId)
+    if (error) return failure(error.message)
+    return success(undefined)
+  }
+)
+
+export const acceptEstimateAction = protectedAction<{ estimateId: string }, undefined>(
+  {
+    permission: 'accounting.edit',
+    auditModule: 'accounting',
+    auditAction: 'state_change',
+    auditEntity: 'estimate',
+    revalidate: ['/admin/contabilidad'],
+  },
+  async (ctx, { estimateId }) => {
+    const { data: est } = await ctx.adminClient.from('estimates').select('id, status, estimate_number').eq('id', estimateId).single()
+    if (!est) return failure('Presupuesto no encontrado')
+    if (!['sent', 'draft'].includes(est.status)) return failure('Solo se pueden aceptar presupuestos enviados o en borrador')
+
+    const { error } = await ctx.adminClient.from('estimates').update({ status: 'accepted' }).eq('id', estimateId)
+    if (error) return failure(error.message)
+    return success(undefined)
+  }
+)
+
+export const rejectEstimateAction = protectedAction<{ estimateId: string; reason?: string }, undefined>(
+  {
+    permission: 'accounting.edit',
+    auditModule: 'accounting',
+    auditAction: 'state_change',
+    auditEntity: 'estimate',
+    revalidate: ['/admin/contabilidad'],
+  },
+  async (ctx, { estimateId, reason }) => {
+    const { data: est } = await ctx.adminClient.from('estimates').select('id, status, estimate_number, notes').eq('id', estimateId).single()
+    if (!est) return failure('Presupuesto no encontrado')
+    if (!['sent', 'draft'].includes(est.status)) return failure('Solo se pueden rechazar presupuestos enviados o en borrador')
+
+    const newNotes = reason?.trim()
+      ? (est.notes ? `${est.notes}\n\nRechazado: ${reason.trim()}` : `Rechazado: ${reason.trim()}`)
+      : est.notes
+
+    const { error } = await ctx.adminClient.from('estimates').update({
+      status: 'rejected',
+      notes: newNotes ?? null,
+    }).eq('id', estimateId)
+    if (error) return failure(error.message)
+    return success(undefined)
+  }
+)
+
+export const convertEstimateToInvoiceAction = protectedAction<{ estimateId: string }, { invoiceId: string; invoice_number: string }>(
+  {
+    permission: 'accounting.edit',
+    auditModule: 'accounting',
+    auditAction: 'create',
+    auditEntity: 'invoice',
+    revalidate: ['/admin/contabilidad'],
+  },
+  async (ctx, { estimateId }) => {
+    const { data: est } = await ctx.adminClient.from('estimates').select('id, status, client_name, total, estimate_number').eq('id', estimateId).single()
+    if (!est) return failure('Presupuesto no encontrado')
+    if (est.status !== 'accepted') return failure('Solo se pueden facturar presupuestos aceptados')
+
+    const year = new Date().getFullYear()
+    const { count } = await ctx.adminClient.from('invoices').select('*', { count: 'exact', head: true }).like('invoice_number', `F${year}-%`)
+    const seq = String((count ?? 0) + 1).padStart(4, '0')
+    const invoice_number = `F${year}-${seq}`
+
+    const { data: lines } = await ctx.adminClient.from('estimate_lines').select('description, quantity, unit_price, tax_rate, total').eq('estimate_id', estimateId)
+
+    const { data: inv, error } = await ctx.adminClient.from('invoices').insert({
+      invoice_number,
+      invoice_series: 'F',
+      invoice_type: 'issued',
+      client_name: est.client_name,
+      company_name: 'Sastrería Prats',
+      company_nif: 'B12345678',
+      company_address: 'Madrid, España',
+      invoice_date: new Date().toISOString().split('T')[0],
+      subtotal: Number(est.total) / 1.21,
+      tax_rate: 21,
+      tax_amount: Number(est.total) - Number(est.total) / 1.21,
+      irpf_rate: 0,
+      irpf_amount: 0,
+      total: Number(est.total),
+      status: 'draft',
+    }).select('id').single()
+
+    if (error || !inv) return failure(error?.message ?? 'Error al crear la factura')
+
+    if (lines?.length) {
+      const { error: linesError } = await ctx.adminClient.from('invoice_lines').insert(
+        lines.map((l: Record<string, unknown>, i: number) => ({
+          invoice_id: inv.id,
+          description: String(l.description),
+          quantity: Number(l.quantity),
+          unit_price: Number(l.unit_price),
+          tax_rate: Number(l.tax_rate ?? 21),
+          line_total: Number(l.total),
+          sort_order: i,
+        }))
+      )
+      if (linesError) return failure(linesError.message)
+    }
+
+    await ctx.adminClient.from('estimates').update({
+      status: 'invoiced',
+      invoice_id: inv.id,
+      invoiced_at: new Date().toISOString(),
+    }).eq('id', estimateId)
+
+    createInvoiceJournalEntry(inv.id).catch(() => {})
+    return success({ invoiceId: inv.id as string, invoice_number })
   }
 )
 

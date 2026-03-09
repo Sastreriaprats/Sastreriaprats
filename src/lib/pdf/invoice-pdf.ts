@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, rgb, PageSizes } from 'pdf-lib'
+import { PDFDocument, StandardFonts, rgb, PageSizes, degrees } from 'pdf-lib'
 import { createAdminClient } from '@/lib/supabase/admin'
 
 const BUCKET = 'documents'
@@ -20,7 +20,8 @@ const MR = W - 45         // margen der
 
 type InvoiceRecord = {
   id: string
-  invoice_number: string
+  status: string
+  invoice_number: string | null
   client_name: string
   client_nif: string | null
   client_address: string | null
@@ -69,7 +70,7 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
 
   const { data: inv, error: invError } = await admin
     .from('invoices')
-    .select(`id, invoice_number, client_name, client_nif, client_address,
+    .select(`id, status, invoice_number, client_name, client_nif, client_address,
       company_name, company_nif, company_address,
       invoice_date, due_date, subtotal, tax_rate, tax_amount,
       irpf_rate, irpf_amount, total, notes`)
@@ -85,7 +86,9 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
     .order('sort_order', { ascending: true })
 
   const doc = await PDFDocument.create()
-  doc.setTitle(`Factura ${inv.invoice_number}`)
+  const isDraft = inv.status === 'draft'
+  console.log('[invoice-pdf] invoiceId:', invoiceId, 'status:', inv.status, 'isDraft:', isDraft)
+  doc.setTitle(isDraft ? 'Borrador factura' : `Factura ${inv.invoice_number ?? ''}`)
   doc.setAuthor('Sastrería Prats')
 
   const regular = doc.embedStandardFont(StandardFonts.Helvetica)
@@ -104,14 +107,16 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
   page.drawText('PRATS', { x: ML, y: H - 38, size: 28, font: bold, color: WHITE })
   page.drawText('SASTRERÍA', { x: ML, y: H - 54, size: 10, font: regular, color: rgb(0.7, 0.85, 1) })
 
-  // "FACTURA" a la derecha
-  page.drawText('FACTURA', { x: MR - 120, y: H - 40, size: 22, font: bold, color: WHITE })
+  // Título cabecera: BORRADOR o FACTURA según estado
+  const headerTitle = isDraft ? 'BORRADOR' : 'FACTURA'
+  page.drawText(headerTitle, { x: MR - 120, y: H - 40, size: 22, font: bold, color: WHITE })
 
   // Número en caja blanca dentro de la cabecera
   const numBoxW = 130
   const numBoxX = MR - numBoxW
+  const displayNumber = isDraft && (!invoice.invoice_number || !invoice.invoice_number.trim()) ? 'BORRADOR' : (invoice.invoice_number ?? '')
   page.drawRectangle({ x: numBoxX, y: H - HEADER_H + 8, width: numBoxW, height: 26, color: WHITE, borderColor: WHITE, borderWidth: 0 })
-  page.drawText(`Nº: ${invoice.invoice_number}`, { x: numBoxX + 8, y: H - HEADER_H + 18, size: 12, font: bold, color: BLUE })
+  page.drawText(`Nº: ${displayNumber}`, { x: numBoxX + 8, y: H - HEADER_H + 18, size: 12, font: bold, color: BLUE })
 
   let y = H - HEADER_H - 24
 
@@ -230,12 +235,27 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
   page.drawText('Sastrería Prats  ·  ' + invoice.company_nif + '  ·  ' + invoice.company_address,
     { x: ML, y: 22, size: 7, font: regular, color: LGRAY })
 
-  // ── 9. SUBIR A STORAGE ───────────────────────────────────────────────────────
+  // ── 9. MARCA DE AGUA (solo borradores) — al final para quedar por encima ───────
+  if (isDraft) {
+    page.drawText('BORRADOR', {
+      x: W / 2 - 150,
+      y: H / 2 - 20,
+      size: 70,
+      font: bold,
+      color: rgb(0.8, 0, 0),
+      opacity: 0.12,
+      rotate: degrees(45),
+    })
+  }
+
+  // ── 10. SUBIR A STORAGE ───────────────────────────────────────────────────────
   const pdfBytes = await doc.save()
 
   try { await admin.storage.createBucket(BUCKET, { public: true }) } catch { /* ya existe */ }
 
-  const slug = `invoices/${invoice.invoice_number.replace(/\//g, '-')}.pdf`
+  const slug = isDraft
+    ? `invoices/factura-borrador-${invoice.id.slice(0, 8)}-${Date.now()}.pdf`
+    : `invoices/factura-${(invoice.invoice_number ?? '').replace(/\//g, '-')}.pdf`
   const { error: uploadError } = await admin.storage.from(BUCKET).upload(slug, pdfBytes, {
     contentType: 'application/pdf',
     upsert: true,

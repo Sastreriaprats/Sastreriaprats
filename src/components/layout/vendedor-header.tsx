@@ -12,7 +12,7 @@ import { Menu, LogOut, ChevronRight, PanelLeftClose, PanelLeft } from 'lucide-re
 import { useAuth } from '@/components/providers/auth-provider'
 import { logoutAction } from '@/actions/auth'
 import { cn } from '@/lib/utils'
-import { LayoutDashboard, Users, Package, CircleDollarSign, ShoppingCart } from 'lucide-react'
+import { LayoutDashboard, Users, Package, CircleDollarSign, ShoppingCart, ClipboardList } from 'lucide-react'
 
 const breadcrumbLabels: Record<string, string> = {
   vendedor: '', clientes: 'Clientes', stock: 'Productos y Stock', cobros: 'Cobros', caja: 'Caja TPV',
@@ -24,6 +24,7 @@ const mobileNavItems = [
   { label: 'Productos y Stock', href: '/vendedor/stock', icon: Package },
   { label: 'Cobros', href: '/vendedor/cobros', icon: CircleDollarSign },
   { label: 'Caja TPV', href: '/vendedor/caja', icon: ShoppingCart },
+  { label: 'Albaranes', href: '/admin/almacen/albaranes', icon: ClipboardList },
 ]
 
 function MobileSidebar() {

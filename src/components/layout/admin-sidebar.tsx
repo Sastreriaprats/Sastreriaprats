@@ -9,7 +9,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   LayoutDashboard, Users, Scissors, Truck, UserCheck,
   CreditCard, BookOpen, Calendar, Settings, Shirt, Database,
-  Store, ShoppingBag, BarChart3, Mail, ScrollText, CircleDollarSign, Receipt,
+  Store, ShoppingBag, BarChart3, Mail, ScrollText, CircleDollarSign, Receipt, ClipboardList,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState, useEffect, useRef } from 'react'
@@ -27,7 +27,7 @@ interface NavItem {
   badge?: number
   /** Si true, no se muestra para roles vendedor_basico / vendedor_avanzado */
   hideForVendedor?: boolean
-  children?: { label: string; href: string; permission?: string; hideForVendedor?: boolean }[]
+  children?: { label: string; href: string; permission?: string; hideForVendedor?: boolean; icon?: React.ElementType }[]
 }
 
 const navItems: NavItem[] = [
@@ -50,6 +50,7 @@ const navItems: NavItem[] = [
       { label: 'Almacenes',    href: '/admin/stock?tab=almacenes', hideForVendedor: true },
       { label: 'Tejidos',      href: '/admin/stock?tab=tejidos', hideForVendedor: true },
       { label: 'Movimientos',  href: '/admin/stock?tab=movimientos', hideForVendedor: true },
+      { label: 'Albaranes',    href: '/admin/almacen/albaranes', icon: ClipboardList },
     ],
   },
   { label: 'Proveedores',  href: '/admin/proveedores',  icon: Truck,        permission: 'suppliers.view' },
@@ -236,6 +237,7 @@ export function AdminSidebar({ collapsed = false }: { collapsed?: boolean }) {
                       .map((child) => {
                         const isFacturasProveedores = child.href === '/admin/contabilidad/facturas-proveedores'
                         const childBadge = isFacturasProveedores ? overdueSupplierInvoicesCount : 0
+                        const ChildIcon = child.icon
                         return (
                           <Link
                             key={child.href}
@@ -247,7 +249,10 @@ export function AdminSidebar({ collapsed = false }: { collapsed?: boolean }) {
                                 : 'text-muted-foreground hover:text-foreground'
                             )}
                           >
-                            <span>{child.label}</span>
+                            <span className="inline-flex items-center gap-1.5">
+                              {ChildIcon ? <ChildIcon className="h-3 w-3" /> : null}
+                              {child.label}
+                            </span>
                             {childBadge > 0 && (
                               <Badge variant="destructive" className="h-4 min-w-[18px] px-1 text-[10px]">{childBadge}</Badge>
                             )}

@@ -1,13 +1,14 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { Textarea } from '@/components/ui/textarea'
-import { updateSupplierOrderStatusAction, createSupplierOrderAction } from '@/actions/suppliers'
+import { updateSupplierOrderStatusAction, createSupplierOrderAction, updateSupplierOrderFinanceAction } from '@/actions/suppliers'
+import { createSupplierDeliveryNote, uploadSupplierDeliveryNoteAttachment, upsertSupplierDeliveryNoteForOrder } from '@/actions/delivery-notes'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -21,7 +22,7 @@ import {
 } from '@/components/ui/dialog'
 import {
   ArrowLeft, User, Phone, Mail, MapPin, CreditCard, Truck,
-  AlertTriangle, ShoppingBag, Plus, Loader2,
+  AlertTriangle, ShoppingBag, Plus, Loader2, FileText,
 } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -44,6 +45,28 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
   const { can } = usePermissions()
   const [newOrderOpen, setNewOrderOpen] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [markingReceivedOrderId, setMarkingReceivedOrderId] = useState<string | null>(null)
+  const [newDeliveryOpen, setNewDeliveryOpen] = useState(false)
+  const [creatingDelivery, setCreatingDelivery] = useState(false)
+  const [uploadingOrderPdfId, setUploadingOrderPdfId] = useState<string | null>(null)
+  const [financeOpen, setFinanceOpen] = useState(false)
+  const [savingFinance, setSavingFinance] = useState(false)
+  const [financeOrderId, setFinanceOrderId] = useState<string>('')
+  const [financeForm, setFinanceForm] = useState({ total: '', payment_due_date: '', notes: '' })
+  const [uploadingDeliveryNoteId, setUploadingDeliveryNoteId] = useState<string | null>(null)
+  const [deliveryOrderId, setDeliveryOrderId] = useState<string>('')
+  const [deliveryFile, setDeliveryFile] = useState<File | null>(null)
+  const [selectedDeliveryNoteId, setSelectedDeliveryNoteId] = useState<string | null>(null)
+  const selectedDeliveryNoteIdRef = useRef<string | null>(null)
+  const [uploadedNoteUrls, setUploadedNoteUrls] = useState<Record<string, string>>({})
+  const uploadPdfInputRef = useRef<HTMLInputElement | null>(null)
+  const orderUploadInputRef = useRef<HTMLInputElement | null>(null)
+  const selectedOrderIdForUploadRef = useRef<string | null>(null)
+  const [newDeliveryForm, setNewDeliveryForm] = useState({
+    supplier_reference: '',
+    delivery_date: '',
+    notes: '',
+  })
   const [newOrderForm, setNewOrderForm] = useState({
     total: '',
     payment_due_date: '',
@@ -54,11 +77,93 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
   const contacts = supplier.supplier_contacts || []
   const fabrics = supplier.fabrics || []
   const orders = supplier.supplier_orders || []
+  const supplierDeliveryNotes = (supplier.supplier_delivery_notes_all || orders
+    .flatMap((order: any) => (order.supplier_delivery_notes || []).map((note: any) => ({
+      ...note,
+      order_id: order.id,
+      order_number: order.order_number,
+    }))))
+    .sort((a: any, b: any) => new Date(b.created_at || b.delivery_date || 0).getTime() - new Date(a.created_at || a.delivery_date || 0).getTime())
   const dueDates = supplier.supplier_due_dates || []
 
   const pendingDueDates = dueDates.filter((d: any) => !d.is_paid)
   const totalPendingDebt = pendingDueDates.reduce((sum: number, d: any) => sum + d.amount, 0)
   const overdueDates = pendingDueDates.filter((d: any) => new Date(d.due_date) < new Date())
+
+  const requestUploadForDeliveryNote = (deliveryNoteId: string) => {
+    selectedDeliveryNoteIdRef.current = deliveryNoteId
+    setSelectedDeliveryNoteId(deliveryNoteId)
+    uploadPdfInputRef.current?.click()
+  }
+
+  const handleUploadDeliveryNotePdf = async (file: File) => {
+    const targetId = selectedDeliveryNoteIdRef.current || selectedDeliveryNoteId
+    if (!targetId) {
+      toast.error('No se pudo identificar el albarán para subir el PDF')
+      return
+    }
+    setUploadingDeliveryNoteId(targetId)
+    const fd = new FormData()
+    fd.append('id', targetId)
+    fd.append('file', file)
+    console.log('[upload-albaran] id del albarán:', targetId)
+    console.log('[upload-albaran] archivo:', file?.name, file?.size, file?.type)
+    const uploaded = await uploadSupplierDeliveryNoteAttachment(fd)
+    setUploadingDeliveryNoteId(null)
+    selectedDeliveryNoteIdRef.current = null
+    setSelectedDeliveryNoteId(null)
+    if (!uploaded.success) {
+      toast.error(uploaded.error || 'No se pudo subir el PDF')
+      return
+    }
+    if (uploaded.data?.url) {
+      setUploadedNoteUrls((prev) => ({ ...prev, [targetId]: uploaded.data.url }))
+    }
+    toast.success('PDF subido correctamente')
+    router.refresh()
+  }
+
+  const requestUploadFromOrder = (orderId: string) => {
+    selectedOrderIdForUploadRef.current = orderId
+    orderUploadInputRef.current?.click()
+  }
+
+  const handleUploadOrderPdf = async (file: File) => {
+    const orderId = selectedOrderIdForUploadRef.current
+    selectedOrderIdForUploadRef.current = null
+    if (!orderId) {
+      toast.error('No se pudo identificar el pedido')
+      return
+    }
+    setUploadingOrderPdfId(orderId)
+    const upsert = await upsertSupplierDeliveryNoteForOrder({
+      supplier_id: supplier.id,
+      supplier_order_id: orderId,
+      delivery_date: new Date().toISOString().slice(0, 10),
+    })
+    if (!upsert.success || !upsert.data?.id) {
+      setUploadingOrderPdfId(null)
+      toast.error(upsert.success ? 'No se pudo preparar el albarán' : upsert.error)
+      return
+    }
+    const targetNoteId = upsert.data.id
+    const fd = new FormData()
+    fd.append('id', targetNoteId)
+    fd.append('file', file)
+    console.log('[upload-albaran] id del albarán:', targetNoteId)
+    console.log('[upload-albaran] archivo:', file?.name, file?.size, file?.type)
+    const uploaded = await uploadSupplierDeliveryNoteAttachment(fd)
+    setUploadingOrderPdfId(null)
+    if (!uploaded.success) {
+      toast.error(uploaded.error || 'No se pudo subir el PDF')
+      return
+    }
+    if (uploaded.data?.url) {
+      setUploadedNoteUrls((prev) => ({ ...prev, [targetNoteId]: uploaded.data.url }))
+    }
+    toast.success('Albarán PDF subido correctamente')
+    router.refresh()
+  }
 
   return (
     <div className="space-y-6">
@@ -93,6 +198,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
           <TabsTrigger value="info" className="gap-1"><User className="h-4 w-4" /> Info</TabsTrigger>
           <TabsTrigger value="fabrics" className="gap-1"><ShoppingBag className="h-4 w-4" /> Tejidos ({fabrics.length})</TabsTrigger>
           <TabsTrigger value="orders" className="gap-1"><Truck className="h-4 w-4" /> Pedidos ({orders.length})</TabsTrigger>
+          <TabsTrigger value="delivery-notes" className="gap-1"><FileText className="h-4 w-4" /> Albaranes ({supplierDeliveryNotes.length})</TabsTrigger>
           <TabsTrigger value="payments" className="gap-1"><CreditCard className="h-4 w-4" /> Vencimientos ({dueDates.length})</TabsTrigger>
         </TabsList>
 
@@ -171,7 +277,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                   <Button
                     onClick={() => {
                       const today = new Date().toISOString().slice(0, 10)
-                      setNewOrderForm({ total: '', payment_due_date: today, estimated_delivery_date: today, notes: '' })
+                      setNewOrderForm({ total: '', payment_due_date: '', estimated_delivery_date: today, notes: '' })
                       setNewOrderOpen(true)
                     }}
                     className="gap-2"
@@ -184,39 +290,209 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
               <Table>
                 <TableHeader><TableRow>
                   <TableHead>N&ordm; Pedido</TableHead><TableHead>Estado</TableHead><TableHead>Total</TableHead>
-                  <TableHead>Fecha</TableHead><TableHead>Fecha pago</TableHead><TableHead>Entrega est.</TableHead><TableHead className="w-28">Acciones</TableHead>
+                  <TableHead>Pago</TableHead><TableHead>Fecha</TableHead><TableHead>Fecha pago</TableHead><TableHead>Entrega est.</TableHead><TableHead className="w-28">Acciones</TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
                   {orders.length === 0 ? (
-                    <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">Sin pedidos</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">Sin pedidos</TableCell></TableRow>
                   ) : [...orders].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((o: any) => (
                     <TableRow key={o.id}>
                       <TableCell className="font-mono">{o.order_number}</TableCell>
                       <TableCell><Badge className={`text-xs ${orderStatusColors[o.status] || ''}`}>{orderStatusLabels[o.status] || o.status}</Badge></TableCell>
                       <TableCell className="font-medium">{formatCurrency(o.total)}</TableCell>
+                      <TableCell>
+                        <Badge variant={o.payment_status === 'pagado' ? 'default' : 'destructive'} className="text-xs">
+                          {o.payment_status === 'pagado' ? 'Pagado' : 'No pagado'}
+                        </Badge>
+                      </TableCell>
                       <TableCell className="text-sm">{formatDate(o.created_at)}</TableCell>
                       <TableCell className="text-sm">{o.payment_due_date ? formatDate(o.payment_due_date) : '-'}</TableCell>
                       <TableCell className="text-sm">{formatDate(o.estimated_delivery_date)}</TableCell>
                       <TableCell>
-                        {o.status !== 'received' && o.status !== 'cancelled' ? (
+                        <div className="flex flex-col gap-1">
                           <Button
                             variant="outline"
                             size="sm"
                             className="text-xs"
-                            onClick={async () => {
-                              const res = await updateSupplierOrderStatusAction({ supplierOrderId: o.id, status: 'received' })
-                              if (res?.success) router.refresh()
+                            onClick={() => {
+                              setFinanceOrderId(o.id)
+                              setFinanceForm({
+                                total: String(o.total ?? ''),
+                                payment_due_date: o.payment_due_date || '',
+                                notes: o.internal_notes || '',
+                              })
+                              setFinanceOpen(true)
                             }}
                           >
-                            Marcar recibido
+                            Completar pago/coste
                           </Button>
-                        ) : null}
+                          {o.status !== 'received' && o.status !== 'cancelled' ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-xs"
+                              disabled={markingReceivedOrderId !== null}
+                              onClick={async () => {
+                                setMarkingReceivedOrderId(o.id)
+                                const res = await updateSupplierOrderStatusAction({ supplierOrderId: o.id, status: 'received' })
+                                setMarkingReceivedOrderId(null)
+                                if (res?.success) {
+                                  const warnings = Number((res.data as any)?.stock_warnings || 0)
+                                  if (warnings > 0) {
+                                    toast.warning('Pedido recibido. Algunas líneas no actualizaron stock (sin variante asociada).')
+                                  } else {
+                                    toast.success('Pedido marcado como recibido. Stock actualizado correctamente.')
+                                  }
+                                  router.refresh()
+                                } else {
+                                  toast.error((res as any)?.error || 'No se pudo marcar el pedido como recibido')
+                                }
+                              }}
+                            >
+                              {markingReceivedOrderId === o.id ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+                              Marcar recibido
+                            </Button>
+                          ) : null}
+                          {o.supplier_delivery_notes?.[0] ? (
+                            <div className="flex gap-1">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-xs"
+                                onClick={() => router.push('/admin/almacen/albaranes?tab=proveedor')}
+                              >
+                                <FileText className="h-3 w-3 mr-1" /> Ver albarán
+                              </Button>
+                              {o.supplier_delivery_notes?.[0]?.attachment_url && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="text-xs"
+                                  onClick={() => window.open(o.supplier_delivery_notes[0].attachment_url, '_blank')}
+                                >
+                                  Ver PDF
+                                </Button>
+                              )}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-xs"
+                                disabled={uploadingOrderPdfId !== null}
+                                onClick={() => requestUploadFromOrder(o.id)}
+                              >
+                                {uploadingOrderPdfId === o.id ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <FileText className="h-3 w-3 mr-1" />}
+                                {o.supplier_delivery_notes?.[0]?.attachment_url ? 'Reemplazar PDF' : 'Subir albarán PDF'}
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="flex gap-1">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-xs"
+                                disabled={uploadingOrderPdfId !== null}
+                                onClick={() => requestUploadFromOrder(o.id)}
+                              >
+                                {uploadingOrderPdfId === o.id ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <FileText className="h-3 w-3 mr-1" />}
+                                Subir albarán PDF
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-xs"
+                                onClick={() => {
+                                  const today = new Date().toISOString().slice(0, 10)
+                                  setDeliveryOrderId(o.id)
+                                  setNewDeliveryForm({ supplier_reference: '', delivery_date: today, notes: '' })
+                                  setDeliveryFile(null)
+                                  setNewDeliveryOpen(true)
+                                }}
+                              >
+                                Registrar albarán recibido
+                              </Button>
+                            </div>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             </div>
+
+            </div>
+          </TabsContent>
+
+          <TabsContent value="delivery-notes">
+            <div className="rounded-lg border">
+              <div className="flex items-center justify-between border-b px-4 py-3">
+                <h3 className="text-sm font-semibold">Albaranes recibidos del proveedor</h3>
+                <Badge variant="secondary">{supplierDeliveryNotes.length}</Badge>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Referencia</TableHead>
+                    <TableHead>Pedido</TableHead>
+                    <TableHead>Fecha entrega</TableHead>
+                    <TableHead>Estado</TableHead>
+                    <TableHead>Fecha registro</TableHead>
+                    <TableHead className="w-44 text-right">Acciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {supplierDeliveryNotes.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                        Sin albaranes registrados para este proveedor
+                      </TableCell>
+                    </TableRow>
+                  ) : supplierDeliveryNotes.map((n: any) => {
+                    const fileUrl = uploadedNoteUrls[n.id] || n.attachment_url || ''
+                    return (
+                    <TableRow key={n.id}>
+                      <TableCell className="font-mono text-xs">{n.supplier_reference || '-'}</TableCell>
+                      <TableCell className="font-mono text-xs">{n.order_number || '-'}</TableCell>
+                      <TableCell className="text-sm">{n.delivery_date ? formatDate(n.delivery_date) : '-'}</TableCell>
+                      <TableCell>
+                        <Badge variant={n.status === 'recibido' ? 'default' : n.status === 'incidencia' ? 'destructive' : 'secondary'}>
+                          {n.status === 'recibido' ? 'Recibido' : n.status === 'incidencia' ? 'Incidencia' : 'Pendiente'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm">{formatDate(n.created_at)}</TableCell>
+                      <TableCell>
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-xs"
+                            disabled={uploadingDeliveryNoteId !== null}
+                            onClick={() => requestUploadForDeliveryNote(n.id)}
+                          >
+                            {uploadingDeliveryNoteId === n.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                            ) : (
+                              <FileText className="h-3 w-3 mr-1" />
+                            )}
+                            {fileUrl ? 'Reemplazar PDF' : 'Subir PDF'}
+                          </Button>
+                          {fileUrl ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-xs"
+                              onClick={() => window.open(fileUrl, '_blank')}
+                            >
+                              Ver PDF
+                            </Button>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
             </div>
           </TabsContent>
 
@@ -276,7 +552,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="new-order-payment">Fecha de pago al proveedor *</Label>
+              <Label htmlFor="new-order-payment">Fecha de pago al proveedor</Label>
               <DatePickerPopover
                 id="new-order-payment"
                 value={newOrderForm.payment_due_date}
@@ -306,7 +582,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
           <DialogFooter>
             <Button variant="outline" onClick={() => setNewOrderOpen(false)}>Cancelar</Button>
             <Button
-              disabled={creating || !newOrderForm.total || !newOrderForm.payment_due_date || !newOrderForm.estimated_delivery_date || Number(newOrderForm.total) < 0}
+              disabled={creating || !newOrderForm.total || !newOrderForm.estimated_delivery_date || Number(newOrderForm.total) < 0}
               onClick={async () => {
                 const total = parseFloat(String(newOrderForm.total).replace(',', '.'))
                 if (total < 0) {
@@ -317,7 +593,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                 const res = await createSupplierOrderAction({
                   supplier_id: supplier.id,
                   total,
-                  payment_due_date: newOrderForm.payment_due_date,
+                  payment_due_date: newOrderForm.payment_due_date || null,
                   estimated_delivery_date: newOrderForm.estimated_delivery_date,
                   notes: newOrderForm.notes?.trim() || null,
                   alert_on_payment: true,
@@ -344,6 +620,193 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={newDeliveryOpen} onOpenChange={setNewDeliveryOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" /> Registrar albarán de proveedor
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="delivery-ref">Referencia proveedor</Label>
+              <Input
+                id="delivery-ref"
+                value={newDeliveryForm.supplier_reference}
+                onChange={(e) => setNewDeliveryForm((f) => ({ ...f, supplier_reference: e.target.value }))}
+                placeholder="Número de albarán del proveedor"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="delivery-date">Fecha entrega</Label>
+              <DatePickerPopover
+                id="delivery-date"
+                value={newDeliveryForm.delivery_date}
+                onChange={(date) => setNewDeliveryForm((f) => ({ ...f, delivery_date: date }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="delivery-notes">Notas</Label>
+              <Textarea
+                id="delivery-notes"
+                rows={2}
+                className="resize-none"
+                value={newDeliveryForm.notes}
+                onChange={(e) => setNewDeliveryForm((f) => ({ ...f, notes: e.target.value }))}
+                placeholder="Observaciones de recepción"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="delivery-pdf">PDF albarán (opcional)</Label>
+              <Input
+                id="delivery-pdf"
+                type="file"
+                accept="application/pdf"
+                onChange={(e) => setDeliveryFile(e.target.files?.[0] || null)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNewDeliveryOpen(false)}>Cancelar</Button>
+            <Button
+              disabled={creatingDelivery || !deliveryOrderId}
+              onClick={async () => {
+                setCreatingDelivery(true)
+                const created = await createSupplierDeliveryNote({
+                  supplier_id: supplier.id,
+                  supplier_order_id: deliveryOrderId,
+                  supplier_reference: newDeliveryForm.supplier_reference?.trim() || null,
+                  delivery_date: newDeliveryForm.delivery_date || null,
+                  notes: newDeliveryForm.notes?.trim() || null,
+                })
+                if (!created.success || !created.data?.id) {
+                  setCreatingDelivery(false)
+                  toast.error(created.success ? 'No se pudo crear el albarán' : created.error)
+                  return
+                }
+                if (deliveryFile) {
+                  const fd = new FormData()
+                  fd.append('id', created.data.id)
+                  fd.append('file', deliveryFile)
+                  console.log('[upload-albaran] id del albarán:', created.data.id)
+                  console.log('[upload-albaran] archivo:', deliveryFile?.name, deliveryFile?.size, deliveryFile?.type)
+                  const uploaded = await uploadSupplierDeliveryNoteAttachment(fd)
+                  if (!uploaded.success) {
+                    setCreatingDelivery(false)
+                    toast.error(uploaded.error || 'Albarán creado, pero no se pudo subir el PDF')
+                    router.refresh()
+                    setNewDeliveryOpen(false)
+                    return
+                  }
+                }
+                setCreatingDelivery(false)
+                setNewDeliveryOpen(false)
+                toast.success('Albarán de proveedor registrado')
+                router.refresh()
+              }}
+            >
+              {creatingDelivery && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Guardar albarán
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={financeOpen} onOpenChange={setFinanceOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Completar pago y coste del pedido</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="finance-total">Coste total (€) *</Label>
+              <Input
+                id="finance-total"
+                type="number"
+                min="0"
+                step="0.01"
+                value={financeForm.total}
+                onChange={(e) => setFinanceForm((f) => ({ ...f, total: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="finance-payment-date">Fecha de pago (opcional)</Label>
+              <DatePickerPopover
+                id="finance-payment-date"
+                value={financeForm.payment_due_date}
+                onChange={(date) => setFinanceForm((f) => ({ ...f, payment_due_date: date }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="finance-notes">Notas</Label>
+              <Textarea
+                id="finance-notes"
+                rows={2}
+                value={financeForm.notes}
+                onChange={(e) => setFinanceForm((f) => ({ ...f, notes: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFinanceOpen(false)}>Cancelar</Button>
+            <Button
+              disabled={savingFinance || !financeOrderId || financeForm.total === '' || Number(financeForm.total) < 0}
+              onClick={async () => {
+                const total = parseFloat(String(financeForm.total).replace(',', '.'))
+                if (Number.isNaN(total) || total < 0) {
+                  toast.error('Coste no válido')
+                  return
+                }
+                setSavingFinance(true)
+                const res = await updateSupplierOrderFinanceAction({
+                  supplierOrderId: financeOrderId,
+                  total,
+                  payment_due_date: financeForm.payment_due_date || null,
+                  notes: financeForm.notes?.trim() || null,
+                  alert_on_payment: true,
+                })
+                setSavingFinance(false)
+                if (!res.success) {
+                  toast.error(res.error || 'No se pudo actualizar el pedido')
+                  return
+                }
+                toast.success('Pedido actualizado')
+                setFinanceOpen(false)
+                router.refresh()
+              }}
+            >
+              {savingFinance && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Guardar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <input
+        ref={uploadPdfInputRef}
+        type="file"
+        accept="application/pdf"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          e.currentTarget.value = ''
+          if (!file) return
+          handleUploadDeliveryNotePdf(file)
+        }}
+      />
+      <input
+        ref={orderUploadInputRef}
+        type="file"
+        accept="application/pdf"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          e.currentTarget.value = ''
+          if (!file) return
+          handleUploadOrderPdf(file)
+        }}
+      />
     </div>
   )
 }
