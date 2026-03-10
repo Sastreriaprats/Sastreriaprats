@@ -73,7 +73,7 @@ export function NewVentaClienteClient({ tipo }: { tipo: string }) {
         router.push(`/sastre/nueva-venta/medidas?tipo=${encodeURIComponent(tipo)}&clientId=${encodeURIComponent(clientId)}&nuevo=true`)
       }
     },
-    onError: (err) => toast.error(err?.message ?? 'Error al crear el cliente'),
+    onError: (err) => toast.error(typeof err === 'string' ? err : (err as Error)?.message ?? 'Error al crear el cliente'),
   })
 
   const handleCreateAndContinue = () => {

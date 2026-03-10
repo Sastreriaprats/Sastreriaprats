@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 export default async function NewVentaFichaPage({
   searchParams,
 }: {
-  searchParams: Promise<{ clientId?: string; orderType?: string; prenda?: string }>
+  searchParams: Promise<{ clientId?: string; tipo?: string; orderType?: string; prenda?: string }>
 }) {
   const params = await searchParams
   const supabase = await createServerSupabaseClient()

@@ -441,7 +441,7 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
                         type="button"
                         variant="outline"
                         className="gap-2 border-[#c9a96e]/40 text-[#c9a96e] hover:bg-[#c9a96e]/10"
-                        onClick={() => generateCamiseriaFichaPdf({ clientName, values: values, prefix: 'camiseria' })}
+                        onClick={() => generateCamiseriaFichaPdf({ clientName, values: Object.fromEntries(Object.entries(values).map(([k, v]) => [k, String(v)])), prefix: 'camiseria' })}
                       >
                         <Printer className="h-4 w-4" />
                         Imprimir ficha
