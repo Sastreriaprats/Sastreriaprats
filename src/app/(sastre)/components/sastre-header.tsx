@@ -33,13 +33,14 @@ export function SastreHeader({ sastreName, sectionTitle, title, backHref }: Prop
     >
       <div className="flex items-center gap-4 min-w-0 flex-1">
         {backHref ? (
-          <Link
-            href={backHref}
+          <button
+            type="button"
+            onClick={() => router.back()}
             className="flex items-center justify-center w-12 h-12 rounded-xl border border-white/50 text-white hover:bg-white/5 transition-colors shrink-0 touch-manipulation"
             aria-label="Volver"
           >
             <ArrowLeft className="h-5 w-5" />
-          </Link>
+          </button>
         ) : null}
         <Link href="/sastre" className="flex items-center gap-6 min-w-0">
           <img

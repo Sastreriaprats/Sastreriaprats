@@ -32,7 +32,7 @@ export function PosSummaryContent() {
 
       if (sess) {
         const { data: salesData } = await supabase.from('sales')
-          .select('id, ticket_number, sale_type, total, payment_method, status, created_at, clients(full_name)')
+          .select('id, ticket_number, sale_type, total, payment_method, status, created_at, clients(full_name), profiles!sales_salesperson_id_fkey(full_name)')
           .eq('cash_session_id', sess.id)
           .order('created_at', { ascending: false })
         if (salesData) setSales(salesData)
@@ -46,7 +46,7 @@ export function PosSummaryContent() {
   if (!session) return (
     <div className="flex h-full flex-col items-center justify-center text-muted-foreground gap-4">
       <p>No hay caja abierta</p>
-      <Button variant="outline" onClick={() => router.push('/pos/caja')}>Volver al TPV</Button>
+      <Button variant="outline" onClick={() => router.back()}>Volver al TPV</Button>
     </div>
   )
 
@@ -56,12 +56,28 @@ export function PosSummaryContent() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-4 p-4 border-b bg-white">
-        <Button variant="ghost" size="icon" onClick={() => router.push('/pos/caja')}><ArrowLeft className="h-5 w-5" /></Button>
+        <Button variant="ghost" size="icon" onClick={() => router.back()}><ArrowLeft className="h-5 w-5" /></Button>
         <h1 className="text-xl font-bold">Resumen de la sesión</h1>
         <Badge variant="outline" className="text-xs">Abierta desde {formatDateTime(session.opened_at)}</Badge>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <Card>
+          <CardHeader><CardTitle className="text-base">Caja</CardTitle></CardHeader>
+          <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="rounded-lg border bg-slate-50 p-4">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Apertura de caja</p>
+              <p className="text-lg font-semibold mt-1">{session.opened_at ? formatDateTime(session.opened_at) : '—'}</p>
+              <p className="text-sm text-muted-foreground mt-0.5">Fondo inicial: {formatCurrency(Number(session.opening_amount) || 0)}</p>
+            </div>
+            <div className="rounded-lg border bg-slate-50 p-4">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Cierre de caja</p>
+              <p className="text-lg font-semibold mt-1">{session.closed_at ? formatDateTime(session.closed_at) : 'Pendiente de cierre'}</p>
+              {session.closed_at && <p className="text-sm text-muted-foreground mt-0.5">Sesión cerrada</p>}
+            </div>
+          </CardContent>
+        </Card>
+
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card><CardContent className="pt-4 pb-3">
             <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1"><TrendingUp className="h-3 w-3" /> Ventas totales</div>
@@ -109,17 +125,19 @@ export function PosSummaryContent() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Ticket</TableHead><TableHead>Tipo</TableHead><TableHead>Cliente</TableHead>
+                    <TableHead>Vendedor</TableHead>
                     <TableHead>Total</TableHead><TableHead>Pago</TableHead><TableHead>Hora</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {sales.length === 0 ? (
-                    <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">Sin ventas aún</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">Sin ventas aún</TableCell></TableRow>
                   ) : sales.map((s: any) => (
                     <TableRow key={s.id}>
                       <TableCell className="font-mono text-sm">{s.ticket_number}</TableCell>
                       <TableCell><Badge variant="outline" className="text-xs">{saleTypeLabels[s.sale_type] || s.sale_type}</Badge></TableCell>
                       <TableCell className="text-sm">{s.clients?.full_name || '\u2014'}</TableCell>
+                      <TableCell className="text-sm text-slate-600">{(s.profiles as any)?.full_name ?? '\u2014'}</TableCell>
                       <TableCell className="font-medium">{formatCurrency(s.total)}</TableCell>
                       <TableCell className="text-sm capitalize">{s.payment_method}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{new Date(s.created_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</TableCell>

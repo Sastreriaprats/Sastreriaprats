@@ -1,6 +1,6 @@
 'use client'
 
-import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
@@ -33,6 +33,7 @@ export function OrderDetailContent({ order, lines, history }: {
   lines: Record<string, unknown>[]
   history: Record<string, unknown>[]
 }) {
+  const router = useRouter()
   const isTailoring = order.type === 'tailoring'
   const steps = isTailoring ? tailoringSteps : onlineSteps
   const currentStepIndex = steps.indexOf(order.status as string)
@@ -49,12 +50,13 @@ export function OrderDetailContent({ order, lines, history }: {
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/mi-cuenta/pedidos"
+      <button
+        type="button"
+        onClick={() => router.back()}
         className="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-prats-navy transition-colors"
       >
         <ArrowLeft className="h-4 w-4" />Volver a pedidos
-      </Link>
+      </button>
 
       <div className="flex items-center justify-between">
         <div>

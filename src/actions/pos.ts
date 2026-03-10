@@ -9,6 +9,34 @@ import {
 import { success, failure } from '@/lib/errors'
 import { createSaleJournalEntry } from '@/actions/accounting-triggers'
 
+/** Lista de empleados que pueden realizar ventas en la tienda (usuarios asignados a la tienda). */
+export const listPosEmployees = protectedAction<
+  { store_id: string },
+  { id: string; full_name: string }[]
+>(
+  { permission: 'pos.access', auditModule: 'pos' },
+  async (ctx, { store_id }) => {
+    if (!store_id) return success([])
+    const { data: rows, error } = await ctx.adminClient
+      .from('user_stores')
+      .select('user_id, profiles!user_stores_user_id_fkey(id, full_name)')
+      .eq('store_id', store_id)
+    if (error) return failure(error.message)
+    const list: { id: string; full_name: string }[] = []
+    const seen = new Set<string>()
+    for (const r of rows ?? []) {
+      const profile = (r as any).profiles
+      const id = profile?.id ?? (r as any).user_id
+      if (id && !seen.has(id)) {
+        seen.add(id)
+        list.push({ id, full_name: profile?.full_name ?? 'Sin nombre' })
+      }
+    }
+    list.sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''))
+    return success(list)
+  },
+)
+
 export const openCashSession = protectedAction<any, any>(
   {
     permission: 'pos.open_session',
@@ -163,7 +191,7 @@ export const createSale = protectedAction<{
       .insert({
         ...parsedSale.data,
         ticket_number: ticketNumber,
-        salesperson_id: ctx.userId,
+        salesperson_id: parsedSale.data.salesperson_id ?? ctx.userId,
         subtotal,
         discount_amount: saleDiscount,
         tax_amount: taxAmount,
@@ -349,7 +377,7 @@ export const listTickets = protectedAction<{
   async (ctx, { page = 1, pageSize = 20, clientSearch, dateFrom, dateTo, productSearch }) => {
     let query = ctx.adminClient
       .from('sales')
-      .select('id, ticket_number, created_at, total, payment_method, status, client_id, stores(name)', { count: 'exact' })
+      .select('id, ticket_number, created_at, total, payment_method, status, client_id, stores(name), profiles!sales_salesperson_id_fkey(full_name)', { count: 'exact' })
       .order('created_at', { ascending: false })
 
     if (dateFrom) query = query.gte('created_at', dateFrom + 'T00:00:00')
@@ -424,6 +452,7 @@ export const listTickets = protectedAction<{
       client_name: s.client_id ? (clientsMap[s.client_id]?.full_name ?? '') : null,
       client_code: s.client_id ? (clientsMap[s.client_id]?.client_code ?? '') : null,
       products_summary: (linesBySale[s.id] ?? []).slice(0, 3).join(' · ') || '—',
+      salesperson_name: (s.profiles as any)?.full_name ?? null,
     }))
 
     return success({

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
 import { Button } from '@/components/ui/button'
@@ -17,6 +18,7 @@ import { buildBreadcrumbs } from '@/lib/seo/metadata'
 import { trackViewItem, trackAddToCart } from '@/lib/analytics/events'
 
 export function ProductContent({ slug }: { slug: string }) {
+  const router = useRouter()
   const { addItem } = useCart()
   const [product, setProduct] = useState<Record<string, unknown> | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -148,12 +150,13 @@ export function ProductContent({ slug }: { slug: string }) {
         { label: 'Boutique', path: '/boutique' },
         { label: product.name as string, path: `/boutique/${slug}` },
       ])} />
-      <Link
-        href="/boutique"
+      <button
+        type="button"
+        onClick={() => router.back()}
         className="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-prats-navy transition-colors mb-8"
       >
         <ArrowLeft className="h-4 w-4" /> Volver a boutique
-      </Link>
+      </button>
 
       <div className="grid gap-12 lg:grid-cols-2">
         {/* Gallery */}

@@ -86,9 +86,7 @@ export function ImprimirEtiquetasContent({ variantIdsParam, legacyIdsParam }: { 
             ? 'Use la lista de Códigos de barras y seleccione variantes (producto + talla) para imprimir. Cada talla tiene su propio código.'
             : 'No hay variantes con código de barras para los IDs indicados.'}
         </p>
-        <Button variant="outline" asChild>
-          <Link href="/admin/stock/codigos-barras">Volver a Códigos de barras</Link>
-        </Button>
+        <Button variant="outline" onClick={() => router.back()}>Volver a Códigos de barras</Button>
       </div>
     )
   }
@@ -108,10 +106,8 @@ export function ImprimirEtiquetasContent({ variantIdsParam, legacyIdsParam }: { 
 
       <div className="no-print space-y-6 mb-8">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" asChild>
-            <Link href="/admin/stock/codigos-barras">
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
+          <Button variant="ghost" size="icon" onClick={() => router.back()}>
+            <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
             <h1 className="text-2xl font-bold">Imprimir etiquetas</h1>

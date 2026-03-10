@@ -207,6 +207,7 @@ export function TicketsContent() {
                     <TableHead>Productos (resumen)</TableHead>
                     <TableHead>Total</TableHead>
                     <TableHead>Pago</TableHead>
+                    <TableHead>Vendedor</TableHead>
                     <TableHead>Tienda</TableHead>
                     <TableHead className="w-[200px]">PDF / Factura</TableHead>
                   </TableRow>
@@ -228,6 +229,7 @@ export function TicketsContent() {
                       </TableCell>
                       <TableCell className="font-medium">{formatCurrency(row.total)}</TableCell>
                       <TableCell className="text-sm capitalize">{PAYMENT_LABELS[row.payment_method] ?? row.payment_method}</TableCell>
+                      <TableCell className="text-sm text-slate-600">{row.salesperson_name ?? '—'}</TableCell>
                       <TableCell className="text-sm">{row.store_name ?? '—'}</TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1.5 items-center">

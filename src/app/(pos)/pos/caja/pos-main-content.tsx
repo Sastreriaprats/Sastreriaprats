@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useAuth } from '@/components/providers/auth-provider'
 import { getCurrentSession } from '@/actions/pos'
@@ -11,16 +11,25 @@ import { PosOpenCash } from './pos-open-cash'
 import { PosSaleScreen } from './pos-sale-screen'
 import { PosCloseCash } from './pos-close-cash'
 
+const POS_LAST_Caja_STORE_KEY = 'prats_pos_caja_last_store'
+
 type PosView = 'loading' | 'choose_store' | 'open_cash' | 'sale' | 'close_cash'
 
 export function PosMainContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { activeStoreId } = useAuth()
-  const [view, setView] = useState<PosView>(POS_CHOOSE_STORE_FIRST ? 'choose_store' : 'loading')
+  const { activeStoreId, setActiveStoreId } = useAuth()
+  const [view, setView] = useState<PosView>(() => {
+    if (!POS_CHOOSE_STORE_FIRST) return 'loading'
+    if (typeof window === 'undefined') return 'choose_store'
+    const stored = window.sessionStorage.getItem(POS_LAST_Caja_STORE_KEY)
+    const fromAuth = typeof localStorage !== 'undefined' ? localStorage.getItem('prats_active_store') : null
+    return (stored || fromAuth) ? 'loading' : 'choose_store'
+  })
   const [session, setSession] = useState<any>(null)
   /** Cuando se elige tienda y hay que abrir caja, guardamos el id para usarlo en open_cash por si activeStoreId no ha actualizado aún. */
   const [storeIdForOpenCash, setStoreIdForOpenCash] = useState<string | null>(null)
+  const restoredFromBackRef = useRef(false)
 
   const initialCobro = (() => {
     const cobro = searchParams.get('cobro')
@@ -66,15 +75,44 @@ export function PosMainContent() {
       })
   }, [activeStoreId])
 
+  // Al volver atrás a /pos/caja (ej. desde Resumen), restaurar la caja de la última tienda si tiene sesión abierta
+  useEffect(() => {
+    if (!POS_CHOOSE_STORE_FIRST || restoredFromBackRef.current) return
+    if (view !== 'choose_store' && view !== 'loading') return
+    const storeId = activeStoreId || (typeof window !== 'undefined' ? window.sessionStorage.getItem(POS_LAST_Caja_STORE_KEY) : null)
+    if (!storeId) {
+      if (view === 'loading') setView('choose_store')
+      return
+    }
+    restoredFromBackRef.current = true
+    getCurrentSession(storeId)
+      .then((result) => {
+        if (result.success && result.data) {
+          setActiveStoreId(storeId)
+          setSession(result.data)
+          setView('sale')
+        } else {
+          setView('choose_store')
+        }
+      })
+      .catch(() => setView('choose_store'))
+  }, [POS_CHOOSE_STORE_FIRST, view, activeStoreId, setActiveStoreId])
+
   const handleCashOpened = (newSession: any) => {
     setSession(newSession)
     setStoreIdForOpenCash(null)
     setView('sale')
+    if (typeof window !== 'undefined' && newSession?.store_id) {
+      window.sessionStorage.setItem(POS_LAST_Caja_STORE_KEY, newSession.store_id)
+    }
   }
 
   const handleStoreSelected = (_storeId: string, existingSession: any) => {
     setSession(existingSession)
     setView('sale')
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem(POS_LAST_Caja_STORE_KEY, _storeId)
+    }
   }
 
   const handleOpenCashForStore = (storeId: string) => {

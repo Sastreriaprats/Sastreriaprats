@@ -21,6 +21,8 @@ export const createSaleSchema = z.object({
   is_tax_free: z.boolean().default(false),
   tailoring_order_id: z.string().uuid().optional().nullable(),
   notes: z.string().optional().nullable(),
+  /** Quién realiza la venta (empleado). Si no se envía, se usa el usuario actual. */
+  salesperson_id: z.string().uuid().optional().nullable(),
 })
 
 export const saleLineSchema = z.object({

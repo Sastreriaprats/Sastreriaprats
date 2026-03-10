@@ -68,7 +68,7 @@ export function PosChooseStore({ onStoreSelected, onOpenCash }: PosChooseStorePr
         <div className="text-center max-w-md">
           <p className="text-slate-600 font-medium">No hay tiendas con caja configuradas.</p>
           <p className="text-sm text-slate-500 mt-1">La tienda online no tiene caja; solo aparecen tiendas físicas activas.</p>
-          <Button variant="outline" className="mt-4" onClick={() => router.push('/admin/perfil')}>
+          <Button variant="outline" className="mt-4" onClick={() => router.back()}>
             Volver al perfil
           </Button>
         </div>
@@ -112,7 +112,7 @@ export function PosChooseStore({ onStoreSelected, onOpenCash }: PosChooseStorePr
           </div>
 
           <div className="px-6 pb-6">
-            <Button variant="ghost" className="w-full text-slate-500" onClick={() => router.push('/admin/perfil')}>
+            <Button variant="ghost" className="w-full text-slate-500" onClick={() => router.back()}>
               Volver al perfil
             </Button>
           </div>

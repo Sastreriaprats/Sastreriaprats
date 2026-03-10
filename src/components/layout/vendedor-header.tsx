@@ -98,7 +98,7 @@ export function VendedorHeader({
               {idx === breadcrumbs.length - 1 ? (
                 <span className="font-medium">{bc.label}</span>
               ) : (
-                <button type="button" onClick={() => router.push(bc.href)} className="text-muted-foreground hover:text-foreground transition-colors">
+                <button type="button" onClick={() => router.back()} className="text-muted-foreground hover:text-foreground transition-colors">
                   {bc.label}
                 </button>
               )}

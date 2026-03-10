@@ -77,7 +77,7 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => router.push(`${basePath}/clientes`)}>
+        <Button variant="ghost" size="icon" onClick={() => router.back()}>
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <div className="flex flex-1 items-center justify-between">

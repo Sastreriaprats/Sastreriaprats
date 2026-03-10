@@ -21,12 +21,12 @@ import {
 import {
   Search, X, Plus, Minus, Trash2, User, ShoppingBag, CreditCard,
   Banknote, Smartphone, ArrowRightLeft, Receipt, FileText,
-  LogOut, Clock, BarChart3, Loader2, Percent, UserPlus, CalendarClock, AlertCircle, Lock, Check,
+  LogOut, Clock, BarChart3, Loader2, Percent, UserPlus, CalendarClock, AlertCircle, Lock, Check, ImageOff, ChevronLeft,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/components/providers/auth-provider'
 import { useAction } from '@/hooks/use-action'
-import { searchProductsForPos, createSale, cashWithdrawal } from '@/actions/pos'
+import { searchProductsForPos, createSale, cashWithdrawal, listPosEmployees } from '@/actions/pos'
 import { addOrderPayment, addSalePayment, getClientPendingDebt } from '@/actions/payments'
 import { getProductByBarcode } from '@/actions/products'
 import { listClients, createClientAction } from '@/actions/clients'
@@ -45,6 +45,8 @@ interface TicketLine {
   tax_rate: number
   cost_price: number
   image_url?: string
+  /** Si la línea es un cobro de un pedido/venta pendiente, se registra el pago en onSuccess. */
+  cobro_ref?: { entity_type: 'tailoring_order' | 'sale'; entity_id: string }
 }
 
 interface Payment {
@@ -63,7 +65,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
   const barcodeBufferRef = useRef({ digits: '', firstAt: 0 })
   const scannerInputRef = useRef<HTMLInputElement>(null)
   const appliedCobroRef = useRef(false)
-  const cobroContextRef = useRef<{ entity_type: 'tailoring_order' | 'sale'; entity_id: string } | null>(null)
+  const lastCobroLinesRef = useRef<Array<{ entity_type: 'tailoring_order' | 'sale'; entity_id: string; amount: number }>>([])
   const cobroPaymentMethodRef = useRef<'cash' | 'card' | 'bizum' | 'transfer' | 'voucher'>('cash')
   const integroSubmitRef = useRef(false)
 
@@ -93,10 +95,15 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
   const [nextPaymentDate, setNextPaymentDate] = useState('')
   const [wantPartialPayment, setWantPartialPayment] = useState(false)
   const [downloadingInvoice, setDownloadingInvoice] = useState(false)
-  const [clientPendingDebt, setClientPendingDebt] = useState<Array<{ entity_type: string; reference: string; total_pending: number }>>([])
+  const [clientPendingDebt, setClientPendingDebt] = useState<Array<{ entity_type: 'tailoring_order' | 'sale'; entity_id: string; reference: string; total_pending: number }>>([])
   const [clientDebtLoading, setClientDebtLoading] = useState(false)
   const [showCloseReminderDialog, setShowCloseReminderDialog] = useState(false)
   const [paymentTab, setPaymentTab] = useState<'integro' | 'mixto' | 'parcial'>('integro')
+  const [paymentStep, setPaymentStep] = useState<'salesperson' | 'choose_type' | 'details'>('salesperson')
+  const [posEmployees, setPosEmployees] = useState<Array<{ id: string; full_name: string }>>([])
+  const [posEmployeesLoading, setPosEmployeesLoading] = useState(false)
+  const [selectedSalespersonId, setSelectedSalespersonId] = useState<string | null>(null)
+  const [lastSaleSalespersonName, setLastSaleSalespersonName] = useState<string | null>(null)
 
   // Totales de sesión para la cabecera
   const [sessionTotals, setSessionTotals] = useState({
@@ -179,7 +186,6 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
   useEffect(() => {
     if (!initialCobro || appliedCobroRef.current) return
     appliedCobroRef.current = true
-    cobroContextRef.current = { entity_type: initialCobro.entity_type, entity_id: initialCobro.entity_id }
     if (initialCobro.client_id) {
       setSelectedClientId(initialCobro.client_id)
       setSelectedClientName(initialCobro.client_name)
@@ -194,6 +200,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
       discount_percentage: 0,
       tax_rate: 0,
       cost_price: 0,
+      cobro_ref: { entity_type: initialCobro.entity_type, entity_id: initialCobro.entity_id },
     }])
     setSaleType(initialCobro.entity_type === 'tailoring_order' ? 'tailoring_final' : 'boutique')
     router.replace('/pos/caja')
@@ -231,6 +238,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
         if (result.success && result.data && result.data.length > 0) {
           setClientPendingDebt(result.data.map((r) => ({
             entity_type: r.entity_type,
+            entity_id: r.id,
             reference: r.reference,
             total_pending: r.total_pending,
           })))
@@ -324,6 +332,32 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
 
   const removeLine = (id: string) => setTicketLines(prev => prev.filter(l => l.id !== id))
 
+  /** Añade al ticket una línea por cada cobro pendiente del cliente que aún no esté en el ticket. */
+  const addPendingDebtToTicket = () => {
+    const existingEntityIds = new Set(ticketLines.filter(l => l.cobro_ref).map(l => l.cobro_ref!.entity_id))
+    const toAdd = clientPendingDebt.filter((p) => !existingEntityIds.has(p.entity_id))
+    if (toAdd.length === 0) {
+      toast.info('Todos los pendientes ya están en el ticket')
+      return
+    }
+    setTicketLines(prev => [
+      ...prev,
+      ...toAdd.map((p) => ({
+        id: crypto.randomUUID(),
+        product_variant_id: null as string | null,
+        description: `Cobro pendiente - ${p.reference}`,
+        sku: '',
+        quantity: 1,
+        unit_price: p.total_pending,
+        discount_percentage: 0,
+        tax_rate: 0,
+        cost_price: 0,
+        cobro_ref: { entity_type: p.entity_type, entity_id: p.entity_id } as const,
+      })),
+    ])
+    toast.success(`${toAdd.length} pendiente(s) añadido(s) al ticket`)
+  }
+
   const quickPay = (method: Payment['payment_method']) => {
     if (wantPartialPayment) {
       const amount = Math.min(
@@ -346,10 +380,24 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
       setNextPaymentDate('')
       setWantPartialPayment(false)
       setPaymentTab('integro')
+      setPaymentStep('salesperson')
       integroSubmitRef.current = false
+      setSelectedSalespersonId(profile?.id ?? null)
+      if (activeStoreId) {
+        setPosEmployeesLoading(true)
+        listPosEmployees({ store_id: activeStoreId })
+          .then((res) => {
+            if (res?.success && res.data) setPosEmployees(res.data)
+            else setPosEmployees([])
+          })
+          .catch(() => setPosEmployees([]))
+          .finally(() => setPosEmployeesLoading(false))
+      } else {
+        setPosEmployees([])
+      }
     }
     paymentDialogOpenedRef.current = !!showPayment
-  }, [showPayment, remaining])
+  }, [showPayment, remaining, activeStoreId, profile?.id])
 
   // Cobro íntegro: al elegir un solo método, enviar venta cuando payments se actualice
   useEffect(() => {
@@ -382,33 +430,34 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
       setShowPayment(false)
       setCompletedSale(data)
       setShowTicketModal(true)
-      const ctx = cobroContextRef.current
-      if (ctx && data?.total != null) {
-        cobroContextRef.current = null
+      const cobroLines = lastCobroLinesRef.current
+      lastCobroLinesRef.current = []
+      if (cobroLines.length > 0) {
         const method = cobroPaymentMethodRef.current
         const orderMethod = method === 'bizum' || method === 'voucher' ? 'card' : (method === 'cash' || method === 'card' || method === 'transfer' ? method : 'cash')
         const today = new Date().toISOString().split('T')[0]
-        const amountToRegister = Number(data.amount_paid ?? data.total ?? 0)
-        try {
-          if (ctx.entity_type === 'tailoring_order') {
-            const res = await addOrderPayment({
-              tailoring_order_id: ctx.entity_id,
-              payment_date: today,
-              payment_method: orderMethod,
-              amount: amountToRegister,
-            })
-            if (res?.success !== true) toast.error(res && 'error' in res ? res.error : 'Error al registrar pago en pedido')
-          } else {
-            const res = await addSalePayment({
-              sale_id: ctx.entity_id,
-              payment_method: orderMethod,
-              amount: amountToRegister,
-            })
-            if (res?.success !== true) toast.error(res && 'error' in res ? res.error : 'Error al registrar pago en venta')
+        for (const item of cobroLines) {
+          try {
+            if (item.entity_type === 'tailoring_order') {
+              const res = await addOrderPayment({
+                tailoring_order_id: item.entity_id,
+                payment_date: today,
+                payment_method: orderMethod,
+                amount: item.amount,
+              })
+              if (res?.success !== true) toast.error(res && 'error' in res ? res.error : 'Error al registrar pago en pedido')
+            } else {
+              const res = await addSalePayment({
+                sale_id: item.entity_id,
+                payment_method: orderMethod,
+                amount: item.amount,
+              })
+              if (res?.success !== true) toast.error(res && 'error' in res ? res.error : 'Error al registrar pago en venta')
+            }
+          } catch (e) {
+            console.error('[POS] registrar pago cobro:', e)
+            toast.error('Error al registrar el pago en el pedido/venta')
           }
-        } catch (e) {
-          console.error('[POS] registrar pago cobro:', e)
-          toast.error('Error al registrar el pago en el pedido/venta')
         }
       }
     },
@@ -510,6 +559,12 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
       toast.error('Completa el pago o marca "Dejar pendiente" e indica el importe a cobrar ahora')
       return
     }
+    const salespersonId = selectedSalespersonId || profile?.id || null
+    if (!salespersonId) {
+      toast.error('Selecciona quién realiza la venta')
+      return
+    }
+    setLastSaleSalespersonName(posEmployees.find((e) => e.id === salespersonId)?.full_name ?? (profile?.id === salespersonId ? (profile?.fullName ?? null) : null))
     cobroPaymentMethodRef.current = payments[0]?.payment_method ?? 'cash'
     let paymentsToSend: Payment[] = [...payments]
     if (usePartialFromInput) {
@@ -520,6 +575,10 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
       paymentsToSend[paymentsToSend.length - 1] = { ...last, next_payment_date: nextPaymentDate }
     }
     lastPaymentsRef.current = paymentsToSend
+    const lineTotal = (l: TicketLine) => l.unit_price * l.quantity * (1 - (l.discount_percentage || 0) / 100)
+    lastCobroLinesRef.current = ticketLines
+      .filter((l): l is TicketLine & { cobro_ref: NonNullable<TicketLine['cobro_ref']> } => !!l.cobro_ref)
+      .map(l => ({ entity_type: l.cobro_ref.entity_type, entity_id: l.cobro_ref.entity_id, amount: lineTotal(l) }))
     submitSale({
       sale: {
         cash_session_id: session.id,
@@ -529,6 +588,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
         discount_percentage: globalDiscount,
         is_tax_free: isTaxFree,
         notes: saleWithoutClient ? 'Venta sin cliente' : null,
+        salesperson_id: salespersonId,
       },
       lines: ticketLines.map(l => ({
         product_variant_id: l.product_variant_id,
@@ -566,44 +626,51 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
 
   return (
     <div className="flex flex-col h-screen bg-slate-50">
-      {/* FILA 1 — Cabecera */}
-      <div className="bg-[#1B2A4A] h-14 px-5 flex items-center justify-between shrink-0">
-        <div className="flex flex-col">
-          <span className="text-[10px] text-white/50 uppercase tracking-wider">ESTADO</span>
-          <div className="flex items-center gap-2">
-            <div className="h-2 w-2 rounded-full bg-emerald-400 shrink-0" aria-hidden />
-            <span className="text-emerald-400 font-semibold text-base">Caja abierta</span>
+      {/* FILA 1 — Cabecera (igual que referencia: espaciosa, recuadro teal cuadrado, Caja abierta en verde, botones definidos) */}
+      <div className="bg-[#1A2436] min-h-[5rem] px-6 py-4 flex items-center justify-between shrink-0">
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[10px] text-slate-400 uppercase tracking-widest font-medium">ESTADO</span>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center w-9 h-9 rounded bg-[#1E5257] border border-[#2a6b70]" aria-hidden>
+              <div className="h-2.5 w-2.5 rounded-full bg-[#2DE6AA] shadow-[0_0_6px_#2DE6AA]" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-[#2DE6AA] font-bold text-lg leading-tight">Caja abierta</span>
+              {profile?.fullName && <span className="text-slate-400 text-xs mt-0.5">{profile.fullName}</span>}
+            </div>
           </div>
-          {profile?.fullName && <span className="text-white/60 text-xs mt-0.5">{profile.fullName}</span>}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <Button
             variant="outline"
             size="sm"
-            className="gap-1.5 min-h-[44px] border border-slate-400/50 bg-slate-500/20 text-white font-medium hover:bg-slate-500/30 hover:text-white hover:border-slate-400"
+            className="gap-2 h-10 px-5 rounded border border-slate-400/60 bg-[#252d3d] text-white font-medium hover:bg-slate-500/40 hover:text-white hover:border-slate-400"
             onClick={() => router.push('/admin/perfil')}
           >
             <User className="h-4 w-4" />
             Volver a mi perfil
           </Button>
-          <Button size="sm" className="gap-1.5 min-h-[44px] bg-red-700 hover:bg-red-800 text-white font-medium border-0" onClick={onCloseCash}>
+          <Button size="sm" className="gap-2 h-10 px-5 rounded bg-red-600 hover:bg-red-700 text-white font-medium border-0 shadow-none" onClick={onCloseCash}>
             <Lock className="h-4 w-4" />
             Cerrar caja
           </Button>
         </div>
       </div>
-      {/* FILA 2 — Totales */}
-      <div className="bg-[#111d33] h-12 flex shrink-0">
+      {/* FILA 2 — Totales (líneas duras entre columnas, EFECTIVO destacado en ámbar) */}
+      <div className="bg-[#252d3d] min-h-[3.5rem] flex shrink-0">
         {[
-          { label: 'VENTAS TOTAL', value: sessionTotals.total_sales },
-          { label: 'EFECTIVO', value: totalCashInDrawer },
-          { label: 'TARJETA', value: sessionTotals.total_card_sales },
-          { label: 'BIZUM', value: sessionTotals.total_bizum_sales },
-          { label: 'TRANSFERENCIA', value: sessionTotals.total_transfer_sales },
-        ].map(({ label, value }) => (
-          <div key={label} className="flex-1 flex flex-col items-center justify-center border-r border-slate-500/30 last:border-r-0">
-            <span className="text-[10px] uppercase tracking-widest text-white/40">{label}</span>
-            <span className="text-white font-bold text-sm tabular-nums">{formatCurrency(value ?? 0)}</span>
+          { label: 'VENTAS TOTAL', value: sessionTotals.total_sales, highlight: false },
+          { label: 'EFECTIVO', value: totalCashInDrawer, highlight: true },
+          { label: 'TARJETA', value: sessionTotals.total_card_sales, highlight: false },
+          { label: 'BIZUM', value: sessionTotals.total_bizum_sales, highlight: false },
+          { label: 'TRANSFERENCIA', value: sessionTotals.total_transfer_sales, highlight: false },
+        ].map(({ label, value, highlight }) => (
+          <div
+            key={label}
+            className={`flex-1 flex flex-col items-center justify-center border-r border-slate-600 last:border-r-0 ${highlight ? 'bg-slate-800/50' : ''}`}
+          >
+            <span className={`text-[10px] uppercase tracking-widest font-medium tabular-nums ${highlight ? 'text-amber-400/90' : 'text-slate-400'}`}>{label}</span>
+            <span className="text-white font-bold text-base mt-0.5 tabular-nums">{formatCurrency(value ?? 0)}</span>
           </div>
         ))}
       </div>
@@ -614,7 +681,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
         <div className="w-52 bg-[#f5f5f5] border-r border-slate-200 flex flex-col overflow-y-auto shrink-0">
           <div className="p-4 border-b border-slate-200">
             <p className="text-xs text-slate-500 uppercase tracking-wider mb-2">Cajero</p>
-            <div className="w-full h-16 rounded-lg bg-[#4a6fa5] text-white text-2xl font-black flex items-center justify-center">
+            <div className="w-full h-16 rounded bg-[#4a6fa5] text-white text-2xl font-black flex items-center justify-center">
               {(profile?.fullName ?? 'AP').slice(0, 2).toUpperCase()}
             </div>
             <p className="text-xs text-slate-500 mt-2">F3 Venta</p>
@@ -623,7 +690,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
           <div className="p-4 border-b border-slate-200">
             <p className="text-xs text-slate-500 mb-2">Tipo de venta</p>
             <Select value={saleType} onValueChange={(v) => { if (v === 'manual') { addManualLine(); setSaleType('boutique') } else setSaleType(v) }}>
-              <SelectTrigger className="w-full border border-slate-200 rounded-md h-9 text-sm bg-slate-200 text-slate-800">
+              <SelectTrigger className="w-full border border-slate-200 rounded h-9 text-sm bg-slate-200 text-slate-800">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -642,16 +709,24 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
                 Asignar cliente
               </Button>
             ) : (
-              <div className="rounded-lg bg-slate-200 border border-slate-300 p-2.5">
-                <p className="text-sm font-medium text-slate-800 truncate">{selectedClientName}</p>
+              <div className="rounded bg-slate-200 border border-slate-300 p-2.5 flex flex-col items-center text-center">
+                <p className="text-sm font-medium text-slate-800 truncate w-full">{selectedClientName}</p>
                 <Button variant="ghost" size="sm" className="h-8 text-xs text-slate-600 font-medium hover:text-slate-800 hover:bg-slate-300 mt-1" onClick={() => { setSelectedClientId(null); setSelectedClientName('') }}>Cambiar</Button>
               </div>
             )}
             {clientDebtLoading && selectedClientId && <div className="flex items-center gap-1.5 text-xs text-slate-600 mt-1.5"><Loader2 className="h-3 w-3 animate-spin" /> Comprobando...</div>}
-            {!clientDebtLoading && clientPendingDebt.length > 0 && selectedClientId && <p className="text-amber-700 text-xs mt-1">Pendiente: {formatCurrency(clientDebtTotal)}</p>}
+            {!clientDebtLoading && clientPendingDebt.length > 0 && selectedClientId && (
+              <div className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs">
+                <p className="font-semibold text-amber-800 tabular-nums">Pendiente: {formatCurrency(clientDebtTotal)}</p>
+                <p className="text-amber-700/90 mt-0.5 leading-tight">Puedes añadirlo al cobro actual.</p>
+                <Button type="button" size="sm" variant="outline" className="mt-2 w-full h-auto min-h-8 py-2 text-xs font-medium border-amber-300 text-amber-800 hover:bg-amber-100 hover:border-amber-400 justify-center text-center whitespace-normal leading-tight" onClick={addPendingDebtToTicket}>
+                  Incluir pendientes en este ticket
+                </Button>
+              </div>
+            )}
           </div>
           <div className="p-4 border-b border-slate-200">
-            <label className="flex flex-col gap-1 cursor-pointer rounded-lg bg-slate-200 border border-slate-300 px-3 py-2.5">
+            <label className="flex flex-col gap-1 cursor-pointer rounded bg-slate-200 border border-slate-300 px-3 py-2.5">
               <div className="flex items-center gap-2">
                 <Checkbox checked={saleWithoutClient} onCheckedChange={(c) => setSaleWithoutClient(c === true)} />
                 <span className="text-sm text-slate-700">Venta sin cliente (excepcional)</span>
@@ -747,53 +822,112 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
                 </div>
               )})}
             </div>
-            <div className="border-t border-slate-200 px-4 py-2.5 bg-slate-100 text-xs text-slate-500 shrink-0">
-              {ticketLines.length} líneas | {totalUnits} unidades | Total: {formatCurrency(total)}
-            </div>
           </div>
         </div>
 
         {/* COLUMNA DERECHA */}
         <div className="w-64 bg-[#f5f5f5] border-l border-slate-200 flex flex-col p-4 gap-4 shrink-0 overflow-y-auto">
-          <div className="bg-[#4a6fa5] rounded-xl p-4 text-white shrink-0">
+          <div className="bg-[#4a6fa5] rounded p-4 text-white shrink-0">
             <p className="text-xs uppercase tracking-widest text-slate-200">TOTAL A COBRAR</p>
             <p className="text-4xl font-black text-center mt-1 tabular-nums">{formatCurrency(total)}</p>
           </div>
-          <div className="space-y-3 rounded-lg bg-slate-200 p-3 border border-slate-300">
+          <div className="space-y-3 rounded bg-slate-200 p-3 border border-slate-300">
             <p className="text-sm text-slate-600">Tarifa CT: 1</p>
             <div>
               <Label className="text-sm text-slate-500">% Descuento</Label>
               <Input type="number" min={0} max={100} value={globalDiscount || ''} onChange={(e) => setGlobalDiscount(parseFloat(e.target.value) || 0)} className="w-full h-9 mt-1 border-slate-300 bg-slate-200 text-slate-800 placeholder:text-slate-500" />
             </div>
           </div>
-          <div className="flex-1" />
+          {/* Recuadros de productos del ticket: descripción, precio, imagen (más pequeña); sin foto = recuadro en blanco */}
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            {ticketLines.length === 0 ? null : (
+              <div className={ticketLines.length === 1 ? 'space-y-2' : 'grid grid-cols-2 gap-2 content-start'}>
+                {ticketLines.map((line) => {
+                  const taxRate = line.tax_rate ?? 21
+                  const pvpConIva = line.unit_price * (1 + taxRate / 100)
+                  const lineTotalConIva = line.quantity * pvpConIva * (1 - line.discount_percentage / 100)
+                  return (
+                    <div key={line.id} className="rounded border border-slate-300 bg-white p-2 flex flex-col shrink-0">
+                      <div className={`rounded overflow-hidden border border-slate-200 bg-slate-50 flex items-center justify-center ${ticketLines.length === 1 ? 'h-24' : 'h-20'}`}>
+                        {line.image_url ? (
+                          <img src={line.image_url} alt={line.description} className="w-full h-full object-contain" />
+                        ) : (
+                          <span className="text-slate-400 flex flex-col items-center gap-0.5">
+                            <ImageOff className="h-6 w-6" />
+                            <span className="text-[10px]">Sin foto</span>
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1.5 min-w-0">
+                        <p className="text-xs font-medium text-slate-800 line-clamp-2" title={line.description}>{line.description}</p>
+                        {line.sku ? <p className="text-[10px] text-slate-500 truncate">Cód: {line.sku}</p> : null}
+                        <p className="text-xs text-slate-700 mt-0.5">
+                          {line.quantity} × {formatCurrency(pvpConIva)}
+                          {line.discount_percentage > 0 && <span className="text-amber-600"> (−{line.discount_percentage}%)</span>}
+                          {' → '}<span className="font-semibold">{formatCurrency(lineTotalConIva)}</span>
+                        </p>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Barra inferior azul — Resumen, Devoluciones, Retirada efectivo + PAGAR */}
-      <div className="bg-[#1B2A4A] h-14 px-4 flex items-center justify-between shrink-0 border-t border-slate-500/30">
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" className="gap-2 text-white hover:bg-white/10 min-h-[44px]" onClick={() => router.push('/pos/resumen')}>
-            <BarChart3 className="h-5 w-5" />
-            <span className="text-sm font-medium">Resumen</span>
-          </Button>
-          <Button variant="ghost" size="sm" className="gap-2 text-white hover:bg-white/10 min-h-[44px]" onClick={() => router.push('/pos/devoluciones')}>
+      {/* Franja gris resumen (sobre la barra azul) */}
+      <div className="bg-slate-200 border-t border-slate-300 px-4 py-2 flex items-center justify-center text-sm text-slate-600 shrink-0">
+        <span className="tabular-nums">{ticketLines.length} lineas</span>
+        <span className="mx-2">·</span>
+        <span className="tabular-nums">{totalUnits} unidades</span>
+        <span className="mx-2">·</span>
+        <span className="font-medium tabular-nums">Total: {formatCurrency(total)}</span>
+      </div>
+      {/* Barra inferior azul — Línea -, Ticket X, Devolver, Resumen, Retirada, Salir, PAGAR */}
+      <div className="bg-[#1B2A4A] min-h-[4rem] px-4 flex items-center justify-between shrink-0 border-t border-slate-700">
+        <div className="flex-1 flex items-center justify-center gap-1">
+          <button
+            type="button"
+            onClick={() => addManualLine()}
+            className="flex flex-col items-center justify-center gap-0.5 min-w-[4rem] py-2 text-rose-300 hover:text-rose-200 hover:bg-white/5 rounded transition-colors"
+          >
+            <Minus className="h-5 w-5" />
+            <span className="text-[10px] font-medium uppercase tracking-wide">Línea -</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => { setTicketLines([]); setPayments([]); toast.success('Ticket anulado'); }}
+            className="flex flex-col items-center justify-center gap-0.5 min-w-[4rem] py-2 text-rose-300 hover:text-rose-200 hover:bg-white/5 rounded transition-colors"
+          >
+            <X className="h-5 w-5" />
+            <span className="text-[10px] font-medium uppercase tracking-wide">Anular ticket</span>
+          </button>
+          <Button variant="ghost" className="flex flex-col items-center justify-center gap-0.5 min-w-[4rem] py-2 h-auto text-sky-300 hover:text-sky-200 hover:bg-white/5 rounded" onClick={() => router.push('/pos/devoluciones')}>
             <ArrowRightLeft className="h-5 w-5" />
-            <span className="text-sm font-medium">Devoluciones</span>
+            <span className="text-[10px] font-medium uppercase tracking-wide">Devolver</span>
           </Button>
-          <Button variant="ghost" size="sm" className="gap-2 text-white hover:bg-white/10 min-h-[44px]" onClick={() => setShowWithdrawal(true)}>
+          <Button variant="ghost" className="flex flex-col items-center justify-center gap-0.5 min-w-[4rem] py-2 h-auto text-emerald-300 hover:text-emerald-200 hover:bg-white/5 rounded" onClick={() => router.push('/pos/resumen')}>
+            <BarChart3 className="h-5 w-5" />
+            <span className="text-[10px] font-medium uppercase tracking-wide">Resumen</span>
+          </Button>
+          <Button variant="ghost" className="flex flex-col items-center justify-center gap-0.5 min-w-[4rem] py-2 h-auto text-emerald-300 hover:text-emerald-200 hover:bg-white/5 rounded" onClick={() => setShowWithdrawal(true)}>
             <Banknote className="h-5 w-5" />
-            <span className="text-sm font-medium">Retirada efectivo</span>
+            <span className="text-[10px] font-medium uppercase tracking-wide">Retirada</span>
+          </Button>
+          <Button variant="ghost" className="flex flex-col items-center justify-center gap-0.5 min-w-[4rem] py-2 h-auto text-slate-300 hover:text-white hover:bg-white/5 rounded" onClick={() => router.back()}>
+            <LogOut className="h-5 w-5" />
+            <span className="text-[10px] font-medium uppercase tracking-wide">Salir</span>
           </Button>
         </div>
         <Button
           onClick={() => { if (ticketLines.length === 0) { toast.error('Ticket vacío'); return } if (!canCobrar) { toast.error('Selecciona un cliente o activa "Venta sin cliente"'); return } setShowPayment(true) }}
           disabled={!canCobrar || ticketLines.length === 0}
-          className="gap-2 h-12 px-6 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl shadow-lg min-h-[44px] disabled:opacity-50"
+          className="flex flex-col items-center justify-center gap-0.5 h-14 px-8 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded disabled:opacity-50 shrink-0"
         >
-          <Check className="h-5 w-5" />
-          <span>PAGAR</span>
-          <span className="text-xs font-normal opacity-80">(F2)</span>
+          <Check className="h-6 w-6" />
+          <span className="text-sm uppercase tracking-wide">PAGAR</span>
+          <span className="text-[10px] font-normal opacity-90">(F2)</span>
         </Button>
       </div>
 
@@ -924,196 +1058,261 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
         </DialogContent>
       </Dialog>
 
-      {/* Payment Dialog — 3 tabs */}
-      <Dialog open={showPayment} onOpenChange={(open) => { setShowPayment(open); if (!open) { setPayments([]); setWantPartialPayment(false); setPaymentTab('integro') } }}>
-        <DialogContent className="max-w-lg rounded-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-black text-[#1B2A4A]">Cobrar {formatCurrency(total)}</DialogTitle>
-          </DialogHeader>
-          <Tabs value={paymentTab} onValueChange={(v) => setPaymentTab(v as 'integro' | 'mixto' | 'parcial')}>
-            <TabsList className="bg-slate-100 rounded-xl p-1 w-full grid grid-cols-3">
-              <TabsTrigger value="integro" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-[#1B2A4A] data-[state=active]:font-semibold data-[state=inactive]:text-slate-500 text-xs">
-                COBRO ÍNTEGRO
-              </TabsTrigger>
-              <TabsTrigger value="mixto" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-[#1B2A4A] data-[state=active]:font-semibold data-[state=inactive]:text-slate-500 text-xs">
-                PAGO MIXTO
-              </TabsTrigger>
-              <TabsTrigger value="parcial" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-[#1B2A4A] data-[state=active]:font-semibold data-[state=inactive]:text-slate-500 text-xs">
-                COBRO PARCIAL
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="integro" className="space-y-4 pt-4">
-              <p className="text-2xl font-bold text-center text-[#1B2A4A]">{formatCurrency(total)}</p>
-              <p className="text-sm text-slate-500 text-center">Total a cobrar</p>
-              <div className="grid grid-cols-2 gap-3">
-                {([
-                  { method: 'cash' as const, label: 'Efectivo', icon: Banknote, hoverIcon: 'hover:text-emerald-600' },
-                  { method: 'card' as const, label: 'Tarjeta', icon: CreditCard, hoverIcon: 'hover:text-blue-600' },
-                  { method: 'bizum' as const, label: 'Bizum', icon: Smartphone, hoverIcon: 'hover:text-purple-600' },
-                  { method: 'transfer' as const, label: 'Transferencia', icon: ArrowRightLeft, hoverIcon: 'hover:text-amber-600' },
-                ] as const).map(({ method, label, icon: Icon, hoverIcon }) => (
+      {/* Diálogo de cobro — Paso 1: elegir tipo (Íntegro / Mixto / Parcial). Paso 2: método de pago y detalles */}
+      <Dialog open={showPayment} onOpenChange={(open) => {
+        setShowPayment(open)
+        if (!open) {
+          setPayments([])
+          setWantPartialPayment(false)
+          setPaymentTab('integro')
+          setPaymentStep('salesperson')
+        }
+      }}>
+        <DialogContent className="max-w-md rounded-2xl border-0 shadow-2xl overflow-hidden p-0 gap-0">
+          {/* Cabecera con total */}
+          <div className="bg-gradient-to-br from-[#1B2A4A] to-[#243b5e] px-6 py-5 text-white">
+            <p className="text-xs font-medium text-white/70 uppercase tracking-wider">Total a cobrar</p>
+            <p className="text-3xl font-black tabular-nums mt-0.5">{formatCurrency(total)}</p>
+          </div>
+
+          {paymentStep === 'salesperson' ? (
+            /* Paso 0: Quién realiza la venta (obligatorio primero) */
+            <div className="p-6 space-y-5">
+              <p className="text-sm font-medium text-slate-700 text-center">Indica quién realiza esta venta</p>
+              {posEmployeesLoading ? (
+                <div className="flex items-center justify-center gap-2 py-6 text-slate-500"><Loader2 className="h-5 w-5 animate-spin" /> Cargando empleados...</div>
+              ) : (
+                <Select value={selectedSalespersonId ?? ''} onValueChange={(v) => setSelectedSalespersonId(v || null)}>
+                  <SelectTrigger className="w-full h-12 text-base border-slate-300 bg-white">
+                    <SelectValue placeholder="Selecciona el vendedor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {posEmployees.length === 0 && profile?.id && (
+                      <SelectItem value={profile.id}>{profile.fullName ?? 'Yo'}</SelectItem>
+                    )}
+                    {posEmployees.map((emp) => (
+                      <SelectItem key={emp.id} value={emp.id}>{emp.full_name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <Button
+                className="w-full h-12 rounded-xl bg-[#1B2A4A] hover:bg-[#243860] text-white font-bold"
+                disabled={!selectedSalespersonId || posEmployeesLoading}
+                onClick={() => setPaymentStep('choose_type')}
+              >
+                Continuar
+              </Button>
+            </div>
+          ) : paymentStep === 'choose_type' ? (
+            /* Paso 1: tipo de cobro (íntegro, mixto, parcial) */
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-slate-600 text-center">Elige cómo quieres cobrar</p>
+              <div className="grid gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setPaymentTab('integro'); setPaymentStep('details') }}
+                  className="flex items-center gap-4 p-4 rounded-xl border-2 border-emerald-200 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-300 transition-all text-left group"
+                >
+                  <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-emerald-500 text-white group-hover:bg-emerald-600">
+                    <Check className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-800">Cobro íntegro</p>
+                    <p className="text-xs text-slate-500">Un solo pago por el total</p>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setPaymentTab('mixto'); setPaymentStep('details'); setPaymentAmountInput(remaining.toFixed(2)) }}
+                  className="flex items-center gap-4 p-4 rounded-xl border-2 border-blue-200 bg-blue-50 hover:bg-blue-100 hover:border-blue-300 transition-all text-left group"
+                >
+                  <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-blue-500 text-white group-hover:bg-blue-600">
+                    <CreditCard className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-800">Pago mixto</p>
+                    <p className="text-xs text-slate-500">Varios métodos (efectivo + tarjeta, etc.)</p>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setPaymentTab('parcial'); setPaymentStep('details'); setPaymentAmountInput(remaining.toFixed(2)) }}
+                  className="flex items-center gap-4 p-4 rounded-xl border-2 border-amber-200 bg-amber-50 hover:bg-amber-100 hover:border-amber-300 transition-all text-left group"
+                >
+                  <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-amber-500 text-white group-hover:bg-amber-600">
+                    <Percent className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-800">Cobro parcial</p>
+                    <p className="text-xs text-slate-500">Cobrar ahora una parte y dejar pendiente</p>
+                  </div>
+                </button>
+              </div>
+              <Button variant="ghost" size="sm" className="w-full gap-1.5 text-slate-500" onClick={() => setPaymentStep('salesperson')}>
+                <ChevronLeft className="h-4 w-4" />
+                Cambiar vendedor
+              </Button>
+            </div>
+          ) : (
+            /* Paso 2: contenido según el tipo elegido */
+            <div className="p-6 space-y-4">
+              <Button variant="ghost" size="sm" className="gap-1.5 -ml-1 text-slate-500 hover:text-slate-700" onClick={() => setPaymentStep('choose_type')}>
+                <ChevronLeft className="h-4 w-4" />
+                Cambiar tipo de cobro
+              </Button>
+
+              <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                <span className="text-slate-600">Vendedor:</span>
+                <span className="font-medium text-slate-800">
+                  {posEmployees.find((e) => e.id === selectedSalespersonId)?.full_name ?? (profile?.id === selectedSalespersonId ? profile?.fullName : null) ?? '—'}
+                </span>
+                <Button variant="ghost" size="sm" className="h-7 text-xs text-slate-500" onClick={() => setPaymentStep('salesperson')}>Cambiar</Button>
+              </div>
+
+              {paymentTab === 'integro' && (
+                <>
+                  <div className="rounded-xl bg-slate-100 py-4 px-4 text-center">
+                    <p className="text-2xl font-bold text-[#1B2A4A] tabular-nums">{formatCurrency(total)}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Elige el método de pago</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {([
+                      { method: 'cash' as const, label: 'Efectivo', icon: Banknote, bg: 'bg-emerald-500 hover:bg-emerald-600', border: 'border-emerald-200' },
+                      { method: 'card' as const, label: 'Tarjeta', icon: CreditCard, bg: 'bg-blue-500 hover:bg-blue-600', border: 'border-blue-200' },
+                      { method: 'bizum' as const, label: 'Bizum', icon: Smartphone, bg: 'bg-purple-500 hover:bg-purple-600', border: 'border-purple-200' },
+                      { method: 'transfer' as const, label: 'Transferencia', icon: ArrowRightLeft, bg: 'bg-amber-500 hover:bg-amber-600', border: 'border-amber-200' },
+                    ] as const).map(({ method, label, icon: Icon, bg, border }) => {
+                      const selected = payments.length === 1 && payments[0].payment_method === method
+                      return (
+                        <Button
+                          key={method}
+                          type="button"
+                          variant="outline"
+                          className={`h-16 rounded-xl flex-col gap-1.5 border-2 ${border} bg-white hover:bg-slate-50 text-slate-800 font-medium ${selected ? 'ring-2 ring-[#1B2A4A] ring-offset-2' : ''}`}
+                          onClick={() => setPayments([{ payment_method: method, amount: total }])}
+                        >
+                          <Icon className={`h-7 w-7 ${method === 'cash' ? 'text-emerald-600' : method === 'card' ? 'text-blue-600' : method === 'bizum' ? 'text-purple-600' : 'text-amber-600'}`} />
+                          <span className="text-sm">{label}</span>
+                        </Button>
+                      )
+                    })}
+                  </div>
                   <Button
-                    key={method}
-                    variant="outline"
-                    className={`h-20 rounded-2xl flex-col gap-2 border-2 border-transparent hover:border-[#1B2A4A]/20 hover:bg-slate-50 bg-white ${hoverIcon}`}
-                    onClick={() => {
-                      setPayments([{ payment_method: method, amount: total }])
-                      integroSubmitRef.current = true
-                    }}
+                    className="w-full h-12 rounded-xl bg-[#1B2A4A] hover:bg-[#243860] text-white font-bold disabled:opacity-50 gap-2"
+                    disabled={payments.length !== 1 || isProcessing}
+                    onClick={() => handleProcessSale()}
                   >
-                    <Icon className="h-7 w-7 transition-colors" />
-                    <span className="text-sm font-medium">{label}</span>
+                    {isProcessing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Receipt className="h-5 w-5" />}
+                    Pagar
                   </Button>
-                ))}
-              </div>
-            </TabsContent>
-            <TabsContent value="mixto" className="space-y-4 pt-4">
-              <div className="flex gap-2 items-center">
-                <Label className="text-sm shrink-0">Importe (€)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={paymentAmountInput}
-                  onChange={(e) => setPaymentAmountInput(e.target.value)}
-                  className="h-9 w-24 font-mono"
-                />
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {(['cash', 'card', 'bizum', 'transfer'] as const).map((method) => {
-                  const Icon = method === 'cash' ? Banknote : method === 'card' ? CreditCard : method === 'bizum' ? Smartphone : ArrowRightLeft
-                  const label = method === 'cash' ? 'Efectivo' : method === 'card' ? 'Tarjeta' : method === 'bizum' ? 'Bizum' : 'Transfer.'
-                  return (
-                    <Button
-                      key={method}
-                      variant="outline"
-                      size="sm"
-                      className="gap-1"
-                      onClick={() => {
-                        const amount = Math.min(Math.max(0, parseFloat(String(paymentAmountInput).replace(',', '.')) || 0), remaining)
-                        if (amount >= 0.01) {
-                          setPayments(prev => [...prev, { payment_method: method, amount }])
-                          setPaymentAmountInput((remaining - amount).toFixed(2))
-                        }
-                      }}
-                    >
-                      <Icon className="h-3 w-3" /> +{label}
-                    </Button>
-                  )
-                })}
-              </div>
-              {payments.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-sm font-semibold">Pagos aplicados</p>
-                  {payments.map((p, i) => (
-                    <div key={i} className="flex items-center justify-between p-2 bg-slate-100 rounded-lg">
-                      <span className="text-sm capitalize">{p.payment_method}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{formatCurrency(p.amount)}</span>
-                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setPayments(prev => prev.filter((_, idx) => idx !== i))}>
-                          <X className="h-3 w-3" />
+                </>
+              )}
+
+              {paymentTab === 'mixto' && (
+                <>
+                  <div className="flex gap-2 items-center">
+                    <Label className="text-sm shrink-0 font-medium text-slate-700">Importe (€)</Label>
+                    <Input type="number" step="0.01" value={paymentAmountInput} onChange={(e) => setPaymentAmountInput(e.target.value)} className="h-10 w-28 font-mono text-center border-slate-300" />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {(['cash', 'card', 'bizum', 'transfer'] as const).map((method) => {
+                      const Icon = method === 'cash' ? Banknote : method === 'card' ? CreditCard : method === 'bizum' ? Smartphone : ArrowRightLeft
+                      const label = method === 'cash' ? 'Efectivo' : method === 'card' ? 'Tarjeta' : method === 'bizum' ? 'Bizum' : 'Transfer.'
+                      return (
+                        <Button key={method} variant="outline" size="sm" className="gap-1.5 rounded-lg border-slate-300" onClick={() => {
+                          const amount = Math.min(Math.max(0, parseFloat(String(paymentAmountInput).replace(',', '.')) || 0), remaining)
+                          if (amount >= 0.01) {
+                            setPayments(prev => [...prev, { payment_method: method, amount }])
+                            setPaymentAmountInput((remaining - amount).toFixed(2))
+                          }
+                        }}>
+                          <Icon className="h-3.5 w-3.5" /> +{label}
                         </Button>
-                      </div>
+                      )
+                    })}
+                  </div>
+                  {payments.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-sm font-semibold text-slate-700">Pagos aplicados</p>
+                      {payments.map((p, i) => (
+                        <div key={i} className="flex items-center justify-between p-3 bg-slate-100 rounded-lg border border-slate-200">
+                          <span className="text-sm capitalize text-slate-700">{p.payment_method}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-[#1B2A4A]">{formatCurrency(p.amount)}</span>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-500 hover:text-red-600" onClick={() => setPayments(prev => prev.filter((_, idx) => idx !== i))}><X className="h-3.5 w-3.5" /></Button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  )}
+                  <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
+                    <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${total > 0 ? Math.min(100, (totalPaid / total) * 100) : 0}%` }} />
+                  </div>
+                  <p className="text-xs text-center text-slate-500">Cubierto {formatCurrency(totalPaid)} / Pendiente {formatCurrency(remaining)}</p>
+                  <Button className="w-full h-12 rounded-xl bg-[#1B2A4A] hover:bg-[#243860] text-white font-bold disabled:opacity-40" disabled={remaining > 0.01 || isProcessing} onClick={handleProcessSale}>
+                    {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4" />}
+                    Completar venta
+                  </Button>
+                </>
               )}
-              <div className="space-y-1">
-                <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${total > 0 ? Math.min(100, (totalPaid / total) * 100) : 0}%` }} />
-                </div>
-                <p className="text-xs text-center text-slate-500">
-                  Cubierto {formatCurrency(totalPaid)} / Pendiente {formatCurrency(remaining)}€
-                </p>
-              </div>
-              <Button
-                className="w-full h-12 rounded-xl bg-[#1B2A4A] hover:bg-[#243860] text-white font-bold disabled:opacity-40"
-                disabled={remaining > 0.01 || isProcessing}
-                onClick={handleProcessSale}
-              >
-                {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4" />}
-                Completar venta
-              </Button>
-            </TabsContent>
-            <TabsContent value="parcial" className="space-y-4 pt-4">
-              <div className="space-y-2">
-                <Label className="text-sm">Importe a cobrar ahora (€)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max={total}
-                  value={paymentAmountInput}
-                  onChange={(e) => setPaymentAmountInput(e.target.value)}
-                  placeholder={total.toFixed(2)}
-                  className="text-lg font-mono h-11"
-                />
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {(['cash', 'card', 'bizum', 'transfer'] as const).map((method) => {
-                  const Icon = method === 'cash' ? Banknote : method === 'card' ? CreditCard : method === 'bizum' ? Smartphone : ArrowRightLeft
-                  const label = method === 'cash' ? 'Efectivo' : method === 'card' ? 'Tarjeta' : method === 'bizum' ? 'Bizum' : 'Transfer.'
-                  return (
-                    <Button
-                      key={method}
-                      variant="outline"
-                      size="sm"
-                      className="gap-1"
-                      onClick={() => {
-                        const amount = Math.min(Math.max(0, parseFloat(String(paymentAmountInput).replace(',', '.')) || 0), total)
-                        if (amount >= 0.01) {
-                          setPayments(prev => [...prev, { payment_method: method, amount }])
-                        }
-                      }}
-                    >
-                      <Icon className="h-3 w-3" /> {label}
-                    </Button>
-                  )
-                })}
-              </div>
-              <label className="flex items-center gap-2 cursor-pointer text-sm">
-                <Checkbox checked={leaveAsPending} onCheckedChange={(c) => setLeaveAsPending(c === true)} />
-                <span>Dejar resto como cobro pendiente</span>
-              </label>
-              {leaveAsPending && (
-                <div className="space-y-2">
-                  <Label className="text-sm flex items-center gap-1.5">
-                    <CalendarClock className="h-4 w-4" />
-                    Fecha próximo cobro
-                  </Label>
-                  <DatePickerPopover
-                    value={nextPaymentDate}
-                    onChange={(date) => setNextPaymentDate(date)}
-                    min={new Date().toISOString().split('T')[0]}
-                  />
-                </div>
-              )}
-              {payments.length > 0 && (
-                <div className="space-y-1">
-                  {payments.map((p, i) => (
-                    <div key={i} className="flex items-center justify-between p-2 bg-slate-100 rounded-lg text-sm">
-                      <span className="capitalize">{p.payment_method}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{formatCurrency(p.amount)}</span>
-                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setPayments(prev => prev.filter((_, idx) => idx !== i))}>
-                          <X className="h-3 w-3" />
+
+              {paymentTab === 'parcial' && (
+                <>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-slate-700">Importe a cobrar ahora (€)</Label>
+                    <Input type="number" step="0.01" min="0" max={total} value={paymentAmountInput} onChange={(e) => setPaymentAmountInput(e.target.value)} placeholder={total.toFixed(2)} className="text-lg font-mono h-11 border-slate-300 rounded-lg" />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {(['cash', 'card', 'bizum', 'transfer'] as const).map((method) => {
+                      const Icon = method === 'cash' ? Banknote : method === 'card' ? CreditCard : method === 'bizum' ? Smartphone : ArrowRightLeft
+                      const label = method === 'cash' ? 'Efectivo' : method === 'card' ? 'Tarjeta' : method === 'bizum' ? 'Bizum' : 'Transfer.'
+                      return (
+                        <Button key={method} variant="outline" size="sm" className="gap-1.5 rounded-lg border-slate-300" onClick={() => {
+                          const amount = Math.min(Math.max(0, parseFloat(String(paymentAmountInput).replace(',', '.')) || 0), total)
+                          if (amount >= 0.01) {
+                            setPayments(prev => [...prev, { payment_method: method, amount }])
+                          }
+                        }}>
+                          <Icon className="h-3.5 w-3.5" /> {label}
                         </Button>
-                      </div>
+                      )
+                    })}
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+                    <Checkbox checked={leaveAsPending} onCheckedChange={(c) => setLeaveAsPending(c === true)} />
+                    Dejar resto como cobro pendiente
+                  </label>
+                  {leaveAsPending && (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-slate-700 flex items-center gap-1.5"><CalendarClock className="h-4 w-4" /> Fecha próximo cobro</Label>
+                      <DatePickerPopover value={nextPaymentDate} onChange={(date) => setNextPaymentDate(date)} min={new Date().toISOString().split('T')[0]} />
                     </div>
-                  ))}
-                </div>
+                  )}
+                  {payments.length > 0 && (
+                    <div className="space-y-1">
+                      {payments.map((p, i) => (
+                        <div key={i} className="flex items-center justify-between p-2.5 bg-slate-100 rounded-lg text-sm border border-slate-200">
+                          <span className="capitalize text-slate-700">{p.payment_method}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-[#1B2A4A]">{formatCurrency(p.amount)}</span>
+                            <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-500 hover:text-red-600" onClick={() => setPayments(prev => prev.filter((_, idx) => idx !== i))}><X className="h-3 w-3" /></Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <Button className="w-full h-12 rounded-xl bg-[#1B2A4A] hover:bg-[#243860] text-white font-bold disabled:opacity-40" disabled={payments.length === 0 || isProcessing} onClick={() => handleProcessSale()}>
+                    {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4" />}
+                    Registrar cobro parcial
+                  </Button>
+                </>
               )}
-              <Button
-                className="w-full h-12 rounded-xl bg-[#1B2A4A] hover:bg-[#243860] text-white font-bold disabled:opacity-40"
-                disabled={payments.length === 0 || isProcessing}
-                onClick={() => handleProcessSale()}
-              >
-                {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4" />}
-                Registrar cobro parcial
-              </Button>
-            </TabsContent>
-          </Tabs>
-          <DialogFooter className="sm:justify-start pt-2">
-            <Button variant="outline" onClick={() => { setPayments([]); setShowPayment(false) }}>
+            </div>
+          )}
+
+          <DialogFooter className="border-t bg-slate-50 px-6 py-4 flex-row justify-between">
+            <Button variant="outline" className="rounded-lg border-slate-300" onClick={() => { setPayments([]); setShowPayment(false) }}>
               Cancelar
             </Button>
           </DialogFooter>
@@ -1122,7 +1321,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
 
       {/* Ticket completado: nº ticket, descargar PDF, nueva venta */}
       <Dialog open={showTicketModal} onOpenChange={(open) => !open && handleNewSale()}>
-        <DialogContent className="max-w-sm" onPointerDownOutside={(e) => e.preventDefault()}>
+        <DialogContent className="max-w-md" onPointerDownOutside={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Receipt className="h-5 w-5 text-green-600" />
@@ -1130,34 +1329,48 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
             </DialogTitle>
           </DialogHeader>
           {completedSale && (
-            <div className="space-y-4 py-4">
-              <div className="rounded-lg bg-muted/50 p-4 space-y-2">
-                <p className="text-sm font-medium text-slate-600">Nº Ticket</p>
-                <p className="text-xl font-mono font-bold">{completedSale.ticket_number}</p>
+            <div className="space-y-4 py-2">
+              <div className="rounded-lg bg-slate-50 border border-slate-200 p-4">
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Nº Ticket</p>
+                <p className="text-xl font-mono font-bold text-slate-900 mt-0.5">{completedSale.ticket_number}</p>
               </div>
-              <div className="flex justify-between text-sm">
-                <span>Total cobrado</span>
-                <span className="font-semibold">{formatCurrency(completedSale.total)}</span>
-              </div>
-              <div className="flex justify-between text-sm capitalize">
-                <span>Método de pago</span>
-                <span>{completedSale.payment_method === 'cash' ? 'Efectivo' : completedSale.payment_method === 'card' ? 'Tarjeta' : completedSale.payment_method}</span>
-              </div>
+              <dl className="grid grid-cols-1 gap-3 text-sm">
+                <div className="flex justify-between items-center py-2 border-b border-slate-100">
+                  <dt className="text-slate-600">Total cobrado</dt>
+                  <dd className="font-semibold tabular-nums">{formatCurrency(completedSale.total)}</dd>
+                </div>
+                <div className="flex justify-between items-center py-2 border-b border-slate-100">
+                  <dt className="text-slate-600">Método de pago</dt>
+                  <dd className="capitalize">{completedSale.payment_method === 'cash' ? 'Efectivo' : completedSale.payment_method === 'card' ? 'Tarjeta' : completedSale.payment_method}</dd>
+                </div>
+                {lastSaleSalespersonName && (
+                  <div className="flex justify-between items-center py-2 border-b border-slate-100">
+                    <dt className="text-slate-600">Realizada por</dt>
+                    <dd className="font-medium">{lastSaleSalespersonName}</dd>
+                  </div>
+                )}
+                {selectedClientName && (
+                  <div className="flex justify-between items-center py-2">
+                    <dt className="text-slate-600">Cliente</dt>
+                    <dd className="text-slate-800">{selectedClientName}</dd>
+                  </div>
+                )}
+              </dl>
               {selectedClientName && (
-                <p className="text-xs text-slate-600">Cliente: {selectedClientName} · Ticket guardado en su perfil</p>
+                <p className="text-xs text-slate-500">Ticket guardado en el perfil del cliente</p>
               )}
             </div>
           )}
-          <DialogFooter className="flex-col sm:flex-row gap-2">
-            <Button variant="outline" className="w-full sm:w-auto gap-2" onClick={handleDownloadTicketPdf}>
+          <DialogFooter className="flex flex-wrap gap-2 sm:flex-row border-t pt-4">
+            <Button variant="outline" className="flex-1 min-w-[140px] gap-2" onClick={handleDownloadTicketPdf}>
               <Receipt className="h-4 w-4" />
               Descargar ticket PDF
             </Button>
-            <Button variant="outline" className="w-full sm:w-auto gap-2" onClick={handleDownloadFactura} disabled={downloadingInvoice}>
+            <Button variant="outline" className="flex-1 min-w-[140px] gap-2" onClick={handleDownloadFactura} disabled={downloadingInvoice}>
               {downloadingInvoice ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
               Descargar factura
             </Button>
-            <Button className="w-full sm:w-auto bg-prats-navy hover:bg-prats-navy-light" onClick={handleNewSale}>
+            <Button className="flex-1 min-w-[140px] bg-prats-navy hover:bg-prats-navy-light" onClick={handleNewSale}>
               Nueva venta
             </Button>
           </DialogFooter>

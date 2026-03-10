@@ -121,7 +121,7 @@ export function ReturnsContent() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-4 p-4 border-b bg-white">
-        <Button variant="ghost" size="icon" onClick={() => router.push('/pos/caja')}><ArrowLeft className="h-5 w-5" /></Button>
+        <Button variant="ghost" size="icon" onClick={() => router.back()}><ArrowLeft className="h-5 w-5" /></Button>
         <h1 className="text-xl font-bold">Devoluciones</h1>
       </div>
 

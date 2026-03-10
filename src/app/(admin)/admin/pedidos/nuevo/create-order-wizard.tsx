@@ -653,7 +653,7 @@ export function CreateOrderWizard({
     return (
       <div className="space-y-6">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => router.push(fromSastre ? '/sastre/pedidos' : '/admin/pedidos')}><ArrowLeft className="h-5 w-5" /></Button>
+          <Button variant="ghost" size="icon" onClick={() => router.back()}><ArrowLeft className="h-5 w-5" /></Button>
           <div>
             <h1 className="text-2xl font-bold">Nuevo pedido</h1>
             <p className="text-muted-foreground">Elige el tipo de pedido</p>
@@ -681,7 +681,7 @@ export function CreateOrderWizard({
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => step === 1 ? (fromSastre ? router.push('/sastre/pedidos') : setOrderType(null)) : setStep(step - 1)}>
+        <Button variant="ghost" size="icon" onClick={() => step === 1 ? router.back() : setStep(step - 1)}>
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <div>

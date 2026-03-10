@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -45,6 +45,7 @@ function getEventColor(status: string, dueDate: string) {
 }
 
 export function SupplierInvoicesCalendarContent() {
+  const router = useRouter()
   const [year, setYear] = useState(new Date().getFullYear())
   const [month, setMonth] = useState(new Date().getMonth() + 1)
   const [events, setEvents] = useState<CalendarEvent[]>([])
@@ -121,8 +122,8 @@ export function SupplierInvoicesCalendarContent() {
           </h1>
           <p className="text-muted-foreground text-sm mt-1">Facturas de proveedores por fecha de vencimiento.</p>
         </div>
-        <Button variant="outline" asChild>
-          <Link href="/admin/contabilidad/facturas-proveedores">Volver al listado</Link>
+        <Button variant="outline" onClick={() => router.back()}>
+          Volver al listado
         </Button>
       </div>
 
@@ -213,8 +214,8 @@ export function SupplierInvoicesCalendarContent() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" asChild>
-              <Link href="/admin/contabilidad/facturas-proveedores">Ver listado</Link>
+            <Button variant="outline" onClick={() => router.back()}>
+              Ver listado
             </Button>
             {selectedEvent && selectedEvent.status !== 'pagada' && (
               <Button onClick={handleMarkPaid} disabled={markingPaid}>
