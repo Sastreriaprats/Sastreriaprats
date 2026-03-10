@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { SastreLayoutWithSidebar } from '@/app/(sastre)/components/sastre-layout-with-sidebar'
 import { SastrePedidosContent } from './sastre-pedidos-content'
 
 export const metadata = { title: 'Pedidos · Sastre' }
@@ -24,8 +25,12 @@ export default async function SastrePedidosPage() {
   })
   const isSastrePlus = roleNames.includes('sastre_plus')
 
-  // Solo sastre_plus puede ver la lista de pedidos; sastre normal va directo a Nuevo producto (dos cajas)
-  if (!isSastrePlus) redirect('/sastre')
+  // Solo sastre_plus puede ver la lista de pedidos
+  if (!isSastrePlus) redirect('/sastre/nueva-venta')
 
-  return <SastrePedidosContent sastreName={sastreName} />
+  return (
+    <SastreLayoutWithSidebar sastreName={sastreName} isSastrePlus={isSastrePlus}>
+      <SastrePedidosContent sastreName={sastreName} />
+    </SastreLayoutWithSidebar>
+  )
 }

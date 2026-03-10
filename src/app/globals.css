@@ -126,6 +126,14 @@
     background-color: hsl(var(--muted-foreground) / 0.3);
     border-radius: 3px;
   }
+  /* Ocultar barra de scroll para uso táctil (iPad): scroll con el dedo sin barra visible */
+  .scrollbar-hide-touch {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-hide-touch::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* scroll suave vía data-scroll-behavior="smooth" en <html> (Next.js 16) */

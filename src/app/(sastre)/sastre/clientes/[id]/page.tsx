@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getClient, getClientMeasurements } from '@/actions/clients'
+import { SastreLayoutWithSidebar } from '@/app/(sastre)/components/sastre-layout-with-sidebar'
 import { SastreHeader } from '../../../components/sastre-header'
 import { Ruler, Phone, Mail, MapPin } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
@@ -18,12 +19,17 @@ export default async function SastreClientePage({
   if (!user) return null
 
   const admin = createAdminClient()
-  const { data: profile } = await admin
-    .from('profiles')
-    .select('full_name, first_name, last_name')
-    .eq('id', user.id)
-    .single()
+  const [profileRes, rolesRes] = await Promise.all([
+    admin.from('profiles').select('full_name, first_name, last_name').eq('id', user.id).single(),
+    admin.from('user_roles').select('roles(name)').eq('user_id', user.id),
+  ])
+  const profile = profileRes?.data
   const sastreName = profile?.full_name || profile?.first_name || profile?.last_name || 'Sastre'
+  const roleNames: string[] = (rolesRes?.data ?? []).flatMap((ur: { roles?: { name: string } | { name: string }[] | null }) => {
+    if (!ur?.roles) return []
+    return Array.isArray(ur.roles) ? ur.roles.map((r: { name: string }) => r.name) : [ur.roles.name]
+  })
+  const isSastrePlus = roleNames.includes('sastre_plus')
 
   const clientResult = await getClient(id)
   if (!clientResult.success || !clientResult.data) notFound()
@@ -36,12 +42,13 @@ export default async function SastreClientePage({
   const fullName = String(client.full_name || `${client.first_name || ''} ${client.last_name || ''}`).trim() || 'Sin nombre'
 
   return (
-    <div
-      className="min-h-screen flex flex-col"
-      style={{ background: 'radial-gradient(ellipse at top, #1a2744 0%, #0a1020 70%)' }}
-    >
-      <SastreHeader sastreName={sastreName} sectionTitle={fullName} backHref="/sastre/clientes" />
-      <main className="flex-1 p-6">
+    <SastreLayoutWithSidebar sastreName={sastreName} isSastrePlus={isSastrePlus}>
+      <div
+        className="flex-1 flex flex-col min-h-screen"
+        style={{ background: 'radial-gradient(ellipse at top, #1a2744 0%, #0a1020 70%)' }}
+      >
+        <SastreHeader sastreName={sastreName} sectionTitle={fullName} backHref="/sastre/clientes" />
+        <main className="flex-1 p-6">
         <div className="max-w-2xl mx-auto space-y-6">
           {/* Ficha cliente */}
           <div className="rounded-2xl border border-[#c9a96e]/20 bg-gradient-to-br from-[#1a2744] to-[#0d1629] p-6">
@@ -125,5 +132,6 @@ export default async function SastreClientePage({
         </p>
       </footer>
     </div>
+    </SastreLayoutWithSidebar>
   )
 }

@@ -61,7 +61,7 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <SastreHeader sastreName={sastreName} sectionTitle="Pedidos" backHref="/sastre" />
+      <SastreHeader sastreName={sastreName} sectionTitle="Pedidos" backHref="/sastre/nueva-venta" />
       <main className="flex-1 p-6">
         <div className="max-w-6xl mx-auto space-y-6">
           <div className="flex items-center justify-between gap-4 flex-wrap">

@@ -33,6 +33,16 @@ export function SastreDashboardClient({ sastreName, isSastrePlus = false }: { sa
           <main className="px-6 sm:px-10 pb-24 w-full flex justify-center">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-4xl w-full mx-auto">
             <Link
+              href="/sastre/nueva-venta"
+              className="min-h-[14rem] flex flex-col items-center justify-center rounded-xl border-2 border-[#c9a96e]/40 bg-gradient-to-br from-[#1a2744] to-[#0d1629] shadow-lg hover:border-[#c9a96e]/70 hover:shadow-[0_8px_30px_rgba(201,169,110,0.2)] transition-all duration-300 touch-manipulation py-8"
+            >
+              <div className="w-14 h-14 rounded-full border-2 border-[#c9a96e]/50 flex items-center justify-center bg-[#c9a96e]/10">
+                <Plus className="h-7 w-7 text-[#c9a96e]" />
+              </div>
+              <span className="font-serif text-xl text-[#c9a96e] mt-4">Nueva venta</span>
+              <span className="text-sm text-white/60 mt-1">Cliente → Producto → Ficha</span>
+            </Link>
+            <Link
               href="/sastre/clientes"
               className="min-h-[14rem] flex flex-col items-center justify-center rounded-xl border border-[#c9a96e]/20 bg-gradient-to-br from-[#1a2744] to-[#0d1629] shadow-lg hover:border-[#c9a96e]/60 hover:shadow-[0_8px_30px_rgba(201,169,110,0.15)] transition-all duration-300 touch-manipulation py-8"
             >

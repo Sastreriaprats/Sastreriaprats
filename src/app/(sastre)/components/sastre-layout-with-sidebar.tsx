@@ -4,13 +4,28 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import { LogOut, Calendar } from 'lucide-react'
+import {
+  LogOut,
+  Calendar,
+  Users,
+  Ruler,
+  Package,
+  Shirt,
+  ListOrdered,
+  ShoppingCart,
+  CircleDollarSign,
+} from 'lucide-react'
 
 type Props = {
   sastreName: string
   isSastrePlus?: boolean
   children: React.ReactNode
 }
+
+const navClass = (active: boolean) =>
+  `flex flex-col items-center gap-1 px-1.5 py-2 rounded-md text-xs transition-colors touch-manipulation min-h-[44px] justify-center ${
+    active ? 'bg-[#c9a96e]/20 text-[#c9a96e]' : 'text-white/70 hover:text-white hover:bg-white/5'
+  }`
 
 export function SastreLayoutWithSidebar({ sastreName, isSastrePlus = false, children }: Props) {
   const pathname = usePathname()
@@ -29,36 +44,64 @@ export function SastreLayoutWithSidebar({ sastreName, isSastrePlus = false, chil
         className="w-28 shrink-0 flex flex-col border-r border-[#c9a96e]/20"
         style={{ backgroundColor: '#0d1629' }}
       >
-        <Link href="/sastre" className="p-3 flex flex-col gap-2">
+        <Link href="/sastre/nueva-venta" className="p-2 flex flex-col gap-1">
           <img
             src="/logo-prats.png"
             alt="Prats"
-            width={120}
-            height={48}
-            className="object-contain w-full min-h-[3rem] max-h-[4rem]"
+            width={96}
+            height={36}
+            className="object-contain w-full h-9"
             style={{ filter: 'brightness(0) invert(1)', objectFit: 'contain' }}
           />
           <div className="h-px w-full bg-[#c9a96e]/30" aria-hidden />
-          <span className="tracking-[0.15em] text-[11px] text-white/80 font-light leading-tight">
+          <span className="tracking-[0.12em] text-[10px] text-white/80 font-light leading-tight">
             SASTRERÍA MADRID · EST. 1985
           </span>
         </Link>
-        <nav className="p-2 flex flex-col gap-0.5">
+        <nav className="p-1.5 flex flex-col gap-0.5">
           <Link
-            href="/sastre/calendario"
-            className={`flex flex-col items-center gap-1.5 px-2 py-3 rounded-md text-sm transition-colors ${
-              pathname === '/sastre/calendario'
-                ? 'bg-[#c9a96e]/20 text-[#c9a96e]'
-                : 'text-white/70 hover:text-white hover:bg-white/5'
-            }`}
+            href="/sastre/nueva-venta"
+            className={navClass(pathname === '/sastre/nueva-venta' || pathname.startsWith('/sastre/nueva-venta/'))}
           >
-            <Calendar className="h-8 w-8 shrink-0" />
-            <span>Calendario</span>
+            <Shirt className="h-5 w-5 shrink-0" />
+            <span className="text-center leading-tight">Nueva venta</span>
           </Link>
+          <Link href="/sastre/calendario" className={navClass(pathname === '/sastre/calendario')}>
+            <Calendar className="h-5 w-5 shrink-0" />
+            <span className="text-center leading-tight">Calendario</span>
+          </Link>
+          <Link href="/sastre/clientes" className={navClass(pathname === '/sastre/clientes' || pathname.startsWith('/sastre/clientes/'))}>
+            <Users className="h-5 w-5 shrink-0" />
+            <span className="text-center leading-tight">Clientes</span>
+          </Link>
+          <Link href="/sastre/clientes" className={navClass(false)} title="Tomar medidas (desde cliente)">
+            <Ruler className="h-5 w-5 shrink-0" />
+            <span className="text-center leading-tight">Tomar medidas</span>
+          </Link>
+          <Link href="/sastre/stock" className={navClass(pathname === '/sastre/stock' || pathname.startsWith('/sastre/stock'))}>
+            <Package className="h-5 w-5 shrink-0" />
+            <span className="text-center leading-tight">Stock</span>
+          </Link>
+          {isSastrePlus && (
+            <>
+              <Link href="/sastre/pedidos" className={navClass(pathname === '/sastre/pedidos' || pathname.startsWith('/sastre/pedidos'))}>
+                <ListOrdered className="h-5 w-5 shrink-0" />
+                <span className="text-center leading-tight">Pedidos</span>
+              </Link>
+              <Link href="/pos/caja" className={navClass(pathname === '/pos/caja')}>
+                <ShoppingCart className="h-5 w-5 shrink-0" />
+                <span className="text-center leading-tight">Caja TPV</span>
+              </Link>
+              <Link href="/sastre/cobros" className={navClass(pathname === '/sastre/cobros')}>
+                <CircleDollarSign className="h-5 w-5 shrink-0" />
+                <span className="text-center leading-tight">Cobros</span>
+              </Link>
+            </>
+          )}
         </nav>
         <div className="flex-1" />
-        <div className="p-3 border-t border-[#c9a96e]/20 flex flex-col gap-2">
-          <span className="text-white font-light text-xs truncate" title={sastreName}>{sastreName}</span>
+        <div className="p-2 border-t border-[#c9a96e]/20 flex flex-col gap-1.5">
+          <span className="text-white font-light text-[11px] truncate" title={sastreName}>{sastreName}</span>
           <button
             type="button"
             onClick={handleLogout}
@@ -70,7 +113,9 @@ export function SastreLayoutWithSidebar({ sastreName, isSastrePlus = false, chil
           </button>
         </div>
       </aside>
-      {children}
+      <div className="flex-1 min-h-0 flex flex-col min-w-0">
+        {children}
+      </div>
     </div>
   )
 }

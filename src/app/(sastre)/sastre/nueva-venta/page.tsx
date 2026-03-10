@@ -1,9 +1,12 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { SastreLayoutWithSidebar } from '@/app/(sastre)/components/sastre-layout-with-sidebar'
-import { StockPageContent } from './stock-page-content'
+import { NewVentaTipoClient } from './new-venta-tipo-client'
 
-export default async function SastreStockPage() {
+export const metadata = { title: 'Nueva venta · Sastre' }
+export const dynamic = 'force-dynamic'
+
+export default async function NewVentaPage() {
   const supabase = await createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
@@ -23,7 +26,7 @@ export default async function SastreStockPage() {
 
   return (
     <SastreLayoutWithSidebar sastreName={sastreName} isSastrePlus={isSastrePlus}>
-      <StockPageContent sastreName={sastreName} />
+      <NewVentaTipoClient />
     </SastreLayoutWithSidebar>
   )
 }

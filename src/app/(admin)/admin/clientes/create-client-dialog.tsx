@@ -60,9 +60,13 @@ interface CreateClientDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSuccess: () => void
+  /** Si se proporciona, se llama con el id del cliente recién creado (antes de onSuccess). */
+  onSuccessWithId?: (clientId: string) => void
+  /** Si se proporciona, se llama al pulsar Cancelar (para redirigir en flujo sastre). */
+  onCancel?: () => void
 }
 
-export function CreateClientDialog({ open, onOpenChange, onSuccess }: CreateClientDialogProps) {
+export function CreateClientDialog({ open, onOpenChange, onSuccess, onSuccessWithId, onCancel }: CreateClientDialogProps) {
   const [activeTab, setActiveTab] = useState('personal')
   const [form, setForm] = useState({
     first_name: '', last_name: '', email: '', phone: '', phone_secondary: '',
@@ -81,6 +85,8 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess }: CreateClie
 
   const { execute, isLoading } = useAction(createClientAction, {
     onSuccess: (data) => {
+      const clientId = (data as { id?: string })?.id
+      if (clientId && onSuccessWithId) onSuccessWithId(clientId)
       if (data?.accountCreated) {
         toast.success('Cliente creado con cuenta de acceso (puede entrar en Mi cuenta con su email y la contraseña por defecto)')
       } else {
@@ -276,7 +282,7 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess }: CreateClie
         </Tabs>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
+          <Button variant="outline" onClick={() => { onCancel?.(); onOpenChange(false) }}>Cancelar</Button>
           <Button onClick={() => {
             const dateOfBirth = form.date_of_birth && String(form.date_of_birth).length === 10 && /^\d{4}-\d{2}-\d{2}$/.test(form.date_of_birth)
               ? form.date_of_birth

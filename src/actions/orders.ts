@@ -2,6 +2,7 @@
 
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { queryList, queryById, getNextNumber } from '@/lib/server/query-helpers'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { createTailoringOrderSchema, tailoringOrderLineSchema, changeOrderStatusSchema } from '@/lib/validations/orders'
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
@@ -14,6 +15,22 @@ const SELECT_ORDERS = `
   clients ( id, full_name, phone, email, category ),
   stores ( name, code )
 `
+
+/** Devuelve el siguiente número de talón (solo el número, ej. 46). */
+export async function getNextTalonNumber(): Promise<number> {
+  const supabase = createAdminClient()
+  const { data } = await supabase
+    .from('tailoring_orders')
+    .select('order_number')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single()
+  if (data?.order_number) {
+    const match = String(data.order_number).match(/(\d+)$/)
+    if (match) return parseInt(match[1], 10) + 1
+  }
+  return 1
+}
 
 export const listOrders = protectedAction<ListParams & { status?: string }, ListResult<any>>(
   { permission: 'orders.view', auditModule: 'orders' },
@@ -357,5 +374,298 @@ export const scheduleFitting = protectedAction<{
 
     if (error) return failure(error.message)
     return success(fitting)
+  }
+)
+
+// ─── Nueva venta (ficha) ────────────────────────────────────────────────────
+
+export interface CreateFichaOrderInput {
+  clientId: string
+  orderType: 'artesanal' | 'industrial' | 'camiseria'
+  storeId: string
+  precioPrenda: number
+  notas: string
+  camisas: Array<{
+    cuello: string
+    puno: string
+    bolsillo: boolean
+    botones: string
+    tejido: string
+    obs: string
+    precio: number
+  }>
+  complementos: Array<{ product_variant_id: string; nombre: string; cantidad: number; precio: number }>
+  entregaACuenta: number
+  /** Campos adicionales ficha de confección (cabecera y secciones) */
+  prenda?: string
+  cortador?: string
+  fechaCompromiso?: string
+  situacionTrabajo?: string
+  fechaCobro?: string
+  fichaData?: Record<string, unknown>
+}
+
+export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId: string; orderNumber: string }>(
+  {
+    permission: 'orders.create',
+    auditModule: 'orders',
+    auditAction: 'create',
+    auditEntity: 'tailoring_order',
+    revalidate: ['/sastre/pedidos'],
+  },
+  async (ctx, input) => {
+    const orderTypeDb = input.orderType === 'camiseria' ? 'industrial' : input.orderType
+
+    const { data: garmentTypes } = await ctx.adminClient
+      .from('garment_types')
+      .select('id, name, code')
+      .eq('is_active', true)
+
+    const americana = (garmentTypes ?? []).find((g: { name?: string; code?: string }) =>
+      (g.name && g.name.toLowerCase().includes('americana')) || (g.code && g.code.toLowerCase() === 'americana'))
+    const camiseria = (garmentTypes ?? []).find((g: { name?: string; code?: string }) =>
+      (g.name && g.name.toLowerCase().includes('camiser')) || (g.code && g.code.toLowerCase() === 'camiseria'))
+    const firstType = garmentTypes?.[0]
+
+    const mainGarmentTypeId = americana?.id ?? firstType?.id
+    const camiseriaGarmentTypeId = camiseria?.id ?? firstType?.id
+    const complementGarmentTypeId = camiseria?.id ?? firstType?.id
+
+    if (!mainGarmentTypeId) return failure('No hay tipos de prenda configurados')
+
+    const orderNumber = await getNextNumber('tailoring_orders', 'order_number', 'PED')
+
+    let subtotal = Number(input.precioPrenda) || 0
+    const linesToInsert: Array<{
+      tailoring_order_id: string
+      garment_type_id: string
+      line_type: 'artesanal' | 'industrial'
+      unit_price: number
+      line_total: number
+      finishing_notes: string | null
+      configuration: Record<string, unknown>
+      sort_order: number
+    }> = []
+
+    const { data: order, error: orderError } = await ctx.adminClient
+      .from('tailoring_orders')
+      .insert({
+        client_id: input.clientId,
+        order_type: orderTypeDb,
+        store_id: input.storeId,
+        status: 'created',
+        order_number: orderNumber,
+        estimated_delivery_date: input.fechaCompromiso || null,
+        subtotal: 0,
+        discount_amount: 0,
+        tax_amount: 0,
+        total: 0,
+        total_paid: 0,
+        total_pending: 0,
+        created_by: ctx.userId,
+      })
+      .select('id')
+      .single()
+
+    if (orderError || !order) return failure(orderError?.message ?? 'Error al crear el pedido')
+
+    let sortOrder = 0
+
+    const mainConfig: Record<string, unknown> = {
+      ...(input.fichaData || {}),
+      prenda: input.prenda,
+      cortador: input.cortador,
+      fechaCompromiso: input.fechaCompromiso,
+      situacionTrabajo: input.situacionTrabajo,
+      fechaCobro: input.fechaCobro,
+    }
+
+    linesToInsert.push({
+      tailoring_order_id: order.id,
+      garment_type_id: mainGarmentTypeId,
+      line_type: 'artesanal',
+      unit_price: Number(input.precioPrenda) || 0,
+      line_total: Number(input.precioPrenda) || 0,
+      finishing_notes: (input.notas || '').trim() || null,
+      configuration: mainConfig,
+      sort_order: sortOrder++,
+    })
+
+    for (const camisa of input.camisas || []) {
+      const precio = Number(camisa.precio) || 0
+      subtotal += precio
+      linesToInsert.push({
+        tailoring_order_id: order.id,
+        garment_type_id: camiseriaGarmentTypeId,
+        line_type: 'industrial',
+        unit_price: precio,
+        line_total: precio,
+        finishing_notes: null,
+        configuration: {
+          cuello: camisa.cuello,
+          puno: camisa.puno,
+          bolsillo: camisa.bolsillo,
+          botones: camisa.botones,
+          tejido: camisa.tejido,
+          obs: camisa.obs,
+        },
+        sort_order: sortOrder++,
+      })
+    }
+
+    for (const comp of input.complementos || []) {
+      const precio = Number(comp.precio) || 0
+      const cantidad = Math.max(1, Math.floor(Number(comp.cantidad) || 1))
+      for (let i = 0; i < cantidad; i++) {
+        linesToInsert.push({
+          tailoring_order_id: order.id,
+          garment_type_id: complementGarmentTypeId,
+          line_type: 'industrial',
+          unit_price: precio,
+          line_total: precio,
+          finishing_notes: null,
+          configuration: { product_variant_id: comp.product_variant_id, product_name: comp.nombre },
+          sort_order: sortOrder++,
+        })
+      }
+      subtotal += precio * cantidad
+    }
+
+    const total = subtotal
+    const taxAmount = total * 0.21
+    const totalWithTax = total + taxAmount
+    const entrega = Number(input.entregaACuenta) || 0
+    const totalPaid = entrega
+    const totalPending = Math.max(0, totalWithTax - entrega)
+
+    const { error: linesError } = await ctx.adminClient
+      .from('tailoring_order_lines')
+      .insert(linesToInsert.map((l) => ({
+        tailoring_order_id: l.tailoring_order_id,
+        garment_type_id: l.garment_type_id,
+        line_type: l.line_type,
+        unit_price: l.unit_price,
+        line_total: l.line_total,
+        finishing_notes: l.finishing_notes,
+        configuration: l.configuration,
+        sort_order: l.sort_order,
+      })))
+
+    if (linesError) return failure(linesError.message)
+
+    await ctx.adminClient
+      .from('tailoring_orders')
+      .update({
+        subtotal,
+        tax_amount: taxAmount,
+        total: totalWithTax,
+        total_paid: totalPaid,
+        total_pending: totalPending,
+      })
+      .eq('id', order.id)
+
+    await ctx.adminClient.from('tailoring_order_state_history').insert({
+      tailoring_order_id: order.id,
+      to_status: 'created',
+      changed_by: ctx.userId,
+      changed_by_name: ctx.userName,
+    })
+
+    if (entrega > 0) {
+      const today = new Date().toISOString().split('T')[0]
+      await ctx.adminClient.from('tailoring_order_payments').insert({
+        tailoring_order_id: order.id,
+        payment_date: today,
+        payment_method: 'cash',
+        amount: entrega,
+        reference: `Entrega a cuenta - ${orderNumber}`,
+        created_by: ctx.userId,
+      })
+    }
+
+    return success({ orderId: order.id, orderNumber })
+  }
+)
+
+/** Búsqueda de productos para complementos (boutique) en nueva venta.
+ * Busca en products con product_type = 'boutique' por nombre (ILIKE).
+ * Devuelve un resultado por producto usando la primera variante para id/precio.
+ */
+export const searchComplementProducts = protectedAction<
+  { query: string; storeId?: string },
+  Array<{ id: string; name: string; sku: string; price: number; stock: number }>
+>(
+  { permission: 'orders.create' },
+  async (ctx, { query, storeId }) => {
+    const q = (query || '').trim()
+    if (q.length < 2) return success([])
+
+    const { data: productsData, error: productsError } = await ctx.adminClient
+      .from('products')
+      .select('id, name, sku, base_price')
+      .eq('product_type', 'boutique')
+      .ilike('name', `%${q}%`)
+      .limit(20)
+
+    if (productsError) {
+      console.error('[searchComplementProducts] products:', productsError)
+      return success([])
+    }
+    const products = productsData ?? []
+    if (products.length === 0) return success([])
+
+    const productIds = products.map((p: { id: string }) => p.id)
+    const { data: variantsData, error: variantsError } = await ctx.adminClient
+      .from('product_variants')
+      .select('id, product_id, variant_sku, price_override')
+      .in('product_id', productIds)
+      .order('created_at', { ascending: true })
+
+    if (variantsError) {
+      console.error('[searchComplementProducts] variants:', variantsError)
+      return success([])
+    }
+    const variants = (variantsData ?? []) as Array<{ id: string; product_id: string; variant_sku: string; price_override: number | null }>
+    const variantByProductId: Record<string, (typeof variants)[0]> = {}
+    for (const v of variants) {
+      if (!variantByProductId[v.product_id]) variantByProductId[v.product_id] = v
+    }
+
+    const variantIds = Object.values(variantByProductId).map((v) => v.id)
+    let stockMap: Record<string, number> = {}
+    if (variantIds.length > 0 && storeId) {
+      const { data: wh } = await ctx.adminClient
+        .from('warehouses')
+        .select('id')
+        .eq('store_id', storeId)
+        .eq('is_main', true)
+        .single()
+      if (wh) {
+        const { data: levels } = await ctx.adminClient
+          .from('stock_levels')
+          .select('product_variant_id, quantity')
+          .eq('warehouse_id', wh.id)
+          .in('product_variant_id', variantIds)
+        for (const l of levels ?? []) {
+          const row = l as { product_variant_id: string; quantity: number }
+          stockMap[row.product_variant_id] = Number(row.quantity ?? 0)
+        }
+      }
+    }
+
+    const result = products
+      .filter((p: { id: string }) => variantByProductId[p.id])
+      .map((p: { id: string; name: string; sku: string | null; base_price: unknown }) => {
+        const v = variantByProductId[p.id]
+        const price = v?.price_override != null ? Number(v.price_override) : Number(p.base_price) || 0
+        return {
+          id: v.id,
+          name: p.name ?? '—',
+          sku: v.variant_sku ?? p.sku ?? '—',
+          price,
+          stock: stockMap[v.id] ?? 0,
+        }
+      })
+    return success(result)
   }
 )

@@ -36,7 +36,7 @@ export function ClientesPageContent({ sastreName }: { sastreName: string }) {
       className="min-h-screen flex flex-col"
       style={{ background: 'radial-gradient(ellipse at top, #1a2744 0%, #0a1020 70%)' }}
     >
-      <SastreHeader sastreName={sastreName} sectionTitle="Clientes" backHref="/sastre" />
+      <SastreHeader sastreName={sastreName} sectionTitle="Clientes" backHref="/sastre/nueva-venta" />
       <main className="flex-1 px-6 py-8">
         <div className="max-w-3xl mx-auto space-y-6">
           <div className="relative">
