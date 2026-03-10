@@ -758,7 +758,6 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
   const handleIssue = async () => {
     const r = await issueInvoiceAction(inv.id)
     if (!r.success) { toast.error(!r.success && 'error' in r ? r.error : 'Error al emitir'); return }
-    createInvoiceJournalEntry(inv.id).catch(e => console.error('Journal entry error:', e))
     toast.success('Factura emitida — asiento contable creado')
     onRefresh()
   }

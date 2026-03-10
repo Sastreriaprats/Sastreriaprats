@@ -1323,7 +1323,7 @@ export const sendEstimateAction = protectedAction<{ estimateId: string }, undefi
         pdfUrl = await generateEstimatePdf(estimateId)
       } catch (e) {
         console.error('[sendEstimateAction] Error generando PDF:', e)
-        pdfUrl = null
+        pdfUrl = undefined
       }
     }
 

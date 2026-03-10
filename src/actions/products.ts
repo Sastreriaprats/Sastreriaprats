@@ -132,7 +132,8 @@ export const getProductsWithVariantsForBarcodes = protectedAction<
     let withoutBarcodeCount = 0
 
     for (const v of rows) {
-      const p = v.products || {}
+      const rawProducts = v.products
+      const p = Array.isArray(rawProducts) ? rawProducts[0] ?? {} : (rawProducts ?? {}) as { id?: string; sku?: string; name?: string; base_price?: number; tax_rate?: number; is_active?: boolean }
       const productId = v.product_id
       const priceOverride = v.price_override != null ? Number(v.price_override) : null
       const basePrice = priceOverride ?? Number(p.base_price ?? 0)
