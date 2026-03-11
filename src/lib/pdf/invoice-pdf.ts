@@ -1,22 +1,11 @@
-import { PDFDocument, StandardFonts, rgb, PageSizes, degrees } from 'pdf-lib'
+import type { Content } from 'pdfmake'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { COMPANY, formatDateDDMMYYYY, eurFormat, getLogoBase64 } from './pdf-company'
 
 const BUCKET = 'documents'
 
-// Azul corporativo Prats: #1E3A5F
-const BLUE     = rgb(0.118, 0.227, 0.373)
-const BLUE_MID = rgb(0.22,  0.42,  0.62)
-const GRAY     = rgb(0.35,  0.35,  0.35)
-const LGRAY    = rgb(0.6,   0.6,   0.6)
-const WHITE    = rgb(1, 1, 1)
-const BLACK    = rgb(0, 0, 0)
-const BG_HEADER= rgb(0.118, 0.227, 0.373)  // cabecera azul sólida
-const BG_TABLE = rgb(0.92,  0.95,  0.98)   // azul pálido filas cabecera tabla
-
-const W = PageSizes.A4[0] // 595
-const H = PageSizes.A4[1] // 842
-const ML = 45             // margen izq
-const MR = W - 45         // margen der
+const HEADER_BG = '#1a1a2e'
+const ROW_ALT = '#f9f9f9'
 
 type InvoiceRecord = {
   id: string
@@ -53,16 +42,8 @@ function n(v: unknown): number {
   return Number(String(v).replace(',', '.')) || 0
 }
 
-function eur(v: number): string {
-  return new Intl.NumberFormat('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v) + ' €'
-}
-
-function fmt(v: string | null | undefined): string {
-  return v ? String(v) : ''
-}
-
 /**
- * Genera un PDF profesional de la factura con logo Prats y azul corporativo.
+ * Genera un PDF de factura con pdfmake según el diseño indicado.
  * Lo sube a Supabase Storage y actualiza invoices.pdf_url. Devuelve la URL pública.
  */
 export async function generateInvoicePdf(invoiceId: string): Promise<string> {
@@ -85,178 +66,259 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
     .eq('invoice_id', invoiceId)
     .order('sort_order', { ascending: true })
 
-  const doc = await PDFDocument.create()
-  const isDraft = inv.status === 'draft'
-  console.log('[invoice-pdf] invoiceId:', invoiceId, 'status:', inv.status, 'isDraft:', isDraft)
-  doc.setTitle(isDraft ? 'Borrador factura' : `Factura ${inv.invoice_number ?? ''}`)
-  doc.setAuthor('Sastrería Prats')
-
-  const regular = doc.embedStandardFont(StandardFonts.Helvetica)
-  const bold    = doc.embedStandardFont(StandardFonts.HelveticaBold)
-
-  const page = doc.addPage(PageSizes.A4)
-
   const invoice = inv as unknown as InvoiceRecord
-  const lines   = (rawLines || []) as unknown as InvoiceLineRecord[]
+  const lines = (rawLines || []) as unknown as InvoiceLineRecord[]
+  const isDraft = invoice.status === 'draft'
+  const displayNumber =
+    isDraft && (!invoice.invoice_number || !String(invoice.invoice_number).trim())
+      ? 'BORRADOR'
+      : invoice.invoice_number ?? ''
 
-  // ── 1. CABECERA AZUL ────────────────────────────────────────────────────────
-  const HEADER_H = 90
-  page.drawRectangle({ x: 0, y: H - HEADER_H, width: W, height: HEADER_H, color: BG_HEADER })
+  const logoData = getLogoBase64()
 
-  // Logo "Prats" en la cabecera (izquierda)
-  page.drawText('PRATS', { x: ML, y: H - 38, size: 28, font: bold, color: WHITE })
-  page.drawText('SASTRERÍA', { x: ML, y: H - 54, size: 10, font: regular, color: rgb(0.7, 0.85, 1) })
-
-  // Título cabecera: BORRADOR o FACTURA según estado
-  const headerTitle = isDraft ? 'BORRADOR' : 'FACTURA'
-  page.drawText(headerTitle, { x: MR - 120, y: H - 40, size: 22, font: bold, color: WHITE })
-
-  // Número en caja blanca dentro de la cabecera
-  const numBoxW = 130
-  const numBoxX = MR - numBoxW
-  const displayNumber = isDraft && (!invoice.invoice_number || !invoice.invoice_number.trim()) ? 'BORRADOR' : (invoice.invoice_number ?? '')
-  page.drawRectangle({ x: numBoxX, y: H - HEADER_H + 8, width: numBoxW, height: 26, color: WHITE, borderColor: WHITE, borderWidth: 0 })
-  page.drawText(`Nº: ${displayNumber}`, { x: numBoxX + 8, y: H - HEADER_H + 18, size: 12, font: bold, color: BLUE })
-
-  let y = H - HEADER_H - 24
-
-  // ── 2. FECHAS ────────────────────────────────────────────────────────────────
-  page.drawText(`Fecha:`, { x: MR - 200, y, size: 9, font: regular, color: LGRAY })
-  page.drawText(invoice.invoice_date, { x: MR - 150, y, size: 9, font: bold, color: GRAY })
+  const headerRight: Content[] = [
+    { text: isDraft ? 'BORRADOR' : 'FACTURA', fontSize: 28, bold: true, color: 'white', alignment: 'right', margin: [0, 0, 0, 4] },
+    { text: `Nº: ${displayNumber}`, fontSize: 10, color: 'white', alignment: 'right', margin: [0, 0, 0, 2] },
+    { text: `Fecha: ${formatDateDDMMYYYY(invoice.invoice_date)}`, fontSize: 10, color: 'white', alignment: 'right', margin: [0, 0, 0, 2] },
+  ]
   if (invoice.due_date) {
-    y -= 14
-    page.drawText(`Vencimiento:`, { x: MR - 200, y, size: 9, font: regular, color: LGRAY })
-    page.drawText(invoice.due_date, { x: MR - 150, y, size: 9, font: bold, color: GRAY })
-  }
-
-  // ── 3. DOS COLUMNAS: EMPRESA | CLIENTE ───────────────────────────────────────
-  const colTopY = H - HEADER_H - 20
-  const colH    = 75
-  const halfW   = (MR - ML - 8) / 2
-  const c2X     = ML + halfW + 8
-
-  // Empresa (izquierda)
-  page.drawText('EMPRESA', { x: ML, y: colTopY - 16, size: 8, font: bold, color: BLUE })
-  page.drawLine({ start: { x: ML, y: colTopY - 19 }, end: { x: ML + halfW, y: colTopY - 19 }, thickness: 0.5, color: BLUE })
-  page.drawText(invoice.company_name, { x: ML, y: colTopY - 31, size: 9, font: bold, color: BLACK })
-  page.drawText(`NIF: ${invoice.company_nif}`, { x: ML, y: colTopY - 43, size: 8, font: regular, color: GRAY })
-  page.drawText(invoice.company_address.slice(0, 42), { x: ML, y: colTopY - 54, size: 8, font: regular, color: GRAY })
-
-  // Cliente (derecha)
-  page.drawText('CLIENTE', { x: c2X, y: colTopY - 16, size: 8, font: bold, color: BLUE })
-  page.drawLine({ start: { x: c2X, y: colTopY - 19 }, end: { x: MR, y: colTopY - 19 }, thickness: 0.5, color: BLUE })
-  page.drawText(invoice.client_name, { x: c2X, y: colTopY - 31, size: 9, font: bold, color: BLACK })
-  if (invoice.client_nif) page.drawText(`NIF/CIF: ${invoice.client_nif}`, { x: c2X, y: colTopY - 43, size: 8, font: regular, color: GRAY })
-  if (invoice.client_address) page.drawText(String(invoice.client_address).slice(0, 42), { x: c2X, y: colTopY - 54, size: 8, font: regular, color: GRAY })
-
-  y = colTopY - colH - 20
-
-  // Línea separadora
-  page.drawLine({ start: { x: ML, y }, end: { x: MR, y }, thickness: 0.5, color: BLUE_MID })
-  y -= 16
-
-  // ── 4. TABLA DE LÍNEAS ───────────────────────────────────────────────────────
-  const cDesc    = ML
-  const cQty     = ML + 230
-  const cPrice   = ML + 295
-  const cTax     = ML + 370
-  const cLineTot = MR - 60
-  const TABLE_W  = MR - ML
-  const ROW_H    = 20
-  const HEAD_H   = 22
-
-  // Cabecera tabla
-  page.drawRectangle({ x: ML, y: y - HEAD_H, width: TABLE_W, height: HEAD_H, color: BG_TABLE })
-  page.drawText('CONCEPTO',  { x: cDesc + 4,     y: y - 15, size: 8, font: bold, color: BLUE })
-  page.drawText('CANT.',     { x: cQty + 4,      y: y - 15, size: 8, font: bold, color: BLUE })
-  page.drawText('PRECIO',    { x: cPrice + 4,    y: y - 15, size: 8, font: bold, color: BLUE })
-  page.drawText('IVA',       { x: cTax + 4,      y: y - 15, size: 8, font: bold, color: BLUE })
-  page.drawText('TOTAL',     { x: cLineTot + 4,  y: y - 15, size: 8, font: bold, color: BLUE })
-  y -= HEAD_H
-
-  for (let i = 0; i < lines.length; i++) {
-    const ln = lines[i]
-    const rowY = y - ROW_H * (i + 1)
-    if (i % 2 === 1) page.drawRectangle({ x: ML, y: rowY, width: TABLE_W, height: ROW_H, color: rgb(0.97, 0.97, 0.97) })
-    page.drawText(String(ln.description ?? '').slice(0, 40), { x: cDesc + 4,    y: rowY + 6, size: 8, font: regular, color: GRAY })
-    page.drawText(String(n(ln.quantity)),                    { x: cQty + 4,     y: rowY + 6, size: 8, font: regular, color: GRAY })
-    page.drawText(eur(n(ln.unit_price)),                     { x: cPrice + 4,   y: rowY + 6, size: 8, font: regular, color: GRAY })
-    page.drawText(`${n(ln.tax_rate)}%`,                      { x: cTax + 4,     y: rowY + 6, size: 8, font: regular, color: GRAY })
-    page.drawText(eur(n(ln.line_total)),                     { x: cLineTot + 4, y: rowY + 6, size: 8, font: bold,    color: GRAY })
-  }
-  y -= ROW_H * lines.length
-
-  // Borde inferior tabla
-  page.drawLine({ start: { x: ML, y }, end: { x: MR, y }, thickness: 0.5, color: BLUE_MID })
-  y -= 16
-
-  // ── 5. TOTALES (columna derecha) ─────────────────────────────────────────────
-  const totLabelX = MR - 155
-  const totValX   = MR - 60
-
-  const drawTotalRow = (label: string, value: string, isBig = false) => {
-    const size = isBig ? 11 : 9
-    page.drawText(label, { x: totLabelX, y, size, font: isBig ? bold : regular, color: isBig ? BLUE : GRAY })
-    page.drawText(value, { x: totValX,   y, size, font: isBig ? bold : regular, color: isBig ? BLUE : GRAY })
-    y -= isBig ? 18 : 14
-  }
-
-  drawTotalRow('Subtotal:',        eur(n(invoice.subtotal)))
-  drawTotalRow(`IVA (${n(invoice.tax_rate)}%):`, eur(n(invoice.tax_amount)))
-  if (n(invoice.irpf_amount) > 0)
-    drawTotalRow(`IRPF (${n(invoice.irpf_rate)}%):`, `- ${eur(n(invoice.irpf_amount))}`)
-
-  // Caja TOTAL
-  y -= 4
-  page.drawRectangle({ x: totLabelX - 8, y: y - 22, width: MR - totLabelX + 8, height: 28, color: BLUE })
-  page.drawText('TOTAL', { x: totLabelX,  y: y - 12, size: 12, font: bold, color: WHITE })
-  page.drawText(eur(n(invoice.total)), { x: totValX, y: y - 12, size: 12, font: bold, color: WHITE })
-  y -= 38
-
-  // ── 6. INFO DE PAGO ──────────────────────────────────────────────────────────
-  if (y > 110) {
-    page.drawRectangle({ x: ML, y: y - 52, width: 200, height: 56, borderColor: BLUE, borderWidth: 0.6 })
-    page.drawRectangle({ x: ML, y: y - 16, width: 200, height: 16, color: BG_TABLE })
-    page.drawText('INFORMACIÓN DE PAGO', { x: ML + 6, y: y - 11, size: 8, font: bold, color: BLUE })
-    page.drawText('Transferencia bancaria', { x: ML + 6, y: y - 26, size: 8, font: regular, color: GRAY })
-    page.drawText(invoice.company_name,     { x: ML + 6, y: y - 38, size: 8, font: regular, color: GRAY })
-    y -= 62
-  }
-
-  // ── 7. NOTAS ─────────────────────────────────────────────────────────────────
-  if (invoice.notes && y > 70) {
-    page.drawText('Notas:', { x: ML, y, size: 8, font: bold, color: BLUE })
-    y -= 12
-    page.drawText(String(invoice.notes).slice(0, 200), { x: ML, y, size: 8, font: regular, color: GRAY })
-  }
-
-  // ── 8. PIE ───────────────────────────────────────────────────────────────────
-  page.drawLine({ start: { x: ML, y: 35 }, end: { x: MR, y: 35 }, thickness: 0.4, color: BLUE })
-  page.drawText('Sastrería Prats  ·  ' + invoice.company_nif + '  ·  ' + invoice.company_address,
-    { x: ML, y: 22, size: 7, font: regular, color: LGRAY })
-
-  // ── 9. MARCA DE AGUA (solo borradores) — al final para quedar por encima ───────
-  if (isDraft) {
-    page.drawText('BORRADOR', {
-      x: W / 2 - 150,
-      y: H / 2 - 20,
-      size: 70,
-      font: bold,
-      color: rgb(0.8, 0, 0),
-      opacity: 0.12,
-      rotate: degrees(45),
+    headerRight.push({
+      text: `Vencimiento: ${formatDateDDMMYYYY(invoice.due_date)}`,
+      fontSize: 10,
+      color: 'white',
+      alignment: 'right',
     })
   }
 
-  // ── 10. SUBIR A STORAGE ───────────────────────────────────────────────────────
-  const pdfBytes = await doc.save()
+  const headerTable: Content = {
+    table: {
+      widths: ['40%', '60%'],
+      body: [
+        [
+          {
+            fillColor: '#ffffff',
+            margin: [10, 10, 10, 10] as [number, number, number, number],
+            ...(logoData
+              ? { image: logoData, width: 140, alignment: 'center' as const }
+              : { text: 'SASTRERÍA PRATS', fontSize: 18, bold: true, color: '#1a1a2e', alignment: 'center' as const }),
+          },
+          {
+            fillColor: HEADER_BG,
+            stack: headerRight,
+            alignment: 'right',
+            margin: [0, 8, 0, 8] as [number, number, number, number],
+          },
+        ],
+      ],
+    },
+    layout: 'noBorders',
+    margin: [0, 0, 0, 0],
+  }
 
-  try { await admin.storage.createBucket(BUCKET, { public: true }) } catch { /* ya existe */ }
+  const headerGoldenLine: Content = {
+    table: {
+      widths: ['*'],
+      body: [[{ fillColor: '#c9a96e', text: '', height: 2 }]],
+    },
+    layout: 'noBorders',
+    margin: [0, 0, 0, 16],
+  }
+
+  const companyBlock: Content = {
+    stack: [
+      { text: 'EMPRESA', fontSize: 8, bold: true, color: '#666', margin: [0, 0, 0, 2] },
+      { text: COMPANY.name, fontSize: 10, bold: true, color: 'black', margin: [0, 0, 0, 2] },
+      { text: `NIF / CIF: ${COMPANY.nif}`, fontSize: 9, color: 'black', margin: [0, 0, 0, 2] },
+      { text: COMPANY.address, fontSize: 9, color: 'black', margin: [0, 0, 0, 2] },
+      { text: `${COMPANY.postalCode}, ${COMPANY.city}, ${COMPANY.country}`, fontSize: 9, color: 'black' },
+    ],
+  }
+
+  const clientLines: Content[] = [
+    { text: 'CLIENTE', fontSize: 8, bold: true, color: '#666', margin: [0, 0, 0, 2] },
+    { text: invoice.client_name || '—', fontSize: 10, bold: true, color: 'black', margin: [0, 0, 0, 2] },
+  ]
+  if (invoice.client_nif)
+    clientLines.push({
+      text: `NIF / CIF: ${invoice.client_nif}`,
+      fontSize: 9,
+      color: 'black',
+      margin: [0, 0, 0, 2],
+    })
+  if (invoice.client_address)
+    clientLines.push({
+      text: `Dirección: ${String(invoice.client_address)}`,
+      fontSize: 9,
+      color: 'black',
+    })
+
+  const clientBlock: Content = { stack: clientLines }
+
+  const tableHeader = [
+    { text: 'CONCEPTO', fillColor: HEADER_BG, color: 'white', bold: true },
+    { text: 'CANT.', fillColor: HEADER_BG, color: 'white', bold: true },
+    { text: 'PRECIO', fillColor: HEADER_BG, color: 'white', bold: true },
+    { text: 'IVA', fillColor: HEADER_BG, color: 'white', bold: true },
+    { text: 'TOTAL', fillColor: HEADER_BG, color: 'white', bold: true },
+  ]
+  const tableBody: unknown[][] = [tableHeader]
+  lines.forEach((ln, i) => {
+    tableBody.push([
+      {
+        text: String(ln.description ?? '').slice(0, 50),
+        fillColor: i % 2 === 1 ? ROW_ALT : undefined,
+      },
+      { text: String(n(ln.quantity)), fillColor: i % 2 === 1 ? ROW_ALT : undefined },
+      { text: eurFormat(n(ln.unit_price)), fillColor: i % 2 === 1 ? ROW_ALT : undefined },
+      { text: `${n(ln.tax_rate)}%`, fillColor: i % 2 === 1 ? ROW_ALT : undefined },
+      {
+        text: eurFormat(n(ln.line_total)),
+        fillColor: i % 2 === 1 ? ROW_ALT : undefined,
+        bold: true,
+      },
+    ])
+  })
+
+  const totals: Content = {
+    columns: [
+      { text: '' },
+      {
+        stack: [
+          {
+            text: `Subtotal: ${eurFormat(n(invoice.subtotal))}`,
+            alignment: 'right',
+            margin: [0, 0, 0, 4],
+            fontSize: 10,
+          },
+          {
+            text: `IVA (${n(invoice.tax_rate)}%): ${eurFormat(n(invoice.tax_amount))}`,
+            alignment: 'right',
+            margin: [0, 0, 0, 4],
+            fontSize: 10,
+          },
+          ...(n(invoice.irpf_amount) > 0
+            ? [
+                {
+                  text: `IRPF (${n(invoice.irpf_rate)}%): - ${eurFormat(n(invoice.irpf_amount))}`,
+                  alignment: 'right' as const,
+                  margin: [0, 0, 0, 4] as [number, number, number, number],
+                  fontSize: 10,
+                },
+              ]
+            : []),
+          {
+            text: `TOTAL: ${eurFormat(n(invoice.total))}`,
+            fontSize: 14,
+            bold: true,
+            alignment: 'right',
+            margin: [0, 8, 0, 0] as [number, number, number, number],
+          },
+        ],
+        width: 200,
+      },
+    ],
+    margin: [0, 12, 0, 0],
+  }
+
+  const paymentBlock: Content = {
+    stack: [
+      { text: 'CONDICIONES DE PAGO', fontSize: 8, bold: true, color: '#666', margin: [0, 0, 0, 6] },
+      { text: `Forma de pago: ${COMPANY.payment.form}`, fontSize: 9, margin: [0, 0, 0, 2] },
+      { text: `Beneficiario: ${COMPANY.payment.beneficiary}`, fontSize: 9, margin: [0, 0, 0, 2] },
+      { text: `Banco: ${COMPANY.payment.bank}`, fontSize: 9, margin: [0, 0, 0, 2] },
+      { text: `IBAN: ${COMPANY.payment.iban}`, fontSize: 9, margin: [0, 0, 0, 2] },
+      { text: `BIC: ${COMPANY.payment.bic}`, fontSize: 9 },
+    ],
+    margin: [0, 16, 0, 0],
+  }
+
+  const footerContent: Content = {
+    stack: [
+      {
+        text: COMPANY.footerLine1,
+        fontSize: 7,
+        color: '#666',
+        alignment: 'center',
+        margin: [0, 0, 0, 2],
+      },
+      {
+        text: COMPANY.registroMercantil,
+        fontSize: 6,
+        color: '#666',
+        alignment: 'center',
+        margin: [0, 0, 0, 2],
+      },
+      {
+        text: `Teléfono: ${COMPANY.phone} · ${COMPANY.email} · ${COMPANY.web}`,
+        fontSize: 6,
+        color: '#666',
+        alignment: 'center',
+      },
+    ],
+    margin: [40, 20, 40, 0],
+  }
+
+  const content: Content[] = [
+    headerTable,
+    headerGoldenLine,
+    {
+      columns: [
+        { width: '*', ...companyBlock },
+        { width: '*', ...clientBlock },
+      ],
+      margin: [0, 0, 0, 16],
+    },
+    {
+      table: {
+        widths: ['*', 40, 55, 35, 55],
+        body: tableBody as Content[][],
+      },
+      layout: {
+        hLineWidth: () => 0.5,
+        vLineWidth: () => 0.5,
+      },
+    },
+    totals,
+  ]
+  if (!isDraft) content.push(paymentBlock)
+  if (invoice.notes) {
+    content.push({
+      text: [
+        { text: 'Notas: ', bold: true },
+        { text: String(invoice.notes).slice(0, 300) },
+      ],
+      margin: [0, 12, 0, 0],
+      fontSize: 9,
+    })
+  }
+  content.push(footerContent)
+
+  const docDef = {
+    pageSize: 'A4',
+    pageMargins: [40, 40, 40, 80],
+    content,
+  }
+
+  const pdfMake = (await import('pdfmake/build/pdfmake')).default
+  const vfsModule = await import('pdfmake/build/vfs_fonts')
+  const vfs = (vfsModule as { default?: Record<string, string> }).default
+  if (typeof pdfMake.addVirtualFileSystem === 'function' && vfs) {
+    pdfMake.addVirtualFileSystem(vfs)
+  }
+
+  const pdf = pdfMake.createPdf(docDef as Parameters<typeof pdfMake.createPdf>[0])
+  const pdfBuffer = await (pdf as { getBuffer(): Promise<Buffer> }).getBuffer()
+
+  try {
+    await admin.storage.createBucket(BUCKET, { public: true })
+  } catch {
+    /* ya existe */
+  }
 
   const slug = isDraft
     ? `invoices/factura-borrador-${invoice.id.slice(0, 8)}-${Date.now()}.pdf`
     : `invoices/factura-${(invoice.invoice_number ?? '').replace(/\//g, '-')}.pdf`
-  const { error: uploadError } = await admin.storage.from(BUCKET).upload(slug, pdfBytes, {
+  const { error: uploadError } = await admin.storage.from(BUCKET).upload(slug, pdfBuffer, {
     contentType: 'application/pdf',
     upsert: true,
   })

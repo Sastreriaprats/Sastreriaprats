@@ -588,3 +588,25 @@ ON CONFLICT (role_id, permission_id) DO NOTHING;
 2. **032** → **033** → **034** → **035** → **036** → **037** → **038** → **039**.
 
 Si 003c ya está aplicada, empieza por 032. Tras aplicar 003c (y las que necesites), el dashboard debería cargar sin el error de “unexpected response” por tablas faltantes.
+
+---
+
+## 11/03/2026
+
+### 057 - products_rls_tailoring_fabric
+Ya aplicado manualmente:
+  CREATE POLICY "products_select_tailoring_fabric"
+  ON products FOR SELECT
+  USING (product_type = 'tailoring_fabric');
+
+### 058 - total_paid_trigger
+Trigger aplicado manualmente via UPDATE directo en Supabase.
+El trigger se creará en el próximo reset/deploy.
+
+### Columnas delivered_at / delivered_by en tailoring_order_lines
+Ya aplicado manualmente:
+  ALTER TABLE tailoring_order_lines 
+  ADD COLUMN IF NOT EXISTS delivered_at timestamptz,
+  ADD COLUMN IF NOT EXISTS delivered_by uuid REFERENCES profiles(id);
+(Incluido en 056_tailoring_order_lines_delivered.sql)
+

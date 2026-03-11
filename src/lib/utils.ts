@@ -85,6 +85,14 @@ export function getOrderStatusColor(status: string): string {
     cancelled: 'bg-red-200 text-red-800',
     requested: 'bg-violet-100 text-violet-700',
     supplier_delivered: 'bg-teal-100 text-teal-700',
+    in_workshop: 'bg-yellow-900 text-yellow-300',
+    pending_first_fitting: 'bg-blue-900 text-blue-300',
+    note_sent_factory: 'bg-orange-900 text-orange-300',
+    fabric_ordered_supplier: 'bg-orange-900 text-orange-300',
+    fabric_at_factory: 'bg-orange-900 text-orange-300',
+    shipping_to_store: 'bg-purple-900 text-purple-300',
+    delivered_to_store: 'bg-green-900 text-green-300',
+    order_requested: 'bg-gray-700 text-gray-300',
   }
   return colors[status] || 'bg-gray-100 text-gray-700'
 }
@@ -104,6 +112,14 @@ export function getOrderStatusLabel(status: string): string {
     cancelled: 'Cancelado',
     requested: 'Solicitado',
     supplier_delivered: 'Entregado por proveedor/oficial',
+    in_workshop: 'En confección',
+    pending_first_fitting: 'Pendiente 1ª prueba',
+    note_sent_factory: 'Nota enviada a fábrica',
+    fabric_ordered_supplier: 'Tejido pedido a proveedor',
+    fabric_at_factory: 'Tejido en fábrica',
+    shipping_to_store: 'Envío a tienda',
+    delivered_to_store: 'Entregado en tienda',
+    order_requested: 'Pedido solicitado',
   }
   return labels[status] || status
 }

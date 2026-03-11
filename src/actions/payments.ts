@@ -1,5 +1,6 @@
 'use server'
 
+import { revalidatePath } from 'next/cache'
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { serializeForServerAction } from '@/lib/server/serialize'
@@ -88,31 +89,19 @@ export const addOrderPayment = protectedAction<AddOrderPaymentInput, OrderPaymen
         return failure(insertError.message)
       }
 
-      // Recalcular total_paid y total_pending desde los pagos registrados
-      const { data: agg, error: aggError } = await ctx.adminClient
+      // Recalcular total_paid desde los pagos registrados
+      const orderId = input.tailoring_order_id
+      const { data: pagos } = await ctx.adminClient
         .from('tailoring_order_payments')
         .select('amount')
-        .eq('tailoring_order_id', input.tailoring_order_id)
+        .eq('tailoring_order_id', orderId)
 
-      if (aggError) {
-        console.error('[addOrderPayment] aggregate:', aggError)
-      } else {
-        const totalPaid = (agg ?? []).reduce((sum, p) => sum + Number(p.amount), 0)
+      const nuevoTotalPaid = pagos?.reduce((sum, p) => sum + Number(p.amount), 0) ?? 0
 
-        const { data: order } = await ctx.adminClient
-          .from('tailoring_orders')
-          .select('total')
-          .eq('id', input.tailoring_order_id)
-          .single()
-
-        if (order) {
-          const totalPending = Math.max(0, Number(order.total) - totalPaid)
-          await ctx.adminClient
-            .from('tailoring_orders')
-            .update({ total_paid: totalPaid, total_pending: totalPending })
-            .eq('id', input.tailoring_order_id)
-        }
-      }
+      await ctx.adminClient
+        .from('tailoring_orders')
+        .update({ total_paid: nuevoTotalPaid })
+        .eq('id', orderId)
 
       const { data: orderRow } = await ctx.adminClient
         .from('tailoring_orders')
@@ -122,6 +111,25 @@ export const addOrderPayment = protectedAction<AddOrderPaymentInput, OrderPaymen
       const orderNumber = (orderRow as any)?.order_number ?? ''
       const methodLabels: Record<string, string> = { cash: 'efectivo', card: 'tarjeta', transfer: 'transferencia', check: 'cheque', bizum: 'bizum', voucher: 'vale' }
       const methodLabel = methodLabels[input.payment_method] ?? input.payment_method
+
+      const importe = Number(input.amount)
+      const baseAmount = importe / 1.21
+      const taxAmountManual = importe - baseAmount
+      await ctx.adminClient.from('manual_transactions').insert({
+        type: 'income',
+        date: input.payment_date,
+        description: 'Pago pedido - ' + orderNumber,
+        category: 'sastreria',
+        amount: baseAmount,
+        tax_rate: 21,
+        tax_amount: taxAmountManual,
+        total: importe,
+        notes: 'Pedido ' + orderNumber + ' - ' + methodLabel,
+        created_by: ctx.userId,
+      })
+
+      revalidatePath(`/sastre/pedidos/${input.tailoring_order_id}`)
+
       const auditDescription = `Pago ${Number(input.amount).toFixed(2)}€ · Pedido ${orderNumber} · Método: ${methodLabel}`
       return success(serializeForServerAction({ ...payment!, auditDescription }))
     } catch (e) {

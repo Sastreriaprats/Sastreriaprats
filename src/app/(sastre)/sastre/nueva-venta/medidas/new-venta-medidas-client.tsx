@@ -52,15 +52,18 @@ export function NewVentaMedidasClient({
       <div className="shrink-0 p-4 pb-0">
         <NuevaVentaSteps currentStep={3} tipo={tipo} clientId={clientId} />
       </div>
-      <MedidasPageContent
-        clientId={clientId}
-        clientName={clientName}
-        sastreName={sastreName}
-        saveRef={saveRef}
-        hideTabs={tipo === 'camiseria' ? ['Americana', 'Pantalón', 'Chaleco'] : ['Camisería']}
-        onValuesChange={() => setIsDirty(true)}
-        onSavingChange={setSaving}
-      />
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden min-w-0">
+        <MedidasPageContent
+          clientId={clientId}
+          clientName={clientName}
+          sastreName={sastreName}
+          saveRef={saveRef}
+          hideTabs={tipo === 'camiseria' ? ['Americana', 'Pantalón', 'Chaleco'] : ['Camisería']}
+          onValuesChange={() => setIsDirty(true)}
+          onSavingChange={setSaving}
+          embedScroll={true}
+        />
+      </div>
       <div className="shrink-0 border-t border-[#c9a96e]/20 p-4 flex gap-3">
         <button
           type="button"

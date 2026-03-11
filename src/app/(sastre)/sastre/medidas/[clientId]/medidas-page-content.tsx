@@ -53,6 +53,8 @@ interface MedidasPageContentProps {
   sastreName: string
   /** Si se proporciona, el padre puede llamar a save() y navegar después (ej. flujo nueva venta). */
   saveRef?: React.MutableRefObject<{ save: () => Promise<boolean> } | null>
+  /** Si true, no se usa scroll interno; el padre debe tener overflow-y-auto (para que la rueda del ratón funcione). */
+  embedScroll?: boolean
   /** Nombres de tabs a ocultar (ej. ['Camisería'] o ['Americana','Pantalón','Chaleco']). */
   hideTabs?: string[]
   /** Se llama cada vez que el usuario modifica un valor. */
@@ -61,7 +63,7 @@ interface MedidasPageContentProps {
   onSavingChange?: (saving: boolean) => void
 }
 
-export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, hideTabs, onValuesChange, onSavingChange }: MedidasPageContentProps) {
+export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, hideTabs, onValuesChange, onSavingChange, embedScroll }: MedidasPageContentProps) {
   const supabase = createClient()
   const { data: garmentTypesData, isLoading: garmentTypesLoading } = useGarmentTypes()
   const fieldRefsMap = useRef<Record<string, HTMLElement | null>>({})
@@ -360,7 +362,7 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
 
   return (
     <div
-      className="flex flex-col min-h-0 flex-1"
+      className={embedScroll ? 'flex flex-col' : 'flex flex-col min-h-0 flex-1'}
       style={{ background: 'radial-gradient(ellipse at top, #1a2744 0%, #0a1020 70%)' }}
     >
       <SastreHeader
@@ -368,15 +370,12 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
         sectionTitle={`Medidas · ${clientName}`}
         backHref={`/sastre/clientes/${clientId}`}
       />
-      <main className="flex-1 flex flex-col min-h-0 overflow-hidden p-6 gap-4">
-        {/* ÚNICO contenedor con scroll (iPad: dedo, sin barra visible) */}
+      <main className={`flex-1 flex flex-col min-h-0 p-6 gap-4 ${embedScroll ? 'overflow-visible' : 'overflow-hidden'}`}>
+        {/* Contenedor con scroll (o sin overflow si embedScroll: el padre hace el scroll) */}
         <div
-          tabIndex={0}
-          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain scrollbar-hide-touch"
-          style={{
-            WebkitOverflowScrolling: 'touch',
-            scrollbarWidth: 'none',
-          }}
+          tabIndex={embedScroll ? undefined : 0}
+          className={embedScroll ? 'flex flex-col gap-4' : 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain flex flex-col gap-4'}
+          style={embedScroll ? undefined : { WebkitOverflowScrolling: 'touch' }}
         >
           <div className="flex flex-col gap-4">
           {/* Tabs prenda */}

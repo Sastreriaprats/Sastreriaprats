@@ -14,10 +14,10 @@ import { changeOrderStatus } from '@/actions/orders'
 import { getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
 
 const allStatusesByType: Record<string, string[]> = {
-  artesanal: ['created', 'in_production', 'fitting', 'adjustments', 'finished', 'delivered', 'incident', 'cancelled'],
-  industrial: ['created', 'fabric_ordered', 'fabric_received', 'in_production', 'finished', 'delivered', 'incident', 'cancelled'],
+  artesanal: ['in_workshop', 'pending_first_fitting', 'adjustments', 'finished', 'delivered', 'cancelled'],
+  industrial: ['note_sent_factory', 'fabric_ordered_supplier', 'fabric_at_factory', 'in_production', 'shipping_to_store', 'fitting', 'adjustments', 'finished', 'delivered', 'cancelled'],
   oficial: ['created', 'requested', 'in_production', 'supplier_delivered', 'delivered', 'cancelled'],
-  proveedor: ['created', 'requested', 'supplier_delivered', 'finished', 'cancelled'],
+  proveedor: ['order_requested', 'shipping_to_store', 'delivered_to_store', 'cancelled'],
 }
 
 export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus, lines, orderType = 'artesanal' }: {

@@ -1,21 +1,36 @@
-import { PDFDocument, StandardFonts, rgb, PageSizes } from 'pdf-lib'
+import type { Content } from 'pdfmake'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { COMPANY, formatDateDDMMYYYY, eurFormat, getLogoBase64 } from './pdf-company'
 
 const BUCKET = 'documents'
 
-const BLUE     = rgb(0.118, 0.227, 0.373)
-const BLUE_MID = rgb(0.22,  0.42,  0.62)
-const GRAY     = rgb(0.35,  0.35,  0.35)
-const LGRAY    = rgb(0.6,   0.6,   0.6)
-const WHITE    = rgb(1, 1, 1)
-const BLACK    = rgb(0, 0, 0)
-const BG_HEADER= rgb(0.118, 0.227, 0.373)
-const BG_TABLE = rgb(0.92,  0.95,  0.98)
+const HEADER_BG = '#1a1a2e'
+const ROW_ALT = '#f5f5f5'
 
-const W = PageSizes.A4[0]
-const H = PageSizes.A4[1]
-const ML = 45
-const MR = W - 45
+type EstimateRecord = {
+  id: string
+  estimate_number: string | null
+  client_name: string | null
+  client_nif: string | null
+  client_address: string | null
+  estimate_date: string | null
+  valid_until: string | null
+  subtotal: number
+  tax_rate: number
+  tax_amount: number
+  irpf_rate: number
+  irpf_amount: number
+  total: number
+  notes: string | null
+}
+
+type EstimateLineRecord = {
+  description: string
+  quantity: number
+  unit_price: number
+  tax_rate: number
+  line_total: number
+}
 
 function n(v: unknown): number {
   if (v == null) return 0
@@ -23,10 +38,10 @@ function n(v: unknown): number {
   return Number(String(v).replace(',', '.')) || 0
 }
 
-function eur(v: number): string {
-  return new Intl.NumberFormat('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v) + ' €'
-}
-
+/**
+ * Genera un PDF de presupuesto con pdfmake (mismo layout que factura).
+ * Lo sube a Supabase Storage y actualiza estimates.pdf_url. Devuelve la URL pública.
+ */
 export async function generateEstimatePdf(estimateId: string): Promise<string> {
   const admin = createAdminClient()
 
@@ -46,143 +61,224 @@ export async function generateEstimatePdf(estimateId: string): Promise<string> {
     .eq('estimate_id', estimateId)
     .order('sort_order', { ascending: true })
 
-  const COMPANY_NAME    = 'Sastrería Prats'
-  const COMPANY_NIF     = 'B12345678'
-  const COMPANY_ADDRESS = 'Madrid, España'
+  const estimate = est as unknown as EstimateRecord
+  const lines = (rawLines || []) as unknown as EstimateLineRecord[]
+  const displayNumber = estimate.estimate_number ?? ''
 
-  const doc = await PDFDocument.create()
-  doc.setTitle(`Presupuesto ${est.estimate_number}`)
-  doc.setAuthor('Sastrería Prats')
+  const logoData = getLogoBase64()
 
-  const regular = doc.embedStandardFont(StandardFonts.Helvetica)
-  const bold    = doc.embedStandardFont(StandardFonts.HelveticaBold)
-
-  const page = doc.addPage(PageSizes.A4)
-
-  // ── 1. CABECERA AZUL ────────────────────────────────────────────────────────
-  const HEADER_H = 90
-  page.drawRectangle({ x: 0, y: H - HEADER_H, width: W, height: HEADER_H, color: BG_HEADER })
-
-  page.drawText('PRATS', { x: ML, y: H - 38, size: 28, font: bold, color: WHITE })
-  page.drawText('SASTRERÍA', { x: ML, y: H - 54, size: 10, font: regular, color: rgb(0.7, 0.85, 1) })
-
-  page.drawText('PRESUPUESTO', { x: MR - 140, y: H - 40, size: 20, font: bold, color: WHITE })
-
-  const numBoxW = 140
-  const numBoxX = MR - numBoxW
-  page.drawRectangle({ x: numBoxX, y: H - HEADER_H + 8, width: numBoxW, height: 26, color: WHITE })
-  page.drawText(`Nº: ${est.estimate_number}`, { x: numBoxX + 8, y: H - HEADER_H + 18, size: 12, font: bold, color: BLUE })
-
-  let y = H - HEADER_H - 24
-
-  // ── 2. FECHAS ────────────────────────────────────────────────────────────────
-  page.drawText(`Fecha:`, { x: MR - 200, y, size: 9, font: regular, color: LGRAY })
-  page.drawText(String(est.estimate_date || ''), { x: MR - 150, y, size: 9, font: bold, color: GRAY })
-  if (est.valid_until) {
-    y -= 14
-    page.drawText(`Válido hasta:`, { x: MR - 200, y, size: 9, font: regular, color: LGRAY })
-    page.drawText(String(est.valid_until), { x: MR - 150, y, size: 9, font: bold, color: GRAY })
+  const headerRight: Content[] = [
+    { text: 'PRESUPUESTO', fontSize: 22, bold: true, color: 'white', margin: [0, 0, 0, 4] },
+    { text: `Nº: ${displayNumber}`, fontSize: 11, bold: true, color: 'white', margin: [0, 0, 0, 2] },
+    { text: `Fecha: ${formatDateDDMMYYYY(estimate.estimate_date)}`, fontSize: 9, color: 'white', margin: [0, 0, 0, 2] },
+  ]
+  if (estimate.valid_until) {
+    headerRight.push({
+      text: `Válido hasta: ${formatDateDDMMYYYY(estimate.valid_until)}`,
+      fontSize: 9,
+      color: 'white',
+    })
   }
 
-  // ── 3. DOS COLUMNAS ──────────────────────────────────────────────────────────
-  const colTopY = H - HEADER_H - 20
-  const colH    = 75
-  const halfW   = (MR - ML - 8) / 2
-  const c2X     = ML + halfW + 8
-
-  page.drawText('EMPRESA', { x: ML, y: colTopY - 16, size: 8, font: bold, color: BLUE })
-  page.drawLine({ start: { x: ML, y: colTopY - 19 }, end: { x: ML + halfW, y: colTopY - 19 }, thickness: 0.5, color: BLUE })
-  page.drawText(COMPANY_NAME, { x: ML, y: colTopY - 31, size: 9, font: bold, color: BLACK })
-  page.drawText(`NIF: ${COMPANY_NIF}`, { x: ML, y: colTopY - 43, size: 8, font: regular, color: GRAY })
-  page.drawText(COMPANY_ADDRESS, { x: ML, y: colTopY - 54, size: 8, font: regular, color: GRAY })
-
-  page.drawText('CLIENTE', { x: c2X, y: colTopY - 16, size: 8, font: bold, color: BLUE })
-  page.drawLine({ start: { x: c2X, y: colTopY - 19 }, end: { x: MR, y: colTopY - 19 }, thickness: 0.5, color: BLUE })
-  page.drawText(String(est.client_name || ''), { x: c2X, y: colTopY - 31, size: 9, font: bold, color: BLACK })
-  if (est.client_nif) page.drawText(`NIF/CIF: ${est.client_nif}`, { x: c2X, y: colTopY - 43, size: 8, font: regular, color: GRAY })
-  if (est.client_address) page.drawText(String(est.client_address).slice(0, 42), { x: c2X, y: colTopY - 54, size: 8, font: regular, color: GRAY })
-
-  y = colTopY - colH - 20
-
-  page.drawLine({ start: { x: ML, y }, end: { x: MR, y }, thickness: 0.5, color: BLUE_MID })
-  y -= 16
-
-  // ── 4. TABLA DE LÍNEAS ───────────────────────────────────────────────────────
-  const cDesc    = ML
-  const cQty     = ML + 230
-  const cPrice   = ML + 295
-  const cTax     = ML + 370
-  const cLineTot = MR - 60
-  const TABLE_W  = MR - ML
-  const ROW_H    = 20
-  const HEAD_H   = 22
-
-  page.drawRectangle({ x: ML, y: y - HEAD_H, width: TABLE_W, height: HEAD_H, color: BG_TABLE })
-  page.drawText('CONCEPTO',  { x: cDesc + 4,    y: y - 15, size: 8, font: bold, color: BLUE })
-  page.drawText('CANT.',     { x: cQty + 4,     y: y - 15, size: 8, font: bold, color: BLUE })
-  page.drawText('PRECIO',    { x: cPrice + 4,   y: y - 15, size: 8, font: bold, color: BLUE })
-  page.drawText('IVA',       { x: cTax + 4,     y: y - 15, size: 8, font: bold, color: BLUE })
-  page.drawText('TOTAL',     { x: cLineTot + 4, y: y - 15, size: 8, font: bold, color: BLUE })
-  y -= HEAD_H
-
-  const lines = (rawLines || []) as { description: string; quantity: number; unit_price: number; tax_rate: number; line_total: number }[]
-  for (let i = 0; i < lines.length; i++) {
-    const ln = lines[i]
-    const rowY = y - ROW_H * (i + 1)
-    if (i % 2 === 1) page.drawRectangle({ x: ML, y: rowY, width: TABLE_W, height: ROW_H, color: rgb(0.97, 0.97, 0.97) })
-    page.drawText(String(ln.description ?? '').slice(0, 40), { x: cDesc + 4,    y: rowY + 6, size: 8, font: regular, color: GRAY })
-    page.drawText(String(n(ln.quantity)),                    { x: cQty + 4,     y: rowY + 6, size: 8, font: regular, color: GRAY })
-    page.drawText(eur(n(ln.unit_price)),                     { x: cPrice + 4,   y: rowY + 6, size: 8, font: regular, color: GRAY })
-    page.drawText(`${n(ln.tax_rate)}%`,                      { x: cTax + 4,     y: rowY + 6, size: 8, font: regular, color: GRAY })
-    page.drawText(eur(n(ln.line_total)),                     { x: cLineTot + 4, y: rowY + 6, size: 8, font: bold,    color: GRAY })
-  }
-  y -= ROW_H * lines.length
-
-  page.drawLine({ start: { x: ML, y }, end: { x: MR, y }, thickness: 0.5, color: BLUE_MID })
-  y -= 16
-
-  // ── 5. TOTALES ───────────────────────────────────────────────────────────────
-  const totLabelX = MR - 155
-  const totValX   = MR - 60
-
-  const drawTotalRow = (label: string, value: string, isBig = false) => {
-    const size = isBig ? 11 : 9
-    page.drawText(label, { x: totLabelX, y, size, font: isBig ? bold : regular, color: isBig ? BLUE : GRAY })
-    page.drawText(value, { x: totValX,   y, size, font: isBig ? bold : regular, color: isBig ? BLUE : GRAY })
-    y -= isBig ? 18 : 14
+  const headerTable: Content = {
+    table: {
+      widths: ['*'],
+      body: [
+        [
+          {
+            fillColor: HEADER_BG,
+            columns: [
+              logoData
+                ? { image: logoData, width: 100, margin: [0, 8, 0, 8] }
+                : { text: 'Sastrería Prats', fontSize: 18, bold: true, color: 'white', margin: [0, 8, 0, 8] },
+              { stack: headerRight, alignment: 'right', margin: [0, 8, 0, 8] },
+            ],
+          },
+        ],
+      ],
+    },
+    layout: 'noBorders',
+    margin: [0, 0, 0, 16],
   }
 
-  drawTotalRow('Subtotal:', eur(n(est.subtotal)))
-  drawTotalRow(`IVA (${n(est.tax_rate)}%):`, eur(n(est.tax_amount)))
-  if (n(est.irpf_amount) > 0) drawTotalRow(`IRPF (${n(est.irpf_rate)}%):`, `- ${eur(n(est.irpf_amount))}`)
-
-  y -= 4
-  page.drawRectangle({ x: totLabelX - 8, y: y - 22, width: MR - totLabelX + 8, height: 28, color: BLUE })
-  page.drawText('TOTAL', { x: totLabelX,  y: y - 12, size: 12, font: bold, color: WHITE })
-  page.drawText(eur(n(est.total)), { x: totValX, y: y - 12, size: 12, font: bold, color: WHITE })
-  y -= 38
-
-  // ── 6. NOTAS ─────────────────────────────────────────────────────────────────
-  if (est.notes && y > 70) {
-    page.drawText('Notas:', { x: ML, y, size: 8, font: bold, color: BLUE })
-    y -= 12
-    page.drawText(String(est.notes).slice(0, 200), { x: ML, y, size: 8, font: regular, color: GRAY })
+  const companyBlock: Content = {
+    stack: [
+      { text: 'Empresa:', fontSize: 8, bold: true, color: '#333', margin: [0, 0, 0, 2] },
+      { text: COMPANY.name, fontSize: 10, bold: true, margin: [0, 0, 0, 2] },
+      { text: `NIF / CIF: ${COMPANY.nif}`, fontSize: 9, margin: [0, 0, 0, 2] },
+      { text: COMPANY.fullAddress, fontSize: 9 },
+    ],
   }
 
-  // ── 7. PIE ───────────────────────────────────────────────────────────────────
-  page.drawLine({ start: { x: ML, y: 35 }, end: { x: MR, y: 35 }, thickness: 0.4, color: BLUE })
-  page.drawText(`Sastrería Prats  ·  ${COMPANY_NIF}  ·  ${COMPANY_ADDRESS}`,
-    { x: ML, y: 22, size: 7, font: regular, color: LGRAY })
-  page.drawText('Este presupuesto no tiene validez fiscal hasta su aceptación firmada.',
-    { x: ML, y: 11, size: 6, font: regular, color: LGRAY })
+  const clientLines: Content[] = [
+    { text: 'Cliente:', fontSize: 8, bold: true, color: '#333', margin: [0, 0, 0, 2] },
+    { text: estimate.client_name || '—', fontSize: 10, bold: true, margin: [0, 0, 0, 2] },
+  ]
+  if (estimate.client_nif)
+    clientLines.push({
+      text: `NIF / CIF: ${estimate.client_nif}`,
+      fontSize: 9,
+      margin: [0, 0, 0, 2],
+    })
+  if (estimate.client_address)
+    clientLines.push({
+      text: `Dirección: ${String(estimate.client_address)}`,
+      fontSize: 9,
+    })
 
-  // ── 8. SUBIR A STORAGE ───────────────────────────────────────────────────────
-  const pdfBytes = await doc.save()
+  const clientBlock: Content = { stack: clientLines }
 
-  try { await admin.storage.createBucket(BUCKET, { public: true }) } catch { /* ya existe */ }
+  const tableHeader = [
+    { text: 'CONCEPTO', fillColor: HEADER_BG, color: 'white', bold: true },
+    { text: 'CANT.', fillColor: HEADER_BG, color: 'white', bold: true },
+    { text: 'PRECIO', fillColor: HEADER_BG, color: 'white', bold: true },
+    { text: 'IVA', fillColor: HEADER_BG, color: 'white', bold: true },
+    { text: 'TOTAL', fillColor: HEADER_BG, color: 'white', bold: true },
+  ]
+  const tableBody: unknown[][] = [tableHeader]
+  lines.forEach((ln, i) => {
+    tableBody.push([
+      {
+        text: String(ln.description ?? '').slice(0, 50),
+        fillColor: i % 2 === 1 ? ROW_ALT : undefined,
+      },
+      { text: String(n(ln.quantity)), fillColor: i % 2 === 1 ? ROW_ALT : undefined },
+      { text: eurFormat(n(ln.unit_price)), fillColor: i % 2 === 1 ? ROW_ALT : undefined },
+      { text: `${n(ln.tax_rate)}%`, fillColor: i % 2 === 1 ? ROW_ALT : undefined },
+      {
+        text: eurFormat(n(ln.line_total)),
+        fillColor: i % 2 === 1 ? ROW_ALT : undefined,
+        bold: true,
+      },
+    ])
+  })
 
-  const slug = `estimates/${String(est.estimate_number).replace(/\//g, '-')}.pdf`
-  const { error: uploadError } = await admin.storage.from(BUCKET).upload(slug, pdfBytes, {
+  const totals: Content = {
+    columns: [
+      { text: '' },
+      {
+        stack: [
+          {
+            text: `Subtotal: ${eurFormat(n(estimate.subtotal))}`,
+            alignment: 'right',
+            margin: [0, 0, 0, 4],
+          },
+          {
+            text: `IVA (${n(estimate.tax_rate)}%): ${eurFormat(n(estimate.tax_amount))}`,
+            alignment: 'right',
+            margin: [0, 0, 0, 4],
+          },
+          ...(n(estimate.irpf_amount) > 0
+            ? [
+                {
+                  text: `IRPF (${n(estimate.irpf_rate)}%): - ${eurFormat(n(estimate.irpf_amount))}`,
+                  alignment: 'right' as const,
+                  margin: [0, 0, 0, 4] as [number, number, number, number],
+                },
+              ]
+            : []),
+          {
+            text: `TOTAL: ${eurFormat(n(estimate.total))}`,
+            fontSize: 12,
+            bold: true,
+            alignment: 'right',
+            margin: [0, 8, 0, 0] as [number, number, number, number],
+          },
+        ],
+        width: 180,
+      },
+    ],
+    margin: [0, 12, 0, 0],
+  }
+
+  const validityBlock: Content = {
+    text: COMPANY.estimateValidity,
+    fontSize: 9,
+    margin: [0, 16, 0, 0],
+    italics: true,
+  }
+
+  const footerContent: Content = {
+    stack: [
+      {
+        text: COMPANY.footerLine1,
+        fontSize: 7,
+        color: '#666',
+        alignment: 'center',
+        margin: [0, 0, 0, 2],
+      },
+      {
+        text: COMPANY.registroMercantil,
+        fontSize: 6,
+        color: '#666',
+        alignment: 'center',
+        margin: [0, 0, 0, 2],
+      },
+      {
+        text: `Teléfono: ${COMPANY.phone} · ${COMPANY.email} · ${COMPANY.web}`,
+        fontSize: 6,
+        color: '#666',
+        alignment: 'center',
+      },
+    ],
+    margin: [40, 20, 40, 0],
+  }
+
+  const content: Content[] = [
+    headerTable,
+    {
+      columns: [
+        { width: '*', ...companyBlock },
+        { width: '*', ...clientBlock },
+      ],
+      margin: [0, 0, 0, 16],
+    },
+    {
+      table: {
+        widths: ['*', 40, 55, 35, 55],
+        body: tableBody as Content[][],
+      },
+      layout: { hLineWidth: () => 0.3, vLineWidth: () => 0.3 },
+    },
+    totals,
+    validityBlock,
+  ]
+  if (estimate.notes) {
+    content.push({
+      text: [
+        { text: 'Notas: ', bold: true },
+        { text: String(estimate.notes).slice(0, 300) },
+      ],
+      margin: [0, 12, 0, 0],
+      fontSize: 9,
+    })
+  }
+  content.push(footerContent)
+
+  const docDef = {
+    pageSize: 'A4',
+    pageMargins: [40, 40, 40, 80],
+    content,
+  }
+
+  const pdfMake = (await import('pdfmake/build/pdfmake')).default
+  const vfsModule = await import('pdfmake/build/vfs_fonts')
+  const vfs = (vfsModule as { default?: Record<string, string> }).default
+  if (typeof pdfMake.addVirtualFileSystem === 'function' && vfs) {
+    pdfMake.addVirtualFileSystem(vfs)
+  }
+
+  const pdf = pdfMake.createPdf(docDef as Parameters<typeof pdfMake.createPdf>[0])
+  const pdfBuffer = await (pdf as { getBuffer(): Promise<Buffer> }).getBuffer()
+
+  try {
+    await admin.storage.createBucket(BUCKET, { public: true })
+  } catch {
+    /* ya existe */
+  }
+
+  const slug = `estimates/${String(estimate.estimate_number).replace(/\//g, '-')}.pdf`
+  const { error: uploadError } = await admin.storage.from(BUCKET).upload(slug, pdfBuffer, {
     contentType: 'application/pdf',
     upsert: true,
   })
@@ -192,7 +288,9 @@ export async function generateEstimatePdf(estimateId: string): Promise<string> {
 
   try {
     await admin.from('estimates').update({ pdf_url: urlData.publicUrl }).eq('id', estimateId)
-  } catch { /* columna puede no existir */ }
+  } catch {
+    /* columna puede no existir */
+  }
 
   return urlData.publicUrl
 }

@@ -1,5 +1,6 @@
 'use server'
 
+import { revalidatePath } from 'next/cache'
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { queryList, queryById, getNextNumber } from '@/lib/server/query-helpers'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -119,8 +120,10 @@ export const getOrder = protectedAction<string, any>(
   { permission: 'orders.view', auditModule: 'orders' },
   async (ctx, orderId) => {
     const order = await queryById('tailoring_orders', orderId, `
-      *,
-      clients ( id, full_name, phone, email, category, document_number ),
+      id, order_number, total, total_paid, total_pending, client_id, status,
+      order_type, order_date, estimated_delivery_date, subtotal, discount_amount, tax_amount,
+      store_id, internal_notes, client_notes, created_at, updated_at, created_by,
+      clients ( id, full_name, first_name, last_name, phone, email, category, document_number ),
       stores ( id, name, code ),
       tailoring_order_lines (
         *,
@@ -132,6 +135,28 @@ export const getOrder = protectedAction<string, any>(
       tailoring_fittings ( id, fitting_number, scheduled_date, scheduled_time, status, adjustments_needed )
     `)
     if (!order) return failure('Pedido no encontrado', 'NOT_FOUND')
+
+    const orderObj = order as Record<string, unknown>
+    const clientId = orderObj.client_id as string | undefined
+    if (clientId) {
+      const { data: measurementsRows } = await ctx.adminClient
+        .from('client_measurements')
+        .select('values')
+        .eq('client_id', clientId)
+        .eq('is_current', true)
+      const merged: Record<string, unknown> = {}
+      for (const record of measurementsRows ?? []) {
+        const v = (record as { values?: unknown }).values
+        if (!v || typeof v !== 'object' || Array.isArray(v)) continue
+        for (const [key, val] of Object.entries(v)) {
+          if (val !== null && val !== undefined && val !== '') {
+            merged[key] = val
+          }
+        }
+      }
+      orderObj.clientMeasurements = { values: merged }
+    }
+
     return success(order)
   }
 )
@@ -377,6 +402,67 @@ export const scheduleFitting = protectedAction<{
   }
 )
 
+export const markLineDelivered = protectedAction<string, { orderId: string }>(
+  {
+    permission: 'orders.edit',
+    auditModule: 'orders',
+    auditAction: 'update',
+    auditEntity: 'tailoring_order_line',
+    revalidate: ['/sastre/pedidos'],
+  },
+  async (ctx, lineId) => {
+    if (!lineId?.trim()) return failure('ID de línea no válido', 'VALIDATION')
+
+    const { data: line } = await ctx.adminClient
+      .from('tailoring_order_lines')
+      .select('id, tailoring_order_id')
+      .eq('id', lineId.trim())
+      .single()
+
+    if (!line) return failure('Línea de pedido no encontrada', 'NOT_FOUND')
+
+    const { error } = await ctx.adminClient
+      .from('tailoring_order_lines')
+      .update({
+        delivered_at: new Date().toISOString(),
+        delivered_by: ctx.userId,
+      })
+      .eq('id', lineId.trim())
+
+    if (error) return failure(error.message, 'INTERNAL')
+
+    const orderId = (line as { tailoring_order_id: string }).tailoring_order_id
+    revalidatePath(`/sastre/pedidos/${orderId}`)
+    return success({ orderId })
+  }
+)
+
+export const updateOrderStatus = protectedAction<
+  { orderId: string; newStatus: string },
+  { orderId: string }
+>(
+  {
+    permission: 'orders.edit',
+    auditModule: 'orders',
+    auditAction: 'state_change',
+    auditEntity: 'tailoring_order',
+    revalidate: ['/sastre/pedidos'],
+  },
+  async (ctx, { orderId, newStatus }) => {
+    if (!orderId?.trim() || !newStatus?.trim()) return failure('Parámetros no válidos', 'VALIDATION')
+
+    const { error } = await ctx.adminClient
+      .from('tailoring_orders')
+      .update({ status: newStatus.trim() })
+      .eq('id', orderId.trim())
+
+    if (error) return failure(error.message, 'INTERNAL')
+
+    revalidatePath(`/sastre/pedidos/${orderId}`)
+    return success({ orderId })
+  }
+)
+
 // ─── Nueva venta (ficha) ────────────────────────────────────────────────────
 
 export interface CreateFichaOrderInput {
@@ -385,20 +471,21 @@ export interface CreateFichaOrderInput {
   storeId: string
   precioPrenda: number
   notas: string
+  /** Descripción de la ficha (alternativa a notas para el PDF). */
+  descripcion?: string
+  /** Cada elemento es una línea de camisa; la configuration se guarda completa. */
   camisas: Array<{
-    cuello: string
-    puno: string
-    bolsillo: boolean
-    botones: string
-    tejido: string
-    obs: string
     precio: number
+    [key: string]: unknown
   }>
   complementos: Array<{ product_variant_id: string; nombre: string; cantidad: number; precio: number }>
   entregaACuenta: number
+  /** Método de pago cuando entregaACuenta > 0 (efectivo, tarjeta, transferencia, bizum). */
+  metodoPago?: 'efectivo' | 'tarjeta' | 'transferencia' | 'bizum'
   /** Campos adicionales ficha de confección (cabecera y secciones) */
   prenda?: string
   cortador?: string
+  oficial?: string
   fechaCompromiso?: string
   situacionTrabajo?: string
   fechaCobro?: string
@@ -415,6 +502,13 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
   },
   async (ctx, input) => {
     const orderTypeDb = input.orderType === 'camiseria' ? 'industrial' : input.orderType
+
+    const initialStatus =
+      input.orderType === 'artesanal' ? 'in_workshop'
+      : input.orderType === 'industrial' ? 'note_sent_factory'
+      : input.orderType === 'camiseria' ? 'in_workshop'
+      : orderTypeDb === 'proveedor' ? 'order_requested'
+      : 'created'
 
     const { data: garmentTypes } = await ctx.adminClient
       .from('garment_types')
@@ -433,9 +527,26 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
 
     if (!mainGarmentTypeId) return failure('No hay tipos de prenda configurados')
 
+    const entregaNum = Number(input.entregaACuenta) || 0
+    if (entregaNum > 0 && !input.metodoPago) return failure('Indica el método de pago para la entrega a cuenta.')
+
+    const paymentMethodDb = input.metodoPago
+      ? { efectivo: 'cash', tarjeta: 'card', transferencia: 'transfer', bizum: 'card' }[input.metodoPago] ?? 'cash'
+      : 'cash'
+
     const orderNumber = await getNextNumber('tailoring_orders', 'order_number', 'PED')
 
-    let subtotal = Number(input.precioPrenda) || 0
+    const precioConfeccion = Number(input.precioPrenda) || 0
+    const totalCamisas = (input.camisas || []).reduce((s, c) => s + (Number(c.precio) || 0), 0)
+    let totalComplementos = 0
+    for (const comp of input.complementos || []) {
+      const cantidad = Math.max(1, Math.floor(Number(comp.cantidad) || 1))
+      totalComplementos += (Number(comp.precio) || 0) * cantidad
+    }
+    const subtotal = precioConfeccion + totalCamisas + totalComplementos
+    const entregadoACuenta = Number(input.entregaACuenta) || 0
+
+    let subtotalLines = precioConfeccion
     const linesToInsert: Array<{
       tailoring_order_id: string
       garment_type_id: string
@@ -453,15 +564,14 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
         client_id: input.clientId,
         order_type: orderTypeDb,
         store_id: input.storeId,
-        status: 'created',
+        status: initialStatus,
         order_number: orderNumber,
         estimated_delivery_date: input.fechaCompromiso || null,
-        subtotal: 0,
+        subtotal,
         discount_amount: 0,
         tax_amount: 0,
-        total: 0,
-        total_paid: 0,
-        total_pending: 0,
+        total: subtotal,
+        total_paid: entregadoACuenta,
         created_by: ctx.userId,
       })
       .select('id')
@@ -475,10 +585,16 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
       ...(input.fichaData || {}),
       prenda: input.prenda,
       cortador: input.cortador,
+      oficial: input.oficial,
       fechaCompromiso: input.fechaCompromiso,
       situacionTrabajo: input.situacionTrabajo,
       fechaCobro: input.fechaCobro,
+      descripcion: (input.notas ?? input.descripcion ?? '').toString().trim() || undefined,
+      observaciones: (input.notas || '').trim(),
     }
+
+    console.log('[ACTION] fichaData que se guarda:', JSON.stringify(input.fichaData ?? {}, null, 2))
+    console.log('[ACTION] mainConfig:', JSON.stringify(mainConfig, null, 2))
 
     linesToInsert.push({
       tailoring_order_id: order.id,
@@ -493,7 +609,8 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
 
     for (const camisa of input.camisas || []) {
       const precio = Number(camisa.precio) || 0
-      subtotal += precio
+      subtotalLines += precio
+      const { precio: _p, ...config } = camisa
       linesToInsert.push({
         tailoring_order_id: order.id,
         garment_type_id: camiseriaGarmentTypeId,
@@ -501,14 +618,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
         unit_price: precio,
         line_total: precio,
         finishing_notes: null,
-        configuration: {
-          cuello: camisa.cuello,
-          puno: camisa.puno,
-          bolsillo: camisa.bolsillo,
-          botones: camisa.botones,
-          tejido: camisa.tejido,
-          obs: camisa.obs,
-        },
+        configuration: { ...config, tipo: 'camiseria' },
         sort_order: sortOrder++,
       })
     }
@@ -528,15 +638,12 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
           sort_order: sortOrder++,
         })
       }
-      subtotal += precio * cantidad
+      subtotalLines += precio * cantidad
     }
 
-    const total = subtotal
-    const taxAmount = total * 0.21
-    const totalWithTax = total + taxAmount
+    const total = subtotalLines
     const entrega = Number(input.entregaACuenta) || 0
     const totalPaid = entrega
-    const totalPending = Math.max(0, totalWithTax - entrega)
 
     const { error: linesError } = await ctx.adminClient
       .from('tailoring_order_lines')
@@ -556,11 +663,10 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
     await ctx.adminClient
       .from('tailoring_orders')
       .update({
-        subtotal,
-        tax_amount: taxAmount,
-        total: totalWithTax,
+        subtotal: subtotalLines,
+        tax_amount: 0,
+        total: subtotalLines,
         total_paid: totalPaid,
-        total_pending: totalPending,
       })
       .eq('id', order.id)
 
@@ -576,9 +682,24 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
       await ctx.adminClient.from('tailoring_order_payments').insert({
         tailoring_order_id: order.id,
         payment_date: today,
-        payment_method: 'cash',
+        payment_method: paymentMethodDb,
         amount: entrega,
         reference: `Entrega a cuenta - ${orderNumber}`,
+        notes: `Entrega a cuenta - ${orderNumber}`,
+        created_by: ctx.userId,
+      })
+      const baseAmount = entrega / 1.21
+      const taxAmountManual = entrega - baseAmount
+      await ctx.adminClient.from('manual_transactions').insert({
+        type: 'income',
+        date: today,
+        description: `Entrega a cuenta - ${orderNumber}`,
+        category: 'sastreria',
+        amount: baseAmount,
+        tax_rate: 21,
+        tax_amount: taxAmountManual,
+        total: entrega,
+        notes: `Pedido ${orderNumber} - ${input.metodoPago ?? 'efectivo'}`,
         created_by: ctx.userId,
       })
     }
@@ -589,11 +710,11 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
 
 /** Búsqueda de productos para complementos (boutique) en nueva venta.
  * Busca en products con product_type = 'boutique' por nombre (ILIKE).
- * Devuelve un resultado por producto usando la primera variante para id/precio.
+ * Devuelve un resultado por producto usando la primera variante para id/sku/stock; precio desde products.price_with_tax.
  */
 export const searchComplementProducts = protectedAction<
   { query: string; storeId?: string },
-  Array<{ id: string; name: string; sku: string; price: number; stock: number }>
+  Array<{ id: string; name: string; sku: string; price_with_tax: number; tax_rate: number; stock: number }>
 >(
   { permission: 'orders.create' },
   async (ctx, { query, storeId }) => {
@@ -602,7 +723,7 @@ export const searchComplementProducts = protectedAction<
 
     const { data: productsData, error: productsError } = await ctx.adminClient
       .from('products')
-      .select('id, name, sku, base_price')
+      .select('id, name, sku, price_with_tax, tax_rate')
       .eq('product_type', 'boutique')
       .ilike('name', `%${q}%`)
       .limit(20)
@@ -617,7 +738,7 @@ export const searchComplementProducts = protectedAction<
     const productIds = products.map((p: { id: string }) => p.id)
     const { data: variantsData, error: variantsError } = await ctx.adminClient
       .from('product_variants')
-      .select('id, product_id, variant_sku, price_override')
+      .select('id, product_id, variant_sku')
       .in('product_id', productIds)
       .order('created_at', { ascending: true })
 
@@ -625,7 +746,7 @@ export const searchComplementProducts = protectedAction<
       console.error('[searchComplementProducts] variants:', variantsError)
       return success([])
     }
-    const variants = (variantsData ?? []) as Array<{ id: string; product_id: string; variant_sku: string; price_override: number | null }>
+    const variants = (variantsData ?? []) as Array<{ id: string; product_id: string; variant_sku: string }>
     const variantByProductId: Record<string, (typeof variants)[0]> = {}
     for (const v of variants) {
       if (!variantByProductId[v.product_id]) variantByProductId[v.product_id] = v
@@ -655,14 +776,14 @@ export const searchComplementProducts = protectedAction<
 
     const result = products
       .filter((p: { id: string }) => variantByProductId[p.id])
-      .map((p: { id: string; name: string; sku: string | null; base_price: unknown }) => {
+      .map((p: { id: string; name: string; sku: string | null; price_with_tax: unknown; tax_rate: unknown }) => {
         const v = variantByProductId[p.id]
-        const price = v?.price_override != null ? Number(v.price_override) : Number(p.base_price) || 0
         return {
           id: v.id,
           name: p.name ?? '—',
           sku: v.variant_sku ?? p.sku ?? '—',
-          price,
+          price_with_tax: Number(p.price_with_tax) || 0,
+          tax_rate: Number(p.tax_rate) || 0,
           stock: stockMap[v.id] ?? 0,
         }
       })

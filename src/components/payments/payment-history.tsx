@@ -51,12 +51,14 @@ interface PaymentHistoryProps {
   onPaymentAdded?: () => void
   /** Si es true, oculta el botón de añadir pago (modo solo lectura) */
   readonly?: boolean
+  /** Estilo tabla: 'sastre' aplica tema oscuro para vista sastre */
+  variant?: 'default' | 'sastre'
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function PaymentHistory({
-  entityType, entityId, total, onPaymentAdded, readonly = false,
+  entityType, entityId, total, onPaymentAdded, readonly = false, variant = 'default',
 }: PaymentHistoryProps) {
   const [payments, setPayments] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -213,7 +215,12 @@ export function PaymentHistory({
           </Button>
         )}
         {!readonly && totalPending <= 0 && (
-          <Badge variant="default" className="bg-green-600 text-white">Pagado</Badge>
+          <Badge
+            variant="default"
+            className={variant === 'sastre' ? 'bg-green-900 text-green-300 px-2 py-0.5 rounded text-xs' : 'bg-green-600 text-white'}
+          >
+            Pagado
+          </Badge>
         )}
       </div>
 
@@ -228,10 +235,16 @@ export function PaymentHistory({
           <p className="text-sm">Sin pagos registrados</p>
         </div>
       ) : (
-        <div className="rounded-lg border overflow-hidden">
+        <div
+          className={
+            variant === 'sastre'
+              ? 'bg-[#0a1628] border border-[#1e3a5f] rounded-lg overflow-hidden'
+              : 'rounded-lg border overflow-hidden'
+          }
+        >
           <Table>
             <TableHeader>
-              <TableRow className="bg-muted/50">
+              <TableRow className={variant === 'sastre' ? 'bg-[#1e3a5f] text-gray-300 text-xs uppercase' : 'bg-muted/50'}>
                 <TableHead className="text-xs">Fecha</TableHead>
                 <TableHead className="text-xs">Método</TableHead>
                 <TableHead className="text-xs text-right">Importe</TableHead>
@@ -244,23 +257,36 @@ export function PaymentHistory({
             </TableHeader>
             <TableBody>
               {payments.map((p) => (
-                <TableRow key={p.id}>
-                  <TableCell className="text-sm tabular-nums">
+                <TableRow
+                  key={p.id}
+                  className={
+                    variant === 'sastre'
+                      ? 'border-b border-[#1e3a5f] text-white hover:bg-[#1a2744]'
+                      : undefined
+                  }
+                >
+                  <TableCell className={variant === 'sastre' ? 'py-3 px-4 text-sm' : 'text-sm tabular-nums'}>
                     {formatDate(p.payment_date ?? p.created_at)}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className={variant === 'sastre' ? 'py-3 px-4 text-sm' : ''}>
                     <span className="inline-flex items-center gap-1.5 text-xs">
                       {METHOD_ICONS[p.payment_method as PaymentMethod] ?? null}
                       {METHOD_LABELS[p.payment_method as PaymentMethod] ?? p.payment_method}
                     </span>
                   </TableCell>
-                  <TableCell className="text-right font-medium tabular-nums">
+                  <TableCell
+                    className={
+                      variant === 'sastre'
+                        ? 'text-right py-3 px-4 text-sm text-white font-medium tabular-nums'
+                        : 'text-right font-medium tabular-nums'
+                    }
+                  >
                     {formatCurrency(p.amount)}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground truncate max-w-[120px]">
+                  <TableCell className={variant === 'sastre' ? 'py-3 px-4 text-sm text-xs text-muted-foreground truncate max-w-[120px]' : 'text-xs text-muted-foreground truncate max-w-[120px]'}>
                     {p.reference ?? '—'}
                   </TableCell>
-                  <TableCell className="text-xs">
+                  <TableCell className={variant === 'sastre' ? 'py-3 px-4 text-sm text-xs' : 'text-xs'}>
                     {p.next_payment_date ? (
                       <span className={`inline-flex items-center gap-1 ${
                         p.next_payment_date <= today()
@@ -273,7 +299,7 @@ export function PaymentHistory({
                     ) : '—'}
                   </TableCell>
                   {entityType === 'tailoring_order' && !readonly && (
-                    <TableCell>
+                    <TableCell className={variant === 'sastre' ? 'py-3 px-4' : ''}>
                       <Button
                         variant="ghost"
                         size="icon"

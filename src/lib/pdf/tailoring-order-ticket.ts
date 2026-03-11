@@ -1,20 +1,17 @@
 /**
  * Genera el PDF tipo ticket del pedido de sastrería.
- * Uso: desde la página de confirmación de nueva venta.
+ * Usa el formato unificado de Sastrería Prats vía generateTicketPdf.
  */
 
-const W_MM = 80
-const MARGIN = 5
-const FONT = 9
-const FONT_SMALL = 8
-const LINE = 5
+import { COMPANY } from '@/lib/pdf/pdf-company'
+import { generateTicketPdf } from '@/components/pos/ticket-pdf'
 
 export interface TailoringTicketOrder {
   order_number: string
   total: number
   total_paid?: number
   created_at?: string
-  clients?: { full_name?: string; first_name?: string; last_name?: string } | null
+  clients?: { full_name?: string; first_name?: string; last_name?: string; code?: string; client_code?: string } | null
   tailoring_order_lines?: Array<{
     garment_types?: { name?: string } | null
     unit_price?: number
@@ -30,69 +27,49 @@ function getClientName(order: TailoringTicketOrder): string {
   return [first, last].filter(Boolean).join(' ') || '—'
 }
 
-function fmtDate(s: string | undefined): string {
-  if (!s) return '—'
-  try {
-    const d = new Date(s)
-    return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })
-  } catch {
-    return String(s)
-  }
+function getClientCode(order: TailoringTicketOrder): string | null {
+  const c = order.clients
+  if (!c || typeof c !== 'object') return null
+  return (c as { code?: string; client_code?: string }).code ?? (c as { client_code?: string }).client_code ?? null
 }
 
+const DEFAULT_STORE_ADDRESS = COMPANY.address + ', ' + COMPANY.postalCode + ' ' + COMPANY.city
+
 export async function generateTailoringOrderTicketPdf(order: TailoringTicketOrder): Promise<void> {
-  const { jsPDF } = await import('jspdf')
-  const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: [W_MM, 297] })
-  let y = 10
+  const orderLines = order.tailoring_order_lines ?? []
+  const total = Number(order.total ?? 0)
+  const subtotal = Math.round((total / 1.21) * 100) / 100
+  const tax_amount = Math.round((total - subtotal) * 100) / 100
 
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(11)
-  doc.text('PRATS', W_MM / 2, y, { align: 'center' })
-  y += LINE + 2
-
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(FONT)
-  doc.text('PEDIDO SASTRERÍA', W_MM / 2, y, { align: 'center' })
-  y += LINE + 2
-
-  doc.setFontSize(FONT_SMALL)
-  doc.text('Nº ' + (order.order_number ?? '—'), MARGIN, y)
-  y += LINE
-  doc.text('Fecha: ' + fmtDate(order.created_at), MARGIN, y)
-  y += LINE
-  doc.text('Cliente: ' + getClientName(order), MARGIN, y)
-  y += LINE + 2
-
-  doc.line(MARGIN, y, W_MM - MARGIN, y)
-  y += LINE
-
-  const lines = order.tailoring_order_lines ?? []
-  for (const line of lines) {
+  const lines = orderLines.map((line) => {
     const gt = line.garment_types
     const name = (typeof gt === 'object' && gt && 'name' in gt ? (gt as { name?: string }).name : null) ?? 'Prenda'
-    const price = Number(line.unit_price ?? 0)
-    doc.text(name.slice(0, 22), MARGIN, y)
-    doc.text(price.toFixed(2) + ' €', W_MM - MARGIN - 20, y)
-    y += LINE
-  }
+    const unitPrice = Number(line.unit_price ?? 0)
+    const quantity = 1
+    const lineTotal = Math.round(quantity * unitPrice * 1.21 * 100) / 100
+    return {
+      description: name,
+      quantity,
+      unit_price: unitPrice,
+      discount_percentage: 0,
+      line_total: lineTotal,
+    }
+  })
 
-  y += LINE
-  doc.line(MARGIN, y, W_MM - MARGIN, y)
-  y += LINE
-  doc.setFont('helvetica', 'bold')
-  doc.text('TOTAL: ' + Number(order.total ?? 0).toFixed(2) + ' €', MARGIN, y)
-  y += LINE
-  const paid = Number(order.total_paid ?? 0)
-  if (paid > 0) {
-    doc.setFont('helvetica', 'normal')
-    doc.text('Entregado: ' + paid.toFixed(2) + ' €', MARGIN, y)
-  }
-
-  y = 287
-  doc.setFontSize(FONT_SMALL)
-  doc.setTextColor(100, 100, 100)
-  doc.text('SASTRERÍA PRATS', W_MM / 2, y, { align: 'center' })
-  doc.setTextColor(0, 0, 0)
-
-  doc.save(`ticket-pedido-${(order.order_number || '').replace(/\s+/g, '-')}.pdf`)
+  await generateTicketPdf({
+    sale: {
+      ticket_number: String(order.order_number ?? 'pedido'),
+      created_at: order.created_at ?? new Date().toISOString(),
+      client_id: null,
+      subtotal,
+      tax_amount,
+      total,
+      payment_method: 'card',
+    },
+    lines,
+    payments: [{ payment_method: 'card', amount: total }],
+    clientName: getClientName(order),
+    clientCode: getClientCode(order),
+    storeAddress: DEFAULT_STORE_ADDRESS,
+  })
 }

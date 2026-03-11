@@ -46,6 +46,23 @@ const PRENDA_LABELS: Record<string, string> = {
   camiseria: 'Camisería',
 }
 
+/** Devuelve las secciones de características a mostrar según el slug de prenda. */
+function getPrendasFromSlug(prenda: string): Array<{ slug: string; label: string }> {
+  const map: Record<string, Array<{ slug: string; label: string }>> = {
+    traje_2_piezas: [{ slug: 'americana', label: 'Americana' }, { slug: 'pantalon', label: 'Pantalón' }],
+    traje_3_piezas: [{ slug: 'americana', label: 'Americana' }, { slug: 'pantalon', label: 'Pantalón' }, { slug: 'chaleco', label: 'Chaleco' }],
+    americana_sola: [{ slug: 'americana', label: 'Americana' }],
+    pantalon_solo: [{ slug: 'pantalon', label: 'Pantalón' }],
+    chaleco_solo: [{ slug: 'chaleco', label: 'Chaleco' }],
+    teba: [{ slug: 'teba', label: 'Teba' }],
+    smoking: [{ slug: 'americana', label: 'Americana' }, { slug: 'pantalon', label: 'Pantalón' }],
+    chaquet: [{ slug: 'chaque', label: 'Chaqué' }, { slug: 'pantalon', label: 'Pantalón' }, { slug: 'chaleco', label: 'Chaleco' }],
+    abrigo: [{ slug: 'abrigo', label: 'Abrigo' }],
+    gabardina: [{ slug: 'gabardina', label: 'Gabardina' }],
+  }
+  return map[prenda] ?? []
+}
+
 const SITUACION_TRABAJO = [
   'Pendiente 1ª prueba',
   'En prueba',
@@ -73,17 +90,35 @@ const PUNO_CAMISA_OPTIONS: Array<{ value: 'sencillo' | 'gemelo' | 'mixto' | 'mos
   { value: 'otro', label: 'Otro' },
 ]
 
+const MEDIDAS_FIELDS: Array<{ label: string; field: 'cuello' | 'canesu' | 'manga' | 'frenPecho' | 'contPecho' | 'cintura' | 'cadera' | 'largo' | 'pIzq' | 'pDch' | 'hombro' | 'biceps' }> = [
+  { label: 'Cuello', field: 'cuello' },
+  { label: 'Canesú', field: 'canesu' },
+  { label: 'Manga', field: 'manga' },
+  { label: 'Fren.Pecho', field: 'frenPecho' },
+  { label: 'Cont.Pecho', field: 'contPecho' },
+  { label: 'Cintura', field: 'cintura' },
+  { label: 'Cadera', field: 'cadera' },
+  { label: 'Lar.Cuerpo', field: 'largo' },
+  { label: 'P.Izq', field: 'pIzq' },
+  { label: 'P.Dch', field: 'pDch' },
+  { label: 'Hombro', field: 'hombro' },
+  { label: 'Bíceps', field: 'biceps' },
+]
+
 type CamisaItem = {
   id: string
-  // Medidas editables (pre-rellenadas desde camiseriaMeasurements si existen)
+  cuello: string
   canesu: string
+  manga: string
   frenPecho: string
   contPecho: string
+  cintura: string
+  cadera: string
   largo: string
   pIzq: string
   pDch: string
+  hombro: string
   biceps: string
-  // Checkboxes
   jareton: boolean
   bolsillo: boolean
   hombroCaido: boolean
@@ -98,15 +133,97 @@ type CamisaItem = {
   espTablonCentr: boolean
   espPinzas: boolean
   iniciales: boolean
-  // Texto y puño
   modCuello: string
   puno: 'sencillo' | 'gemelo' | 'mixto' | 'mosquetero' | 'otro'
   tejido: string
-  // Económico
   precio: number
-  entregadoACuenta: number
   cantidad: number
   obs: string
+}
+
+function defaultCamisa(): CamisaItem {
+  return {
+    id: crypto.randomUUID(),
+    cuello: '',
+    canesu: '',
+    manga: '',
+    frenPecho: '',
+    contPecho: '',
+    cintura: '',
+    cadera: '',
+    largo: '',
+    pIzq: '',
+    pDch: '',
+    hombro: '',
+    biceps: '',
+    jareton: false,
+    bolsillo: false,
+    hombroCaido: false,
+    derecho: false,
+    izquierdo: false,
+    hombrosAltos: false,
+    hombrosBajos: false,
+    erguido: false,
+    cargado: false,
+    espaldaLisa: false,
+    espPliegues: false,
+    espTablonCentr: false,
+    espPinzas: false,
+    iniciales: false,
+    modCuello: '',
+    puno: 'sencillo',
+    tejido: '',
+    precio: 0,
+    cantidad: 1,
+    obs: '',
+  }
+}
+
+/** Mapeo API → clave interna. Solo devuelve string si el valor es numérico. Acepta 0 como válido. */
+function getMeasuresFromRecord(
+  v: Record<string, unknown> | null | undefined
+): Pick<CamisaItem, 'cuello' | 'canesu' | 'manga' | 'frenPecho' | 'contPecho' | 'cintura' | 'cadera' | 'largo' | 'pIzq' | 'pDch' | 'hombro' | 'biceps'> {
+  const empty = {
+    cuello: '',
+    canesu: '',
+    manga: '',
+    frenPecho: '',
+    contPecho: '',
+    cintura: '',
+    cadera: '',
+    largo: '',
+    pIzq: '',
+    pDch: '',
+    hombro: '',
+    biceps: '',
+  }
+  console.log('[getMeasuresFromRecord] input:', JSON.stringify(v))
+  if (!v || typeof v !== 'object') return empty
+
+  const MEDIDAS_MAP: Array<[string, keyof CamisaItem]> = [
+    ['cuello', 'cuello'],
+    ['canesu', 'canesu'],
+    ['manga', 'manga'],
+    ['fren_pecho', 'frenPecho'],
+    ['cont_pecho', 'contPecho'],
+    ['cintura', 'cintura'],
+    ['cadera', 'cadera'],
+    ['largo_cuerpo', 'largo'],
+    ['p_izq', 'pIzq'],
+    ['p_dch', 'pDch'],
+    ['hombro', 'hombro'],
+    ['biceps', 'biceps'],
+  ]
+
+  const out = { ...empty }
+  for (const [recordKey, outKey] of MEDIDAS_MAP) {
+    const val = v['camiseria_' + recordKey] ?? v[recordKey]
+    if (val !== null && val !== undefined && val !== '' && !Number.isNaN(Number(val))) {
+      ;(out as Record<string, string>)[outKey] = String(val)
+    }
+  }
+  console.log('[getMeasuresFromRecord] output:', JSON.stringify(out))
+  return out
 }
 
 type ComplementoItem = {
@@ -117,7 +234,7 @@ type ComplementoItem = {
   precio: number
 }
 
-type ComplementResult = { id: string; name: string; sku: string; price: number; stock: number }
+type ComplementResult = { id: string; name: string; sku: string; price_with_tax: number; tax_rate: number; stock: number }
 
 function add15WorkingDays(from: Date): string {
   let count = 0
@@ -222,6 +339,7 @@ export function NuevaVentaFichaClient({
   const [camisas, setCamisas] = useState<CamisaItem[]>([])
   const [complementos, setComplementos] = useState<ComplementoItem[]>([])
   const [entregaACuenta, setEntregaACuenta] = useState(0)
+  const [metodoPago, setMetodoPago] = useState<'efectivo' | 'tarjeta' | 'transferencia' | 'bizum'>('efectivo')
   const [showComplementSearch, setShowComplementSearch] = useState(false)
   const [complementSearchQuery, setComplementSearchQuery] = useState('')
   const [complementResults, setComplementResults] = useState<ComplementResult[]>([])
@@ -231,24 +349,12 @@ export function NuevaVentaFichaClient({
 
   const [client, setClient] = useState<Record<string, unknown> | null>(null)
   const [clientLoading, setClientLoading] = useState(false)
-  const [camiseriaMeasurements, setCamiseriaMeasurements] = useState<{
-    cuello: string
-    canesu: string
-    manga: string
-    frenPecho: string
-    contPecho: string
-    cintura: string
-    cadera: string
-    largo: string
-    pIzq: string
-    pDch: string
-    hombro: string
-    biceps: string
-  } | null>(null)
+  const [camiseriaMeasurements, setCamiseriaMeasurements] = useState<Record<string, unknown> | null>(null)
   const [camiseriaMeasurementsLoading, setCamiseriaMeasurementsLoading] = useState(true)
   const [ficha, setFicha] = useState({
     numeroTalon: '',
     cortador: '',
+    oficial: '',
     situacionTrabajo: 'Pendiente 1ª prueba',
     fechaProximaVisita: add15WorkingDays(new Date()),
     caracteristicas: '',
@@ -310,15 +416,12 @@ export function NuevaVentaFichaClient({
   })
 
   const prendaLabel = (prenda && PRENDA_LABELS[prenda]) || prenda || '—'
-
-  const includeAmericana = ['traje_2_piezas', 'traje_3_piezas', 'americana_sola', 'teba', 'smoking', 'chaquet', 'abrigo', 'gabardina'].includes(prenda)
-  const includePantalon = ['traje_2_piezas', 'traje_3_piezas', 'pantalon_solo', 'smoking', 'chaquet'].includes(prenda)
-  const includeChaleco = ['traje_3_piezas', 'chaleco_solo', 'chaquet'].includes(prenda)
+  const prendasSections = getPrendasFromSlug(prenda || '')
 
   const isCamiseria = orderType === 'camiseria'
 
   useEffect(() => {
-    if (!clientId || !prenda) return
+    if (!clientId) return
     let cancelled = false
     setClientLoading(true)
     getClient(clientId)
@@ -346,7 +449,7 @@ export function NuevaVentaFichaClient({
   }, [clientId, prenda, sastreName])
 
   useEffect(() => {
-    if (!clientId || isCamiseria) {
+    if (!clientId) {
       setCamiseriaMeasurementsLoading(false)
       return
     }
@@ -358,41 +461,33 @@ export function NuevaVentaFichaClient({
           setCamiseriaMeasurements(null)
           return
         }
-        const list = res.data as Array<{ values?: Record<string, unknown>; garment_types?: { name?: string; code?: string } | null }>
-        const withCamiseria = list.find((m) => {
-          const gt = m.garment_types
-          const name = gt?.name ?? ''
-          const code = (gt?.code ?? '').toLowerCase()
-          if (name === 'Camisería' || code === 'camiseria') return true
-          const vals = m.values ?? {}
-          return Object.keys(vals).some((k) => k.startsWith('camiseria_'))
-        })
-        if (!withCamiseria?.values) {
-          setCamiseriaMeasurements(null)
-          return
+        const allMeasurements = res.data as Array<{ values?: Record<string, unknown> }>
+        const merged: Record<string, unknown> = {}
+        for (const record of allMeasurements) {
+          for (const [key, val] of Object.entries(record.values || {})) {
+            if (val !== null && val !== undefined && val !== '') {
+              merged[key] = val
+            }
+          }
         }
-        const v = withCamiseria.values as Record<string, unknown>
-        const get = (pre: string, key: string) => String(v[`${pre}${key}`] ?? v[key] ?? '').trim()
-        setCamiseriaMeasurements({
-          cuello: get('camiseria_', 'cuello'),
-          canesu: get('camiseria_', 'canesu'),
-          manga: get('camiseria_', 'manga'),
-          frenPecho: get('camiseria_', 'frenPecho'),
-          contPecho: get('camiseria_', 'contPecho'),
-          cintura: get('camiseria_', 'cintura'),
-          cadera: get('camiseria_', 'cadera'),
-          largo: get('camiseria_', 'largo'),
-          pIzq: get('camiseria_', 'pIzq'),
-          pDch: get('camiseria_', 'pDch'),
-          hombro: get('camiseria_', 'hombro'),
-          biceps: get('camiseria_', 'biceps'),
-        })
+        setCamiseriaMeasurements(merged)
       })
       .finally(() => {
         if (!cancelled) setCamiseriaMeasurementsLoading(false)
       })
     return () => { cancelled = true }
-  }, [clientId, isCamiseria])
+  }, [clientId])
+
+  // Si tipo es camisería, añadir la primera camisa cuando terminen de cargar las medidas (o una vacía si no hay)
+  useEffect(() => {
+    if (orderType !== 'camiseria' || camiseriaMeasurementsLoading) return
+    setCamisas((prev) => {
+      if (prev.length !== 0) return prev
+      const base = defaultCamisa()
+      const measures = getMeasuresFromRecord(camiseriaMeasurements ?? undefined)
+      return [{ ...base, ...measures }]
+    })
+  }, [orderType, camiseriaMeasurementsLoading, camiseriaMeasurements])
 
   const setFichaField = useCallback((field: keyof typeof ficha, value: string | boolean) => {
     setFicha((prev) => ({ ...prev, [field]: value }))
@@ -403,18 +498,23 @@ export function NuevaVentaFichaClient({
   }, [setFichaField])
 
   const addCamisa = () => {
-    const m = camiseriaMeasurements
+    const m = getMeasuresFromRecord(camiseriaMeasurements ?? undefined)
     setCamisas((prev) => [
       ...prev,
       {
         id: crypto.randomUUID(),
-        canesu: m?.canesu ?? '',
-        frenPecho: m?.frenPecho ?? '',
-        contPecho: m?.contPecho ?? '',
-        largo: m?.largo ?? '',
-        pIzq: m?.pIzq ?? '',
-        pDch: m?.pDch ?? '',
-        biceps: m?.biceps ?? '',
+        cuello: m.cuello,
+        canesu: m.canesu,
+        manga: m.manga,
+        frenPecho: m.frenPecho,
+        contPecho: m.contPecho,
+        cintura: m.cintura,
+        cadera: m.cadera,
+        largo: m.largo,
+        pIzq: m.pIzq,
+        pDch: m.pDch,
+        hombro: m.hombro,
+        biceps: m.biceps,
         jareton: false,
         bolsillo: false,
         hombroCaido: false,
@@ -433,7 +533,6 @@ export function NuevaVentaFichaClient({
         puno: 'sencillo',
         tejido: '',
         precio: 0,
-        entregadoACuenta: 0,
         cantidad: 1,
         obs: '',
       },
@@ -459,7 +558,7 @@ export function NuevaVentaFichaClient({
         product_variant_id: item.id,
         nombre: item.name,
         cantidad: qty,
-        precio: item.price,
+        precio: item.price_with_tax,
       },
     ])
     setAddingComplementQty((prev) => ({ ...prev, [item.id]: 0 }))
@@ -534,6 +633,11 @@ export function NuevaVentaFichaClient({
       toast.error('El total debe ser mayor que 0.')
       return
     }
+    const entrega = Number(entregaACuenta) || 0
+    if (entrega > 0 && !metodoPago) {
+      toast.error('Indica el método de pago para la entrega a cuenta.')
+      return
+    }
     setSubmitting(true)
     try {
       const res = await createFichaOrder({
@@ -544,13 +648,37 @@ export function NuevaVentaFichaClient({
         notas: prendaSastre.notas.trim(),
         camisas: camisas.flatMap((c) =>
           Array.from({ length: Math.max(1, c.cantidad) }, () => ({
-            cuello: c.modCuello,
-            puno: c.puno,
+            cuello: c.cuello,
+            canesu: c.canesu,
+            manga: c.manga,
+            frenPecho: c.frenPecho,
+            contPecho: c.contPecho,
+            cintura: c.cintura,
+            cadera: c.cadera,
+            largo: c.largo,
+            pIzq: c.pIzq,
+            pDch: c.pDch,
+            hombro: c.hombro,
+            biceps: c.biceps,
+            jareton: c.jareton,
             bolsillo: c.bolsillo,
-            botones: 'nácar',
+            hombroCaido: c.hombroCaido,
+            derecho: c.derecho,
+            izquierdo: c.izquierdo,
+            hombrosAltos: c.hombrosAltos,
+            hombrosBajos: c.hombrosBajos,
+            erguido: c.erguido,
+            cargado: c.cargado,
+            espaldaLisa: c.espaldaLisa,
+            espPliegues: c.espPliegues,
+            espTablonCentr: c.espTablonCentr,
+            espPinzas: c.espPinzas,
+            iniciales: c.iniciales,
+            modCuello: c.modCuello,
+            puno: c.puno,
             tejido: c.tejido,
-            obs: c.obs,
             precio: Number(c.precio) || 0,
+            obs: c.obs,
           }))
         ),
         complementos: complementos.map((c) => ({
@@ -560,12 +688,14 @@ export function NuevaVentaFichaClient({
           precio: Number(c.precio) || 0,
         })),
         entregaACuenta: Number(entregaACuenta) || 0,
+        metodoPago: (Number(entregaACuenta) || 0) > 0 ? metodoPago : undefined,
         prenda: prenda || undefined,
         cortador: ficha.cortador.trim() || undefined,
+        oficial: ficha.oficial.trim() || undefined,
         fechaCompromiso: ficha.fechaProximaVisita || undefined,
         situacionTrabajo: ficha.situacionTrabajo || undefined,
         fechaCobro: ficha.fechaCobro || undefined,
-        fichaData: { ...ficha },
+        fichaData: { ...ficha, prendaLabel },
       })
       if (res?.success && res.data) {
         toast.success(`Pedido ${res.data.orderNumber} creado.`)
@@ -645,6 +775,10 @@ export function NuevaVentaFichaClient({
                     <Label className="text-white/60 text-xs">Cortador</Label>
                     <Input className="mt-1 min-h-[44px] bg-[#0d1629] border-[#c9a96e]/20 text-white" value={ficha.cortador} onChange={(e) => setFichaField('cortador', e.target.value)} placeholder="Nombre del cortador" />
                   </div>
+                  <div>
+                    <Label className="text-white/60 text-xs">Oficial</Label>
+                    <Input className="mt-1 min-h-[44px] bg-[#0d1629] border-[#c9a96e]/20 text-white" value={ficha.oficial} onChange={(e) => setFichaField('oficial', e.target.value)} placeholder="Taller / oficial que confecciona" />
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   <div>
@@ -677,29 +811,220 @@ export function NuevaVentaFichaClient({
                     <Input type="date" className="mt-1 min-h-[44px] bg-[#0d1629] border-[#c9a96e]/20 text-white" value={ficha.fechaProximaVisita} onChange={(e) => setFichaField('fechaProximaVisita', e.target.value)} />
                   </div>
                 </div>
-                <div>
-                  <Label className="text-white/60 text-xs">Características / Tejido</Label>
-                  <div className="mt-1">
-                    <TejidoInput value={ficha.caracteristicas} onChange={(v) => setFichaField('caracteristicas', v)} placeholder="Ej: TEJIDO PROPIO - ESPIGA GRIS" />
-                  </div>
-                </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label className="text-white/60 text-xs">Metros</Label>
+                    <Label className="text-white/60 text-xs">Metros de tela a utilizar</Label>
                     <Input className="mt-1 min-h-[44px] bg-[#0d1629] border-[#c9a96e]/20 text-white" value={ficha.metros} onChange={(e) => setFichaField('metros', e.target.value)} placeholder="Ej: 3" />
                   </div>
                 </div>
-                <div>
-                  <Label className="text-white/60 text-xs">Medidas</Label>
-                  <p className="mt-1 text-white/70 text-sm">Las medidas del cliente se tomaron en el paso anterior. Puedes consultarlas en la ficha del cliente.</p>
-                </div>
+                {orderType !== 'camiseria' && (
+                  <div>
+                    <Label className="text-white/60 text-xs">Medidas</Label>
+                    <p className="mt-1 text-white/70 text-sm">Las medidas del cliente se tomaron en el paso anterior. Puedes consultarlas en la ficha del cliente.</p>
+                  </div>
+                )}
 
-                {/* SECCIÓN AMERICANA */}
-                {includeAmericana && (
-                  <div className="space-y-4 border-t border-[#c9a96e]/20 pt-4">
-                    <h3 className="text-[#c9a96e] text-sm uppercase tracking-wide font-medium">
-                      Americana
-                    </h3>
+                {/* Secciones de características por prenda (Americana/Teba/Chaqué/Abrigo/Gabardina, Pantalón, Chaleco) */}
+                {prendasSections.map((section) =>
+                  section.slug === 'pantalon' ? (
+                    <div key="pantalon" className="space-y-4 border-t border-[#c9a96e]/20 pt-4">
+                      <h3 className="text-[#c9a96e] text-sm uppercase tracking-wide font-medium">
+                        {section.label}
+                      </h3>
+
+                    <div>
+                      <Label className="text-white/60 text-xs">Vueltas</Label>
+                      <div className="flex flex-wrap gap-3 mt-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="radio" name="vueltas"
+                            checked={ficha.vueltas === 'sin_vueltas'}
+                            onChange={() => setFichaField('vueltas', 'sin_vueltas')}
+                            className="text-[#c9a96e]" />
+                          <span className="text-white/80 text-sm">Sin vueltas</span>
+                        </label>
+                        <span className="text-white/40 text-sm self-center">Con vuelta:</span>
+                        {['3.5', '4', '4.5'].map((v) => (
+                          <label key={v} className="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="vueltas"
+                              checked={ficha.vueltas === v}
+                              onChange={() => setFichaField('vueltas', v)}
+                              className="text-[#c9a96e]" />
+                            <span className="text-white/80 text-sm">{v} cm</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label className="text-white/60 text-xs">Bragueta</Label>
+                      <div className="flex gap-3 mt-2">
+                        {[
+                          { v: 'cremallera', label: 'Br. cremallera' },
+                          { v: 'botones', label: 'Br. botones' },
+                        ].map(({ v, label }) => (
+                          <label key={v} className="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="bragueta"
+                              checked={ficha.bragueta === v}
+                              onChange={() => setFichaField('bragueta', v)}
+                              className="text-[#c9a96e]" />
+                            <span className="text-white/80 text-sm">{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label className="text-white/60 text-xs">Pliegues</Label>
+                      <div className="flex gap-3 mt-2">
+                        {[
+                          { v: 'sin_pliegues', label: 'Sin pliegues' },
+                          { v: '1_pliegue', label: '1 pliegue' },
+                          { v: '2_pliegues', label: '2 pliegues' },
+                        ].map(({ v, label }) => (
+                          <label key={v} className="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="pliegues"
+                              checked={ficha.pliegues === v}
+                              onChange={() => setFichaField('pliegues', v)}
+                              className="text-[#c9a96e]" />
+                            <span className="text-white/80 text-sm">{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label className="text-white/60 text-xs">Bolsillos y detalles</Label>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">
+                        {[
+                          { k: 'p7pasadores', label: '7 pasadores' },
+                          { k: 'p5bolsillos', label: '5 bolsillos' },
+                          { k: 'pRefForro', label: 'Ref. forro' },
+                          { k: 'pRefExtTela', label: 'Ref. ext. tela' },
+                          { k: 'pSinBolTrasero', label: 'Sin bol. trasero' },
+                          { k: 'p1BolTrasero', label: '1 bol. trasero' },
+                          { k: 'p2BolTraseros', label: '2 bol. traseros' },
+                          { k: 'pBolCostura', label: 'Bol. costura' },
+                          { k: 'pBolFrances', label: 'Bol. francés' },
+                          { k: 'pBolVivo', label: 'Bol. vivo' },
+                          { k: 'pCenidores', label: 'Ceñidores costados' },
+                          { k: 'pBotonesTirantes', label: 'Botones tirantes' },
+                        ].map(({ k, label }) => (
+                          <label key={k} className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox"
+                              checked={!!(ficha as Record<string, unknown>)[k]}
+                              onChange={(e) => setFichaField(k as keyof typeof ficha, e.target.checked)}
+                              className="text-[#c9a96e]" />
+                            <span className="text-white/80 text-sm">{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label className="text-white/60 text-xs">Pretina</Label>
+                      <div className="space-y-2 mt-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox"
+                            checked={ficha.pretinaCorrida}
+                            onChange={(e) => setFichaField('pretinaCorrida', e.target.checked)}
+                            className="text-[#c9a96e]" />
+                          <span className="text-white/80 text-sm">
+                            Pretina corrida a 13 y un pasador a 7 en pico
+                          </span>
+                        </label>
+                        <div className="flex items-center gap-3">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox"
+                              checked={ficha.pretina2Botones}
+                              onChange={(e) => setFichaField('pretina2Botones', e.target.checked)}
+                              className="text-[#c9a96e]" />
+                            <span className="text-white/80 text-sm">
+                              Pretina de dos botones en punta
+                            </span>
+                          </label>
+                          {ficha.pretina2Botones && (
+                            <div className="flex gap-2">
+                              {['4', '4.5', '5'].map((v) => (
+                                <label key={v} className="flex items-center gap-1 cursor-pointer">
+                                  <input type="radio" name="pretinaTamano"
+                                    checked={ficha.pretinaTamano === v}
+                                    onChange={() => setFichaField('pretinaTamano', v)}
+                                    className="text-[#c9a96e]" />
+                                  <span className="text-white/80 text-sm">{v} cm</span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label className="text-white/60 text-xs">Tejido pantalón</Label>
+                      <div className="mt-1">
+                        <TejidoInput value={ficha.tejidoPantalon} onChange={(v) => setFichaField('tejidoPantalon', v)} placeholder="Descripción tejido" />
+                      </div>
+                    </div>
+                  </div>
+                ) : section.slug === 'chaleco' ? (
+                    <div key="chaleco" className="space-y-4 border-t border-[#c9a96e]/20 pt-4">
+                      <h3 className="text-[#c9a96e] text-sm uppercase tracking-wide font-medium">
+                        {section.label}
+                      </h3>
+                    <div>
+                      <Label className="text-white/60 text-xs">Corte</Label>
+                      <div className="flex gap-3 mt-2">
+                        {[
+                          { v: 'recto', label: 'Recto' },
+                          { v: 'cruzado', label: 'Cruzado' },
+                        ].map(({ v, label }) => (
+                          <label key={v} className="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="chalecoCorte"
+                              checked={ficha.chalecoCorte === v}
+                              onChange={() => setFichaField('chalecoCorte', v)}
+                              className="text-[#c9a96e]" />
+                            <span className="text-white/80 text-sm">{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-white/60 text-xs">Bolsillo</Label>
+                      <div className="flex gap-3 mt-2">
+                        {[
+                          { v: 'cartera', label: 'Bols. cartera' },
+                          { v: 'vivo', label: 'Bolsillo vivo' },
+                        ].map(({ v, label }) => (
+                          <label key={v} className="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="chalecoBolsillo"
+                              checked={ficha.chalecoBolsillo === v}
+                              onChange={() => setFichaField('chalecoBolsillo', v)}
+                              className="text-[#c9a96e]" />
+                            <span className="text-white/80 text-sm">{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <Label className="text-white/60 text-xs">Tejido chaleco</Label>
+                        <div className="mt-1">
+                          <TejidoInput value={ficha.tejidoChaleco} onChange={(v) => setFichaField('tejidoChaleco', v)} placeholder="Descripción tejido" />
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-white/60 text-xs">Forro chaleco</Label>
+                        <div className="mt-1">
+                          <TejidoInput value={ficha.forroChaleco} onChange={(v) => setFichaField('forroChaleco', v)} placeholder="Descripción forro" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                    <div key={section.slug} className="space-y-4 border-t border-[#c9a96e]/20 pt-4">
+                      <h3 className="text-[#c9a96e] text-sm uppercase tracking-wide font-medium">
+                        {section.label}
+                      </h3>
 
                     <div>
                       <Label className="text-white/60 text-xs">Botones</Label>
@@ -877,7 +1202,7 @@ export function NuevaVentaFichaClient({
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
-                        <Label className="text-white/60 text-xs">Tejido americana</Label>
+                        <Label className="text-white/60 text-xs">Tejido</Label>
                         <div className="mt-1">
                           <TejidoInput value={ficha.tejido} onChange={(v) => setFichaField('tejido', v)} placeholder="Descripción tejido" />
                         </div>
@@ -890,212 +1215,15 @@ export function NuevaVentaFichaClient({
                       </div>
                     </div>
                   </div>
+                )
                 )}
 
-                {/* SECCIÓN PANTALÓN */}
-                {includePantalon && (
-                  <div className="space-y-4 border-t border-[#c9a96e]/20 pt-4">
-                    <h3 className="text-[#c9a96e] text-sm uppercase tracking-wide font-medium">
-                      Pantalón
-                    </h3>
-
-                    <div>
-                      <Label className="text-white/60 text-xs">Vueltas</Label>
-                      <div className="flex flex-wrap gap-3 mt-2">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input type="radio" name="vueltas"
-                            checked={ficha.vueltas === 'sin_vueltas'}
-                            onChange={() => setFichaField('vueltas', 'sin_vueltas')}
-                            className="text-[#c9a96e]" />
-                          <span className="text-white/80 text-sm">Sin vueltas</span>
-                        </label>
-                        <span className="text-white/40 text-sm self-center">Con vuelta:</span>
-                        {['3.5', '4', '4.5'].map((v) => (
-                          <label key={v} className="flex items-center gap-2 cursor-pointer">
-                            <input type="radio" name="vueltas"
-                              checked={ficha.vueltas === v}
-                              onChange={() => setFichaField('vueltas', v)}
-                              className="text-[#c9a96e]" />
-                            <span className="text-white/80 text-sm">{v} cm</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div>
-                      <Label className="text-white/60 text-xs">Bragueta</Label>
-                      <div className="flex gap-3 mt-2">
-                        {[
-                          { v: 'cremallera', label: 'Br. cremallera' },
-                          { v: 'botones', label: 'Br. botones' },
-                        ].map(({ v, label }) => (
-                          <label key={v} className="flex items-center gap-2 cursor-pointer">
-                            <input type="radio" name="bragueta"
-                              checked={ficha.bragueta === v}
-                              onChange={() => setFichaField('bragueta', v)}
-                              className="text-[#c9a96e]" />
-                            <span className="text-white/80 text-sm">{label}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div>
-                      <Label className="text-white/60 text-xs">Pliegues</Label>
-                      <div className="flex gap-3 mt-2">
-                        {[
-                          { v: 'sin_pliegues', label: 'Sin pliegues' },
-                          { v: '1_pliegue', label: '1 pliegue' },
-                          { v: '2_pliegues', label: '2 pliegues' },
-                        ].map(({ v, label }) => (
-                          <label key={v} className="flex items-center gap-2 cursor-pointer">
-                            <input type="radio" name="pliegues"
-                              checked={ficha.pliegues === v}
-                              onChange={() => setFichaField('pliegues', v)}
-                              className="text-[#c9a96e]" />
-                            <span className="text-white/80 text-sm">{label}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div>
-                      <Label className="text-white/60 text-xs">Bolsillos y detalles</Label>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">
-                        {[
-                          { k: 'p7pasadores', label: '7 pasadores' },
-                          { k: 'p5bolsillos', label: '5 bolsillos' },
-                          { k: 'pRefForro', label: 'Ref. forro' },
-                          { k: 'pRefExtTela', label: 'Ref. ext. tela' },
-                          { k: 'pSinBolTrasero', label: 'Sin bol. trasero' },
-                          { k: 'p1BolTrasero', label: '1 bol. trasero' },
-                          { k: 'p2BolTraseros', label: '2 bol. traseros' },
-                          { k: 'pBolCostura', label: 'Bol. costura' },
-                          { k: 'pBolFrances', label: 'Bol. francés' },
-                          { k: 'pBolVivo', label: 'Bol. vivo' },
-                          { k: 'pCenidores', label: 'Ceñidores costados' },
-                          { k: 'pBotonesTirantes', label: 'Botones tirantes' },
-                        ].map(({ k, label }) => (
-                          <label key={k} className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox"
-                              checked={!!(ficha as Record<string, unknown>)[k]}
-                              onChange={(e) => setFichaField(k as keyof typeof ficha, e.target.checked)}
-                              className="text-[#c9a96e]" />
-                            <span className="text-white/80 text-sm">{label}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div>
-                      <Label className="text-white/60 text-xs">Pretina</Label>
-                      <div className="space-y-2 mt-2">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input type="checkbox"
-                            checked={ficha.pretinaCorrida}
-                            onChange={(e) => setFichaField('pretinaCorrida', e.target.checked)}
-                            className="text-[#c9a96e]" />
-                          <span className="text-white/80 text-sm">
-                            Pretina corrida a 13 y un pasador a 7 en pico
-                          </span>
-                        </label>
-                        <div className="flex items-center gap-3">
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox"
-                              checked={ficha.pretina2Botones}
-                              onChange={(e) => setFichaField('pretina2Botones', e.target.checked)}
-                              className="text-[#c9a96e]" />
-                            <span className="text-white/80 text-sm">
-                              Pretina de dos botones en punta
-                            </span>
-                          </label>
-                          {ficha.pretina2Botones && (
-                            <div className="flex gap-2">
-                              {['4', '4.5', '5'].map((v) => (
-                                <label key={v} className="flex items-center gap-1 cursor-pointer">
-                                  <input type="radio" name="pretinaTamano"
-                                    checked={ficha.pretinaTamano === v}
-                                    onChange={() => setFichaField('pretinaTamano', v)}
-                                    className="text-[#c9a96e]" />
-                                  <span className="text-white/80 text-sm">{v} cm</span>
-                                </label>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div>
-                      <Label className="text-white/60 text-xs">Tejido pantalón</Label>
-                      <div className="mt-1">
-                        <TejidoInput value={ficha.tejidoPantalon} onChange={(v) => setFichaField('tejidoPantalon', v)} placeholder="Descripción tejido" />
-                      </div>
-                    </div>
+                {orderType !== 'camiseria' && (
+                  <div>
+                    <Label className="text-white/60 text-xs">Descripción</Label>
+                    <Textarea className="mt-1 min-h-[100px] bg-[#0d1629] border-[#c9a96e]/20 text-white" value={ficha.observaciones} onChange={(e) => setFichaField('observaciones', e.target.value)} placeholder="Instrucciones de confección, ojales, botones, largos..." />
                   </div>
                 )}
-
-                {/* SECCIÓN CHALECO */}
-                {includeChaleco && (
-                  <div className="space-y-4 border-t border-[#c9a96e]/20 pt-4">
-                    <h3 className="text-[#c9a96e] text-sm uppercase tracking-wide font-medium">
-                      Chaleco
-                    </h3>
-                    <div>
-                      <Label className="text-white/60 text-xs">Corte</Label>
-                      <div className="flex gap-3 mt-2">
-                        {[
-                          { v: 'recto', label: 'Recto' },
-                          { v: 'cruzado', label: 'Cruzado' },
-                        ].map(({ v, label }) => (
-                          <label key={v} className="flex items-center gap-2 cursor-pointer">
-                            <input type="radio" name="chalecoCorte"
-                              checked={ficha.chalecoCorte === v}
-                              onChange={() => setFichaField('chalecoCorte', v)}
-                              className="text-[#c9a96e]" />
-                            <span className="text-white/80 text-sm">{label}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <Label className="text-white/60 text-xs">Bolsillo</Label>
-                      <div className="flex gap-3 mt-2">
-                        {[
-                          { v: 'cartera', label: 'Bols. cartera' },
-                          { v: 'vivo', label: 'Bolsillo vivo' },
-                        ].map(({ v, label }) => (
-                          <label key={v} className="flex items-center gap-2 cursor-pointer">
-                            <input type="radio" name="chalecoBolsillo"
-                              checked={ficha.chalecoBolsillo === v}
-                              onChange={() => setFichaField('chalecoBolsillo', v)}
-                              className="text-[#c9a96e]" />
-                            <span className="text-white/80 text-sm">{label}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <Label className="text-white/60 text-xs">Tejido chaleco</Label>
-                        <div className="mt-1">
-                          <TejidoInput value={ficha.tejidoChaleco} onChange={(v) => setFichaField('tejidoChaleco', v)} placeholder="Descripción tejido" />
-                        </div>
-                      </div>
-                      <div>
-                        <Label className="text-white/60 text-xs">Forro chaleco</Label>
-                        <div className="mt-1">
-                          <TejidoInput value={ficha.forroChaleco} onChange={(v) => setFichaField('forroChaleco', v)} placeholder="Descripción forro" />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div>
-                  <Label className="text-white/60 text-xs">Observaciones</Label>
-                  <Textarea className="mt-1 min-h-[100px] bg-[#0d1629] border-[#c9a96e]/20 text-white" value={ficha.observaciones} onChange={(e) => setFichaField('observaciones', e.target.value)} placeholder="Instrucciones de confección, ojales, botones, largos..." />
-                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   <div className="col-span-2">
                     <Label className="text-white/60 text-xs">Domicilio</Label>
@@ -1142,40 +1270,42 @@ export function NuevaVentaFichaClient({
         )}
 
         {/* SASTRERÍA */}
-        <section className="rounded-xl border border-[#c9a96e]/20 bg-[#1a2744]/80 p-5 space-y-4">
-          <h2 className="font-serif text-lg text-[#c9a96e]">Sastrería</h2>
-          <div className="grid gap-4">
-            <div>
-              <Label className="text-white/80">Precio confección (€)</Label>
-              <Input
-                type="number"
-                min={0}
-                step={0.01}
-                className="mt-1 min-h-[48px] bg-[#0d1629] border-[#c9a96e]/20 text-white"
-                value={prendaSastre.precio || ''}
-                onChange={(e) => setPrendaSastre((p) => ({ ...p, precio: parseFloat(e.target.value) || 0 }))}
-              />
-            </div>
-            <div>
-              <Label className="text-white/80">Notas / acabados</Label>
-              <Textarea
-                className="mt-1 min-h-[80px] bg-[#0d1629] border-[#c9a96e]/20 text-white"
-                value={prendaSastre.notas}
-                onChange={(e) => setPrendaSastre((p) => ({ ...p, notas: e.target.value }))}
-                placeholder="Opcional"
-              />
-            </div>
-          </div>
-        </section>
-
-        {/* CAMISAS (solo si no es solo camisería) */}
-        {!isCamiseria && (
+        {orderType !== 'camiseria' && (
           <section className="rounded-xl border border-[#c9a96e]/20 bg-[#1a2744]/80 p-5 space-y-4">
-            <h2 className="font-serif text-lg text-[#c9a96e]">Camisas a medida</h2>
+            <h2 className="font-serif text-lg text-[#c9a96e]">Sastrería</h2>
+            <div className="grid gap-4">
+              <div>
+                <Label className="text-white/80">Precio confección (€)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  className="mt-1 min-h-[48px] bg-[#0d1629] border-[#c9a96e]/20 text-white"
+                  value={prendaSastre.precio || ''}
+                  onChange={(e) => setPrendaSastre((p) => ({ ...p, precio: parseFloat(e.target.value) || 0 }))}
+                />
+              </div>
+              <div>
+                <Label className="text-white/80">Notas / acabados</Label>
+                <Textarea
+                  className="mt-1 min-h-[80px] bg-[#0d1629] border-[#c9a96e]/20 text-white"
+                  value={prendaSastre.notas}
+                  onChange={(e) => setPrendaSastre((p) => ({ ...p, notas: e.target.value }))}
+                  placeholder="Opcional"
+                />
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* CAMISAS / CAMISERÍA */}
+        {(isCamiseria || camiseriaMeasurements) && (
+          <section className="rounded-xl border border-[#c9a96e]/20 bg-[#1a2744]/80 p-5 space-y-4">
+            <h2 className="font-serif text-lg text-[#c9a96e]">{isCamiseria ? 'Camisería' : 'Camisas a medida'}</h2>
 
             {camiseriaMeasurementsLoading ? (
               <p className="text-white/60 text-sm">Cargando medidas de camisería...</p>
-            ) : !camiseriaMeasurements ? (
+            ) : !camiseriaMeasurements && !isCamiseria ? (
               <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-4">
                 <p className="text-amber-200 text-sm">
                   Este cliente no tiene medidas de camisería. Para hacer una camisa a medida, crea primero un pedido de camisería desde el flujo de Camisería.
@@ -1192,12 +1322,14 @@ export function NuevaVentaFichaClient({
                   <Plus className="h-5 w-5" />
                   Añadir camisa
                 </Button>
-                {camisas.map((camisa) => (
+                {camisas.map((camisa, index) => (
                   <div
                     key={camisa.id}
                     className="rounded-lg border border-[#c9a96e]/15 bg-[#0d1629] p-4 space-y-4"
                   >
-                    <div className="flex justify-end">
+                    {/* CABECERA: CAMISA #N + eliminar */}
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-[#c9a96e] font-medium">CAMISA #{index + 1}</h3>
                       <Button
                         type="button"
                         variant="ghost"
@@ -1209,65 +1341,30 @@ export function NuevaVentaFichaClient({
                       </Button>
                     </div>
 
-                    {/* Sección 1 — MEDIDAS (grid 6 cols) */}
+                    {/* MEDIDAS — 2 filas de 6 columnas */}
                     <div>
                       <Label className="text-white/60 text-xs mb-2 block">Medidas</Label>
-                      <div className="grid grid-cols-6 gap-2 rounded-lg bg-[#0a1020] p-3">
-                        <div>
-                          <Label className="text-white/40 text-xs">Cuello</Label>
-                          <Input readOnly className="mt-0.5 h-9 bg-[#1a2744]/60 border-[#c9a96e]/10 text-white/90 text-sm" value={camiseriaMeasurements?.cuello || '—'} />
-                        </div>
-                        <div>
-                          <Label className="text-white/40 text-xs">Canesú</Label>
-                          <Input className="mt-0.5 h-9 bg-[#1a2744] border-[#c9a96e]/20 text-white text-sm" value={camisa.canesu} onChange={(e) => updateCamisa(camisa.id, 'canesu', e.target.value)} placeholder="—" />
-                        </div>
-                        <div>
-                          <Label className="text-white/40 text-xs">Manga</Label>
-                          <Input readOnly className="mt-0.5 h-9 bg-[#1a2744]/60 border-[#c9a96e]/10 text-white/90 text-sm" value={camiseriaMeasurements?.manga || '—'} />
-                        </div>
-                        <div>
-                          <Label className="text-white/40 text-xs">Fren.Pecho</Label>
-                          <Input className="mt-0.5 h-9 bg-[#1a2744] border-[#c9a96e]/20 text-white text-sm" value={camisa.frenPecho} onChange={(e) => updateCamisa(camisa.id, 'frenPecho', e.target.value)} placeholder="—" />
-                        </div>
-                        <div>
-                          <Label className="text-white/40 text-xs">Cont.Pecho</Label>
-                          <Input className="mt-0.5 h-9 bg-[#1a2744] border-[#c9a96e]/20 text-white text-sm" value={camisa.contPecho} onChange={(e) => updateCamisa(camisa.id, 'contPecho', e.target.value)} placeholder="—" />
-                        </div>
-                        <div>
-                          <Label className="text-white/40 text-xs">Cintura</Label>
-                          <Input readOnly className="mt-0.5 h-9 bg-[#1a2744]/60 border-[#c9a96e]/10 text-white/90 text-sm" value={camiseriaMeasurements?.cintura || '—'} />
-                        </div>
-                        <div>
-                          <Label className="text-white/40 text-xs">Cadera</Label>
-                          <Input readOnly className="mt-0.5 h-9 bg-[#1a2744]/60 border-[#c9a96e]/10 text-white/90 text-sm" value={camiseriaMeasurements?.cadera || '—'} />
-                        </div>
-                        <div>
-                          <Label className="text-white/40 text-xs">Largo</Label>
-                          <Input className="mt-0.5 h-9 bg-[#1a2744] border-[#c9a96e]/20 text-white text-sm" value={camisa.largo} onChange={(e) => updateCamisa(camisa.id, 'largo', e.target.value)} placeholder="—" />
-                        </div>
-                        <div>
-                          <Label className="text-white/40 text-xs">P.Izq</Label>
-                          <Input className="mt-0.5 h-9 bg-[#1a2744] border-[#c9a96e]/20 text-white text-sm" value={camisa.pIzq} onChange={(e) => updateCamisa(camisa.id, 'pIzq', e.target.value)} placeholder="—" />
-                        </div>
-                        <div>
-                          <Label className="text-white/40 text-xs">P.Dch</Label>
-                          <Input className="mt-0.5 h-9 bg-[#1a2744] border-[#c9a96e]/20 text-white text-sm" value={camisa.pDch} onChange={(e) => updateCamisa(camisa.id, 'pDch', e.target.value)} placeholder="—" />
-                        </div>
-                        <div>
-                          <Label className="text-white/40 text-xs">Hombro</Label>
-                          <Input readOnly className="mt-0.5 h-9 bg-[#1a2744]/60 border-[#c9a96e]/10 text-white/90 text-sm" value={camiseriaMeasurements?.hombro || '—'} />
-                        </div>
-                        <div>
-                          <Label className="text-white/40 text-xs">Bíceps</Label>
-                          <Input className="mt-0.5 h-9 bg-[#1a2744] border-[#c9a96e]/20 text-white text-sm" value={camisa.biceps} onChange={(e) => updateCamisa(camisa.id, 'biceps', e.target.value)} placeholder="—" />
-                        </div>
+                      <div className="grid grid-cols-6 gap-3 rounded-lg bg-[#0a1020] p-3">
+                        {MEDIDAS_FIELDS.map(({ label, field }) => (
+                          <div key={field}>
+                            <Label className="text-xs text-gray-400 block mb-1">{label}</Label>
+                            <Input
+                              type="number"
+                              inputMode="decimal"
+                              className="w-full py-2 text-center bg-[#1a2744] border-[#c9a96e]/20 text-white text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              value={camisa[field] ?? ''}
+                              onChange={(e) => updateCamisa(camisa.id, field, e.target.value)}
+                              placeholder="—"
+                            />
+                          </div>
+                        ))}
                       </div>
                     </div>
 
-                    {/* Sección 2 — OPCIONES (3 columnas checkboxes) */}
+                    {/* CHECKBOXES — 4 columnas */}
                     <div>
                       <Label className="text-white/60 text-xs mb-2 block">Opciones</Label>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                         <div className="flex flex-col gap-2">
                           {[
                             { k: 'jareton', label: 'Jaretón' },
@@ -1301,7 +1398,6 @@ export function NuevaVentaFichaClient({
                             { k: 'espPliegues', label: 'Esp. pliegues' },
                             { k: 'espTablonCentr', label: 'Esp. tablón centr.' },
                             { k: 'espPinzas', label: 'Esp. pinzas' },
-                            { k: 'iniciales', label: 'Iniciales' },
                           ].map(({ k, label }) => (
                             <label key={k} className="flex items-center gap-2 cursor-pointer">
                               <Checkbox checked={!!(camisa as Record<string, unknown>)[k]} onCheckedChange={(v) => updateCamisa(camisa.id, k as keyof CamisaItem, !!v)} className="border-[#c9a96e]/40" />
@@ -1309,35 +1405,39 @@ export function NuevaVentaFichaClient({
                             </label>
                           ))}
                         </div>
-                      </div>
-                    </div>
-
-                    {/* Sección 3 — MODELO y PUÑO */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <Label className="text-white/70 text-xs">Mod. Cuello</Label>
-                        <Input className="mt-1 min-h-[44px] bg-[#1a2744] border-[#c9a96e]/20 text-white" value={camisa.modCuello} onChange={(e) => updateCamisa(camisa.id, 'modCuello', e.target.value)} placeholder="Texto libre" />
-                      </div>
-                      <div>
-                        <Label className="text-white/70 text-xs">Puño</Label>
-                        <div className="flex flex-wrap gap-3 mt-2">
-                          {PUNO_CAMISA_OPTIONS.map(({ value, label }) => (
-                            <label key={value} className="flex items-center gap-2 cursor-pointer">
-                              <input
-                                type="radio"
-                                name={`puno-${camisa.id}`}
-                                checked={camisa.puno === value}
-                                onChange={() => updateCamisa(camisa.id, 'puno', value)}
-                                className="text-[#c9a96e]"
-                              />
-                              <span className="text-white/80 text-sm">{label}</span>
-                            </label>
-                          ))}
+                        <div className="flex flex-col gap-2">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <Checkbox checked={camisa.iniciales} onCheckedChange={(v) => updateCamisa(camisa.id, 'iniciales', !!v)} className="border-[#c9a96e]/40" />
+                            <span className="text-white/80 text-sm">Iniciales</span>
+                          </label>
+                          <div>
+                            <Label className="text-white/70 text-xs">Mod. cuello</Label>
+                            <Input className="mt-1 h-9 bg-[#1a2744] border-[#c9a96e]/20 text-white text-sm" value={camisa.modCuello} onChange={(e) => updateCamisa(camisa.id, 'modCuello', e.target.value)} placeholder="Texto" />
+                          </div>
                         </div>
                       </div>
                     </div>
 
-                    {/* Sección 4 — TEJIDO */}
+                    {/* PUÑO — radio horizontal */}
+                    <div>
+                      <Label className="text-white/70 text-xs mb-2 block">Puño</Label>
+                      <div className="flex flex-wrap gap-3">
+                        {PUNO_CAMISA_OPTIONS.map(({ value, label }) => (
+                          <label key={value} className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name={`puno-${camisa.id}`}
+                              checked={camisa.puno === value}
+                              onChange={() => updateCamisa(camisa.id, 'puno', value)}
+                              className="text-[#c9a96e]"
+                            />
+                            <span className="text-white/80 text-sm">{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* TEJIDO — ancho completo */}
                     <div>
                       <Label className="text-white/70 text-xs">Tejido</Label>
                       <div className="mt-1">
@@ -1345,26 +1445,22 @@ export function NuevaVentaFichaClient({
                       </div>
                     </div>
 
-                    {/* Sección 5 — ECONÓMICO */}
+                    {/* PRECIO y CANTIDAD — grid 2 columnas */}
                     <div>
-                      <Label className="text-white/60 text-xs mb-2 block">Económico</Label>
-                      <div className="grid grid-cols-3 gap-3">
-                        <div>
-                          <Label className="text-white/50 text-xs">Cantidad</Label>
-                          <Input type="number" min={1} className="mt-1 h-10 bg-[#1a2744] border-[#c9a96e]/20 text-white" value={camisa.cantidad} onChange={(e) => updateCamisa(camisa.id, 'cantidad', Math.max(1, parseInt(e.target.value, 10) || 1))} />
-                        </div>
+                      <Label className="text-white/60 text-xs mb-2 block">Precio y cantidad</Label>
+                      <div className="grid grid-cols-2 gap-3">
                         <div>
                           <Label className="text-white/50 text-xs">Precio (€)</Label>
                           <Input type="number" min={0} step={0.01} className="mt-1 h-10 bg-[#1a2744] border-[#c9a96e]/20 text-white" value={camisa.precio || ''} onChange={(e) => updateCamisa(camisa.id, 'precio', parseFloat(e.target.value) || 0)} />
                         </div>
                         <div>
-                          <Label className="text-white/50 text-xs">Entregado a cuenta (€)</Label>
-                          <Input type="number" min={0} step={0.01} className="mt-1 h-10 bg-[#1a2744] border-[#c9a96e]/20 text-white" value={camisa.entregadoACuenta || ''} onChange={(e) => updateCamisa(camisa.id, 'entregadoACuenta', parseFloat(e.target.value) || 0)} />
+                          <Label className="text-white/50 text-xs">Cantidad</Label>
+                          <Input type="number" min={1} className="mt-1 h-10 bg-[#1a2744] border-[#c9a96e]/20 text-white" value={camisa.cantidad} onChange={(e) => updateCamisa(camisa.id, 'cantidad', Math.max(1, parseInt(e.target.value, 10) || 1))} />
                         </div>
                       </div>
                     </div>
 
-                    {/* Sección 6 — OBSERVACIONES */}
+                    {/* OBSERVACIONES */}
                     <div>
                       <Label className="text-white/70 text-xs">Observaciones</Label>
                       <Textarea className="mt-1 min-h-[60px] bg-[#1a2744] border-[#c9a96e]/20 text-white" value={camisa.obs} onChange={(e) => updateCamisa(camisa.id, 'obs', e.target.value)} placeholder="Opcional" />
@@ -1429,7 +1525,7 @@ export function NuevaVentaFichaClient({
               <span>Precio confección:</span>
               <span>{precioConfeccion.toFixed(2)} €</span>
             </div>
-            {!isCamiseria && totalCamisas > 0 && (
+            {totalCamisas > 0 && (
               <div className="flex justify-between">
                 <span>Camisas:</span>
                 <span>{totalCamisas.toFixed(2)} €</span>
@@ -1446,16 +1542,38 @@ export function NuevaVentaFichaClient({
               <span>{total.toFixed(2)} €</span>
             </div>
           </dl>
-          <div>
-            <Label className="text-white/80">Entrega a cuenta (€)</Label>
-            <Input
-              type="number"
-              min={0}
-              step={0.01}
-              className="mt-1 min-h-[48px] bg-[#1a2744] border-[#c9a96e]/20 text-white"
-              value={entregaACuenta || ''}
-              onChange={(e) => setEntregaACuenta(parseFloat(e.target.value) || 0)}
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <Label className="text-white/80">Entrega a cuenta (€)</Label>
+              <Input
+                type="number"
+                min={0}
+                step={0.01}
+                className="mt-1 min-h-[48px] bg-[#1a2744] border-[#c9a96e]/20 text-white"
+                value={entregaACuenta || ''}
+                onChange={(e) => setEntregaACuenta(parseFloat(e.target.value) || 0)}
+              />
+            </div>
+            <div>
+              <Label className="text-white/80">
+                Método de pago
+                {(Number(entregaACuenta) || 0) > 0 && <span className="text-[#c9a96e] ml-0.5">*</span>}
+              </Label>
+              <Select
+                value={metodoPago}
+                onValueChange={(v: 'efectivo' | 'tarjeta' | 'transferencia' | 'bizum') => setMetodoPago(v)}
+              >
+                <SelectTrigger className="mt-1 min-h-[48px] bg-[#1a2744] border-[#c9a96e]/20 text-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="efectivo">Efectivo</SelectItem>
+                  <SelectItem value="tarjeta">Tarjeta</SelectItem>
+                  <SelectItem value="transferencia">Transferencia</SelectItem>
+                  <SelectItem value="bizum">Bizum</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <p className="text-white/80">
             Pendiente: <strong className="text-white">{pendiente.toFixed(2)} €</strong>
@@ -1498,7 +1616,7 @@ export function NuevaVentaFichaClient({
                   >
                     <div className="min-w-0">
                       <p className="font-medium truncate">{item.name}</p>
-                      <p className="text-white/60 text-xs">SKU: {item.sku} · {item.price.toFixed(2)} € · Stock: {item.stock}</p>
+                      <p className="text-white/60 text-xs">SKU: {item.sku} · {item.price_with_tax.toFixed(2)} € · Stock: {item.stock}</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <Input

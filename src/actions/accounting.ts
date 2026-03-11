@@ -1470,7 +1470,6 @@ export const generateInvoicePdfAction = protectedAction<string, { url: string }>
   { permission: 'accounting.manage_invoices', auditModule: 'accounting' },
   async (ctx, invoiceId) => {
     const { data: inv } = await ctx.adminClient.from('invoices').select('pdf_url').eq('id', invoiceId).single()
-    if (inv?.pdf_url) return success({ url: inv.pdf_url as string })
     try {
       const url = await generateInvoicePdf(invoiceId)
       return success({ url })

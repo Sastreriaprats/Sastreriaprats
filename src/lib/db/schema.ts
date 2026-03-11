@@ -696,6 +696,10 @@ export const tailoringOrderStatusEnum = pgEnum('tailoring_order_status', [
   'created', 'fabric_ordered', 'fabric_received', 'factory_ordered',
   'in_production', 'fitting', 'adjustments', 'finished',
   'delivered', 'incident', 'cancelled',
+  'requested', 'supplier_delivered',
+  'in_workshop', 'pending_first_fitting', 'note_sent_factory',
+  'fabric_ordered_supplier', 'fabric_at_factory', 'shipping_to_store',
+  'delivered_to_store', 'order_requested',
 ])
 export const cashSessionStatusEnum = pgEnum('cash_session_status', ['open', 'closed'])
 export const saleStatusEnum = pgEnum('sale_status', ['completed', 'partially_returned', 'fully_returned', 'voided'])
@@ -996,6 +1000,8 @@ export const tailoringOrderLines = pgTable('tailoring_order_lines', {
   modelSize: text('model_size'),
   finishingNotes: text('finishing_notes'),
   sortOrder: integer('sort_order').default(0),
+  deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+  deliveredBy: uuid('delivered_by').references(() => profiles.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
