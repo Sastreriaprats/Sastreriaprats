@@ -118,7 +118,7 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
   const headerGoldenLine: Content = {
     table: {
       widths: ['*'],
-      body: [[{ fillColor: '#c9a96e', text: '', height: 2 }]],
+      body: [[{ fillColor: '#c9a96e', text: '', margin: [0, 1, 0, 1] as [number, number, number, number] }]],
     },
     layout: 'noBorders',
     margin: [0, 0, 0, 16],
