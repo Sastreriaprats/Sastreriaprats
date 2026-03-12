@@ -7,9 +7,7 @@ import { useCallback } from 'react'
  * Hook para gestionar la tienda activa del usuario.
  */
 export function useActiveStore() {
-  const { activeStoreId, setActiveStoreId, profile } = useAuth()
-
-  const stores = profile?.stores ?? []
+  const { activeStoreId, setActiveStoreId, stores } = useAuth()
 
   const switchStore = useCallback(
     (storeId: string) => {

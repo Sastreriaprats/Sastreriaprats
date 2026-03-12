@@ -72,7 +72,6 @@ const TYPE_CARDS: { type: OrderType; label: string; description: string; bg: str
   { type: 'artesanal', label: 'Pedido de cliente artesanal', description: 'Confección en sastrería o con oficial', bg: 'bg-blue-50', border: 'border-blue-300', icon: Shirt },
   { type: 'camiseria', label: 'Pedido de camisería', description: 'Camisas a medida con ficha de medidas', bg: 'bg-violet-50', border: 'border-violet-300', icon: Shirt },
   { type: 'industrial', label: 'Pedido de cliente industrial', description: 'Envío a fábrica con tela y medidas', bg: 'bg-orange-50', border: 'border-orange-300', icon: Factory },
-  { type: 'proveedor', label: 'Pedido a proveedor', description: 'Compra de telas o materiales', bg: 'bg-yellow-50', border: 'border-yellow-300', icon: Package },
   { type: 'oficial', label: 'Pedido a oficial', description: 'Encargo de confección a oficial externo', bg: 'bg-green-50', border: 'border-green-300', icon: UserCheck },
 ]
 

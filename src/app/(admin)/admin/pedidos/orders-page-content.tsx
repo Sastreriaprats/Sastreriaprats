@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -30,12 +30,16 @@ const orderStatuses = [
   'in_production', 'fitting', 'adjustments', 'finished', 'delivered', 'incident', 'cancelled',
 ]
 
-export function OrdersPageContent({ initialView, initialStatus }: { initialView: string; initialStatus?: string }) {
+export function OrdersPageContent({ initialView, initialStatus, initialType }: { initialView: string; initialStatus?: string; initialType?: string }) {
   const router = useRouter()
   const { can } = usePermissions()
   const [view, setView] = useState<'table' | 'pipeline'>(initialView as any)
   const [statusFilter, setStatusFilter] = useState(initialStatus || 'all')
-  const [typeFilter, setTypeFilter] = useState('all')
+  const [typeFilter, setTypeFilter] = useState(initialType === 'supplier' ? 'all' : (initialType || 'all'))
+
+  useEffect(() => {
+    if (initialType === 'supplier') router.replace('/admin/pedidos')
+  }, [initialType, router])
 
   const {
     data: orders, total, totalPages, page, setPage,
@@ -57,7 +61,7 @@ export function OrdersPageContent({ initialView, initialStatus }: { initialView:
 
   const applyType = (v: string) => {
     setTypeFilter(v)
-    setFilters(prev => ({ ...prev, ...(v !== 'all' ? { order_type: v } : { order_type: undefined }) }))
+    setFilters(prev => ({ ...prev, order_type: v !== 'all' ? v : undefined }))
   }
 
   const hasActiveFilters = statusFilter !== 'all' || typeFilter !== 'all'
@@ -83,7 +87,9 @@ export function OrdersPageContent({ initialView, initialStatus }: { initialView:
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Pedidos de Sastrería</h1>
-          <p className="text-muted-foreground">{isLoading ? 'Cargando...' : `${total} pedidos`}</p>
+          <p className="text-muted-foreground">
+            {isLoading ? 'Cargando...' : `${total} pedidos`}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex rounded-lg border p-0.5">
@@ -102,7 +108,7 @@ export function OrdersPageContent({ initialView, initialStatus }: { initialView:
         </div>
       </div>
 
-      {/* Barra de filtros (como en Stock) */}
+      {/* Barra de filtros */}
       <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
         <div className="flex items-center gap-2">
           <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />

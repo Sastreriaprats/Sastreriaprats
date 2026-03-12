@@ -321,6 +321,30 @@ export const listProductsForSastre = protectedAction<ListParams, ListResult<any>
   }
 )
 
+/** Busca productos de un proveedor por nombre (para selector en pedido a proveedor). */
+export const searchProductsBySupplier = protectedAction<
+  { supplierId: string; query?: string },
+  { id: string; sku: string; name: string }[]
+>(
+  { permission: 'suppliers.create_order', auditModule: 'stock' },
+  async (ctx, { supplierId, query }) => {
+    if (!supplierId?.trim()) return success([])
+    let q = ctx.adminClient
+      .from('products')
+      .select('id, sku, name')
+      .eq('supplier_id', supplierId.trim())
+      .eq('is_active', true)
+      .order('name', { ascending: true })
+      .limit(20)
+    if (query?.trim()) {
+      q = q.ilike('name', `%${query.trim()}%`)
+    }
+    const { data, error } = await q
+    if (error) return failure(error.message)
+    return success((data ?? []) as { id: string; sku: string; name: string }[])
+  }
+)
+
 export const getProduct = protectedAction<string, any>(
   { permission: 'products.view', auditModule: 'stock' },
   async (ctx, productId) => {

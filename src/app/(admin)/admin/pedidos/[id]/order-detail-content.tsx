@@ -6,9 +6,10 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import Link from 'next/link'
 import {
   ArrowLeft, User, Phone, Shirt, History,
-  Calendar, CreditCard, AlertTriangle,
+  Calendar, CreditCard, AlertTriangle, ExternalLink,
 } from 'lucide-react'
 import { usePermissions } from '@/hooks/use-permissions'
 import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
@@ -40,11 +41,20 @@ export function OrderDetailContent({ order }: { order: any }) {
             <Badge variant="outline">{order.order_type === 'artesanal' ? 'Artesanal' : 'Industrial'}</Badge>
             {isOverdue && <Badge variant="destructive" className="gap-1"><AlertTriangle className="h-3 w-3" /> Retrasado</Badge>}
           </div>
-          <div className="flex items-center gap-4 text-sm text-muted-foreground mt-1">
+          <div className="flex items-center gap-4 text-sm text-muted-foreground mt-1 flex-wrap">
             <span className="flex items-center gap-1"><User className="h-3 w-3" />{order.clients?.full_name}</span>
             {order.clients?.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{order.clients.phone}</span>}
             <span>Tienda: {order.stores?.name}</span>
             <span>Fecha: {formatDate(order.order_date || order.created_at)}</span>
+            {order.supplier_order_id && (
+              <Link
+                href={`/admin/proveedores/pedidos/${order.supplier_order_id}`}
+                className="inline-flex items-center gap-1 text-prats-navy hover:underline"
+              >
+                <ExternalLink className="h-3 w-3" />
+                Pedido a proveedor: {order.supplier_orders?.order_number ?? (Array.isArray(order.supplier_orders) ? order.supplier_orders[0]?.order_number : '—')}
+              </Link>
+            )}
           </div>
         </div>
         <div className="flex gap-2">

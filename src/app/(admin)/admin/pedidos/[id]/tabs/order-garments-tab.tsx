@@ -47,22 +47,59 @@ export function OrderGarmentsTab({ order }: { order: any }) {
               )}
             </div>
 
-            {line.configuration && Object.keys(line.configuration).length > 0 && (
-              <>
-                <Separator />
-                <div>
-                  <p className="text-xs font-semibold text-muted-foreground mb-2">CONFIGURACIÓN</p>
-                  <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
-                    {Object.entries(line.configuration).map(([key, val]) => (
-                      <div key={key} className="text-sm">
-                        <span className="text-muted-foreground text-xs block capitalize">{key.replace(/_/g, ' ')}</span>
-                        <span className="font-medium">{val as string}</span>
-                      </div>
-                    ))}
+            {(() => {
+              const cfg = line.configuration || {}
+              const ALLOWED_KEYS = [
+                // Sastrería - prenda
+                'prenda', 'prendaLabel', 'tejido', 'forro', 'manga', 'solapa',
+                'anchoSolapa', 'botones', 'vueltas', 'pliegues', 'aberturas',
+                'escote', 'metros', 'picado34', 'forroDesc',
+                'bolsilloTipo', 'cerrilleraExterior', 'primerBoton',
+                'ojalesAbiertos', 'ojalesCerrados', 'medidaHombro', 'sinHombreras',
+                // Sastrería - pantalón
+                'pretinaTamano', 'pretinaCorrida', 'pretina2Botones',
+                'tejidoPantalon', 'pBotonesTirantes',
+                // Sastrería - chaleco
+                'chalecoCorte', 'chalecoBolsillo', 'tejidoChaleco', 'forroChaleco',
+                // Sastrería - gestión
+                'cortador', 'oficial', 'situacionTrabajo', 'SituacionTrabajo',
+                'fechaCompromiso', 'FechaCompromiso', 'descripcion', 'observaciones',
+                'notas', 'Notas', 'caracteristicas',
+                // Camisería - medidas
+                'cuello', 'canesu', 'manga', 'frenPecho', 'contPecho',
+                'cintura', 'cadera', 'largo', 'hombro', 'biceps',
+                // Camisería - opciones
+                'modCuello', 'puno', 'jareton', 'espPliegues',
+                'erguido', 'hombrosAltos', 'iniciales', 'obs',
+                // Camisería - tipo
+                'tipo',
+                // Complementos
+                'product_name',
+              ]
+              const entries = Object.entries(cfg).filter(([key, val]) =>
+                ALLOWED_KEYS.includes(key) &&
+                val != null && val !== '' && val !== 0 && val !== false
+              )
+              if (entries.length === 0) return null
+              return (
+                <>
+                  <Separator />
+                  <div>
+                    <p className="text-xs font-semibold text-muted-foreground mb-2">CONFIGURACIÓN</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {entries.map(([key, val]) => (
+                        <span key={key} className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-xs">
+                          <span className="text-muted-foreground capitalize">
+                            {key.replace(/_/g, ' ')}:
+                          </span>
+                          <span className="font-medium">{String(val)}</span>
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              </>
-            )}
+                </>
+              )
+            })()}
 
             {line.finishing_notes && (
               <div className="p-2 bg-muted rounded text-sm italic">&quot;{line.finishing_notes}&quot;</div>

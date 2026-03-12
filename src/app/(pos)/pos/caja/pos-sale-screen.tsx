@@ -444,6 +444,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
                 payment_date: today,
                 payment_method: orderMethod,
                 amount: item.amount,
+                storeId: activeStoreId ?? undefined,
               })
               if (res?.success !== true) toast.error(res && 'error' in res ? res.error : 'Error al registrar pago en pedido')
             } else {
@@ -451,6 +452,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
                 sale_id: item.entity_id,
                 payment_method: orderMethod,
                 amount: item.amount,
+                storeId: activeStoreId ?? undefined,
               })
               if (res?.success !== true) toast.error(res && 'error' in res ? res.error : 'Error al registrar pago en venta')
             }
@@ -760,7 +762,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
             <div className="bg-white border-b border-slate-200 max-h-48 overflow-y-auto shrink-0">
               {searchResults.map((v: any) => {
                 const stock = Array.isArray(v.stock_levels) ? (v.stock_levels[0]?.available ?? 0) : (v.stock_levels?.[0]?.available || 0)
-                const price = v.price_override ?? v.products?.base_price ?? 0
+                const price = v.products?.price_with_tax ?? 0
                 const name = v.products?.name ?? ''
                 return (
                   <button key={v.id} type="button" className="w-full flex justify-between px-4 py-3 hover:bg-slate-50 cursor-pointer border-b border-slate-200 last:border-b-0 text-left disabled:opacity-60" onClick={() => stock > 0 && addToTicket(v)} disabled={stock <= 0}>

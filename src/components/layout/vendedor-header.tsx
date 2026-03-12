@@ -1,15 +1,25 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
+import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
-import { Menu, LogOut, ChevronRight, PanelLeftClose, PanelLeft } from 'lucide-react'
+import { Menu, LogOut, ChevronRight, PanelLeftClose, PanelLeft, MapPin } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
+import { useActiveStore } from '@/hooks/use-store'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { logoutAction } from '@/actions/auth'
 import { cn } from '@/lib/utils'
 import { LayoutDashboard, Users, Package, CircleDollarSign, ShoppingCart, ClipboardList } from 'lucide-react'
@@ -64,6 +74,24 @@ export function VendedorHeader({
   const pathname = usePathname()
   const router = useRouter()
   const { profile } = useAuth()
+  const { activeStoreId, switchStore } = useActiveStore()
+  const [allStores, setAllStores] = useState<{ id: string; name: string }[]>([])
+
+  useEffect(() => {
+    createClient()
+      .from('stores')
+      .select('id, name')
+      .eq('is_active', true)
+      .neq('store_type', 'online')
+      .order('name')
+      .then(({ data }) => {
+        if (data) setAllStores(data)
+      })
+  }, [])
+
+  useEffect(() => {
+    if (!activeStoreId && allStores.length > 0) switchStore(allStores[0].id)
+  }, [activeStoreId, allStores, switchStore])
 
   const pathParts = pathname.split('/').filter(Boolean)
   const breadcrumbs = pathParts.map((part, idx) => {
@@ -108,6 +136,23 @@ export function VendedorHeader({
       </div>
 
       <div className="flex items-center gap-2">
+        {allStores.length > 0 && (
+          <Select value={activeStoreId ?? ''} onValueChange={switchStore}>
+            <SelectTrigger className="h-8 w-auto min-w-[120px] max-w-[160px] text-xs border-gray-200 [&>svg:last-child]:hidden">
+              <span className="flex items-center gap-1.5 truncate">
+                <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <SelectValue placeholder="Tienda" />
+              </span>
+            </SelectTrigger>
+            <SelectContent>
+              {allStores.map((s) => (
+                <SelectItem key={s.id} value={s.id} className="text-xs">
+                  {s.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full bg-[#1a2744] text-white text-xs font-medium">

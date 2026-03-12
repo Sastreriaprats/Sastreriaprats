@@ -1,9 +1,18 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { ArrowLeft, LogOut } from 'lucide-react'
+import { ArrowLeft, LogOut, MapPin } from 'lucide-react'
+import { useActiveStore } from '@/hooks/use-store'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 type Props = {
   sastreName: string
@@ -18,6 +27,27 @@ type Props = {
 export function SastreHeader({ sastreName, sectionTitle, title, backHref }: Props) {
   const activeSection = sectionTitle ?? title
   const router = useRouter()
+  const { activeStoreId, switchStore } = useActiveStore()
+  const [allStores, setAllStores] = useState<{ storeId: string; storeName: string }[]>([])
+
+  useEffect(() => {
+    const supabase = createClient()
+    supabase
+      .from('stores')
+      .select('id, name')
+      .eq('is_active', true)
+      .neq('store_type', 'online')
+      .order('name')
+      .then(({ data }) => {
+        if (data) setAllStores(data.map((s) => ({ storeId: s.id, storeName: s.name })))
+      })
+  }, [])
+
+  useEffect(() => {
+    if (activeStoreId == null && allStores.length > 0) {
+      switchStore(allStores[0].storeId)
+    }
+  }, [activeStoreId, allStores, switchStore])
 
   const handleLogout = async () => {
     const supabase = createClient()
@@ -65,6 +95,29 @@ export function SastreHeader({ sastreName, sectionTitle, title, backHref }: Prop
       </div>
       <div className="flex items-center gap-5 shrink-0">
         <span className="text-white font-serif font-light text-lg truncate max-w-[140px] sm:max-w-none">{sastreName}</span>
+        {allStores.length > 0 && (
+          <>
+            <span className="h-5 w-px bg-white/20" aria-hidden />
+            <Select value={activeStoreId ?? ''} onValueChange={switchStore}>
+              <SelectTrigger
+                className="h-8 min-w-0 w-auto max-w-[160px] sm:max-w-[200px] border-[rgba(201,169,110,0.3)] bg-transparent text-white text-sm font-normal hover:bg-[#1a2744] focus:ring-[rgba(201,169,110,0.3)] [&>svg:last-child]:hidden"
+                style={{ backgroundColor: 'transparent' }}
+              >
+                <span className="flex items-center gap-1.5 truncate">
+                  <MapPin className="h-3.5 w-3.5 shrink-0 opacity-80" />
+                  <SelectValue placeholder="Tienda" />
+                </span>
+              </SelectTrigger>
+              <SelectContent className="border-[rgba(201,169,110,0.3)] bg-[#1a2744] text-white">
+                {allStores.map((s) => (
+                  <SelectItem key={s.storeId} value={s.storeId} className="text-white focus:bg-white/10 focus:text-white">
+                    {s.storeName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </>
+        )}
         <span className="h-5 w-px bg-white/20" aria-hidden />
         <button
           type="button"

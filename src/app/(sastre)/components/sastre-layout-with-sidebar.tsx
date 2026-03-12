@@ -1,5 +1,6 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -14,7 +15,16 @@ import {
   ListOrdered,
   ShoppingCart,
   CircleDollarSign,
+  MapPin,
 } from 'lucide-react'
+import { useActiveStore } from '@/hooks/use-store'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 type Props = {
   sastreName: string
@@ -30,6 +40,24 @@ const navClass = (active: boolean) =>
 export function SastreLayoutWithSidebar({ sastreName, isSastrePlus = false, children }: Props) {
   const pathname = usePathname()
   const router = useRouter()
+  const { activeStoreId, switchStore } = useActiveStore()
+  const [allStores, setAllStores] = useState<{ id: string; name: string }[]>([])
+
+  useEffect(() => {
+    createClient()
+      .from('stores')
+      .select('id, name')
+      .eq('is_active', true)
+      .neq('store_type', 'online')
+      .order('name')
+      .then(({ data }) => {
+        if (data) setAllStores(data)
+      })
+  }, [])
+
+  useEffect(() => {
+    if (!activeStoreId && allStores.length > 0) switchStore(allStores[0].id)
+  }, [activeStoreId, allStores, switchStore])
 
   const handleLogout = async () => {
     const supabase = createClient()
@@ -101,6 +129,23 @@ export function SastreLayoutWithSidebar({ sastreName, isSastrePlus = false, chil
         </nav>
         <div className="flex-1" />
         <div className="p-2 border-t border-[#c9a96e]/20 flex flex-col gap-1.5">
+          {allStores.length > 0 && (
+            <Select value={activeStoreId ?? ''} onValueChange={switchStore}>
+              <SelectTrigger className="h-7 w-full text-xs bg-transparent border-[rgba(201,169,110,0.3)] text-white/80 [&>svg:last-child]:hidden">
+                <span className="flex items-center gap-1 truncate">
+                  <MapPin className="h-3 w-3 shrink-0" />
+                  <SelectValue placeholder="Tienda" />
+                </span>
+              </SelectTrigger>
+              <SelectContent className="bg-[#1a2744] border-[rgba(201,169,110,0.3)] text-white">
+                {allStores.map((s) => (
+                  <SelectItem key={s.id} value={s.id} className="text-white text-xs focus:bg-white/10 focus:text-white">
+                    {s.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <span className="text-white font-light text-[11px] truncate" title={sastreName}>{sastreName}</span>
           <button
             type="button"

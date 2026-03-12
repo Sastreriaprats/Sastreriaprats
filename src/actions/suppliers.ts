@@ -8,6 +8,66 @@ import { createPurchaseJournalEntry } from '@/actions/accounting-triggers'
 import { checkUserPermission } from '@/actions/auth'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 
+export const listSupplierOrders = protectedAction<void, any[]>(
+  { permission: 'orders.view' },
+  async (ctx) => {
+    const { data, error } = await ctx.adminClient
+      .from('supplier_orders')
+      .select('id, order_number, status, total, order_date, estimated_delivery_date, tailoring_order_id, supplier_id, suppliers(name)')
+      .order('created_at', { ascending: false })
+    if (error) return failure(error.message)
+    return success(data ?? [])
+  }
+)
+
+/** Busca tejidos de un proveedor por nombre (ilike). */
+export const searchSupplierFabrics = protectedAction<
+  { supplierId: string; query?: string },
+  { id: string; name: string; fabric_code: string | null; unit: string | null }[]
+>(
+  { permission: 'suppliers.view' },
+  async (ctx, { supplierId, query }) => {
+    if (!supplierId?.trim()) return success([])
+    let q = ctx.adminClient
+      .from('fabrics')
+      .select('id, name, fabric_code, unit')
+      .eq('supplier_id', supplierId.trim())
+      .eq('is_active', true)
+      .order('name', { ascending: true })
+      .limit(20)
+    if (query?.trim()) {
+      q = q.ilike('name', `%${query.trim()}%`)
+    }
+    const { data, error } = await q
+    if (error) return failure(error.message)
+    return success((data ?? []) as { id: string; name: string; fabric_code: string | null; unit: string | null }[])
+  }
+)
+
+/** Busca productos de un proveedor por nombre (ilike). */
+export const searchSupplierProducts = protectedAction<
+  { supplierId: string; query?: string },
+  { id: string; name: string; sku: string; cost_price: number | null }[]
+>(
+  { permission: 'suppliers.view' },
+  async (ctx, { supplierId, query }) => {
+    if (!supplierId?.trim()) return success([])
+    let q = ctx.adminClient
+      .from('products')
+      .select('id, name, sku, cost_price')
+      .eq('supplier_id', supplierId.trim())
+      .eq('is_active', true)
+      .order('name', { ascending: true })
+      .limit(20)
+    if (query?.trim()) {
+      q = q.ilike('name', `%${query.trim()}%`)
+    }
+    const { data, error } = await q
+    if (error) return failure(error.message)
+    return success((data ?? []) as { id: string; name: string; sku: string; cost_price: number | null }[])
+  }
+)
+
 export const listSuppliers = protectedAction<ListParams, ListResult<any>>(
   { permission: 'suppliers.view', auditModule: 'suppliers' },
   async (ctx, params) => {
@@ -433,6 +493,7 @@ export type CreateSupplierOrderInput = {
   notes?: string | null
   alert_on_payment?: boolean
   alert_on_delivery?: boolean
+  tailoring_order_id?: string
   lines?: Array<{
     fabric_id?: string | null
     product_id?: string | null
@@ -440,6 +501,7 @@ export type CreateSupplierOrderInput = {
     reference?: string | null
     quantity: number
     unit?: string | null
+    unit_price?: number
   }>
 }
 
@@ -454,7 +516,7 @@ export const createSupplierOrderAction = protectedAction<
     auditEntity: 'supplier_order',
     revalidate: ['/admin/proveedores', '/admin/contabilidad/facturas-proveedores'],
   },
-  async (ctx, { supplier_id, total, payment_due_date, estimated_delivery_date, notes, alert_on_payment, alert_on_delivery, lines }) => {
+  async (ctx, { supplier_id, total, payment_due_date, estimated_delivery_date, notes, alert_on_payment, alert_on_delivery, tailoring_order_id, lines }) => {
     if (!supplier_id?.trim()) return failure('Proveedor obligatorio', 'VALIDATION')
     if (!estimated_delivery_date?.trim()) return failure('Fecha de entrega estimada obligatoria', 'VALIDATION')
 
@@ -466,12 +528,12 @@ export const createSupplierOrderAction = protectedAction<
         reference: l.reference || null,
         quantity: Number(l.quantity),
         unit: (l.unit || 'unidades').trim(),
+        unit_price: Number(l.unit_price) >= 0 ? Number(l.unit_price) : 0,
       }))
       .filter((l) => l.description && Number.isFinite(l.quantity) && l.quantity > 0)
 
-    const hasLegacyTotal = total != null && Number.isFinite(Number(total)) && Number(total) >= 0
-    if (cleanedLines.length === 0 && !hasLegacyTotal) {
-      return failure('Añade al menos un producto solicitado', 'VALIDATION')
+    if (cleanedLines.length === 0) {
+      return failure('Añade al menos una línea al pedido', 'VALIDATION')
     }
 
     const paymentDue = payment_due_date?.trim() || null
@@ -481,7 +543,8 @@ export const createSupplierOrderAction = protectedAction<
     if (isNaN(deliveryDate.getTime())) return failure('Fecha de entrega no válida', 'VALIDATION')
 
     const orderNumber = await getNextNumber('supplier_orders', 'order_number', 'PEDPROV')
-    const totalNum = Number.isFinite(Number(total)) && Number(total) >= 0 ? Number(total) : 0
+    const totalFromLines = cleanedLines.reduce((sum, l) => sum + l.quantity * (l.unit_price ?? 0), 0)
+    const totalNum = totalFromLines >= 0 ? totalFromLines : 0
     const today = new Date().toISOString().slice(0, 10)
 
     const baseOrderPayload: Record<string, unknown> = {
@@ -497,6 +560,7 @@ export const createSupplierOrderAction = protectedAction<
       internal_notes: notes?.trim() || null,
       created_by: ctx.userId !== 'system' ? ctx.userId : null,
       alert_on_delivery: alert_on_delivery !== false,
+      tailoring_order_id: tailoring_order_id?.trim() || null,
     }
 
     let order: { id: string; order_number: string } | null = null
@@ -538,7 +602,7 @@ export const createSupplierOrderAction = protectedAction<
             reference: line.reference,
             quantity: line.quantity,
             unit: line.unit || 'unidades',
-            unit_price: 0,
+            unit_price: line.unit_price ?? 0,
             sort_order: idx,
           }))
         )

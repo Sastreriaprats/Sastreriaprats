@@ -66,6 +66,30 @@ export const listFabricsBySupplier = protectedAction<
   }
 )
 
+/** Busca tejidos de un proveedor por nombre (para selector en pedido a proveedor). */
+export const searchFabricsBySupplier = protectedAction<
+  { supplierId: string; query?: string },
+  { id: string; fabric_code: string | null; name: string }[]
+>(
+  { permission: 'suppliers.create_order', auditModule: 'stock' },
+  async (ctx, { supplierId, query }) => {
+    if (!supplierId?.trim()) return success([])
+    let q = ctx.adminClient
+      .from('fabrics')
+      .select('id, fabric_code, name')
+      .eq('supplier_id', supplierId.trim())
+      .eq('is_active', true)
+      .order('name', { ascending: true })
+      .limit(20)
+    if (query?.trim()) {
+      q = q.ilike('name', `%${query.trim()}%`)
+    }
+    const { data, error } = await q
+    if (error) return failure(error.message)
+    return success((data ?? []) as { id: string; fabric_code: string | null; name: string }[])
+  }
+)
+
 /** Obtiene un tejido por id. */
 export const getFabric = protectedAction<string, any>(
   { permission: 'stock.view', auditModule: 'stock' },
@@ -87,6 +111,8 @@ export const createFabricAction = protectedAction<
     name: string
     description?: string
     supplier_id: string
+    supplier_reference?: string
+    unit?: string
     category_id?: string
     composition?: string
     color_name?: string
@@ -108,6 +134,7 @@ export const createFabricAction = protectedAction<
   },
   async (ctx, input) => {
     if (!input.supplier_id?.trim()) return failure('Proveedor obligatorio', 'VALIDATION')
+    const unitVal = input.unit === 'yards' || input.unit === 'pieces' ? input.unit : 'meters'
     const { data, error } = await ctx.adminClient
       .from('fabrics')
       .insert({
@@ -115,6 +142,8 @@ export const createFabricAction = protectedAction<
         name: input.name,
         description: input.description || null,
         supplier_id: input.supplier_id,
+        supplier_reference: input.supplier_reference || null,
+        unit: unitVal,
         category_id: input.category_id || null,
         composition: input.composition || null,
         color_name: input.color_name || null,

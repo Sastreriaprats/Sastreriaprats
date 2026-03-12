@@ -1,40 +1,42 @@
-import { createServerSupabaseClient } from '@/lib/supabase/server'
-import { createAdminClient } from '@/lib/supabase/admin'
+'use client'
+
+import { Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { useAuth } from '@/components/providers/auth-provider'
 import { SastreLayoutWithSidebar } from '@/app/(sastre)/components/sastre-layout-with-sidebar'
 import { NuevaVentaFichaClient } from './nueva-venta-ficha-client'
 
-export const metadata = { title: 'Nueva venta — Ficha · Sastre' }
-export const dynamic = 'force-dynamic'
+function NuevaVentaFichaPage() {
+  const searchParams = useSearchParams()
+  const { profile, activeStoreId } = useAuth()
 
-export default async function NewVentaFichaPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ clientId?: string; tipo?: string; orderType?: string; prenda?: string }>
-}) {
-  const params = await searchParams
-  const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
+  const sastreName = profile?.fullName ?? profile?.firstName ?? profile?.lastName ?? 'Sastre'
+  const clientId = searchParams.get('clientId') ?? ''
+  const tipo = searchParams.get('tipo') ?? searchParams.get('orderType') ?? ''
+  const prenda = searchParams.get('prenda') ?? ''
 
-  const admin = createAdminClient()
-  const [profileRes, storeRes] = await Promise.all([
-    admin.from('profiles').select('full_name, first_name, last_name').eq('id', user.id).single(),
-    admin.from('user_stores').select('store_id').eq('user_id', user.id).order('is_primary', { ascending: false }).limit(1),
-  ])
-
-  const profile = profileRes?.data
-  const sastreName = profile?.full_name || profile?.first_name || profile?.last_name || 'Sastre'
-  const defaultStoreId = (storeRes?.data?.[0] as { store_id?: string } | undefined)?.store_id ?? ''
-
-  return (
-    <SastreLayoutWithSidebar sastreName={sastreName}>
+  const content =
+    activeStoreId == null ? (
+      <p className="text-white/90 text-center py-8">
+        Selecciona tu tienda en el menú superior antes de crear una venta
+      </p>
+    ) : (
       <NuevaVentaFichaClient
-        clientId={params.clientId ?? ''}
-        tipo={params.tipo ?? params.orderType ?? ''}
-        prenda={params.prenda ?? ''}
+        clientId={clientId}
+        tipo={tipo}
+        prenda={prenda}
         sastreName={sastreName}
-        defaultStoreId={defaultStoreId}
+        defaultStoreId={activeStoreId}
       />
-    </SastreLayoutWithSidebar>
+    )
+
+  return <SastreLayoutWithSidebar sastreName={sastreName}>{content}</SastreLayoutWithSidebar>
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={null}>
+      <NuevaVentaFichaPage />
+    </Suspense>
   )
 }

@@ -70,6 +70,18 @@ export const openCashSession = protectedAction<any, any>(
       .single()
 
     if (error) return failure(error.message)
+    await ctx.adminClient.from('manual_transactions').insert({
+      type: 'income',
+      date: new Date().toISOString().split('T')[0],
+      description: 'Apertura de caja',
+      category: 'caja',
+      amount: parsed.data.opening_amount,
+      tax_rate: 0,
+      tax_amount: 0,
+      total: parsed.data.opening_amount,
+      created_by: ctx.userId,
+      cash_session_id: session.id,
+    })
     const description = `Apertura de caja — Fondo inicial: ${Number(parsed.data.opening_amount).toFixed(2)} €`
     return success({ ...session, auditDescription: description })
   }
@@ -249,6 +261,24 @@ export const createSale = protectedAction<{
         .from('cash_sessions')
         .update(updates)
         .eq('id', parsedSale.data.cash_session_id)
+    }
+
+    for (const p of paymentsInput) {
+      const baseAmount = Number(p.amount) / 1.21
+      const taxAmount = Number(p.amount) - baseAmount
+      await ctx.adminClient.from('manual_transactions').insert({
+        type: 'income',
+        date: new Date().toISOString().split('T')[0],
+        description: `Venta TPV - ${ticketNumber}`,
+        category: 'tpv',
+        amount: baseAmount,
+        tax_rate: 21,
+        tax_amount: taxAmount,
+        total: Number(p.amount),
+        notes: `Pedido ${ticketNumber} - ${p.payment_method}`,
+        created_by: ctx.userId,
+        cash_session_id: parsedSale.data.cash_session_id ?? null,
+      })
     }
 
     // Update stock for product variants
@@ -501,6 +531,20 @@ export const cashWithdrawal = protectedAction<{
         .update({ total_withdrawals: (session.total_withdrawals || 0) + input.amount })
         .eq('id', input.session_id)
     }
+
+    await ctx.adminClient.from('manual_transactions').insert({
+      type: 'expense',
+      date: new Date().toISOString().split('T')[0],
+      description: `Retirada de caja: ${input.reason}`,
+      category: 'caja',
+      amount: input.amount,
+      tax_rate: 0,
+      tax_amount: 0,
+      total: input.amount,
+      notes: `Retirada manual - Sesión ${input.session_id}`,
+      created_by: ctx.userId,
+      cash_session_id: input.session_id,
+    })
 
     return success(withdrawal)
   }

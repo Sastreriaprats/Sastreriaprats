@@ -116,15 +116,44 @@ export const listOrders = protectedAction<ListParams & { status?: string }, List
   }
 )
 
+/** Búsqueda de pedidos por número para vincular a pedido a proveedor. */
+export const searchTailoringOrdersByNumber = protectedAction<
+  { query: string },
+  { id: string; order_number: string; client_name: string }[]
+>(
+  { permission: 'orders.view', auditModule: 'orders' },
+  async (ctx, { query }) => {
+    const q = (query || '').trim()
+    if (q.length < 2) return success([])
+    const { data, error } = await ctx.adminClient
+      .from('tailoring_orders')
+      .select('id, order_number, clients(full_name)')
+      .ilike('order_number', `%${q}%`)
+      .order('order_number', { ascending: false })
+      .limit(10)
+    if (error) return failure(error.message)
+    const list = (data ?? []).map((r: any) => {
+      const client = r.clients ?? (Array.isArray(r.clients) ? r.clients[0] : null)
+      return {
+        id: r.id,
+        order_number: r.order_number ?? '',
+        client_name: client?.full_name ?? '',
+      }
+    })
+    return success(list)
+  }
+)
+
 export const getOrder = protectedAction<string, any>(
   { permission: 'orders.view', auditModule: 'orders' },
   async (ctx, orderId) => {
     const order = await queryById('tailoring_orders', orderId, `
       id, order_number, total, total_paid, total_pending, client_id, status,
       order_type, order_date, estimated_delivery_date, subtotal, discount_amount, tax_amount,
-      store_id, internal_notes, client_notes, created_at, updated_at, created_by,
+      store_id, internal_notes, client_notes, created_at, updated_at, created_by, supplier_order_id,
       clients ( id, full_name, first_name, last_name, phone, email, category, document_number ),
       stores ( id, name, code ),
+      supplier_orders ( order_number ),
       tailoring_order_lines (
         *,
         garment_types ( id, name, code ),
@@ -689,7 +718,15 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
       })
       const baseAmount = entrega / 1.21
       const taxAmountManual = entrega - baseAmount
-      await ctx.adminClient.from('manual_transactions').insert({
+      let sessionQuery = ctx.adminClient
+        .from('cash_sessions')
+        .select('id')
+        .eq('status', 'open')
+        .limit(1)
+      if (input.storeId) sessionQuery = sessionQuery.eq('store_id', input.storeId)
+      const { data: activeSession } = await sessionQuery.maybeSingle()
+      const activeSessionId = activeSession?.id ?? null
+      const { error: mtError2 } = await ctx.adminClient.from('manual_transactions').insert({
         type: 'income',
         date: today,
         description: `Entrega a cuenta - ${orderNumber}`,
@@ -700,7 +737,35 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
         total: entrega,
         notes: `Pedido ${orderNumber} - ${input.metodoPago ?? 'efectivo'}`,
         created_by: ctx.userId,
+        cash_session_id: activeSessionId,
       })
+      if (mtError2) console.error('[createFichaOrder] manual_transactions error:', mtError2)
+      if (activeSessionId) {
+        const methodMap: Record<string, string> = {
+          cash: 'total_cash_sales',
+          card: 'total_card_sales',
+          transfer: 'total_transfer_sales',
+          bizum: 'total_bizum_sales',
+        }
+        const field = input.metodoPago === 'bizum' ? 'total_bizum_sales' : methodMap[paymentMethodDb]
+        if (field) {
+          const { data: currentSession } = await ctx.adminClient
+            .from('cash_sessions')
+            .select(`total_sales, ${field}`)
+            .eq('id', activeSessionId)
+            .single()
+          if (currentSession) {
+            const session = currentSession as unknown as { total_sales?: number; [k: string]: unknown }
+            await ctx.adminClient
+              .from('cash_sessions')
+              .update({
+                total_sales: (session.total_sales || 0) + entrega,
+                [field]: ((session[field] as number) || 0) + entrega,
+              })
+              .eq('id', activeSessionId)
+          }
+        }
+      }
     }
 
     return success({ orderId: order.id, orderNumber })

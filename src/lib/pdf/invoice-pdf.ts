@@ -1,11 +1,14 @@
 import type { Content } from 'pdfmake'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { COMPANY, formatDateDDMMYYYY, eurFormat, getLogoBase64 } from './pdf-company'
+import { COMPANY, formatDateDDMMYYYY, eurFormat } from './pdf-company'
+import { getLogoBase64Processed } from './pdf-company-server'
 
 const BUCKET = 'documents'
 
 const HEADER_BG = '#1a1a2e'
+const TABLE_HEADER_BG = '#4a5568'
 const ROW_ALT = '#f9f9f9'
+const LINE_COLOR = '#cccccc'
 
 type InvoiceRecord = {
   id: string
@@ -74,21 +77,34 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
       ? 'BORRADOR'
       : invoice.invoice_number ?? ''
 
-  const logoData = getLogoBase64()
+  const logoData = await getLogoBase64Processed()
+
+  const numberBadge: Content = {
+    columns: [
+      { text: '', width: '*' },
+      {
+        width: 'auto',
+        table: {
+          widths: ['auto'],
+          body: [[{
+            text: `Nº: ${displayNumber}`,
+            fillColor: '#ffffff',
+            color: '#1a1a2e',
+            bold: true,
+            fontSize: 10,
+            margin: [10, 4, 10, 4] as [number, number, number, number],
+          }]],
+        },
+        layout: 'noBorders',
+      },
+    ],
+    margin: [0, 6, 0, 0] as [number, number, number, number],
+  }
 
   const headerRight: Content[] = [
-    { text: isDraft ? 'BORRADOR' : 'FACTURA', fontSize: 28, bold: true, color: 'white', alignment: 'right', margin: [0, 0, 0, 4] },
-    { text: `Nº: ${displayNumber}`, fontSize: 10, color: 'white', alignment: 'right', margin: [0, 0, 0, 2] },
-    { text: `Fecha: ${formatDateDDMMYYYY(invoice.invoice_date)}`, fontSize: 10, color: 'white', alignment: 'right', margin: [0, 0, 0, 2] },
+    { text: isDraft ? 'BORRADOR' : 'FACTURA', fontSize: 20, bold: true, color: 'white', alignment: 'right', margin: [0, 0, 0, 6] },
+    numberBadge,
   ]
-  if (invoice.due_date) {
-    headerRight.push({
-      text: `Vencimiento: ${formatDateDDMMYYYY(invoice.due_date)}`,
-      fontSize: 10,
-      color: 'white',
-      alignment: 'right',
-    })
-  }
 
   const headerTable: Content = {
     table: {
@@ -96,32 +112,24 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
       body: [
         [
           {
-            fillColor: '#ffffff',
-            margin: [10, 10, 10, 10] as [number, number, number, number],
+            fillColor: HEADER_BG,
+            alignment: 'left' as const,
+            margin: [16, 10, 16, 10] as [number, number, number, number],
             ...(logoData
-              ? { image: logoData, width: 140, alignment: 'center' as const }
-              : { text: 'SASTRERÍA PRATS', fontSize: 18, bold: true, color: '#1a1a2e', alignment: 'center' as const }),
+              ? { image: logoData, width: 80 }
+              : { text: 'SASTRERÍA PRATS', fontSize: 18, bold: true, color: 'white' }),
           },
           {
             fillColor: HEADER_BG,
             stack: headerRight,
             alignment: 'right',
-            margin: [0, 8, 0, 8] as [number, number, number, number],
+            margin: [0, 12, 16, 12] as [number, number, number, number],
           },
         ],
       ],
     },
     layout: 'noBorders',
     margin: [0, 0, 0, 0],
-  }
-
-  const headerGoldenLine: Content = {
-    table: {
-      widths: ['*'],
-      body: [[{ fillColor: '#c9a96e', text: '', margin: [0, 1, 0, 1] as [number, number, number, number] }]],
-    },
-    layout: 'noBorders',
-    margin: [0, 0, 0, 16],
   }
 
   const companyBlock: Content = {
@@ -145,21 +153,39 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
       color: 'black',
       margin: [0, 0, 0, 2],
     })
-  if (invoice.client_address)
-    clientLines.push({
-      text: `Dirección: ${String(invoice.client_address)}`,
-      fontSize: 9,
-      color: 'black',
-    })
+  clientLines.push({
+    text: `Dirección: ${invoice.client_address ?? ''}`,
+    fontSize: 9,
+    color: 'black',
+  })
 
   const clientBlock: Content = { stack: clientLines }
 
+  const datesBlock: Content = {
+    stack: [
+      {
+        columns: [
+          { text: 'Fecha:', fontSize: 8, color: '#666', width: 65 },
+          { text: formatDateDDMMYYYY(invoice.invoice_date), fontSize: 10, bold: true, color: 'black' },
+        ],
+        margin: [0, 0, 0, 6],
+      },
+      {
+        columns: [
+          { text: 'Vencimiento:', fontSize: 8, color: '#666', width: 65 },
+          { text: invoice.due_date ? formatDateDDMMYYYY(invoice.due_date) : '—', fontSize: 10, bold: true, color: 'black' },
+        ],
+      },
+    ],
+    alignment: 'right',
+  }
+
   const tableHeader = [
-    { text: 'CONCEPTO', fillColor: HEADER_BG, color: 'white', bold: true },
-    { text: 'CANT.', fillColor: HEADER_BG, color: 'white', bold: true },
-    { text: 'PRECIO', fillColor: HEADER_BG, color: 'white', bold: true },
-    { text: 'IVA', fillColor: HEADER_BG, color: 'white', bold: true },
-    { text: 'TOTAL', fillColor: HEADER_BG, color: 'white', bold: true },
+    { text: 'CONCEPTO', fillColor: TABLE_HEADER_BG, color: 'white', bold: true },
+    { text: 'CANT.', fillColor: TABLE_HEADER_BG, color: 'white', bold: true },
+    { text: 'PRECIO', fillColor: TABLE_HEADER_BG, color: 'white', bold: true },
+    { text: 'IVA', fillColor: TABLE_HEADER_BG, color: 'white', bold: true },
+    { text: 'TOTAL', fillColor: TABLE_HEADER_BG, color: 'white', bold: true },
   ]
   const tableBody: unknown[][] = [tableHeader]
   lines.forEach((ln, i) => {
@@ -207,10 +233,20 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
               ]
             : []),
           {
-            text: `TOTAL: ${eurFormat(n(invoice.total))}`,
-            fontSize: 14,
-            bold: true,
-            alignment: 'right',
+            table: {
+              widths: [200],
+              body: [[
+                {
+                  text: `TOTAL: ${eurFormat(n(invoice.total))}`,
+                  fillColor: HEADER_BG,
+                  color: 'white',
+                  bold: true,
+                  fontSize: 14,
+                  margin: [8, 6, 8, 6] as [number, number, number, number],
+                },
+              ]],
+            },
+            layout: 'noBorders',
             margin: [0, 8, 0, 0] as [number, number, number, number],
           },
         ],
@@ -221,14 +257,30 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
   }
 
   const paymentBlock: Content = {
-    stack: [
-      { text: 'CONDICIONES DE PAGO', fontSize: 8, bold: true, color: '#666', margin: [0, 0, 0, 6] },
-      { text: `Forma de pago: ${COMPANY.payment.form}`, fontSize: 9, margin: [0, 0, 0, 2] },
-      { text: `Beneficiario: ${COMPANY.payment.beneficiary}`, fontSize: 9, margin: [0, 0, 0, 2] },
-      { text: `Banco: ${COMPANY.payment.bank}`, fontSize: 9, margin: [0, 0, 0, 2] },
-      { text: `IBAN: ${COMPANY.payment.iban}`, fontSize: 9, margin: [0, 0, 0, 2] },
-      { text: `BIC: ${COMPANY.payment.bic}`, fontSize: 9 },
-    ],
+    table: {
+      widths: ['*'],
+      body: [
+        [
+          {
+            text: 'CONDICIONES DE PAGO',
+            fillColor: HEADER_BG,
+            color: 'white',
+            bold: true,
+            fontSize: 9,
+            margin: [8, 6, 8, 6] as [number, number, number, number],
+          },
+        ],
+        [{ text: `Forma de pago: ${COMPANY.payment.form}`, margin: [8, 4, 8, 2] as [number, number, number, number], fontSize: 9 }],
+        [{ text: `Beneficiario: ${COMPANY.payment.beneficiary}`, margin: [8, 0, 8, 2] as [number, number, number, number], fontSize: 9 }],
+        [{ text: `Banco: ${COMPANY.payment.bank}`, margin: [8, 0, 8, 2] as [number, number, number, number], fontSize: 9 }],
+        [{ text: `IBAN: ${COMPANY.payment.iban}`, margin: [8, 0, 8, 2] as [number, number, number, number], fontSize: 9 }],
+        [{ text: `BIC: ${COMPANY.payment.bic}`, margin: [8, 0, 8, 6] as [number, number, number, number], fontSize: 9 }],
+      ],
+    },
+    layout: {
+      hLineWidth: () => 0.5,
+      vLineWidth: () => 0.5,
+    },
     margin: [0, 16, 0, 0],
   }
 
@@ -258,15 +310,14 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
     margin: [40, 20, 40, 0],
   }
 
-  const content: Content[] = [
-    headerTable,
-    headerGoldenLine,
+  const bodyContent: Content[] = [
     {
       columns: [
         { width: '*', ...companyBlock },
         { width: '*', ...clientBlock },
+        { width: 120, ...datesBlock },
       ],
-      margin: [0, 0, 0, 16],
+      margin: [0, 16, 0, 16],
     },
     {
       table: {
@@ -280,9 +331,9 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
     },
     totals,
   ]
-  if (!isDraft) content.push(paymentBlock)
+  if (!isDraft) bodyContent.push(paymentBlock)
   if (invoice.notes) {
-    content.push({
+    bodyContent.push({
       text: [
         { text: 'Notas: ', bold: true },
         { text: String(invoice.notes).slice(0, 300) },
@@ -291,11 +342,19 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
       fontSize: 9,
     })
   }
-  content.push(footerContent)
+  bodyContent.push(footerContent)
+
+  const content: Content[] = [
+    headerTable,
+    {
+      stack: bodyContent,
+      margin: [40, 16, 40, 0] as [number, number, number, number],
+    },
+  ]
 
   const docDef = {
     pageSize: 'A4',
-    pageMargins: [40, 40, 40, 80],
+    pageMargins: [0, 0, 0, 40] as [number, number, number, number],
     content,
   }
 

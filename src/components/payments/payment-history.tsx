@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { toast } from 'sonner'
+import { useActiveStore } from '@/hooks/use-store'
 import {
   getOrderPayments, addOrderPayment, deleteOrderPayment,
   getSalePayments, addSalePayment,
@@ -60,6 +61,7 @@ interface PaymentHistoryProps {
 export function PaymentHistory({
   entityType, entityId, total, onPaymentAdded, readonly = false, variant = 'default',
 }: PaymentHistoryProps) {
+  const { activeStoreId } = useActiveStore()
   const [payments, setPayments] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -130,6 +132,7 @@ export function PaymentHistory({
           reference: formReference || undefined,
           notes: formNotes || undefined,
           next_payment_date: formNextPaymentDate || undefined,
+          storeId: activeStoreId ?? undefined,
         })
       } else {
         result = await addSalePayment({
@@ -138,6 +141,7 @@ export function PaymentHistory({
           amount,
           reference: formReference || undefined,
           next_payment_date: formNextPaymentDate || undefined,
+          storeId: activeStoreId ?? undefined,
         })
       }
 

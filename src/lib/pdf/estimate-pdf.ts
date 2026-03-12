@@ -1,11 +1,14 @@
 import type { Content } from 'pdfmake'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { COMPANY, formatDateDDMMYYYY, eurFormat, getLogoBase64 } from './pdf-company'
+import { COMPANY, formatDateDDMMYYYY, eurFormat } from './pdf-company'
+import { getLogoBase64Processed } from './pdf-company-server'
 
 const BUCKET = 'documents'
 
 const HEADER_BG = '#1a1a2e'
-const ROW_ALT = '#f5f5f5'
+const TABLE_HEADER_BG = '#4a5568'
+const ROW_ALT = '#f9f9f9'
+const LINE_COLOR = '#cccccc'
 
 type EstimateRecord = {
   id: string
@@ -39,7 +42,7 @@ function n(v: unknown): number {
 }
 
 /**
- * Genera un PDF de presupuesto con pdfmake (mismo layout que factura).
+ * Genera un PDF de presupuesto con pdfmake (misma estructura visual que factura).
  * Lo sube a Supabase Storage y actualiza estimates.pdf_url. Devuelve la URL pública.
  */
 export async function generateEstimatePdf(estimateId: string): Promise<string> {
@@ -49,7 +52,7 @@ export async function generateEstimatePdf(estimateId: string): Promise<string> {
     .from('estimates')
     .select(`id, estimate_number, client_name, client_nif, client_address,
       estimate_date, valid_until, subtotal, tax_rate, tax_amount,
-      irpf_rate, irpf_amount, total, notes, status`)
+      irpf_rate, irpf_amount, total, notes`)
     .eq('id', estimateId)
     .single()
 
@@ -65,75 +68,115 @@ export async function generateEstimatePdf(estimateId: string): Promise<string> {
   const lines = (rawLines || []) as unknown as EstimateLineRecord[]
   const displayNumber = estimate.estimate_number ?? ''
 
-  const logoData = getLogoBase64()
+  const logoData = await getLogoBase64Processed()
+
+  const numberBadge: Content = {
+    columns: [
+      { text: '', width: '*' },
+      {
+        width: 'auto',
+        table: {
+          widths: ['auto'],
+          body: [[{
+            text: `Nº: ${displayNumber}`,
+            fillColor: '#ffffff',
+            color: '#1a1a2e',
+            bold: true,
+            fontSize: 10,
+            margin: [10, 4, 10, 4] as [number, number, number, number],
+          }]],
+        },
+        layout: 'noBorders',
+      },
+    ],
+    margin: [0, 6, 0, 0] as [number, number, number, number],
+  }
 
   const headerRight: Content[] = [
-    { text: 'PRESUPUESTO', fontSize: 22, bold: true, color: 'white', margin: [0, 0, 0, 4] },
-    { text: `Nº: ${displayNumber}`, fontSize: 11, bold: true, color: 'white', margin: [0, 0, 0, 2] },
-    { text: `Fecha: ${formatDateDDMMYYYY(estimate.estimate_date)}`, fontSize: 9, color: 'white', margin: [0, 0, 0, 2] },
+    { text: 'PRESUPUESTO', fontSize: 20, bold: true, color: 'white', alignment: 'right', margin: [0, 0, 0, 6] },
+    numberBadge,
   ]
-  if (estimate.valid_until) {
-    headerRight.push({
-      text: `Válido hasta: ${formatDateDDMMYYYY(estimate.valid_until)}`,
-      fontSize: 9,
-      color: 'white',
-    })
-  }
 
   const headerTable: Content = {
     table: {
-      widths: ['*'],
+      widths: ['40%', '60%'],
       body: [
         [
           {
             fillColor: HEADER_BG,
-            columns: [
-              logoData
-                ? { image: logoData, width: 100, margin: [0, 8, 0, 8] }
-                : { text: 'Sastrería Prats', fontSize: 18, bold: true, color: 'white', margin: [0, 8, 0, 8] },
-              { stack: headerRight, alignment: 'right', margin: [0, 8, 0, 8] },
-            ],
+            alignment: 'left' as const,
+            margin: [16, 10, 16, 10] as [number, number, number, number],
+            ...(logoData
+              ? { image: logoData, width: 80 }
+              : { text: 'SASTRERÍA PRATS', fontSize: 18, bold: true, color: 'white' }),
+          },
+          {
+            fillColor: HEADER_BG,
+            stack: headerRight,
+            alignment: 'right',
+            margin: [0, 12, 16, 12] as [number, number, number, number],
           },
         ],
       ],
     },
     layout: 'noBorders',
-    margin: [0, 0, 0, 16],
+    margin: [0, 0, 0, 0],
   }
 
   const companyBlock: Content = {
     stack: [
-      { text: 'Empresa:', fontSize: 8, bold: true, color: '#333', margin: [0, 0, 0, 2] },
-      { text: COMPANY.name, fontSize: 10, bold: true, margin: [0, 0, 0, 2] },
-      { text: `NIF / CIF: ${COMPANY.nif}`, fontSize: 9, margin: [0, 0, 0, 2] },
-      { text: COMPANY.fullAddress, fontSize: 9 },
+      { text: 'EMPRESA', fontSize: 8, bold: true, color: '#666', margin: [0, 0, 0, 2] },
+      { text: COMPANY.name, fontSize: 10, bold: true, color: 'black', margin: [0, 0, 0, 2] },
+      { text: `NIF / CIF: ${COMPANY.nif}`, fontSize: 9, color: 'black', margin: [0, 0, 0, 2] },
+      { text: COMPANY.address, fontSize: 9, color: 'black', margin: [0, 0, 0, 2] },
+      { text: `${COMPANY.postalCode}, ${COMPANY.city}, ${COMPANY.country}`, fontSize: 9, color: 'black' },
     ],
   }
 
   const clientLines: Content[] = [
-    { text: 'Cliente:', fontSize: 8, bold: true, color: '#333', margin: [0, 0, 0, 2] },
-    { text: estimate.client_name || '—', fontSize: 10, bold: true, margin: [0, 0, 0, 2] },
+    { text: 'CLIENTE', fontSize: 8, bold: true, color: '#666', margin: [0, 0, 0, 2] },
+    { text: estimate.client_name || '—', fontSize: 10, bold: true, color: 'black', margin: [0, 0, 0, 2] },
   ]
   if (estimate.client_nif)
     clientLines.push({
       text: `NIF / CIF: ${estimate.client_nif}`,
       fontSize: 9,
+      color: 'black',
       margin: [0, 0, 0, 2],
     })
-  if (estimate.client_address)
-    clientLines.push({
-      text: `Dirección: ${String(estimate.client_address)}`,
-      fontSize: 9,
-    })
+  clientLines.push({
+    text: `Dirección: ${estimate.client_address ?? ''}`,
+    fontSize: 9,
+    color: 'black',
+  })
 
   const clientBlock: Content = { stack: clientLines }
 
+  const datesBlock: Content = {
+    stack: [
+      {
+        columns: [
+          { text: 'Fecha:', fontSize: 8, color: '#666', width: 65 },
+          { text: formatDateDDMMYYYY(estimate.estimate_date), fontSize: 10, bold: true, color: 'black' },
+        ],
+        margin: [0, 0, 0, 6],
+      },
+      {
+        columns: [
+          { text: 'Válido hasta:', fontSize: 8, color: '#666', width: 65 },
+          { text: estimate.valid_until ? formatDateDDMMYYYY(estimate.valid_until) : '—', fontSize: 10, bold: true, color: 'black' },
+        ],
+      },
+    ],
+    alignment: 'right',
+  }
+
   const tableHeader = [
-    { text: 'CONCEPTO', fillColor: HEADER_BG, color: 'white', bold: true },
-    { text: 'CANT.', fillColor: HEADER_BG, color: 'white', bold: true },
-    { text: 'PRECIO', fillColor: HEADER_BG, color: 'white', bold: true },
-    { text: 'IVA', fillColor: HEADER_BG, color: 'white', bold: true },
-    { text: 'TOTAL', fillColor: HEADER_BG, color: 'white', bold: true },
+    { text: 'CONCEPTO', fillColor: TABLE_HEADER_BG, color: 'white', bold: true },
+    { text: 'CANT.', fillColor: TABLE_HEADER_BG, color: 'white', bold: true },
+    { text: 'PRECIO', fillColor: TABLE_HEADER_BG, color: 'white', bold: true },
+    { text: 'IVA', fillColor: TABLE_HEADER_BG, color: 'white', bold: true },
+    { text: 'TOTAL', fillColor: TABLE_HEADER_BG, color: 'white', bold: true },
   ]
   const tableBody: unknown[][] = [tableHeader]
   lines.forEach((ln, i) => {
@@ -162,11 +205,13 @@ export async function generateEstimatePdf(estimateId: string): Promise<string> {
             text: `Subtotal: ${eurFormat(n(estimate.subtotal))}`,
             alignment: 'right',
             margin: [0, 0, 0, 4],
+            fontSize: 10,
           },
           {
             text: `IVA (${n(estimate.tax_rate)}%): ${eurFormat(n(estimate.tax_amount))}`,
             alignment: 'right',
             margin: [0, 0, 0, 4],
+            fontSize: 10,
           },
           ...(n(estimate.irpf_amount) > 0
             ? [
@@ -174,28 +219,56 @@ export async function generateEstimatePdf(estimateId: string): Promise<string> {
                   text: `IRPF (${n(estimate.irpf_rate)}%): - ${eurFormat(n(estimate.irpf_amount))}`,
                   alignment: 'right' as const,
                   margin: [0, 0, 0, 4] as [number, number, number, number],
+                  fontSize: 10,
                 },
               ]
             : []),
           {
-            text: `TOTAL: ${eurFormat(n(estimate.total))}`,
-            fontSize: 12,
-            bold: true,
-            alignment: 'right',
+            table: {
+              widths: [200],
+              body: [[
+                {
+                  text: `TOTAL: ${eurFormat(n(estimate.total))}`,
+                  fillColor: HEADER_BG,
+                  color: 'white',
+                  bold: true,
+                  fontSize: 14,
+                  margin: [8, 6, 8, 6] as [number, number, number, number],
+                },
+              ]],
+            },
+            layout: 'noBorders',
             margin: [0, 8, 0, 0] as [number, number, number, number],
           },
         ],
-        width: 180,
+        width: 200,
       },
     ],
     margin: [0, 12, 0, 0],
   }
 
   const validityBlock: Content = {
-    text: COMPANY.estimateValidity,
-    fontSize: 9,
+    table: {
+      widths: ['*'],
+      body: [
+        [
+          {
+            text: 'VALIDEZ DEL PRESUPUESTO',
+            fillColor: HEADER_BG,
+            color: 'white',
+            bold: true,
+            fontSize: 9,
+            margin: [8, 6, 8, 6] as [number, number, number, number],
+          },
+        ],
+        [{ text: COMPANY.estimateValidity, margin: [8, 4, 8, 6] as [number, number, number, number], fontSize: 9 }],
+      ],
+    },
+    layout: {
+      hLineWidth: () => 0.5,
+      vLineWidth: () => 0.5,
+    },
     margin: [0, 16, 0, 0],
-    italics: true,
   }
 
   const footerContent: Content = {
@@ -224,27 +297,30 @@ export async function generateEstimatePdf(estimateId: string): Promise<string> {
     margin: [40, 20, 40, 0],
   }
 
-  const content: Content[] = [
-    headerTable,
+  const bodyContent: Content[] = [
     {
       columns: [
         { width: '*', ...companyBlock },
         { width: '*', ...clientBlock },
+        { width: 120, ...datesBlock },
       ],
-      margin: [0, 0, 0, 16],
+      margin: [0, 16, 0, 16],
     },
     {
       table: {
         widths: ['*', 40, 55, 35, 55],
         body: tableBody as Content[][],
       },
-      layout: { hLineWidth: () => 0.3, vLineWidth: () => 0.3 },
+      layout: {
+        hLineWidth: () => 0.5,
+        vLineWidth: () => 0.5,
+      },
     },
     totals,
-    validityBlock,
   ]
+  bodyContent.push(validityBlock)
   if (estimate.notes) {
-    content.push({
+    bodyContent.push({
       text: [
         { text: 'Notas: ', bold: true },
         { text: String(estimate.notes).slice(0, 300) },
@@ -253,11 +329,19 @@ export async function generateEstimatePdf(estimateId: string): Promise<string> {
       fontSize: 9,
     })
   }
-  content.push(footerContent)
+  bodyContent.push(footerContent)
+
+  const content: Content[] = [
+    headerTable,
+    {
+      stack: bodyContent,
+      margin: [40, 16, 40, 0] as [number, number, number, number],
+    },
+  ]
 
   const docDef = {
     pageSize: 'A4',
-    pageMargins: [40, 40, 40, 80],
+    pageMargins: [0, 0, 0, 40] as [number, number, number, number],
     content,
   }
 
@@ -277,7 +361,7 @@ export async function generateEstimatePdf(estimateId: string): Promise<string> {
     /* ya existe */
   }
 
-  const slug = `estimates/${String(estimate.estimate_number).replace(/\//g, '-')}.pdf`
+  const slug = `estimates/presupuesto-${estimate.id.slice(0, 8)}-${Date.now()}.pdf`
   const { error: uploadError } = await admin.storage.from(BUCKET).upload(slug, pdfBuffer, {
     contentType: 'application/pdf',
     upsert: true,

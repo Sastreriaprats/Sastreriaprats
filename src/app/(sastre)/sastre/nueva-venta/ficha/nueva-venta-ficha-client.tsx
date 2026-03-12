@@ -624,6 +624,53 @@ export function NuevaVentaFichaClient({
   const total = precioConfeccion + totalCamisas + totalComplementos
   const pendiente = Math.max(0, total - (Number(entregaACuenta) || 0))
 
+  const buildFichaData = (ficha: any, prenda: string, prendaLabel: string) => {
+    const CAMPOS_COMUNES = [
+      'numeroTalon', 'cortador', 'oficial', 'situacionTrabajo',
+      'fechaProximaVisita', 'caracteristicas', 'metros', 'observaciones',
+      'fechaCobro',
+    ]
+    const CAMPOS_AMERICANA = [
+      'botones', 'aberturas', 'bolsilloTipo', 'cerrilleraExterior',
+      'primerBoton', 'solapa', 'anchoSolapa', 'manga', 'ojalesAbiertos',
+      'ojalesCerrados', 'medidaHombro', 'hTerminado', 'escote',
+      'sinHombreras', 'picado34', 'forro', 'tejido', 'forroDesc',
+    ]
+    const CAMPOS_PANTALON = [
+      'vueltas', 'bragueta', 'pliegues', 'p7pasadores', 'p5bolsillos',
+      'pRefForro', 'pRefExtTela', 'pSinBolTrasero', 'p1BolTrasero',
+      'p2BolTraseros', 'pBolCostura', 'pBolFrances', 'pBolVivo',
+      'pCenidores', 'pBotonesTirantes', 'pretinaCorrida', 'pretina2Botones',
+      'pretinaTamano', 'tejidoPantalon',
+    ]
+    const CAMPOS_CHALECO = [
+      'chalecoCorte', 'chalecoBolsillo', 'tejidoChaleco', 'forroChaleco',
+    ]
+
+    const prendaNorm = (prenda || '').toLowerCase()
+
+    let camposPermitidos = [...CAMPOS_COMUNES]
+
+    if (['americana', 'abrigo', 'teba', 'smoking', 'gabardina', 'chaqueta'].some(p => prendaNorm.includes(p))) {
+      camposPermitidos = [...camposPermitidos, ...CAMPOS_AMERICANA]
+    } else if (['pantalon', 'pantalón'].some(p => prendaNorm.includes(p))) {
+      camposPermitidos = [...camposPermitidos, ...CAMPOS_PANTALON]
+    } else if (prendaNorm.includes('chaleco')) {
+      camposPermitidos = [...camposPermitidos, ...CAMPOS_CHALECO]
+    } else if (['traje'].some(p => prendaNorm.includes(p))) {
+      camposPermitidos = [...camposPermitidos, ...CAMPOS_AMERICANA, ...CAMPOS_PANTALON, ...CAMPOS_CHALECO]
+    } else {
+      // Por defecto incluir americana (caso genérico)
+      camposPermitidos = [...camposPermitidos, ...CAMPOS_AMERICANA]
+    }
+
+    const filtered: Record<string, any> = { prendaLabel }
+    for (const key of camposPermitidos) {
+      if (ficha[key] !== undefined) filtered[key] = ficha[key]
+    }
+    return filtered
+  }
+
   const handleCreateOrder = async () => {
     if (!clientId || !defaultStoreId) {
       toast.error('Faltan cliente o tienda.')
@@ -695,7 +742,7 @@ export function NuevaVentaFichaClient({
         fechaCompromiso: ficha.fechaProximaVisita || undefined,
         situacionTrabajo: ficha.situacionTrabajo || undefined,
         fechaCobro: ficha.fechaCobro || undefined,
-        fichaData: { ...ficha, prendaLabel },
+        fichaData: buildFichaData(ficha, prenda || '', prendaLabel),
       })
       if (res?.success && res.data) {
         toast.success(`Pedido ${res.data.orderNumber} creado.`)

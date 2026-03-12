@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, Fragment } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -19,7 +19,7 @@ import {
   TrendingUp, TrendingDown, Euro, Calculator, BookOpen, FileText,
   Loader2, Plus, Search, ChevronDown, ChevronRight, Eye,
   Send, CheckCircle, FileOutput, Trash2, RefreshCw, ArrowUpCircle, Download,
-  Receipt, ExternalLink, Package, ClipboardList, Pencil, Calendar, XCircle,
+  Receipt, ExternalLink, Package, ClipboardList, Pencil, Calendar, XCircle, Store,
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -138,6 +138,7 @@ export function AccountingContent() {
           <TabsTrigger value="movimientos"   className="gap-1.5"><ArrowUpCircle className="h-4 w-4" /> Movimientos</TabsTrigger>
           <TabsTrigger value="asientos"      className="gap-1.5"><BookOpen      className="h-4 w-4" /> Asientos</TabsTrigger>
           <TabsTrigger value="iva"           className="gap-1.5"><Calculator    className="h-4 w-4" /> IVA Trimestral</TabsTrigger>
+          <TabsTrigger value="caja"         className="gap-1.5"><Store          className="h-4 w-4" /> Resúmenes de Caja</TabsTrigger>
         </TabsList>
         <div className="mt-6">
           <TabsContent value="resumen">      <SummaryTab /></TabsContent>
@@ -146,6 +147,7 @@ export function AccountingContent() {
           <TabsContent value="movimientos">  <MovimientosTab /></TabsContent>
           <TabsContent value="asientos">     <JournalTab /></TabsContent>
           <TabsContent value="iva">          <VatTab /></TabsContent>
+          <TabsContent value="caja">         <CajaSessionsTab /></TabsContent>
         </div>
       </Tabs>
     </div>
@@ -1774,6 +1776,7 @@ function MovimientosTab() {
   const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all')
   const [filterYear, setFilterYear] = useState(new Date().getFullYear())
   const [filterMonth, setFilterMonth] = useState(0)
+  const [filterStore, setFilterStore] = useState<string>('')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
@@ -1842,8 +1845,15 @@ function MovimientosTab() {
     else toast.error('Error al eliminar')
   }
 
-  const totalIngresos = rows.filter(r => r.type === 'income').reduce((s, r) => s + r.total, 0)
-  const totalGastos   = rows.filter(r => r.type === 'expense').reduce((s, r) => s + r.total, 0)
+  const storeOptions = useMemo(() => {
+    const names = new Set(rows.map(r => r.storeName).filter((n): n is string => Boolean(n)))
+    return Array.from(names).sort()
+  }, [rows])
+
+  const filteredRows = filterStore ? rows.filter(r => r.storeName === filterStore) : rows
+
+  const totalIngresos = filteredRows.filter(r => r.type === 'income').reduce((s, r) => s + r.total, 0)
+  const totalGastos   = filteredRows.filter(r => r.type === 'expense').reduce((s, r) => s + r.total, 0)
   const resultado     = totalIngresos - totalGastos
 
   return (
@@ -1872,6 +1882,15 @@ function MovimientosTab() {
           <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
           <SelectContent>{years.map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
         </Select>
+        <Select value={filterStore || '__all__'} onValueChange={v => setFilterStore(v === '__all__' ? '' : v)}>
+          <SelectTrigger className="w-44"><SelectValue placeholder="Tienda" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">Todas las tiendas</SelectItem>
+            {storeOptions.map(name => (
+              <SelectItem key={name} value={name}>{name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <div className="flex-1" />
         <Button onClick={() => setDialogOpen(true)}><Plus className="h-4 w-4 mr-1" /> Nuevo movimiento</Button>
       </div>
@@ -1894,17 +1913,18 @@ function MovimientosTab() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.length === 0 ? (
+                {filteredRows.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={9} className="text-center py-12 text-muted-foreground">
                       Sin movimientos para el periodo seleccionado
                     </TableCell>
                   </TableRow>
-                ) : rows.map(r => (
+                ) : filteredRows.map(r => (
                   <TableRow key={r.isManual ? `manual-${r.id}` : `je-${r.id}`}>
                     <TableCell className="text-muted-foreground whitespace-nowrap">{formatDate(r.date)}</TableCell>
                     <TableCell>
                       <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">{r.sourceLabel}</span>
+                      {r.storeName && <div className="text-xs text-muted-foreground">{r.storeName}</div>}
                     </TableCell>
                     <TableCell className="font-medium max-w-[200px] truncate">{r.description}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{r.category ?? '—'}</TableCell>
@@ -2074,6 +2094,458 @@ function MovimientosTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+// ─── Tab: Resúmenes de Caja ─────────────────────────────────────────────────
+
+function CajaSessionsTab() {
+  const supabase = useMemo(() => createClient(), [])
+  const [vista, setVista] = useState<'list' | 'detail'>('list')
+  const [selectedSession, setSelectedSession] = useState<any | null>(null)
+  const [sessions, setSessions] = useState<any[]>([])
+  const [cobrosBySession, setCobrosBySession] = useState<Record<string, number>>({})
+  const [loading, setLoading] = useState(true)
+  const [expandedMonths, setExpandedMonths] = useState<Set<string>>(new Set())
+  const [timelineEvents, setTimelineEvents] = useState<any[]>([])
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailTotalCobrosSastreria, setDetailTotalCobrosSastreria] = useState<number>(0)
+
+  const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      setLoading(true)
+      const { data: sessData, error } = await supabase
+        .from('cash_sessions')
+        .select('*, opened_by_profile:profiles!cash_sessions_opened_by_fkey(full_name), closed_by_profile:profiles!cash_sessions_closed_by_fkey(full_name), stores(name)')
+        .order('opened_at', { ascending: false })
+        .limit(100)
+      if (cancelled) return
+      if (error) {
+        toast.error('Error al cargar sesiones de caja')
+        setSessions([])
+        setLoading(false)
+        return
+      }
+      const list = sessData ?? []
+      setSessions(list)
+      if (list.length > 0) {
+        const ids = list.map((s: any) => s.id).filter(Boolean)
+        const { data: topSums } = await supabase
+          .from('tailoring_order_payments')
+          .select('cash_session_id, amount')
+          .in('cash_session_id', ids)
+        const bySession: Record<string, number> = {}
+        for (const row of topSums ?? []) {
+          const id = row.cash_session_id
+          if (id) bySession[id] = (bySession[id] ?? 0) + Number(row.amount ?? 0)
+        }
+        const zeroSessions = list.filter((s: any) => (bySession[s.id] ?? 0) === 0)
+        if (zeroSessions.length > 0) {
+          const openedDates = zeroSessions.map((s: any) => s.opened_at ? s.opened_at.split('T')[0] : null).filter(Boolean)
+          const closedDates = zeroSessions.map((s: any) => s.closed_at ? s.closed_at.split('T')[0] : new Date().toISOString().split('T')[0])
+          const minDate = openedDates.length ? openedDates.reduce((a: string, b: string) => a < b ? a : b) : null
+          const maxDate = closedDates.reduce((a: string, b: string) => a > b ? a : b)
+          if (minDate) {
+            const { data: fallbackRows } = await supabase
+              .from('tailoring_order_payments')
+              .select('payment_date, amount')
+              .gte('payment_date', minDate)
+              .lte('payment_date', maxDate)
+            for (const s of zeroSessions) {
+              const openedDate = s.opened_at ? s.opened_at.split('T')[0] : null
+              const closedDate = s.closed_at ? s.closed_at.split('T')[0] : new Date().toISOString().split('T')[0]
+              if (!openedDate) continue
+              const sum2 = (fallbackRows ?? []).reduce((acc: number, r: any) => {
+                const d = r.payment_date
+                if (d >= openedDate && d <= closedDate) return acc + Number(r.amount ?? 0)
+                return acc
+              }, 0)
+              bySession[s.id] = Math.max(bySession[s.id] ?? 0, sum2)
+            }
+          }
+        }
+        if (!cancelled) setCobrosBySession(bySession)
+      }
+      setLoading(false)
+    }
+    load()
+    return () => { cancelled = true }
+  }, [supabase])
+
+  const sessionsByMonth = useMemo(() => {
+    const map: Record<string, any[]> = {}
+    for (const s of sessions) {
+      const d = s.opened_at ? new Date(s.opened_at) : new Date()
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      if (!map[key]) map[key] = []
+      map[key].push(s)
+    }
+    const keys = Object.keys(map).sort().reverse()
+    return { keys, map }
+  }, [sessions])
+
+  const loadDetail = useCallback(async (session: any) => {
+    setSelectedSession(session)
+    setVista('detail')
+    setDetailLoading(true)
+    const openedDate = session.opened_at ? session.opened_at.split('T')[0] : null
+    const openedAtFull = session.opened_at
+    const closedAtFull = session.closed_at ?? new Date().toISOString()
+
+    let txData: any[] = []
+    const { data: mtRes } = await supabase
+      .from('manual_transactions')
+      .select('id, type, description, category, amount, total, notes, created_at, created_by, cash_session_id')
+      .eq('cash_session_id', session.id)
+      .order('created_at', { ascending: true })
+    if (!mtRes) {
+      txData = []
+    } else {
+      txData = mtRes
+    }
+
+    const wdRes = await supabase
+      .from('cash_withdrawals')
+      .select('id, amount, reason, withdrawn_at, withdrawn_by, cash_session_id')
+      .eq('cash_session_id', session.id)
+      .order('withdrawn_at', { ascending: true })
+    const wdData = wdRes.data ?? []
+
+    const apertura = {
+      type: 'apertura',
+      ts: session.opened_at,
+      data: {
+        description: 'Apertura de caja',
+        profiles: { full_name: session.opened_by_profile?.full_name },
+        creator: { full_name: session.opened_by_profile?.full_name },
+        total: session.opening_amount,
+        type: 'income',
+        category: 'caja',
+      },
+    }
+    const cierre = session.closed_at ? {
+      type: 'cierre',
+      ts: session.closed_at,
+      data: {
+        description: 'Cierre de caja',
+        profiles: { full_name: session.closed_by_profile?.full_name },
+        creator: { full_name: session.closed_by_profile?.full_name },
+      },
+    } : null
+
+    const manual = txData.map((r: any) => ({ type: 'manual', ts: r.created_at, data: r }))
+    const withdrawals = wdData.map((r: any) => ({ type: 'withdrawal', ts: r.withdrawn_at, data: r }))
+    const merged = [apertura, ...manual, ...withdrawals, ...(cierre ? [cierre] : [])].sort(
+      (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()
+    )
+    setTimelineEvents(merged)
+
+    const sumBySession = txData
+      .filter((r: any) => r.category === 'sastreria')
+      .reduce((acc: number, r: any) => acc + Number(r.total ?? 0), 0)
+    if (sumBySession > 0) {
+      setDetailTotalCobrosSastreria(sumBySession)
+    } else if (openedDate) {
+      const { data: mtSastreriaRange } = await supabase
+        .from('manual_transactions')
+        .select('total')
+        .eq('category', 'sastreria')
+        .gte('created_at', openedAtFull)
+        .lte('created_at', closedAtFull)
+      const fallbackSum = (mtSastreriaRange ?? []).reduce((acc: number, r: any) => acc + Number(r.total ?? 0), 0)
+      setDetailTotalCobrosSastreria(fallbackSum)
+    } else {
+      setDetailTotalCobrosSastreria(0)
+    }
+
+    setDetailLoading(false)
+  }, [supabase])
+
+  const toggleMonth = (key: string) => {
+    setExpandedMonths(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const formatDateTime = (iso: string | null) => {
+    if (!iso) return '—'
+    const d = new Date(iso)
+    return d.toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })
+  }
+
+  const formatTime = (iso: string | null) => {
+    if (!iso) return '—'
+    return new Date(iso).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+  }
+
+  if (loading) return <Spinner />
+
+  if (vista === 'detail' && selectedSession) {
+    const s = selectedSession
+    const openedAt = s.opened_at ? new Date(s.opened_at) : null
+    const dateLong = openedAt ? (() => { const s = openedAt.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); return s.charAt(0).toUpperCase() + s.slice(1); })() : '—'
+    const openedBy = s.opened_by_profile?.full_name ?? '—'
+    const closedBy = s.closed_by_profile?.full_name ?? '—'
+    const openedTime = s.opened_at ? new Date(s.opened_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : '—'
+    const closedTime = s.closed_at ? new Date(s.closed_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : null
+    const openingAmount = Number(s.opening_amount) ?? 0
+
+    const totalCobrosSastreria = detailTotalCobrosSastreria
+    const totalVentasTpv = Number(s.total_sales) ?? 0
+    const totalRetiradas = Number(s.total_withdrawals) ?? 0
+    const totalCashSales = Number(s.total_cash_sales) ?? 0
+    const efectivoIngresosTimeline = timelineEvents
+      .filter((ev: any) => ev.type === 'manual' && ev.data?.type === 'income' && (ev.data?.notes?.toLowerCase().includes('efectivo') ?? false))
+      .reduce((sum: number, ev: any) => sum + Number(ev.data?.total ?? 0), 0)
+    const efectivoEnCaja = openingAmount + efectivoIngresosTimeline - totalRetiradas
+    const expectedCash = openingAmount + totalCashSales - totalRetiradas
+    const countedCash = s.counted_cash != null ? Number(s.counted_cash) : null
+    const diff = countedCash != null ? countedCash - expectedCash : null
+    const totalEntradas = totalVentasTpv + totalCobrosSastreria
+
+    const formatMethod = (notes: string | null) => {
+      if (!notes) return null
+      const m = notes.match(/(?:Método|método):\s*(\S+)/i) || notes.match(/(efectivo|tarjeta|bizum|transferencia|cash|card)/i)
+      if (m) return m[1].toLowerCase()
+      return notes.length > 40 ? notes.slice(0, 40) + '…' : notes
+    }
+
+    return (
+      <div className="space-y-4">
+        <Button variant="outline" size="sm" onClick={() => { setVista('list'); setSelectedSession(null); setTimelineEvents([]); setDetailTotalCobrosSastreria(0) }}>
+          ← Volver al listado
+        </Button>
+
+        <Card>
+          <CardContent className="pt-6 pb-6">
+            <h2 className="text-lg font-semibold mb-3">Caja del {dateLong}</h2>
+            <p className="text-sm text-muted-foreground flex items-center gap-2">
+              <span>🔓</span> Abierta a las {openedTime} por {openedBy} · Fondo inicial: {formatCurrency(openingAmount)}
+            </p>
+            <p className="text-sm text-muted-foreground flex items-center gap-2 mt-1">
+              <span>🔒</span>
+              {s.status === 'open' ? (
+                <Badge variant="secondary" className="text-xs">EN CURSO</Badge>
+              ) : (
+                <>Cerrada a las {closedTime ?? '—'} por {closedBy}</>
+              )}
+            </p>
+          </CardContent>
+        </Card>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Movimientos</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {detailLoading ? (
+                  <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                ) : timelineEvents.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-8">Sin movimientos</p>
+                ) : (
+                  <div className="divide-y divide-border">
+                    {timelineEvents.map((ev, i) => {
+                      const isManual = ev.type === 'manual'
+                      const isAperturaEv = ev.type === 'apertura'
+                      const isCierreEv = ev.type === 'cierre'
+                      const d = ev.data
+                      const ts = ev.ts
+                      const who = d?.creator?.full_name ?? d?.profiles?.full_name ?? d?.created_by ?? ''
+                      const desc = isAperturaEv ? 'Apertura de caja' : isCierreEv ? 'Cierre de caja' : isManual ? (d?.description ?? '—') : (d?.reason ?? 'Retirada')
+                      const amount = Number(isManual ? d?.total : d?.amount) ?? (isAperturaEv ? Number(d?.total ?? 0) : 0)
+                      const isIncome = isManual && d?.type === 'income'
+                      const category = d?.category ?? ''
+                      const isApertura = isAperturaEv || (isManual && (desc.includes('Apertura') || (category === 'caja' && !desc.includes('Cierre'))))
+                      const isCierre = isCierreEv || (isManual && (desc.includes('Cierre') || (category === 'caja' && desc.includes('Cierre'))))
+                      const isRetirada = ev.type === 'withdrawal' || (isManual && d?.type === 'expense')
+                      const isCobroTpv = isManual && category === 'tpv'
+                      const isCobroSastreria = isManual && category === 'sastreria'
+                      const isCobro = isCobroTpv || isCobroSastreria
+
+                      let icon = '•'
+                      let textClass = 'text-foreground'
+                      let amountClass = 'text-muted-foreground'
+                      if (isApertura) {
+                        icon = '🔓'
+                        textClass = 'text-muted-foreground'
+                        amountClass = 'text-muted-foreground'
+                      } else if (isCierre) {
+                        icon = '🔒'
+                        textClass = 'text-muted-foreground'
+                        amountClass = 'text-muted-foreground'
+                      } else if (isCobroTpv) {
+                        icon = '💳'
+                        amountClass = 'text-green-600'
+                      } else if (isCobroSastreria) {
+                        icon = '🧵'
+                        amountClass = 'text-green-600'
+                      } else if (isRetirada) {
+                        icon = '💸'
+                        textClass = 'text-red-600'
+                        amountClass = 'text-red-600'
+                      }
+
+                      const methodLabel = formatMethod(d?.notes)
+                      return (
+                        <div key={ev.type + (d?.id ?? '') + i} className="py-3 first:pt-0">
+                          <div className="flex items-start gap-3">
+                            <span className="text-sm text-muted-foreground w-12 shrink-0 tabular-nums">{formatTime(ts)}</span>
+                            <span className="text-lg shrink-0">{icon}</span>
+                            <div className="min-w-0 flex-1">
+                              <p className={`text-sm font-medium ${textClass}`}>{desc}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{who}</p>
+                              {isRetirada && (d?.reason || (isManual && d?.description)) && <p className="text-xs text-red-600/80 mt-0.5">{d?.reason || d?.description}</p>}
+                              {isCobro && methodLabel && <p className="text-xs text-muted-foreground mt-0.5">Método: {methodLabel}</p>}
+                            </div>
+                            <span className={`text-sm font-medium tabular-nums shrink-0 ${amountClass}`}>
+                              {isCierre ? '—' : isApertura ? (Number(s.opening_amount || 0).toFixed(2) + ' €') : (isRetirada ? '-' : isIncome ? '+' : '') + formatCurrency(amount)}
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="lg:col-span-1">
+            <div className="sticky top-4 space-y-4">
+              <Card>
+                <CardContent className="pt-4 pb-4">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">Efectivo en caja</p>
+                  <p className="text-2xl font-bold tabular-nums">{formatCurrency(efectivoEnCaja)}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-4 pb-4 space-y-2">
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Tarjeta</span><span className="tabular-nums">{formatCurrency(Number(s.total_card_sales) ?? 0)}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Bizum</span><span className="tabular-nums">{formatCurrency(Number(s.total_bizum_sales) ?? 0)}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Transfer.</span><span className="tabular-nums">{formatCurrency(Number(s.total_transfer_sales) ?? 0)}</span></div>
+                  <div className="border-t pt-2 mt-2 flex justify-between text-sm font-medium"><span className="text-muted-foreground">Total entradas</span><span className="tabular-nums">{formatCurrency(totalEntradas)}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Total retiradas</span><span className="tabular-nums text-red-600">{formatCurrency(totalRetiradas)}</span></div>
+                </CardContent>
+              </Card>
+              {s.status === 'closed' && (
+                <Card>
+                  <CardContent className="pt-4 pb-4">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">Cierre</p>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm"><span className="text-muted-foreground">Esperado</span><span className="tabular-nums">{formatCurrency(expectedCash)}</span></div>
+                      <div className="flex justify-between text-sm"><span className="text-muted-foreground">Contado</span><span className="tabular-nums">{formatCurrency(countedCash ?? 0)}</span></div>
+                      <div className="flex justify-between text-sm font-medium pt-2 border-t">
+                        <span className="text-muted-foreground">Descuadre</span>
+                        <span className={`tabular-nums ${diff === 0 ? 'text-green-600' : 'text-red-600'}`}>{formatCurrency(diff ?? 0)}</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Sesiones de caja</CardTitle>
+          <p className="text-sm text-muted-foreground">Agrupadas por mes. Clic en un mes para expandir/colapsar. Clic en una fila para ver el detalle.</p>
+        </CardHeader>
+        <CardContent>
+          {sessionsByMonth.keys.length === 0 ? (
+            <p className="text-center text-muted-foreground py-8">Sin sesiones</p>
+          ) : (
+            <div className="space-y-4">
+              {sessionsByMonth.keys.map(monthKey => {
+                const [y, m] = monthKey.split('-')
+                const monthLabel = `${MONTH_NAMES[parseInt(m, 10) - 1]} ${y}`
+                const list = sessionsByMonth.map[monthKey] ?? []
+                const totalVentasMes = list.reduce((s, sess) => s + (Number(sess.total_sales) ?? 0), 0)
+                const totalCobrosMes = list.reduce((s, sess) => s + (cobrosBySession[sess.id] ?? 0), 0)
+                const isExpanded = expandedMonths.has(monthKey)
+                return (
+                  <div key={monthKey} className="rounded-lg border">
+                    <button
+                      type="button"
+                      className="w-full flex items-center justify-between p-4 text-left hover:bg-muted/50 transition-colors"
+                      onClick={() => toggleMonth(monthKey)}
+                    >
+                      <span className="font-medium">{monthLabel}</span>
+                      <span className="flex items-center gap-3 text-sm text-muted-foreground">
+                        <span>Ventas TPV: {formatCurrency(totalVentasMes)}</span>
+                        <span>·</span>
+                        <span>Sastrería: {formatCurrency(totalCobrosMes)}</span>
+                        {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                      </span>
+                    </button>
+                    {isExpanded && (
+                      <div className="border-t overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Fecha</TableHead>
+                              <TableHead>Hora apertura</TableHead>
+                              <TableHead>Abrió</TableHead>
+                              <TableHead>Hora cierre</TableHead>
+                              <TableHead>Cerró</TableHead>
+                              <TableHead className="text-right">Total entrada</TableHead>
+                              <TableHead>Estado</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {list.map((s: any) => {
+                              const openedBy = s.opened_by_profile?.full_name ?? '—'
+                              const closedBy = s.closed_by_profile?.full_name ?? '—'
+                              const cobrosSastreria = cobrosBySession[s.id] ?? 0
+                              const totalSales = Number(s.total_sales) ?? 0
+                              const totalEntrada = totalSales + cobrosSastreria
+                              const horaApertura = s.opened_at ? new Date(s.opened_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : '—'
+                              const horaCierre = s.closed_at ? new Date(s.closed_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : '—'
+                              return (
+                                <TableRow
+                                  key={s.id}
+                                  className="cursor-pointer hover:bg-muted/50"
+                                  onClick={() => loadDetail(s)}
+                                >
+                                  <TableCell className="text-sm text-muted-foreground">{s.opened_at ? formatDate(s.opened_at.split('T')[0]) : '—'}</TableCell>
+                                  <TableCell className="text-sm tabular-nums">{horaApertura}</TableCell>
+                                  <TableCell className="text-sm">{openedBy}</TableCell>
+                                  <TableCell className="text-sm tabular-nums">{horaCierre}</TableCell>
+                                  <TableCell className="text-sm">{closedBy}</TableCell>
+                                  <TableCell className="text-right font-medium tabular-nums">{formatCurrency(totalEntrada)}</TableCell>
+                                  <TableCell>
+                                    <Badge variant={s.status === 'open' ? 'default' : 'secondary'} className="text-xs">
+                                      {s.status === 'open' ? 'Abierta' : 'Cerrada'}
+                                    </Badge>
+                                  </TableCell>
+                                </TableRow>
+                              )
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

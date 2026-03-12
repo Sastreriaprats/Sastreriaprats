@@ -428,6 +428,8 @@ export type AccountingMovementRow = {
   referenceNumber?: string
   isManual: boolean
   journalEntryId?: string
+  storeId?: string | null
+  storeName?: string | null
 }
 
 export const getAccountingMovements = protectedAction<
@@ -452,6 +454,7 @@ export const getAccountingMovements = protectedAction<
       .gte('entry_date', dateFrom)
       .lte('entry_date', dateTo)
       .eq('status', 'posted')
+      .not('reference_type', 'in', '("sale","invoice","online_order")')
       .order('entry_date', { ascending: false })
 
     const entriesList = (entries || []) as Array<{
@@ -536,7 +539,7 @@ export const getAccountingMovements = protectedAction<
 
     let q = ctx.adminClient
       .from('manual_transactions')
-      .select('id, type, date, description, category, amount, tax_rate, tax_amount, total, notes, created_at')
+      .select('id, type, date, description, category, amount, tax_rate, tax_amount, total, notes, created_at, cash_sessions(store_id, stores(name))')
       .gte('date', dateFrom)
       .lte('date', dateTo)
       .order('date', { ascending: false })
@@ -545,19 +548,23 @@ export const getAccountingMovements = protectedAction<
 
     const { data: manual } = await q
     const manualList = (manual || []) as Array<Record<string, unknown>>
-    for (const r of manualList) {
+    for (const m of manualList) {
+      const storeName = (m as any).cash_sessions?.stores?.name ?? null
+      const storeId = (m as any).cash_sessions?.store_id ?? null
       rows.push({
-        id: String(r.id),
+        id: String(m.id),
         source: 'manual',
-        sourceLabel: r.type === 'income' ? 'Ingreso manual' : 'Gasto manual',
-        date: String(r.date),
-        description: String(r.description),
-        type: String(r.type) as 'income' | 'expense',
-        amount: Number(r.amount),
-        tax_amount: Number(r.tax_amount),
-        total: Number(r.total),
-        category: String(r.category),
+        sourceLabel: m.type === 'income' ? 'Ingreso manual' : 'Gasto manual',
+        date: String(m.date),
+        description: String(m.description),
+        type: String(m.type) as 'income' | 'expense',
+        amount: Number(m.amount),
+        tax_amount: Number(m.tax_amount),
+        total: Number(m.total),
+        category: String(m.category),
         isManual: true,
+        storeId,
+        storeName,
       })
     }
 
