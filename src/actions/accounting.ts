@@ -203,7 +203,7 @@ export const getJournalEntries = protectedAction<
       const { data: lines } = await ctx.adminClient
         .from('journal_entry_lines')
         .select('account_code, debit, credit, description')
-        .eq('journal_entry_id', e.id)
+        .eq('journal_entry_id', e.id as string)
         .order('sort_order')
       const lineList = (lines || []).map((l: Record<string, unknown>) => ({
         account_code: String(l.account_code),
@@ -1060,9 +1060,9 @@ export const createInvoiceFromTailoringOrderAction = protectedAction<
     const seq = String((count ?? 0) + 1).padStart(4, '0')
     const invoice_number = `F${year}-${seq}`
 
-    const subtotal = lines.reduce((s, l) => s + l.quantity * l.unit_price, 0)
-    const taxAmount = lines.reduce((s, l) => s + (l.line_total - l.quantity * l.unit_price), 0)
-    const total = lines.reduce((s, l) => s + l.line_total, 0)
+    const subtotal = lines.reduce((s: number, l: any) => s + l.quantity * l.unit_price, 0)
+    const taxAmount = lines.reduce((s: number, l: any) => s + (l.line_total - l.quantity * l.unit_price), 0)
+    const total = lines.reduce((s: number, l: any) => s + l.line_total, 0)
     const storeId = (order as { store_id?: string }).store_id ?? null
     const today = new Date().toISOString().slice(0, 10)
     const dueDate = new Date()
@@ -1104,7 +1104,7 @@ export const createInvoiceFromTailoringOrderAction = protectedAction<
     const { error: linesError } = await ctx.adminClient
       .from('invoice_lines')
       .insert(
-        lines.map((l, i) => ({
+        lines.map((l: any, i: number) => ({
           invoice_id: inv.id,
           description: l.description,
           quantity: l.quantity,
@@ -1196,7 +1196,7 @@ export const getInvoiceLinesAction = protectedAction<string, { lines: { descript
       .eq('invoice_id', invoiceId)
       .order('sort_order', { ascending: true })
     if (error) return failure(error.message)
-    return success({ lines: (data || []).map(l => ({
+    return success({ lines: (data || []).map((l: any) => ({
       description: String(l.description),
       quantity: Number(l.quantity),
       unit_price: Number(l.unit_price),

@@ -133,7 +133,7 @@ export function PedidoDetailContent({
       .map((l) => ({
         lineId: l.id,
         quantityReceived: Number(receptionLineState[l.id].quantityReceived),
-        type: l.fabric_id ? 'fabric' : 'product',
+        type: (l.fabric_id ? 'fabric' : 'product') as 'fabric' | 'product',
         referenceId: (l.fabric_id || l.product_id) ?? '',
       }))
       .filter((l) => l.referenceId)

@@ -13,9 +13,12 @@ const REQUIRED_ACCOUNTS: Record<string, { name: string; level: number; account_t
   '600': { name: 'Compras mercaderías', level: 3, account_type: 'expense' },
 }
 
-async function ensureChartAccounts(admin: ReturnType<typeof createAdminClient>) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyClient = any
+
+async function ensureChartAccounts(db: AnyClient) {
   for (const [code, { name, level, account_type }] of Object.entries(REQUIRED_ACCOUNTS)) {
-    await admin.from('chart_of_accounts').upsert(
+    await db.from('chart_of_accounts').upsert(
       {
         account_code: code,
         name,
@@ -30,8 +33,8 @@ async function ensureChartAccounts(admin: ReturnType<typeof createAdminClient>) 
   }
 }
 
-async function getNextEntryNumber(admin: ReturnType<typeof createAdminClient>, fiscalYear: number): Promise<number> {
-  const { data } = await admin
+async function getNextEntryNumber(db: AnyClient, fiscalYear: number): Promise<number> {
+  const { data } = await db
     .from('journal_entries')
     .select('entry_number')
     .eq('fiscal_year', fiscalYear)
@@ -48,6 +51,7 @@ async function getNextEntryNumber(admin: ReturnType<typeof createAdminClient>, f
 export async function createSaleJournalEntry(saleId: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const admin = createAdminClient()
+    const db: AnyClient = admin
     const { data: sale, error: saleError } = await admin
       .from('sales')
       .select('id, total, subtotal, tax_amount, client_id, created_at')
@@ -56,18 +60,19 @@ export async function createSaleJournalEntry(saleId: string): Promise<{ ok: bool
 
     if (saleError || !sale) return { ok: false, error: 'Venta no encontrada' }
 
-    const total = Number(sale.total ?? 0)
-    const subtotal = Number(sale.subtotal ?? sale.total) ?? 0
-    const taxAmount = Number(sale.tax_amount ?? 0)
-    const saleDate = (sale as { created_at?: string }).created_at
+    const s = sale as any
+    const total = Number(s.total ?? 0)
+    const subtotal = Number(s.subtotal ?? s.total) ?? 0
+    const taxAmount = Number(s.tax_amount ?? 0)
+    const saleDate = s.created_at as string | undefined
     const date = saleDate ? saleDate.slice(0, 10) : new Date().toISOString().split('T')[0]
     const fiscalYear = new Date(date).getFullYear()
     const fiscalMonth = new Date(date).getMonth() + 1
 
-    await ensureChartAccounts(admin)
-    const entryNumber = await getNextEntryNumber(admin, fiscalYear)
+    await ensureChartAccounts(db)
+    const entryNumber = await getNextEntryNumber(db, fiscalYear)
 
-    const { data: entry, error: entryError } = await admin
+    const { data: entry, error: entryError } = await db
       .from('journal_entries')
       .insert({
         entry_number: entryNumber,
@@ -87,14 +92,14 @@ export async function createSaleJournalEntry(saleId: string): Promise<{ ok: bool
 
     if (entryError || !entry) return { ok: false, error: entryError?.message ?? 'Error al crear asiento' }
 
-    const entryId = (entry as { id: string }).id
-    await admin.from('journal_entry_lines').insert([
+    const entryId = entry.id
+    await db.from('journal_entry_lines').insert([
       { journal_entry_id: entryId, account_code: '430', debit: total, credit: 0, description: 'Cliente', sort_order: 0 },
       { journal_entry_id: entryId, account_code: '700', debit: 0, credit: subtotal, description: 'Ventas', sort_order: 1 },
       { journal_entry_id: entryId, account_code: '477', debit: 0, credit: taxAmount, description: 'IVA repercutido', sort_order: 2 },
     ])
 
-    await admin.from('sales').update({ journal_entry_id: entryId }).eq('id', saleId)
+    await db.from('sales').update({ journal_entry_id: entryId }).eq('id', saleId)
     return { ok: true }
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Error desconocido'
@@ -108,6 +113,7 @@ export async function createSaleJournalEntry(saleId: string): Promise<{ ok: bool
 export async function createPurchaseJournalEntry(supplierOrderId: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const admin = createAdminClient()
+    const db: AnyClient = admin
     const { data: order, error: orderError } = await admin
       .from('supplier_orders')
       .select('id, total, subtotal, tax_amount, order_date, created_at')
@@ -116,18 +122,19 @@ export async function createPurchaseJournalEntry(supplierOrderId: string): Promi
 
     if (orderError || !order) return { ok: false, error: 'Pedido no encontrado' }
 
-    const total = Number(order.total ?? 0)
-    const taxAmount = Number(order.tax_amount ?? 0)
+    const o = order as any
+    const total = Number(o.total ?? 0)
+    const taxAmount = Number(o.tax_amount ?? 0)
     const subtotal = total - taxAmount
-    const rawDate = (order as { order_date?: string; created_at?: string }).order_date ?? (order as { created_at?: string }).created_at
+    const rawDate = o.order_date ?? o.created_at
     const date = rawDate ? String(rawDate).slice(0, 10) : new Date().toISOString().split('T')[0]
     const fiscalYear = new Date(date).getFullYear()
     const fiscalMonth = new Date(date).getMonth() + 1
 
-    await ensureChartAccounts(admin)
-    const entryNumber = await getNextEntryNumber(admin, fiscalYear)
+    await ensureChartAccounts(db)
+    const entryNumber = await getNextEntryNumber(db, fiscalYear)
 
-    const { data: entry, error: entryError } = await admin
+    const { data: entry, error: entryError } = await db
       .from('journal_entries')
       .insert({
         entry_number: entryNumber,
@@ -147,8 +154,8 @@ export async function createPurchaseJournalEntry(supplierOrderId: string): Promi
 
     if (entryError || !entry) return { ok: false, error: entryError?.message ?? 'Error al crear asiento' }
 
-    const entryId = (entry as { id: string }).id
-    await admin.from('journal_entry_lines').insert([
+    const entryId = entry.id
+    await db.from('journal_entry_lines').insert([
       { journal_entry_id: entryId, account_code: '600', debit: subtotal, credit: 0, description: 'Compras', sort_order: 0 },
       { journal_entry_id: entryId, account_code: '472', debit: taxAmount, credit: 0, description: 'IVA soportado', sort_order: 1 },
       { journal_entry_id: entryId, account_code: '400', debit: 0, credit: total, description: 'Proveedor', sort_order: 2 },
@@ -167,7 +174,8 @@ export async function createPurchaseJournalEntry(supplierOrderId: string): Promi
 export async function createOnlineOrderJournalEntry(onlineOrderId: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const admin = createAdminClient()
-    const { data: order, error: orderError } = await admin
+    const db: AnyClient = admin
+    const { data: order, error: orderError } = await db
       .from('online_orders')
       .select('id, total, subtotal, tax_amount, created_at')
       .eq('id', onlineOrderId)
@@ -178,22 +186,21 @@ export async function createOnlineOrderJournalEntry(onlineOrderId: string): Prom
     const total = Number(order.total ?? 0)
     const subtotal = Number(order.subtotal ?? total - Number(order.tax_amount ?? 0))
     const taxAmount = Number(order.tax_amount ?? 0)
-    const rawDate = (order as { created_at?: string }).created_at
-    const date = rawDate ? rawDate.slice(0, 10) : new Date().toISOString().split('T')[0]
+    const date = order.created_at ? String(order.created_at).slice(0, 10) : new Date().toISOString().split('T')[0]
     const fiscalYear = new Date(date).getFullYear()
     const fiscalMonth = new Date(date).getMonth() + 1
 
-    await ensureChartAccounts(admin)
-    const entryNumber = await getNextEntryNumber(admin, fiscalYear)
+    await ensureChartAccounts(db)
+    const entryNumber = await getNextEntryNumber(db, fiscalYear)
 
-    const { data: entry, error: entryError } = await admin
+    const { data: entry, error: entryError } = await db
       .from('journal_entries')
       .insert({
         entry_number: entryNumber,
         fiscal_year: fiscalYear,
         fiscal_month: fiscalMonth,
         entry_date: date,
-        description: `Venta online #${(order as { order_number?: string }).order_number ?? onlineOrderId.slice(0, 8)}`,
+        description: `Venta online #${order.order_number ?? onlineOrderId.slice(0, 8)}`,
         entry_type: 'sale',
         reference_type: 'online_order',
         reference_id: onlineOrderId,
@@ -206,8 +213,8 @@ export async function createOnlineOrderJournalEntry(onlineOrderId: string): Prom
 
     if (entryError || !entry) return { ok: false, error: entryError?.message ?? 'Error al crear asiento' }
 
-    const entryId = (entry as { id: string }).id
-    await admin.from('journal_entry_lines').insert([
+    const entryId = entry.id
+    await db.from('journal_entry_lines').insert([
       { journal_entry_id: entryId, account_code: '430', debit: total, credit: 0, description: 'Cliente', sort_order: 0 },
       { journal_entry_id: entryId, account_code: '700', debit: 0, credit: subtotal, description: 'Ventas', sort_order: 1 },
       { journal_entry_id: entryId, account_code: '477', debit: 0, credit: taxAmount, description: 'IVA repercutido', sort_order: 2 },
@@ -226,6 +233,7 @@ export async function createOnlineOrderJournalEntry(onlineOrderId: string): Prom
 export async function createInvoiceJournalEntry(invoiceId: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const admin = createAdminClient()
+    const db: AnyClient = admin
     const { data: inv, error: invError } = await admin
       .from('invoices')
       .select('id, invoice_number, total, subtotal, tax_amount, irpf_amount, invoice_date')
@@ -234,18 +242,19 @@ export async function createInvoiceJournalEntry(invoiceId: string): Promise<{ ok
 
     if (invError || !inv) return { ok: false, error: 'Factura no encontrada' }
 
-    const total = Number(inv.total ?? 0)
-    const subtotal = Number(inv.subtotal ?? 0)
-    const taxAmount = Number(inv.tax_amount ?? 0)
-    const irpfAmount = Number(inv.irpf_amount ?? 0)
-    const date = (inv as { invoice_date?: string }).invoice_date
-      ? String((inv as { invoice_date: string }).invoice_date).slice(0, 10)
+    const i = inv as any
+    const total = Number(i.total ?? 0)
+    const subtotal = Number(i.subtotal ?? 0)
+    const taxAmount = Number(i.tax_amount ?? 0)
+    const irpfAmount = Number(i.irpf_amount ?? 0)
+    const date = i.invoice_date
+      ? String(i.invoice_date).slice(0, 10)
       : new Date().toISOString().split('T')[0]
     const fiscalYear = new Date(date).getFullYear()
     const fiscalMonth = new Date(date).getMonth() + 1
 
-    await ensureChartAccounts(admin)
-    const entryNumber = await getNextEntryNumber(admin, fiscalYear)
+    await ensureChartAccounts(db)
+    const entryNumber = await getNextEntryNumber(db, fiscalYear)
 
     const lines: { journal_entry_id: string; account_code: string; debit: number; credit: number; description: string; sort_order: number }[] = [
       { journal_entry_id: '', account_code: '430', debit: total, credit: 0, description: 'Cliente', sort_order: 0 },
@@ -259,14 +268,14 @@ export async function createInvoiceJournalEntry(invoiceId: string): Promise<{ ok
     const totalDebit = lines.reduce((s, l) => s + l.debit, 0)
     const totalCredit = lines.reduce((s, l) => s + l.credit, 0)
 
-    const { data: entry, error: entryError } = await admin
+    const { data: entry, error: entryError } = await db
       .from('journal_entries')
       .insert({
         entry_number: entryNumber,
         fiscal_year: fiscalYear,
         fiscal_month: fiscalMonth,
         entry_date: date,
-        description: `Factura ${(inv as { invoice_number?: string }).invoice_number ?? invoiceId.slice(0, 8)}`,
+        description: `Factura ${i.invoice_number ?? invoiceId.slice(0, 8)}`,
         entry_type: 'sale',
         reference_type: 'invoice',
         reference_id: invoiceId,
@@ -279,19 +288,19 @@ export async function createInvoiceJournalEntry(invoiceId: string): Promise<{ ok
 
     if (entryError || !entry) return { ok: false, error: entryError?.message ?? 'Error al crear asiento' }
 
-    const entryId = (entry as { id: string }).id
-    await admin.from('journal_entry_lines').insert(
-      lines.map((l, i) => ({
+    const entryId = entry.id
+    await db.from('journal_entry_lines').insert(
+      lines.map((l, idx) => ({
         journal_entry_id: entryId,
         account_code: l.account_code,
         debit: l.debit,
         credit: l.credit,
         description: l.description,
-        sort_order: i,
+        sort_order: idx,
       }))
     )
 
-    await admin.from('invoices').update({ journal_entry_id: entryId }).eq('id', invoiceId)
+    await db.from('invoices').update({ journal_entry_id: entryId }).eq('id', invoiceId)
     return { ok: true }
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Error desconocido'
