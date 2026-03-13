@@ -29,11 +29,23 @@ export default async function SupplierDetailPage(props: { params: Promise<{ id: 
   const orderIds = (supplier.supplier_orders || []).map((o: any) => o.id)
   const notesByOrder: Record<string, any[]> = {}
   const invoiceByOrder: Record<string, any> = {}
-  const { data: allSupplierNotes } = await admin
-    .from('supplier_delivery_notes')
-    .select('id, supplier_id, supplier_order_id, supplier_reference, delivery_date, status, attachment_url, notes, created_at')
-    .eq('supplier_id', params.id)
-    .order('created_at', { ascending: false })
+
+  const [notesResult, invoicesResult] = await Promise.all([
+    admin
+      .from('supplier_delivery_notes')
+      .select('id, supplier_id, supplier_order_id, supplier_reference, delivery_date, status, attachment_url, notes, created_at')
+      .eq('supplier_id', params.id)
+      .order('created_at', { ascending: false }),
+    orderIds.length > 0
+      ? admin
+          .from('ap_supplier_invoices')
+          .select('id, supplier_order_id, status, due_date, payment_date, total_amount')
+          .in('supplier_order_id', orderIds)
+          .order('created_at', { ascending: false })
+      : Promise.resolve({ data: [] as any[], error: null }),
+  ])
+
+  const allSupplierNotes = notesResult.data
   for (const n of allSupplierNotes || []) {
     const k = String((n as any).supplier_order_id || '')
     if (!k) continue
@@ -41,18 +53,11 @@ export default async function SupplierDetailPage(props: { params: Promise<{ id: 
     notesByOrder[k].push(n)
   }
 
-  if (orderIds.length > 0) {
-    const { data: invoices, error: invErr } = await admin
-      .from('ap_supplier_invoices')
-      .select('id, supplier_order_id, status, due_date, payment_date, total_amount')
-      .in('supplier_order_id', orderIds)
-      .order('created_at', { ascending: false })
-    if (!invErr) {
-      for (const inv of invoices || []) {
-        const k = String((inv as any).supplier_order_id || '')
-        if (!k || invoiceByOrder[k]) continue
-        invoiceByOrder[k] = inv
-      }
+  if (!invoicesResult.error) {
+    for (const inv of invoicesResult.data || []) {
+      const k = String((inv as any).supplier_order_id || '')
+      if (!k || invoiceByOrder[k]) continue
+      invoiceByOrder[k] = inv
     }
   }
   const orderNumberById = new Map((supplier.supplier_orders || []).map((o: any) => [String(o.id), o.order_number]))

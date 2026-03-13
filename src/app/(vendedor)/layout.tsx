@@ -8,22 +8,24 @@ export const dynamic = 'force-dynamic'
 
 const VENDEDOR_ROLES = ['vendedor_basico', 'vendedor_avanzado']
 
-const getUserRoles = unstable_cache(
-  async (userId: string) => {
-    const admin = createAdminClient()
-    const { data } = await admin
-      .from('user_roles')
-      .select('roles(name)')
-      .eq('user_id', userId)
-    return (data ?? []).flatMap((ur: { roles?: { name: string } | { name: string }[] | null }) => {
-      if (!ur.roles) return []
-      if (Array.isArray(ur.roles)) return ur.roles.map(r => r.name)
-      return [ur.roles.name]
-    })
-  },
-  ['user-roles-vendedor'],
-  { revalidate: 300 }
-)
+function getUserRoles(userId: string): Promise<string[]> {
+  return unstable_cache(
+    async () => {
+      const admin = createAdminClient()
+      const { data } = await admin
+        .from('user_roles')
+        .select('roles(name)')
+        .eq('user_id', userId)
+      return (data ?? []).flatMap((ur: { roles?: { name: string } | { name: string }[] | null }) => {
+        if (!ur.roles) return []
+        if (Array.isArray(ur.roles)) return ur.roles.map(r => r.name)
+        return [ur.roles.name]
+      })
+    },
+    ['user-roles-vendedor', userId],
+    { revalidate: 300 }
+  )()
+}
 
 export default async function VendedorLayout({
   children,

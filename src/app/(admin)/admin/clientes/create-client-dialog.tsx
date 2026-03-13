@@ -246,9 +246,10 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess, onSuccessWit
           </TabsContent>
 
           <TabsContent value="preferences" className="space-y-4 mt-4">
-            <div className="space-y-2"><Label>Origen/Captación</Label>
+            <div className="space-y-2">
+              <Label>Origen/Captación <span className="text-red-500">*</span></Label>
               <Select value={form.source || ''} onValueChange={(v) => set('source', v)}>
-                <SelectTrigger><SelectValue placeholder="¿Cómo nos conoció?" /></SelectTrigger>
+                <SelectTrigger className={!form.source ? 'border-red-300' : ''}><SelectValue placeholder="¿Cómo nos conoció?" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="walk_in">Visita tienda</SelectItem>
                   <SelectItem value="referral">Recomendación</SelectItem>
@@ -259,6 +260,7 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess, onSuccessWit
                   <SelectItem value="other">Otro</SelectItem>
                 </SelectContent>
               </Select>
+              {!form.source && <p className="text-xs text-red-500">Indica cómo nos conoció</p>}
             </div>
             <div className="space-y-2"><Label>Descuento fijo (%)</Label>
               <Input type="number" min={0} max={100} placeholder="0" value={form.discount_percentage} onChange={(e) => set('discount_percentage', parseFloat(e.target.value) || 0)} />
@@ -288,7 +290,7 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess, onSuccessWit
               ? form.date_of_birth
               : null
             execute({ ...form, date_of_birth: dateOfBirth })
-          }} disabled={isLoading || !form.first_name || !form.last_name}
+          }} disabled={isLoading || !form.first_name || !form.last_name || !form.source}
             className="bg-prats-navy hover:bg-prats-navy-light">
             {isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creando...</> : 'Crear cliente'}
           </Button>

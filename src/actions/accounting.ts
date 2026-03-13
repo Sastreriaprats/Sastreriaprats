@@ -676,6 +676,43 @@ export const createManualTransaction = protectedAction<
   }
 )
 
+export const updateManualTransaction = protectedAction<
+  { id: string; total: number; payment_method: string },
+  void
+>(
+  { permission: 'accounting.edit', auditModule: 'accounting' },
+  async (ctx, { id, total, payment_method }) => {
+    const amount = total / 1.21
+    const tax_amount = total - amount
+
+    const { data: current } = await ctx.adminClient
+      .from('manual_transactions')
+      .select('notes')
+      .eq('id', id)
+      .single()
+
+    const paymentLabel: Record<string, string> = {
+      cash: 'Efectivo', card: 'Tarjeta', bizum: 'Bizum', transfer: 'Transferencia',
+    }
+    const methodText = `Método: ${paymentLabel[payment_method] ?? payment_method}`
+    const oldNotes: string = (current as any)?.notes ?? ''
+    const newNotes = /Método:/.test(oldNotes)
+      ? oldNotes.replace(/Método:[^\n]*/, methodText)
+      : oldNotes ? `${oldNotes}\n${methodText}` : methodText
+
+    const { error } = await ctx.adminClient
+      .from('manual_transactions')
+      .update({ total, amount, tax_amount, notes: newNotes })
+      .eq('id', id)
+
+    if (error) {
+      const { failure: fail } = await import('@/lib/errors')
+      return fail(error.message)
+    }
+    return success(undefined)
+  }
+)
+
 export const deleteManualTransaction = protectedAction<{ id: string }, void>(
   { permission: 'accounting.edit', auditModule: 'accounting' },
   async (ctx, { id }) => {

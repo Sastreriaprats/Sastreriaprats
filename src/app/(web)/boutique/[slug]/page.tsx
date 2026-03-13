@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import { ProductContent } from './product-content'
 
+export const revalidate = 60
+
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params
   try {

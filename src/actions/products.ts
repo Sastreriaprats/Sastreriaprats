@@ -7,6 +7,7 @@ import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { generateEAN13, validateEAN13 } from '@/lib/barcode/ean13'
 import { generateSkuBase } from '@/lib/utils/sku'
+import { generateFabricCode } from '@/actions/fabrics'
 
 /** Obtiene el siguiente número correlativo para un SKU base. Cuenta productos con sku LIKE 'skuBase-%' y retorna (count+1) con pad 3. Si el SKU completo ya existe (race), reintenta con el siguiente. */
 export const getNextSkuNumber = protectedAction<
@@ -290,6 +291,10 @@ export const listProducts = protectedAction<ListParams, ListResult<any>>(
     const result = await queryList('products', {
       ...params,
       searchFields: ['sku', 'name', 'brand', 'barcode'],
+      filters: {
+        ...(params.filters?.product_type === undefined ? { product_type: '!=tailoring_fabric' } : {}),
+        ...params.filters,
+      },
     }, `
       id, sku, name, product_type, brand, collection, season,
       base_price, cost_price, main_image_url, color, fabric_meters_used,
@@ -373,16 +378,43 @@ export const createProductAction = protectedAction<any, any>(
     const parsed = createProductSchema.safeParse(input)
     if (!parsed.success) return failure(parsed.error.issues[0].message, 'VALIDATION')
 
-    const { data: existing } = await ctx.adminClient
-      .from('products').select('id').eq('sku', parsed.data.sku).single()
-    if (existing) return failure('Ya existe un producto con este SKU', 'CONFLICT')
-
-    const data = { ...parsed.data, created_by: ctx.userId }
+    const { metros_iniciales, ...productFields } = parsed.data
+    const data = { ...productFields, created_by: ctx.userId }
     if (data.category_id === '' || data.category_id == null) data.category_id = null
     if (data.supplier_id === '' || data.supplier_id == null) data.supplier_id = null
-    if (data.product_type === 'tailoring_fabric' && !data.supplier_id) {
-      return failure('Para crear una tela debes seleccionar un proveedor', 'VALIDATION')
+
+    // Telas: INSERT solo en fabrics, sin tocar products
+    if (data.product_type === 'tailoring_fabric') {
+      if (!data.supplier_id) {
+        return failure('Para crear una tela debes seleccionar un proveedor', 'VALIDATION')
+      }
+
+      const fabricCode = await generateFabricCode(ctx.adminClient, data.supplier_id)
+      const { data: fabric, error: fabricError } = await ctx.adminClient
+        .from('fabrics')
+        .insert({
+          fabric_code: fabricCode,
+          name: data.name,
+          supplier_id: data.supplier_id,
+          supplier_reference: data.supplier_reference || null,
+          category_id: null,
+          collection: data.collection || null,
+          season: data.season || null,
+          description: data.description || null,
+          stock_meters: metros_iniciales != null ? metros_iniciales : 0,
+          is_active: data.is_active !== false,
+        })
+        .select()
+        .single()
+
+      if (fabricError) return failure(fabricError.message)
+      return success({ ...fabric, product_type: 'tailoring_fabric', sku: data.sku })
     }
+
+    // Otros tipos: INSERT en products
+    const { data: existing } = await ctx.adminClient
+      .from('products').select('id').eq('sku', data.sku).single()
+    if (existing) return failure('Ya existe un producto con este SKU', 'CONFLICT')
 
     const { data: product, error } = await ctx.adminClient
       .from('products')
@@ -391,45 +423,6 @@ export const createProductAction = protectedAction<any, any>(
       .single()
 
     if (error) return failure(error.message)
-
-    if (product && data.product_type === 'tailoring_fabric' && data.supplier_id) {
-      const { data: existingFabric } = await ctx.adminClient
-        .from('fabrics')
-        .select('id')
-        .eq('fabric_code', product.sku)
-        .maybeSingle()
-
-      if (!existingFabric?.id) {
-        const { error: fabricError } = await ctx.adminClient
-          .from('fabrics')
-          .insert({
-            fabric_code: product.sku,
-            name: product.name,
-            description: product.description || null,
-            supplier_id: data.supplier_id,
-            supplier_reference: product.supplier_reference || null,
-            color_name: product.color || null,
-            composition: product.material || null,
-            price_per_meter: product.base_price ?? null,
-            status: product.is_active === false ? 'discontinued' : 'active',
-            is_active: product.is_active !== false,
-          })
-
-        if (fabricError) {
-          console.error('[createProductAction] Error creando registro en fabrics', {
-            productId: product.id,
-            sku: product.sku,
-            supplierId: data.supplier_id,
-            message: fabricError.message,
-            code: (fabricError as any)?.code,
-          })
-
-          await ctx.adminClient.from('products').delete().eq('id', product.id)
-          return failure('No se pudo sincronizar la tela en catálogo de tejidos', 'INTERNAL')
-        }
-      }
-    }
-
     return success(product)
   }
 )
@@ -446,8 +439,10 @@ export const updateProductAction = protectedAction<{ id: string; data: any }, an
     const parsed = updateProductSchema.safeParse(input)
     if (!parsed.success) return failure(parsed.error.issues[0].message, 'VALIDATION')
 
+    const { metros_iniciales, ...updateFields } = parsed.data
+
     const { data: product, error } = await ctx.adminClient
-      .from('products').update(parsed.data).eq('id', id).select().single()
+      .from('products').update(updateFields).eq('id', id).select().single()
 
     if (error) return failure(error.message)
     return success(product)

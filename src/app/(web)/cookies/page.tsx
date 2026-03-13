@@ -1,5 +1,7 @@
 import { buildMetadata } from '@/lib/seo/metadata'
 
+export const revalidate = 86400
+
 export const metadata = buildMetadata({
   title: 'Política de Cookies — Sastrería Prats',
   description: 'Información sobre las cookies que utilizamos en Sastrería Prats.',

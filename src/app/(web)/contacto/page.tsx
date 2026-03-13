@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import { ContactContent } from './contact-content'
 
+export const revalidate = 3600
+
 export const metadata: Metadata = {
   title: 'Contacto',
   description:

@@ -29,7 +29,7 @@ import { toast } from 'sonner'
 import {
   getAccountingSummary, getInvoices, getEstimates,
   getJournalEntries, getVatQuarterly, getClientsForInvoice,
-  getManualTransactions, createManualTransaction, deleteManualTransaction,
+  getManualTransactions, createManualTransaction, deleteManualTransaction, updateManualTransaction,
   getAccountingMovements,
   getProductsForInvoice, listTailoringOrdersForInvoice, getTailoringOrderLinesForInvoice,
   createInvoiceAction, updateInvoiceAction, issueInvoiceAction,
@@ -1779,6 +1779,8 @@ function MovimientosTab() {
   const [filterStore, setFilterStore] = useState<string>('')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [editRow, setEditRow] = useState<{ id: string; total: number; payment_method: string } | null>(null)
+  const [editSaving, setEditSaving] = useState(false)
   const [form, setForm] = useState({
     type: 'expense' as 'income' | 'expense',
     date: new Date().toISOString().split('T')[0],
@@ -1786,6 +1788,7 @@ function MovimientosTab() {
     category: 'Otros gastos',
     amount: '' as string | number,
     tax_rate: 21,
+    payment_method: '',
     notes: '',
     generateJournalEntry: false,
   })
@@ -1813,6 +1816,12 @@ function MovimientosTab() {
     if (!form.description.trim()) { toast.error('La descripción es obligatoria'); return }
     if (!amount || amount <= 0) { toast.error('El importe debe ser mayor que 0'); return }
     setSaving(true)
+    const paymentLabels: Record<string, string> = {
+      cash: 'Efectivo', card: 'Tarjeta', bizum: 'Bizum', transfer: 'Transferencia',
+    }
+    const methodText = form.payment_method ? `Método: ${paymentLabels[form.payment_method] ?? form.payment_method}` : ''
+    const baseNotes = form.notes.trim()
+    const notesValue = baseNotes && methodText ? `${baseNotes}\n${methodText}` : baseNotes || methodText || undefined
     const r = await createManualTransaction({
       type: form.type,
       date: form.date,
@@ -1820,7 +1829,7 @@ function MovimientosTab() {
       category: form.category,
       amount,
       tax_rate: form.tax_rate,
-      notes: form.notes.trim() || undefined,
+      notes: notesValue,
       generateJournalEntry: form.generateJournalEntry,
     })
     if (r.success) {
@@ -1829,7 +1838,7 @@ function MovimientosTab() {
       setForm({
         type: 'expense', date: new Date().toISOString().split('T')[0],
         description: '', category: 'Otros gastos', amount: '', tax_rate: 21,
-        notes: '', generateJournalEntry: false,
+        payment_method: '', notes: '', generateJournalEntry: false,
       })
       load()
     } else {
@@ -1843,6 +1852,21 @@ function MovimientosTab() {
     const r = await deleteManualTransaction({ id })
     if (r.success) { toast.success('Movimiento eliminado'); load() }
     else toast.error('Error al eliminar')
+  }
+
+  const handleEditSave = async () => {
+    if (!editRow) return
+    if (!editRow.total || editRow.total <= 0) { toast.error('El importe debe ser mayor que 0'); return }
+    setEditSaving(true)
+    const r = await updateManualTransaction(editRow)
+    setEditSaving(false)
+    if (r.success) {
+      toast.success('Movimiento actualizado')
+      setEditRow(null)
+      load()
+    } else {
+      toast.error('Error al guardar')
+    }
   }
 
   const storeOptions = useMemo(() => {
@@ -1958,9 +1982,18 @@ function MovimientosTab() {
                           </Button>
                         )}
                         {r.isManual && (
-                          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleDelete(r.id)}>
-                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                          </Button>
+                          <>
+                            <Button
+                              size="icon" variant="ghost" className="h-7 w-7"
+                              title="Editar movimiento"
+                              onClick={() => setEditRow({ id: r.id, total: r.total, payment_method: 'cash' })}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleDelete(r.id)}>
+                              <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                            </Button>
+                          </>
                         )}
                       </div>
                     </TableCell>
@@ -1993,6 +2026,46 @@ function MovimientosTab() {
           </div>
         </>
       )}
+
+      {/* Diálogo editar movimiento */}
+      <Dialog open={editRow !== null} onOpenChange={(open) => { if (!open) setEditRow(null) }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Editar movimiento</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium mb-1 block">Importe total (€)</label>
+              <input
+                type="number"
+                min={0.01}
+                step="0.01"
+                className="w-full border rounded px-3 py-2 text-sm"
+                value={editRow?.total ?? ''}
+                onChange={(e) => setEditRow(prev => prev ? { ...prev, total: Number(e.target.value) } : null)}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-1 block">Forma de pago</label>
+              <select
+                className="w-full border rounded px-3 py-2 text-sm"
+                value={editRow?.payment_method ?? 'cash'}
+                onChange={(e) => setEditRow(prev => prev ? { ...prev, payment_method: e.target.value } : null)}
+              >
+                <option value="cash">Efectivo</option>
+                <option value="card">Tarjeta</option>
+                <option value="bizum">Bizum</option>
+                <option value="transfer">Transferencia</option>
+              </select>
+            </div>
+          </div>
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setEditRow(null)} disabled={editSaving}>Cancelar</Button>
+            <Button onClick={handleEditSave} disabled={editSaving}>
+              {editSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Guardar cambios
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -2065,6 +2138,20 @@ function MovimientosTab() {
                   {(form.type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES).map(c => (
                     <SelectItem key={c} value={c}>{c}</SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label>Forma de pago</Label>
+              <Select value={form.payment_method} onValueChange={v => setForm(f => ({ ...f, payment_method: v }))}>
+                <SelectTrigger><SelectValue placeholder="Sin especificar" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Sin especificar</SelectItem>
+                  <SelectItem value="cash">Efectivo</SelectItem>
+                  <SelectItem value="card">Tarjeta</SelectItem>
+                  <SelectItem value="bizum">Bizum</SelectItem>
+                  <SelectItem value="transfer">Transferencia</SelectItem>
                 </SelectContent>
               </Select>
             </div>

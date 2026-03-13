@@ -7,6 +7,7 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import type { UserWithRoles } from '@/lib/types/auth'
 import { sendWelcomeEmail } from '@/lib/email/transactional'
+import { cookies } from 'next/headers'
 
 // ==========================================
 // HELPER: consulta directa de permiso (sin RPC)
@@ -44,10 +45,34 @@ export async function checkUserPermission(userId: string, permissionCode: string
 /** Comprueba si el usuario tiene al menos uno de los permisos indicados. */
 export async function checkUserAnyPermission(userId: string, permissionCodes: string[]): Promise<boolean> {
   if (permissionCodes.length === 0) return false
-  for (const code of permissionCodes) {
-    if (await checkUserPermission(userId, code)) return true
-  }
-  return false
+
+  const admin = createAdminClient()
+
+  const { data: userRoles } = await admin
+    .from('user_roles')
+    .select('role_id, roles!inner(name)')
+    .eq('user_id', userId)
+
+  if (!userRoles || userRoles.length === 0) return false
+
+  // Administrador → acceso total
+  const isFullAdmin = userRoles.some(ur => {
+    const r = ur.roles as { name?: string } | null
+    return r?.name && FULL_ADMIN_ROLES.includes(r.name)
+  })
+  if (isFullAdmin) return true
+
+  const roleIds = userRoles.map(ur => ur.role_id)
+
+  // Una sola query para TODOS los permisos a la vez
+  const { data: perms } = await admin
+    .from('role_permissions')
+    .select('permissions!inner(code)')
+    .in('role_id', roleIds)
+    .in('permissions.code', permissionCodes)
+    .limit(1)
+
+  return (perms?.length ?? 0) > 0
 }
 
 function toSerializableDate(v: unknown): string | null {
@@ -205,6 +230,29 @@ export async function loginAction(formData: FormData) {
     p_description: 'Login desde web',
   })
 
+  // Cachear roles en cookie para que el middleware no tenga que consultar /api/auth/me
+  const { data: userRolesData } = await adminClient
+    .from('user_roles')
+    .select('roles(name)')
+    .eq('user_id', data.user.id)
+
+  const roleNames: string[] = []
+  for (const ur of userRolesData ?? []) {
+    const r = ur.roles
+    if (!r) continue
+    if (Array.isArray(r)) roleNames.push(...r.map((x: { name: string }) => x.name))
+    else roleNames.push((r as { name: string }).name)
+  }
+
+  const cookieStore = await cookies()
+  cookieStore.set('x-user-roles', JSON.stringify(roleNames), {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 60 * 60 * 4,
+  })
+
   const redirectTo = (formData.get('redirectTo') as string) || '/admin/dashboard'
   redirect(redirectTo)
 }
@@ -228,6 +276,8 @@ export async function logoutAction() {
   }
 
   await supabase.auth.signOut()
+  const cookieStore = await cookies()
+  cookieStore.delete('x-user-roles')
   redirect('/auth/login')
 }
 
@@ -235,6 +285,8 @@ export async function logoutAction() {
 export async function logoutClientAction() {
   const supabase = await createServerSupabaseClient()
   await supabase.auth.signOut()
+  const cookieStore = await cookies()
+  cookieStore.delete('x-user-roles')
   redirect('/')
 }
 
@@ -616,18 +668,15 @@ export async function getServerProfile(userId: string): Promise<UserWithRoles | 
   try {
     const adminClient = createAdminClient()
 
-    const { data: profile, error: profileError } = await adminClient
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
-    .single()
+    const [profileRes, rolesRes] = await Promise.all([
+      adminClient.from('profiles').select('*').eq('id', userId).single(),
+      adminClient.from('user_roles').select('roles(id, name, display_name, color, icon)').eq('user_id', userId),
+    ])
 
-  if (profileError || !profile) return null
+    const { data: profile, error: profileError } = profileRes
+    if (profileError || !profile) return null
 
-  const { data: rolesData } = await adminClient
-    .from('user_roles')
-    .select('roles(id, name, display_name, color, icon)')
-    .eq('user_id', userId)
+    const rolesData = rolesRes.data
 
   const rolesRaw = (rolesData ?? []) as { roles?: { id: string; name: string; display_name: string | null; color: string | null; icon: string | null } | { id: string; name: string; display_name: string | null; color: string | null; icon: string | null }[] | null }[]
   const roles = rolesRaw.map((ur) => {
@@ -642,10 +691,14 @@ export async function getServerProfile(userId: string): Promise<UserWithRoles | 
   })
 
   const roleIds = roles.map(r => r.roleId).filter(Boolean)
-  const { data: rpData } = await adminClient
-    .from('role_permissions')
-    .select('permissions(code)')
-    .in('role_id', roleIds.length > 0 ? roleIds : ['__none__'])
+
+  const [rpRes, storesRes] = await Promise.all([
+    adminClient.from('role_permissions').select('permissions(code)').in('role_id', roleIds.length > 0 ? roleIds : ['__none__']),
+    adminClient.from('user_stores').select('stores(name)').eq('user_id', userId),
+  ])
+
+  const rpData = rpRes.data
+  const storesData = storesRes.data
 
   const permissionCodes = [...new Set(
     (rpData ?? []).flatMap((rp: { permissions?: { code: string } | { code: string }[] | null }) => {
@@ -654,11 +707,6 @@ export async function getServerProfile(userId: string): Promise<UserWithRoles | 
       return [(rp.permissions as { code: string }).code]
     })
   )]
-
-  const { data: storesData } = await adminClient
-    .from('user_stores')
-    .select('stores(name)')
-    .eq('user_id', userId)
 
   const storesRaw = (storesData ?? []) as { stores?: { name: string } | { name: string }[] | null }[]
   const stores = storesRaw.map((us) => {

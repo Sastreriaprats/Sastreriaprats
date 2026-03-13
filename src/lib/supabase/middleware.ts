@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { getRolesFromCookie, clearRolesCookie } from '@/lib/auth/role-cookie'
 
 const SASTRE_ROLES = ['sastre', 'sastre_plus']
 const VENDEDOR_ROLES = ['vendedor_basico', 'vendedor_avanzado']
@@ -25,16 +26,33 @@ function clearSupabaseCookies(response: NextResponse, request: NextRequest): voi
   })
 }
 
-/** Obtiene los roles del usuario actual llamando al API (usa cookies de la request) */
-async function getUserRoles(request: NextRequest): Promise<string[]> {
+/** Obtiene roles: primero de cookie (fast path), luego fallback a Supabase REST */
+async function resolveUserRoles(request: NextRequest, userId: string): Promise<string[]> {
+  const cached = getRolesFromCookie(request)
+  if (cached) return cached
+
+  // Fallback: query directa a Supabase REST API (no pasa por /api/auth/me)
   try {
-    const url = new URL('/api/auth/me', request.nextUrl.origin)
-    const res = await fetch(url.toString(), {
-      headers: { cookie: request.headers.get('cookie') || '' },
-    })
+    const res = await fetch(
+      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/user_roles?user_id=eq.${userId}&select=roles(name)`,
+      {
+        headers: {
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY!,
+          'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY!}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    )
     if (!res.ok) return []
     const data = await res.json()
-    return Array.isArray(data?.roles) ? data.roles : []
+    const roles: string[] = []
+    for (const ur of data ?? []) {
+      const r = ur.roles
+      if (!r) continue
+      if (Array.isArray(r)) roles.push(...r.map((x: { name: string }) => x.name))
+      else roles.push((r as { name: string }).name)
+    }
+    return roles
   } catch {
     return []
   }
@@ -74,7 +92,7 @@ export async function updateSession(request: NextRequest) {
     return supabaseResponse
   }
 
-  // Corregir URL con espacio "mi cuenta" → "mi-cuenta" (evita 404 y página offline)
+  // Corregir URL con espacio "mi cuenta" → "mi-cuenta"
   if (pathname.includes('mi cuenta')) {
     const url = request.nextUrl.clone()
     url.pathname = pathname.replace(/mi cuenta/g, 'mi-cuenta')
@@ -84,17 +102,16 @@ export async function updateSession(request: NextRequest) {
     return redirectRes
   }
 
-  const isAdminRoute  = pathname.startsWith('/admin')
+  const isAdminRoute    = pathname.startsWith('/admin')
   const isVendedorRoute = pathname.startsWith('/vendedor')
-  const isPosRoute    = pathname.startsWith('/pos')
-  const isClientRoute = pathname.startsWith('/mi-cuenta')
-  const isSastreRoute = pathname.startsWith('/sastre')
-  const isAuthRoute   = pathname.startsWith('/auth')
-  const isLoginPage   = pathname === '/auth/login'
+  const isPosRoute      = pathname.startsWith('/pos')
+  const isClientRoute   = pathname.startsWith('/mi-cuenta')
+  const isSastreRoute   = pathname.startsWith('/sastre')
+  const isAuthRoute     = pathname.startsWith('/auth')
+  const isLoginPage     = pathname === '/auth/login'
 
   const { data: { user }, error } = await supabase.auth.getUser()
 
-  // Rutas protegidas que requieren sesión
   const isProtectedRoute = isAdminRoute || isPosRoute || isClientRoute || isSastreRoute || isVendedorRoute
 
   // Si hay error de sesión, limpiar cookies y redirigir a login
@@ -104,6 +121,7 @@ export async function updateSession(request: NextRequest) {
     const redirectRes = NextResponse.redirect(url)
     copySupabaseCookies(redirectRes, supabaseResponse)
     clearSupabaseCookies(redirectRes, request)
+    clearRolesCookie(redirectRes)
     setSecurityHeaders(redirectRes)
     return redirectRes
   }
@@ -118,12 +136,18 @@ export async function updateSession(request: NextRequest) {
     return redirectRes
   }
 
-  // Ruta /mi-cuenta: staff (sastre, administrador, vendedor, etc.) no debe entrar → redirigir a su panel
+  // Obtener roles UNA SOLA VEZ para todas las comprobaciones de esta request
+  // (cookie hit → 0 queries; cache miss → 1 fetch REST directo a Supabase)
+  const userRoles = user
+    ? await resolveUserRoles(request, user.id)
+    : []
+
+  const hasSastreRole   = userRoles.some(n => SASTRE_ROLES.includes(n))
+  const hasVendedorRole = userRoles.some(n => VENDEDOR_ROLES.includes(n))
+  const hasStaffRole    = userRoles.some(n => STAFF_ROLES.includes(n))
+
+  // Ruta /mi-cuenta: staff no debe entrar → redirigir a su panel
   if (user && isClientRoute) {
-    const roleNames = await getUserRoles(request)
-    const hasSastreRole = roleNames.some((n: string) => SASTRE_ROLES.includes(n))
-    const hasVendedorRole = roleNames.some((n: string) => VENDEDOR_ROLES.includes(n))
-    const hasStaffRole = roleNames.some((n: string) => STAFF_ROLES.includes(n))
     if (hasSastreRole) {
       const url = request.nextUrl.clone()
       url.pathname = '/sastre'
@@ -150,18 +174,14 @@ export async function updateSession(request: NextRequest) {
     }
   }
 
-  // Autenticado en /auth/login → redirigir según rol (sastre → /sastre, vendedor → /vendedor, staff → /admin, cliente → /mi-cuenta)
+  // Autenticado en /auth/login → redirigir según rol
   if (user && isLoginPage) {
-    const roleNames = await getUserRoles(request)
-    const isSastre = roleNames.some((n: string) => SASTRE_ROLES.includes(n))
-    const isVendedor = roleNames.some((n: string) => VENDEDOR_ROLES.includes(n))
-    const isStaff = roleNames.some((n: string) => STAFF_ROLES.includes(n))
     const url = request.nextUrl.clone()
-    if (isSastre) {
+    if (hasSastreRole) {
       url.pathname = '/sastre'
-    } else if (isVendedor) {
+    } else if (hasVendedorRole) {
       url.pathname = '/vendedor'
-    } else if (isStaff) {
+    } else if (hasStaffRole) {
       url.pathname = '/admin/dashboard'
     } else {
       url.pathname = '/mi-cuenta'
@@ -182,16 +202,13 @@ export async function updateSession(request: NextRequest) {
     return redirectRes
   }
 
-  // Ruta /admin: si el usuario tiene solo rol sastre/sastre_plus → redirigir a /sastre; si solo vendedor → /vendedor
-  // Excepciones: vendedor_avanzado puede acceder a /admin/stock/codigos-barras, /admin/stock/productos (crear/editar); todos los vendedores a /admin/calendario
+  // Ruta /admin: sastre → /sastre, vendedor → /vendedor
+  // Excepciones: vendedor_avanzado puede acceder a codigos-barras, productos; todos los vendedores a /admin/calendario
   if (user && isAdminRoute) {
-    const roleNames = await getUserRoles(request)
-    const hasSastreRole = roleNames.some((n: string) => SASTRE_ROLES.includes(n))
-    const hasVendedorRole = roleNames.some((n: string) => VENDEDOR_ROLES.includes(n))
-    const isVendedorAvanzado = roleNames.includes('vendedor_avanzado')
+    const isVendedorAvanzado = userRoles.includes('vendedor_avanzado')
     const isCodigosBarrasRoute = pathname.startsWith('/admin/stock/codigos-barras')
-    const isProductosRoute = pathname.startsWith('/admin/stock/productos')
-    const isCalendarioRoute = pathname.startsWith('/admin/calendario')
+    const isProductosRoute     = pathname.startsWith('/admin/stock/productos')
+    const isCalendarioRoute    = pathname.startsWith('/admin/calendario')
     if (hasSastreRole) {
       const url = request.nextUrl.clone()
       url.pathname = '/sastre'
@@ -210,10 +227,8 @@ export async function updateSession(request: NextRequest) {
     }
   }
 
-  // Ruta /vendedor: usuario debe tener rol vendedor_basico o vendedor_avanzado
+  // Ruta /vendedor: usuario debe tener rol vendedor
   if (user && isVendedorRoute) {
-    const roleNames = await getUserRoles(request)
-    const hasVendedorRole = roleNames.some((n: string) => VENDEDOR_ROLES.includes(n))
     if (!hasVendedorRole) {
       const url = request.nextUrl.clone()
       url.pathname = '/auth/login'
@@ -224,10 +239,8 @@ export async function updateSession(request: NextRequest) {
     }
   }
 
-  // Ruta /sastre: usuario debe tener rol sastre o sastre_plus
+  // Ruta /sastre: usuario debe tener rol sastre
   if (user && isSastreRoute) {
-    const roleNames = await getUserRoles(request)
-    const hasSastreRole = roleNames.some((n: string) => SASTRE_ROLES.includes(n))
     if (!hasSastreRole) {
       const url = request.nextUrl.clone()
       url.pathname = '/auth/login'

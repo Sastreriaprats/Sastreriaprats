@@ -4,6 +4,8 @@ import { getPublicBlogPosts } from '@/actions/cms'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
+export const revalidate = 600
+
 export const metadata: Metadata = {
   title: 'Blog',
   description: 'Noticias, consejos y novedades de Sastrería Prats — sastrería de lujo en Madrid.',

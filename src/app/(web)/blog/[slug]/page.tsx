@@ -2,6 +2,8 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ArrowLeft, Calendar, User, Tag } from 'lucide-react'
+
+export const revalidate = 1800
 import { getPublicBlogPost } from '@/actions/cms'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'

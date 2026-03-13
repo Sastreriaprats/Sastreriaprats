@@ -1,5 +1,7 @@
 import { buildMetadata } from '@/lib/seo/metadata'
 
+export const revalidate = 86400
+
 export const metadata = buildMetadata({
   title: 'Aviso Legal — Sastrería Prats',
   description: 'Aviso legal y condiciones de uso de Sastrería Prats.',

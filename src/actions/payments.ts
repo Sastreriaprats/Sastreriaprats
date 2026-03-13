@@ -70,113 +70,27 @@ export const getOrderPayments = protectedAction<{ tailoring_order_id: string }, 
 export const addOrderPayment = protectedAction<AddOrderPaymentInput, OrderPayment>(
   { permission: 'orders.edit', auditAction: 'payment', auditModule: 'orders' },
   async (ctx, input) => {
-    try {
-      console.log('[addOrderPayment] iniciando con input:', JSON.stringify(input))
-      const { data: payment, error: insertError } = await ctx.adminClient
-        .from('tailoring_order_payments')
-        .insert({
-          tailoring_order_id: input.tailoring_order_id,
-          payment_date: input.payment_date,
-          payment_method: input.payment_method,
-          amount: input.amount,
-          reference: input.reference ?? null,
-          notes: input.notes ?? null,
-          next_payment_date: input.next_payment_date ?? null,
-          created_by: ctx.userId,
-        })
-        .select('id, tailoring_order_id, payment_date, payment_method, amount, reference, notes, next_payment_date, created_by, created_at')
-        .single()
+    const { data: result, error: rpcError } = await ctx.adminClient.rpc('rpc_add_order_payment', {
+      p_tailoring_order_id: input.tailoring_order_id,
+      p_payment_date: input.payment_date,
+      p_payment_method: input.payment_method,
+      p_amount: input.amount,
+      p_reference: input.reference ?? null,
+      p_notes: input.notes ?? null,
+      p_next_payment_date: input.next_payment_date ?? null,
+      p_store_id: input.storeId ?? null,
+      p_user_id: ctx.userId,
+    })
 
-      if (insertError) {
-        console.error('[addOrderPayment] insert:', insertError)
-        return failure(insertError.message)
-      }
+    if (rpcError) return failure(rpcError.message)
 
-      // Recalcular total_paid desde los pagos registrados
-      const orderId = input.tailoring_order_id
-      const { data: pagos } = await ctx.adminClient
-        .from('tailoring_order_payments')
-        .select('amount')
-        .eq('tailoring_order_id', orderId)
+    revalidatePath(`/sastre/pedidos/${input.tailoring_order_id}`)
 
-      const nuevoTotalPaid = pagos?.reduce((sum, p) => sum + Number(p.amount), 0) ?? 0
+    const methodLabels: Record<string, string> = { cash: 'efectivo', card: 'tarjeta', transfer: 'transferencia', check: 'cheque', bizum: 'bizum', voucher: 'vale' }
+    const methodLabel = methodLabels[input.payment_method] ?? input.payment_method
+    const auditDescription = `Pago ${Number(input.amount).toFixed(2)}€ · Pedido ${result.order_number} · Método: ${methodLabel}`
 
-      await ctx.adminClient
-        .from('tailoring_orders')
-        .update({ total_paid: nuevoTotalPaid })
-        .eq('id', orderId)
-
-      const { data: orderRow } = await ctx.adminClient
-        .from('tailoring_orders')
-        .select('order_number')
-        .eq('id', input.tailoring_order_id)
-        .single()
-      const orderNumber = (orderRow as any)?.order_number ?? ''
-      const methodLabels: Record<string, string> = { cash: 'efectivo', card: 'tarjeta', transfer: 'transferencia', check: 'cheque', bizum: 'bizum', voucher: 'vale' }
-      const methodLabel = methodLabels[input.payment_method] ?? input.payment_method
-
-      const importe = Number(input.amount)
-      const baseAmount = importe / 1.21
-      const taxAmountManual = importe - baseAmount
-      let sessionQuery = ctx.adminClient
-        .from('cash_sessions')
-        .select('id')
-        .eq('status', 'open')
-        .limit(1)
-      if (input.storeId) sessionQuery = sessionQuery.eq('store_id', input.storeId)
-      const { data: activeSession } = await sessionQuery.maybeSingle()
-      const activeSessionId = activeSession?.id ?? null
-      const { error: mtError } = await ctx.adminClient.from('manual_transactions').insert({
-        type: 'income',
-        date: input.payment_date,
-        description: 'Pago pedido - ' + orderNumber,
-        category: 'sastreria',
-        amount: baseAmount,
-        tax_rate: 21,
-        tax_amount: taxAmountManual,
-        total: importe,
-        notes: 'Pedido ' + orderNumber + ' - ' + methodLabel,
-        created_by: ctx.userId,
-        cash_session_id: activeSessionId,
-      })
-      if (mtError) console.error('[addOrderPayment] manual_transactions error:', mtError)
-      console.log('[addOrderPayment] mtError:', JSON.stringify(mtError), 'activeSessionId:', activeSessionId)
-
-      if (activeSessionId) {
-        const methodMap: Record<string, string> = {
-          cash: 'total_cash_sales',
-          card: 'total_card_sales',
-          transfer: 'total_transfer_sales',
-          check: 'total_transfer_sales',
-        }
-        const field = methodMap[input.payment_method]
-        if (field) {
-          const { data: currentSession } = await ctx.adminClient
-            .from('cash_sessions')
-            .select(`total_sales, ${field}`)
-            .eq('id', activeSessionId)
-            .single()
-          if (currentSession) {
-            const session = currentSession as unknown as { total_sales?: number; [k: string]: unknown }
-            await ctx.adminClient
-              .from('cash_sessions')
-              .update({
-                total_sales: (session.total_sales || 0) + input.amount,
-                [field]: ((session[field] as number) || 0) + input.amount,
-              })
-              .eq('id', activeSessionId)
-          }
-        }
-      }
-
-      revalidatePath(`/sastre/pedidos/${input.tailoring_order_id}`)
-
-      const auditDescription = `Pago ${Number(input.amount).toFixed(2)}€ · Pedido ${orderNumber} · Método: ${methodLabel}`
-      return success(serializeForServerAction({ ...payment!, auditDescription }))
-    } catch (e) {
-      console.error('[addOrderPayment] unexpected:', e)
-      return failure('Error al registrar pago')
-    }
+    return success(serializeForServerAction({ ...result, auditDescription }))
   }
 )
 
@@ -312,7 +226,7 @@ export const addSalePayment = protectedAction<AddSalePaymentInput, any>(
 
       const baseAmount = input.amount / 1.21
       const taxAmount = input.amount - baseAmount
-      await ctx.adminClient.from('manual_transactions').insert({
+      const mtPayloadSale = {
         type: 'income',
         date: new Date().toISOString().split('T')[0],
         description: `Cobro venta - Ticket ${saleData?.ticket_number ?? input.sale_id}`,
@@ -324,7 +238,11 @@ export const addSalePayment = protectedAction<AddSalePaymentInput, any>(
         notes: `Método: ${input.payment_method} - Tipo: ${saleData?.sale_type ?? ''}`,
         created_by: ctx.userId,
         cash_session_id: activeSessionId,
-      })
+      }
+      const { error: mtErrorSale } = await ctx.adminClient.from('manual_transactions').insert(mtPayloadSale)
+      if (mtErrorSale) {
+        console.error('[addSalePayment] manual_transactions INSERT error:', mtErrorSale.message, { code: (mtErrorSale as any).code, payload: mtPayloadSale })
+      }
 
       return success(serializeForServerAction(payment!))
     } catch (e) {

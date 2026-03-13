@@ -4,16 +4,50 @@ import { protectedAction } from '@/lib/server/action-wrapper'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { success, failure } from '@/lib/errors'
 
-/** Lista tejidos con búsqueda (usa cliente admin para evitar RLS). */
-export const listFabrics = protectedAction<{ search?: string; limit?: number }, { data: any[] }>(
+/**
+ * Genera un fabric_code automático con formato XXXX-TEL-NNN.
+ * Recibe el adminClient ya instanciado para reutilizarlo.
+ */
+export async function generateFabricCode(adminClient: ReturnType<typeof createAdminClient>, supplierId: string): Promise<string> {
+  const { data: supplier } = await adminClient
+    .from('suppliers')
+    .select('name')
+    .eq('id', supplierId)
+    .single()
+
+  const prefix = ((supplier as any)?.name || '')
+    .toUpperCase()
+    .replace(/[^A-Z]/g, '')
+    .slice(0, 4)
+    .padEnd(4, 'X')
+
+  const { count } = await adminClient
+    .from('fabrics')
+    .select('*', { count: 'exact', head: true })
+    .ilike('fabric_code', `${prefix}-TEL-%`)
+
+  const next = (count ?? 0) + 1
+  return `${prefix}-TEL-${String(next).padStart(3, '0')}`
+}
+
+/** Lista tejidos con búsqueda y filtros (usa cliente admin para evitar RLS). */
+export const listFabrics = protectedAction<
+  { search?: string; limit?: number; supplierId?: string; isActive?: boolean },
+  { data: any[] }
+>(
   { permission: 'stock.view', auditModule: 'stock' },
   async (ctx, params) => {
     let query = ctx.adminClient
       .from('fabrics')
-      .select('*, suppliers(name)', { count: 'exact' })
-      .eq('is_active', true)
+      .select('*, suppliers(id, name)', { count: 'exact' })
       .order('name', { ascending: true })
 
+    if (params.isActive !== undefined) {
+      query = query.eq('is_active', params.isActive)
+    }
+    if (params.supplierId?.trim()) {
+      query = query.eq('supplier_id', params.supplierId.trim())
+    }
     if (params.search?.trim()) {
       const term = `%${params.search.trim()}%`
       query = query.or(`name.ilike.${term},fabric_code.ilike.${term},composition.ilike.${term},color_name.ilike.${term}`)
@@ -135,10 +169,12 @@ export const createFabricAction = protectedAction<
   async (ctx, input) => {
     if (!input.supplier_id?.trim()) return failure('Proveedor obligatorio', 'VALIDATION')
     const unitVal = input.unit === 'yards' || input.unit === 'pieces' ? input.unit : 'meters'
+    const fabricCode = input.fabric_code?.trim()
+      || await generateFabricCode(ctx.adminClient, input.supplier_id)
     const { data, error } = await ctx.adminClient
       .from('fabrics')
       .insert({
-        fabric_code: input.fabric_code || null,
+        fabric_code: fabricCode,
         name: input.name,
         description: input.description || null,
         supplier_id: input.supplier_id,

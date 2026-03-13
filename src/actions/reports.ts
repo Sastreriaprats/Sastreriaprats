@@ -220,7 +220,7 @@ export const getTailorPerformance = protectedAction<
   async (ctx, { start_date, end_date }) => {
     const { data: orders } = await ctx.adminClient
       .from('tailoring_orders')
-      .select('id, total, status, created_by, profiles!tailoring_orders_created_by_fkey(full_name), tailoring_fittings(id)')
+      .select('id, total, status, created_by, profiles!tailoring_orders_created_by_fkey(full_name), tailoring_fittings(count)')
       .gte('created_at', start_date)
       .lte('created_at', end_date + 'T23:59:59')
       .not('status', 'eq', 'cancelled')
@@ -233,7 +233,11 @@ export const getTailorPerformance = protectedAction<
       if (!tailors[id]) tailors[id] = { name, orders: 0, revenue: 0, fittings: 0, completed: 0 }
       tailors[id].orders++
       tailors[id].revenue += (order.total as number) || 0
-      tailors[id].fittings += (order.tailoring_fittings as unknown[])?.length || 0
+      const fittingsData = order.tailoring_fittings as unknown
+      const fittingsCount = Array.isArray(fittingsData) && fittingsData.length > 0 && typeof fittingsData[0] === 'object' && fittingsData[0] !== null && 'count' in fittingsData[0]
+        ? (fittingsData[0] as { count: number }).count
+        : 0
+      tailors[id].fittings += fittingsCount
       if (['finished', 'delivered'].includes(order.status as string)) tailors[id].completed++
     }
 
@@ -247,41 +251,261 @@ export const getTailorPerformance = protectedAction<
   }
 )
 
-export const getClientsAnalytics = protectedAction<
+export const getSalesByStore = protectedAction<
   { start_date: string; end_date: string },
-  { newClients: number; totalClients: number; sources: Record<string, number>; topClients: { full_name: string; total_revenue: number }[] }
+  { store_id: string; store_name: string; pos: number; tailoring: number; total: number }[]
 >(
   { permission: 'reports.view', auditModule: 'reports' },
   async (ctx, { start_date, end_date }) => {
-    const { data: newClients } = await ctx.adminClient.from('clients')
-      .select('id, source')
-      .gte('created_at', start_date).lte('created_at', end_date + 'T23:59:59')
+    const [saleLinesRes, tailoringRes] = await Promise.all([
+      ctx.adminClient
+        .from('sale_lines')
+        .select('line_total, sales!inner(store_id, stores(name), status, created_at)')
+        .gte('sales.created_at', start_date)
+        .lte('sales.created_at', end_date + 'T23:59:59')
+        .eq('sales.status', 'completed'),
+      ctx.adminClient
+        .from('tailoring_orders')
+        .select('total, store_id, stores(name)')
+        .gte('created_at', start_date)
+        .lte('created_at', end_date + 'T23:59:59')
+        .not('status', 'eq', 'cancelled'),
+    ])
+
+    const stores: Record<string, { store_name: string; pos: number; tailoring: number }> = {}
+
+    for (const line of saleLinesRes.data || []) {
+      const sale = line.sales as any
+      const storeId = sale?.store_id || 'unknown'
+      const storeName = (sale?.stores as any)?.name || 'Sin tienda'
+      if (!stores[storeId]) stores[storeId] = { store_name: storeName, pos: 0, tailoring: 0 }
+      stores[storeId].pos += (line.line_total as number) || 0
+    }
+
+    for (const order of tailoringRes.data || []) {
+      const storeId = (order.store_id as string) || 'unknown'
+      const storeName = (order.stores as any)?.name || 'Sin tienda'
+      if (!stores[storeId]) stores[storeId] = { store_name: storeName, pos: 0, tailoring: 0 }
+      stores[storeId].tailoring += (order.total as number) || 0
+    }
+
+    return success(
+      Object.entries(stores)
+        .map(([store_id, d]) => ({ store_id, ...d, total: d.pos + d.tailoring }))
+        .sort((a, b) => b.total - a.total)
+    )
+  }
+)
+
+export const getSalesByEmployee = protectedAction<
+  { start_date: string; end_date: string },
+  { employee_id: string; employee_name: string; pos_ops: number; pos_total: number; tailoring_ops: number; tailoring_total: number; total: number }[]
+>(
+  { permission: 'reports.view', auditModule: 'reports' },
+  async (ctx, { start_date, end_date }) => {
+    const [saleLinesRes, paymentsRes] = await Promise.all([
+      ctx.adminClient
+        .from('sale_lines')
+        .select('sale_id, line_total, sales!inner(created_by, status, created_at)')
+        .gte('sales.created_at', start_date)
+        .lte('sales.created_at', end_date + 'T23:59:59')
+        .eq('sales.status', 'completed'),
+      ctx.adminClient
+        .from('tailoring_order_payments')
+        .select('amount, created_by, created_at')
+        .gte('created_at', start_date)
+        .lte('created_at', end_date + 'T23:59:59'),
+    ])
+
+    const employees: Record<string, { name: string; saleIds: Set<string>; pos_total: number; tailoring_ops: number; tailoring_total: number }> = {}
+
+    for (const line of saleLinesRes.data || []) {
+      const sale = line.sales as any
+      const empId = sale?.created_by || 'unknown'
+      if (!employees[empId]) employees[empId] = { name: empId, saleIds: new Set(), pos_total: 0, tailoring_ops: 0, tailoring_total: 0 }
+      if (line.sale_id) employees[empId].saleIds.add(String(line.sale_id))
+      employees[empId].pos_total += (line.line_total as number) || 0
+    }
+
+    for (const payment of paymentsRes.data || []) {
+      const empId = (payment.created_by as string) || 'unknown'
+      if (!employees[empId]) employees[empId] = { name: empId, saleIds: new Set(), pos_total: 0, tailoring_ops: 0, tailoring_total: 0 }
+      employees[empId].tailoring_ops += 1
+      employees[empId].tailoring_total += (payment.amount as number) || 0
+    }
+
+    // Resolve names in one batch query
+    const empIds = Object.keys(employees).filter(id => id !== 'unknown')
+    if (empIds.length > 0) {
+      const { data: profiles } = await ctx.adminClient
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', empIds)
+      for (const p of profiles || []) {
+        if (employees[p.id]) employees[p.id].name = (p.full_name as string) || p.id
+      }
+    }
+
+    const result = Object.entries(employees)
+      .map(([employee_id, d]) => ({
+        employee_id,
+        employee_name: d.name,
+        pos_ops: d.saleIds.size,
+        pos_total: d.pos_total,
+        tailoring_ops: d.tailoring_ops,
+        tailoring_total: d.tailoring_total,
+        total: d.pos_total + d.tailoring_total,
+      }))
+      .sort((a, b) => b.total - a.total)
+
+    return success(result)
+  }
+)
+
+export const getSalesByTimePattern = protectedAction<
+  { start_date: string; end_date: string },
+  {
+    byHour: { hour: number; total: number; count: number }[]
+    byDayOfWeek: { day: number; label: string; total: number; count: number }[]
+  }
+>(
+  { permission: 'reports.view', auditModule: 'reports' },
+  async (ctx, { start_date, end_date }) => {
+    const [saleLinesRes, paymentsRes] = await Promise.all([
+      ctx.adminClient
+        .from('sale_lines')
+        .select('line_total, sales!inner(created_at, status)')
+        .gte('sales.created_at', start_date)
+        .lte('sales.created_at', end_date + 'T23:59:59')
+        .eq('sales.status', 'completed'),
+      ctx.adminClient
+        .from('tailoring_order_payments')
+        .select('amount, created_at')
+        .gte('created_at', start_date)
+        .lte('created_at', end_date + 'T23:59:59'),
+    ])
+
+    const DAY_LABELS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
+    const hourMap = Array.from({ length: 24 }, (_, i) => ({ hour: i, total: 0, count: 0 }))
+    const dayMap = Array.from({ length: 7 }, (_, i) => ({ day: i, label: DAY_LABELS[i], total: 0, count: 0 }))
+
+    const accumulate = (dateStr: string, amount: number) => {
+      const d = new Date(dateStr)
+      const hour = d.getHours()
+      const dow = (d.getDay() + 6) % 7 // 0=Mon...6=Sun
+      hourMap[hour].total += amount
+      hourMap[hour].count += 1
+      dayMap[dow].total += amount
+      dayMap[dow].count += 1
+    }
+
+    for (const line of saleLinesRes.data || []) {
+      const sale = line.sales as any
+      if (sale?.created_at) accumulate(sale.created_at, (line.line_total as number) || 0)
+    }
+    for (const payment of paymentsRes.data || []) {
+      if (payment.created_at) accumulate(payment.created_at as string, (payment.amount as number) || 0)
+    }
+
+    return success({ byHour: hourMap, byDayOfWeek: dayMap })
+  }
+)
+
+export const getExpensesReport = protectedAction<
+  { start_date: string; end_date: string },
+  {
+    byCategory: { category: string; count: number; total: number }[]
+    grandTotal: number
+    recentExpenses: { description: string; category: string; total: number; date: string }[]
+  }
+>(
+  { permission: 'reports.view', auditModule: 'reports' },
+  async (ctx, { start_date, end_date }) => {
+    const { data } = await ctx.adminClient
+      .from('manual_transactions')
+      .select('category, total, description, date')
+      .eq('type', 'expense')
+      .gte('date', start_date)
+      .lte('date', end_date)
+      .order('date', { ascending: false })
+
+    const categories: Record<string, { count: number; total: number }> = {}
+    for (const tx of data || []) {
+      const cat = (tx.category as string) || 'Sin categoría'
+      if (!categories[cat]) categories[cat] = { count: 0, total: 0 }
+      categories[cat].count += 1
+      categories[cat].total += (tx.total as number) || 0
+    }
+
+    const byCategory = Object.entries(categories)
+      .map(([category, d]) => ({ category, ...d }))
+      .sort((a, b) => b.total - a.total)
+
+    const recentExpenses = (data || []).slice(0, 5).map(tx => ({
+      description: (tx.description as string) || '',
+      category: (tx.category as string) || 'Sin categoría',
+      total: (tx.total as number) || 0,
+      date: (tx.date as string) || '',
+    }))
+
+    return success({ byCategory, grandTotal: byCategory.reduce((s, c) => s + c.total, 0), recentExpenses })
+  }
+)
+
+export const getExpensesComparison = protectedAction<
+  { current_start: string; current_end: string; previous_start: string; previous_end: string },
+  { current: number; previous: number; change: number }
+>(
+  { permission: 'reports.view', auditModule: 'reports' },
+  async (ctx, { current_start, current_end, previous_start, previous_end }) => {
+    const [currentRes, previousRes] = await Promise.all([
+      ctx.adminClient.from('manual_transactions')
+        .select('total').eq('type', 'expense').gte('date', current_start).lte('date', current_end),
+      ctx.adminClient.from('manual_transactions')
+        .select('total').eq('type', 'expense').gte('date', previous_start).lte('date', previous_end),
+    ])
+    const current = (currentRes.data || []).reduce((s, t) => s + ((t.total as number) || 0), 0)
+    const previous = (previousRes.data || []).reduce((s, t) => s + ((t.total as number) || 0), 0)
+    const change = previous === 0 ? (current > 0 ? 100 : 0) : ((current - previous) / previous) * 100
+    return success({ current, previous, change })
+  }
+)
+
+export const getClientsAnalytics = protectedAction<
+  { start_date: string; end_date: string },
+  {
+    newClients: number; totalClients: number
+    sources: Record<string, number>
+    topClients: { full_name: string; total_revenue: number }[]
+    clientsWithPurchases: number
+  }
+>(
+  { permission: 'reports.view', auditModule: 'reports' },
+  async (ctx, { start_date, end_date }) => {
+    const [newClientsRes, totalRes, withPurchasesRes, topClientsRes] = await Promise.all([
+      ctx.adminClient.from('clients').select('id, source').gte('created_at', start_date).lte('created_at', end_date + 'T23:59:59'),
+      ctx.adminClient.from('clients').select('id', { count: 'exact' }),
+      ctx.adminClient.from('clients').select('id', { count: 'exact' }).gt('total_spent', 0),
+      ctx.adminClient.from('clients').select('first_name, last_name, total_spent').gt('total_spent', 0).gte('created_at', start_date).lte('created_at', end_date + 'T23:59:59').order('total_spent', { ascending: false }).limit(10),
+    ])
 
     const sources: Record<string, number> = {}
-    for (const c of newClients || []) {
+    for (const c of newClientsRes.data || []) {
       const src = (c.source as string) || 'unknown'
       sources[src] = (sources[src] || 0) + 1
     }
 
-    const { count: totalClients } = await ctx.adminClient.from('clients').select('id', { count: 'exact' })
-
-    const { data: topClientsData } = await ctx.adminClient
-      .from('clients')
-      .select('first_name, last_name, total_spent')
-      .gt('total_spent', 0)
-      .order('total_spent', { ascending: false })
-      .limit(10)
-
-    const topClients = (topClientsData || []).map(c => ({
+    const topClients = (topClientsRes.data || []).map(c => ({
       full_name: `${c.first_name} ${c.last_name}`,
       total_revenue: (c.total_spent as number) || 0,
     }))
 
     return success({
-      newClients: newClients?.length || 0,
-      totalClients: totalClients || 0,
+      newClients: newClientsRes.data?.length || 0,
+      totalClients: totalRes.count || 0,
       sources,
       topClients,
+      clientsWithPurchases: withPurchasesRes.count || 0,
     })
   }
 )

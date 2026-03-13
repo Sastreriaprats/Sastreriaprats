@@ -225,48 +225,31 @@ export function ProductForm({
         router.push('/admin/stock')
         return
       }
-      const isFabric = String(product?.product_type || '') === 'tailoring_fabric'
-      const metrosIniciales = isFabric ? metrosInicialesRef.current : 0
 
-      if (isFabric && metrosIniciales > 0 && variants.length === 0) {
-        const variantSku = `${product.sku}-01`
+      // Telas: no crear variantes, redirigir a la lista
+      if (String(product?.product_type || '') === 'tailoring_fabric') {
+        router.push('/admin/stock')
+        return
+      }
+
+      // Productos normales: crear variantes con stock inicial
+      for (const v of variants) {
         const res = await createVariantAction({
           product_id: product.id,
-          variant_sku: variantSku,
-          size: undefined,
-          color: undefined,
+          variant_sku: v.variant_sku,
+          size: v.size || undefined,
+          color: v.color || undefined,
         })
-        if (res.success && res.data?.id) {
+        if (res.success && res.data?.id && v.stock_inicial > 0) {
           const whId = initialStockWarehouseId || warehouses?.[0]?.id
           if (whId) {
             await adjustStock({
               variantId: res.data.id,
               warehouseId: whId,
-              quantity: metrosIniciales,
-              reason: 'Metros iniciales',
+              quantity: v.stock_inicial,
+              reason: 'Stock inicial',
               movementType: 'adjustment_positive',
             })
-          }
-        }
-      } else {
-        for (const v of variants) {
-          const res = await createVariantAction({
-            product_id: product.id,
-            variant_sku: v.variant_sku,
-            size: v.size || undefined,
-            color: v.color || undefined,
-          })
-          if (res.success && res.data?.id && v.stock_inicial > 0) {
-            const whId = initialStockWarehouseId || warehouses?.[0]?.id
-            if (whId) {
-              await adjustStock({
-                variantId: res.data.id,
-                warehouseId: whId,
-                quantity: v.stock_inicial,
-                reason: 'Stock inicial',
-                movementType: 'adjustment_positive',
-              })
-            }
           }
         }
       }

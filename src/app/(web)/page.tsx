@@ -3,6 +3,8 @@ import Image from 'next/image'
 import { getHomeContent } from '@/actions/cms'
 import type { Metadata } from 'next'
 
+export const revalidate = 3600
+
 export const metadata: Metadata = {
   title: 'Sastrería Prats — Madrid · Sastrería a medida y boutique',
   description: 'Sastrería de lujo en Madrid desde 1985. Trajes a medida, americanas y colección boutique.',

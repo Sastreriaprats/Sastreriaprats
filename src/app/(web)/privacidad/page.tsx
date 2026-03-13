@@ -1,5 +1,7 @@
 import { buildMetadata } from '@/lib/seo/metadata'
 
+export const revalidate = 86400
+
 export const metadata = buildMetadata({
   title: 'Política de Privacidad — Sastrería Prats',
   description: 'Política de privacidad de Sastrería Prats.',

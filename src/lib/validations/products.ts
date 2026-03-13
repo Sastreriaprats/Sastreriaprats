@@ -28,6 +28,7 @@ export const createProductSchema = z.object({
   images: z.array(z.string()).optional().nullable(),
   main_image_url: z.string().optional().nullable(),
   fabric_meters_used: z.number().min(0).optional().nullable(),
+  metros_iniciales: z.number().min(0).optional().nullable(),
 })
 
 export const updateProductSchema = createProductSchema.partial()

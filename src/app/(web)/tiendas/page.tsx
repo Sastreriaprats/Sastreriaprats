@@ -1,3 +1,5 @@
+export const revalidate = 3600
+
 export default function TiendasPage() {
   return (
     <div className="flex min-h-[60vh] items-center justify-center">

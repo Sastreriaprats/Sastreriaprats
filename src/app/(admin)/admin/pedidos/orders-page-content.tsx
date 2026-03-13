@@ -23,6 +23,7 @@ import { useList } from '@/hooks/use-list'
 import { usePermissions } from '@/hooks/use-permissions'
 import { listOrders } from '@/actions/orders'
 import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
+import { createClient } from '@/lib/supabase/client'
 import { OrdersPipeline } from './orders-pipeline'
 
 const orderStatuses = [
@@ -30,16 +31,41 @@ const orderStatuses = [
   'in_production', 'fitting', 'adjustments', 'finished', 'delivered', 'incident', 'cancelled',
 ]
 
+const supplierOrderStatusLabels: Record<string, string> = {
+  draft: 'Borrador', sent: 'Enviado', confirmed: 'Confirmado',
+  partially_received: 'Parcial', received: 'Recibido', incident: 'Incidencia', cancelled: 'Cancelado',
+}
+
 export function OrdersPageContent({ initialView, initialStatus, initialType }: { initialView: string; initialStatus?: string; initialType?: string }) {
   const router = useRouter()
   const { can } = usePermissions()
   const [view, setView] = useState<'table' | 'pipeline'>(initialView as any)
   const [statusFilter, setStatusFilter] = useState(initialStatus || 'all')
-  const [typeFilter, setTypeFilter] = useState(initialType === 'supplier' ? 'all' : (initialType || 'all'))
+  const [typeFilter, setTypeFilter] = useState(initialType || 'all')
+  const [supplierOrders, setSupplierOrders] = useState<any[]>([])
+  const [loadingSupplier, setLoadingSupplier] = useState(false)
 
   useEffect(() => {
-    if (initialType === 'supplier') router.replace('/admin/pedidos')
-  }, [initialType, router])
+    if (typeFilter !== 'supplier') return
+    const supabase = createClient()
+    setLoadingSupplier(true)
+    supabase
+      .from('supplier_orders')
+      .select(`id, order_number, status, total, order_date,
+        estimated_delivery_date, tailoring_order_id,
+        suppliers(name),
+        stores:destination_store_id(name),
+        tailoring_orders:tailoring_order_id(order_number)`)
+      .order('created_at', { ascending: false })
+      .then(({ data, error }) => {
+        setLoadingSupplier(false)
+        if (error) {
+          setSupplierOrders([])
+          return
+        }
+        setSupplierOrders(data ?? [])
+      })
+  }, [typeFilter])
 
   const {
     data: orders, total, totalPages, page, setPage,
@@ -61,7 +87,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType }: {
 
   const applyType = (v: string) => {
     setTypeFilter(v)
-    setFilters(prev => ({ ...prev, order_type: v !== 'all' ? v : undefined }))
+    setFilters(prev => ({ ...prev, order_type: v !== 'all' && v !== 'supplier' ? v : undefined }))
   }
 
   const hasActiveFilters = statusFilter !== 'all' || typeFilter !== 'all'
@@ -143,6 +169,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType }: {
               <SelectItem value="all">Todos los tipos</SelectItem>
               <SelectItem value="artesanal">Artesanal</SelectItem>
               <SelectItem value="industrial">Industrial</SelectItem>
+              <SelectItem value="supplier">A proveedor</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -184,7 +211,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType }: {
             )}
             {typeFilter !== 'all' && (
               <Badge variant="secondary" className="text-xs gap-1 pr-1">
-                {typeFilter === 'artesanal' ? 'Artesanal' : 'Industrial'}
+                {typeFilter === 'artesanal' ? 'Artesanal' : typeFilter === 'industrial' ? 'Industrial' : 'A proveedor'}
                 <button type="button" onClick={() => applyType('all')} className="ml-0.5 hover:text-foreground"><X className="h-3 w-3" /></button>
               </Badge>
             )}
@@ -194,6 +221,82 @@ export function OrdersPageContent({ initialView, initialStatus, initialType }: {
 
       {view === 'pipeline' ? (
         <OrdersPipeline orders={orders} isLoading={isLoading} onRefresh={refresh} />
+      ) : typeFilter === 'supplier' ? (
+        <>
+          <div className="rounded-lg border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Nº Pedido</TableHead>
+                  <TableHead>Proveedor</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead>Fecha</TableHead>
+                  <TableHead>Entrega est.</TableHead>
+                  <TableHead>Total</TableHead>
+                  <TableHead>Pedido sastrería</TableHead>
+                  <TableHead>Tienda</TableHead>
+                  <TableHead className="w-10"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {loadingSupplier ? (
+                  Array.from({ length: 8 }).map((_, i) => (
+                    <TableRow key={i}>
+                      <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-28" /></TableCell>
+                      <TableCell><Skeleton className="h-5 w-20 rounded-full" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                      <TableCell><Skeleton className="h-7 w-7 rounded" /></TableCell>
+                    </TableRow>
+                  ))
+                ) : supplierOrders.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={9} className="h-40 text-center text-muted-foreground">
+                      No hay pedidos a proveedor
+                    </TableCell>
+                  </TableRow>
+                ) : supplierOrders.map((so: any) => (
+                  <TableRow
+                    key={so.id}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => router.push(`/admin/proveedores?pedido=${so.id}`)}
+                  >
+                    <TableCell className="font-mono font-medium">{so.order_number}</TableCell>
+                    <TableCell className="text-sm">{so.suppliers?.name ?? '—'}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="text-xs">
+                        {supplierOrderStatusLabels[so.status] ?? so.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-sm">{formatDate(so.order_date)}</TableCell>
+                    <TableCell className="text-sm">{formatDate(so.estimated_delivery_date)}</TableCell>
+                    <TableCell className="font-medium">{formatCurrency(so.total)}</TableCell>
+                    <TableCell className="text-sm font-mono">
+                      {so.tailoring_orders?.order_number ?? '—'}
+                    </TableCell>
+                    <TableCell className="text-sm">{(so.stores && so.stores.name) ?? '—'}</TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => router.push(`/admin/proveedores?pedido=${so.id}`)}>
+                            <Eye className="mr-2 h-4 w-4" /> Ver ficha
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </>
       ) : (
         <>
           <div className="rounded-lg border">
@@ -206,7 +309,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType }: {
                   <TableHead>Estado</TableHead>
                   <SortHeader field="created_at">Fecha</SortHeader>
                   <SortHeader field="estimated_delivery_date">Entrega est.</SortHeader>
-                  <SortHeader field="total">Total</SortHeader>
+                  <TableHead>Total</TableHead>
                   <TableHead>Pagado</TableHead>
                   <TableHead>Pendiente</TableHead>
                   <TableHead>Tienda</TableHead>

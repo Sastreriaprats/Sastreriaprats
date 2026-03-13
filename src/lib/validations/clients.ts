@@ -23,7 +23,7 @@ export const createClientSchema = z.object({
   standard_sizes: z.record(z.string(), z.string()).optional(),
   preferences: z.record(z.string(), z.any()).optional(),
   tags: z.array(z.string()).optional(),
-  source: z.string().optional().nullable(),
+  source: z.string().min(1, 'Indica cómo nos conoció'),
   discount_percentage: z.number().min(0).max(100).default(0),
   accepts_marketing: z.boolean().default(false),
   accepts_data_storage: z.boolean().default(false),

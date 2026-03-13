@@ -2,12 +2,21 @@
 
 import { useRef, useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { Textarea } from '@/components/ui/textarea'
-import { updateSupplierOrderStatusAction, createSupplierOrderAction, updateSupplierOrderFinanceAction } from '@/actions/suppliers'
+import {
+  updateSupplierOrderStatusAction,
+  createSupplierOrderAction,
+  updateSupplierOrderFinanceAction,
+  getSupplierOrderLines,
+  receiveSupplierOrderLines,
+  type SupplierOrderLineForReceipt,
+  type ReceiveSupplierOrderLineInput,
+} from '@/actions/suppliers'
 import { searchTailoringOrdersByNumber } from '@/actions/orders'
 import { createClient } from '@/lib/supabase/client'
 import { searchSupplierFabrics, searchSupplierProducts } from '@/actions/suppliers'
@@ -50,6 +59,12 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
   const [newOrderOpen, setNewOrderOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [markingReceivedOrderId, setMarkingReceivedOrderId] = useState<string | null>(null)
+  const [receptionDialogOpen, setReceptionDialogOpen] = useState(false)
+  const [receptionOrderId, setReceptionOrderId] = useState<string | null>(null)
+  const [receptionLines, setReceptionLines] = useState<SupplierOrderLineForReceipt[]>([])
+  const [receptionLinesLoading, setReceptionLinesLoading] = useState(false)
+  const [receptionSubmitting, setReceptionSubmitting] = useState(false)
+  const [receptionLineState, setReceptionLineState] = useState<Record<string, { selected: boolean; quantityReceived: string }>>({})
   const [newDeliveryOpen, setNewDeliveryOpen] = useState(false)
   const [creatingDelivery, setCreatingDelivery] = useState(false)
   const [uploadingOrderPdfId, setUploadingOrderPdfId] = useState<string | null>(null)
@@ -86,7 +101,6 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
     reference: string
     quantity: string
     unit: string
-    unit_price: string
     newFabric?: { name: string; fabric_code: string; reference: string; unit: string }
   }>>([])
   const [tailoringSearchQuery, setTailoringSearchQuery] = useState('')
@@ -105,6 +119,28 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
   const [newFabricForm, setNewFabricForm] = useState({ name: '', fabric_code: '', reference: '', unit: 'meters' })
   const fabricSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const productSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (!receptionDialogOpen || !receptionOrderId) return
+    setReceptionLinesLoading(true)
+    setReceptionLines([])
+    setReceptionLineState({})
+    getSupplierOrderLines(receptionOrderId).then((res) => {
+      setReceptionLinesLoading(false)
+      if (res.success && res.data) {
+        setReceptionLines(res.data)
+        const initial: Record<string, { selected: boolean; quantityReceived: string }> = {}
+        res.data.forEach((line) => {
+          const remaining = Math.max(0, line.quantity - line.quantity_received)
+          initial[line.id] = {
+            selected: remaining > 0,
+            quantityReceived: remaining > 0 ? String(remaining) : '0',
+          }
+        })
+        setReceptionLineState(initial)
+      }
+    })
+  }, [receptionDialogOpen, receptionOrderId])
+
   useEffect(() => {
     if (!newOrderOpen) return
     const q = tailoringSearchQuery.trim()
@@ -161,7 +197,6 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
       reference: '',
       quantity: '1',
       unit: 'unidades',
-      unit_price: '',
     }])
   }
   const updateOrderLine = (tempId: string, upd: Partial<typeof orderLines[0]>) => {
@@ -173,13 +208,6 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
     if (fabricSearchForLine === tempId) setFabricSearchForLine(null)
     if (productSearchForLine === tempId) setProductSearchForLine(null)
   }
-  const computedOrderTotal = orderLines.reduce((sum, l) => {
-    const q = parseFloat(String(l.quantity).replace(',', '.'))
-    const p = parseFloat(String(l.unit_price).replace(',', '.'))
-    if (Number.isFinite(q) && Number.isFinite(p)) return sum + q * p
-    return sum
-  }, 0)
-
   const contacts = supplier.supplier_contacts || []
   const fabrics = supplier.fabrics || []
   const orders = supplier.supplier_orders || []
@@ -404,7 +432,14 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                     <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">Sin pedidos</TableCell></TableRow>
                   ) : [...orders].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((o: any) => (
                     <TableRow key={o.id}>
-                      <TableCell className="font-mono">{o.order_number}</TableCell>
+                      <TableCell className="font-mono">
+                        <Link
+                          href={`/admin/proveedores/${supplier.id}/pedidos/${o.id}`}
+                          className="hover:underline text-primary"
+                        >
+                          {o.order_number}
+                        </Link>
+                      </TableCell>
                       <TableCell><Badge className={`text-xs ${orderStatusColors[o.status] || ''}`}>{orderStatusLabels[o.status] || o.status}</Badge></TableCell>
                       <TableCell className="font-medium">{formatCurrency(o.total)}</TableCell>
                       <TableCell>
@@ -433,7 +468,22 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                           >
                             Completar pago/coste
                           </Button>
-                          {o.status !== 'received' && o.status !== 'cancelled' ? (
+                          {['sent', 'confirmed', 'partially_received'].includes(o.status) ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-xs"
+                              disabled={receptionLinesLoading || receptionSubmitting}
+                              onClick={() => {
+                                setReceptionOrderId(o.id)
+                                setReceptionLines([])
+                                setReceptionLineState({})
+                                setReceptionDialogOpen(true)
+                              }}
+                            >
+                              Registrar recepción
+                            </Button>
+                          ) : o.status !== 'received' && o.status !== 'cancelled' ? (
                             <Button
                               variant="outline"
                               size="sm"
@@ -745,7 +795,10 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                   <div key={line.tempId} className="flex flex-wrap items-start gap-2 rounded border bg-background p-2">
                     <Select
                       value={line.type}
-                      onValueChange={(v: 'fabric' | 'product' | 'custom') => updateOrderLine(line.tempId, { type: v, fabric_id: undefined, product_id: undefined, description: line.type === 'custom' ? line.description : '' })}
+                      onValueChange={(v: 'fabric' | 'product' | 'custom') => {
+                        const unit = v === 'fabric' ? 'metros' : v === 'product' ? 'unidades' : line.unit
+                        updateOrderLine(line.tempId, { type: v, unit, fabric_id: undefined, product_id: undefined, description: line.type === 'custom' ? line.description : '' })
+                      }}
                     >
                       <SelectTrigger className="w-[140px] h-9">
                         <SelectValue />
@@ -825,10 +878,10 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                           onFocus={() => setProductSearchForLine(line.tempId)}
                         />
                         {productSearchForLine === line.tempId && productSearchResults.length > 0 && (
-                          <ul className="absolute left-0 right-0 top-full z-[100] mt-1 min-w-full rounded-md border border-border bg-popover py-1 text-sm shadow-lg max-h-40 overflow-auto">
+                          <ul className="absolute left-0 top-full z-[100] mt-1 min-w-[300px] w-max max-w-[min(28rem,85vw)] rounded-md border border-border bg-popover py-1 text-sm shadow-lg max-h-40 overflow-auto overflow-x-visible">
                             {productSearchResults.map((p) => (
-                              <li key={p.id}>
-                                <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-muted" onClick={() => { updateOrderLine(line.tempId, { product_id: p.id, description: p.name }); setProductSearchForLine(null); setProductSearchQuery('') }}>{p.sku} — {p.name}</button>
+                              <li key={p.id} className="min-w-0">
+                                <button type="button" className="w-full min-w-[300px] px-3 py-1.5 text-left hover:bg-muted whitespace-nowrap overflow-x-auto" onClick={() => { updateOrderLine(line.tempId, { product_id: p.id, description: p.name }); setProductSearchForLine(null); setProductSearchQuery('') }}>{p.sku} — {p.name}</button>
                               </li>
                             ))}
                           </ul>
@@ -839,22 +892,24 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                       <Input placeholder="Descripción" className="h-9 flex-1 min-w-[140px]" value={line.description} onChange={(e) => updateOrderLine(line.tempId, { description: e.target.value })} />
                     )}
                     <Input type="number" min="0" step="0.01" placeholder="Cant." className="w-20 h-9" value={line.quantity} onChange={(e) => updateOrderLine(line.tempId, { quantity: e.target.value })} />
-                    <Select value={line.unit} onValueChange={(v) => updateOrderLine(line.tempId, { unit: v })}>
-                      <SelectTrigger className="w-[100px] h-9"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="metros">metros</SelectItem>
-                        <SelectItem value="unidades">unidades</SelectItem>
-                        <SelectItem value="kg">kg</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Input type="number" min="0" step="0.01" placeholder="P. unit." className="w-24 h-9" value={line.unit_price} onChange={(e) => updateOrderLine(line.tempId, { unit_price: e.target.value })} />
+                    {line.type === 'fabric' ? (
+                      <span className="inline-flex h-9 w-[100px] items-center text-sm text-muted-foreground">metros</span>
+                    ) : line.type === 'product' ? (
+                      <span className="inline-flex h-9 w-[100px] items-center text-sm text-muted-foreground">unidades</span>
+                    ) : (
+                      <Select value={line.unit} onValueChange={(v) => updateOrderLine(line.tempId, { unit: v })}>
+                        <SelectTrigger className="w-[100px] h-9"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="metros">metros</SelectItem>
+                          <SelectItem value="unidades">unidades</SelectItem>
+                          <SelectItem value="kg">kg</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
                     <Button type="button" variant="ghost" size="icon" className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => removeOrderLine(line.tempId)}>×</Button>
                   </div>
                 ))}
               </div>
-              {orderLines.length > 0 && (
-                <p className="text-sm font-medium">Total: {formatCurrency(computedOrderTotal)}</p>
-              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="new-order-notes">Notas</Label>
@@ -910,19 +965,13 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                     description: l.description.trim(),
                     reference: (l.newFabric?.reference ?? l.reference)?.trim() || null,
                     quantity: parseFloat(String(l.quantity).replace(',', '.')) || 0,
-                    unit: l.unit || 'unidades',
-                    unit_price: parseFloat(String(l.unit_price).replace(',', '.')) || 0,
+                    unit: l.type === 'fabric' ? 'metros' : l.type === 'product' ? 'unidades' : (l.unit || 'unidades'),
+                    unit_price: 0,
                   })
                 }
-                const total = orderLines.reduce((sum, l) => {
-                  const q = parseFloat(String(l.quantity).replace(',', '.'))
-                  const p = parseFloat(String(l.unit_price).replace(',', '.'))
-                  if (Number.isFinite(q) && Number.isFinite(p)) return sum + q * p
-                  return sum
-                }, 0)
                 const res = await createSupplierOrderAction({
                   supplier_id: supplier.id,
-                  total,
+                  total: 0,
                   payment_due_date: newOrderForm.payment_due_date || null,
                   estimated_delivery_date: newOrderForm.estimated_delivery_date,
                   notes: newOrderForm.notes?.trim() || null,
@@ -1110,6 +1159,156 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
             >
               {savingFinance && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Guardar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={receptionDialogOpen}
+        onOpenChange={(open) => {
+          setReceptionDialogOpen(open)
+          if (!open) {
+            setReceptionOrderId(null)
+            setReceptionLines([])
+            setReceptionLineState({})
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Truck className="h-5 w-5" /> Registrar recepción
+              {receptionOrderId && (
+                <span className="font-mono text-muted-foreground font-normal">
+                  {orders.find((x: any) => x.id === receptionOrderId)?.order_number}
+                </span>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Marca las líneas a incluir en esta recepción e indica la cantidad recibida en cada una. El stock se actualizará al confirmar.
+          </p>
+          {receptionLinesLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : receptionLines.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-6">No hay líneas en este pedido.</p>
+          ) : (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-12">Incluir</TableHead>
+                    <TableHead>Descripción</TableHead>
+                    <TableHead className="text-right">Pedido</TableHead>
+                    <TableHead className="text-right">Ya recibido</TableHead>
+                    <TableHead className="w-32">Cant. esta entrega</TableHead>
+                    <TableHead className="w-20">Unidad</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {receptionLines.map((line) => {
+                    const remaining = Math.max(0, line.quantity - line.quantity_received)
+                    const state = receptionLineState[line.id] ?? { selected: remaining > 0, quantityReceived: String(remaining) }
+                    return (
+                      <TableRow key={line.id}>
+                        <TableCell>
+                          <input
+                            type="checkbox"
+                            checked={state.selected}
+                            onChange={(e) =>
+                              setReceptionLineState((prev) => ({
+                                ...prev,
+                                [line.id]: { ...state, selected: e.target.checked },
+                              }))
+                            }
+                            className="h-4 w-4 rounded border-input"
+                          />
+                        </TableCell>
+                        <TableCell className="font-medium">{line.description}</TableCell>
+                        <TableCell className="text-right">{line.quantity}</TableCell>
+                        <TableCell className="text-right text-muted-foreground">{line.quantity_received}</TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={state.quantityReceived}
+                            onChange={(e) =>
+                              setReceptionLineState((prev) => ({
+                                ...prev,
+                                [line.id]: { ...state, quantityReceived: e.target.value },
+                              }))
+                            }
+                            disabled={!state.selected}
+                            className="h-9"
+                          />
+                        </TableCell>
+                        <TableCell className="text-muted-foreground text-sm">{line.unit ?? 'ud'}</TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReceptionDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              disabled={
+                receptionSubmitting ||
+                receptionLines.length === 0 ||
+                !receptionOrderId ||
+                !receptionLines.some((line) => {
+                  const state = receptionLineState[line.id]
+                  return state?.selected && Number(state?.quantityReceived) > 0
+                })
+              }
+              onClick={async () => {
+                if (!receptionOrderId) return
+                const linesToSend: ReceiveSupplierOrderLineInput[] = []
+                for (const line of receptionLines) {
+                  const state = receptionLineState[line.id]
+                  if (!state?.selected) continue
+                  const qty = Number(String(state.quantityReceived).replace(',', '.'))
+                  if (!Number.isFinite(qty) || qty <= 0) continue
+                  const referenceId = line.fabric_id ?? line.product_id
+                  if (!referenceId) continue
+                  const type: 'fabric' | 'product' = line.fabric_id ? 'fabric' : 'product'
+                  linesToSend.push({ lineId: line.id, quantityReceived: qty, type, referenceId })
+                }
+                if (linesToSend.length === 0) {
+                  toast.error('Indica al menos una línea con cantidad recibida mayor que 0')
+                  return
+                }
+                setReceptionSubmitting(true)
+                const res = await receiveSupplierOrderLines({ orderId: receptionOrderId, lines: linesToSend })
+                setReceptionSubmitting(false)
+                if (res?.success) {
+                  toast.success(
+                    res.data?.status === 'received'
+                      ? 'Recepción completada. Pedido recibido por completo.'
+                      : 'Recepción registrada. Pedido parcialmente recibido.'
+                  )
+                  if ((res.data as any)?.stock_warnings > 0) {
+                    toast.warning('Algunas líneas no actualizaron stock (tejido/producto no encontrado o sin variante).')
+                  }
+                  setReceptionDialogOpen(false)
+                  setReceptionOrderId(null)
+                  setReceptionLines([])
+                  setReceptionLineState({})
+                  router.refresh()
+                } else {
+                  toast.error((res as any)?.error ?? 'No se pudo registrar la recepción')
+                }
+              }}
+            >
+              {receptionSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Confirmar recepción
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,7 +1,6 @@
 'use server'
 
 import { protectedAction } from '@/lib/server/action-wrapper'
-import { getNextNumber } from '@/lib/server/query-helpers'
 import {
   openCashSessionSchema, closeCashSessionSchema,
   createSaleSchema,
@@ -179,164 +178,22 @@ export const createSale = protectedAction<{
     const parsedSale = createSaleSchema.safeParse(saleInput)
     if (!parsedSale.success) return failure(parsedSale.error.issues[0].message)
 
-    const ticketNumber = await getNextNumber('sales', 'ticket_number', 'TICK')
-
-    let subtotal = 0
-    const processedLines = linesInput.map((line: any) => {
-      const lineDiscount = line.unit_price * line.quantity * (line.discount_percentage / 100)
-      const taxableAmount = (line.unit_price * line.quantity) - lineDiscount
-      const lineTotal = taxableAmount * (1 + line.tax_rate / 100)
-      subtotal += line.unit_price * line.quantity - lineDiscount
-      return { ...line, discount_amount: lineDiscount, line_total: lineTotal }
+    const { data: result, error: rpcError } = await ctx.adminClient.rpc('rpc_create_sale', {
+      p_sale: parsedSale.data,
+      p_lines: linesInput,
+      p_payments: paymentsInput,
+      p_user_id: ctx.userId,
     })
 
-    const saleDiscount = subtotal * (parsedSale.data.discount_percentage || 0) / 100
-    const taxableTotal = subtotal - saleDiscount
-    const taxAmount = taxableTotal * 0.21
-    const total = taxableTotal + taxAmount
+    if (rpcError) return failure(rpcError.message)
 
-    const paymentMethods = paymentsInput.map((p: any) => p.payment_method)
-    const paymentMethod = paymentMethods.length === 1 ? paymentMethods[0] : 'mixed'
+    // Fire-and-forget: asiento contable
+    createSaleJournalEntry(result.id).catch(() => {})
 
-    const { data: sale, error: saleError } = await ctx.adminClient
-      .from('sales')
-      .insert({
-        ...parsedSale.data,
-        ticket_number: ticketNumber,
-        salesperson_id: parsedSale.data.salesperson_id ?? ctx.userId,
-        subtotal,
-        discount_amount: saleDiscount,
-        tax_amount: taxAmount,
-        total,
-        payment_method: paymentMethod,
-        status: 'completed',
-      })
-      .select()
-      .single()
+    const auditDescription = `Venta #${result.ticket_number} · Cliente: ${result.client_name} · Total: ${Number(result.total).toFixed(2)}€`
 
-    if (saleError) return failure(saleError.message)
-
-    const saleLines = processedLines.map((line: any) => ({ ...line, sale_id: sale.id }))
-    await ctx.adminClient.from('sale_lines').insert(saleLines)
-
-    const totalPaid = paymentsInput.reduce((sum: number, p: any) => sum + Number(p.amount), 0)
-    const paymentStatus = totalPaid >= total ? 'paid' : totalPaid > 0 ? 'partial' : 'pending'
-
-    const salePayments = paymentsInput.map((p: any) => ({
-      sale_id: sale.id,
-      payment_method: p.payment_method,
-      amount: p.amount,
-      reference: p.reference ?? null,
-      voucher_id: p.voucher_id ?? null,
-      next_payment_date: p.next_payment_date ?? null,
-    }))
-    await ctx.adminClient.from('sale_payments').insert(salePayments)
-
-    await ctx.adminClient
-      .from('sales')
-      .update({ amount_paid: totalPaid, payment_status: paymentStatus })
-      .eq('id', sale.id)
-
-    // Asiento contable automático por venta completada
-    createSaleJournalEntry(sale.id).catch(() => {})
-
-    // Update cash session totals directly
-    const { data: currentSession } = await ctx.adminClient
-      .from('cash_sessions')
-      .select('total_sales, total_cash_sales, total_card_sales, total_bizum_sales, total_transfer_sales, total_voucher_sales')
-      .eq('id', parsedSale.data.cash_session_id)
-      .single()
-
-    if (currentSession) {
-      const updates: Record<string, number> = {
-        total_sales: (currentSession.total_sales || 0) + total,
-      }
-      for (const p of paymentsInput) {
-        const field = `total_${p.payment_method}_sales` as string
-        if (field in currentSession) {
-          updates[field] = ((currentSession as any)[field] || 0) + p.amount
-        }
-      }
-      await ctx.adminClient
-        .from('cash_sessions')
-        .update(updates)
-        .eq('id', parsedSale.data.cash_session_id)
-    }
-
-    for (const p of paymentsInput) {
-      const baseAmount = Number(p.amount) / 1.21
-      const taxAmount = Number(p.amount) - baseAmount
-      await ctx.adminClient.from('manual_transactions').insert({
-        type: 'income',
-        date: new Date().toISOString().split('T')[0],
-        description: `Venta TPV - ${ticketNumber}`,
-        category: 'tpv',
-        amount: baseAmount,
-        tax_rate: 21,
-        tax_amount: taxAmount,
-        total: Number(p.amount),
-        notes: `Pedido ${ticketNumber} - ${p.payment_method}`,
-        created_by: ctx.userId,
-        cash_session_id: parsedSale.data.cash_session_id ?? null,
-      })
-    }
-
-    // Update stock for product variants
-    for (const line of linesInput) {
-      if (line.product_variant_id) {
-        const { data: warehouse } = await ctx.adminClient
-          .from('warehouses')
-          .select('id')
-          .eq('store_id', parsedSale.data.store_id)
-          .eq('is_main', true)
-          .single()
-
-        if (warehouse) {
-          const { data: stock } = await ctx.adminClient
-            .from('stock_levels')
-            .select('id, quantity')
-            .eq('product_variant_id', line.product_variant_id)
-            .eq('warehouse_id', warehouse.id)
-            .single()
-
-          if (stock) {
-            const newQty = Math.max(0, stock.quantity - line.quantity)
-            await ctx.adminClient
-              .from('stock_levels')
-              .update({ quantity: newQty, last_sale_at: new Date().toISOString(), last_movement_at: new Date().toISOString() })
-              .eq('id', stock.id)
-
-            await ctx.adminClient.from('stock_movements').insert({
-              product_variant_id: line.product_variant_id,
-              warehouse_id: warehouse.id,
-              movement_type: 'sale',
-              quantity: -line.quantity,
-              stock_before: stock.quantity,
-              stock_after: newQty,
-              reference_type: 'sale',
-              reference_id: sale.id,
-              created_by: ctx.userId,
-              store_id: parsedSale.data.store_id,
-            })
-          }
-        }
-      }
-    }
-
-    let clientName = 'Sin cliente'
-    if (sale.client_id) {
-      const { data: client } = await ctx.adminClient
-        .from('clients')
-        .select('full_name, first_name, last_name')
-        .eq('id', sale.client_id)
-        .single()
-      if (client) clientName = (client as any).full_name || [ (client as any).first_name, (client as any).last_name ].filter(Boolean).join(' ') || 'Sin nombre'
-    }
-    const auditDescription = `Venta #${ticketNumber} · Cliente: ${clientName} · Total: ${Number(total).toFixed(2)}€`
     return success({
-      ...sale,
-      amount_paid: totalPaid,
-      payment_status: paymentStatus,
+      ...result,
       auditDescription,
     })
   }
@@ -449,22 +306,21 @@ export const listTickets = protectedAction<{
     if (list.length === 0) return success({ data: [], total, page, pageSize, totalPages: Math.ceil(total / pageSize) })
 
     const clientIds = [...new Set(list.map((s: any) => s.client_id).filter(Boolean))]
+    const saleIdsForLines = list.map((s: any) => s.id)
+
+    const [clientsResult, linesResult] = await Promise.all([
+      clientIds.length > 0
+        ? ctx.adminClient.from('clients').select('id, full_name, client_code').in('id', clientIds)
+        : Promise.resolve({ data: [] as any[] }),
+      ctx.adminClient.from('sale_lines').select('sale_id, description').in('sale_id', saleIdsForLines),
+    ])
+
     let clientsMap: Record<string, { full_name: string; client_code: string }> = {}
-    if (clientIds.length > 0) {
-      const { data: clients } = await ctx.adminClient
-        .from('clients')
-        .select('id, full_name, client_code')
-        .in('id', clientIds)
-      for (const c of clients ?? []) {
-        clientsMap[c.id] = { full_name: c.full_name ?? '', client_code: c.client_code ?? '' }
-      }
+    for (const c of clientsResult.data ?? []) {
+      clientsMap[c.id] = { full_name: c.full_name ?? '', client_code: c.client_code ?? '' }
     }
 
-    const saleIdsForLines = list.map((s: any) => s.id)
-    const { data: allLines } = await ctx.adminClient
-      .from('sale_lines')
-      .select('sale_id, description')
-      .in('sale_id', saleIdsForLines)
+    const allLines = linesResult.data
     const linesBySale: Record<string, string[]> = {}
     for (const l of allLines ?? []) {
       if (!linesBySale[l.sale_id]) linesBySale[l.sale_id] = []
@@ -640,110 +496,21 @@ export const createReturn = protectedAction<{
     revalidate: ['/pos'],
   },
   async (ctx, input) => {
-    const { data: originalSale } = await ctx.adminClient
-      .from('sales')
-      .select('*, sale_lines(*)')
-      .eq('id', input.original_sale_id)
-      .single()
+    const { data: result, error: rpcError } = await ctx.adminClient.rpc('rpc_create_return', {
+      p_original_sale_id: input.original_sale_id,
+      p_return_type: input.return_type,
+      p_line_ids: input.line_ids,
+      p_reason: input.reason,
+      p_store_id: input.store_id,
+      p_user_id: ctx.userId,
+    })
 
-    if (!originalSale) return failure('Venta original no encontrada')
+    if (rpcError) return failure(rpcError.message)
 
-    const returnLines = originalSale.sale_lines.filter((l: any) => input.line_ids.includes(l.id))
-    const totalReturned = returnLines.reduce((sum: number, l: any) => sum + l.line_total, 0)
-
-    let voucherId: string | null = null
-
-    if (input.return_type === 'voucher') {
-      const voucherCode = `DEV-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`
-
-      const { data: voucher, error: vError } = await ctx.adminClient
-        .from('vouchers')
-        .insert({
-          code: voucherCode,
-          voucher_type: 'fixed',
-          original_amount: totalReturned,
-          remaining_amount: totalReturned,
-          origin_sale_id: input.original_sale_id,
-          client_id: originalSale.client_id,
-          issued_date: new Date().toISOString().split('T')[0],
-          expiry_date: new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0],
-          status: 'active',
-          issued_by_store_id: input.store_id,
-          issued_by: ctx.userId,
-        })
-        .select()
-        .single()
-
-      if (vError) return failure(vError.message)
-      voucherId = voucher.id
-    }
-
-    const { data: returnRecord, error } = await ctx.adminClient
-      .from('returns')
-      .insert({
-        original_sale_id: input.original_sale_id,
-        return_type: input.return_type,
-        total_returned: totalReturned,
-        voucher_id: voucherId,
-        reason: input.reason,
-        processed_by: ctx.userId,
-        store_id: input.store_id,
-      })
-      .select()
-      .single()
-
-    if (error) return failure(error.message)
-
-    for (const line of returnLines) {
-      await ctx.adminClient
-        .from('sale_lines')
-        .update({ quantity_returned: line.quantity, returned_at: new Date().toISOString(), return_reason: input.reason })
-        .eq('id', line.id)
-    }
-
-    const allReturned = originalSale.sale_lines.every((l: any) =>
-      input.line_ids.includes(l.id) || l.quantity_returned > 0
-    )
-    await ctx.adminClient
-      .from('sales')
-      .update({ status: allReturned ? 'fully_returned' : 'partially_returned' })
-      .eq('id', input.original_sale_id)
-
-    // Restore stock
-    for (const line of returnLines) {
-      if (line.product_variant_id) {
-        const { data: warehouse } = await ctx.adminClient
-          .from('warehouses').select('id')
-          .eq('store_id', input.store_id).eq('is_main', true).single()
-        if (warehouse) {
-          const { data: stock } = await ctx.adminClient
-            .from('stock_levels').select('id, quantity')
-            .eq('product_variant_id', line.product_variant_id)
-            .eq('warehouse_id', warehouse.id).single()
-          if (stock) {
-            const newQty = stock.quantity + line.quantity
-            await ctx.adminClient.from('stock_levels')
-              .update({ quantity: newQty, last_movement_at: new Date().toISOString() })
-              .eq('id', stock.id)
-            await ctx.adminClient.from('stock_movements').insert({
-              product_variant_id: line.product_variant_id, warehouse_id: warehouse.id,
-              movement_type: 'return', quantity: line.quantity,
-              stock_before: stock.quantity, stock_after: newQty,
-              reference_type: 'return', reference_id: returnRecord.id,
-              created_by: ctx.userId, store_id: input.store_id,
-            })
-          }
-        }
-      }
-    }
-
-    let voucherCode: string | null = null
-    if (voucherId) {
-      const { data: v } = await ctx.adminClient.from('vouchers').select('code').eq('id', voucherId).single()
-      voucherCode = v?.code || null
-    }
-
-    return success({ ...returnRecord, voucher_code: voucherCode })
+    return success({
+      ...result,
+      voucher_code: result.voucher_code ?? null,
+    })
   }
 )
 
