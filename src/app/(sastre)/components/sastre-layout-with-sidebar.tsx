@@ -110,12 +110,12 @@ export function SastreLayoutWithSidebar({ sastreName, isSastrePlus = false, chil
             <Package className="h-5 w-5 shrink-0" />
             <span className="text-center leading-tight">Stock</span>
           </Link>
+          <Link href="/sastre/pedidos" className={navClass(pathname === '/sastre/pedidos' || pathname.startsWith('/sastre/pedidos'))}>
+            <ListOrdered className="h-5 w-5 shrink-0" />
+            <span className="text-center leading-tight">Pedidos</span>
+          </Link>
           {isSastrePlus && (
             <>
-              <Link href="/sastre/pedidos" className={navClass(pathname === '/sastre/pedidos' || pathname.startsWith('/sastre/pedidos'))}>
-                <ListOrdered className="h-5 w-5 shrink-0" />
-                <span className="text-center leading-tight">Pedidos</span>
-              </Link>
               <Link href="/pos/caja" className={navClass(pathname === '/pos/caja')}>
                 <ShoppingCart className="h-5 w-5 shrink-0" />
                 <span className="text-center leading-tight">Caja TPV</span>

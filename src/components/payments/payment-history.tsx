@@ -22,6 +22,7 @@ import {
   getSalePayments, addSalePayment,
   type OrderPayment, type PaymentMethod,
 } from '@/actions/payments'
+import { checkCashSessionOpen } from '@/actions/pos'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -67,6 +68,7 @@ export function PaymentHistory({
   const [dialogOpen, setDialogOpen] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [cashSessionOpen, setCashSessionOpen] = useState<boolean | null>(null)
 
   // Form state
   const [formDate, setFormDate] = useState(today())
@@ -95,6 +97,13 @@ export function PaymentHistory({
   }, [entityType, entityId])
 
   useEffect(() => { loadPayments() }, [loadPayments])
+
+  useEffect(() => {
+    if (readonly) return
+    checkCashSessionOpen({ storeId: activeStoreId ?? undefined })
+      .then(r => setCashSessionOpen(r.success ? r.data.open : null))
+      .catch(() => setCashSessionOpen(null))
+  }, [activeStoreId, readonly])
 
   const totalPaid = payments.reduce((s, p) => s + Number(p.amount), 0)
   const totalPending = Math.max(0, total - totalPaid)
@@ -185,24 +194,24 @@ export function PaymentHistory({
   return (
     <div className="space-y-4">
       {/* Resumen */}
-      <div className="rounded-lg border bg-card p-4 space-y-3">
+      <div className={variant === 'sastre' ? 'rounded-lg border border-white/10 bg-white/[0.04] p-4 space-y-3' : 'rounded-lg border bg-card p-4 space-y-3'}>
         <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Progreso de pago</span>
-          <span className="font-medium tabular-nums">{progressPct.toFixed(0)}%</span>
+          <span className={variant === 'sastre' ? 'text-white/50' : 'text-muted-foreground'}>Progreso de pago</span>
+          <span className={`font-medium tabular-nums${variant === 'sastre' ? ' text-white/70' : ''}`}>{progressPct.toFixed(0)}%</span>
         </div>
         <Progress value={progressPct} className="h-2" />
         <div className="grid grid-cols-3 gap-3 pt-1">
           <div>
-            <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Total</p>
-            <p className="font-semibold tabular-nums">{formatCurrency(total)}</p>
+            <p className={variant === 'sastre' ? 'text-[11px] text-white/40 uppercase tracking-wide' : 'text-[11px] text-muted-foreground uppercase tracking-wide'}>Total</p>
+            <p className={`font-semibold tabular-nums${variant === 'sastre' ? ' text-white' : ''}`}>{formatCurrency(total)}</p>
           </div>
           <div>
-            <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Pagado</p>
-            <p className="font-semibold text-green-600 tabular-nums">{formatCurrency(totalPaid)}</p>
+            <p className={variant === 'sastre' ? 'text-[11px] text-white/40 uppercase tracking-wide' : 'text-[11px] text-muted-foreground uppercase tracking-wide'}>Pagado</p>
+            <p className={`font-semibold tabular-nums${variant === 'sastre' ? ' text-green-400' : ' text-green-600'}`}>{formatCurrency(totalPaid)}</p>
           </div>
           <div>
-            <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Pendiente</p>
-            <p className={`font-semibold tabular-nums ${totalPending > 0 ? 'text-amber-600' : 'text-green-600'}`}>
+            <p className={variant === 'sastre' ? 'text-[11px] text-white/40 uppercase tracking-wide' : 'text-[11px] text-muted-foreground uppercase tracking-wide'}>Pendiente</p>
+            <p className={`font-semibold tabular-nums ${totalPending > 0 ? (variant === 'sastre' ? 'text-amber-400' : 'text-amber-600') : (variant === 'sastre' ? 'text-green-400' : 'text-green-600')}`}>
               {formatCurrency(totalPending)}
             </p>
           </div>
@@ -211,9 +220,14 @@ export function PaymentHistory({
 
       {/* Cabecera + botón */}
       <div className="flex items-center justify-between">
-        <h4 className="text-sm font-medium">Historial de pagos</h4>
+        <h4 className={`text-sm font-medium${variant === 'sastre' ? ' text-white/70' : ''}`}>Historial de pagos</h4>
         {!readonly && totalPending > 0 && (
-          <Button size="sm" onClick={() => { resetForm(); setDialogOpen(true) }}>
+          <Button
+            size="sm"
+            onClick={() => { resetForm(); setDialogOpen(true) }}
+            disabled={cashSessionOpen === false}
+            title={cashSessionOpen === false ? 'No hay caja abierta' : undefined}
+          >
             <Plus className="h-4 w-4 mr-1" />
             Registrar pago
           </Button>
@@ -221,7 +235,7 @@ export function PaymentHistory({
         {!readonly && totalPending <= 0 && (
           <Badge
             variant="default"
-            className={variant === 'sastre' ? 'bg-green-900 text-green-300 px-2 py-0.5 rounded text-xs' : 'bg-green-600 text-white'}
+            className={variant === 'sastre' ? 'bg-green-500/15 text-green-400 border border-green-500/20 px-2.5 py-1 rounded-md text-xs' : 'bg-green-600 text-white'}
           >
             Pagado
           </Badge>
@@ -242,18 +256,18 @@ export function PaymentHistory({
         <div
           className={
             variant === 'sastre'
-              ? 'bg-[#0a1628] border border-[#1e3a5f] rounded-lg overflow-hidden'
+              ? 'bg-white/[0.03] border border-white/10 rounded-lg overflow-hidden'
               : 'rounded-lg border overflow-hidden'
           }
         >
           <Table>
             <TableHeader>
-              <TableRow className={variant === 'sastre' ? 'bg-[#1e3a5f] text-gray-300 text-xs uppercase' : 'bg-muted/50'}>
-                <TableHead className="text-xs">Fecha</TableHead>
-                <TableHead className="text-xs">Método</TableHead>
-                <TableHead className="text-xs text-right">Importe</TableHead>
-                <TableHead className="text-xs">Referencia</TableHead>
-                <TableHead className="text-xs">Próximo pago</TableHead>
+              <TableRow className={variant === 'sastre' ? 'bg-white/[0.06] text-white/50 text-xs uppercase' : 'bg-muted/50'}>
+                <TableHead className={variant === 'sastre' ? 'text-xs text-white/50' : 'text-xs'}>Fecha</TableHead>
+                <TableHead className={variant === 'sastre' ? 'text-xs text-white/50' : 'text-xs'}>Método</TableHead>
+                <TableHead className={variant === 'sastre' ? 'text-xs text-right text-white/50' : 'text-xs text-right'}>Importe</TableHead>
+                <TableHead className={variant === 'sastre' ? 'text-xs text-white/50' : 'text-xs'}>Referencia</TableHead>
+                <TableHead className={variant === 'sastre' ? 'text-xs text-white/50' : 'text-xs'}>Próximo pago</TableHead>
                 {entityType === 'tailoring_order' && !readonly && (
                   <TableHead className="w-10" />
                 )}
@@ -265,7 +279,7 @@ export function PaymentHistory({
                   key={p.id}
                   className={
                     variant === 'sastre'
-                      ? 'border-b border-[#1e3a5f] text-white hover:bg-[#1a2744]'
+                      ? 'border-b border-white/[0.06] text-white hover:bg-white/[0.04]'
                       : undefined
                   }
                 >
@@ -287,7 +301,7 @@ export function PaymentHistory({
                   >
                     {formatCurrency(p.amount)}
                   </TableCell>
-                  <TableCell className={variant === 'sastre' ? 'py-3 px-4 text-sm text-xs text-muted-foreground truncate max-w-[120px]' : 'text-xs text-muted-foreground truncate max-w-[120px]'}>
+                  <TableCell className={variant === 'sastre' ? 'py-3 px-4 text-xs text-white/40 truncate max-w-[120px]' : 'text-xs text-muted-foreground truncate max-w-[120px]'}>
                     {p.reference ?? '—'}
                   </TableCell>
                   <TableCell className={variant === 'sastre' ? 'py-3 px-4 text-sm text-xs' : 'text-xs'}>

@@ -2,10 +2,10 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { getRolesFromCookie, clearRolesCookie } from '@/lib/auth/role-cookie'
 
-const SASTRE_ROLES = ['sastre', 'sastre_plus']
-const VENDEDOR_ROLES = ['vendedor_basico', 'vendedor_avanzado']
+const SASTRE_ROLES = ['sastre_plus']
+const VENDEDOR_ROLES = ['vendedor_avanzado']
 const STAFF_ROLES = [
-  'administrador', 'sastre', 'sastre_plus', 'vendedor_basico', 'vendedor_avanzado',
+  'administrador', 'sastre_plus', 'vendedor_avanzado',
   'super_admin', 'admin', 'accountant', 'tailor', 'salesperson', 'web_manager', 'manager',
 ]
 
@@ -106,7 +106,7 @@ export async function updateSession(request: NextRequest) {
   const isVendedorRoute = pathname.startsWith('/vendedor')
   const isPosRoute      = pathname.startsWith('/pos')
   const isClientRoute   = pathname.startsWith('/mi-cuenta')
-  const isSastreRoute   = pathname.startsWith('/sastre')
+  const isSastreRoute   = pathname === '/sastre' || pathname.startsWith('/sastre/')
   const isAuthRoute     = pathname.startsWith('/auth')
   const isLoginPage     = pathname === '/auth/login'
 

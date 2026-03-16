@@ -11,10 +11,10 @@ export const metadata: Metadata = {
 }
 
 const STAFF_ROLES = [
-  'administrador', 'sastre', 'sastre_plus', 'vendedor_basico', 'vendedor_avanzado',
+  'administrador', 'sastre_plus', 'vendedor_avanzado',
   'super_admin', 'admin', 'accountant', 'tailor', 'salesperson', 'web_manager', 'manager',
 ]
-const SASTRE_ROLES = ['sastre', 'sastre_plus']
+const SASTRE_ROLES = ['sastre_plus']
 
 export default async function LoginPage({
   searchParams,

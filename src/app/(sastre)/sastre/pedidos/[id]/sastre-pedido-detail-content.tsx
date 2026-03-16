@@ -146,7 +146,7 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <Card className="border-[#c9a96e]/20 bg-white/5">
+      <Card className="border-white/10 bg-white/[0.04] shadow-none">
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
@@ -154,13 +154,13 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
               <p className="text-white/60 text-sm mt-0.5">Cliente: {clientName}</p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs px-2 py-1 rounded bg-white/10 text-white/80">
+              <span className="text-xs px-3 py-1 rounded-lg bg-white/[0.08] text-white/70 border border-white/10">
                 {getOrderStatusLabel(order.status)}
               </span>
               <select
                 value={order.status}
                 onChange={(e) => handleStatusChange(e.target.value)}
-                className="bg-[#1a2744] text-white border border-[#2a3a5c] rounded px-3 py-1.5 text-sm hover:bg-[#243255] cursor-pointer"
+                className="bg-white/[0.07] text-white border border-white/15 rounded-lg px-3 py-1.5 text-sm hover:bg-white/10 cursor-pointer focus:outline-none focus:border-[#c9a96e]/50 transition-all"
               >
                 {statusOptions.map((s) => (
                   <option key={s} value={s}>{getOrderStatusLabel(s)}</option>
@@ -171,35 +171,35 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
         </CardHeader>
         <CardContent className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
           <div>
-            <p className="text-white/50">Fecha</p>
+            <p className="text-white/40 text-xs uppercase tracking-wide">Fecha</p>
             <p className="text-white">{formatDate(order.order_date)}</p>
           </div>
           <div>
-            <p className="text-white/50">Total</p>
+            <p className="text-white/40 text-xs uppercase tracking-wide">Total</p>
             <p className="text-white">{formatCurrency(order.total)}</p>
           </div>
           <div>
-            <p className="text-white/50">Pagado</p>
+            <p className="text-white/40 text-xs uppercase tracking-wide">Pagado</p>
             <p className="text-white">{formatCurrency(order.total_paid ?? 0)}</p>
           </div>
           <div>
-            <p className="text-white/50">Pendiente</p>
+            <p className="text-white/40 text-xs uppercase tracking-wide">Pendiente</p>
             <p className="text-amber-400 font-medium">{formatCurrency(order.total_pending ?? 0)}</p>
           </div>
         </CardContent>
       </Card>
 
       {/* Piezas del pedido */}
-      <section className="bg-[#0f1e35] border border-[#1e3a5f] rounded-xl p-6">
-        <h3 className="text-lg font-medium text-white mb-4">Piezas del pedido</h3>
+      <section className="bg-white/[0.03] border border-white/10 rounded-xl p-6">
+        <h3 className="text-base font-semibold text-white mb-4">Piezas del pedido</h3>
         {totalCount === 0 ? (
           <p className="text-gray-400 text-sm">No hay líneas en este pedido.</p>
         ) : (
           <>
-            <p className="text-sm text-gray-400 mb-2">
+            <p className="text-sm text-white/50 mb-2">
               {deliveredCount} de {totalCount} entregadas
             </p>
-            <div className="h-2 bg-[#1e3a5f] rounded-full overflow-hidden mb-4">
+            <div className="h-1.5 bg-white/10 rounded-full overflow-hidden mb-4">
               <div
                 className="h-full bg-green-600 transition-all duration-300"
                 style={{ width: totalCount ? `${(deliveredCount / totalCount) * 100}%` : '0%' }}
@@ -208,17 +208,17 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
 
             {sastreriaLines.length > 0 && (
               <>
-                <p className="text-sm text-gray-400 mb-2 mt-4">Sastrería</p>
+                <p className="text-xs font-semibold text-[#c9a96e] uppercase tracking-[0.15em] mb-3 mt-5">Sastrería</p>
                 {sastreriaLines.map((line: any) => (
                   <div
                     key={line.id}
-                    className="flex items-center justify-between py-3 border-b border-[#1e3a5f] last:border-b-0"
+                    className="flex items-center justify-between py-3 border-b border-white/[0.06] last:border-b-0"
                   >
                     <span className="mr-2" aria-hidden>👕</span>
                     <span className="text-white flex-1 min-w-0">{getLineName(line)}</span>
                     <span
-                      className={`text-xs px-2 py-0.5 rounded shrink-0 ml-2 ${
-                        line.delivered_at ? 'bg-green-600/80 text-white' : 'bg-gray-600 text-gray-300'
+                      className={`text-xs px-2.5 py-1 rounded-md shrink-0 ml-2 font-medium ${
+                        line.delivered_at ? 'bg-green-500/15 text-green-400 border border-green-500/20' : 'bg-white/[0.06] text-white/50 border border-white/10'
                       }`}
                     >
                       {line.delivered_at ? 'Entregado' : 'Creado'}
@@ -228,7 +228,7 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
                         type="button"
                         onClick={() => handleMarkDelivered(line.id)}
                         disabled={markingId === line.id}
-                        className="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded text-sm shrink-0 ml-2 disabled:opacity-50"
+                        className="bg-green-600 hover:bg-green-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium shrink-0 ml-2 disabled:opacity-50 transition-colors"
                       >
                         {markingId === line.id ? '...' : 'Marcar entregado'}
                       </button>
@@ -240,19 +240,19 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
 
             {camiseriaLines.length > 0 && (
               <>
-                <p className="text-sm text-gray-400 mb-2 mt-4">Camisas a medida</p>
+                <p className="text-xs font-semibold text-[#c9a96e] uppercase tracking-[0.15em] mb-3 mt-5">Camisas a medida</p>
                 {camiseriaLines.map((line: any) => {
                   const lineIndex = lines.indexOf(line)
                   return (
                     <div
                       key={line.id}
-                      className="flex items-center justify-between py-3 border-b border-[#1e3a5f] last:border-b-0"
+                      className="flex items-center justify-between py-3 border-b border-white/[0.06] last:border-b-0"
                     >
                       <span className="mr-2" aria-hidden>👕</span>
                       <span className="text-white flex-1 min-w-0">{getLineName(line)}</span>
                       <span
-                        className={`text-xs px-2 py-0.5 rounded shrink-0 ml-2 ${
-                          line.delivered_at ? 'bg-green-600/80 text-white' : 'bg-gray-600 text-gray-300'
+                        className={`text-xs px-2.5 py-1 rounded-md shrink-0 ml-2 font-medium ${
+                          line.delivered_at ? 'bg-green-500/15 text-green-400 border border-green-500/20' : 'bg-white/[0.06] text-white/50 border border-white/10'
                         }`}
                       >
                         {line.delivered_at ? 'Entregado' : 'Creado'}
@@ -262,7 +262,7 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
                           type="button"
                           onClick={() => handleMarkDelivered(line.id)}
                           disabled={markingId === line.id}
-                          className="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded text-sm shrink-0 ml-2 disabled:opacity-50"
+                          className="bg-green-600 hover:bg-green-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium shrink-0 ml-2 disabled:opacity-50 transition-colors"
                         >
                           {markingId === line.id ? '...' : 'Marcar entregado'}
                         </button>
@@ -271,7 +271,7 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
                         type="button"
                         onClick={() => handleDownloadFicha(line, lineIndex)}
                         disabled={pdfLoadingId === line.id}
-                        className="border border-[#2a3a5c] text-gray-300 px-3 py-1.5 rounded text-sm shrink-0 ml-2 hover:bg-white/5 disabled:opacity-50"
+                        className="border border-white/15 text-white/60 px-3 py-1.5 rounded-lg text-xs font-medium shrink-0 ml-2 hover:bg-white/[0.07] hover:text-white/80 disabled:opacity-50 transition-all"
                       >
                         {pdfLoadingId === line.id ? '...' : 'Descargar ficha'}
                       </button>
@@ -283,17 +283,17 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
 
             {complementosLines.length > 0 && (
               <>
-                <p className="text-sm text-gray-400 mb-2 mt-4">Complementos</p>
+                <p className="text-xs font-semibold text-[#c9a96e] uppercase tracking-[0.15em] mb-3 mt-5">Complementos</p>
                 {complementosLines.map((line: any) => (
                   <div
                     key={line.id}
-                    className="flex items-center justify-between py-3 border-b border-[#1e3a5f] last:border-b-0"
+                    className="flex items-center justify-between py-3 border-b border-white/[0.06] last:border-b-0"
                   >
                     <span className="mr-2" aria-hidden>👕</span>
                     <span className="text-white flex-1 min-w-0">{getLineName(line)}</span>
                     <span
-                      className={`text-xs px-2 py-0.5 rounded shrink-0 ml-2 ${
-                        line.delivered_at ? 'bg-green-600/80 text-white' : 'bg-gray-600 text-gray-300'
+                      className={`text-xs px-2.5 py-1 rounded-md shrink-0 ml-2 font-medium ${
+                        line.delivered_at ? 'bg-green-500/15 text-green-400 border border-green-500/20' : 'bg-white/[0.06] text-white/50 border border-white/10'
                       }`}
                     >
                       {line.delivered_at ? 'Entregado' : 'Creado'}
@@ -303,7 +303,7 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
                         type="button"
                         onClick={() => handleMarkDelivered(line.id)}
                         disabled={markingId === line.id}
-                        className="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded text-sm shrink-0 ml-2 disabled:opacity-50"
+                        className="bg-green-600 hover:bg-green-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium shrink-0 ml-2 disabled:opacity-50 transition-colors"
                       >
                         {markingId === line.id ? '...' : 'Marcar entregado'}
                       </button>
@@ -312,7 +312,7 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
                       type="button"
                       onClick={() => handleDownloadTicketComplemento(line)}
                       disabled={ticketLoadingId === line.id}
-                      className="border border-[#2a3a5c] text-gray-300 px-3 py-1.5 rounded text-sm shrink-0 ml-2 hover:bg-[#1a2744] disabled:opacity-50"
+                      className="border border-white/15 text-white/60 px-3 py-1.5 rounded-lg text-xs font-medium shrink-0 ml-2 hover:bg-white/[0.07] hover:text-white/80 disabled:opacity-50 transition-all"
                     >
                       {ticketLoadingId === line.id ? '...' : 'Descargar ticket'}
                     </button>
@@ -324,9 +324,9 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
         )}
       </section>
 
-      <Card className="border-[#c9a96e]/20 bg-white/5">
+      <Card className="border-white/10 bg-white/[0.04] shadow-none">
         <CardHeader>
-          <h3 className="text-lg font-medium text-white">Pagos</h3>
+          <h3 className="text-base font-semibold text-white">Pagos</h3>
         </CardHeader>
         <CardContent>
           <PaymentHistory

@@ -178,6 +178,17 @@ export const createSale = protectedAction<{
     const parsedSale = createSaleSchema.safeParse(saleInput)
     if (!parsedSale.success) return failure(parsedSale.error.issues[0].message)
 
+    // Verificar que hay una caja abierta
+    const sessionId = (parsedSale.data as any).cash_session_id
+    if (!sessionId) return failure('No hay una caja abierta. Abre la caja antes de registrar una venta.')
+    const { data: openSession } = await ctx.adminClient
+      .from('cash_sessions')
+      .select('id')
+      .eq('id', sessionId)
+      .eq('status', 'open')
+      .single()
+    if (!openSession) return failure('La sesión de caja está cerrada. Abre la caja antes de registrar una venta.')
+
     const { data: result, error: rpcError } = await ctx.adminClient.rpc('rpc_create_sale', {
       p_sale: parsedSale.data,
       p_lines: linesInput,
@@ -546,6 +557,23 @@ export const searchProductsForPos = protectedAction<{
       return success([])
     }
     return success(Array.isArray(data) ? data : [])
+  }
+)
+
+export const checkCashSessionOpen = protectedAction<
+  { storeId?: string },
+  { open: boolean; sessionId: string | null }
+>(
+  { permission: 'pos.access', auditModule: 'pos' },
+  async (ctx, { storeId }) => {
+    let query = ctx.adminClient
+      .from('cash_sessions')
+      .select('id')
+      .eq('status', 'open')
+      .limit(1)
+    if (storeId) query = query.eq('store_id', storeId)
+    const { data } = await query.maybeSingle()
+    return success({ open: !!data, sessionId: data?.id ?? null })
   }
 )
 

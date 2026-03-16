@@ -385,10 +385,10 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
                 key={g.id}
                 type="button"
                 onClick={() => setActiveTabIndex(i)}
-                className={`px-5 h-12 rounded-xl font-serif text-lg transition-all touch-manipulation ${
+                className={`px-6 h-11 rounded-xl text-sm font-medium tracking-wide transition-all touch-manipulation ${
                   i === activeTabIndex
-                    ? 'bg-transparent text-white font-medium border-2 border-white/70'
-                    : 'bg-transparent border border-[#c9a96e]/40 text-white/70 hover:bg-white/5 hover:text-white'
+                    ? 'bg-[#c9a96e] text-[#0a1020] shadow-lg shadow-[#c9a96e]/20'
+                    : 'bg-white/[0.05] border border-white/15 text-white/60 hover:bg-white/10 hover:text-white'
                 }`}
               >
                 {g.name}
@@ -407,8 +407,8 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
                   <>
                     {/* Solo medidas físicas (field_group === 'medidas', number/decimal) */}
                     <div>
-                      <h3 className="text-sm font-medium text-[#c9a96e] uppercase tracking-wide mb-3">Medidas</h3>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                      <h3 className="text-xs font-semibold text-[#c9a96e] uppercase tracking-[0.2em] mb-4 pb-2 border-b border-[#c9a96e]/15">Medidas</h3>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
                         {(currentGroup.fields.filter(
                           (f) =>
                             f.field_group === 'medidas' &&
@@ -417,17 +417,17 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
                           const vKey = valueKey('camiseria', f.code)
                           return (
                             <div key={f.id} className="space-y-1">
-                              <label className="block text-sm text-white/80">{f.name}</label>
+                              <label className="block text-sm font-medium text-white/90">{f.name}</label>
                               <div className="flex items-center gap-2">
                                 <input
                                   type="number"
                                   step="0.5"
                                   value={String(values[vKey] ?? '')}
                                   onChange={(e) => setValue(vKey, e.target.value)}
-                                  className="flex-1 h-12 px-4 rounded-xl border border-[#c9a96e]/20 bg-[#1a2744] text-white placeholder:text-white/40 focus:outline-none focus:border-[#c9a96e]/60"
+                                  className="flex-1 h-12 px-4 rounded-xl border border-white/20 bg-white/[0.07] text-white text-lg font-medium placeholder:text-white/30 focus:outline-none focus:border-[#c9a96e] focus:ring-1 focus:ring-[#c9a96e]/30 transition-all"
                                   placeholder="—"
                                 />
-                                <span className="text-white/50 text-sm w-8 shrink-0">cm</span>
+                                <span className="text-white/30 text-xs w-8 shrink-0">cm</span>
                               </div>
                             </div>
                           )
@@ -474,9 +474,9 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
                       return Object.entries(byGroup).map(([groupName, groupFields]) => (
                         <div key={groupName}>
                           {groupName !== '__default__' && (
-                            <h3 className="text-sm font-medium text-[#c9a96e] uppercase tracking-wide mb-3">{groupName}</h3>
+                            <h3 className="text-xs font-semibold text-[#c9a96e] uppercase tracking-[0.2em] mb-4 pb-2 border-b border-[#c9a96e]/15">{groupName}</h3>
                           )}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
                             {groupFields.map((f) => {
                               const vKey = valueKey(groupPrefix, f.code)
                               const unit = (f.unit || 'cm').toLowerCase()
@@ -488,17 +488,17 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
                                   }}
                                   className="space-y-1"
                                 >
-                                  <label className="block text-sm text-white/80">{f.name}</label>
+                                  <label className="block text-sm font-medium text-white/90">{f.name}</label>
                                   <div className="flex items-center gap-2">
                                     <input
                                       type={f.field_type === 'number' ? 'number' : 'text'}
                                       step={f.field_type === 'number' ? '0.5' : undefined}
                                       value={String(values[vKey] ?? '')}
                                       onChange={(e) => setValue(vKey, e.target.value)}
-                                      className="flex-1 h-12 px-4 rounded-xl border border-[#c9a96e]/20 bg-[#1a2744] text-white placeholder:text-white/40 focus:outline-none focus:border-[#c9a96e]/60 transition-colors touch-manipulation"
+                                      className="flex-1 h-12 px-4 rounded-xl border border-white/20 bg-white/[0.07] text-white text-lg font-medium placeholder:text-white/30 focus:outline-none focus:border-[#c9a96e] focus:ring-1 focus:ring-[#c9a96e]/30 transition-all touch-manipulation"
                                       placeholder="—"
                                     />
-                                    <span className="text-white/50 text-sm w-8 shrink-0">{unit}</span>
+                                    <span className="text-white/30 text-xs w-8 shrink-0">{unit}</span>
                                   </div>
                                 </div>
                               )
@@ -514,7 +514,7 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
 
           {/* Historial de medidas */}
           <div className="shrink-0 border-t border-[#c9a96e]/20 pt-4 mt-4">
-            <h3 className="text-sm font-medium text-[#c9a96e] flex items-center gap-2 mb-2">
+            <h3 className="text-xs font-semibold text-[#c9a96e] uppercase tracking-[0.2em] flex items-center gap-2 mb-3">
               <Clock className="h-4 w-4" />
               Historial
             </h3>
@@ -543,8 +543,8 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
                       }}
                       className={`shrink-0 w-36 p-3 rounded-xl border text-left text-sm transition-all touch-manipulation hover:border-[#c9a96e]/50 ${
                         selectedHistoryId === m.id
-                          ? 'border-[#c9a96e] bg-[#c9a96e]/10'
-                          : 'border-[#c9a96e]/20 bg-gradient-to-br from-[#1a2744] to-[#0d1629]'
+                          ? 'border-[#c9a96e] bg-[#c9a96e]/15 shadow-md shadow-[#c9a96e]/10'
+                          : 'border-white/10 bg-white/[0.04]'
                       }`}
                     >
                       <p className="text-white font-medium">v{version}</p>
@@ -566,7 +566,7 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
                 setSelectedHistoryId(null)
                 toast.success('Formulario listo para medidas nuevas. Rellena los campos y guarda.')
               }}
-              className="flex-1 h-12 rounded-xl bg-transparent border-2 border-[#c9a96e]/60 text-[#c9a96e] font-medium hover:bg-[#c9a96e]/10 transition-colors flex items-center justify-center gap-2 touch-manipulation"
+              className="flex-1 h-12 rounded-xl bg-white/[0.05] border border-white/15 text-white/70 font-medium hover:bg-white/10 hover:text-white transition-all flex items-center justify-center gap-2 touch-manipulation"
             >
               <PlusCircle className="h-5 w-5" />
               Nuevas medidas
@@ -575,7 +575,7 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
               type="button"
               onClick={handleSave}
               disabled={isSaving}
-              className="flex-1 h-12 rounded-xl bg-transparent border-2 border-white/60 text-white font-medium hover:bg-white/5 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 touch-manipulation"
+              className="flex-1 h-12 rounded-xl bg-[#c9a96e] text-[#0a1020] font-semibold hover:bg-[#c9a96e]/90 shadow-lg shadow-[#c9a96e]/20 transition-all disabled:opacity-50 flex items-center justify-center gap-2 touch-manipulation"
             >
               {isSaving ? <Loader2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
               Guardar medidas

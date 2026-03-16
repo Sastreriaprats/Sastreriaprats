@@ -147,28 +147,77 @@ export const searchTailoringOrdersByNumber = protectedAction<
 export const getOrder = protectedAction<string, any>(
   { permission: 'orders.view', auditModule: 'orders' },
   async (ctx, orderId) => {
-    const order = await queryById('tailoring_orders', orderId, `
-      id, order_number, total, total_paid, total_pending, client_id, status,
-      order_type, order_date, estimated_delivery_date, subtotal, discount_amount, tax_amount,
-      store_id, internal_notes, client_notes, created_at, updated_at, created_by, supplier_order_id,
-      clients ( id, full_name, first_name, last_name, phone, email, category, document_number ),
-      stores ( id, name, code ),
-      supplier_orders ( order_number ),
-      tailoring_order_lines (
-        *,
-        garment_types ( id, name, code ),
-        fabrics ( id, fabric_code, name, composition ),
-        suppliers ( id, name )
-      ),
-      tailoring_order_state_history ( id, from_status, to_status, notes, changed_by_name, changed_at ),
-      tailoring_fittings ( id, fitting_number, scheduled_date, scheduled_time, status, adjustments_needed )
-    `)
-    if (!order) return failure('Pedido no encontrado', 'NOT_FOUND')
+    const admin = ctx.adminClient
 
-    const orderObj = order as Record<string, unknown>
-    const clientId = orderObj.client_id as string | undefined
+    // Query base sin joins para evitar 400 por tablas/FKs problemáticas
+    const { data: orderBase, error: baseError } = await admin
+      .from('tailoring_orders')
+      .select('id, order_number, total, total_paid, total_pending, client_id, status, order_type, order_date, estimated_delivery_date, subtotal, discount_amount, tax_amount, store_id, internal_notes, client_notes, created_at, updated_at, created_by')
+      .eq('id', orderId)
+      .single()
+
+    if (baseError || !orderBase) {
+      console.error('[getOrder] base query error:', baseError)
+      return failure('Pedido no encontrado', 'NOT_FOUND')
+    }
+
+    const order = orderBase as Record<string, unknown>
+
+    // Joins en paralelo — cada uno falla de forma independiente
+    const clientId = order.client_id as string | undefined
+    const storeId = order.store_id as string | undefined
+
+    const [
+      { data: clientData },
+      { data: storeData },
+      { data: orderLines },
+      { data: stateHistory },
+      { data: fittings },
+    ] = await Promise.all([
+      clientId
+        ? admin.from('clients').select('id, full_name, first_name, last_name, phone, email, category, document_number').eq('id', clientId).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      storeId
+        ? admin.from('stores').select('id, name, code').eq('id', storeId).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      admin.from('tailoring_order_lines').select('*').eq('tailoring_order_id', orderId),
+      admin.from('tailoring_order_state_history').select('id, from_status, to_status, notes, changed_by_name, changed_at').eq('tailoring_order_id', orderId).order('changed_at', { ascending: false }),
+      admin.from('tailoring_fittings').select('id, fitting_number, scheduled_date, scheduled_time, status, adjustments_needed').eq('tailoring_order_id', orderId).order('scheduled_date', { ascending: true }),
+    ])
+
+    order.clients = clientData ?? null
+    order.stores = storeData ?? null
+    order.tailoring_order_state_history = stateHistory ?? []
+    order.tailoring_fittings = fittings ?? []
+
+    // Enriquecer líneas con sus joins
+    const lines = (orderLines ?? []) as Record<string, unknown>[]
+    if (lines.length > 0) {
+      const garmentTypeIds = [...new Set(lines.map(l => l.garment_type_id).filter(Boolean))] as string[]
+      const fabricIds = [...new Set(lines.map(l => l.fabric_id).filter(Boolean))] as string[]
+      const supplierIds = [...new Set(lines.map(l => l.supplier_id).filter(Boolean))] as string[]
+
+      const [{ data: garmentTypes }, { data: fabrics }, { data: suppliers }] = await Promise.all([
+        garmentTypeIds.length ? admin.from('garment_types').select('id, name, code').in('id', garmentTypeIds) : Promise.resolve({ data: [], error: null }),
+        fabricIds.length ? admin.from('fabrics').select('id, fabric_code, name, composition').in('id', fabricIds) : Promise.resolve({ data: [], error: null }),
+        supplierIds.length ? admin.from('suppliers').select('id, name').in('id', supplierIds) : Promise.resolve({ data: [], error: null }),
+      ])
+
+      const gtMap = Object.fromEntries((garmentTypes ?? []).map((g: Record<string, unknown>) => [g.id, g]))
+      const fMap = Object.fromEntries((fabrics ?? []).map((f: Record<string, unknown>) => [f.id, f]))
+      const sMap = Object.fromEntries((suppliers ?? []).map((s: Record<string, unknown>) => [s.id, s]))
+
+      for (const line of lines) {
+        line.garment_types = gtMap[line.garment_type_id as string] ?? null
+        line.fabrics = fMap[line.fabric_id as string] ?? null
+        line.suppliers = sMap[line.supplier_id as string] ?? null
+      }
+    }
+    order.tailoring_order_lines = lines
+
+    // Medidas del cliente
     if (clientId) {
-      const { data: measurementsRows } = await ctx.adminClient
+      const { data: measurementsRows } = await admin
         .from('client_measurements')
         .select('values')
         .eq('client_id', clientId)
@@ -178,12 +227,10 @@ export const getOrder = protectedAction<string, any>(
         const v = (record as { values?: unknown }).values
         if (!v || typeof v !== 'object' || Array.isArray(v)) continue
         for (const [key, val] of Object.entries(v)) {
-          if (val !== null && val !== undefined && val !== '') {
-            merged[key] = val
-          }
+          if (val !== null && val !== undefined && val !== '') merged[key] = val
         }
       }
-      orderObj.clientMeasurements = { values: merged }
+      order.clientMeasurements = { values: merged }
     }
 
     return success(order)
@@ -557,6 +604,17 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
 
     const entregaNum = Number(input.entregaACuenta) || 0
     if (entregaNum > 0 && !input.metodoPago) return failure('Indica el método de pago para la entrega a cuenta.')
+
+    if (entregaNum > 0) {
+      let sessionCheck = ctx.adminClient
+        .from('cash_sessions')
+        .select('id')
+        .eq('status', 'open')
+        .limit(1)
+      if (input.storeId) sessionCheck = sessionCheck.eq('store_id', input.storeId)
+      const { data: openSession } = await sessionCheck.maybeSingle()
+      if (!openSession) return failure('No hay una caja abierta. Abre la caja antes de registrar una entrega a cuenta.')
+    }
 
     const paymentMethodDb = input.metodoPago
       ? { efectivo: 'cash', tarjeta: 'card', transferencia: 'transfer', bizum: 'card' }[input.metodoPago] ?? 'cash'

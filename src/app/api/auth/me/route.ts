@@ -3,7 +3,7 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
 const STAFF_ROLES = [
-  'administrador', 'sastre', 'sastre_plus', 'vendedor_basico', 'vendedor_avanzado',
+  'administrador', 'sastre_plus', 'vendedor_avanzado',
   'super_admin', 'admin', 'accountant', 'tailor', 'salesperson', 'web_manager', 'manager',
 ]
 

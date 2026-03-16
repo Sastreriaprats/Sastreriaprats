@@ -5,7 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 // Roles que tienen acceso al panel de administración
 const STAFF_ROLES = [
   // Roles v2 (nuevos)
-  'administrador', 'sastre', 'sastre_plus', 'vendedor_basico', 'vendedor_avanzado',
+  'administrador', 'sastre_plus', 'vendedor_avanzado',
   // Roles legacy (por compatibilidad)
   'super_admin', 'admin', 'accountant', 'tailor', 'salesperson', 'web_manager', 'manager',
 ]
