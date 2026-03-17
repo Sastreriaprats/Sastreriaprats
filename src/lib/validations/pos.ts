@@ -3,12 +3,14 @@ import { z } from 'zod'
 export const openCashSessionSchema = z.object({
   store_id: z.string().uuid(),
   opening_amount: z.number().min(0),
+  opening_breakdown: z.record(z.string(), z.number()).optional().nullable(),
 })
 
 export const closeCashSessionSchema = z.object({
   session_id: z.string().uuid(),
   counted_cash: z.number().min(0),
   closing_notes: z.string().optional(),
+  closing_breakdown: z.record(z.string(), z.number()).optional().nullable(),
 })
 
 export const createSaleSchema = z.object({

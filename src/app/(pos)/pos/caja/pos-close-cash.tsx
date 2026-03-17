@@ -37,6 +37,7 @@ export function PosCloseCash({ session, onClosed, onCancel }: {
         session_id: session.id,
         counted_cash: counted,
         closing_notes: closingNotes || undefined,
+        closing_breakdown: cashBreakdown,
       })
       if (!result.success) {
         toast.error(result.error ?? 'Error al cerrar la caja')

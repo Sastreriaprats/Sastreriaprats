@@ -63,6 +63,7 @@ export const openCashSession = protectedAction<any, any>(
         store_id: parsed.data.store_id,
         opened_by: ctx.userId,
         opening_amount: parsed.data.opening_amount,
+        opening_breakdown: parsed.data.opening_breakdown ?? null,
         status: 'open',
       })
       .select()
@@ -123,6 +124,7 @@ export const closeCashSession = protectedAction<any, any>(
         expected_cash: expectedCash,
         cash_difference: difference,
         closing_notes: parsed.data.closing_notes || null,
+        closing_breakdown: parsed.data.closing_breakdown ?? null,
         status: 'closed',
       })
       .eq('id', session.id)

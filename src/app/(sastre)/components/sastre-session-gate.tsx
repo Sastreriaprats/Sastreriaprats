@@ -67,6 +67,7 @@ export function SastreSessionGate({ children, stores }: SastreSessionGateProps) 
       const result = await openCashSession({
         store_id: activeStoreId,
         opening_amount: parseFloat(openingAmount) || 0,
+        opening_breakdown: cashBreakdown,
       })
       if (result.success) {
         toast.success('Caja abierta correctamente')

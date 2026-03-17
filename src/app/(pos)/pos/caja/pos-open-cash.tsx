@@ -52,7 +52,7 @@ export function PosOpenCash({ storeId, onOpened }: { storeId: string | undefined
             />
 
             <Button
-              onClick={() => storeId && execute({ store_id: storeId, opening_amount: openingTotal })}
+              onClick={() => storeId && execute({ store_id: storeId, opening_amount: openingTotal, opening_breakdown: cashBreakdown })}
               disabled={isLoading || loadingStore}
               className="w-full h-14 text-base font-semibold rounded-xl bg-[#1B2A4A] hover:bg-[#253a5c] shadow-lg shadow-[#1B2A4A]/25 transition-all duration-200"
             >
