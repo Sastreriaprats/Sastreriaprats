@@ -2,38 +2,87 @@
 
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
 import { Loader2, Lock, AlertTriangle, CheckCircle, ArrowLeft } from 'lucide-react'
-import { useAction } from '@/hooks/use-action'
+import { toast } from 'sonner'
 import { closeCashSession } from '@/actions/pos'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { CashCounter } from '@/components/cash/cash-counter'
+import { generateCashSessionReport } from '@/lib/pdf/cash-session-report'
 
 export function PosCloseCash({ session, onClosed, onCancel }: {
   session: any; onClosed: () => void; onCancel: () => void
 }) {
-  const [countedCash, setCountedCash] = useState('')
+  const [cashBreakdown, setCashBreakdown] = useState<Record<string, number>>({})
+  const [counted, setCounted] = useState(0)
   const [closingNotes, setClosingNotes] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
 
   const expectedCash = (session.opening_amount || 0)
     + (session.total_cash_sales || 0)
     - (session.total_returns || 0)
     - (session.total_withdrawals || 0)
 
-  const counted = parseFloat(countedCash) || 0
   const difference = counted - expectedCash
-  const isExact = Math.abs(difference) < 0.01
-  const isMinorDiff = !isExact && Math.abs(difference) <= 5
+  const hasCounted = counted > 0
+  const isExact = hasCounted && Math.abs(difference) < 0.01
+  const isMinorDiff = hasCounted && !isExact && Math.abs(difference) <= 5
 
-  const { execute, isLoading } = useAction(closeCashSession, {
-    successMessage: 'Caja cerrada correctamente',
-    onSuccess: onClosed,
-  })
+  async function handleClose() {
+    if (!hasCounted) return
+    setIsLoading(true)
+    try {
+      const result = await closeCashSession({
+        session_id: session.id,
+        counted_cash: counted,
+        closing_notes: closingNotes || undefined,
+      })
+      if (!result.success) {
+        toast.error(result.error ?? 'Error al cerrar la caja')
+        return
+      }
+
+      // Generar PDF de arqueo
+      try {
+        await generateCashSessionReport({
+          storeName: '—',
+          openedBy: session.opened_by ?? '—',
+          closedBy: '—',
+          openedAt: session.opened_at ?? '',
+          closedAt: result.data?.closed_at ?? new Date().toISOString(),
+          openingAmount: session.opening_amount || 0,
+          closingBreakdown: cashBreakdown,
+          totalSales: session.total_sales || 0,
+          totalCashSales: session.total_cash_sales || 0,
+          totalCardSales: session.total_card_sales || 0,
+          totalBizumSales: session.total_bizum_sales || 0,
+          totalTransferSales: session.total_transfer_sales || 0,
+          totalVoucherSales: session.total_voucher_sales || 0,
+          totalReturns: session.total_returns || 0,
+          totalWithdrawals: session.total_withdrawals || 0,
+          expectedCash,
+          countedCash: counted,
+          cashDifference: difference,
+          closingNotes: closingNotes || undefined,
+        })
+      } catch (e) {
+        console.error('[PDF] Error generando arqueo de caja:', e)
+        toast.warning('Caja cerrada, pero no se pudo generar el PDF de arqueo')
+      }
+
+      toast.success('Caja cerrada correctamente')
+      onClosed()
+    } catch {
+      toast.error('Error inesperado al cerrar la caja')
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   return (
     <div className="h-full min-h-full overflow-y-auto overflow-x-hidden p-6 md:p-10 pb-24 bg-gradient-to-br from-slate-50 via-white to-slate-100">
-      <div className="max-w-2xl mx-auto space-y-8">
+      <div className="max-w-3xl mx-auto space-y-8">
         {/* Cabecera */}
         <div className="text-center">
           <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-[#1B2A4A]/10 mb-6">
@@ -92,19 +141,18 @@ export function PosCloseCash({ session, onClosed, onCancel }: {
             <span className="text-sm text-slate-600">Efectivo esperado en caja</span>
             <span className="text-lg font-semibold tabular-nums text-slate-800">{formatCurrency(expectedCash)}</span>
           </div>
-          <div className="space-y-2">
-            <Label className="text-slate-600 font-medium">Efectivo contado (€)</Label>
-            <Input
-              type="number"
-              step="0.01"
-              value={countedCash}
-              onChange={(e) => setCountedCash(e.target.value)}
-              className="h-16 text-center text-2xl font-semibold font-mono rounded-xl border-slate-200 focus:ring-2 focus:ring-[#1B2A4A]/20"
-              placeholder="0,00"
-              autoFocus
-            />
-          </div>
-          {countedCash && (
+
+          <CashCounter
+            value={cashBreakdown}
+            onChange={(breakdown, total) => {
+              setCashBreakdown(breakdown)
+              setCounted(total)
+            }}
+            label="Efectivo contado"
+            variant="light"
+          />
+
+          {hasCounted && (
             <div className={`rounded-xl flex items-center justify-between px-4 py-4 ${
               isExact ? 'bg-emerald-50 border border-emerald-200' : isMinorDiff ? 'bg-amber-50 border border-amber-200' : 'bg-red-50 border border-red-200'
             }`}>
@@ -117,6 +165,7 @@ export function PosCloseCash({ session, onClosed, onCancel }: {
               </span>
             </div>
           )}
+
           <div className="space-y-2">
             <Label className="text-slate-600 font-medium">Notas de cierre</Label>
             <Textarea
@@ -140,12 +189,12 @@ export function PosCloseCash({ session, onClosed, onCancel }: {
             Volver a venta
           </Button>
           <Button
-            onClick={() => execute({ session_id: session.id, counted_cash: counted, closing_notes: closingNotes || undefined })}
-            disabled={isLoading || !countedCash}
+            onClick={handleClose}
+            disabled={isLoading || !hasCounted}
             className="flex-1 h-14 rounded-xl bg-[#1B2A4A] hover:bg-[#253a5c] font-semibold shadow-lg shadow-[#1B2A4A]/20 gap-2"
           >
             {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Lock className="h-5 w-5" />}
-            Cerrar caja
+            {isLoading ? 'Cerrando...' : 'Cerrar caja'}
           </Button>
         </div>
       </div>

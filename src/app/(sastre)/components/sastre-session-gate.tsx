@@ -5,6 +5,7 @@ import { Loader2, MapPin } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/components/providers/auth-provider'
 import { checkCashSessionOpen, openCashSession } from '@/actions/pos'
+import { CashCounter } from '@/components/cash/cash-counter'
 
 interface Store {
   storeId: string
@@ -22,7 +23,8 @@ type Step = 'loading' | 'choose_store' | 'open_cash' | 'ready'
 export function SastreSessionGate({ children, stores }: SastreSessionGateProps) {
   const { activeStoreId, setActiveStoreId } = useAuth()
   const [step, setStep] = useState<Step>('loading')
-  const [openingAmount, setOpeningAmount] = useState('300')
+  const [openingAmount, setOpeningAmount] = useState('0')
+  const [cashBreakdown, setCashBreakdown] = useState<Record<string, number>>({})
   const [opening, setOpening] = useState(false)
   const checkedRef = useRef(false)
 
@@ -118,7 +120,7 @@ export function SastreSessionGate({ children, stores }: SastreSessionGateProps) 
   if (step === 'open_cash') {
     return (
       <div style={bgStyle} className="min-h-screen flex flex-col items-center justify-center p-6">
-        <div className="max-w-md w-full space-y-6">
+        <div className="max-w-2xl w-full space-y-6">
           <div className="text-center">
             <h1 className="text-2xl font-serif text-white">Caja cerrada</h1>
             {currentStore && (
@@ -132,16 +134,15 @@ export function SastreSessionGate({ children, stores }: SastreSessionGateProps) 
           </div>
 
           <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-white/90 mb-2">Efectivo inicial en caja</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={openingAmount}
-                onChange={e => setOpeningAmount(e.target.value)}
-                placeholder="0.00"
-                className="w-full h-12 px-4 rounded-xl border border-white/20 bg-white/[0.07] text-white text-lg font-medium placeholder:text-white/30 focus:outline-none focus:border-[#c9a96e] focus:ring-1 focus:ring-[#c9a96e]/30 transition-all"
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+              <CashCounter
+                value={cashBreakdown}
+                onChange={(breakdown, total) => {
+                  setCashBreakdown(breakdown)
+                  setOpeningAmount(String(total))
+                }}
+                label="Efectivo inicial en caja"
+                variant="dark"
               />
             </div>
             <button
