@@ -15,6 +15,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Switch } from '@/components/ui/switch'
+import { generateCashSessionReport } from '@/lib/pdf/cash-session-report'
 import {
   TrendingUp, TrendingDown, Euro, Calculator, BookOpen, FileText,
   Loader2, Plus, Search, ChevronDown, ChevronRight, Eye,
@@ -2406,9 +2407,48 @@ function CajaSessionsTab() {
 
     return (
       <div className="space-y-4">
-        <Button variant="outline" size="sm" onClick={() => { setVista('list'); setSelectedSession(null); setTimelineEvents([]); setDetailTotalCobrosSastreria(0) }}>
-          ← Volver al listado
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button variant="outline" size="sm" onClick={() => { setVista('list'); setSelectedSession(null); setTimelineEvents([]); setDetailTotalCobrosSastreria(0) }}>
+            ← Volver al listado
+          </Button>
+          {s.status === 'closed' && (
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await generateCashSessionReport({
+                    storeName: s.stores?.name ?? s.store_id ?? 'Sin tienda',
+                    openedBy: s.opened_by_profile?.full_name ?? s.opened_by ?? '—',
+                    closedBy: s.closed_by_profile?.full_name ?? s.closed_by ?? '—',
+                    openedAt: s.opened_at ?? '',
+                    closedAt: s.closed_at ?? '',
+                    openingAmount: Number(s.opening_amount ?? 0),
+                    openingBreakdown: s.opening_breakdown ?? undefined,
+                    closingBreakdown: s.closing_breakdown ?? undefined,
+                    totalSales: Number(s.total_sales ?? 0),
+                    totalCashSales: Number(s.total_cash_sales ?? 0),
+                    totalCardSales: Number(s.total_card_sales ?? 0),
+                    totalBizumSales: Number(s.total_bizum_sales ?? 0),
+                    totalTransferSales: Number(s.total_transfer_sales ?? 0),
+                    totalVoucherSales: Number(s.total_voucher_sales ?? 0),
+                    totalReturns: Number(s.total_returns ?? 0),
+                    totalWithdrawals: Number(s.total_withdrawals ?? 0),
+                    depositsCollected: Number(s.total_deposits_collected ?? 0),
+                    expectedCash: Number(s.expected_cash ?? 0),
+                    countedCash: Number(s.counted_cash ?? 0),
+                    cashDifference: Number(s.cash_difference ?? 0),
+                    closingNotes: s.closing_notes ?? undefined,
+                  })
+                } catch {
+                  console.error('Error generando PDF de arqueo')
+                }
+              }}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1B2A4A] text-white text-sm font-medium hover:bg-[#2D4470] transition-colors"
+            >
+              📄 Descargar arqueo
+            </button>
+          )}
+        </div>
 
         <Card>
           <CardContent className="pt-6 pb-6">
