@@ -1,11 +1,18 @@
 # Punto de restauración - Estado plataforma (marzo 2026)
 
-## Estado actual guardado (16 marzo 2026)
+## Estado actual guardado (17 marzo 2026)
 
-**Tag en Git:** `estado-plataforma-16marzo2026`
+**Tag en Git:** `estado-plataforma-17marzo2026`
 **Commit:** `aa16ecd` (feat: bloqueo de cobros sin caja abierta + consolidación de roles + gate de sesión sastre)
 
 Incluye: consolidación de roles (elimina `sastre`/`vendedor_basico`, migra a `sastre_plus`/`vendedor_avanzado`); bloqueo de cobros sin caja abierta en `addOrderPayment`, `addSalePayment`, `createFichaOrder`, `createSale`; `PaymentHistory` deshabilita botón de pago si no hay caja; `SastreSessionGate` (selección obligatoria de tienda + verificación de caja al entrar al panel sastre, con `sessionStorage` para forzar selección en cada sesión); sidebar sastre con "Pedidos" visible para todos los roles; mejoras UI en detalle de pedido sastre y `PaymentHistory` tema oscuro.
+
+---
+
+## Estado anterior (16 marzo 2026)
+
+**Tag en Git:** `estado-plataforma-16marzo2026`
+**Commit:** `aa16ecd` (mismo commit, tag anterior)
 
 ---
 
@@ -31,11 +38,12 @@ Incluye: diseño PDF factura (cabecera blanco/azul, línea dorada, bloque empres
 # Ver tags disponibles
 git tag -l estado-plataforma*
 
-# Volver al estado actual guardado (16 marzo 2026)
+# Volver al estado actual guardado (17 marzo 2026)
 git fetch origin
-git checkout estado-plataforma-16marzo2026
+git checkout estado-plataforma-17marzo2026
 
 # O volver a un estado anterior
+git checkout estado-plataforma-16marzo2026
 git checkout estado-plataforma-09marzo2026
 
 # Ver el código de un tag sin cambiar de rama
@@ -47,13 +55,13 @@ Si quieres que **main** vuelva a estar exactamente como en un tag:
 ```bash
 git fetch origin
 git checkout main
-git reset --hard estado-plataforma-16marzo2026
+git reset --hard estado-plataforma-17marzo2026
 git push origin main --force
 ```
 
 *(Usa `--force` solo si estás seguro; reescribe el historial de main en el remoto.)*
 
-## Qué incluye el estado actual (16marzo2026)
+## Qué incluye el estado actual (17marzo2026)
 
 - **Roles consolidados:** `sastre` → `sastre_plus`, `vendedor_basico` → `vendedor_avanzado`. Migración SQL `067_consolidate_roles.sql`.
 - **Bloqueo de cobros sin caja:** `addOrderPayment`, `addSalePayment`, `createFichaOrder` (si entrega > 0) y `createSale` bloquean si no hay caja abierta. `PaymentHistory` deshabilita el botón "Registrar pago" client-side.
