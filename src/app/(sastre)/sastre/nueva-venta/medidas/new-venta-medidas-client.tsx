@@ -27,7 +27,7 @@ export function NewVentaMedidasClient({
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-6">
         <p className="text-white/70 mb-4">Faltan datos. Vuelve a seleccionar cliente y tipo.</p>
-        <Button className="min-h-[48px]" variant="outline" onClick={() => router.push(`/sastre/nueva-venta/cliente?tipo=${encodeURIComponent(tipo || 'artesanal')}`)}>
+        <Button className="min-h-[48px] bg-white/[0.06] border border-white/15 text-white/70 font-medium hover:bg-white/10 hover:text-white transition-all" onClick={() => router.push(`/sastre/nueva-venta/cliente?tipo=${encodeURIComponent(tipo || 'artesanal')}`)}>
           Ir a cliente
         </Button>
       </div>

@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Loader2, ShoppingBag } from 'lucide-react'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { PaymentMethodBadge } from '@/components/ui/payment-method-badge'
 
 const saleTypeLabels: Record<string, string> = {
   boutique: 'Boutique', tailoring_deposit: 'Señal sastrería', tailoring_final: 'Pago final', alteration: 'Arreglo', online: 'Online',
@@ -61,7 +62,7 @@ export function ClientSalesTab({ clientId }: { clientId: string }) {
               <TableCell className="font-mono">{s.ticket_number}</TableCell>
               <TableCell><Badge variant="outline" className="text-xs">{saleTypeLabels[s.sale_type] || s.sale_type}</Badge></TableCell>
               <TableCell className="font-medium">{formatCurrency(s.total)}</TableCell>
-              <TableCell className="text-sm capitalize">{s.payment_method}</TableCell>
+              <TableCell><PaymentMethodBadge method={s.payment_method} /></TableCell>
               <TableCell><Badge variant={s.status === 'completed' ? 'default' : 'destructive'} className="text-xs">{s.status === 'completed' ? 'Completada' : s.status}</Badge></TableCell>
               <TableCell className="text-sm">{(s.stores as any)?.name}</TableCell>
               <TableCell className="text-xs text-muted-foreground">{formatDateTime(s.created_at)}</TableCell>

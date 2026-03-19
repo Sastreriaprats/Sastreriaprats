@@ -15,6 +15,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Switch } from '@/components/ui/switch'
+import { PaymentMethodBadge } from '@/components/ui/payment-method-badge'
 import { generateCashSessionReport } from '@/lib/pdf/cash-session-report'
 import {
   TrendingUp, TrendingDown, Euro, Calculator, BookOpen, FileText,
@@ -1765,9 +1766,15 @@ function VatTab() {
 
 // ─── Tab: Movimientos ────────────────────────────────────────────────────────
 
-const INCOME_CATEGORIES = ['Ventas directas', 'Otros ingresos']
+const INCOME_CATEGORIES = ['sastreria', 'boutique', 'caja', 'Otros ingresos']
 const EXPENSE_CATEGORIES = ['Alquiler', 'Nóminas', 'Suministros', 'Material', 'Publicidad', 'Servicios externos', 'Otros gastos']
 const ALL_CATEGORIES = [...INCOME_CATEGORIES, ...EXPENSE_CATEGORIES]
+
+const CATEGORY_DISPLAY: Record<string, { label: string; cls: string }> = {
+  sastreria: { label: 'Sastrería', cls: 'bg-blue-500/15 text-blue-600 border border-blue-500/20' },
+  boutique:  { label: 'Boutique',  cls: 'bg-purple-500/15 text-purple-600 border border-purple-500/20' },
+  caja:      { label: 'Caja',      cls: 'bg-gray-500/15 text-gray-600 border border-gray-500/20' },
+}
 const TAX_RATES = [0, 4, 10, 21]
 const MONTHS_OPT = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 
@@ -1952,7 +1959,13 @@ function MovimientosTab() {
                       {r.storeName && <div className="text-xs text-muted-foreground">{r.storeName}</div>}
                     </TableCell>
                     <TableCell className="font-medium max-w-[200px] truncate">{r.description}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{r.category ?? '—'}</TableCell>
+                    <TableCell>
+                      {r.category
+                        ? CATEGORY_DISPLAY[r.category]
+                          ? <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${CATEGORY_DISPLAY[r.category].cls}`}>{CATEGORY_DISPLAY[r.category].label}</span>
+                          : <span className="text-xs text-muted-foreground">{r.category}</span>
+                        : <span className="text-muted-foreground">—</span>}
+                    </TableCell>
                     <TableCell>
                       <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
                         r.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
@@ -2081,7 +2094,7 @@ function MovimientosTab() {
                   type="button"
                   onClick={() => setForm(f => ({
                     ...f, type: t,
-                    category: t === 'income' ? 'Ventas directas' : 'Otros gastos',
+                    category: t === 'income' ? 'sastreria' : 'Alquiler',
                   }))}
                   className={`py-3 rounded-lg border-2 text-sm font-medium transition-colors ${
                     form.type === t
@@ -2531,7 +2544,7 @@ function CajaSessionsTab() {
                               <p className={`text-sm font-medium ${textClass}`}>{desc}</p>
                               <p className="text-xs text-muted-foreground mt-0.5">{who}</p>
                               {isRetirada && (d?.reason || (isManual && d?.description)) && <p className="text-xs text-red-600/80 mt-0.5">{d?.reason || d?.description}</p>}
-                              {isCobro && methodLabel && <p className="text-xs text-muted-foreground mt-0.5">Método: {methodLabel}</p>}
+                              {isCobro && methodLabel && <div className="mt-1"><PaymentMethodBadge method={methodLabel} /></div>}
                             </div>
                             <span className={`text-sm font-medium tabular-nums shrink-0 ${amountClass}`}>
                               {isCierre ? '—' : isApertura ? (Number(s.opening_amount || 0).toFixed(2) + ' €') : (isRetirada ? '-' : isIncome ? '+' : '') + formatCurrency(amount)}

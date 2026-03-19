@@ -31,6 +31,7 @@ const METHOD_LABELS: Record<PaymentMethod, string> = {
   card: 'Tarjeta',
   transfer: 'Transferencia',
   check: 'Cheque',
+  bizum: 'Bizum',
 }
 
 const METHOD_ICONS: Record<PaymentMethod, React.ReactNode> = {
@@ -38,6 +39,7 @@ const METHOD_ICONS: Record<PaymentMethod, React.ReactNode> = {
   card: <CreditCard className="h-3.5 w-3.5" />,
   transfer: <ArrowRightLeft className="h-3.5 w-3.5" />,
   check: <FileText className="h-3.5 w-3.5" />,
+  bizum: <ArrowRightLeft className="h-3.5 w-3.5" />,
 }
 
 function today(): string {
@@ -364,9 +366,9 @@ export function PaymentHistory({
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="bg-[#0d1629] border border-white/20 text-white">
                   {(Object.entries(METHOD_LABELS) as [PaymentMethod, string][]).map(([k, v]) => (
-                    <SelectItem key={k} value={k}>
+                    <SelectItem key={k} value={k} className="text-white focus:bg-white/10 focus:text-white">
                       <span className="flex items-center gap-2">
                         {METHOD_ICONS[k]}
                         {v}
@@ -437,10 +439,19 @@ export function PaymentHistory({
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={isSaving}>
+            <Button
+              variant={variant === 'sastre' ? undefined : 'outline'}
+              className={variant === 'sastre' ? 'bg-white/[0.06] border border-white/15 text-white/70 font-medium hover:bg-white/10 hover:text-white transition-all' : undefined}
+              onClick={() => setDialogOpen(false)}
+              disabled={isSaving}
+            >
               Cancelar
             </Button>
-            <Button onClick={handleSave} disabled={isSaving}>
+            <Button
+              className={variant === 'sastre' ? 'bg-[#c9a96e]/15 border border-[#c9a96e]/30 text-[#c9a96e] font-medium hover:bg-[#c9a96e]/25 transition-all' : undefined}
+              onClick={handleSave}
+              disabled={isSaving}
+            >
               {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Guardar pago
             </Button>

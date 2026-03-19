@@ -7,22 +7,38 @@ import { Input } from '@/components/ui/input'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Plus, Search, ChevronLeft, ChevronRight, ArrowUpDown } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useList } from '@/hooks/use-list'
 import { listOrders } from '@/actions/orders'
-import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
+import { formatCurrency, formatDate, getOrderStatusLabel } from '@/lib/utils'
 import { SastreHeader } from '../../components/sastre-header'
 
-const orderStatuses = [
-  'created', 'fabric_ordered', 'fabric_received', 'factory_ordered',
-  'in_production', 'fitting', 'adjustments', 'finished', 'delivered', 'incident', 'cancelled',
-]
+// ── Badge en tabla ────────────────────────────────────────────────────────────
+const BADGE_CLASSES: Record<string, string> = {
+  created:               'bg-gray-500/20 text-gray-300 border-gray-500/30',
+  in_production:         'bg-blue-500/20 text-blue-300 border-blue-500/30',
+  pending_first_fitting: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+  fitting:               'bg-purple-500/20 text-purple-300 border-purple-500/30',
+  adjustments:           'bg-orange-500/20 text-orange-300 border-orange-500/30',
+  finished:              'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+  delivered:             'bg-green-500/20 text-green-300 border-green-500/30',
+  incident:              'bg-red-500/20 text-red-300 border-red-500/30',
+  cancelled:             'bg-red-700/30 text-red-400 border-red-700/40',
+  fabric_ordered:        'bg-blue-500/20 text-blue-300 border-blue-500/30',
+  fabric_received:       'bg-blue-600/20 text-blue-200 border-blue-600/30',
+  factory_ordered:       'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+  in_workshop:           'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
+  note_sent_factory:     'bg-orange-500/20 text-orange-300 border-orange-500/30',
+}
+
+function getBadgeClass(status: string): string {
+  return BADGE_CLASSES[status] ?? 'bg-gray-500/20 text-gray-300 border-gray-500/30'
+}
 
 export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
   const router = useRouter()
-  const [statusFilter, setStatusFilter] = useState('all')
+  const [localSearch, setLocalSearch] = useState('')
 
   const {
     data: orders,
@@ -30,13 +46,8 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
     totalPages,
     page,
     setPage,
-    search,
-    setSearch,
     sortBy,
-    sortOrder,
     toggleSort,
-    filters,
-    setFilters,
     isLoading,
   } = useList(listOrders, {
     pageSize: 25,
@@ -45,10 +56,16 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
     defaultFilters: {},
   })
 
-  const applyStatus = (v: string) => {
-    setStatusFilter(v)
-    setFilters((prev: Record<string, unknown>) => ({ ...prev, ...(v !== 'all' ? { status: v } : { status: undefined }) }))
-  }
+  // Filtrado client-side: número, nombre de cliente y estado (label legible)
+  const q = localSearch.trim().toLowerCase()
+  const visibleOrders = q
+    ? (orders as any[]).filter((o) => {
+        const num = String(o.order_number ?? '').toLowerCase()
+        const name = String(o.clients?.full_name ?? '').toLowerCase()
+        const estado = getOrderStatusLabel(o.status ?? '').toLowerCase()
+        return num.includes(q) || name.includes(q) || estado.includes(q)
+      })
+    : orders
 
   const SortHeader = ({ field, children }: { field: string; children: React.ReactNode }) => (
     <TableHead className="cursor-pointer select-none" onClick={() => toggleSort(field)}>
@@ -63,7 +80,9 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
     <div className="min-h-screen flex flex-col">
       <SastreHeader sastreName={sastreName} sectionTitle="Pedidos" backHref="/sastre/nueva-venta" />
       <main className="flex-1 p-6">
-        <div className="max-w-6xl mx-auto space-y-6">
+        <div className="max-w-6xl mx-auto space-y-4">
+
+          {/* ── Cabecera ── */}
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div>
               <h1 className="text-2xl font-bold text-white">Pedidos de Sastrería</h1>
@@ -75,30 +94,15 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
                 <Input
-                  placeholder="Buscar por número..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-8 w-48 h-9 bg-white/10 border-[#c9a96e]/30 text-white placeholder:text-white/40"
+                  placeholder="Buscar por número, cliente o estado..."
+                  value={localSearch}
+                  onChange={(e) => setLocalSearch(e.target.value)}
+                  className="pl-8 w-72 h-9 bg-white/10 border-[#c9a96e]/30 text-white placeholder:text-white/40"
                 />
               </div>
-              <Select value={statusFilter} onValueChange={applyStatus}>
-                <SelectTrigger className="w-40 h-9 bg-white/10 border-[#c9a96e]/30 text-white">
-                  <SelectValue placeholder="Estado" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
-                  <SelectItem value="overdue">Vencidos</SelectItem>
-                  {orderStatuses.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {getOrderStatusLabel(s)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
               <Button
-                variant="outline"
                 size="sm"
-                className="border-[#c9a96e]/40 text-[#c9a96e] hover:bg-[#c9a96e]/10"
+                className="bg-[#c9a96e]/15 border border-[#c9a96e]/30 text-[#c9a96e] font-medium hover:bg-[#c9a96e]/25 hover:text-[#c9a96e] transition-all"
                 onClick={() => router.push('/sastre/pedidos/nuevo')}
               >
                 <Plus className="h-4 w-4 mr-1" /> Nuevo producto
@@ -106,12 +110,13 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
             </div>
           </div>
 
+          {/* ── Tabla ── */}
           <div className="rounded-xl border border-[#c9a96e]/20 bg-white/5 overflow-hidden">
             {isLoading ? (
               <div className="p-8">
                 <Skeleton className="h-64 w-full bg-white/10" />
               </div>
-            ) : orders.length === 0 ? (
+            ) : (visibleOrders as any[]).length === 0 ? (
               <div className="p-12 text-center text-white/60">No hay pedidos</div>
             ) : (
               <Table>
@@ -123,11 +128,11 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
                     <TableHead className="text-white/70">Total</TableHead>
                     <TableHead className="text-white/70">Pendiente</TableHead>
                     <SortHeader field="status">Estado</SortHeader>
-                    <TableHead className="w-20" />
+                    <TableHead className="w-16" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {orders.map((o: any) => (
+                  {(visibleOrders as any[]).map((o) => (
                     <TableRow
                       key={o.id}
                       className="border-[#c9a96e]/10 hover:bg-white/5 cursor-pointer"
@@ -139,11 +144,13 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
                       </TableCell>
                       <TableCell className="text-white/70">{formatDate(o.order_date)}</TableCell>
                       <TableCell className="text-white">{formatCurrency(o.total)}</TableCell>
-                      <TableCell className="text-amber-400">{formatCurrency(o.total_pending ?? 0)}</TableCell>
                       <TableCell>
-                        <span
-                          className={`text-xs px-2 py-0.5 rounded ${getOrderStatusColor(o.status)}`}
-                        >
+                        <span className={(o.total_pending ?? 0) > 0 ? 'text-amber-400 font-medium' : 'text-green-400'}>
+                          {formatCurrency(o.total_pending ?? 0)}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${getBadgeClass(o.status)}`}>
                           {getOrderStatusLabel(o.status)}
                         </span>
                       </TableCell>
@@ -152,10 +159,7 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
                           variant="ghost"
                           size="sm"
                           className="text-[#c9a96e] hover:bg-[#c9a96e]/10"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            router.push(`/sastre/pedidos/${o.id}`)
-                          }}
+                          onClick={(e) => { e.stopPropagation(); router.push(`/sastre/pedidos/${o.id}`) }}
                         >
                           Ver
                         </Button>
@@ -167,6 +171,7 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
             )}
           </div>
 
+          {/* ── Paginación ── */}
           {totalPages > 1 && (
             <div className="flex items-center justify-between">
               <p className="text-sm text-white/50">
@@ -174,18 +179,16 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
               </p>
               <div className="flex gap-2">
                 <Button
-                  variant="outline"
                   size="sm"
-                  className="border-[#c9a96e]/40 text-white"
+                  className="bg-white/[0.06] border border-white/15 text-white/70 font-medium hover:bg-white/10 hover:text-white transition-all"
                   disabled={page <= 1}
                   onClick={() => setPage((p: number) => p - 1)}
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
                 <Button
-                  variant="outline"
                   size="sm"
-                  className="border-[#c9a96e]/40 text-white"
+                  className="bg-white/[0.06] border border-white/15 text-white/70 font-medium hover:bg-white/10 hover:text-white transition-all"
                   disabled={page >= totalPages}
                   onClick={() => setPage((p: number) => p + 1)}
                 >
@@ -194,6 +197,7 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
               </div>
             </div>
           )}
+
         </div>
       </main>
     </div>

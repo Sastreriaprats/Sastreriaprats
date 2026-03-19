@@ -399,7 +399,7 @@ export const changeOrderStatus = protectedAction<any, any>(
         .eq('id', order_id)
 
       await ctx.adminClient
-        .from('tailoring_order_lines').update({ status: new_status }).eq('tailoring_order_id', order_id)
+        .from('tailoring_order_lines').update({ status: new_status }).eq('tailoring_order_id', order_id).eq('status', 'created')
 
       await ctx.adminClient.from('tailoring_order_state_history').insert({
         tailoring_order_id: order_id,
@@ -514,7 +514,7 @@ export const markLineDelivered = protectedAction<string, { orderId: string }>(
 )
 
 export const updateOrderStatus = protectedAction<
-  { orderId: string; newStatus: string },
+  { orderId: string; newStatus: string; lineId?: string },
   { orderId: string }
 >(
   {
@@ -524,15 +524,25 @@ export const updateOrderStatus = protectedAction<
     auditEntity: 'tailoring_order',
     revalidate: ['/sastre/pedidos'],
   },
-  async (ctx, { orderId, newStatus }) => {
+  async (ctx, { orderId, newStatus, lineId }) => {
     if (!orderId?.trim() || !newStatus?.trim()) return failure('Parámetros no válidos', 'VALIDATION')
 
-    const { error } = await ctx.adminClient
-      .from('tailoring_orders')
-      .update({ status: newStatus.trim() })
-      .eq('id', orderId.trim())
+    if (lineId?.trim()) {
+      const { error } = await ctx.adminClient
+        .from('tailoring_order_lines')
+        .update({ status: newStatus.trim() })
+        .eq('id', lineId.trim())
+        .eq('tailoring_order_id', orderId.trim())
 
-    if (error) return failure(error.message, 'INTERNAL')
+      if (error) return failure(error.message, 'INTERNAL')
+    } else {
+      const { error } = await ctx.adminClient
+        .from('tailoring_orders')
+        .update({ status: newStatus.trim() })
+        .eq('id', orderId.trim())
+
+      if (error) return failure(error.message, 'INTERNAL')
+    }
 
     revalidatePath(`/sastre/pedidos/${orderId}`)
     return success({ orderId })
@@ -541,12 +551,24 @@ export const updateOrderStatus = protectedAction<
 
 // ─── Nueva venta (ficha) ────────────────────────────────────────────────────
 
+export interface PrendaLineaInput {
+  slug: string
+  label: string
+  precio: number
+  oficial: string
+  configuration: Record<string, unknown>
+}
+
 export interface CreateFichaOrderInput {
   clientId: string
   orderType: 'artesanal' | 'industrial' | 'camiseria'
   storeId: string
-  precioPrenda: number
+  precioPrenda?: number
   notas: string
+  /** Una línea artesanal por sub-prenda (americana, pantalón, chaleco…). Si se pasa, se ignoran prenda/oficial/fichaData. */
+  prendasSastreria?: PrendaLineaInput[]
+  /** Campos comunes a todas las líneas de sastrería (tejido, cortador, domicilio…). */
+  fichaCommon?: Record<string, unknown>
   /** Descripción de la ficha (alternativa a notas para el PDF). */
   descripcion?: string
   /** Cada elemento es una línea de camisa; la configuration se guarda completa. */
@@ -596,6 +618,9 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
       (g.name && g.name.toLowerCase().includes('camiser')) || (g.code && g.code.toLowerCase() === 'camiseria'))
     const firstType = garmentTypes?.[0]
 
+    const findGarmentTypeByCode = (code: string) =>
+      (garmentTypes ?? []).find((g: any) => g.code?.toLowerCase() === code.toLowerCase())
+
     const mainGarmentTypeId = americana?.id ?? firstType?.id
     const camiseriaGarmentTypeId = camiseria?.id ?? firstType?.id
     const complementGarmentTypeId = camiseria?.id ?? firstType?.id
@@ -622,7 +647,9 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
 
     const orderNumber = await getNextNumber('tailoring_orders', 'order_number', 'PED')
 
-    const precioConfeccion = Number(input.precioPrenda) || 0
+    const precioConfeccion = input.prendasSastreria !== undefined
+      ? input.prendasSastreria.reduce((s, p) => s + (Number(p.precio) || 0), 0)
+      : Number(input.precioPrenda) || 0
     const totalCamisas = (input.camisas || []).reduce((s, c) => s + (Number(c.precio) || 0), 0)
     let totalComplementos = 0
     for (const comp of input.complementos || []) {
@@ -652,7 +679,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
         store_id: input.storeId,
         status: initialStatus,
         order_number: orderNumber,
-        estimated_delivery_date: input.fechaCompromiso || null,
+        estimated_delivery_date: (input.fichaCommon?.fechaProximaVisita as string) || input.fechaCompromiso || null,
         subtotal,
         discount_amount: 0,
         tax_amount: 0,
@@ -667,31 +694,54 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
 
     let sortOrder = 0
 
-    const mainConfig: Record<string, unknown> = {
-      ...(input.fichaData || {}),
-      prenda: input.prenda,
-      cortador: input.cortador,
-      oficial: input.oficial,
-      fechaCompromiso: input.fechaCompromiso,
-      situacionTrabajo: input.situacionTrabajo,
-      fechaCobro: input.fechaCobro,
-      descripcion: (input.notas ?? input.descripcion ?? '').toString().trim() || undefined,
-      observaciones: (input.notas || '').trim(),
+    if (input.prendasSastreria !== undefined && input.prendasSastreria.length > 0) {
+      // Nueva arquitectura: una línea por sub-prenda
+      for (const prendaInput of input.prendasSastreria) {
+        const gtId = findGarmentTypeByCode(prendaInput.slug)?.id ?? mainGarmentTypeId
+        linesToInsert.push({
+          tailoring_order_id: order.id,
+          garment_type_id: gtId,
+          line_type: 'artesanal',
+          unit_price: Number(prendaInput.precio) || 0,
+          line_total: Number(prendaInput.precio) || 0,
+          finishing_notes: (input.notas || '').trim() || null,
+          configuration: {
+            ...(input.fichaCommon ?? {}),
+            ...prendaInput.configuration,
+            prenda: prendaInput.slug,
+            prendaLabel: prendaInput.label,
+            oficial: prendaInput.oficial,
+          },
+          sort_order: sortOrder++,
+        })
+      }
+    } else if (input.prendasSastreria === undefined) {
+      // Ruta legacy: una sola línea artesanal
+      const mainConfig: Record<string, unknown> = {
+        ...(input.fichaData || {}),
+        prenda: input.prenda,
+        cortador: input.cortador,
+        oficial: input.oficial,
+        fechaCompromiso: input.fechaCompromiso,
+        situacionTrabajo: input.situacionTrabajo,
+        fechaCobro: input.fechaCobro,
+        descripcion: (input.notas ?? input.descripcion ?? '').toString().trim() || undefined,
+        observaciones: (input.notas || '').trim(),
+      }
+      console.log('[ACTION] fichaData que se guarda:', JSON.stringify(input.fichaData ?? {}, null, 2))
+      console.log('[ACTION] mainConfig:', JSON.stringify(mainConfig, null, 2))
+      linesToInsert.push({
+        tailoring_order_id: order.id,
+        garment_type_id: mainGarmentTypeId,
+        line_type: 'artesanal',
+        unit_price: Number(input.precioPrenda) || 0,
+        line_total: Number(input.precioPrenda) || 0,
+        finishing_notes: (input.notas || '').trim() || null,
+        configuration: mainConfig,
+        sort_order: sortOrder++,
+      })
     }
-
-    console.log('[ACTION] fichaData que se guarda:', JSON.stringify(input.fichaData ?? {}, null, 2))
-    console.log('[ACTION] mainConfig:', JSON.stringify(mainConfig, null, 2))
-
-    linesToInsert.push({
-      tailoring_order_id: order.id,
-      garment_type_id: mainGarmentTypeId,
-      line_type: 'artesanal',
-      unit_price: Number(input.precioPrenda) || 0,
-      line_total: Number(input.precioPrenda) || 0,
-      finishing_notes: (input.notas || '').trim() || null,
-      configuration: mainConfig,
-      sort_order: sortOrder++,
-    })
+    // Si prendasSastreria === [] (solo camisería), no se crea línea artesanal
 
     for (const camisa of input.camisas || []) {
       const precio = Number(camisa.precio) || 0

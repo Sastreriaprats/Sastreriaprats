@@ -62,11 +62,13 @@ interface CreateClientDialogProps {
   onSuccess: () => void
   /** Si se proporciona, se llama con el id del cliente recién creado (antes de onSuccess). */
   onSuccessWithId?: (clientId: string) => void
+  /** Si se proporciona, se llama con los datos completos del cliente recién creado. */
+  onSuccessWithData?: (data: any) => void
   /** Si se proporciona, se llama al pulsar Cancelar (para redirigir en flujo sastre). */
   onCancel?: () => void
 }
 
-export function CreateClientDialog({ open, onOpenChange, onSuccess, onSuccessWithId, onCancel }: CreateClientDialogProps) {
+export function CreateClientDialog({ open, onOpenChange, onSuccess, onSuccessWithId, onSuccessWithData, onCancel }: CreateClientDialogProps) {
   const [activeTab, setActiveTab] = useState('personal')
   const [form, setForm] = useState({
     first_name: '', last_name: '', email: '', phone: '', phone_secondary: '',
@@ -87,6 +89,7 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess, onSuccessWit
     onSuccess: (data) => {
       const clientId = (data as { id?: string })?.id
       if (clientId && onSuccessWithId) onSuccessWithId(clientId)
+      if (onSuccessWithData) onSuccessWithData(data)
       if (data?.accountCreated) {
         toast.success('Cliente creado con cuenta de acceso (puede entrar en Mi cuenta con su email y la contraseña por defecto)')
       } else {

@@ -18,7 +18,7 @@ export function ElegirClienteClient({ orderType }: { orderType: string }) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-6">
         <p className="text-white/70 mb-4">Falta el tipo de pedido.</p>
-        <Button className="min-h-[48px]" variant="outline" onClick={() => router.push('/sastre/nueva-venta')}>
+        <Button className="min-h-[48px] bg-white/[0.06] border border-white/15 text-white/70 font-medium hover:bg-white/10 hover:text-white transition-all" onClick={() => router.push('/sastre/nueva-venta')}>
           Volver
         </Button>
       </div>

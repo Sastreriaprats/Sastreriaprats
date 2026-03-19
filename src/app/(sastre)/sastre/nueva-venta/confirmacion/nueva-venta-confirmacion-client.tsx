@@ -38,10 +38,7 @@ function isLineCamiseria(line: any): boolean {
 
 /** Líneas con ficha: sastrería o camisería (no complementos). Si hay alguna línea de camisería, solo se devuelven esas (no se mezclan con sastrería). */
 function getFichaLines(lines: any[]): any[] {
-  const nonComplement = lines.filter((l: any) => !isLineComplement(l))
-  const hasCamiseria = nonComplement.some((l: any) => isLineCamiseria(l))
-  if (hasCamiseria) return nonComplement.filter((l: any) => isLineCamiseria(l))
-  return nonComplement
+  return lines.filter((l: any) => !isLineComplement(l))
 }
 
 function getPrendaLabelForLine(line: any): string {

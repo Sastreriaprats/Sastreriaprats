@@ -7,7 +7,7 @@ import { serializeForServerAction } from '@/lib/server/serialize'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type PaymentMethod = 'cash' | 'card' | 'transfer' | 'check'
+export type PaymentMethod = 'cash' | 'card' | 'transfer' | 'check' | 'bizum'
 
 export interface OrderPayment {
   id: string
@@ -241,7 +241,7 @@ export const addSalePayment = protectedAction<AddSalePaymentInput, any>(
         type: 'income',
         date: new Date().toISOString().split('T')[0],
         description: `Cobro venta - Ticket ${saleData?.ticket_number ?? input.sale_id}`,
-        category: 'tpv',
+        category: 'boutique',
         amount: baseAmount,
         tax_rate: 21,
         tax_amount: taxAmount,

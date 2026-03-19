@@ -7,17 +7,15 @@ const STEPS = [
   { num: 1, label: 'Tipo', path: '/sastre/nueva-venta' },
   { num: 2, label: 'Cliente', path: null },
   { num: 3, label: 'Medidas', path: null },
-  { num: 4, label: 'Prenda', path: null },
-  { num: 5, label: 'Ficha', path: null },
+  { num: 4, label: 'Ficha', path: null },
 ] as const
 
-export function NuevaVentaSteps({ currentStep, tipo, clientId }: { currentStep: 1 | 2 | 3 | 4 | 5; tipo?: string; clientId?: string }) {
+export function NuevaVentaSteps({ currentStep, tipo, clientId }: { currentStep: 1 | 2 | 3 | 4; tipo?: string; clientId?: string }) {
   const base = '/sastre/nueva-venta'
   const paths: (string | null)[] = [
     `${base}`,
     tipo ? `${base}/cliente?tipo=${encodeURIComponent(tipo)}` : null,
     tipo && clientId ? `${base}/medidas?tipo=${encodeURIComponent(tipo)}&clientId=${encodeURIComponent(clientId)}` : null,
-    tipo && clientId ? `${base}/prenda?tipo=${encodeURIComponent(tipo)}&clientId=${encodeURIComponent(clientId)}` : null,
     tipo && clientId ? `${base}/ficha?tipo=${encodeURIComponent(tipo)}&clientId=${encodeURIComponent(clientId)}` : null,
   ]
 
@@ -47,9 +45,7 @@ export function NuevaVentaSteps({ currentStep, tipo, clientId }: { currentStep: 
           if (href && (isPast || isCurrent)) {
             return (
               <li key={step.num}>
-                <Link href={href} className={className}>
-                  {content}
-                </Link>
+                <Link href={href} className={className}>{content}</Link>
               </li>
             )
           }

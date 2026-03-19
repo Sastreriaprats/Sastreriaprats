@@ -11,9 +11,9 @@ import { formatDateTime } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { generateCamiseriaFichaPdf } from '@/lib/camiseria-ficha-pdf'
 
-const GARMENT_NAMES = ['Americana', 'Pantalón', 'Chaleco', 'Camisería']
-/** Índice tab → zona silueta: 0=americana, 1=pantalon, 2=chaleco, 3=camiseria (sin zona en silueta) */
-const TAB_TO_ZONE = ['americana', 'pantalon', 'chaleco', 'camiseria'] as const
+const GARMENT_NAMES = ['Americana', 'Pantalón', 'Chaleco', 'Frac', 'Abrigo', 'Camisería']
+/** Índice tab → zona silueta: 0=americana, 1=pantalon, 2=chaleco, 3=frac, 4=abrigo, 5=camiseria (sin zona en silueta) */
+const TAB_TO_ZONE = ['americana', 'pantalon', 'chaleco', 'frac', 'abrigo', 'camiseria'] as const
 
 function getGarmentPrefix(name: string): string {
   return name
@@ -107,7 +107,8 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
     if (code === 'body') {
       const bodyKeys = Object.fromEntries(
         Object.entries(normalized).filter(([k]) =>
-          k.startsWith('americana_') || k.startsWith('pantalon_') || k.startsWith('chaleco_')
+          k.startsWith('americana_') || k.startsWith('pantalon_') || k.startsWith('chaleco_') ||
+          k.startsWith('frac_') || k.startsWith('abrigo_')
         )
       )
       setValues((prev) => ({ ...prev, ...bodyKeys }))
@@ -290,7 +291,9 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
           if (
             k.startsWith('americana_') ||
             k.startsWith('pantalon_') ||
-            k.startsWith('chaleco_')
+            k.startsWith('chaleco_') ||
+            k.startsWith('frac_') ||
+            k.startsWith('abrigo_')
           ) {
             if (v !== '' && v !== null && v !== undefined) {
               fullValues[k] = String(v)
@@ -438,8 +441,7 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
                     <div className="pt-2">
                       <Button
                         type="button"
-                        variant="outline"
-                        className="gap-2 border-[#c9a96e]/40 text-[#c9a96e] hover:bg-[#c9a96e]/10"
+                        className="gap-2 bg-[#c9a96e]/15 border border-[#c9a96e]/30 text-[#c9a96e] font-medium hover:bg-[#c9a96e]/25 transition-all"
                         onClick={() => generateCamiseriaFichaPdf({ clientName, values: Object.fromEntries(Object.entries(values).map(([k, v]) => [k, String(v)])), prefix: 'camiseria' })}
                       >
                         <Printer className="h-4 w-4" />

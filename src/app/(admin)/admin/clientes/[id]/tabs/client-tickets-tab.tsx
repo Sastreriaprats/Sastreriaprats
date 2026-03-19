@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Loader2, ShoppingBag, FileDown } from 'lucide-react'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { PaymentMethodBadge } from '@/components/ui/payment-method-badge'
 import { getSaleForTicket } from '@/actions/pos'
 import { generateTicketPdf } from '@/components/pos/ticket-pdf'
 
@@ -113,7 +114,7 @@ export function ClientTicketsTab({ clientId }: { clientId: string }) {
               <TableCell className="text-sm text-muted-foreground">{formatDateTime(s.created_at)}</TableCell>
               <TableCell><Badge variant="outline" className="text-xs">{saleTypeLabels[s.sale_type] || s.sale_type}</Badge></TableCell>
               <TableCell className="font-medium">{formatCurrency(s.total)}</TableCell>
-              <TableCell className="text-sm capitalize">{s.payment_method}</TableCell>
+              <TableCell><PaymentMethodBadge method={s.payment_method} /></TableCell>
               <TableCell className="text-sm">{(s.stores as any)?.name}</TableCell>
               <TableCell>
                 <Button

@@ -7,8 +7,8 @@ import { Button } from '@/components/ui/button'
 
 /** Tipos de producto de sastrería (hombre). Se puede ampliar más adelante. */
 const PRODUCTOS_SASTRERIA = [
-  { code: 'traje_2_piezas', label: 'Traje 2 piezas' },
-  { code: 'traje_3_piezas', label: 'Traje 3 piezas' },
+  { code: 'traje_2_piezas', label: 'Traje' },
+  { code: 'traje_3_piezas', label: 'Traje con chaleco' },
   { code: 'americana', label: 'Americana' },
   { code: 'teba', label: 'Teba' },
   { code: 'abrigo', label: 'Abrigo' },

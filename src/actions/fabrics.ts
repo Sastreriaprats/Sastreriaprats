@@ -4,6 +4,23 @@ import { protectedAction } from '@/lib/server/action-wrapper'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { success, failure } from '@/lib/errors'
 
+/** Lista tejidos activos para el selector de la ficha de confección (sin restricción de permiso, solo autenticado). */
+export const listActiveFabricsForFicha = protectedAction<
+  void,
+  { id: string; fabric_code: string | null; name: string }[]
+>(
+  {},
+  async (ctx) => {
+    const { data, error } = await ctx.adminClient
+      .from('fabrics')
+      .select('id, fabric_code, name')
+      .eq('is_active', true)
+      .order('fabric_code', { ascending: true })
+    if (error) return failure(error.message)
+    return success((data ?? []) as { id: string; fabric_code: string | null; name: string }[])
+  }
+)
+
 /**
  * Genera un fabric_code automático con formato XXXX-TEL-NNN.
  * Recibe el adminClient ya instanciado para reutilizarlo.

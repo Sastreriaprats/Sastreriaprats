@@ -29,9 +29,11 @@ import { useAction } from '@/hooks/use-action'
 import { searchProductsForPos, createSale, cashWithdrawal, listPosEmployees } from '@/actions/pos'
 import { addOrderPayment, addSalePayment, getClientPendingDebt } from '@/actions/payments'
 import { getProductByBarcode } from '@/actions/products'
-import { listClients, createClientAction } from '@/actions/clients'
+import { listClients } from '@/actions/clients'
+import { CreateClientDialog } from '@/app/(admin)/admin/clientes/create-client-dialog'
 import { formatCurrency } from '@/lib/utils'
 import { generateTicketPdf } from '@/components/pos/ticket-pdf'
+import { getStorePdfData } from '@/lib/pdf/pdf-company'
 import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
 
 interface TicketLine {
@@ -85,11 +87,10 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
   const [showTicketModal, setShowTicketModal] = useState(false)
   const [saleWithoutClient, setSaleWithoutClient] = useState(false)
   const [showClientDialog, setShowClientDialog] = useState(false)
+  const [showCreateClientDialog, setShowCreateClientDialog] = useState(false)
   const [clientSearchQuery, setClientSearchQuery] = useState('')
   const [clientSearchResults, setClientSearchResults] = useState<any[]>([])
   const [clientSearching, setClientSearching] = useState(false)
-  const [clientTab, setClientTab] = useState<'search' | 'new'>('search')
-  const [newClientForm, setNewClientForm] = useState({ first_name: '', last_name: '', phone: '', email: '' })
   const [paymentAmountInput, setPaymentAmountInput] = useState('')
   const [leaveAsPending, setLeaveAsPending] = useState(false)
   const [nextPaymentDate, setNextPaymentDate] = useState('')
@@ -465,21 +466,6 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
     },
   })
 
-  const { execute: createClient, isLoading: isCreatingClient } = useAction(createClientAction, {
-    onSuccess: (data) => {
-      if (data?.id) {
-        const name = data.full_name || `${data.first_name || ''} ${data.last_name || ''}`.trim()
-        setSelectedClientId(data.id)
-        setSelectedClientName(name)
-        setShowClientDialog(false)
-        setClientTab('search')
-        setNewClientForm({ first_name: '', last_name: '', phone: '', email: '' })
-        setClientSearchQuery('')
-        setClientSearchResults([])
-        toast.success('Cliente creado y asignado a la venta')
-      }
-    },
-  })
 
   const handleNewSale = () => {
     setShowTicketModal(false)
@@ -500,6 +486,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
     if (!completedSale) return
     const lineTotal = (l: TicketLine) =>
       l.unit_price * l.quantity * (1 - (l.discount_percentage || 0) / 100)
+    const storeConfig = getStorePdfData(activeStoreName)
     await generateTicketPdf({
       sale: {
         ticket_number: completedSale.ticket_number,
@@ -523,6 +510,9 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
       payments,
       clientName: selectedClientName || null,
       clientCode: null,
+      storeAddress: storeConfig.address,
+      storeSubtitle: storeConfig.subtitle ?? null,
+      storePhones: storeConfig.phones,
     })
   }
 
@@ -933,14 +923,12 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
         </Button>
       </div>
 
-      {/* Diálogo Asignar / Crear cliente */}
+      {/* Diálogo Buscar / Asignar cliente */}
       <Dialog open={showClientDialog} onOpenChange={(open) => {
         setShowClientDialog(open)
         if (!open) {
-          setClientTab('search')
           setClientSearchQuery('')
           setClientSearchResults([])
-          setNewClientForm({ first_name: '', last_name: '', phone: '', email: '' })
         }
       }}>
         <DialogContent className="max-w-md">
@@ -949,116 +937,84 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
               <User className="h-5 w-5" /> Asignar cliente a la venta
             </DialogTitle>
           </DialogHeader>
-          <Tabs value={clientTab} onValueChange={(v) => setClientTab(v as 'search' | 'new')} className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="search">Buscar cliente</TabsTrigger>
-              <TabsTrigger value="new">Crear cliente nuevo</TabsTrigger>
-            </TabsList>
-            <TabsContent value="search" className="space-y-3 mt-3">
-              <Input
-                placeholder="Nombre, apellido o código..."
-                value={clientSearchQuery}
-                onChange={(e) => setClientSearchQuery(e.target.value)}
-                className="h-9"
-              />
-              {clientSearching && (
-                <div className="flex items-center justify-center py-4 text-slate-600 text-sm">
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" /> Buscando...
-                </div>
-              )}
-              {!clientSearching && clientSearchQuery.length >= 2 && (
-                <ScrollArea className="h-[220px] rounded border border-slate-200">
-                  {clientSearchResults.length === 0 ? (
-                    <p className="p-4 text-sm text-slate-600 text-center">Sin resultados</p>
-                  ) : (
-                    <ul className="p-2 space-y-1">
-                      {clientSearchResults.map((c) => (
-                        <li key={c.id}>
-                          <Button
-                            variant="ghost"
-                            className="w-full justify-start h-9 text-left font-normal"
-                            onClick={() => {
-                              const name = c.full_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()
-                              setSelectedClientId(c.id)
-                              setSelectedClientName(name)
-                              setShowClientDialog(false)
-                              setClientSearchQuery('')
-                              setClientSearchResults([])
-                              toast.success('Cliente asignado')
-                            }}
-                          >
-                            <span className="font-medium">{c.full_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()}</span>
-                            {c.client_code && <span className="text-slate-500 ml-2">({c.client_code})</span>}
-                          </Button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </ScrollArea>
-              )}
-              {clientSearchQuery.length < 2 && !clientSearching && (
-                <p className="text-sm text-slate-600 py-2">Escribe al menos 2 caracteres para buscar</p>
-              )}
-            </TabsContent>
-            <TabsContent value="new" className="space-y-3 mt-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>Nombre *</Label>
-                  <Input
-                    placeholder="Nombre"
-                    value={newClientForm.first_name}
-                    onChange={(e) => setNewClientForm((f) => ({ ...f, first_name: e.target.value }))}
-                    className="h-9"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Apellidos *</Label>
-                  <Input
-                    placeholder="Apellidos"
-                    value={newClientForm.last_name}
-                    onChange={(e) => setNewClientForm((f) => ({ ...f, last_name: e.target.value }))}
-                    className="h-9"
-                  />
-                </div>
+          <div className="space-y-3">
+            <Input
+              placeholder="Nombre, apellido o código..."
+              value={clientSearchQuery}
+              onChange={(e) => setClientSearchQuery(e.target.value)}
+              className="h-9"
+            />
+            {clientSearching && (
+              <div className="flex items-center justify-center py-4 text-slate-600 text-sm">
+                <Loader2 className="h-4 w-4 animate-spin mr-2" /> Buscando...
               </div>
-              <div className="space-y-1.5">
-                <Label>Teléfono</Label>
-                <Input
-                  placeholder="Teléfono"
-                  value={newClientForm.phone}
-                  onChange={(e) => setNewClientForm((f) => ({ ...f, phone: e.target.value }))}
-                  className="h-9"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Email</Label>
-                <Input
-                  type="email"
-                  placeholder="email@ejemplo.com"
-                  value={newClientForm.email}
-                  onChange={(e) => setNewClientForm((f) => ({ ...f, email: e.target.value }))}
-                  className="h-9"
-                />
-              </div>
-              <Button
-                className="w-full gap-2 bg-prats-navy hover:bg-prats-navy-light"
-                disabled={isCreatingClient || !newClientForm.first_name.trim() || !newClientForm.last_name.trim()}
-                onClick={() => {
-                  createClient({
-                    first_name: newClientForm.first_name.trim(),
-                    last_name: newClientForm.last_name.trim(),
-                    email: newClientForm.email.trim() || undefined,
-                    phone: newClientForm.phone.trim() || undefined,
-                  })
-                }}
-              >
-                {isCreatingClient ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-                Crear y asignar a la venta
-              </Button>
-            </TabsContent>
-          </Tabs>
+            )}
+            {!clientSearching && clientSearchQuery.length >= 2 && (
+              <ScrollArea className="h-[220px] rounded border border-slate-200">
+                {clientSearchResults.length === 0 ? (
+                  <p className="p-4 text-sm text-slate-600 text-center">Sin resultados</p>
+                ) : (
+                  <ul className="p-2 space-y-1">
+                    {clientSearchResults.map((c) => (
+                      <li key={c.id}>
+                        <Button
+                          variant="ghost"
+                          className="w-full justify-start h-9 text-left font-normal"
+                          onClick={() => {
+                            const name = c.full_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()
+                            setSelectedClientId(c.id)
+                            setSelectedClientName(name)
+                            setShowClientDialog(false)
+                            setClientSearchQuery('')
+                            setClientSearchResults([])
+                            toast.success('Cliente asignado')
+                          }}
+                        >
+                          <span className="font-medium">{c.full_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()}</span>
+                          {c.client_code && <span className="text-slate-500 ml-2">({c.client_code})</span>}
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </ScrollArea>
+            )}
+            {clientSearchQuery.length < 2 && !clientSearching && (
+              <p className="text-sm text-slate-600 py-2">Escribe al menos 2 caracteres para buscar</p>
+            )}
+          </div>
+          <div className="pt-3 border-t border-slate-200">
+            <Button
+              variant="outline"
+              className="w-full gap-2"
+              onClick={() => {
+                setShowClientDialog(false)
+                setShowCreateClientDialog(true)
+              }}
+            >
+              <UserPlus className="h-4 w-4" />
+              Crear cliente nuevo
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
+
+      {/* Diálogo Crear cliente nuevo (formulario completo) */}
+      <CreateClientDialog
+        open={showCreateClientDialog}
+        onOpenChange={setShowCreateClientDialog}
+        onSuccess={() => {}}
+        onSuccessWithData={(data) => {
+          if (data?.id) {
+            const name = data.full_name || `${data.first_name || ''} ${data.last_name || ''}`.trim()
+            setSelectedClientId(data.id)
+            setSelectedClientName(name)
+            setClientSearchQuery('')
+            setClientSearchResults([])
+            toast.success('Cliente creado y asignado a la venta')
+          }
+        }}
+      />
 
       {/* Diálogo de cobro — Paso 1: elegir tipo (Íntegro / Mixto / Parcial). Paso 2: método de pago y detalles */}
       <Dialog open={showPayment} onOpenChange={(open) => {

@@ -56,7 +56,7 @@ export function ClientesPageContent({ sastreName }: { sastreName: string }) {
             <button
               type="button"
               onClick={() => setShowCreate(true)}
-              className="flex items-center gap-2 px-6 h-12 rounded-xl bg-transparent border-2 border-white/60 text-white font-medium hover:bg-white/5 transition-colors touch-manipulation"
+              className="flex items-center gap-2 px-6 h-12 rounded-xl bg-[#c9a96e]/15 border border-[#c9a96e]/30 text-[#c9a96e] font-medium hover:bg-[#c9a96e]/25 hover:text-[#c9a96e] transition-all touch-manipulation"
             >
               <UserPlus className="h-5 w-5" />
               Nuevo cliente

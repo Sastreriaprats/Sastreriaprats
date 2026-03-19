@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ArrowLeft, Loader2, TrendingUp, ShoppingBag, CreditCard, Users } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { PaymentMethodBadge } from '@/components/ui/payment-method-badge'
 
 const saleTypeLabels: Record<string, string> = {
   boutique: 'Boutique', tailoring_deposit: 'Señal', tailoring_final: 'Pago final', alteration: 'Arreglo', online: 'Online',
@@ -139,7 +140,7 @@ export function PosSummaryContent() {
                       <TableCell className="text-sm">{s.clients?.full_name || '\u2014'}</TableCell>
                       <TableCell className="text-sm text-slate-600">{(s.profiles as any)?.full_name ?? '\u2014'}</TableCell>
                       <TableCell className="font-medium">{formatCurrency(s.total)}</TableCell>
-                      <TableCell className="text-sm capitalize">{s.payment_method}</TableCell>
+                      <TableCell><PaymentMethodBadge method={s.payment_method} /></TableCell>
                       <TableCell className="text-xs text-muted-foreground">{new Date(s.created_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</TableCell>
                     </TableRow>
                   ))}

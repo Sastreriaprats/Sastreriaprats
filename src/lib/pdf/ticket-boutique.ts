@@ -3,7 +3,7 @@
  * Usa el formato unificado de Sastrería Prats vía generateTicketPdf.
  */
 
-import { COMPANY } from '@/lib/pdf/pdf-company'
+import { COMPANY, getStorePdfData } from '@/lib/pdf/pdf-company'
 import { generateTicketPdf } from '@/components/pos/ticket-pdf'
 
 function getClientName(order: any): string {
@@ -19,8 +19,9 @@ function getClientCode(order: any): string | null {
   return c.code ?? c.client_code ?? null
 }
 
-/** Dirección de la tienda por defecto (sede principal) */
-const DEFAULT_STORE_ADDRESS = COMPANY.address + ', ' + COMPANY.postalCode + ' ' + COMPANY.city
+function getOrderStoreName(order: any): string | null {
+  return order?.stores?.name ?? order?.store?.name ?? null
+}
 
 /**
  * Genera un ticket PDF para una sola línea complemento del pedido.
@@ -41,6 +42,7 @@ export async function generateTicketComplemento(order: any, line: any): Promise<
   const now = new Date().toISOString()
   const paymentMethodKey = order?.payment_method ?? order?.payment ?? 'card'
 
+  const storeConfig = getStorePdfData(getOrderStoreName(order))
   await generateTicketPdf({
     sale: {
       ticket_number: String(order?.order_number ?? 'pedido'),
@@ -63,7 +65,9 @@ export async function generateTicketComplemento(order: any, line: any): Promise<
     payments: [{ payment_method: paymentMethodKey, amount: total }],
     clientName: getClientName(order),
     clientCode: getClientCode(order),
-    storeAddress: DEFAULT_STORE_ADDRESS,
+    storeAddress: storeConfig.address,
+    storeSubtitle: storeConfig.subtitle ?? null,
+    storePhones: storeConfig.phones,
   })
 }
 
@@ -99,6 +103,7 @@ export async function generateTicketBoutiquePDF(order: any): Promise<void> {
   const tax_amount = Math.round((total - subtotal) * 100) / 100
   const paymentMethodKey = order?.payment_method ?? order?.payment ?? 'card'
 
+  const storeConfig2 = getStorePdfData(getOrderStoreName(order))
   await generateTicketPdf({
     sale: {
       ticket_number: String(order?.order_number ?? order?.id ?? 'pedido'),
@@ -113,6 +118,8 @@ export async function generateTicketBoutiquePDF(order: any): Promise<void> {
     payments: [{ payment_method: paymentMethodKey, amount: total }],
     clientName: getClientName(order),
     clientCode: getClientCode(order),
-    storeAddress: DEFAULT_STORE_ADDRESS,
+    storeAddress: storeConfig2.address,
+    storeSubtitle: storeConfig2.subtitle ?? null,
+    storePhones: storeConfig2.phones,
   })
 }

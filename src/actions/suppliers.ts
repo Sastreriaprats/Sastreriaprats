@@ -47,14 +47,14 @@ export const searchSupplierFabrics = protectedAction<
 /** Busca productos de un proveedor por nombre (ilike). */
 export const searchSupplierProducts = protectedAction<
   { supplierId: string; query?: string },
-  { id: string; name: string; sku: string; cost_price: number | null }[]
+  { id: string; name: string; sku: string; cost_price: number | null; main_image_url: string | null; images: string[] | null }[]
 >(
   { permission: 'suppliers.view' },
   async (ctx, { supplierId, query }) => {
     if (!supplierId?.trim()) return success([])
     let q = ctx.adminClient
       .from('products')
-      .select('id, name, sku, cost_price')
+      .select('id, name, sku, cost_price, main_image_url, images')
       .eq('supplier_id', supplierId.trim())
       .eq('is_active', true)
       .order('name', { ascending: true })
@@ -64,7 +64,7 @@ export const searchSupplierProducts = protectedAction<
     }
     const { data, error } = await q
     if (error) return failure(error.message)
-    return success((data ?? []) as { id: string; name: string; sku: string; cost_price: number | null }[])
+    return success((data ?? []) as { id: string; name: string; sku: string; cost_price: number | null; main_image_url: string | null; images: string[] | null }[])
   }
 )
 

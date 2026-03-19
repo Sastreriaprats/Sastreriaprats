@@ -20,7 +20,7 @@ import { formatDateTime } from '@/lib/utils'
 import { saveBodyMeasurements } from '@/actions/clients'
 
 // Tipos de prenda que se cargan dinámicamente desde measurement_fields
-const GARMENT_NAMES = ['Americana', 'Pantalón', 'Chaleco']
+const GARMENT_NAMES = ['Americana', 'Pantalón', 'Chaleco', 'Frac', 'Abrigo']
 
 /**
  * Convierte el nombre del garment_type en el prefijo usado como clave en el JSONB.

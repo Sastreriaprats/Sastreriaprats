@@ -219,6 +219,7 @@ export const getSaleForTicket = protectedAction<string, {
   payments: any[]
   clientName: string | null
   clientCode: string | null
+  storeName: string | null
 } | null>(
   { permission: 'pos.access', auditModule: 'pos' },
   async (ctx, saleId) => {
@@ -226,7 +227,8 @@ export const getSaleForTicket = protectedAction<string, {
       .from('sales')
       .select(`
         id, ticket_number, created_at, client_id, subtotal, discount_amount, discount_percentage,
-        tax_amount, total, payment_method, is_tax_free, status
+        tax_amount, total, payment_method, is_tax_free, status,
+        stores(name)
       `)
       .eq('id', saleId)
       .single()
@@ -255,12 +257,15 @@ export const getSaleForTicket = protectedAction<string, {
       }
     }
 
+    const storeName = (sale.stores as { name?: string } | null)?.name ?? null
+
     return success({
       sale,
       lines: lines ?? [],
       payments: payments ?? [],
       clientName,
       clientCode,
+      storeName,
     })
   }
 )

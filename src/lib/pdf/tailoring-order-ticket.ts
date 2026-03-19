@@ -3,7 +3,7 @@
  * Usa el formato unificado de Sastrería Prats vía generateTicketPdf.
  */
 
-import { COMPANY } from '@/lib/pdf/pdf-company'
+import { STORE_PDF_CONFIGS } from '@/lib/pdf/pdf-company'
 import { generateTicketPdf } from '@/components/pos/ticket-pdf'
 
 export interface TailoringTicketOrder {
@@ -32,8 +32,6 @@ function getClientCode(order: TailoringTicketOrder): string | null {
   if (!c || typeof c !== 'object') return null
   return (c as { code?: string; client_code?: string }).code ?? (c as { client_code?: string }).client_code ?? null
 }
-
-const DEFAULT_STORE_ADDRESS = COMPANY.address + ', ' + COMPANY.postalCode + ' ' + COMPANY.city
 
 export async function generateTailoringOrderTicketPdf(order: TailoringTicketOrder): Promise<void> {
   const orderLines = order.tailoring_order_lines ?? []
@@ -70,6 +68,7 @@ export async function generateTailoringOrderTicketPdf(order: TailoringTicketOrde
     payments: [{ payment_method: 'card', amount: total }],
     clientName: getClientName(order),
     clientCode: getClientCode(order),
-    storeAddress: DEFAULT_STORE_ADDRESS,
+    storeAddress: STORE_PDF_CONFIGS.pinzon.address,
+    storePhones: STORE_PDF_CONFIGS.pinzon.phones,
   })
 }

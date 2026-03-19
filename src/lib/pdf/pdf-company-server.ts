@@ -6,7 +6,6 @@
 import path from 'path'
 import fs from 'fs/promises'
 import sharp from 'sharp'
-import { LOGO_BASE64 } from './pdf-company'
 
 /**
  * Lee el logo del filesystem, lo procesa con sharp (fondo blanco → transparente,
@@ -43,6 +42,6 @@ export async function getLogoBase64Processed(): Promise<string | null> {
 
     return `data:image/png;base64,${pngBuffer.toString('base64')}`
   } catch {
-    return LOGO_BASE64
+    return null
   }
 }

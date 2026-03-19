@@ -18,6 +18,7 @@ import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { listTickets, getSaleForTicket } from '@/actions/pos'
 import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
 import { generateTicketPdf } from '@/components/pos/ticket-pdf'
+import { getStorePdfData } from '@/lib/pdf/pdf-company'
 import { toast } from 'sonner'
 
 const PAYMENT_LABELS: Record<string, string> = {
@@ -75,7 +76,8 @@ export function TicketsContent() {
     try {
       const result = await getSaleForTicket(saleId)
       if (result.success && result.data) {
-        const { sale, lines, payments, clientName, clientCode } = result.data
+        const { sale, lines, payments, clientName, clientCode, storeName } = result.data
+        const storeConfig = getStorePdfData(storeName)
         await generateTicketPdf({
           sale: {
             ticket_number: sale.ticket_number,
@@ -99,6 +101,9 @@ export function TicketsContent() {
           payments,
           clientName,
           clientCode,
+          storeAddress: storeConfig.address,
+          storeSubtitle: storeConfig.subtitle ?? null,
+          storePhones: storeConfig.phones,
         })
       }
     } catch (e) {

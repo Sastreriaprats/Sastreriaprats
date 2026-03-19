@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { formatCurrency, formatDate, getOrderStatusLabel } from '@/lib/utils'
 import { PaymentHistory } from '@/components/payments/payment-history'
 import { getOrder, markLineDelivered, updateOrderStatus } from '@/actions/orders'
-import { generateFichaForLineCamiseria } from '@/lib/pdf/ficha-confeccion'
+import { generateFichaForLine, generateFichaForLineCamiseria } from '@/lib/pdf/ficha-confeccion'
 import { generateTicketComplemento } from '@/lib/pdf/ticket-boutique'
 
 function slugToPrendaLabel(slug: string): string {
@@ -113,6 +113,16 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
     }
   }
 
+  const handleDownloadFichaSastreria = async (line: any) => {
+    if (!order) return
+    setPdfLoadingId(line.id)
+    try {
+      await generateFichaForLine(order, line)
+    } finally {
+      setPdfLoadingId(null)
+    }
+  }
+
   const handleDownloadFicha = async (line: any, lineIndex: number) => {
     if (!order) return
     setPdfLoadingId(line.id)
@@ -144,6 +154,20 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
     if (res?.success) await refreshOrder()
   }
 
+  const LINE_STATUS_COLORS: Record<string, string> = {
+    created:     'bg-gray-400',
+    in_workshop: 'bg-blue-400',
+    fitting:     'bg-amber-400',
+    adjustments: 'bg-orange-400',
+    finished:    'bg-green-400',
+    delivered:   'bg-emerald-400',
+  }
+
+  const handleLineStatusChange = async (lineId: string, newStatus: string) => {
+    const res = await updateOrderStatus({ orderId: order.id, lineId, newStatus })
+    if (res?.success) await refreshOrder()
+  }
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <Card className="border-white/10 bg-white/[0.04] shadow-none">
@@ -160,7 +184,7 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
               <select
                 value={order.status}
                 onChange={(e) => handleStatusChange(e.target.value)}
-                className="bg-white/[0.07] text-white border border-white/15 rounded-lg px-3 py-1.5 text-sm hover:bg-white/10 cursor-pointer focus:outline-none focus:border-[#c9a96e]/50 transition-all"
+                className="bg-white/[0.07] text-white border border-white/15 rounded-lg px-3 py-1.5 text-sm hover:bg-white/10 cursor-pointer focus:outline-none focus:border-[#c9a96e]/50 transition-all [&>option]:bg-[#0d1629] [&>option]:text-white"
               >
                 {statusOptions.map((s) => (
                   <option key={s} value={s}>{getOrderStatusLabel(s)}</option>
@@ -216,14 +240,18 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
                   >
                     <span className="mr-2" aria-hidden>👕</span>
                     <span className="text-white flex-1 min-w-0">{getLineName(line)}</span>
-                    <span
-                      className={`text-xs px-2.5 py-1 rounded-md shrink-0 ml-2 font-medium ${
-                        line.delivered_at ? 'bg-green-500/15 text-green-400 border border-green-500/20' : 'bg-white/[0.06] text-white/50 border border-white/10'
-                      }`}
+                    <span className={`w-2 h-2 rounded-full shrink-0 ml-2 ${LINE_STATUS_COLORS[line.status] || 'bg-gray-400'}`} />
+                    <select
+                      value={line.status || 'created'}
+                      onChange={(e) => handleLineStatusChange(line.id, e.target.value)}
+                      className="bg-white/[0.07] text-white border border-white/15 rounded-lg px-2 py-1 text-xs font-medium hover:bg-white/10 cursor-pointer focus:outline-none focus:border-[#c9a96e]/50 transition-all shrink-0 ml-2 [&>option]:bg-[#0d1629] [&>option]:text-white"
                     >
-                      {line.delivered_at ? 'Entregado' : 'Creado'}
-                    </span>
-                    {!line.delivered_at && (
+                      <option value="in_workshop">En confección</option>
+                      <option value="fitting">En prueba</option>
+                      <option value="adjustments">Arreglos</option>
+                      <option value="finished">Finalizada</option>
+                    </select>
+                    {line.status === 'finished' && !line.delivered_at && (
                       <button
                         type="button"
                         onClick={() => handleMarkDelivered(line.id)}
@@ -233,6 +261,19 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
                         {markingId === line.id ? '...' : 'Marcar entregado'}
                       </button>
                     )}
+                    {line.delivered_at && (
+                      <span className="text-xs px-2.5 py-1 rounded-md shrink-0 ml-2 font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">
+                        Entregado
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadFichaSastreria(line)}
+                      disabled={pdfLoadingId === line.id}
+                      className="border border-white/15 text-white/60 px-3 py-1.5 rounded-lg text-xs font-medium shrink-0 ml-2 hover:bg-white/[0.07] hover:text-white/80 disabled:opacity-50 transition-all"
+                    >
+                      {pdfLoadingId === line.id ? '...' : 'Descargar ficha'}
+                    </button>
                   </div>
                 ))}
               </>

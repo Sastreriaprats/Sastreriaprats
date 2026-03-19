@@ -1,14 +1,21 @@
 import type { Content } from 'pdfmake'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { COMPANY, formatDateDDMMYYYY, eurFormat } from './pdf-company'
+import { COMPANY } from './pdf-company'
 import { getLogoBase64Processed } from './pdf-company-server'
+import {
+  HEADER_BG,
+  n,
+  buildHeader,
+  buildInfoSection,
+  buildTableBody,
+  buildTotals,
+  buildSectionBox,
+  buildPageFooter,
+  initPdfMake,
+  type PdfLine,
+} from './pdf-layout'
 
 const BUCKET = 'documents'
-
-const HEADER_BG = '#1a1a2e'
-const TABLE_HEADER_BG = '#4a5568'
-const ROW_ALT = '#f9f9f9'
-const LINE_COLOR = '#cccccc'
 
 type InvoiceRecord = {
   id: string
@@ -29,20 +36,6 @@ type InvoiceRecord = {
   irpf_amount: number
   total: number
   notes: string | null
-}
-
-type InvoiceLineRecord = {
-  description: string
-  quantity: number
-  unit_price: number
-  tax_rate: number
-  line_total: number
-}
-
-function n(v: unknown): number {
-  if (v == null) return 0
-  if (typeof v === 'number' && !Number.isNaN(v)) return v
-  return Number(String(v).replace(',', '.')) || 0
 }
 
 /**
@@ -70,7 +63,7 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
     .order('sort_order', { ascending: true })
 
   const invoice = inv as unknown as InvoiceRecord
-  const lines = (rawLines || []) as unknown as InvoiceLineRecord[]
+  const lines = (rawLines || []) as unknown as PdfLine[]
   const isDraft = invoice.status === 'draft'
   const displayNumber =
     isDraft && (!invoice.invoice_number || !String(invoice.invoice_number).trim())
@@ -79,293 +72,71 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
 
   const logoData = await getLogoBase64Processed()
 
-  const numberBadge: Content = {
-    columns: [
-      { text: '', width: '*' },
-      {
-        width: 'auto',
-        table: {
-          widths: ['auto'],
-          body: [[{
-            text: `Nº: ${displayNumber}`,
-            fillColor: '#ffffff',
-            color: '#1a1a2e',
-            bold: true,
-            fontSize: 10,
-            margin: [10, 4, 10, 4] as [number, number, number, number],
-          }]],
-        },
-        layout: 'noBorders',
-      },
-    ],
-    margin: [0, 6, 0, 0] as [number, number, number, number],
-  }
-
-  const headerRight: Content[] = [
-    { text: isDraft ? 'BORRADOR' : 'FACTURA', fontSize: 20, bold: true, color: 'white', alignment: 'right', margin: [0, 0, 0, 6] },
-    numberBadge,
-  ]
-
-  const headerTable: Content = {
-    table: {
-      widths: ['40%', '60%'],
-      body: [
-        [
-          {
-            fillColor: HEADER_BG,
-            alignment: 'left' as const,
-            margin: [16, 10, 16, 10] as [number, number, number, number],
-            ...(logoData
-              ? { image: logoData, width: 80 }
-              : { text: 'SASTRERÍA PRATS', fontSize: 18, bold: true, color: 'white' }),
-          },
-          {
-            fillColor: HEADER_BG,
-            stack: headerRight,
-            alignment: 'right',
-            margin: [0, 12, 16, 12] as [number, number, number, number],
-          },
-        ],
-      ],
-    },
-    layout: 'noBorders',
-    margin: [0, 0, 0, 0],
-  }
-
-  const companyBlock: Content = {
-    stack: [
-      { text: 'EMPRESA', fontSize: 8, bold: true, color: '#666', margin: [0, 0, 0, 2] },
-      { text: COMPANY.name, fontSize: 10, bold: true, color: 'black', margin: [0, 0, 0, 2] },
-      { text: `NIF / CIF: ${COMPANY.nif}`, fontSize: 9, color: 'black', margin: [0, 0, 0, 2] },
-      { text: COMPANY.address, fontSize: 9, color: 'black', margin: [0, 0, 0, 2] },
-      { text: `${COMPANY.postalCode}, ${COMPANY.city}, ${COMPANY.country}`, fontSize: 9, color: 'black' },
-    ],
-  }
-
-  const clientLines: Content[] = [
-    { text: 'CLIENTE', fontSize: 8, bold: true, color: '#666', margin: [0, 0, 0, 2] },
-    { text: invoice.client_name || '—', fontSize: 10, bold: true, color: 'black', margin: [0, 0, 0, 2] },
-  ]
-  if (invoice.client_nif)
-    clientLines.push({
-      text: `NIF / CIF: ${invoice.client_nif}`,
-      fontSize: 9,
-      color: 'black',
-      margin: [0, 0, 0, 2],
-    })
-  clientLines.push({
-    text: `Dirección: ${invoice.client_address ?? ''}`,
-    fontSize: 9,
-    color: 'black',
-  })
-
-  const clientBlock: Content = { stack: clientLines }
-
-  const datesBlock: Content = {
-    stack: [
-      {
-        columns: [
-          { text: 'Fecha:', fontSize: 8, color: '#666', width: 65 },
-          { text: formatDateDDMMYYYY(invoice.invoice_date), fontSize: 10, bold: true, color: 'black' },
-        ],
-        margin: [0, 0, 0, 6],
-      },
-      {
-        columns: [
-          { text: 'Vencimiento:', fontSize: 8, color: '#666', width: 65 },
-          { text: invoice.due_date ? formatDateDDMMYYYY(invoice.due_date) : '—', fontSize: 10, bold: true, color: 'black' },
-        ],
-      },
-    ],
-    alignment: 'right',
-  }
-
-  const tableHeader = [
-    { text: 'CONCEPTO', fillColor: TABLE_HEADER_BG, color: 'white', bold: true },
-    { text: 'CANT.', fillColor: TABLE_HEADER_BG, color: 'white', bold: true },
-    { text: 'PRECIO', fillColor: TABLE_HEADER_BG, color: 'white', bold: true },
-    { text: 'IVA', fillColor: TABLE_HEADER_BG, color: 'white', bold: true },
-    { text: 'TOTAL', fillColor: TABLE_HEADER_BG, color: 'white', bold: true },
-  ]
-  const tableBody: unknown[][] = [tableHeader]
-  lines.forEach((ln, i) => {
-    tableBody.push([
-      {
-        text: String(ln.description ?? '').slice(0, 50),
-        fillColor: i % 2 === 1 ? ROW_ALT : undefined,
-      },
-      { text: String(n(ln.quantity)), fillColor: i % 2 === 1 ? ROW_ALT : undefined },
-      { text: eurFormat(n(ln.unit_price)), fillColor: i % 2 === 1 ? ROW_ALT : undefined },
-      { text: `${n(ln.tax_rate)}%`, fillColor: i % 2 === 1 ? ROW_ALT : undefined },
-      {
-        text: eurFormat(n(ln.line_total)),
-        fillColor: i % 2 === 1 ? ROW_ALT : undefined,
-        bold: true,
-      },
-    ])
-  })
-
-  const totals: Content = {
-    columns: [
-      { text: '' },
-      {
-        stack: [
-          {
-            text: `Subtotal: ${eurFormat(n(invoice.subtotal))}`,
-            alignment: 'right',
-            margin: [0, 0, 0, 4],
-            fontSize: 10,
-          },
-          {
-            text: `IVA (${n(invoice.tax_rate)}%): ${eurFormat(n(invoice.tax_amount))}`,
-            alignment: 'right',
-            margin: [0, 0, 0, 4],
-            fontSize: 10,
-          },
-          ...(n(invoice.irpf_amount) > 0
-            ? [
-                {
-                  text: `IRPF (${n(invoice.irpf_rate)}%): - ${eurFormat(n(invoice.irpf_amount))}`,
-                  alignment: 'right' as const,
-                  margin: [0, 0, 0, 4] as [number, number, number, number],
-                  fontSize: 10,
-                },
-              ]
-            : []),
-          {
-            table: {
-              widths: [200],
-              body: [[
-                {
-                  text: `TOTAL: ${eurFormat(n(invoice.total))}`,
-                  fillColor: HEADER_BG,
-                  color: 'white',
-                  bold: true,
-                  fontSize: 14,
-                  margin: [8, 6, 8, 6] as [number, number, number, number],
-                },
-              ]],
-            },
-            layout: 'noBorders',
-            margin: [0, 8, 0, 0] as [number, number, number, number],
-          },
-        ],
-        width: 200,
-      },
-    ],
-    margin: [0, 12, 0, 0],
-  }
-
-  const paymentBlock: Content = {
-    table: {
-      widths: ['*'],
-      body: [
-        [
-          {
-            text: 'CONDICIONES DE PAGO',
-            fillColor: HEADER_BG,
-            color: 'white',
-            bold: true,
-            fontSize: 9,
-            margin: [8, 6, 8, 6] as [number, number, number, number],
-          },
-        ],
-        [{ text: `Forma de pago: ${COMPANY.payment.form}`, margin: [8, 4, 8, 2] as [number, number, number, number], fontSize: 9 }],
-        [{ text: `Beneficiario: ${COMPANY.payment.beneficiary}`, margin: [8, 0, 8, 2] as [number, number, number, number], fontSize: 9 }],
-        [{ text: `Banco: ${COMPANY.payment.bank}`, margin: [8, 0, 8, 2] as [number, number, number, number], fontSize: 9 }],
-        [{ text: `IBAN: ${COMPANY.payment.iban}`, margin: [8, 0, 8, 2] as [number, number, number, number], fontSize: 9 }],
-        [{ text: `BIC: ${COMPANY.payment.bic}`, margin: [8, 0, 8, 6] as [number, number, number, number], fontSize: 9 }],
-      ],
-    },
-    layout: {
-      hLineWidth: () => 0.5,
-      vLineWidth: () => 0.5,
-    },
-    margin: [0, 16, 0, 0],
-  }
-
-  const footerContent: Content = {
-    stack: [
-      {
-        text: COMPANY.footerLine1,
-        fontSize: 7,
-        color: '#666',
-        alignment: 'center',
-        margin: [0, 0, 0, 2],
-      },
-      {
-        text: COMPANY.registroMercantil,
-        fontSize: 6,
-        color: '#666',
-        alignment: 'center',
-        margin: [0, 0, 0, 2],
-      },
-      {
-        text: `Teléfono: ${COMPANY.phone} · ${COMPANY.email} · ${COMPANY.web}`,
-        fontSize: 6,
-        color: '#666',
-        alignment: 'center',
-      },
-    ],
-    margin: [40, 20, 40, 0],
-  }
+  const paymentBlock = buildSectionBox('CONDICIONES DE PAGO', [
+    { text: 'Forma de pago:', margin: [8, 6, 8, 2] as [number, number, number, number], fontSize: 9, bold: true },
+    { text: COMPANY.payment.form, margin: [8, 0, 8, 4] as [number, number, number, number], fontSize: 9, color: HEADER_BG },
+    { text: 'Nº Cuenta para ingreso:', margin: [8, 4, 8, 2] as [number, number, number, number], fontSize: 9, bold: true },
+    { text: `Beneficiario: ${COMPANY.payment.beneficiary}`, margin: [8, 0, 8, 2] as [number, number, number, number], fontSize: 9 },
+    { text: `Banco: ${COMPANY.payment.bank}`, margin: [8, 0, 8, 2] as [number, number, number, number], fontSize: 9 },
+    { text: `IBAN: ${COMPANY.payment.iban}`, margin: [8, 0, 8, 2] as [number, number, number, number], fontSize: 9 },
+    { text: `BIC: ${COMPANY.payment.bic}`, margin: [8, 0, 8, 6] as [number, number, number, number], fontSize: 9 },
+  ])
 
   const bodyContent: Content[] = [
-    {
-      columns: [
-        { width: '*', ...companyBlock },
-        { width: '*', ...clientBlock },
-        { width: 120, ...datesBlock },
-      ],
-      margin: [0, 16, 0, 16],
-    },
+    ...buildInfoSection({
+      clientName: invoice.client_name,
+      clientNif: invoice.client_nif,
+      clientAddress: invoice.client_address,
+      label1: 'Fecha:',
+      date1: invoice.invoice_date,
+      label2: 'Vencimiento:',
+      date2: invoice.due_date,
+    }),
     {
       table: {
         widths: ['*', 40, 55, 35, 55],
-        body: tableBody as Content[][],
+        body: buildTableBody(lines) as Content[][],
       },
-      layout: {
-        hLineWidth: () => 0.5,
-        vLineWidth: () => 0.5,
-      },
+      layout: { hLineWidth: () => 0.5, vLineWidth: () => 0.5, hLineColor: () => '#e2e8f0', vLineColor: () => '#e2e8f0' },
     },
-    totals,
+    buildTotals({
+      subtotal: n(invoice.subtotal),
+      taxRate: n(invoice.tax_rate),
+      taxAmount: n(invoice.tax_amount),
+      irpfRate: n(invoice.irpf_rate),
+      irpfAmount: n(invoice.irpf_amount),
+      total: n(invoice.total),
+    }),
   ]
+
   if (!isDraft) bodyContent.push(paymentBlock)
+
   if (invoice.notes) {
     bodyContent.push({
       text: [
         { text: 'Notas: ', bold: true },
         { text: String(invoice.notes).slice(0, 300) },
       ],
-      margin: [0, 12, 0, 0],
+      margin: [0, 12, 0, 0] as [number, number, number, number],
       fontSize: 9,
     })
   }
-  bodyContent.push(footerContent)
 
   const content: Content[] = [
-    headerTable,
+    buildHeader(isDraft ? 'BORRADOR' : 'FACTURA', displayNumber, logoData),
     {
       stack: bodyContent,
       margin: [40, 16, 40, 0] as [number, number, number, number],
     },
   ]
 
-  const docDef = {
+  const pdfMake = await initPdfMake()
+  const pdf = pdfMake.createPdf({
     pageSize: 'A4',
-    pageMargins: [0, 0, 0, 40] as [number, number, number, number],
+    pageMargins: [0, 0, 0, 60] as [number, number, number, number],
+    footer: buildPageFooter(),
     content,
-  }
-
-  const pdfMake = (await import('pdfmake/build/pdfmake')).default
-  const vfsModule = await import('pdfmake/build/vfs_fonts')
-  const vfs = (vfsModule as { default?: Record<string, string> }).default
-  if (typeof pdfMake.addVirtualFileSystem === 'function' && vfs) {
-    pdfMake.addVirtualFileSystem(vfs)
-  }
-
-  const pdf = pdfMake.createPdf(docDef as Parameters<typeof pdfMake.createPdf>[0])
+  } as Parameters<typeof pdfMake.createPdf>[0])
   const pdfBuffer = await (pdf as { getBuffer(): Promise<Buffer> }).getBuffer()
 
   try {

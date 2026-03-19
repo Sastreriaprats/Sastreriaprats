@@ -1,13 +1,10 @@
 'use client'
 
 import type { Content } from 'pdfmake'
-import { COMPANY, getLogoBase64Client } from '@/lib/pdf/pdf-company'
+import { COMPANY, getLogoBase64Client, STORE_PDF_CONFIGS } from '@/lib/pdf/pdf-company'
 
-/** Dirección y teléfono de la tienda para el ticket (por defecto sede principal) */
-const STORE_DEFAULT = {
-  address: COMPANY.address + ', ' + COMPANY.postalCode + ' ' + COMPANY.city,
-  phones: COMPANY.phone,
-}
+/** Dirección y teléfono de la tienda por defecto (Hermanos Pinzón) */
+const STORE_DEFAULT = STORE_PDF_CONFIGS.pinzon
 
 const W_MM = 80
 const W_PT = Math.round(W_MM * 2.83465)
@@ -51,8 +48,10 @@ export interface TicketPdfData {
   clientCode?: string | null
   /** Nombre del vendedor que atendió (opcional) */
   attendedBy?: string | null
-  /** Dirección de la tienda (opcional, por defecto sede principal) */
+  /** Dirección de la tienda (opcional, por defecto Hermanos Pinzón) */
   storeAddress?: string | null
+  /** Subtítulo de la tienda, e.g. "Wellington Hotel & Spa" (opcional) */
+  storeSubtitle?: string | null
   /** Teléfonos de la tienda (opcional) */
   storePhones?: string | null
 }
@@ -84,6 +83,7 @@ export async function generateTicketPdf(data: TicketPdfData): Promise<void> {
   }
 
   const storeAddress = data.storeAddress ?? STORE_DEFAULT.address
+  const storeSubtitle = data.storeSubtitle ?? null
   const storePhones = data.storePhones ?? STORE_DEFAULT.phones
   const createdAt = new Date(data.sale.created_at)
   const dateStr = createdAt.toLocaleDateString('es-ES', {
@@ -99,40 +99,24 @@ export async function generateTicketPdf(data: TicketPdfData): Promise<void> {
   const discountAmount = data.sale.discount_amount ?? 0
   const tax = data.sale.tax_amount ?? 0
   const totalArticles = data.lines.reduce((acc, l) => acc + (l.quantity || 1), 0)
-  const logoBase64 = getLogoBase64Client()
+  const logoBase64 = await getLogoBase64Client()
 
   const content: Content[] = [
     ...(logoBase64
       ? [
           {
             image: logoBase64,
-            width: 80,
+            width: 160,
             alignment: 'center',
             margin: [0, 0, 0, 6] as [number, number, number, number],
           } as Content,
         ]
       : []),
-    {
-      text: COMPANY.name,
-      fontSize: FONT_HEAD,
-      bold: true,
-      alignment: 'center',
-      margin: [0, 0, 0, 2] as [number, number, number, number],
-    },
-    {
-      text: `${COMPANY.nif} · ${COMPANY.address}`,
-      fontSize: FONT_SMALL,
-      alignment: 'center',
-      margin: [0, 0, 0, 2] as [number, number, number, number],
-    },
-    {
-      text: `${COMPANY.postalCode} - ${COMPANY.city} - ${COMPANY.country}`,
-      fontSize: FONT_SMALL,
-      alignment: 'center',
-      margin: [0, 0, 0, 2] as [number, number, number, number],
-    },
     { text: storeAddress, fontSize: FONT_SMALL, alignment: 'center', margin: [0, 0, 0, 2] as [number, number, number, number] },
-    { text: storePhones, fontSize: FONT_SMALL, alignment: 'center', margin: [0, 0, 0, 12] as [number, number, number, number] },
+    ...(storeSubtitle
+      ? [{ text: storeSubtitle, fontSize: FONT_SMALL, alignment: 'center', margin: [0, 0, 0, 2] as [number, number, number, number] } as Content]
+      : []),
+    { text: storePhones, fontSize: FONT_SMALL, alignment: 'center', margin: [0, 0, 0, 4] as [number, number, number, number] },
     { canvas: [{ type: 'line', x1: 0, y1: 0, x2: W_PT - 2 * MARGIN_PT, y2: 0, lineWidth: 0.5 }], margin: [0, 0, 0, 8] as [number, number, number, number] },
     {
       table: {
@@ -251,9 +235,21 @@ export async function generateTicketPdf(data: TicketPdfData): Promise<void> {
       margin: [0, 4, 0, 2] as [number, number, number, number],
     },
     {
+      text: `Artículos: ${totalArticles}`,
+      fontSize: FONT_BODY,
+      margin: [0, 0, 0, 2] as [number, number, number, number],
+    },
+    {
       text: `Pago: ${payLabel}`,
       fontSize: FONT_BODY,
       margin: [0, 0, 0, 12] as [number, number, number, number],
+    },
+    {
+      text: '¡Gracias por elegir Sastrería Prats!',
+      fontSize: FONT_BODY,
+      bold: true,
+      alignment: 'center',
+      margin: [0, 0, 0, 8] as [number, number, number, number],
     },
     {
       canvas: [
@@ -261,24 +257,50 @@ export async function generateTicketPdf(data: TicketPdfData): Promise<void> {
       ],
       margin: [0, 0, 0, 8] as [number, number, number, number],
     },
+    ...(() => {
+      const parts = COMPANY.returnsPolicy.split('Cuando el único')
+      const para1 = parts[0].trim()
+      const para2 = parts[1] ? 'Cuando el único' + parts[1] : ''
+      const items: Content[] = [
+        {
+          text: para1,
+          fontSize: 6,
+          color: '#333',
+          alignment: 'left',
+          margin: [0, 0, 0, 6] as [number, number, number, number],
+        },
+      ]
+      if (para2) {
+        items.push({
+          text: para2,
+          fontSize: 6,
+          color: '#333',
+          alignment: 'left',
+          margin: [0, 0, 0, 0] as [number, number, number, number],
+        })
+      }
+      return items
+    })(),
+    { text: '', margin: [0, 8, 0, 0] as [number, number, number, number] },
     {
-      text: '¡Gracias por elegir Sastrería Prats!',
-      fontSize: FONT_BODY,
-      bold: true,
+      text: COMPANY.name,
+      fontSize: 6,
+      color: '#999',
       alignment: 'center',
-      margin: [0, 0, 0, 4] as [number, number, number, number],
+      margin: [0, 0, 0, 1] as [number, number, number, number],
     },
     {
-      text: `Artículos: ${totalArticles}`,
-      fontSize: FONT_SMALL,
+      text: `${COMPANY.nif} · ${COMPANY.address}`,
+      fontSize: 6,
+      color: '#999',
       alignment: 'center',
-      margin: [0, 0, 0, 12] as [number, number, number, number],
+      margin: [0, 0, 0, 1] as [number, number, number, number],
     },
     {
-      text: COMPANY.returnsPolicy,
-      fontSize: 5,
-      color: '#444',
-      alignment: 'left',
+      text: `${COMPANY.postalCode} - ${COMPANY.city} · ${COMPANY.country}`,
+      fontSize: 6,
+      color: '#999',
+      alignment: 'center',
       margin: [0, 0, 0, 0] as [number, number, number, number],
     }
   )

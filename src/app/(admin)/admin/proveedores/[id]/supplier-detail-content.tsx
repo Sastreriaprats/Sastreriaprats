@@ -35,7 +35,7 @@ import {
 } from '@/components/ui/dialog'
 import {
   ArrowLeft, User, Phone, Mail, MapPin, CreditCard, Truck,
-  AlertTriangle, ShoppingBag, Plus, Loader2, FileText,
+  AlertTriangle, ShoppingBag, Plus, Loader2, FileText, Package,
 } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -101,8 +101,16 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
     reference: string
     quantity: string
     unit: string
+    unit_price: string
+    image_url?: string | null
+    sizeQuantities?: Record<string, string>
+    variants?: Array<{ id: string; size: string | null; color: string | null }>
     newFabric?: { name: string; fabric_code: string; reference: string; unit: string }
   }>>([])
+  const [quickProductOpen, setQuickProductOpen] = useState(false)
+  const [quickProductForm, setQuickProductForm] = useState({ name: '', sku: '', cost_price: '', sizes: '' })
+  const [creatingQuickProduct, setCreatingQuickProduct] = useState(false)
+  const [loadingVariantsForLine, setLoadingVariantsForLine] = useState<Set<string>>(new Set())
   const [tailoringSearchQuery, setTailoringSearchQuery] = useState('')
   const [tailoringSearchResults, setTailoringSearchResults] = useState<{ id: string; order_number: string; client_name: string }[]>([])
   const [tailoringSearchOpen, setTailoringSearchOpen] = useState(false)
@@ -114,7 +122,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
   const [fabricSearchResults, setFabricSearchResults] = useState<{ id: string; fabric_code: string | null; name: string }[]>([])
   const [productSearchForLine, setProductSearchForLine] = useState<string | null>(null)
   const [productSearchQuery, setProductSearchQuery] = useState('')
-  const [productSearchResults, setProductSearchResults] = useState<{ id: string; sku: string; name: string }[]>([])
+  const [productSearchResults, setProductSearchResults] = useState<{ id: string; sku: string; name: string; main_image_url: string | null; images: string[] | null }[]>([])
   const [newFabricForLine, setNewFabricForLine] = useState<string | null>(null)
   const [newFabricForm, setNewFabricForm] = useState({ name: '', fabric_code: '', reference: '', unit: 'meters' })
   const fabricSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -189,14 +197,15 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
     return () => { if (productSearchTimeoutRef.current) clearTimeout(productSearchTimeoutRef.current) }
   }, [newOrderOpen, productSearchForLine, productSearchQuery, supplier.id])
 
-  const addOrderLine = () => {
+  const addLine = (type: 'fabric' | 'product' | 'custom') => {
     setOrderLines((prev) => [...prev, {
       tempId: `line-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      type: 'custom',
+      type,
       description: '',
       reference: '',
-      quantity: '1',
-      unit: 'unidades',
+      quantity: '',
+      unit: type === 'fabric' ? 'metros' : 'unidades',
+      unit_price: '',
     }])
   }
   const updateOrderLine = (tempId: string, upd: Partial<typeof orderLines[0]>) => {
@@ -207,6 +216,20 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
     if (newFabricForLine === tempId) setNewFabricForLine(null)
     if (fabricSearchForLine === tempId) setFabricSearchForLine(null)
     if (productSearchForLine === tempId) setProductSearchForLine(null)
+  }
+  const loadProductVariants = async (productId: string, tempId: string) => {
+    setLoadingVariantsForLine((prev) => new Set(prev).add(tempId))
+    const supabase = createClient()
+    const { data } = await supabase
+      .from('product_variants')
+      .select('id, size, color')
+      .eq('product_id', productId)
+      .eq('is_active', true)
+      .order('size')
+    setLoadingVariantsForLine((prev) => { const next = new Set(prev); next.delete(tempId); return next })
+    if (data) {
+      updateOrderLine(tempId, { variants: data, sizeQuantities: {} })
+    }
   }
   const contacts = supplier.supplier_contacts || []
   const fabrics = supplier.fabrics || []
@@ -699,34 +722,36 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
           }
         }}
       >
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Truck className="h-5 w-5" /> Nuevo pedido a proveedor
             </DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Se creará el pedido y, si tienes permiso de facturas proveedores, se generará la factura en Contabilidad → Facturas proveedores.
-          </p>
-          <div className="grid gap-4 py-2">
-            <div className="space-y-2">
-              <Label htmlFor="new-order-payment">Fecha de pago al proveedor</Label>
-              <DatePickerPopover
-                id="new-order-payment"
-                value={newOrderForm.payment_due_date}
-                onChange={(date) => setNewOrderForm((f) => ({ ...f, payment_due_date: date }))}
-              />
+
+          <div className="grid gap-6 py-2">
+            {/* ── SECCIÓN 1: CABECERA ───────────────────────────────── */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="new-order-delivery">Fecha de entrega estimada *</Label>
+                <DatePickerPopover
+                  id="new-order-delivery"
+                  value={newOrderForm.estimated_delivery_date}
+                  onChange={(date) => setNewOrderForm((f) => ({ ...f, estimated_delivery_date: date }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="new-order-payment">Fecha de pago al proveedor</Label>
+                <DatePickerPopover
+                  id="new-order-payment"
+                  value={newOrderForm.payment_due_date}
+                  onChange={(date) => setNewOrderForm((f) => ({ ...f, payment_due_date: date }))}
+                />
+              </div>
             </div>
+
             <div className="space-y-2">
-              <Label htmlFor="new-order-delivery">Fecha de entrega estimada *</Label>
-              <DatePickerPopover
-                id="new-order-delivery"
-                value={newOrderForm.estimated_delivery_date}
-                onChange={(date) => setNewOrderForm((f) => ({ ...f, estimated_delivery_date: date }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="new-order-tailoring">Pedido de sastrería (opcional)</Label>
+              <Label htmlFor="new-order-tailoring">Pedido de sastrería vinculado (opcional)</Label>
               {newOrderForm.tailoring_order_id ? (
                 <div className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm bg-muted/50">
                   <span>{selectedTailoringLabel}</span>
@@ -739,9 +764,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                       setNewOrderForm((f) => ({ ...f, tailoring_order_id: '' }))
                       setSelectedTailoringLabel('')
                     }}
-                  >
-                    ×
-                  </Button>
+                  >×</Button>
                 </div>
               ) : (
                 <div className="relative">
@@ -749,10 +772,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                     id="new-order-tailoring"
                     placeholder="Buscar por nº pedido (ej. PED-2026-0008)"
                     value={tailoringSearchQuery}
-                    onChange={(e) => {
-                      setTailoringSearchQuery(e.target.value)
-                      setTailoringSearchOpen(true)
-                    }}
+                    onChange={(e) => { setTailoringSearchQuery(e.target.value); setTailoringSearchOpen(true) }}
                     onFocus={() => tailoringSearchResults.length > 0 && setTailoringSearchOpen(true)}
                   />
                   {tailoringSearching && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">Buscando...</span>}
@@ -770,9 +790,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                               setTailoringSearchResults([])
                               setTailoringSearchOpen(false)
                             }}
-                          >
-                            {row.order_number} — {row.client_name}
-                          </button>
+                          >{row.order_number} — {row.client_name}</button>
                         </li>
                       ))}
                     </ul>
@@ -780,137 +798,355 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                 </div>
               )}
             </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
+
+            {/* ── SECCIÓN 2: LÍNEAS ─────────────────────────────────── */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
                 <Label>Líneas del pedido</Label>
-                <Button type="button" variant="outline" size="sm" onClick={addOrderLine} className="gap-1">
-                  <Plus className="h-3 w-3" /> Añadir línea
-                </Button>
+                <div className="flex gap-2 flex-wrap">
+                  <Button type="button" variant="outline" size="sm" className="gap-1 text-xs h-8"
+                    onClick={() => addLine('fabric')}>🧵 Añadir tejido</Button>
+                  <Button type="button" variant="outline" size="sm" className="gap-1 text-xs h-8"
+                    onClick={() => addLine('product')}>📦 Añadir producto</Button>
+                  <Button type="button" variant="outline" size="sm" className="gap-1 text-xs h-8"
+                    onClick={() => addLine('custom')}>✏️ Añadir libre</Button>
+                </div>
               </div>
-              <div className="space-y-3 rounded-md border p-3 bg-muted/30">
-                {orderLines.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-4">Añade al menos una línea con tipo, descripción y cantidad.</p>
-                )}
-                {orderLines.map((line) => (
-                  <div key={line.tempId} className="flex flex-wrap items-start gap-2 rounded border bg-background p-2">
-                    <Select
-                      value={line.type}
-                      onValueChange={(v: 'fabric' | 'product' | 'custom') => {
-                        const unit = v === 'fabric' ? 'metros' : v === 'product' ? 'unidades' : line.unit
-                        updateOrderLine(line.tempId, { type: v, unit, fabric_id: undefined, product_id: undefined, description: line.type === 'custom' ? line.description : '' })
-                      }}
-                    >
-                      <SelectTrigger className="w-[140px] h-9">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="fabric">Tejido</SelectItem>
-                        <SelectItem value="product">Producto</SelectItem>
-                        <SelectItem value="custom">Descripción libre</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {line.type === 'fabric' && (
-                      <>
-                        {line.newFabric ? (
-                          <div className="flex items-center gap-2 flex-1 min-w-[160px] text-sm">
-                            <span>{line.description}</span>
-                            <Badge variant="secondary" className="text-xs">nuevo</Badge>
+
+              {orderLines.length === 0 && (
+                <div className="rounded-lg border-2 border-dashed border-gray-200 bg-gray-50 p-8 text-center text-sm text-muted-foreground">
+                  Usa los botones de arriba para añadir líneas al pedido
+                </div>
+              )}
+
+              <div className="space-y-3">
+                {orderLines.map((line) => {
+                  const price = parseFloat(line.unit_price) || 0
+                  const lineTotal = line.type === 'product' && line.variants && line.variants.length > 0
+                    ? Object.values(line.sizeQuantities || {}).reduce((s, v) => s + (parseInt(v) || 0), 0) * price
+                    : (parseFloat(line.quantity) || 0) * price
+
+                  return (
+                    <div key={line.tempId} className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                          {line.type === 'fabric' ? '🧵 Tejido' : line.type === 'product' ? '📦 Producto' : '✏️ Descripción libre'}
+                        </span>
+                        <button
+                          type="button"
+                          className="text-gray-400 hover:text-red-500 transition-colors text-xl leading-none"
+                          onClick={() => removeOrderLine(line.tempId)}
+                        >×</button>
+                      </div>
+
+                      {/* ── TEJIDO ── */}
+                      {line.type === 'fabric' && (
+                        <div className="space-y-3">
+                          {line.newFabric ? (
+                            <div className="flex items-center gap-2 text-sm">
+                              <span className="font-medium">{line.description}</span>
+                              <Badge variant="secondary" className="text-xs">nuevo</Badge>
+                              <button type="button" className="text-xs text-muted-foreground hover:text-foreground ml-auto"
+                                onClick={() => updateOrderLine(line.tempId, { newFabric: undefined, description: '', fabric_id: undefined })}>
+                                Cambiar
+                              </button>
+                            </div>
+                          ) : newFabricForLine === line.tempId ? (
+                            <div className="space-y-2 rounded-lg border bg-white p-3">
+                              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Nuevo tejido</p>
+                              <Input placeholder="Nombre *" value={newFabricForm.name}
+                                onChange={(e) => setNewFabricForm((f) => ({ ...f, name: e.target.value }))} className="h-8" />
+                              <div className="flex gap-2 flex-wrap">
+                                <Input placeholder="Código" value={newFabricForm.fabric_code}
+                                  onChange={(e) => setNewFabricForm((f) => ({ ...f, fabric_code: e.target.value }))} className="h-8 flex-1 min-w-[80px]" />
+                                <Input placeholder="Referencia" value={newFabricForm.reference}
+                                  onChange={(e) => setNewFabricForm((f) => ({ ...f, reference: e.target.value }))} className="h-8 flex-1 min-w-[80px]" />
+                                <Select value={newFabricForm.unit} onValueChange={(v) => setNewFabricForm((f) => ({ ...f, unit: v }))}>
+                                  <SelectTrigger className="h-8 w-[110px]"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="meters">metros</SelectItem>
+                                    <SelectItem value="pieces">unidades</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="flex gap-2">
+                                <Button type="button" size="sm" onClick={() => {
+                                  if (!newFabricForm.name.trim()) { toast.error('Nombre obligatorio'); return }
+                                  updateOrderLine(line.tempId, {
+                                    newFabric: { name: newFabricForm.name.trim(), fabric_code: newFabricForm.fabric_code.trim(), reference: newFabricForm.reference.trim(), unit: newFabricForm.unit },
+                                    description: newFabricForm.name.trim(),
+                                  })
+                                  setNewFabricForLine(null)
+                                  setNewFabricForm({ name: '', fabric_code: '', reference: '', unit: 'meters' })
+                                }}>Crear y usar</Button>
+                                <Button type="button" variant="ghost" size="sm"
+                                  onClick={() => { setNewFabricForLine(null); setNewFabricForm({ name: '', fabric_code: '', reference: '', unit: 'meters' }) }}>
+                                  Cancelar
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <div className="relative">
+                                <Input
+                                  placeholder="Buscar tejido..."
+                                  className="h-9 bg-white"
+                                  value={fabricSearchForLine === line.tempId ? fabricSearchQuery : (line.description || '')}
+                                  onChange={(e) => { setFabricSearchForLine(line.tempId); setFabricSearchQuery(e.target.value) }}
+                                  onFocus={() => setFabricSearchForLine(line.tempId)}
+                                />
+                                {fabricSearchForLine === line.tempId && fabricSearchResults.length > 0 && (
+                                  <ul className="absolute z-10 mt-1 w-full rounded-md border bg-popover py-1 text-sm shadow-md max-h-40 overflow-auto">
+                                    {fabricSearchResults.map((f) => (
+                                      <li key={f.id}>
+                                        <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-muted"
+                                          onClick={() => { updateOrderLine(line.tempId, { fabric_id: f.id, description: f.name }); setFabricSearchForLine(null); setFabricSearchQuery('') }}>
+                                          {f.fabric_code ? `${f.fabric_code} — ` : ''}{f.name}
+                                        </button>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                              <Button type="button" variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground"
+                                onClick={() => { setNewFabricForLine(line.tempId); setNewFabricForm({ name: '', fabric_code: '', reference: '', unit: 'meters' }) }}>
+                                + Nuevo tejido
+                              </Button>
+                            </div>
+                          )}
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            <div className="space-y-1">
+                              <Label className="text-xs text-gray-500">Cantidad (metros)</Label>
+                              <Input type="number" min="0" step="0.01" placeholder="0" className="h-9 bg-white"
+                                value={line.quantity}
+                                onChange={(e) => updateOrderLine(line.tempId, { quantity: e.target.value })} />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-gray-500">Precio ud. (€)</Label>
+                              <Input type="number" min="0" step="0.01" placeholder="0,00" className="h-9 bg-white"
+                                value={line.unit_price}
+                                onChange={(e) => updateOrderLine(line.tempId, { unit_price: e.target.value })} />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-gray-500">Referencia</Label>
+                              <Input placeholder="—" className="h-9 bg-white"
+                                value={line.reference}
+                                onChange={(e) => updateOrderLine(line.tempId, { reference: e.target.value })} />
+                            </div>
+                            <div className="flex flex-col justify-end">
+                              <div className="rounded-md bg-white border px-3 py-2 text-sm text-right">
+                                <span className="text-xs text-gray-500 block">Total línea</span>
+                                <span className="font-medium">{formatCurrency(lineTotal)}</span>
+                              </div>
+                            </div>
                           </div>
-                        ) : newFabricForLine === line.tempId ? (
-                          <div className="flex-1 min-w-[200px] space-y-2 rounded border p-2 bg-muted/50">
-                            <Input placeholder="Nombre *" value={newFabricForm.name} onChange={(e) => setNewFabricForm((f) => ({ ...f, name: e.target.value }))} className="h-8" />
-                            <div className="flex gap-2 flex-wrap">
-                              <Input placeholder="Código" value={newFabricForm.fabric_code} onChange={(e) => setNewFabricForm((f) => ({ ...f, fabric_code: e.target.value }))} className="h-8 flex-1 min-w-[80px]" />
-                              <Input placeholder="Referencia" value={newFabricForm.reference} onChange={(e) => setNewFabricForm((f) => ({ ...f, reference: e.target.value }))} className="h-8 flex-1 min-w-[80px]" />
-                              <Select value={newFabricForm.unit} onValueChange={(v) => setNewFabricForm((f) => ({ ...f, unit: v }))}>
-                                <SelectTrigger className="h-8 w-[110px]"><SelectValue /></SelectTrigger>
-                                <SelectContent><SelectItem value="meters">metros</SelectItem><SelectItem value="pieces">unidades</SelectItem></SelectContent>
+                        </div>
+                      )}
+
+                      {/* ── PRODUCTO ── */}
+                      {line.type === 'product' && (
+                        <div className="space-y-3">
+                          {line.product_id && line.description ? (
+                            <div className="flex items-center gap-3">
+                              {line.image_url ? (
+                                <img src={line.image_url} alt="" className="w-16 h-16 rounded-lg object-cover shrink-0 border border-gray-200" />
+                              ) : (
+                                <div className="w-16 h-16 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 border border-gray-200">
+                                  <Package className="w-8 h-8 text-gray-300" />
+                                </div>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-sm truncate">{line.description}</p>
+                              </div>
+                              <button type="button" className="text-xs text-muted-foreground hover:text-foreground shrink-0"
+                                onClick={() => updateOrderLine(line.tempId, { product_id: undefined, description: '', variants: undefined, sizeQuantities: undefined, image_url: undefined })}>
+                                Cambiar
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <div className="relative">
+                                <Input
+                                  placeholder="Buscar producto..."
+                                  className="h-9 bg-white"
+                                  value={productSearchForLine === line.tempId ? productSearchQuery : (line.description || '')}
+                                  onChange={(e) => { setProductSearchForLine(line.tempId); setProductSearchQuery(e.target.value) }}
+                                  onFocus={() => setProductSearchForLine(line.tempId)}
+                                />
+                                {productSearchForLine === line.tempId && productSearchResults.length > 0 && (
+                                  <ul className="absolute left-0 top-full z-[100] mt-1 min-w-[300px] w-max max-w-[min(28rem,85vw)] rounded-md border bg-popover py-1 text-sm shadow-lg max-h-40 overflow-auto">
+                                    {productSearchResults.map((p) => {
+                                      const img = p.main_image_url || (Array.isArray(p.images) && p.images[0]) || null
+                                      return (
+                                        <li key={p.id}>
+                                          <button type="button" className="w-full min-w-[300px] px-3 py-1.5 text-left hover:bg-muted flex items-center gap-3"
+                                            onClick={async () => {
+                                              updateOrderLine(line.tempId, { product_id: p.id, description: p.name, image_url: img || null })
+                                              setProductSearchForLine(null)
+                                              setProductSearchQuery('')
+                                              await loadProductVariants(p.id, line.tempId)
+                                            }}>
+                                            {img ? (
+                                              <img src={img} alt="" className="w-10 h-10 rounded object-cover shrink-0" />
+                                            ) : (
+                                              <div className="w-10 h-10 rounded bg-gray-100 flex items-center justify-center shrink-0">
+                                                <Package className="w-5 h-5 text-gray-400" />
+                                              </div>
+                                            )}
+                                            <div className="min-w-0">
+                                              <p className="text-sm font-medium truncate">{p.name}</p>
+                                              <p className="text-xs text-muted-foreground">{p.sku}</p>
+                                            </div>
+                                          </button>
+                                        </li>
+                                      )
+                                    })}
+                                  </ul>
+                                )}
+                              </div>
+                              <Button type="button" variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground"
+                                onClick={() => setQuickProductOpen(true)}>
+                                + Nuevo producto
+                              </Button>
+                            </div>
+                          )}
+
+                          {loadingVariantsForLine.has(line.tempId) ? (
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <Loader2 className="h-3 w-3 animate-spin" /> Cargando tallas...
+                            </div>
+                          ) : line.variants && line.variants.length > 0 ? (
+                            <div className="space-y-2">
+                              <Label className="text-xs text-gray-500">Cantidades por talla</Label>
+                              <div className="flex flex-wrap gap-2">
+                                {line.variants.map((v) => {
+                                  const sizeKey = v.size ?? 'sin talla'
+                                  return (
+                                    <div key={v.id} className="flex flex-col items-center gap-1">
+                                      <span className="text-xs font-medium text-gray-600 bg-white border rounded px-2 py-0.5 whitespace-nowrap">{sizeKey}</span>
+                                      <Input
+                                        type="number" min="0" step="1" placeholder="0"
+                                        className="h-8 w-16 text-center bg-white text-sm"
+                                        value={line.sizeQuantities?.[sizeKey] ?? ''}
+                                        onChange={(e) => updateOrderLine(line.tempId, {
+                                          sizeQuantities: { ...(line.sizeQuantities || {}), [sizeKey]: e.target.value }
+                                        })}
+                                      />
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                Total: {Object.values(line.sizeQuantities || {}).reduce((s, v) => s + (parseInt(v) || 0), 0)} unidades
+                              </p>
+                            </div>
+                          ) : line.product_id ? (
+                            <div className="space-y-1">
+                              <Label className="text-xs text-gray-500">Cantidad (unidades)</Label>
+                              <Input type="number" min="0" step="1" placeholder="0" className="h-9 bg-white w-32"
+                                value={line.quantity}
+                                onChange={(e) => updateOrderLine(line.tempId, { quantity: e.target.value })} />
+                            </div>
+                          ) : null}
+
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            <div className="space-y-1">
+                              <Label className="text-xs text-gray-500">Precio ud. (€)</Label>
+                              <Input type="number" min="0" step="0.01" placeholder="0,00" className="h-9 bg-white"
+                                value={line.unit_price}
+                                onChange={(e) => updateOrderLine(line.tempId, { unit_price: e.target.value })} />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-gray-500">Referencia</Label>
+                              <Input placeholder="—" className="h-9 bg-white"
+                                value={line.reference}
+                                onChange={(e) => updateOrderLine(line.tempId, { reference: e.target.value })} />
+                            </div>
+                            <div className="flex flex-col justify-end">
+                              <div className="rounded-md bg-white border px-3 py-2 text-sm text-right">
+                                <span className="text-xs text-gray-500 block">Total línea</span>
+                                <span className="font-medium">{formatCurrency(lineTotal)}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ── DESCRIPCIÓN LIBRE ── */}
+                      {line.type === 'custom' && (
+                        <div className="space-y-3">
+                          <div className="space-y-1">
+                            <Label className="text-xs text-gray-500">Descripción</Label>
+                            <Input placeholder="Descripción del artículo" className="h-9 bg-white"
+                              value={line.description}
+                              onChange={(e) => updateOrderLine(line.tempId, { description: e.target.value })} />
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            <div className="space-y-1">
+                              <Label className="text-xs text-gray-500">Cantidad</Label>
+                              <Input type="number" min="0" step="0.01" placeholder="0" className="h-9 bg-white"
+                                value={line.quantity}
+                                onChange={(e) => updateOrderLine(line.tempId, { quantity: e.target.value })} />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-gray-500">Unidad</Label>
+                              <Select value={line.unit} onValueChange={(v) => updateOrderLine(line.tempId, { unit: v })}>
+                                <SelectTrigger className="h-9 bg-white"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="metros">metros</SelectItem>
+                                  <SelectItem value="unidades">unidades</SelectItem>
+                                  <SelectItem value="kg">kg</SelectItem>
+                                </SelectContent>
                               </Select>
                             </div>
-                            <div className="flex gap-1">
-                              <Button type="button" size="sm" onClick={() => {
-                                if (!newFabricForm.name.trim()) { toast.error('Nombre obligatorio'); return }
-                                updateOrderLine(line.tempId, {
-                                  newFabric: {
-                                    name: newFabricForm.name.trim(),
-                                    fabric_code: newFabricForm.fabric_code.trim(),
-                                    reference: newFabricForm.reference.trim(),
-                                    unit: newFabricForm.unit,
-                                  },
-                                  description: newFabricForm.name.trim(),
-                                })
-                                setNewFabricForLine(null)
-                                setNewFabricForm({ name: '', fabric_code: '', reference: '', unit: 'meters' })
-                              }}>Crear y usar</Button>
-                              <Button type="button" variant="ghost" size="sm" onClick={() => { setNewFabricForLine(null); setNewFabricForm({ name: '', fabric_code: '', reference: '', unit: 'meters' }) }}>Cancelar</Button>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-gray-500">Precio ud. (€)</Label>
+                              <Input type="number" min="0" step="0.01" placeholder="0,00" className="h-9 bg-white"
+                                value={line.unit_price}
+                                onChange={(e) => updateOrderLine(line.tempId, { unit_price: e.target.value })} />
+                            </div>
+                            <div className="flex flex-col justify-end">
+                              <div className="rounded-md bg-white border px-3 py-2 text-sm text-right">
+                                <span className="text-xs text-gray-500 block">Total línea</span>
+                                <span className="font-medium">{formatCurrency(lineTotal)}</span>
+                              </div>
                             </div>
                           </div>
-                        ) : (
-                          <div className="relative flex-1 min-w-[160px]">
-                            <Input
-                              placeholder="Buscar tejido..."
-                              className="h-9"
-                              value={fabricSearchForLine === line.tempId ? fabricSearchQuery : (line.description || '')}
-                              onChange={(e) => { setFabricSearchForLine(line.tempId); setFabricSearchQuery(e.target.value) }}
-                              onFocus={() => setFabricSearchForLine(line.tempId)}
-                            />
-                            {fabricSearchForLine === line.tempId && fabricSearchResults.length > 0 && (
-                              <ul className="absolute z-10 mt-1 w-full rounded-md border bg-popover py-1 text-sm shadow-md max-h-40 overflow-auto">
-                                {fabricSearchResults.map((f) => (
-                                  <li key={f.id}>
-                                    <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-muted" onClick={() => { updateOrderLine(line.tempId, { fabric_id: f.id, description: f.name }); setFabricSearchForLine(null); setFabricSearchQuery('') }}>{f.fabric_code ? `${f.fabric_code} — ` : ''}{f.name}</button>
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                            <Button type="button" variant="ghost" size="sm" className="mt-1 h-7 text-xs" onClick={() => { setNewFabricForLine(line.tempId); setNewFabricForm({ name: '', fabric_code: '', reference: '', unit: 'meters' }) }}>Nuevo tejido</Button>
+                          <div className="space-y-1">
+                            <Label className="text-xs text-gray-500">Referencia (opcional)</Label>
+                            <Input placeholder="—" className="h-9 bg-white w-48"
+                              value={line.reference}
+                              onChange={(e) => updateOrderLine(line.tempId, { reference: e.target.value })} />
                           </div>
-                        )}
-                      </>
-                    )}
-                    {line.type === 'product' && (
-                      <div className="relative flex-1 min-w-[160px] overflow-visible">
-                        <Input
-                          placeholder="Buscar producto..."
-                          className="h-9"
-                          value={productSearchForLine === line.tempId ? productSearchQuery : (line.description || '')}
-                          onChange={(e) => { const value = e.target.value; setProductSearchForLine(line.tempId); setProductSearchQuery(value) }}
-                          onFocus={() => setProductSearchForLine(line.tempId)}
-                        />
-                        {productSearchForLine === line.tempId && productSearchResults.length > 0 && (
-                          <ul className="absolute left-0 top-full z-[100] mt-1 min-w-[300px] w-max max-w-[min(28rem,85vw)] rounded-md border border-border bg-popover py-1 text-sm shadow-lg max-h-40 overflow-auto overflow-x-visible">
-                            {productSearchResults.map((p) => (
-                              <li key={p.id} className="min-w-0">
-                                <button type="button" className="w-full min-w-[300px] px-3 py-1.5 text-left hover:bg-muted whitespace-nowrap overflow-x-auto" onClick={() => { updateOrderLine(line.tempId, { product_id: p.id, description: p.name }); setProductSearchForLine(null); setProductSearchQuery('') }}>{p.sku} — {p.name}</button>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    )}
-                    {line.type === 'custom' && (
-                      <Input placeholder="Descripción" className="h-9 flex-1 min-w-[140px]" value={line.description} onChange={(e) => updateOrderLine(line.tempId, { description: e.target.value })} />
-                    )}
-                    <Input type="number" min="0" step="0.01" placeholder="Cant." className="w-20 h-9" value={line.quantity} onChange={(e) => updateOrderLine(line.tempId, { quantity: e.target.value })} />
-                    {line.type === 'fabric' ? (
-                      <span className="inline-flex h-9 w-[100px] items-center text-sm text-muted-foreground">metros</span>
-                    ) : line.type === 'product' ? (
-                      <span className="inline-flex h-9 w-[100px] items-center text-sm text-muted-foreground">unidades</span>
-                    ) : (
-                      <Select value={line.unit} onValueChange={(v) => updateOrderLine(line.tempId, { unit: v })}>
-                        <SelectTrigger className="w-[100px] h-9"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="metros">metros</SelectItem>
-                          <SelectItem value="unidades">unidades</SelectItem>
-                          <SelectItem value="kg">kg</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    )}
-                    <Button type="button" variant="ghost" size="icon" className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => removeOrderLine(line.tempId)}>×</Button>
-                  </div>
-                ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </div>
+
+            {/* ── SECCIÓN 3: RESUMEN ────────────────────────────────── */}
+            {orderLines.length > 0 && (() => {
+              const grandTotal = orderLines.reduce((sum, line) => {
+                const price = parseFloat(line.unit_price) || 0
+                if (line.type === 'product' && line.variants && line.variants.length > 0) {
+                  return sum + Object.values(line.sizeQuantities || {}).reduce((s, v) => s + (parseInt(v) || 0), 0) * price
+                }
+                return sum + (parseFloat(line.quantity) || 0) * price
+              }, 0)
+              return (
+                <div className="rounded-lg border border-gray-200 bg-white p-4 flex items-center justify-between">
+                  <span className="text-sm text-gray-500">{orderLines.length} {orderLines.length === 1 ? 'línea' : 'líneas'}</span>
+                  <div className="text-right">
+                    <p className="text-xs text-gray-500">Total pedido</p>
+                    <p className="text-lg font-semibold">{formatCurrency(grandTotal)}</p>
+                  </div>
+                </div>
+              )
+            })()}
+
+            {/* ── SECCIÓN 4: NOTAS ──────────────────────────────────── */}
             <div className="space-y-2">
               <Label htmlFor="new-order-notes">Notas</Label>
               <Textarea
@@ -923,20 +1159,17 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
               />
             </div>
           </div>
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setNewOrderOpen(false)}>Cancelar</Button>
             <Button
-              disabled={creating || !newOrderForm.estimated_delivery_date || orderLines.length === 0 || orderLines.every((l) => !l.description.trim() || !Number(l.quantity))}
+              disabled={creating || !newOrderForm.estimated_delivery_date || orderLines.length === 0}
               onClick={async () => {
-                const validLines = orderLines.filter((l) => l.description.trim() && Number(l.quantity) > 0)
-                if (validLines.length === 0) {
-                  toast.error('Añade al menos una línea con descripción y cantidad')
-                  return
-                }
                 setCreating(true)
                 const supabase = createClient()
-                const linesWithFabricIds: Array<{ fabric_id?: string | null; product_id?: string | null; description: string; reference?: string | null; quantity: number; unit: string; unit_price: number }> = []
-                for (const l of validLines) {
+                const finalLines: Array<{ fabric_id?: string | null; product_id?: string | null; description: string; reference?: string | null; quantity: number; unit: string; unit_price: number }> = []
+
+                for (const l of orderLines) {
                   let fabricId: string | null = l.type === 'fabric' ? (l.fabric_id || null) : null
                   if (l.type === 'fabric' && l.newFabric) {
                     const { data: newFabric, error: fabricErr } = await supabase
@@ -959,26 +1192,55 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                     }
                     fabricId = newFabric?.id ?? null
                   }
-                  linesWithFabricIds.push({
-                    fabric_id: l.type === 'fabric' ? fabricId : null,
-                    product_id: l.type === 'product' ? (l.product_id || null) : null,
-                    description: l.description.trim(),
-                    reference: (l.newFabric?.reference ?? l.reference)?.trim() || null,
-                    quantity: parseFloat(String(l.quantity).replace(',', '.')) || 0,
-                    unit: l.type === 'fabric' ? 'metros' : l.type === 'product' ? 'unidades' : (l.unit || 'unidades'),
-                    unit_price: 0,
-                  })
+
+                  const unitPrice = parseFloat(l.unit_price) || 0
+                  const ref = (l.newFabric?.reference ?? l.reference)?.trim() || null
+
+                  if (l.type === 'product' && l.variants && l.variants.length > 0) {
+                    for (const [sizeKey, qtyStr] of Object.entries(l.sizeQuantities || {})) {
+                      const qty = parseInt(qtyStr) || 0
+                      if (qty <= 0) continue
+                      finalLines.push({
+                        fabric_id: null,
+                        product_id: l.product_id || null,
+                        description: `${l.description} — Talla ${sizeKey}`,
+                        reference: ref,
+                        quantity: qty,
+                        unit: 'unidades',
+                        unit_price: unitPrice,
+                      })
+                    }
+                  } else {
+                    const qty = parseFloat(l.quantity) || 0
+                    if (!l.description.trim() || qty <= 0) continue
+                    finalLines.push({
+                      fabric_id: l.type === 'fabric' ? fabricId : null,
+                      product_id: l.type === 'product' ? (l.product_id || null) : null,
+                      description: l.description.trim(),
+                      reference: ref,
+                      quantity: qty,
+                      unit: l.type === 'fabric' ? 'metros' : l.type === 'product' ? 'unidades' : (l.unit || 'unidades'),
+                      unit_price: unitPrice,
+                    })
+                  }
                 }
+
+                if (finalLines.length === 0) {
+                  setCreating(false)
+                  toast.error('Añade al menos una línea con descripción y cantidad')
+                  return
+                }
+
                 const res = await createSupplierOrderAction({
                   supplier_id: supplier.id,
-                  total: 0,
+                  total: finalLines.reduce((s, l) => s + l.quantity * l.unit_price, 0),
                   payment_due_date: newOrderForm.payment_due_date || null,
                   estimated_delivery_date: newOrderForm.estimated_delivery_date,
                   notes: newOrderForm.notes?.trim() || null,
                   alert_on_payment: true,
                   alert_on_delivery: true,
                   tailoring_order_id: newOrderForm.tailoring_order_id?.trim() || undefined,
-                  lines: linesWithFabricIds,
+                  lines: finalLines,
                 })
                 setCreating(false)
                 if (res?.success && res.data) {
@@ -987,9 +1249,6 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                   toast.success(res.data.ap_invoice_id
                     ? 'Pedido creado. Factura generada en Facturas proveedores.'
                     : 'Pedido creado.')
-                  if (res.data.ap_invoice_id) {
-                    // Opcional: enlace en el toast o dejamos que vaya a contabilidad
-                  }
                 } else {
                   toast.error(res && 'error' in res ? res.error : 'Error al crear el pedido')
                 }
@@ -997,6 +1256,95 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
             >
               {creating && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Crear pedido
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog: Nuevo producto rápido ─────────────────────────── */}
+      <Dialog open={quickProductOpen} onOpenChange={setQuickProductOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Nuevo producto rápido</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="space-y-2">
+              <Label>Nombre *</Label>
+              <Input placeholder="Ej: Zapato Oxford" value={quickProductForm.name}
+                onChange={(e) => setQuickProductForm((f) => ({ ...f, name: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>SKU <span className="text-xs text-muted-foreground">(opcional, se auto-genera)</span></Label>
+              <Input placeholder="Dejar vacío para auto-generar" value={quickProductForm.sku}
+                onChange={(e) => setQuickProductForm((f) => ({ ...f, sku: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>Precio de coste (€)</Label>
+              <Input type="number" min="0" step="0.01" placeholder="0,00" value={quickProductForm.cost_price}
+                onChange={(e) => setQuickProductForm((f) => ({ ...f, cost_price: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>Tallas <span className="text-xs text-muted-foreground">(separadas por comas)</span></Label>
+              <Input placeholder="36, 37, 38, 39, 40 — o S, M, L, XL" value={quickProductForm.sizes}
+                onChange={(e) => setQuickProductForm((f) => ({ ...f, sizes: e.target.value }))} />
+              <p className="text-xs text-muted-foreground">Si no tiene tallas, déjalo vacío.</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setQuickProductOpen(false)}>Cancelar</Button>
+            <Button
+              disabled={creatingQuickProduct || !quickProductForm.name.trim()}
+              onClick={async () => {
+                if (!quickProductForm.name.trim()) { toast.error('Nombre obligatorio'); return }
+                setCreatingQuickProduct(true)
+                const supabase = createClient()
+                const sku = quickProductForm.sku.trim()
+                  || quickProductForm.name.trim().toUpperCase().replace(/\s+/g, '-').slice(0, 20) + '-' + Date.now().toString().slice(-4)
+                const { data: newProduct, error: prodErr } = await supabase
+                  .from('products')
+                  .insert({
+                    name: quickProductForm.name.trim(),
+                    sku,
+                    product_type: 'boutique',
+                    supplier_id: supplier.id,
+                    cost_price: parseFloat(quickProductForm.cost_price) || null,
+                    is_active: true,
+                  })
+                  .select('id, name, sku')
+                  .single()
+                if (prodErr || !newProduct) {
+                  setCreatingQuickProduct(false)
+                  toast.error(prodErr?.message || 'Error al crear el producto')
+                  return
+                }
+                const sizes = quickProductForm.sizes.split(',').map((s) => s.trim()).filter(Boolean)
+                if (sizes.length > 0) {
+                  const variants = sizes.map((size) => ({
+                    product_id: newProduct.id,
+                    size,
+                    variant_sku: `${sku}-${size.toUpperCase().replace(/\s+/g, '')}`,
+                    is_active: true,
+                  }))
+                  const { error: varErr } = await supabase.from('product_variants').insert(variants)
+                  if (varErr) {
+                    setCreatingQuickProduct(false)
+                    toast.error('Producto creado, pero error al crear tallas: ' + varErr.message)
+                    return
+                  }
+                }
+                setCreatingQuickProduct(false)
+                setQuickProductOpen(false)
+                setQuickProductForm({ name: '', sku: '', cost_price: '', sizes: '' })
+                const pendingLine = orderLines.find((l) => l.type === 'product' && !l.product_id)
+                if (pendingLine) {
+                  updateOrderLine(pendingLine.tempId, { product_id: newProduct.id, description: newProduct.name })
+                  await loadProductVariants(newProduct.id, pendingLine.tempId)
+                }
+                toast.success('Producto creado')
+              }}
+            >
+              {creatingQuickProduct && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Crear producto
             </Button>
           </DialogFooter>
         </DialogContent>

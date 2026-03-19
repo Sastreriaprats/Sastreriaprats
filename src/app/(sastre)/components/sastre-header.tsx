@@ -66,7 +66,7 @@ export function SastreHeader({ sastreName, sectionTitle, title, backHref }: Prop
           <button
             type="button"
             onClick={() => router.back()}
-            className="flex items-center justify-center w-12 h-12 rounded-xl border border-white/50 text-white hover:bg-white/5 transition-colors shrink-0 touch-manipulation"
+            className="flex items-center justify-center w-12 h-12 rounded-xl bg-white/[0.06] border border-white/15 text-white/70 hover:bg-white/10 hover:text-white transition-all shrink-0 touch-manipulation"
             aria-label="Volver"
           >
             <ArrowLeft className="h-5 w-5" />

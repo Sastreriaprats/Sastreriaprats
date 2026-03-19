@@ -19,19 +19,15 @@ const BORDER_COLOR = '#cccccc'
 const LABEL_FILL = '#f0f0f0'
 const LABEL_COLOR = '#555555'
 
-/** Claves base de medidas (sin prefijo). Se buscan con prefijo americana_ o camiseria_. */
-const MEDIDAS_BASE_KEYS = [
-  'cuello',
-  'canesu',
-  'manga',
-  'fren_pecho',
-  'cont_pecho',
-  'cintura',
-  'cadera',
-  'largo',
-  'hombro',
-  'biceps',
-] as const
+/** Claves de medidas por tipo de prenda (sin prefijo). */
+const MEDIDAS_KEYS_POR_PRENDA: Record<string, readonly string[]> = {
+  americana: ['talle', 'largo', 'encuentro', 'largo_manga', 'pecho', 'cintura', 'frente_pecho', 'hombro', 'cadera'],
+  frac:      ['talle', 'largo', 'encuentro', 'largo_manga', 'pecho', 'cintura', 'frente_pecho', 'hombro', 'cadera'],
+  abrigo:    ['talle', 'largo', 'encuentro', 'largo_manga', 'pecho', 'cintura', 'frente_pecho', 'hombro', 'cadera'],
+  pantalon:  ['largo', 'tiro', 'cintura', 'cadera', 'rodilla', 'bajo'],
+  chaleco:   ['talle', 'largo', 'escote', 'largo_delantero', 'pecho', 'cintura'],
+  camiseria: ['cuello', 'canesu', 'largo_manga', 'frente_pecho', 'pecho', 'cintura', 'cadera', 'largo_cuerpo', 'hombro', 'puno'],
+}
 
 export interface FichaConfeccionOrder {
   id: string
@@ -82,14 +78,34 @@ function slugToPrendaLabel(slug: string): string {
     .join(' ')
 }
 
+const MEDIDAS_LABELS: Record<string, string> = {
+  talle: 'Talle',
+  largo: 'Largo',
+  encuentro: 'Encuentro',
+  largo_manga: 'L.Manga',
+  pecho: 'Pecho',
+  cintura: 'Cintura',
+  frente_pecho: 'Fr.Pecho',
+  hombro: 'Hombro',
+  cadera: 'Cadera',
+  tiro: 'Tiro',
+  rodilla: 'Rodilla',
+  bajo: 'Bajo',
+  escote: 'Escote',
+  largo_delantero: 'L.Delantero',
+  largo_cuerpo: 'L.Cuerpo',
+  puno: 'Puño',
+}
+
 function getMedidasStr(
   clientMeasurementsValues?: Record<string, unknown>,
-  prefix: 'americana_' | 'camiseria_' = 'americana_'
+  prefix: string = 'americana_',
+  keys: readonly string[] = MEDIDAS_KEYS_POR_PRENDA['americana']
 ): string {
   if (!clientMeasurementsValues || typeof clientMeasurementsValues !== 'object') return '—'
   const cfg = clientMeasurementsValues as Record<string, unknown>
   const parts: string[] = []
-  for (const baseKey of MEDIDAS_BASE_KEYS) {
+  for (const baseKey of keys) {
     const keysToTry = [`${prefix}${baseKey}`, baseKey]
     let val: unknown = undefined
     for (const k of keysToTry) {
@@ -98,18 +114,20 @@ function getMedidasStr(
         break
       }
     }
+    const label = MEDIDAS_LABELS[baseKey] ?? baseKey
     const n = typeof val === 'number' ? val : Number(val)
     if (typeof n === 'number' && Number.isFinite(n)) {
-      parts.push(String(n))
+      parts.push(`${label}: ${n}`)
     } else {
-      parts.push('—')
+      parts.push(`${label}: —`)
     }
   }
-  const allDash = parts.every((p) => p === '—')
-  return allDash ? '—' : parts.join(', ')
+  const allDash = parts.every((p) => p.endsWith(': —'))
+  return allDash ? '—' : parts.join(' / ')
 }
 
 const LABELS_BOTONES: Record<string, string> = {
+  '1fila_1': '1 Fila 1 botón',
   '1fila_2': '1 Fila 2 botones',
   '1fila_3para2': '1 Fila 3 para 2',
   '2filas_6': '2 Filas 6 botones',
@@ -117,12 +135,15 @@ const LABELS_BOTONES: Record<string, string> = {
 const LABELS_ABERTURAS: Record<string, string> = {
   '2aberturas': '2 Aberturas',
   '1abertura': '1 Abertura',
+  sin_abertura: 'Sin abertura',
   sin_aberturas: 'Sin abertura',
 }
 const LABELS_BOLSILLO: Record<string, string> = {
   recto: 'Bolsillo recto',
   inclinado: 'Bol. inclinado',
   parche: 'Bolsillo parche',
+  bercheta: 'Pecho de bercheta',
+  bercheta_parche: 'Pecho parche de bercheta',
 }
 const LABELS_SOLAPA: Record<string, string> = {
   normal: 'Solapa normal',
@@ -133,6 +154,7 @@ const LABELS_MANGA: Record<string, string> = {
   napolit: 'Manga napolitana',
   reborde: 'Manga reborde',
   sin_reborde: 'Manga sin reborde',
+  con_reborde: 'Con reborde',
 }
 const LABELS_FORRO: Record<string, string> = {
   sin_forro: 'Sin forro',
@@ -142,15 +164,22 @@ const LABELS_FORRO: Record<string, string> = {
 const LABELS_VUELTAS: Record<string, string> = {
   sin_vueltas: 'Sin vueltas',
   con_vueltas: 'Con vueltas',
+  '3.5': '3.5 cm',
+  '4': '4 cm',
+  '4.5': '4.5 cm',
+  '5': '5 cm',
 }
 const LABELS_BRAGUETA: Record<string, string> = {
   cremallera: 'Cremallera',
   boton: 'Botón',
+  botones: 'Botones',
 }
 const LABELS_PLIEGUES: Record<string, string> = {
   sin_pliegues: 'Sin pliegues',
   un_pliegue: '1 pliegue',
   dos_pliegues: '2 pliegues',
+  '1_pliegue': '1 pliegue',
+  '2_pliegues': '2 pliegues',
 }
 
 function labelBotones(v: unknown): string {
@@ -183,50 +212,77 @@ function labelPliegues(v: unknown): string {
 
 function buildDescripcionFromConfig(config: Record<string, unknown>): string {
   const partes: string[] = []
+  const slug = String(config.prendaSlug ?? config.prenda ?? '').toLowerCase()
+  const isPantalon = slug === 'pantalon'
+  const isChaleco = slug === 'chaleco'
+  const isAmericana = !isPantalon && !isChaleco
 
-  if (config.botones) partes.push(`Botones: ${labelBotones(config.botones)}`)
-  if (config.aberturas) partes.push(`Aberturas: ${labelAberturas(config.aberturas)}`)
+  if (isAmericana) {
+    if (config.botones) partes.push(`Botones: ${labelBotones(config.botones)}`)
+    if (config.aberturas) partes.push(`Aberturas: ${labelAberturas(config.aberturas)}`)
 
-  const bols: string[] = []
-  if (config.bolsilloTipo) bols.push(labelBolsillo(config.bolsilloTipo))
-  if (config.cerrilleraExterior) bols.push('cerillera exterior')
-  if (bols.length) partes.push(`Bolsillos: ${bols.join(', ')}`)
+    const bols: string[] = []
+    if (config.bolsilloTipo) bols.push(labelBolsillo(config.bolsilloTipo))
+    if (config.cerrilleraExterior) bols.push('cerillera exterior')
+    if (bols.length) partes.push(`Bolsillos: ${bols.join(', ')}`)
 
-  if (config.primerBoton) partes.push(`1er botón a ${config.primerBoton} cm`)
+    if (config.primerBoton) partes.push(`1er botón a ${config.primerBoton} cm`)
 
-  if (config.solapa) {
-    let sol = labelSolapa(config.solapa)
-    if (config.anchoSolapa) sol += ` ${config.anchoSolapa} cm`
-    partes.push(`Solapa: ${sol}`)
+    if (config.solapa) {
+      let sol = labelSolapa(config.solapa)
+      if (config.anchoSolapa) sol += ` ${config.anchoSolapa} cm`
+      partes.push(`Solapa: ${sol}`)
+    }
+
+    if (config.manga) partes.push(`Manga: ${labelManga(config.manga)}`)
+    if (config.ojalesAbiertos) partes.push(`Ojales abiertos: ${config.ojalesAbiertos}`)
+    if (config.ojalesCerrados) partes.push(`Ojales cerrados: ${config.ojalesCerrados}`)
+
+    const hombros: string[] = []
+    if (config.medidaHombro) hombros.push('medida hombro')
+    if (config.hTerminado) hombros.push('H. terminado')
+    if (config.escote) hombros.push('escote')
+    if (config.sinHombreras) hombros.push('sin hombreras')
+    if (config.picado34) hombros.push('picado 3/4')
+    if (config.sinHombrera) hombros.push('sin hombrera')
+    if (config.hombrerasTraseras) hombros.push('hombreras traseras')
+    if (config.pocaHombrera) hombros.push('poca hombrera')
+    if (hombros.length) partes.push(`Hombros: ${hombros.join(', ')}`)
+
+    if (config.forro) {
+      let f = labelForro(config.forro)
+      if (config.forroDesc) f += ` (${config.forroDesc})`
+      partes.push(`Forro: ${f}`)
+    }
   }
 
-  if (config.manga) partes.push(`Manga: ${labelManga(config.manga)}`)
-
-  if (config.ojalesAbiertos) partes.push(`Ojales abiertos: ${config.ojalesAbiertos}`)
-  if (config.ojalesCerrados) partes.push(`Ojales cerrados: ${config.ojalesCerrados}`)
-
-  const hombros: string[] = []
-  if (config.medidaHombro) hombros.push('medida hombro')
-  if (config.hTerminado) hombros.push('H. terminado')
-  if (config.escote) hombros.push('escote')
-  if (config.sinHombreras) hombros.push('sin hombreras')
-  if (config.picado34) hombros.push('picado 3/4')
-  if (hombros.length) partes.push(`Hombros: ${hombros.join(', ')}`)
-
-  if (config.forro) {
-    let f = labelForro(config.forro)
-    if (config.forroDesc) f += ` (${config.forroDesc})`
-    partes.push(`Forro: ${f}`)
+  if (isPantalon) {
+    if (config.vueltas) partes.push(`Vueltas: ${labelVueltas(config.vueltas)}`)
+    if (config.bragueta) partes.push(`Bragueta: ${labelBragueta(config.bragueta)}`)
+    if (config.pliegues) partes.push(`Pliegues: ${labelPliegues(config.pliegues)}`)
+    if (config.pVEnTrasero) partes.push('V en trasero')
+    if (config.pretina2Botones) partes.push('Pretina 2 botones')
+    if (config.pretinaCorrida) partes.push('Pretina corrida')
+    const bolsP: string[] = []
+    if (config.p7pasadores) bolsP.push('7 pasadores')
+    if (config.p5bolsillos) bolsP.push('5 bolsillos')
+    if (config.pRefForro) bolsP.push('Ref. forro')
+    if (config.pRefExtTela) bolsP.push('Ref. ext. tela')
+    if (config.pSinBolTrasero) bolsP.push('Sin bol. trasero')
+    if (config.p1BolTrasero) bolsP.push('1 bol. trasero')
+    if (config.p2BolTraseros) bolsP.push('2 bol. traseros')
+    if (config.pBolCostura) bolsP.push('Bol. costura')
+    if (config.pBolFrances) bolsP.push('Bol. francés')
+    if (config.pBolVivo) bolsP.push('Bol. vivo')
+    if (config.pCenidores) bolsP.push('Ceñidores costados')
+    if (config.pBotonesTirantes) bolsP.push('Botones tirantes')
+    if (bolsP.length) partes.push(`Bolsillos: ${bolsP.join(', ')}`)
   }
 
-  if (config.vueltas) partes.push(`Vueltas: ${labelVueltas(config.vueltas)}`)
-  if (config.bragueta) partes.push(`Bragueta: ${labelBragueta(config.bragueta)}`)
-  if (config.pliegues) partes.push(`Pliegues: ${labelPliegues(config.pliegues)}`)
-  if (config.pretina2Botones) partes.push('Pretina 2 botones')
-  if (config.pretinaCorrida) partes.push('Pretina corrida')
-
-  if (config.chalecoCorte) partes.push(`Chaleco corte: ${config.chalecoCorte}`)
-  if (config.chalecoBolsillo) partes.push(`Chaleco bolsillo: ${config.chalecoBolsillo}`)
+  if (isChaleco) {
+    if (config.chalecoCorte) partes.push(`Corte: ${config.chalecoCorte}`)
+    if (config.chalecoBolsillo) partes.push(`Bolsillo: ${config.chalecoBolsillo}`)
+  }
 
   const obs = config.observaciones?.toString().trim()
   if (obs) partes.push(obs)
@@ -238,15 +294,16 @@ function getFichaFromOrder(order: FichaConfeccionOrder): Record<string, unknown>
   const lines = order.tailoring_order_lines ?? []
   const first = lines[0]
   const config = (first?.configuration ?? {}) as Record<string, unknown>
-  const prendaSlug = String(config.prenda ?? '')
-  const isCamiseria = prendaSlug.toLowerCase().includes('camiseria')
-  const medidasPrefix: 'americana_' | 'camiseria_' = isCamiseria ? 'camiseria_' : 'americana_'
+  const prendaSlug = String(config.prendaSlug ?? config.prenda ?? '').toLowerCase().replace(/\s+/g, '_')
+  const isCamiseria = prendaSlug.includes('camiseria')
+  const medidasPrefix = isCamiseria ? 'camiseria_' : (prendaSlug ? `${prendaSlug}_` : 'americana_')
+  const medidasKeys = MEDIDAS_KEYS_POR_PRENDA[prendaSlug] ?? MEDIDAS_KEYS_POR_PRENDA['americana']
   const clientMeasValues = order.clientMeasurements?.values
-  const medidasStr = getMedidasStr(clientMeasValues, medidasPrefix)
+  const medidasStr = getMedidasStr(clientMeasValues, medidasPrefix, medidasKeys)
   const prendaLabel = slugToPrendaLabel(prendaSlug)
 
-  const tejidoStr = String(config.tejido ?? '').trim()
-  const metrosVal = config.metros
+  const tejidoStr = String(config.tejidoStockNombre || config.tejidoCatalogo || config.tejido || '').trim()
+  const metrosVal = config.tejidoMetros || config.metros
   let caracteristicasStr: string
   if (tejidoStr && metrosVal !== undefined && metrosVal !== null && metrosVal !== '') {
     caracteristicasStr = `${tejidoStr} — ${metrosVal} m`
@@ -271,7 +328,8 @@ function getFichaFromOrder(order: FichaConfeccionOrder): Record<string, unknown>
     descripcion: buildDescripcionFromConfig(config),
     observaciones: config.observaciones ?? '',
     caracteristicas: caracteristicasStr,
-    tejido: config.tejido ?? '',
+    caracteristicasPrenda: String(config.caracteristicasPrenda ?? '').trim(),
+    tejido: tejidoStr,
     metros: config.metros ?? '',
     medidas: medidasStr,
     domicilio: config.domicilio ?? '',
@@ -303,6 +361,18 @@ const tableLayoutBorders = {
   vLineWidth: () => 0.5,
   hLineColor: () => BORDER_COLOR,
   vLineColor: () => BORDER_COLOR,
+}
+
+/** Layout con padding vertical mayor para filas de medidas y descripción */
+const tableLayoutBordersPadded = {
+  hLineWidth: () => 0.5,
+  vLineWidth: () => 0.5,
+  hLineColor: () => BORDER_COLOR,
+  vLineColor: () => BORDER_COLOR,
+  paddingTop: () => 6,
+  paddingBottom: () => 6,
+  paddingLeft: () => 4,
+  paddingRight: () => 4,
 }
 
 const labelStyle = {
@@ -353,7 +423,7 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
     ficha.oficial !== undefined && ficha.oficial !== null && String(ficha.oficial).trim() !== ''
       ? String(ficha.oficial).trim()
       : ''
-  const caracteristicasStr = String(ficha.caracteristicas ?? '—').trim() || '—'
+  const caracteristicasStr = String(ficha.caracteristicasPrenda ?? ficha.caracteristicas ?? '—').trim() || '—'
   const medidasStr = String(ficha.medidas ?? '—').trim() || '—'
   const descripcionStr = String(ficha.descripcion ?? ficha.observaciones ?? '').trim() || '—'
   const domicilioStr = String(ficha.domicilio ?? client?.address ?? '—').trim()
@@ -437,7 +507,7 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
       widths: ['25%', '75%'],
       body: [[cellLabel('Medidas:'), cellValue(medidasStr)]],
     },
-    layout: tableLayoutBorders,
+    layout: tableLayoutBordersPadded,
   })
 
   // Descripción: celda crece con el contenido (sin altura fija)
@@ -446,7 +516,7 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
       widths: ['25%', '75%'],
       body: [[cellLabel('Descripción:'), cellValue(descripcionStr)]],
     },
-    layout: tableLayoutBorders,
+    layout: tableLayoutBordersPadded,
   })
 
   // Domicilio: 4 columnas, cada celda stack (label + valor)
@@ -554,28 +624,14 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
               widths: ['25%', '75%'],
               body: [[cellLabel('Medidas:'), cellValue(medidasStr)]],
             },
-            layout: tableLayoutBorders,
+            layout: tableLayoutBordersPadded,
           },
           {
             table: {
               widths: ['25%', '75%'],
               body: [[cellLabel('Descripción:'), cellValue(descripcionStr)]],
             },
-            layout: tableLayoutBorders,
-          },
-          {
-            table: {
-              widths: ['25%', '25%', '25%', '25%'],
-              body: [
-                [
-                  cellStack('Precio:', `${total.toFixed(2)} €`),
-                  cellStack('Entrega:', `${totalPaid.toFixed(2)} €`),
-                  cellStack('Pendiente:', `${totalPending.toFixed(2)} €`),
-                  cellStack('Fecha cobro:', formatDate(ficha.fechaCobro)),
-                ],
-              ],
-            },
-            layout: tableLayoutBorders,
+            layout: tableLayoutBordersPadded,
           },
         ],
       },
@@ -706,30 +762,26 @@ export async function generateFichaForLine(
 const MEDIDAS_HEADERS_CAMISA = [
   'CUELLO',
   'CANESÚ',
-  'MANGA',
-  'FREN.PECHO',
-  'CONT.PECHO',
+  'L.MANGA',
+  'FR.PECHO',
+  'PECHO',
   'CINTURA',
   'CADERA',
   'LAR.CUERPO',
-  'P.IZQ',
-  'P.DCH',
   'HOMBRO',
-  'BÍCEPS',
+  'PUÑO',
 ] as const
 const MEDIDAS_KEYS_CAMISA = [
   'cuello',
   'canesu',
-  'manga',
-  'frenPecho',
-  'contPecho',
+  'largoManga',
+  'frentePecho',
+  'pecho',
   'cintura',
   'cadera',
-  'largo',
-  'pIzq',
-  'pDch',
+  'largoCuerpo',
   'hombro',
-  'biceps',
+  'puno',
 ] as const
 
 const PUNO_LABELS: Record<string, string> = {
