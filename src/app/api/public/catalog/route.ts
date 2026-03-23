@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
 export async function GET(request: NextRequest) {
+  try {
   const { searchParams } = new URL(request.url)
   const category = searchParams.get('category')
   const search = searchParams.get('search')
@@ -75,4 +76,8 @@ export async function GET(request: NextRequest) {
     page,
     totalPages: Math.ceil((count || 0) / limit),
   })
+  } catch (err) {
+    console.error('[catalog]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 }

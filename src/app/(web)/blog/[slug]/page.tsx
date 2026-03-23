@@ -7,6 +7,7 @@ export const revalidate = 1800
 import { getPublicBlogPost } from '@/actions/cms'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
+import DOMPurify from 'isomorphic-dompurify'
 import { ArticleSchema, BreadcrumbSchema } from '@/components/seo/schema-org'
 import { buildBreadcrumbs } from '@/lib/seo/metadata'
 
@@ -40,7 +41,7 @@ export default async function BlogPostPage({ params }: Props) {
   }
 
   const author = post.profiles as { full_name?: string } | null
-  const body = post.body_es || ''
+  const body = DOMPurify.sanitize(post.body_es || '')
 
   return (
     <article className="container mx-auto px-4 py-12 sm:py-16">

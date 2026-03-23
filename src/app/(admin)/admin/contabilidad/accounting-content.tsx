@@ -1279,7 +1279,7 @@ function EstimatesTab() {
         client_nif: form.client_nif || null,
         client_email: form.client_email?.trim() || null,
         estimate_date: form.estimate_date,
-        valid_until: form.valid_until || null,
+        valid_until: addDays(form.estimate_date, 30),
         subtotal,
         tax_rate: form.tax_rate,
         tax_amount: taxAmount,
@@ -1391,16 +1391,6 @@ function EstimatesTab() {
                 <div className="space-y-1">
                   <Label>Fecha</Label>
                   <DatePickerPopover value={form.estimate_date} onChange={date => setForm(f => ({ ...f, estimate_date: date }))} />
-                </div>
-                <div className="space-y-1">
-                  <Label>Válido hasta</Label>
-                  <div className="flex flex-wrap gap-2 items-center">
-                    <DatePickerPopover containerClassName="w-full sm:w-40" value={form.valid_until} onChange={date => setForm(f => ({ ...f, valid_until: date }))} />
-                    <span className="text-xs text-muted-foreground">Rápido:</span>
-                    <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setForm(f => ({ ...f, valid_until: new Date().toISOString().slice(0, 10) }))}>Hoy</Button>
-                    <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setForm(f => ({ ...f, valid_until: addDays(f.estimate_date, 15) }))}>+15 días</Button>
-                    <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setForm(f => ({ ...f, valid_until: addDays(f.estimate_date, 30) }))}>+30 días</Button>
-                  </div>
                 </div>
               </div>
 

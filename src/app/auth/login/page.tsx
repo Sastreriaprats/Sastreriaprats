@@ -1,10 +1,11 @@
 import { Metadata } from 'next'
 import Link from 'next/link'
+import Image from 'next/image'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { LoginForm } from './login-form'
 import { Button } from '@/components/ui/button'
-import { User } from 'lucide-react'
+import { User, ArrowLeft } from 'lucide-react'
 
 export const metadata: Metadata = {
   title: 'Iniciar sesión',
@@ -49,10 +50,18 @@ export default async function LoginPage({
       <div className="flex flex-1 flex-col justify-center px-8 py-12 lg:px-12">
         <div className="mx-auto w-full max-w-sm">
           <div className="mb-8">
-            <h1 className="font-display text-3xl font-light tracking-[0.2em] text-prats-navy">
-              PRATS
-            </h1>
-            <p className="mt-2 text-sm text-muted-foreground">
+            <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-prats-navy mb-6 transition-colors">
+              <ArrowLeft className="h-4 w-4" />
+              Volver a la web
+            </Link>
+            <Image
+              src="/images/logo-prats-hd.webp"
+              alt="Sastrería Prats"
+              width={180}
+              height={180}
+              className="mb-3 object-contain"
+            />
+            <p className="text-sm text-muted-foreground">
               {params.mode === 'pos'
                 ? 'Acceso al Terminal Punto de Venta'
                 : params.mode === 'client'
@@ -104,15 +113,18 @@ export default async function LoginPage({
         </div>
       </div>
 
-      <div className="hidden bg-prats-navy lg:flex lg:flex-1 lg:items-center lg:justify-center">
-        <div className="text-center">
-          <h2 className="font-display text-6xl font-light tracking-[0.3em] text-white">
-            PRATS
-          </h2>
-          <p className="mt-4 text-sm tracking-[0.3em] text-white/50">
-            SASTRERÍA DE LUJO · MADRID
-          </p>
-        </div>
+      <div className="hidden bg-prats-navy lg:flex lg:flex-1 lg:flex-col lg:items-center lg:justify-center">
+        <Image
+          src="/images/logo-prats-hd.webp"
+          alt="Sastrería Prats"
+          width={500}
+          height={500}
+          className="object-contain max-w-[80%]"
+          style={{ filter: 'invert(1)', mixBlendMode: 'screen' }}
+        />
+        <p className="mt-6 text-sm tracking-[0.3em] text-white/50">
+          SASTRERÍA DE LUJO · MADRID
+        </p>
       </div>
     </div>
   )

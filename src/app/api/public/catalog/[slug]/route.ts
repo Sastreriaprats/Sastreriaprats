@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
 export async function GET(_: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
+  try {
   const { slug } = await params
   const admin = createAdminClient()
 
@@ -35,4 +36,8 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ slug: 
   }
 
   return NextResponse.json(product)
+  } catch (err) {
+    console.error('[catalog/slug]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 }

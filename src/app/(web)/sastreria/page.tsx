@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import Image from 'next/image'
 
 export const revalidate = 3600
 
@@ -7,10 +8,13 @@ export default function SastreriaPage() {
     <main className="bg-white">
       {/* HERO - Pantalla completa, taller */}
       <section className="relative h-screen overflow-hidden group">
-        <img
+        <Image
           src="https://www.sastreriaprats.com/cdn/shop/files/recursos_taller_-3.jpg?v=1718892989&width=2000"
           alt="Taller de sastrería Prats"
-          className="absolute inset-0 h-full w-full object-cover object-center transition-transform duration-1000 group-hover:scale-105"
+          fill
+          className="object-cover object-center transition-transform duration-1000 group-hover:scale-105"
+          sizes="100vw"
+          priority
         />
         <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/30 to-transparent" />
         <div className="absolute inset-0 flex flex-col justify-center px-8 md:px-20 max-w-2xl">
@@ -52,10 +56,12 @@ export default function SastreriaPage() {
       {/* FOTO + TEXTO - Por qué a medida */}
       <section className="grid grid-cols-1 md:grid-cols-2 min-h-[70vh]">
         <div className="relative overflow-hidden group order-2 md:order-1">
-          <img
+          <Image
             src="https://www.sastreriaprats.com/cdn/shop/files/recursos_taller_-6.jpg?v=1718892990&width=1200"
             alt="Detalle del taller"
-            className="absolute inset-0 h-full w-full object-cover transition-transform duration-1000 group-hover:scale-105"
+            fill
+            className="object-cover transition-transform duration-1000 group-hover:scale-105"
+            sizes="(max-width: 768px) 100vw, 50vw"
           />
         </div>
         <div className="flex flex-col justify-center px-8 md:px-16 py-16 md:py-24 bg-[#fafaf9] order-1 md:order-2">
@@ -79,10 +85,12 @@ export default function SastreriaPage() {
 
       {/* SECCIÓN OSCURA - Historia */}
       <section className="relative min-h-[80vh] flex items-center justify-center overflow-hidden group">
-        <img
+        <Image
           src="https://www.sastreriaprats.com/cdn/shop/files/DIEGO_PRATS-76.jpg?v=1718899328&width=1600"
           alt="Prats, sastrería de Madrid"
-          className="absolute inset-0 h-full w-full object-cover transition-transform duration-1000 group-hover:scale-105"
+          fill
+          className="object-cover transition-transform duration-1000 group-hover:scale-105"
+          sizes="100vw"
         />
         <div className="absolute inset-0 bg-[#1a2744]/80" />
         <div className="relative z-10 px-8 md:px-16 py-24 text-center max-w-3xl mx-auto">

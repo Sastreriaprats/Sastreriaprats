@@ -18,159 +18,93 @@ export default async function HomePage() {
   const content = await getHomeContent()
 
   const hero = content.hero!
-  const strip = content.editorial_strip!
   const categories = content.categories!
   const editorialDouble = content.editorial_double!
-  const stores = content.stores!
-  const cta = content.cta!
+  const processSteps = content.process_steps!
 
   return (
     <main className="bg-white font-sans antialiased">
-      {/* HERO — 100vh, imagen full, texto centrado, overlay */}
-      <section className="relative min-h-[100vh] overflow-hidden">
+      {/* HERO — imagen B/N full-width, sin overlay ni texto */}
+      <section className="relative w-full overflow-hidden">
         <Image
           src={hero.image_url}
           alt=""
-          fill
-          className="object-cover object-center"
+          width={2000}
+          height={1000}
+          className="w-full h-auto object-cover grayscale"
           sizes="100vw"
           priority
         />
-        <div className="absolute inset-0 bg-black/30" />
-        <div className="relative z-10 flex min-h-[100vh] flex-col items-center justify-center px-6 text-center text-white">
-          <h1 className="font-serif text-5xl font-normal tracking-wide md:text-7xl lg:text-8xl">
-            {hero.title_es}
-          </h1>
-          <p className="mt-4 text-sm font-light tracking-[0.35em] text-white/90 md:text-base">
-            {hero.subtitle_es}
-          </p>
-          <div className="mt-12 flex flex-wrap items-center justify-center gap-4">
-            <Link
-              href={hero.button1_url}
-              className="bg-white px-8 py-3 text-xs font-medium tracking-[0.2em] text-black transition-colors hover:bg-white/90"
-            >
-              {hero.button1_label}
-            </Link>
-            <Link
-              href={hero.button2_url}
-              className="border border-white/80 px-8 py-3 text-xs font-medium tracking-[0.2em] text-white transition-colors hover:bg-white/10"
-            >
-              {hero.button2_label}
-            </Link>
-          </div>
-        </div>
+        <h1 className="sr-only">{hero.title_es} — {hero.subtitle_es}</h1>
       </section>
 
-      {/* EDITORIAL STRIP */}
-      <section className="bg-black py-4 text-center">
-        <p className="text-xs font-light tracking-[0.35em] text-white/90 md:text-sm">
-          {strip.content_es}
-        </p>
-      </section>
-
-      {/* GRID CATEGORÍAS — 3 columnas, imagen vertical, overlay hover, título abajo */}
-      <section className="grid grid-cols-1 md:grid-cols-3">
-        {categories.blocks.map((card, i) => (
+      {/* ESPACIOS — 2 columnas con imagen de fondo y botón DESCUBRE */}
+      <section className="grid grid-cols-1 md:grid-cols-2">
+        {categories.blocks.slice(0, 2).map((card, i) => (
           <Link
             key={i}
             href={card.link_url}
-            className="group relative block aspect-[3/4] overflow-hidden"
+            className="group relative block aspect-[4/3] overflow-hidden"
           >
             <Image
               src={card.image_url}
               alt=""
               fill
               className="object-cover transition-transform duration-500 group-hover:scale-105"
-              sizes="(max-width: 768px) 100vw, 33vw"
+              sizes="(max-width: 768px) 100vw, 50vw"
             />
-            <div className="absolute inset-0 bg-black/0 transition-colors duration-300 group-hover:bg-black/40" />
-            <div className="absolute bottom-0 left-0 right-0 p-6 text-center">
-              <span className="font-serif text-2xl font-light text-white md:text-3xl">
-                {card.title_es}
+            <div className="absolute inset-0 bg-black/20 transition-colors duration-300 group-hover:bg-black/30" />
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
+              <p className="text-xs tracking-[0.3em] uppercase mb-2">ESPACIO</p>
+              <h2 className="text-3xl md:text-4xl font-bold uppercase tracking-wide mb-6">
+                {card.title_es.toUpperCase()}
+              </h2>
+              <span className="border border-white/80 px-8 py-2.5 text-xs font-medium tracking-[0.2em] uppercase transition-colors group-hover:bg-white/10">
+                DESCUBRE
               </span>
             </div>
           </Link>
         ))}
       </section>
 
-      {/* EDITORIAL DOBLE — 50/50 imagen | crema + texto */}
-      <section className="grid grid-cols-1 md:grid-cols-2">
-        <div className="relative aspect-[4/5] md:aspect-auto md:min-h-[480px]">
-          <Image
-            src={editorialDouble.image_url}
-            alt=""
-            fill
-            className="object-cover"
-            sizes="(max-width: 768px) 100vw, 50vw"
-          />
-        </div>
-        <div
-          className="flex flex-col items-center justify-center px-8 py-16 md:px-12 md:py-24"
-          style={{ backgroundColor: '#f5f0e8' }}
-        >
-          <h2 className="font-serif text-3xl font-light text-black md:text-4xl">
+      {/* SASTRERÍA ARTESANAL + PROCESO */}
+      <section className="grid grid-cols-1 lg:grid-cols-2 gap-0">
+        {/* Columna izquierda: título y botón */}
+        <div className="flex flex-col justify-center px-8 py-16 md:px-16 lg:py-24">
+          <h2 className="text-4xl md:text-5xl font-bold text-black leading-tight">
             {editorialDouble.title_es}
           </h2>
-          <p className="mt-6 max-w-md text-center text-sm font-light leading-relaxed text-black/80">
-            {editorialDouble.content_es}
-          </p>
-          <Link
-            href={editorialDouble.button_url}
-            className="mt-10 border border-black px-8 py-3 text-xs font-medium tracking-[0.2em] text-black transition-colors hover:bg-black hover:text-white"
-          >
-            {editorialDouble.button_label}
-          </Link>
-        </div>
-      </section>
-
-      {/* TIENDAS */}
-      <section className="px-6 py-16 md:px-12 lg:px-16">
-        <h2 className="font-serif text-3xl font-light text-black md:text-4xl">
-          {stores.title_es}
-        </h2>
-        <div className="mt-10 grid grid-cols-1 gap-6 md:grid-cols-2">
-          {stores.blocks.map((store, i) => (
-            <a
-              key={i}
-              href={store.link_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="group relative block overflow-hidden"
+          <div className="mt-8">
+            <Link
+              href={editorialDouble.button_url}
+              className="inline-block bg-black text-white px-8 py-3 text-xs font-medium tracking-[0.15em] uppercase rounded-full hover:bg-gray-800 transition-colors"
             >
-              <div className="aspect-video relative">
-                <Image
-                  src={store.image_url}
-                  alt=""
-                  fill
-                  className="object-cover transition-transform duration-500 group-hover:scale-105"
-                  sizes="(max-width: 768px) 100vw, 50vw"
-                />
-              </div>
-              <div className="absolute inset-0 bg-black/30" />
-              <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center text-white">
-                <h3 className="font-serif text-2xl font-light md:text-3xl">
-                  {store.title_es}
-                </h3>
-                <p className="mt-2 text-sm font-light text-white/90">
-                  {store.content_es}
+              {editorialDouble.button_label}
+            </Link>
+          </div>
+        </div>
+
+        {/* Columna derecha: pasos del proceso */}
+        <div className="px-8 py-16 md:px-16 lg:py-24 border-l border-gray-100">
+          <h3 className="text-2xl md:text-3xl font-bold text-black mb-8">
+            {processSteps.title_es}
+          </h3>
+          <p className="text-sm text-gray-600 leading-relaxed mb-8">
+            En <strong>Sastrería Prats</strong> creemos que un traje a medida es mucho más que una prenda: es el resultado de un proceso artesanal donde tradición, precisión y estilo se unen para crear una pieza única. Cada traje nace de una idea y evoluciona a través de un trabajo meticuloso que combina técnicas de sastrería clásica con una atención absoluta al detalle.
+          </p>
+          <div className="space-y-8">
+            {processSteps.blocks.map((step, i) => (
+              <div key={i}>
+                <h4 className="text-xl font-bold text-black mb-3">
+                  {step.title_es}
+                </h4>
+                <p className="text-sm text-gray-600 leading-relaxed">
+                  {step.content_es}
                 </p>
               </div>
-            </a>
-          ))}
+            ))}
+          </div>
         </div>
-      </section>
-
-      {/* CTA FINAL */}
-      <section className="bg-black px-6 py-20 text-center md:py-24">
-        <p className="font-serif text-2xl font-light text-white md:text-3xl">
-          {cta.title_es}
-        </p>
-        <Link
-          href={cta.button_url}
-          className="mt-8 inline-block bg-white px-10 py-3 text-xs font-medium tracking-[0.2em] text-black transition-colors hover:bg-white/90"
-        >
-          {cta.button_label}
-        </Link>
       </section>
     </main>
   )

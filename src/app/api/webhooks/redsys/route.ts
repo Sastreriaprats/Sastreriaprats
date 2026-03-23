@@ -1,13 +1,37 @@
-// Webhook de Redsys - pendiente de configurar con credenciales reales
-// Necesario: REDSYS_MERCHANT_CODE, REDSYS_SECRET_KEY, REDSYS_TERMINAL
+// Webhook de Redsys
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createOnlineOrderJournalEntry } from '@/actions/accounting-triggers'
+import crypto from 'crypto'
+
+function verifyRedsysSignature(merchantParams: string, receivedSignature: string): boolean {
+  const secretKey = process.env.REDSYS_SECRET_KEY
+  if (!secretKey) return false
+
+  const decoded = JSON.parse(Buffer.from(merchantParams, 'base64').toString('utf8'))
+  const orderNumber = decoded.Ds_Order || ''
+
+  // Diversificar clave con 3DES-CBC usando el número de pedido
+  const keyBuffer = Buffer.from(secretKey, 'base64')
+  const iv = Buffer.alloc(8, 0)
+  const orderPadded = Buffer.alloc(8, 0)
+  Buffer.from(orderNumber).copy(orderPadded)
+  const cipher = crypto.createCipheriv('des-ede3-cbc', keyBuffer, iv)
+  cipher.setAutoPadding(false)
+  const diversifiedKey = Buffer.concat([cipher.update(orderPadded), cipher.final()])
+
+  // HMAC-SHA256 de los parámetros con la clave diversificada
+  const hmac = crypto.createHmac('sha256', diversifiedKey)
+  hmac.update(merchantParams)
+  const calculatedSignature = hmac.digest('base64')
+
+  const normalize = (s: string) => s.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  return normalize(calculatedSignature) === normalize(receivedSignature)
+}
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.formData()
-    const dsSignatureVersion = body.get('Ds_SignatureVersion') as string
     const dsMerchantParameters = body.get('Ds_MerchantParameters') as string
     const dsSignature = body.get('Ds_Signature') as string
 
@@ -15,9 +39,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing parameters' }, { status: 400 })
     }
 
-    // TODO: Verificar firma HMAC-SHA256 con REDSYS_SECRET_KEY
-    // const isValid = verifyRedsysSignature(dsMerchantParameters, dsSignature)
-    // if (!isValid) return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+    if (!verifyRedsysSignature(dsMerchantParameters, dsSignature || '')) {
+      console.error('Redsys webhook: invalid signature')
+      return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
+    }
 
     const params = JSON.parse(Buffer.from(dsMerchantParameters, 'base64').toString('utf8'))
     const responseCode = parseInt(params.Ds_Response || '9999')

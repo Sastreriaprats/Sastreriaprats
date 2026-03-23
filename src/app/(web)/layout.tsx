@@ -6,12 +6,18 @@ import { ConsentProvider } from '@/components/providers/consent-provider'
 import { CookieBanner } from '@/components/legal/cookie-banner'
 import { GoogleAnalytics } from '@/components/analytics/google-analytics'
 import { OrganizationSchema, WebSiteSchema } from '@/components/seo/schema-org'
+import { getHomeContent, getWebCategories } from '@/actions/cms'
 
-export default function WebLayout({
+export default async function WebLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  const [content, categories] = await Promise.all([
+    getHomeContent(),
+    getWebCategories(),
+  ])
+
   return (
     <ConsentProvider>
       <GoogleAnalytics />
@@ -20,7 +26,7 @@ export default function WebLayout({
       <CartProvider>
         <div className="flex min-h-screen flex-col">
           <LocalBusinessSchema />
-          <WebHeader />
+          <WebHeader announcementText={content.editorial_strip?.content_es} categories={categories} />
           <main className="flex-1">
             {children}
           </main>

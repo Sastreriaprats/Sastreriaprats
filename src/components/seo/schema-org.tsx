@@ -100,15 +100,15 @@ export function OrganizationSchema() {
     logo: `${process.env.NEXT_PUBLIC_APP_URL || ''}/icons/icon-512.png`,
     contactPoint: {
       '@type': 'ContactPoint',
-      telephone: '+34914356789',
+      telephone: '+34912401845',
       contactType: 'customer service',
       availableLanguage: ['Spanish', 'English'],
     },
     address: {
       '@type': 'PostalAddress',
-      streetAddress: 'Calle de Serrano 82',
+      streetAddress: 'Calle Hermanos Pinzón, 4',
       addressLocality: 'Madrid',
-      postalCode: '28006',
+      postalCode: '28036',
       addressCountry: 'ES',
     },
     sameAs: ['https://instagram.com/sastreriaprats', 'https://facebook.com/sastreriaprats'],

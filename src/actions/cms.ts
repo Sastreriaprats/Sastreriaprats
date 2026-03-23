@@ -34,6 +34,9 @@ export type HomeStores = { title_es: string; blocks: HomeStoreCard[] }
 
 export type HomeCta = { title_es: string; button_label: string; button_url: string }
 
+export type HomeProcessStep = { title_es: string; content_es: string }
+export type HomeProcessSteps = { title_es: string; blocks: HomeProcessStep[] }
+
 export type HomeContent = {
   hero: HomeHero | null
   editorial_strip: HomeEditorialStrip | null
@@ -42,6 +45,7 @@ export type HomeContent = {
   editorial_double: HomeEditorialDouble | null
   stores: HomeStores | null
   cta: HomeCta | null
+  process_steps: HomeProcessSteps | null
 }
 
 const DEFAULT_HERO: HomeHero = {
@@ -91,6 +95,16 @@ const DEFAULT_CTA: HomeCta = {
   button_url: '/reservar',
 }
 
+const DEFAULT_PROCESS_STEPS: HomeProcessSteps = {
+  title_es: 'Proceso artesanal, del boceto al ajuste final',
+  blocks: [
+    { title_es: 'Toma de medidas', content_es: 'Una de las claves de la sastrería a medida es la precisión. En Sastrería Prats realizamos una toma de medidas completa, analizando no solo las dimensiones del cuerpo, sino también la postura, la caída de los hombros y la forma natural del cliente. Este estudio permite crear un patrón único que garantiza comodidad, equilibrio y una silueta elegante.' },
+    { title_es: 'Patronaje personalizado', content_es: 'Con las medidas definidas se elabora el patrón personalizado, el plano técnico que dará forma al traje. Posteriormente se realiza el corte del tejido seleccionado, siempre respetando la dirección de la fibra y las características del material. Este paso es fundamental para asegurar que la prenda mantenga su estructura y caída con el paso del tiempo.' },
+    { title_es: 'Pruebas de ajuste', content_es: 'Un traje verdaderamente a medida requiere varias pruebas. En ellas se evalúa cómo se comporta la prenda sobre el cuerpo del cliente y se realizan los ajustes necesarios. Cada modificación se realiza con precisión para alcanzar un resultado perfecto.' },
+    { title_es: 'Acabados a mano', content_es: 'La confección se realiza mediante técnicas tradicionales de sastrería. Muchas partes del traje se cosen a mano, especialmente aquellas que influyen en la estructura y la movilidad de la prenda. El objetivo es construir una prenda que combine durabilidad, confort y elegancia.' },
+  ],
+}
+
 /** Obtiene el contenido de la home desde el CMS. Público; usa fallbacks si no hay datos. */
 export async function getHomeContent(): Promise<HomeContent> {
   try {
@@ -111,6 +125,7 @@ export async function getHomeContent(): Promise<HomeContent> {
         editorial_double: DEFAULT_EDITORIAL_DOUBLE,
         stores: DEFAULT_STORES,
         cta: DEFAULT_CTA,
+        process_steps: DEFAULT_PROCESS_STEPS,
       }
     }
     const { data: sections } = await admin
@@ -196,6 +211,21 @@ export async function getHomeContent(): Promise<HomeContent> {
         }
       : DEFAULT_CTA
 
+    let process_steps: HomeProcessSteps | null = DEFAULT_PROCESS_STEPS
+    const psRow = get('process_steps')
+    if (psRow?.id) {
+      const { data: blocks } = await admin
+        .from('cms_blocks')
+        .select('title_es, content_es, sort_order')
+        .eq('section_id', psRow.id)
+        .order('sort_order', { ascending: true })
+      const steps: HomeProcessStep[] = (blocks || []).map((b: Record<string, unknown>) => ({
+        title_es: (b.title_es as string) || '',
+        content_es: (b.content_es as string) || '',
+      }))
+      if (steps.length) process_steps = { title_es: (psRow.title_es as string) || DEFAULT_PROCESS_STEPS.title_es, blocks: steps }
+    }
+
     return {
       hero,
       editorial_strip,
@@ -204,6 +234,7 @@ export async function getHomeContent(): Promise<HomeContent> {
       editorial_double,
       stores,
       cta,
+      process_steps,
     }
   } catch (err) {
     console.error('[getHomeContent]', err)
@@ -215,6 +246,7 @@ export async function getHomeContent(): Promise<HomeContent> {
       editorial_double: DEFAULT_EDITORIAL_DOUBLE,
       stores: DEFAULT_STORES,
       cta: DEFAULT_CTA,
+      process_steps: DEFAULT_PROCESS_STEPS,
     }
   }
 }
@@ -284,7 +316,7 @@ export const getHomeSectionsForAdmin = protectedAction<void, HomeSectionForAdmin
         settings,
         blocks: undefined,
       }
-      if (s.section_type === 'categories' || s.section_type === 'stores') {
+      if (s.section_type === 'categories' || s.section_type === 'stores' || s.section_type === 'process_steps') {
         const { data: blocks } = await ctx.adminClient
           .from('cms_blocks')
           .select('id, title_es, content_es, image_url, link_url, sort_order')
@@ -455,5 +487,26 @@ export async function getPublicBlogPost(slug: string) {
   } catch (err) {
     console.error('[getPublicBlogPost]', err)
     return null
+  }
+}
+
+/** Categorías visibles en la web para el menú de navegación */
+export type WebCategory = { name: string; slug: string; sort_order: number }
+
+export async function getWebCategories(): Promise<WebCategory[]> {
+  try {
+    const { createAdminClient } = await import('@/lib/supabase/admin')
+    const admin = createAdminClient()
+    const { data } = await admin
+      .from('product_categories')
+      .select('name, slug, sort_order')
+      .eq('is_active', true)
+      .eq('is_visible_web', true)
+      .is('parent_id', null)
+      .order('sort_order', { ascending: true })
+    return (data || []) as WebCategory[]
+  } catch (err) {
+    console.error('[getWebCategories]', err)
+    return []
   }
 }

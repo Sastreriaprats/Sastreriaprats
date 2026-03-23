@@ -7,13 +7,13 @@ export function LocalBusinessSchema() {
     name: 'Sastrería Prats',
     description: 'Sastrería de lujo en Madrid. Trajes a medida, arreglos y boutique.',
     url: BASE_URL,
-    telephone: '+34914356789',
+    telephone: '+34912401845',
     email: 'info@sastreriaprats.com',
     address: {
       '@type': 'PostalAddress',
-      streetAddress: 'Calle de Serrano 82',
+      streetAddress: 'Calle Hermanos Pinzón, 4',
       addressLocality: 'Madrid',
-      postalCode: '28006',
+      postalCode: '28036',
       addressCountry: 'ES',
     },
     openingHoursSpecification: [

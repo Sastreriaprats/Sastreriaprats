@@ -86,8 +86,8 @@ export function buildInfoSection(params: {
   clientAddress: string | null
   label1: string
   date1: string | null
-  label2: string
-  date2: string | null
+  label2?: string
+  date2?: string | null
 }): Content[] {
   const { clientName, clientNif, clientAddress, label1, date1, label2, date2 } = params
 
@@ -159,14 +159,16 @@ export function buildInfoSection(params: {
               { text: label1, fontSize: 8, color: '#666', width: 75 },
               { text: formatDateDDMMYYYY(date1), fontSize: 10, bold: true, color: 'black' },
             ],
-            margin: [0, 0, 0, 3] as [number, number, number, number],
+            margin: [0, 0, 0, label2 ? 3 : 0] as [number, number, number, number],
           },
-          {
-            columns: [
-              { text: label2, fontSize: 8, color: '#666', width: 75 },
-              { text: formatDateDDMMYYYY(date2), fontSize: 10, bold: true, color: 'black' },
-            ],
-          },
+          ...(label2
+            ? [{
+                columns: [
+                  { text: label2, fontSize: 8, color: '#666', width: 75 },
+                  { text: formatDateDDMMYYYY(date2 ?? null), fontSize: 10, bold: true, color: 'black' },
+                ],
+              }]
+            : []),
         ],
       },
     ],

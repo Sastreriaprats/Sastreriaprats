@@ -73,8 +73,6 @@ export async function generateEstimatePdf(estimateId: string): Promise<string> {
       clientAddress: estimate.client_address,
       label1: 'Fecha:',
       date1: estimate.estimate_date,
-      label2: 'Válido hasta:',
-      date2: estimate.valid_until,
     }),
     {
       table: {

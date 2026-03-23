@@ -3,13 +3,17 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
-import { Search, Loader2, ShoppingBag, Heart } from 'lucide-react'
+import { Search, Loader2, ShoppingBag, Heart, ChevronDown } from 'lucide-react'
 import { trackAddToCart } from '@/lib/analytics/events'
 import { useCart } from '@/components/providers/cart-provider'
 import { toast } from 'sonner'
+import { useSearchParams } from 'next/navigation'
 
 export function CatalogContent() {
   const { addItem } = useCart()
+  const searchParams = useSearchParams()
+  const categoryParam = searchParams.get('category') || ''
+
   const [products, setProducts] = useState<Record<string, unknown>[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -17,6 +21,7 @@ export function CatalogContent() {
   const [isLoading, setIsLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState('newest')
+  const [showSort, setShowSort] = useState(false)
   const [clientId, setClientId] = useState<string | null>(null)
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set())
   const [wishlistLoading, setWishlistLoading] = useState<string | null>(null)
@@ -34,6 +39,7 @@ export function CatalogContent() {
     setIsLoading(true)
     const params = new URLSearchParams({ page: page.toString(), sort })
     if (search) params.set('search', search)
+    if (categoryParam) params.set('category', categoryParam)
 
     const res = await fetch(`/api/public/catalog?${params}`)
     const data = await res.json()
@@ -41,9 +47,12 @@ export function CatalogContent() {
     setTotal(data.total || 0)
     setTotalPages(data.totalPages || 1)
     setIsLoading(false)
-  }, [page, sort, search])
+  }, [page, sort, search, categoryParam])
 
   useEffect(() => { fetchProducts() }, [fetchProducts])
+
+  // Reset page when category changes
+  useEffect(() => { setPage(1) }, [categoryParam])
 
   const handleAddToWishlist = async (e: React.MouseEvent, productId: string) => {
     e.preventDefault()
@@ -68,7 +77,9 @@ export function CatalogContent() {
     }
   }
 
-  const handleQuickAdd = (product: Record<string, unknown>) => {
+  const handleQuickAdd = (e: React.MouseEvent, product: Record<string, unknown>) => {
+    e.preventDefault()
+    e.stopPropagation()
     const variants = product.product_variants as Record<string, unknown>[] | undefined
     const variant = variants?.[0]
     if (!variant || (variant.total_stock as number) <= 0) return
@@ -90,172 +101,160 @@ export function CatalogContent() {
   const formatPrice = (price: number) =>
     new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(price)
 
-  return (
-    <div className="bg-white">
-      {/* Hero */}
-      <div className="relative h-56 overflow-hidden">
-        <Image
-          src="https://www.sastreriaprats.com/cdn/shop/files/AW25_-_DIEGO_MARTIN-191.jpg?v=1762421411&width=2000"
-          alt="Boutique"
-          fill
-          className="object-cover object-top"
-          sizes="100vw"
-          priority
-        />
-        <div className="absolute inset-0 bg-[#1a2744]/70" />
-        <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-          <p className="text-xs tracking-[0.5em] text-white/50 mb-3">SASTRERÍA PRATS</p>
-          <h1 className="font-serif text-5xl font-light text-white tracking-wide">Boutique</h1>
-        </div>
-      </div>
+  const sortLabels: Record<string, string> = {
+    newest: 'Novedades',
+    price_asc: 'Precio: menor a mayor',
+    price_desc: 'Precio: mayor a menor',
+    name: 'Nombre A-Z',
+  }
 
-      {/* Barra de filtros sticky */}
-      <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-8 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
-          <div className="relative w-64">
-            <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-300" />
+  return (
+    <div className="bg-white min-h-screen">
+      {/* Barra superior: búsqueda + ordenar + contador */}
+      <div className="border-b border-gray-200">
+        <div className="flex items-center justify-between px-4 py-3">
+          <div className="relative flex-1 max-w-xs">
+            <Search className="absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <input
-              placeholder="Buscar..."
-              className="w-full pl-9 pr-4 py-2 text-xs border border-gray-200 focus:outline-none focus:border-[#1a2744] transition-colors"
+              placeholder="Buscar"
+              className="w-full pl-6 pr-2 py-1 text-sm bg-transparent border-none outline-none placeholder:text-gray-400"
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(1) }}
             />
           </div>
-          <div className="flex items-center gap-6">
-            <select
-              className="text-xs text-[#1a2744] border-none outline-none cursor-pointer bg-transparent"
-              value={sort}
-              onChange={(e) => { setSort(e.target.value); setPage(1) }}
-            >
-              <option value="newest">Novedades</option>
-              <option value="price_asc">Precio ↑</option>
-              <option value="price_desc">Precio ↓</option>
-              <option value="name">Nombre A-Z</option>
-            </select>
-            <span className="text-xs text-gray-300">{total} prendas</span>
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowSort(!showSort)}
+                className="flex items-center gap-1 text-sm text-black"
+              >
+                Ordenar <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showSort ? 'rotate-180' : ''}`} />
+              </button>
+              {showSort && (
+                <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 shadow-sm z-20 min-w-[180px]">
+                  {Object.entries(sortLabels).map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => { setSort(key); setShowSort(false); setPage(1) }}
+                      className={`block w-full text-left px-4 py-2 text-sm hover:bg-gray-50 ${sort === key ? 'font-medium text-black' : 'text-gray-600'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <span className="text-sm text-gray-400">{total} productos</span>
           </div>
         </div>
       </div>
 
-      {/* Contenido */}
+      {/* Grid de productos */}
       {isLoading ? (
         <div className="flex justify-center py-20">
-          <Loader2 className="h-8 w-8 animate-spin text-[#1a2744]" />
+          <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
         </div>
       ) : products.length === 0 ? (
         <div className="text-center py-20">
-          <ShoppingBag className="mx-auto h-16 w-16 text-gray-200 mb-4" />
+          <ShoppingBag className="mx-auto h-12 w-12 text-gray-200 mb-4" />
           <p className="text-gray-400 text-sm">No se encontraron productos</p>
         </div>
       ) : (
         <>
-          <div className="max-w-7xl mx-auto px-8 py-12 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-12">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {products.map((product) => {
               const variants = product.product_variants as Record<string, unknown>[] | undefined
               const minPrice = (product.price_with_tax as number) || (product.base_price as number)
               const hasStock = variants?.some((v) => (v.total_stock as number) > 0)
-              const sizes = [...new Set(variants?.map((v) => v.size as string).filter(Boolean))]
-              const colors = variants
-                ?.filter((v) => v.color_hex)
-                .map((v) => ({ color: v.color as string, hex: v.color_hex as string }))
-                .filter((v, i, arr) => arr.findIndex(a => a.hex === v.hex) === i)
-
               const productId = product.id as string
               const isFavorite = favoriteIds.has(productId)
 
               return (
-                <div key={productId} className="group">
-                  <Link href={`/boutique/${product.slug || product.web_slug}`}>
-                    <div className="aspect-[3/4] overflow-hidden relative bg-gray-100">
-                      <button
-                        type="button"
-                        onClick={(e) => handleAddToWishlist(e, productId)}
-                        className="absolute top-2 right-2 z-10 h-8 w-8 rounded-full bg-white/90 flex items-center justify-center text-gray-400 hover:text-red-500 transition-colors shadow-sm"
-                        title={clientId ? (isFavorite ? 'En favoritos' : 'Añadir a favoritos') : 'Inicia sesión para guardar favoritos'}
-                      >
-                        {wishlistLoading === productId ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Heart className={`h-4 w-4 ${isFavorite ? 'fill-red-500 text-red-500' : ''}`} />
-                        )}
-                      </button>
-                      {product.main_image_url ? (
-                        <Image
-                          src={product.main_image_url as string}
-                          alt={product.name as string}
-                          fill
-                          className="object-cover transition-transform duration-700 group-hover:scale-105"
-                          sizes="(max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
-                        />
+                <Link
+                  key={productId}
+                  href={`/boutique/${product.slug || product.web_slug}`}
+                  className="group block border-b border-r border-gray-100"
+                >
+                  {/* Imagen */}
+                  <div className="aspect-[3/4] relative overflow-hidden bg-gray-50">
+                    {/* Wishlist */}
+                    <button
+                      type="button"
+                      onClick={(e) => handleAddToWishlist(e, productId)}
+                      className="absolute top-3 right-3 z-10 text-gray-400 hover:text-red-500 transition-colors"
+                      title={clientId ? (isFavorite ? 'En favoritos' : 'Añadir a favoritos') : 'Inicia sesión'}
+                    >
+                      {wishlistLoading === productId ? (
+                        <Loader2 className="h-5 w-5 animate-spin" />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center text-gray-300">
-                          <ShoppingBag className="h-12 w-12" />
-                        </div>
+                        <Heart className={`h-5 w-5 ${isFavorite ? 'fill-red-500 text-red-500' : ''}`} />
                       )}
-                      {!hasStock && (
-                        <div className="absolute inset-0 bg-white/60 flex items-center justify-center">
-                          <span className="text-xs tracking-[0.3em] text-gray-400 uppercase">Agotado</span>
-                        </div>
-                      )}
-                      {hasStock && (
-                        <div className="absolute bottom-0 left-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                          <button
-                            type="button"
-                            onClick={(e) => { e.preventDefault(); handleQuickAdd(product) }}
-                            className="w-full py-2.5 bg-[#1a2744] text-xs tracking-[0.2em] text-white hover:bg-[#1a2744]/90 transition-colors"
-                          >
-                            Añadir
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </Link>
-                  <Link href={`/boutique/${product.slug || product.web_slug}`} className="block mt-3">
-                    {(product.brand as string) && (
-                      <p className="text-[10px] tracking-[0.3em] text-[#c9a96e] uppercase">{product.brand as string}</p>
-                    )}
-                    <h3 className="text-sm font-light text-[#1a2744] mt-1">{product.name as string}</h3>
-                    <p className="text-sm text-[#1a2744] mt-1">{formatPrice(minPrice)}</p>
-                    {colors && colors.length > 1 && (
-                      <div className="flex gap-1 mt-2">
-                        {colors.slice(0, 5).map((c, i) => (
-                          <div
-                            key={i}
-                            className="h-3 w-3 rounded-full border border-gray-200"
-                            style={{ backgroundColor: c.hex }}
-                            title={c.color}
-                          />
-                        ))}
-                        {colors.length > 5 && <span className="text-[10px] text-gray-400">+{colors.length - 5}</span>}
+                    </button>
+
+                    {product.main_image_url ? (
+                      <Image
+                        src={product.main_image_url as string}
+                        alt={product.name as string}
+                        fill
+                        className="object-cover transition-transform duration-500 group-hover:scale-105"
+                        sizes="(max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-gray-200">
+                        <ShoppingBag className="h-10 w-10" />
                       </div>
                     )}
-                    {sizes.length > 0 && (
-                      <p className="text-[10px] text-gray-400 mt-1">{sizes.join(' · ')}</p>
+
+                    {!hasStock && (
+                      <div className="absolute inset-0 bg-white/60 flex items-center justify-center">
+                        <span className="text-xs tracking-[0.2em] text-gray-500 uppercase">Agotado</span>
+                      </div>
                     )}
-                  </Link>
-                </div>
+
+                    {/* Quick add */}
+                    {hasStock && (
+                      <button
+                        type="button"
+                        onClick={(e) => handleQuickAdd(e, product)}
+                        className="absolute bottom-3 right-3 z-10 h-9 w-9 rounded-full bg-black text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-gray-800"
+                        title="Añadir al carrito"
+                      >
+                        <ShoppingBag className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Info */}
+                  <div className="px-3 py-3">
+                    <h3 className="text-sm font-medium text-black leading-tight">{product.name as string}</h3>
+                    <p className="text-sm text-gray-500 mt-1">{formatPrice(minPrice)}</p>
+                  </div>
+                </Link>
               )
             })}
           </div>
 
+          {/* Paginación */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-8 py-16">
+            <div className="flex items-center justify-center gap-8 py-12 border-t border-gray-100">
               <button
                 type="button"
                 onClick={() => setPage((p) => p - 1)}
                 disabled={page <= 1}
-                className="text-xs tracking-[0.3em] text-[#1a2744] disabled:opacity-20 hover:opacity-60 transition-opacity"
+                className="text-xs tracking-[0.2em] uppercase text-black disabled:opacity-20 hover:opacity-60 transition-opacity"
               >
-                ← ANTERIOR
+                ← Anterior
               </button>
-              <span className="text-xs text-gray-300">{page} / {totalPages}</span>
+              <span className="text-xs text-gray-400">{page} / {totalPages}</span>
               <button
                 type="button"
                 onClick={() => setPage((p) => p + 1)}
                 disabled={page >= totalPages}
-                className="text-xs tracking-[0.3em] text-[#1a2744] disabled:opacity-20 hover:opacity-60 transition-opacity"
+                className="text-xs tracking-[0.2em] uppercase text-black disabled:opacity-20 hover:opacity-60 transition-opacity"
               >
-                SIGUIENTE →
+                Siguiente →
               </button>
             </div>
           )}

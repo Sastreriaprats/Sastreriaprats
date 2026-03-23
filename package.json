@@ -67,6 +67,7 @@
     "dexie-react-hooks": "^4.2.0",
     "drizzle-orm": "^0.45.1",
     "framer-motion": "^12.34.1",
+    "isomorphic-dompurify": "^3.6.0",
     "jsbarcode": "^3.12.3",
     "jspdf": "^4.2.0",
     "lucide-react": "^0.574.0",

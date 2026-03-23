@@ -28,13 +28,13 @@ export default async function CitaPreviaPage() {
 
           <div className="grid gap-3">
             <Link
-              href="/auth/login?mode=client&redirect=/cita-previa"
+              href="/auth/login?mode=client&redirectTo=/cita-previa"
               className="flex items-center justify-center gap-2 rounded-xl border-2 border-prats-navy bg-prats-navy px-6 py-4 text-sm font-semibold text-white hover:bg-prats-navy/90 transition-colors"
             >
               <LogIn className="h-4 w-4" /> Iniciar sesión
             </Link>
             <Link
-              href="/auth/registro?redirect=/cita-previa"
+              href="/auth/registro?redirectTo=/cita-previa"
               className="flex items-center justify-center gap-2 rounded-xl border-2 border-prats-navy px-6 py-4 text-sm font-semibold text-prats-navy hover:bg-prats-navy/5 transition-colors"
             >
               <UserPlus className="h-4 w-4" /> Crear cuenta nueva

@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { createServerSupabaseClient } from '@/lib/supabase/server'
 
 export async function PUT(request: NextRequest) {
+  const supabase = await createServerSupabaseClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const body = await request.json()
   const {
     client_id,
@@ -22,6 +27,16 @@ export async function PUT(request: NextRequest) {
   if (!client_id) return NextResponse.json({ error: 'client_id required' }, { status: 400 })
 
   const admin = createAdminClient()
+
+  // Verificar que el client_id pertenece al usuario autenticado
+  const { data: ownerCheck } = await admin
+    .from('clients')
+    .select('id')
+    .eq('id', client_id)
+    .eq('profile_id', user.id)
+    .single()
+
+  if (!ownerCheck) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { error } = await admin.from('clients').update({
     first_name,
     last_name,

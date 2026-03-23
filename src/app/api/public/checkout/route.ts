@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
         { status: 503 }
       )
     }
-    const token = Buffer.from(`${orderNumber}-${Date.now()}`).toString('base64url').slice(0, 48)
+    const token = crypto.randomUUID()
     await admin.from('pending_online_orders').insert({
       token,
       order_number: orderNumber,
