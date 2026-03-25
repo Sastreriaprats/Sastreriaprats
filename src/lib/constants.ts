@@ -3,7 +3,7 @@
 // ==========================================
 
 export const STORES = {
-  PINZON: { code: 'PIN', name: 'Hernán Pinzón' },
+  PINZON: { code: 'PIN', name: 'Hermanos Pinzón' },
   WELLINGTON: { code: 'WEL', name: 'Wellington' },
   CENTRAL: { code: 'CEN', name: 'Almacén Central' },
   ONLINE: { code: 'WEB', name: 'Tienda Online' },

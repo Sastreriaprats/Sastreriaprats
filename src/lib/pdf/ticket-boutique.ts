@@ -57,7 +57,7 @@ export async function generateTicketComplemento(order: any, line: any): Promise<
       {
         description,
         quantity,
-        unit_price: Math.round(unitPriceNoTax * 100) / 100,
+        unit_price: priceWithTax,
         discount_percentage: 0,
         line_total: Math.round(lineTotal * 100) / 100,
       },
@@ -82,24 +82,26 @@ export async function generateTicketBoutiquePDF(order: any): Promise<void> {
     return cfg.product_variant_id || cfg.product_name
   })
 
-  let subtotal = 0
+  // unit_price en BD ya incluye IVA (price_with_tax)
+  let totalWithTax = 0
   const lines = boutiqueLines.map((l: any) => {
     const cfg = l.configuration ?? {}
     const description = (cfg.product_name as string) || 'Complemento'
     const quantity = Number(l.quantity ?? 1) || 1
-    const unitPriceNoTax = Number(l.unit_price ?? 0) || 0
-    const lineTotal = quantity * unitPriceNoTax * 1.21
-    subtotal += quantity * unitPriceNoTax
+    const priceWithTax = Number(l.unit_price ?? 0) || 0
+    const lineTotal = quantity * priceWithTax
+    totalWithTax += lineTotal
     return {
       description,
       quantity,
-      unit_price: unitPriceNoTax,
+      unit_price: priceWithTax,
       discount_percentage: 0,
       line_total: Math.round(lineTotal * 100) / 100,
     }
   })
 
-  const total = Math.round(subtotal * 1.21 * 100) / 100
+  const total = Math.round(totalWithTax * 100) / 100
+  const subtotal = Math.round((total / 1.21) * 100) / 100
   const tax_amount = Math.round((total - subtotal) * 100) / 100
   const paymentMethodKey = order?.payment_method ?? order?.payment ?? 'card'
 

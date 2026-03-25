@@ -1,13 +1,21 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatCurrency, formatDate, getOrderStatusLabel } from '@/lib/utils'
 import { PaymentHistory } from '@/components/payments/payment-history'
 import { getOrder, markLineDelivered, updateOrderStatus } from '@/actions/orders'
+import { getAlterationsByOrder, updateAlterationStatus, type AlterationRow } from '@/actions/alterations'
 import { generateFichaForLine, generateFichaForLineCamiseria } from '@/lib/pdf/ficha-confeccion'
 import { generateTicketComplemento } from '@/lib/pdf/ticket-boutique'
+import { generateTailoringOrderTicketPdf } from '@/lib/pdf/tailoring-order-ticket'
+import { NewAlterationDialog } from '@/app/(sastre)/sastre/arreglos/arreglos-content'
+import { Plus, Scissors, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
+import { useActiveStore } from '@/hooks/use-store'
 
 function slugToPrendaLabel(slug: string): string {
   if (!slug || typeof slug !== 'string') return '—'
@@ -75,9 +83,24 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
 
   const clientName = order.clients?.full_name ?? order.client_id ?? '—'
   const router = useRouter()
+  const { activeStoreId } = useActiveStore()
   const [markingId, setMarkingId] = useState<string | null>(null)
   const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null)
   const [ticketLoadingId, setTicketLoadingId] = useState<string | null>(null)
+
+  // Arreglos del pedido
+  const [orderAlterations, setOrderAlterations] = useState<AlterationRow[]>([])
+  const [alterationsLoading, setAlterationsLoading] = useState(true)
+  const [alterationDialogOpen, setAlterationDialogOpen] = useState(false)
+
+  const loadAlterations = useCallback(async () => {
+    setAlterationsLoading(true)
+    const res = await getAlterationsByOrder({ tailoring_order_id: order.id })
+    if (res.success) setOrderAlterations(res.data)
+    setAlterationsLoading(false)
+  }, [order.id])
+
+  useEffect(() => { loadAlterations() }, [loadAlterations])
 
   const refreshOrder = async () => {
     const res = await getOrder(order.id)
@@ -212,6 +235,18 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
           </div>
         </CardContent>
       </Card>
+
+      {/* Ticket global */}
+      <Button
+        className="bg-[#c9a96e]/15 border border-[#c9a96e]/30 text-[#c9a96e] hover:bg-[#c9a96e]/25 gap-2"
+        disabled={pdfLoadingId === 'ticket-global'}
+        onClick={async () => {
+          setPdfLoadingId('ticket-global')
+          try { await generateTailoringOrderTicketPdf(order) } finally { setPdfLoadingId(null) }
+        }}
+      >
+        {pdfLoadingId === 'ticket-global' ? 'Generando...' : 'Imprimir ticket del pedido'}
+      </Button>
 
       {/* Piezas del pedido */}
       <section className="bg-white/[0.03] border border-white/10 rounded-xl p-6">
@@ -364,6 +399,69 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
           </>
         )}
       </section>
+
+      {/* Arreglos del pedido */}
+      <section className="bg-white/[0.03] border border-white/10 rounded-xl p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-semibold text-white flex items-center gap-2">
+            <Scissors className="h-4 w-4 text-[#c9a96e]" />
+            Arreglos
+          </h3>
+          <Button
+            size="sm"
+            className="bg-[#c9a96e]/15 border border-[#c9a96e]/30 text-[#c9a96e] hover:bg-[#c9a96e]/25 text-xs"
+            onClick={() => setAlterationDialogOpen(true)}
+          >
+            <Plus className="h-3.5 w-3.5 mr-1" /> Nuevo arreglo
+          </Button>
+        </div>
+        {alterationsLoading ? (
+          <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-white/30" /></div>
+        ) : orderAlterations.length === 0 ? (
+          <p className="text-white/40 text-sm text-center py-4">No hay arreglos vinculados a este pedido.</p>
+        ) : (
+          <div className="space-y-2">
+            {orderAlterations.map(a => (
+              <div key={a.id} className="flex items-center gap-3 py-2.5 border-b border-white/[0.06] last:border-b-0">
+                <div className="flex-1 min-w-0">
+                  <p className="text-white text-sm truncate">{a.description}</p>
+                  <p className="text-white/40 text-xs mt-0.5">
+                    {a.assigned_to_profile?.full_name ?? 'Sin asignar'}
+                    {a.has_cost ? ` · ${formatCurrency(a.cost)}` : ''}
+                  </p>
+                </div>
+                <Select
+                  value={a.status}
+                  onValueChange={async (v) => {
+                    const res = await updateAlterationStatus({ id: a.id, status: v as 'pending' | 'in_progress' | 'completed' | 'delivered' })
+                    if (res.success) { toast.success('Estado actualizado'); loadAlterations() }
+                    else toast.error(res.error ?? 'Error')
+                  }}
+                >
+                  <SelectTrigger className="h-7 w-28 bg-transparent border-white/10 text-xs text-white shrink-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-[#0d1629] border border-white/20 text-white">
+                    <SelectItem value="pending" className="text-white text-xs focus:bg-white/10 focus:text-white">Pendiente</SelectItem>
+                    <SelectItem value="in_progress" className="text-white text-xs focus:bg-white/10 focus:text-white">En curso</SelectItem>
+                    <SelectItem value="completed" className="text-white text-xs focus:bg-white/10 focus:text-white">Completado</SelectItem>
+                    <SelectItem value="delivered" className="text-white text-xs focus:bg-white/10 focus:text-white">Entregado</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <NewAlterationDialog
+        open={alterationDialogOpen}
+        onOpenChange={setAlterationDialogOpen}
+        storeId={activeStoreId}
+        onCreated={loadAlterations}
+        preselectedClientId={order.client_id}
+        preselectedOrderId={order.id}
+      />
 
       <Card className="border-white/10 bg-white/[0.04] shadow-none">
         <CardHeader>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import Stripe from 'stripe'
+import { isRateLimited } from '@/lib/rate-limit'
 
 function getStripe() {
   return new Stripe(process.env.STRIPE_SECRET_KEY!, {
@@ -9,9 +10,14 @@ function getStripe() {
 }
 
 export async function POST(request: NextRequest) {
+  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+  if (isRateLimited(ip, 'checkout', 10, 60)) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+  }
+
   try {
     const body = await request.json()
-    const { items, customer, payment_method, shipping_cost, locale } = body
+    const { items, customer, payment_method, shipping_cost, discount_code, discount_amount: clientDiscount, locale } = body
 
     if (!items?.length || !customer?.email) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
@@ -55,8 +61,38 @@ export async function POST(request: NextRequest) {
     })
   }
 
-  const taxAmount = Math.round(subtotal * 0.21 * 100) / 100
-  const total = subtotal + (shipping_cost || 0)
+  // Validar y aplicar descuento
+  let validatedDiscount = 0
+  if (discount_code) {
+    const { data: dc } = await admin
+      .from('discount_codes')
+      .select('*')
+      .eq('code', discount_code.toUpperCase())
+      .eq('is_active', true)
+      .single()
+
+    if (dc) {
+      const now = new Date().toISOString().split('T')[0]
+      const notExpired = !dc.valid_until || now <= dc.valid_until
+      const notMaxed = !dc.max_uses || dc.current_uses < dc.max_uses
+      if (notExpired && notMaxed) {
+        if (dc.discount_type === 'percentage') {
+          validatedDiscount = Math.round(subtotal * (parseFloat(dc.discount_value) / 100) * 100) / 100
+        } else {
+          validatedDiscount = Math.min(parseFloat(dc.discount_value), subtotal)
+        }
+        // Incrementar usos
+        await admin
+          .from('discount_codes')
+          .update({ current_uses: (dc.current_uses || 0) + 1, updated_at: new Date().toISOString() })
+          .eq('id', dc.id)
+      }
+    }
+  }
+
+  const afterDiscount = subtotal - validatedDiscount
+  const taxAmount = Math.round(afterDiscount * 0.21 * 100) / 100
+  const total = afterDiscount + (shipping_cost || 0)
 
   let clientId: string | null = null
   const { data: existingClient } = await admin

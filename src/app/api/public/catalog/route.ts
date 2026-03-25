@@ -16,6 +16,10 @@ export async function GET(request: NextRequest) {
 
   const admin = createAdminClient()
 
+  // Filtrar por temporada: oct-mar → incluir 'aw', abr-sep → incluir 'ss', siempre incluir 'all'/null
+  const currentMonth = new Date().getMonth() + 1 // 1-12
+  const currentSeason = currentMonth >= 4 && currentMonth <= 9 ? 'ss' : 'aw'
+
   let query = admin
     .from('products')
     .select(`
@@ -28,6 +32,7 @@ export async function GET(request: NextRequest) {
     `, { count: 'exact' })
     .eq('is_active', true)
     .eq('is_visible_web', true)
+    .or(`season.is.null,season.eq.all,season.eq.,season.eq.${currentSeason}`)
 
   if (category) query = query.eq('product_categories.slug', category)
   if (search) query = query.or(`name.ilike.%${search}%,brand.ilike.%${search}%,description.ilike.%${search}%`)

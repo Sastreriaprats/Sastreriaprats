@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000 -H 127.0.0.1",
-    "build": "next build",
+    "build": "node scripts/update-sw-version.js && next build",
     "start": "next start",
     "lint": "eslint",
     "format": "prettier --write .",
@@ -58,7 +58,9 @@
     "@supabase/supabase-js": "^2.96.0",
     "@tailwindcss/typography": "^0.5.19",
     "@tanstack/react-query": "^5.90.21",
+    "@types/bcryptjs": "^2.4.6",
     "@types/pdfmake": "^0.3.2",
+    "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

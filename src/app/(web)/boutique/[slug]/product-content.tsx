@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import {
   ArrowLeft, ShoppingBag, Minus, Plus, Check, Truck, Shield, Ruler, Loader2, Heart,
 } from 'lucide-react'
+import { PratsSpinner } from '@/components/ui/prats-spinner'
 import { useCart } from '@/components/providers/cart-provider'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -70,7 +71,7 @@ export function ProductContent({ slug }: { slug: string }) {
   if (isLoading) {
     return (
       <div className="flex justify-center py-32">
-        <Loader2 className="h-8 w-8 animate-spin text-prats-navy" />
+        <PratsSpinner />
       </div>
     )
   }

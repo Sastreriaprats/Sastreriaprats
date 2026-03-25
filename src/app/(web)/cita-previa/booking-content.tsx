@@ -29,6 +29,18 @@ const statusConfig: Record<string, { label: string; color: string }> = {
 interface Store { id: string; name: string; address?: string }
 interface Client { id: string; full_name: string; email?: string }
 
+interface Appointment {
+  id: string
+  type: string
+  title: string
+  date: string
+  start_time: string
+  end_time: string
+  status: string
+  notes: string | null
+  stores?: { name: string } | null
+}
+
 interface BookingContentProps {
   stores: Store[]
   client: Client
@@ -49,9 +61,9 @@ export function BookingContent({ stores, client }: BookingContentProps) {
   const [slots, setSlots] = useState<{ time: string; available: boolean }[]>([])
   const [isLoadingSlots, setIsLoadingSlots] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [bookedAppointment, setBookedAppointment] = useState<any>(null)
+  const [bookedAppointment, setBookedAppointment] = useState<Appointment | null>(null)
 
-  const [myAppointments, setMyAppointments] = useState<any[]>([])
+  const [myAppointments, setMyAppointments] = useState<Appointment[]>([])
   const [loadingAppts, setLoadingAppts] = useState(true)
   const [showHistory, setShowHistory] = useState(false)
 
@@ -62,7 +74,7 @@ export function BookingContent({ stores, client }: BookingContentProps) {
   useEffect(() => {
     getClientAppointmentsWeb()
       .then(r => {
-        if (r.success) setMyAppointments(r.data as any[])
+        if (r.success) setMyAppointments(r.data as unknown as Appointment[])
         setLoadingAppts(false)
       })
       .catch(err => {
@@ -95,7 +107,7 @@ export function BookingContent({ stores, client }: BookingContentProps) {
       setBookedAppointment(result.data)
       setStep('done')
       getClientAppointmentsWeb()
-        .then(r => { if (r.success) setMyAppointments(r.data as any[]) })
+        .then(r => { if (r.success) setMyAppointments(r.data as unknown as Appointment[]) })
         .catch(() => {})
     } else {
       toast.error(result.error || 'No se pudo crear la cita')
@@ -107,7 +119,7 @@ export function BookingContent({ stores, client }: BookingContentProps) {
     if (result.success) {
       toast.success('Cita cancelada')
       getClientAppointmentsWeb()
-        .then(r => { if (r.success) setMyAppointments(r.data as any[]) })
+        .then(r => { if (r.success) setMyAppointments(r.data as unknown as Appointment[]) })
         .catch(() => {})
     } else {
       toast.error(result.error || 'No se pudo cancelar')

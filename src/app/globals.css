@@ -136,7 +136,9 @@
   }
 }
 
-/* scroll suave vía data-scroll-behavior="smooth" en <html> (Next.js 16) */
+html {
+  scroll-behavior: smooth;
+}
 
 @media print {
   .no-print {

@@ -26,7 +26,7 @@ import {
 import { toast } from 'sonner'
 import { useAuth } from '@/components/providers/auth-provider'
 import { useAction } from '@/hooks/use-action'
-import { searchProductsForPos, createSale, cashWithdrawal, listPosEmployees } from '@/actions/pos'
+import { searchProductsForPos, createSale, cashWithdrawal, listPosEmployees, validateDiscountCode } from '@/actions/pos'
 import { addOrderPayment, addSalePayment, getClientPendingDebt } from '@/actions/payments'
 import { getProductByBarcode } from '@/actions/products'
 import { listClients } from '@/actions/clients'
@@ -79,6 +79,9 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
   const [selectedClientName, setSelectedClientName] = useState('')
   const [saleType, setSaleType] = useState<string>('boutique')
   const [globalDiscount, setGlobalDiscount] = useState(0)
+  const [discountCodeInput, setDiscountCodeInput] = useState('')
+  const [discountCodeApplied, setDiscountCodeApplied] = useState<string | null>(null)
+  const [discountCodeLoading, setDiscountCodeLoading] = useState(false)
   const [isTaxFree, setIsTaxFree] = useState(false)
   const [showPayment, setShowPayment] = useState(false)
   const [showWithdrawal, setShowWithdrawal] = useState(false)
@@ -333,6 +336,32 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
 
   const removeLine = (id: string) => setTicketLines(prev => prev.filter(l => l.id !== id))
 
+  const applyPosDiscountCode = async () => {
+    const code = discountCodeInput.trim()
+    if (!code) return
+    setDiscountCodeLoading(true)
+    try {
+      const res = await validateDiscountCode({ code, subtotal })
+      if (!res || !res.success) { toast.error(!res ? 'Error al validar' : res.error); return }
+      const d = res.data
+      if (d.discount_type === 'percentage') {
+        setGlobalDiscount(d.discount_value)
+      } else {
+        const pct = subtotal > 0 ? Math.min((d.discount_amount / subtotal) * 100, 100) : 0
+        setGlobalDiscount(Math.round(pct * 100) / 100)
+      }
+      setDiscountCodeApplied(code.toUpperCase())
+      toast.success(`Código ${code.toUpperCase()} aplicado`)
+    } catch { toast.error('Error al validar el código') }
+    finally { setDiscountCodeLoading(false) }
+  }
+
+  const removePosDiscountCode = () => {
+    setDiscountCodeApplied(null)
+    setDiscountCodeInput('')
+    setGlobalDiscount(0)
+  }
+
   /** Añade al ticket una línea por cada cobro pendiente del cliente que aún no esté en el ticket. */
   const addPendingDebtToTicket = () => {
     const existingEntityIds = new Set(ticketLines.filter(l => l.cobro_ref).map(l => l.cobro_ref!.entity_id))
@@ -578,6 +607,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
         client_id: saleWithoutClient ? null : selectedClientId,
         sale_type: saleType,
         discount_percentage: globalDiscount,
+        discount_code: discountCodeApplied || null,
         is_tax_free: isTaxFree,
         notes: saleWithoutClient ? 'Venta sin cliente' : null,
         salesperson_id: salespersonId,
@@ -827,7 +857,23 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
             <p className="text-sm text-slate-600">Tarifa CT: 1</p>
             <div>
               <Label className="text-sm text-slate-500">% Descuento</Label>
-              <Input type="number" min={0} max={100} value={globalDiscount || ''} onChange={(e) => setGlobalDiscount(parseFloat(e.target.value) || 0)} className="w-full h-9 mt-1 border-slate-300 bg-slate-200 text-slate-800 placeholder:text-slate-500" />
+              <Input type="number" min={0} max={100} value={globalDiscount || ''} onChange={(e) => { setGlobalDiscount(parseFloat(e.target.value) || 0); if (discountCodeApplied) { setDiscountCodeApplied(null); setDiscountCodeInput('') } }} className="w-full h-9 mt-1 border-slate-300 bg-slate-200 text-slate-800 placeholder:text-slate-500" />
+            </div>
+            <div>
+              <Label className="text-sm text-slate-500">Código descuento</Label>
+              {discountCodeApplied ? (
+                <div className="flex items-center gap-1.5 mt-1">
+                  <Badge variant="secondary" className="bg-green-100 text-green-800 text-xs">{discountCodeApplied}</Badge>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-red-500 hover:text-red-700" onClick={removePosDiscountCode}><X className="h-3.5 w-3.5" /></Button>
+                </div>
+              ) : (
+                <div className="flex gap-1 mt-1">
+                  <Input placeholder="CODIGO" value={discountCodeInput} onChange={(e) => setDiscountCodeInput(e.target.value.toUpperCase())} onKeyDown={(e) => e.key === 'Enter' && applyPosDiscountCode()} className="h-9 flex-1 border-slate-300 bg-slate-200 text-slate-800 placeholder:text-slate-500 text-xs" />
+                  <Button variant="outline" size="sm" className="h-9 px-2 border-slate-300 text-slate-700" onClick={applyPosDiscountCode} disabled={discountCodeLoading || !discountCodeInput.trim()}>
+                    {discountCodeLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
           {/* Recuadros de productos del ticket: descripción, precio, imagen (más pequeña); sin foto = recuadro en blanco */}

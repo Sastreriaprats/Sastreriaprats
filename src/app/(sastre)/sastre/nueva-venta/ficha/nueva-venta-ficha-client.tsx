@@ -28,6 +28,7 @@ import { listActiveFabricsForFicha } from '@/actions/fabrics'
 import { NuevaVentaSteps } from '../nueva-venta-steps'
 import { generateFichaConfeccionPDF, generateFichaForLine } from '@/lib/pdf/ficha-confeccion'
 import { toast } from 'sonner'
+import { getOrderStatusLabel } from '@/lib/utils'
 
 const PRENDA_LABELS: Record<string, string> = {
   traje_2_piezas: 'Traje',
@@ -73,6 +74,7 @@ const PRENDAS_DISPONIBLES = [
   { slug: 'chaleco_solo', label: 'Chaleco' },
   { slug: 'teba', label: 'Teba' },
   { slug: 'smoking', label: 'Smoking' },
+  { slug: 'chaque', label: 'Chaqué' },
   { slug: 'abrigo', label: 'Abrigo' },
   { slug: 'gabardina', label: 'Gabardina' },
   { slug: 'frac', label: 'Frac' },
@@ -80,29 +82,37 @@ const PRENDAS_DISPONIBLES = [
 
 function defaultPrendaConfig(slug: string): Record<string, unknown> {
   if (slug === 'pantalon') return {
-    vueltas: 'sin_vueltas', bragueta: 'cremallera', pliegues: 'sin_pliegues',
+    vueltas: 'sin_vueltas', bragueta: 'cremallera', pliegues: 'sin_pliegues', plieguesVal: '',
     p7pasadores: false, p5bolsillos: false, pRefForro: false, pRefExtTela: false,
     pSinBolTrasero: false, p1BolTrasero: false, p2BolTraseros: false,
-    pBolCostura: false, pBolFrances: false, pBolVivo: false,
+    pBolCostura: false, pBolFrances: false, pBolVivo: false, pBolOreja: false,
     pCenidores: false, pBotonesTirantes: false, pVEnTrasero: false,
-    pretinaCorrida: false, pretina2Botones: false, pretinaTamano: '4',
+    pretinaCorrida: false, pretina2Botones: false, pretinaTamano: '4', pretinaReforzadaDelante: false,
+    confFM: '', confFT: '', confPT: '', confRodalTrasero: '', confBajadaDelantero: '',
+    confAlturaTrasero: '', confFormaGemelo: false, confFVSalida: '',
   }
-  if (slug === 'chaleco') return { chalecoCorte: 'recto', chalecoBolsillo: '' }
+  if (slug === 'chaleco') return {
+    chalecoCorte: 'recto', chalecoBolsillo: '',
+    confF: '', confD: '', confFP: '', confFV: '', confHA: '', confHB: '', confVD: '',
+  }
   // americana, teba, abrigo, gabardina, frac, chaque, smoking
   return {
     botones: '1fila_2', aberturas: '2aberturas', bolsilloTipo: '', cerrilleraExterior: false,
     primerBoton: '', solapa: 'normal', anchoSolapa: '', manga: 'napolit',
-    ojalesAbiertos: '', ojalesCerrados: '', medidaHombro: false, hTerminado: false,
-    escote: false, sinHombreras: false, picado34: false, sinHombrera: false,
+    ojalesAbiertos: '', ojalesCerrados: '', medidaHombro: false, hTerminado: false, hTerminadoVal: '',
+    escote: false, escoteVal: '', sinHombreras: false, picado34: false, sinHombrera: false,
     hombrerasTraseras: false, pocaHombrera: false, forro: 'completo',
+    confF: '', confD: '', confFP: '', confFV: '', confHA: '', confHB: '', confVD: '',
   }
 }
 
 const SITUACION_TRABAJO = [
-  'Pendiente 1ª prueba',
-  'En prueba',
-  'Pendiente entrega',
-  'Entregado',
+  'in_workshop',
+  'pending_first_fitting',
+  'adjustments',
+  'finished',
+  'delivered',
+  'cancelled',
 ]
 
 const PUNO_CAMISA_OPTIONS: Array<{ value: 'sencillo' | 'gemelo' | 'mixto' | 'mosquetero' | 'otro'; label: string }> = [
@@ -280,7 +290,7 @@ export function NuevaVentaFichaClient({
   const [ficha, setFicha] = useState({
     numeroTalon: '',
     cortador: '',
-    situacionTrabajo: 'Pendiente 1ª prueba',
+    situacionTrabajo: 'in_workshop',
     fechaProximaVisita: add15WorkingDays(new Date()),
     observaciones: '',
     domicilio: '',
@@ -729,7 +739,7 @@ export function NuevaVentaFichaClient({
                     <Label className="text-white/60 text-xs">Situación trabajo</Label>
                     <Select value={ficha.situacionTrabajo} onValueChange={(v) => setFichaField('situacionTrabajo', v)}>
                       <SelectTrigger className="mt-1 min-h-[44px] bg-[#0d1629] border-[#c9a96e]/20 text-white"><SelectValue /></SelectTrigger>
-                      <SelectContent className="bg-[#0d1629] border border-white/20 text-white">{SITUACION_TRABAJO.map((s) => <SelectItem key={s} value={s} className="text-white focus:bg-white/10 focus:text-white">{s}</SelectItem>)}</SelectContent>
+                      <SelectContent className="bg-[#0d1629] border border-white/20 text-white">{SITUACION_TRABAJO.map((s) => <SelectItem key={s} value={s} className="text-white focus:bg-white/10 focus:text-white">{getOrderStatusLabel(s)}</SelectItem>)}</SelectContent>
                     </Select>
                   </div>
                   <div>
@@ -826,13 +836,14 @@ export function NuevaVentaFichaClient({
                             </div>
                             <div>
                               <Label className="text-white/60 text-xs">Pliegues</Label>
-                              <div className="flex gap-3 mt-2">
+                              <div className="flex items-center gap-3 mt-2">
                                 {[{ v: 'sin_pliegues', label: 'Sin pliegues' }, { v: '1_pliegue', label: '1 pliegue' }, { v: '2_pliegues', label: '2 pliegues' }].map(({ v, label }) => (
                                   <label key={v} className="flex items-center gap-2 cursor-pointer">
                                     <input type="radio" name={`pliegues-${key}`} checked={cfg.pliegues === v} onChange={() => setField('pliegues', v)} className="text-[#c9a96e]" />
                                     <span className="text-white/80 text-sm">{label}</span>
                                   </label>
                                 ))}
+                                <Input className="h-7 w-16 bg-[#0d1629] border-[#c9a96e]/20 text-white text-sm px-2" value={String(cfg.plieguesVal ?? '')} onChange={(e) => setField('plieguesVal', e.target.value)} placeholder="cm" />
                               </div>
                             </div>
                             <div>
@@ -843,7 +854,7 @@ export function NuevaVentaFichaClient({
                                   { k: 'pRefForro', label: 'Ref. forro' }, { k: 'pRefExtTela', label: 'Ref. ext. tela' },
                                   { k: 'pSinBolTrasero', label: 'Sin bol. trasero' }, { k: 'p1BolTrasero', label: '1 bol. trasero' },
                                   { k: 'p2BolTraseros', label: '2 bol. traseros' }, { k: 'pBolCostura', label: 'Bol. costura' },
-                                  { k: 'pBolFrances', label: 'Bol. francés' }, { k: 'pBolVivo', label: 'Bol. vivo' },
+                                  { k: 'pBolFrances', label: 'Bol. francés' }, { k: 'pBolVivo', label: 'Bol. vivo' }, { k: 'pBolOreja', label: 'Bol. oreja' },
                                   { k: 'pCenidores', label: 'Ceñidores costados' }, { k: 'pBotonesTirantes', label: 'Botones tirantes' },
                                   { k: 'pVEnTrasero', label: 'V en trasero' },
                                 ].map(({ k, label }) => (
@@ -877,6 +888,31 @@ export function NuevaVentaFichaClient({
                                     </div>
                                   )}
                                 </div>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                  <input type="checkbox" checked={!!cfg.pretinaReforzadaDelante} onChange={(e) => setField('pretinaReforzadaDelante', e.target.checked)} className="text-[#c9a96e]" />
+                                  <span className="text-white/80 text-sm">Pretina reforzada por delante</span>
+                                </label>
+                              </div>
+                            </div>
+                            <div>
+                              <Label className="text-white/60 text-xs">Configuración</Label>
+                              <div className="flex flex-wrap gap-3 mt-2">
+                                {[
+                                  { k: 'confFM', label: 'FM' }, { k: 'confFT', label: 'FT' },
+                                  { k: 'confPT', label: 'PT' }, { k: 'confRodalTrasero', label: 'Rodal trasero' },
+                                  { k: 'confBajadaDelantero', label: 'Bajada delantero' },
+                                  { k: 'confAlturaTrasero', label: 'Altura trasero' },
+                                  { k: 'confFVSalida', label: 'FV con salida' },
+                                ].map(({ k, label }) => (
+                                  <div key={k} className="flex items-center gap-1.5">
+                                    <span className="text-white/80 text-sm font-medium">{label}</span>
+                                    <Input className="h-7 w-16 bg-[#0d1629] border-[#c9a96e]/20 text-white text-sm px-2" value={String(cfg[k] ?? '')} onChange={(e) => setField(k, e.target.value)} placeholder="—" />
+                                  </div>
+                                ))}
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                  <input type="checkbox" checked={!!cfg.confFormaGemelo} onChange={(e) => setField('confFormaGemelo', e.target.checked)} className="text-[#c9a96e]" />
+                                  <span className="text-white/80 text-sm">Forma gemelo</span>
+                                </label>
                               </div>
                             </div>
                           </>
@@ -904,6 +940,22 @@ export function NuevaVentaFichaClient({
                                     <input type="radio" name={`chalecoBolsillo-${key}`} checked={cfg.chalecoBolsillo === v} onChange={() => setField('chalecoBolsillo', v)} className="text-[#c9a96e]" />
                                     <span className="text-white/80 text-sm">{label}</span>
                                   </label>
+                                ))}
+                              </div>
+                            </div>
+                            <div>
+                              <Label className="text-white/60 text-xs">Configuración</Label>
+                              <div className="flex flex-wrap gap-3 mt-2">
+                                {[
+                                  { k: 'confF', label: 'F' }, { k: 'confD', label: 'D' },
+                                  { k: 'confFP', label: 'FP' }, { k: 'confFV', label: 'FV' },
+                                  { k: 'confHA', label: 'HA' }, { k: 'confHB', label: 'HB' },
+                                  { k: 'confVD', label: 'VD' },
+                                ].map(({ k, label }) => (
+                                  <div key={k} className="flex items-center gap-1.5">
+                                    <span className="text-white/80 text-sm font-medium">{label}</span>
+                                    <Input className="h-7 w-16 bg-[#0d1629] border-[#c9a96e]/20 text-white text-sm px-2" value={String(cfg[k] ?? '')} onChange={(e) => setField(k, e.target.value)} placeholder="—" />
+                                  </div>
                                 ))}
                               </div>
                             </div>
@@ -1006,8 +1058,7 @@ export function NuevaVentaFichaClient({
                               <Label className="text-white/60 text-xs">Hombros</Label>
                               <div className="flex flex-wrap gap-3 mt-2">
                                 {[
-                                  { k: 'medidaHombro', label: 'Medida hombro' }, { k: 'hTerminado', label: 'H. terminado' },
-                                  { k: 'escote', label: 'Escote' }, { k: 'sinHombreras', label: 'Sin hombreras' },
+                                  { k: 'medidaHombro', label: 'Medida hombro' }, { k: 'sinHombreras', label: 'Sin hombreras' },
                                   { k: 'picado34', label: 'Picado 3/4 todo' }, { k: 'sinHombrera', label: 'Sin hombrera' },
                                   { k: 'hombrerasTraseras', label: 'Hombreras traseras' }, { k: 'pocaHombrera', label: 'Poca hombrera' },
                                 ].map(({ k, label }) => (
@@ -1016,6 +1067,16 @@ export function NuevaVentaFichaClient({
                                     <span className="text-white/80 text-sm">{label}</span>
                                   </label>
                                 ))}
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                  <input type="checkbox" checked={!!cfg.hTerminado} onChange={(e) => setField('hTerminado', e.target.checked)} className="text-[#c9a96e]" />
+                                  <span className="text-white/80 text-sm">H. terminado</span>
+                                  <Input className="h-7 w-16 bg-[#0d1629] border-[#c9a96e]/20 text-white text-sm px-2" value={String(cfg.hTerminadoVal ?? '')} onChange={(e) => setField('hTerminadoVal', e.target.value)} placeholder="cm" />
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                  <input type="checkbox" checked={!!cfg.escote} onChange={(e) => setField('escote', e.target.checked)} className="text-[#c9a96e]" />
+                                  <span className="text-white/80 text-sm">Escote</span>
+                                  <Input className="h-7 w-16 bg-[#0d1629] border-[#c9a96e]/20 text-white text-sm px-2" value={String(cfg.escoteVal ?? '')} onChange={(e) => setField('escoteVal', e.target.value)} placeholder="cm" />
+                                </label>
                               </div>
                             </div>
                             <div>
@@ -1026,6 +1087,22 @@ export function NuevaVentaFichaClient({
                                     <input type="radio" name={`forro-${key}`} checked={cfg.forro === v} onChange={() => setField('forro', v)} className="text-[#c9a96e]" />
                                     <span className="text-white/80 text-sm">{label}</span>
                                   </label>
+                                ))}
+                              </div>
+                            </div>
+                            <div>
+                              <Label className="text-white/60 text-xs">Configuración</Label>
+                              <div className="flex flex-wrap gap-3 mt-2">
+                                {[
+                                  { k: 'confF', label: 'F' }, { k: 'confD', label: 'D' },
+                                  { k: 'confFP', label: 'FP' }, { k: 'confFV', label: 'FV' },
+                                  { k: 'confHA', label: 'HA' }, { k: 'confHB', label: 'HB' },
+                                  { k: 'confVD', label: 'VD' },
+                                ].map(({ k, label }) => (
+                                  <div key={k} className="flex items-center gap-1.5">
+                                    <span className="text-white/80 text-sm font-medium">{label}</span>
+                                    <Input className="h-7 w-16 bg-[#0d1629] border-[#c9a96e]/20 text-white text-sm px-2" value={String(cfg[k] ?? '')} onChange={(e) => setField(k, e.target.value)} placeholder="—" />
+                                  </div>
                                 ))}
                               </div>
                             </div>

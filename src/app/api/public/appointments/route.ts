@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
 export async function GET(request: NextRequest) {
+  try {
   const { searchParams } = new URL(request.url)
   const date = searchParams.get('date')
   const storeId = searchParams.get('store_id')
@@ -33,9 +34,14 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json({ date, store_id: storeId, slots })
+  } catch (err) {
+    console.error('[appointments/GET]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 }
 
 export async function POST(request: NextRequest) {
+  try {
   const body = await request.json()
   const { date, start_time, store_id, client_name, client_email, client_phone, type, notes } = body
 
@@ -111,8 +117,8 @@ export async function POST(request: NextRequest) {
     .select()
     .single()
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error || !appointment) {
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 
   return NextResponse.json({
@@ -120,4 +126,8 @@ export async function POST(request: NextRequest) {
     appointment_id: appointment.id,
     message: 'Cita reservada correctamente',
   })
+  } catch (err) {
+    console.error('[appointments/POST]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 }

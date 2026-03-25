@@ -9,29 +9,41 @@ import { createClient } from '@/lib/supabase/client'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import type { WebCategory } from '@/actions/cms'
 
-type NavItem = {
+type NavChild = {
   label: string
   href: string
   children?: { label: string; href: string }[]
 }
 
+type NavItem = {
+  label: string
+  href: string
+  children?: NavChild[]
+}
+
 function buildNavItems(categories: WebCategory[]): NavItem[] {
-  const tiendaChildren = [
+  const tiendaChildren: NavChild[] = [
     { label: 'Ver todo', href: '/boutique' },
     ...categories.map(c => ({
       label: c.name,
       href: `/boutique?category=${c.slug}`,
+      children: c.children?.length
+        ? c.children.map(sub => ({
+            label: sub.name,
+            href: `/boutique?category=${sub.slug}`,
+          }))
+        : undefined,
     })),
   ]
 
   return [
-    { label: 'Inicio', href: '/' },
     {
       label: 'Nosotros',
       href: '/sobre-nosotros',
       children: [
-        { label: 'Sastrería a Medida', href: '/sastreria' },
-        { label: 'Reservar Cita', href: '/reservar' },
+        { label: 'Historia de Prats', href: '/sobre-nosotros' },
+        { label: 'Servicios', href: '/sastreria' },
+        { label: 'Reservar cita', href: '/reservar' },
       ],
     },
     {
@@ -40,7 +52,7 @@ function buildNavItems(categories: WebCategory[]): NavItem[] {
       children: tiendaChildren,
     },
     { label: 'Contacto', href: '/contacto' },
-    { label: 'Blog', href: '/blog' },
+    { label: 'Prats & Co.', href: '/blog' },
   ]
 }
 
@@ -78,6 +90,50 @@ function AnnouncementBar({ text }: { text?: string }) {
   )
 }
 
+function MenuSubItem({ child, onClose }: { child: NavChild; onClose: () => void }) {
+  const [open, setOpen] = useState(false)
+
+  if (!child.children?.length) {
+    return (
+      <Link
+        href={child.href}
+        onClick={onClose}
+        className="block py-2 text-sm text-gray-600 hover:text-black transition-colors"
+      >
+        {child.label}
+      </Link>
+    )
+  }
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center justify-between w-full py-2 text-sm text-gray-600 hover:text-black transition-colors"
+      >
+        <Link href={child.href} onClick={onClose} className="hover:underline">
+          {child.label}
+        </Link>
+        <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+      </button>
+      <div className={`overflow-hidden transition-all duration-300 ${open ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'}`}>
+        <div className="pl-4 pb-1 space-y-1">
+          {child.children.map(sub => (
+            <Link
+              key={sub.href}
+              href={sub.href}
+              onClick={onClose}
+              className="block py-1.5 text-xs text-gray-500 hover:text-black transition-colors"
+            >
+              {sub.label}
+            </Link>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function MenuNavItem({ item, onClose }: { item: NavItem; onClose: () => void }) {
   const [open, setOpen] = useState(false)
 
@@ -102,22 +158,17 @@ function MenuNavItem({ item, onClose }: { item: NavItem; onClose: () => void }) 
         <Link href={item.href} onClick={onClose} className="hover:underline">
           {item.label}
         </Link>
-        <ChevronDown className={`h-4 w-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
       </button>
-      {open && (
+      <div
+        className={`overflow-hidden transition-all duration-300 ${open ? 'max-h-[800px] opacity-100' : 'max-h-0 opacity-0'}`}
+      >
         <div className="pl-4 pb-3 space-y-1">
           {item.children.map(child => (
-            <Link
-              key={child.href}
-              href={child.href}
-              onClick={onClose}
-              className="block py-2 text-sm text-gray-600 hover:text-black transition-colors"
-            >
-              {child.label}
-            </Link>
+            <MenuSubItem key={child.href} child={child} onClose={onClose} />
           ))}
         </div>
-      )}
+      </div>
     </div>
   )
 }
@@ -179,6 +230,13 @@ export function WebHeader({ announcementText, categories = [] }: { announcementT
 
             {/* Iconos derecha */}
             <div className="flex items-center gap-4">
+              <Link
+                href="/reservar"
+                className="hidden sm:inline-block text-[11px] font-medium tracking-[0.15em] uppercase text-prats-navy border border-prats-navy px-4 py-1.5 hover:bg-prats-navy hover:text-white transition-colors"
+              >
+                Reservar cita
+              </Link>
+
               <Link href="/boutique" aria-label="Buscar" className="text-gray-600 hover:text-black transition-colors">
                 <Search className="h-5 w-5" />
               </Link>
@@ -204,23 +262,24 @@ export function WebHeader({ announcementText, categories = [] }: { announcementT
                     <span className="text-sm font-bold tracking-wider uppercase">MENÚ</span>
                   </div>
 
-                  {/* Navegación con submenús */}
-                  <nav className="flex-1 overflow-y-auto px-5 py-4">
+                  {/* Navegación — key={String(isOpen)} resetea acordeones al reabrir */}
+                  <nav key={String(isOpen)} className="flex-1 overflow-y-auto px-5 py-4">
                     {navItems.map(item => (
                       <MenuNavItem key={item.label} item={item} onClose={() => setIsOpen(false)} />
                     ))}
-                  </nav>
 
-                  {/* Iniciar sesión / Mi cuenta */}
-                  <div className="px-5 py-5 border-t border-gray-100">
+                    {/* Espacio separador */}
+                    <div className="h-6" />
+
+                    {/* Entrar / Mi cuenta — link simple */}
                     <Link
                       href={isLoggedIn ? '/mi-cuenta' : '/auth/login?mode=client'}
                       onClick={() => setIsOpen(false)}
-                      className="block w-full text-center py-2.5 bg-black text-white text-sm font-medium tracking-wide hover:bg-gray-800 transition-colors"
+                      className="block py-3 text-base text-gray-800 hover:text-black transition-colors border-b border-gray-100"
                     >
-                      {isLoggedIn ? 'Mi cuenta' : 'Iniciar sesión'}
+                      {isLoggedIn ? 'Mi cuenta' : 'Entrar'}
                     </Link>
-                  </div>
+                  </nav>
 
                   {/* Selector moneda */}
                   <div className="px-5 py-3 border-t border-gray-100">
@@ -229,19 +288,22 @@ export function WebHeader({ announcementText, categories = [] }: { announcementT
 
                   {/* Redes sociales */}
                   <div className="px-5 py-4 border-t border-gray-100 flex items-center gap-4">
-                    <a href="https://facebook.com/sastreriaprats" target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black">
-                      <Facebook className="h-5 w-5" />
-                    </a>
-                    <a href="https://instagram.com/sastreriaprats" target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black">
+                    <a href="https://instagram.com/sastreriaprats" target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="Instagram">
                       <Instagram className="h-5 w-5" />
                     </a>
-                    <a href="https://tiktok.com/@sastreriaprats" target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black">
+                    <a href="https://www.facebook.com/sastreriafprats/?locale=es_ES" target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="Facebook">
+                      <Facebook className="h-5 w-5" />
+                    </a>
+                    <a href="https://tiktok.com/@sastreriaprats" target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="TikTok">
                       <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 00-.79-.05A6.34 6.34 0 003.15 15.2a6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V8.71a8.19 8.19 0 004.76 1.52V6.79a4.85 4.85 0 01-1-.1z"/></svg>
                     </a>
-                    <a href="https://linkedin.com/company/sastreriaprats" target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black">
+                    <a href="https://www.linkedin.com/company/sastreria-prats/?viewAsMember=true" target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="LinkedIn">
                       <Linkedin className="h-5 w-5" />
                     </a>
-                    <a href="mailto:info@sastreriaprats.com" className="text-gray-800 hover:text-black">
+                    <a href="https://www.youtube.com/@Sastrer%C3%ADaPrats" target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="YouTube">
+                      <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.546 12 3.546 12 3.546s-7.505 0-9.377.504A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.122 2.136c1.871.504 9.376.504 9.376.504s7.505 0 9.377-.504a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                    </a>
+                    <a href="mailto:info@sastreriaprats.com" className="text-gray-800 hover:text-black" aria-label="Email">
                       <Mail className="h-5 w-5" />
                     </a>
                   </div>

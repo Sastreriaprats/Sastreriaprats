@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { getOrder } from '@/actions/orders'
 import { generateFichaForLine, generateFichaForLineCamiseria } from '@/lib/pdf/ficha-confeccion'
 import { generateTicketBoutiquePDF } from '@/lib/pdf/ticket-boutique'
+import { generateTailoringOrderTicketPdf } from '@/lib/pdf/tailoring-order-ticket'
 
 function getClientName(order: any): string {
   const c = order?.clients
@@ -106,6 +107,16 @@ export function NuevaVentaConfirmacionClient({ orderId }: { orderId: string }) {
     }
   }
 
+  const handlePrintTicketGlobal = async () => {
+    if (!order) return
+    setPdfLoading('ticket-global')
+    try {
+      await generateTailoringOrderTicketPdf(order)
+    } finally {
+      setPdfLoading(null)
+    }
+  }
+
   if (!orderId) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-6">
@@ -189,6 +200,15 @@ export function NuevaVentaConfirmacionClient({ orderId }: { orderId: string }) {
               {pdfLoading === 'ticket' ? 'Generando...' : 'Imprimir ticket boutique'}
             </Button>
           )}
+          <Button
+            type="button"
+            className="bg-[#c9a96e] text-[#0a0f1e] hover:bg-[#b8935a] font-semibold px-6 py-3 rounded-lg w-full gap-2 min-h-[48px] justify-center"
+            onClick={handlePrintTicketGlobal}
+            disabled={!!pdfLoading}
+          >
+            <Printer className="h-5 w-5" />
+            {pdfLoading === 'ticket-global' ? 'Generando...' : 'Imprimir ticket del pedido'}
+          </Button>
           <Button
             type="button"
             className="bg-[#1a2744] text-white border border-[#2a3a5c] hover:bg-[#243255] px-6 py-3 rounded-lg w-full gap-2 min-h-[48px] justify-center"

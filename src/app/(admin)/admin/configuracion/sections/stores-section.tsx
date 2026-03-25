@@ -25,11 +25,13 @@ export function StoresSection() {
   const supabase = useMemo(() => createClient(), [])
   const { data: storesData, refetch: refetchStores } = useStores()
   const stores = storesData ?? []
-  const [warehouses, setWarehouses] = useState<any[]>([])
+  interface WarehouseRow { id: string; code: string; name: string; is_main: boolean; accepts_online_stock: boolean; stores?: { name: string } | null }
+  interface StoreRow { id: string; code: string; name: string; display_name?: string | null; store_type: string; address?: string | null; city?: string | null; postal_code?: string | null; province?: string | null; country?: string | null; phone?: string | null; email?: string | null; default_cash_fund?: number | null; order_prefix?: string | null; slug?: string | null; opening_hours?: Record<string, unknown> | null; fiscal_name?: string | null; fiscal_nif?: string | null; fiscal_address?: string | null; latitude?: number | null; longitude?: number | null; google_maps_url?: string | null }
+  const [warehouses, setWarehouses] = useState<WarehouseRow[]>([])
   const [warehousesLoading, setWarehousesLoading] = useState(true)
   const [showStoreDialog, setShowStoreDialog] = useState(false)
   const [showWarehouseDialog, setShowWarehouseDialog] = useState(false)
-  const [editingStore, setEditingStore] = useState<any>(null)
+  const [editingStore, setEditingStore] = useState<StoreRow | null>(null)
   const [isSaving, setIsSaving] = useState(false)
 
   const [storeForm, setStoreForm] = useState({
@@ -55,7 +57,7 @@ export function StoresSection() {
     setWarehousesLoading(true)
     try {
       const { data } = await supabase.from('warehouses').select('*, stores(name)').order('name')
-      if (data) setWarehouses(data)
+      if (data) setWarehouses(data as WarehouseRow[])
     } catch (err) {
       console.error('[StoresSection] fetchWarehouses error:', err)
       toast.error('Error al cargar almacenes')
@@ -98,7 +100,7 @@ export function StoresSection() {
     setIsSaving(false)
   }
 
-  const editStore = (store: any) => {
+  const editStore = (store: StoreRow) => {
     setEditingStore(store)
     setStoreForm({
       code: store.code, name: store.name, display_name: store.display_name || '',
@@ -107,7 +109,7 @@ export function StoresSection() {
       phone: store.phone || '', email: store.email || '',
       default_cash_fund: store.default_cash_fund?.toString() || '300',
       order_prefix: store.order_prefix || '', slug: store.slug || '',
-      opening_hours: store.opening_hours || {},
+      opening_hours: (store.opening_hours || {}) as Record<string, { open: string; close: string }>,
       fiscal_name: store.fiscal_name || '', fiscal_nif: store.fiscal_nif || '', fiscal_address: store.fiscal_address || '',
       latitude: store.latitude?.toString() || '', longitude: store.longitude?.toString() || '',
       google_maps_url: store.google_maps_url || '',
@@ -182,7 +184,7 @@ export function StoresSection() {
           <Button onClick={() => setShowWarehouseDialog(true)} size="sm" variant="outline" className="gap-2"><Plus className="h-4 w-4" /> Nuevo almacén</Button>
         </div>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {warehouses.map((w: any) => (
+          {warehouses.map((w) => (
             <Card key={w.id}>
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm"><Warehouse className="h-4 w-4" />{w.name}</CardTitle>
@@ -286,11 +288,13 @@ export function StoresSection() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowWarehouseDialog(false)}>Cancelar</Button>
             <Button onClick={async () => {
+              setIsSaving(true)
               const res = await createWarehouseAction(warehouseForm)
               if (res.error) toast.error(res.error)
               else { toast.success('Almacén creado'); setShowWarehouseDialog(false); fetchWarehouses() }
-            }} disabled={!warehouseForm.code || !warehouseForm.name} className="bg-prats-navy hover:bg-prats-navy-light">
-              Crear almacén
+              setIsSaving(false)
+            }} disabled={isSaving || !warehouseForm.code || !warehouseForm.name} className="bg-prats-navy hover:bg-prats-navy-light">
+              {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Crear almacén
             </Button>
           </DialogFooter>
         </DialogContent>

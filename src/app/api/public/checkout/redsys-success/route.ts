@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
 export async function GET(request: NextRequest) {
+  try {
   const token = request.nextUrl.searchParams.get('token')
   if (!token) {
     return NextResponse.redirect(new URL('/carrito', request.url))
@@ -64,4 +65,8 @@ export async function GET(request: NextRequest) {
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin
   return NextResponse.redirect(`${baseUrl}/checkout/confirmacion?order=${encodeURIComponent(orderNumber)}`)
+  } catch (err) {
+    console.error('[redsys-success]', err)
+    return NextResponse.redirect(new URL('/carrito', request.url))
+  }
 }

@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 import { logAudit } from '@/lib/audit'
 import { checkUserPermission } from '@/actions/auth'
 import { serializeForServerAction } from '@/lib/server/serialize'
+import crypto from 'crypto'
 
 export interface UserRow {
   id: string
@@ -113,7 +114,7 @@ export async function createAdminUser(input: CreateUserInput): Promise<{ data?: 
     const hasPerm = await checkUserPermission(currentUser.id, 'config.users')
     if (!hasPerm) return { error: 'Sin permisos' }
 
-  const rand = Math.floor(1000 + Math.random() * 9000)
+  const rand = crypto.randomInt(1000, 10000)
   const tempPassword = `Prats2026!${rand}`
 
   const { data: authUser, error: authErr } = await admin.auth.admin.createUser({
@@ -218,7 +219,7 @@ export async function updateAdminUser(input: UpdateUserInput): Promise<{ data?: 
 
   let tempPassword: string | undefined
   if (input.resetPassword) {
-    const rand = Math.floor(1000 + Math.random() * 9000)
+    const rand = crypto.randomInt(1000, 10000)
     tempPassword = `Prats2026!${rand}`
     await admin.auth.admin.updateUserById(input.userId, { password: tempPassword })
     changes.password = { old: '***', new: '(reseteado)' }

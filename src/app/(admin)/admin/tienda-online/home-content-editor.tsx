@@ -18,8 +18,8 @@ import { toast } from 'sonner'
 
 const SECTION_CONFIG: Record<string, { label: string; description: string; hidden?: boolean }> = {
   hero: {
-    label: 'Imagen principal (Hero)',
-    description: 'Imagen a pantalla completa en blanco y negro. El título y subtítulo solo se usan para SEO (no visibles).',
+    label: 'Hero (Imagen / Vídeo)',
+    description: 'Imagen o vídeo a pantalla completa en blanco y negro. Si hay vídeo, se reproduce en bucle. El título y subtítulo solo se usan para SEO.',
   },
   editorial_strip: {
     label: 'Barra de anuncios',
@@ -27,7 +27,7 @@ const SECTION_CONFIG: Record<string, { label: string; description: string; hidde
   },
   categories: {
     label: 'Espacios (2 columnas)',
-    description: 'Las dos tarjetas grandes debajo del hero: "ESPACIO EL VISO" y "ESPACIO WELLINGTON".',
+    description: 'Las dos tarjetas grandes debajo del hero: "HERMANOS PINZÓN" y "WELLINGTON".',
   },
   editorial_double: {
     label: 'Sastrería Artesanal',
@@ -255,18 +255,59 @@ function HeroForm({
   const [subtitle_es, setSubtitleEs] = useState(section.subtitle_es ?? '')
   const s = section.settings || {}
   const [image_url, setImageUrl] = useState(s.image_url ?? '')
+  const [video_url, setVideoUrl] = useState(s.video_url ?? '')
+  const [uploadingVideo, setUploadingVideo] = useState(false)
+  const videoInputRef = useRef<HTMLInputElement>(null)
+
+  const handleVideoFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingVideo(true)
+    const url = await onUpload(file)
+    setUploadingVideo(false)
+    if (url) setVideoUrl(url)
+    e.target.value = ''
+  }
 
   const handleSave = () => {
     onSave({
       title_es,
       subtitle_es,
-      settings: { ...s, image_url },
+      settings: { ...s, image_url, video_url },
     })
   }
 
   return (
     <div className="space-y-4">
-      <ImageField value={image_url} onChange={setImageUrl} onUpload={onUpload} label="Imagen de fondo (se muestra en B/N)" />
+      <ImageField value={image_url} onChange={setImageUrl} onUpload={onUpload} label="Imagen de fondo (se usa si no hay vídeo, y como poster del vídeo)" />
+      <div className="space-y-1">
+        <Label>Vídeo de fondo (opcional, tiene prioridad sobre la imagen)</Label>
+        <div className="flex gap-2">
+          <Input
+            value={video_url}
+            onChange={(e) => setVideoUrl(e.target.value)}
+            placeholder="URL del vídeo (.mp4, .webm)"
+            className="flex-1"
+          />
+          <input
+            ref={videoInputRef}
+            type="file"
+            accept="video/*"
+            className="hidden"
+            onChange={handleVideoFile}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={saving || uploadingVideo}
+            onClick={() => videoInputRef.current?.click()}
+          >
+            {uploadingVideo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">Si hay vídeo, se mostrará en bucle sin sonido. La imagen se usa como fallback y poster.</p>
+      </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1">
           <Label>Título (solo SEO, no visible)</Label>
@@ -351,7 +392,7 @@ function CategoriesForm({
           <div className="space-y-1">
             <Label>Nombre del espacio</Label>
             <Input
-              placeholder="Ej: EL VISO"
+              placeholder="Ej: HERMANOS PINZÓN"
               value={b.title_es ?? ''}
               onChange={(e) => updateBlock(i, 'title_es', e.target.value)}
             />

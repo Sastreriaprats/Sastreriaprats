@@ -6,6 +6,7 @@ import { ConsentProvider } from '@/components/providers/consent-provider'
 import { CookieBanner } from '@/components/legal/cookie-banner'
 import { GoogleAnalytics } from '@/components/analytics/google-analytics'
 import { OrganizationSchema, WebSiteSchema } from '@/components/seo/schema-org'
+import { NewsletterPopup } from '@/components/web/newsletter-popup'
 import { getHomeContent, getWebCategories } from '@/actions/cms'
 
 export default async function WebLayout({
@@ -31,6 +32,7 @@ export default async function WebLayout({
             {children}
           </main>
           <WebFooter />
+          <NewsletterPopup />
           <CookieBanner />
         </div>
       </CartProvider>

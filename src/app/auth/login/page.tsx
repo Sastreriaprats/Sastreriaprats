@@ -54,13 +54,6 @@ export default async function LoginPage({
               <ArrowLeft className="h-4 w-4" />
               Volver a la web
             </Link>
-            <Image
-              src="/images/logo-prats-hd.webp"
-              alt="Sastrería Prats"
-              width={180}
-              height={180}
-              className="mb-3 object-contain"
-            />
             <p className="text-sm text-muted-foreground">
               {params.mode === 'pos'
                 ? 'Acceso al Terminal Punto de Venta'
@@ -123,7 +116,7 @@ export default async function LoginPage({
           style={{ filter: 'invert(1)', mixBlendMode: 'screen' }}
         />
         <p className="mt-6 text-sm tracking-[0.3em] text-white/50">
-          SASTRERÍA DE LUJO · MADRID
+          SASTRERÍA A MEDIDA · MADRID
         </p>
       </div>
     </div>

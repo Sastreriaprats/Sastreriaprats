@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   ArrowLeft, Phone, Mail,
-  Ruler, StickyNote, Scissors, Shirt, ShoppingBag, History, Pencil, CalendarDays, Receipt,
+  Ruler, StickyNote, Scissors, Shirt, ShoppingBag, History, Pencil, CalendarDays, Receipt, Building2,
 } from 'lucide-react'
 import { usePermissions } from '@/hooks/use-permissions'
 import { getInitials, formatCurrency, formatDate } from '@/lib/utils'
@@ -21,6 +21,7 @@ import { ClientSalesTab } from './tabs/client-sales-tab'
 import { ClientTicketsTab } from './tabs/client-tickets-tab'
 import { ClientAlterationsTab } from './tabs/client-alterations-tab'
 import { ClientAppointmentsTab } from './tabs/client-appointments-tab'
+import { ClientCompaniesTab } from './tabs/client-companies-tab'
 
 const categoryColors: Record<string, string> = {
   standard: 'bg-gray-100 text-gray-700',
@@ -144,6 +145,7 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
         <TabsList>
           <TabsTrigger value="resumen" className="gap-1"><History className="h-4 w-4" /> Resumen</TabsTrigger>
           <TabsTrigger value="datos" className="gap-1"><Pencil className="h-4 w-4" /> Datos</TabsTrigger>
+          <TabsTrigger value="empresa" className="gap-1"><Building2 className="h-4 w-4" /> Empresa</TabsTrigger>
           {can('clients.view') && (
             <>
               <TabsTrigger value="medidas" className="gap-1"><Ruler className="h-4 w-4" /> Medidas</TabsTrigger>
@@ -182,6 +184,9 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
           </TabsContent>
           <TabsContent value="tickets">
             <ClientTicketsTab clientId={client.id} />
+          </TabsContent>
+          <TabsContent value="empresa">
+            <ClientCompaniesTab clientId={client.id} />
           </TabsContent>
           <TabsContent value="arreglos">
             <ClientAlterationsTab clientId={client.id} />

@@ -8,6 +8,7 @@ import { z } from 'zod'
 import type { UserWithRoles } from '@/lib/types/auth'
 import { sendWelcomeEmail } from '@/lib/email/transactional'
 import { cookies } from 'next/headers'
+import bcrypt from 'bcryptjs'
 
 // ==========================================
 // HELPER: consulta directa de permiso (sin RPC)
@@ -406,7 +407,48 @@ export async function pinLoginAction(formData: FormData) {
     return { error: parsed.error.issues[0]?.message ?? 'Datos inválidos' }
   }
 
-  return { error: 'Acceso por PIN no disponible. Use email y contraseña.' }
+  const { pin, storeId } = parsed.data
+  const admin = createAdminClient()
+
+  // Buscar perfiles con PIN configurado
+  const { data: profiles } = await admin
+    .from('profiles')
+    .select('id, pin_hash, full_name')
+    .not('pin_hash', 'is', null)
+    .eq('is_active', true)
+
+  if (!profiles || profiles.length === 0) {
+    return { error: 'PIN incorrecto' }
+  }
+
+  // Verificar PIN contra cada perfil (con migración lazy)
+  for (const profile of profiles) {
+    if (!profile.pin_hash) continue
+    const match = await verifyPin(pin, profile.pin_hash, profile.id)
+    if (match) {
+      // Guardar sesión TPV en cookie
+      const cookieStore = await cookies()
+      cookieStore.set('pos_user_id', profile.id, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 12, // 12 horas
+        path: '/',
+      })
+      if (storeId) {
+        cookieStore.set('pos_store_id', storeId, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'lax',
+          maxAge: 60 * 60 * 12,
+          path: '/',
+        })
+      }
+      return { success: true, userName: profile.full_name }
+    }
+  }
+
+  return { error: 'PIN incorrecto' }
 }
 
 // ==========================================
@@ -584,16 +626,39 @@ export async function toggleUserActiveAction(userId: string, isActive: boolean) 
 }
 
 // ==========================================
-// HELPER: Hash PIN (simple; en producción usar bcrypt)
+// HELPER: Hash PIN con bcrypt
 // ==========================================
 
 async function hashPin(pin: string): Promise<string> {
+  return bcrypt.hash(pin, 10)
+}
+
+/** Legacy SHA-256 hash — solo para verificación de migración */
+async function hashPinLegacy(pin: string): Promise<string> {
   const salt = process.env.SUPABASE_SERVICE_ROLE_KEY?.slice(0, 16) ?? 'prats-pin-salt'
   const encoder = new TextEncoder()
   const data = encoder.encode(pin + salt)
   const hashBuffer = await crypto.subtle.digest('SHA-256', data)
   const hashArray = Array.from(new Uint8Array(hashBuffer))
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/** Verifica PIN con bcrypt primero, fallback SHA-256 con migración lazy */
+async function verifyPin(pin: string, storedHash: string, profileId: string): Promise<boolean> {
+  // 1. Intentar bcrypt
+  const bcryptMatch = await bcrypt.compare(pin, storedHash).catch(() => false)
+  if (bcryptMatch) return true
+
+  // 2. Fallback: verificar con SHA-256 legacy
+  const legacyHash = await hashPinLegacy(pin)
+  if (legacyHash !== storedHash) return false
+
+  // 3. SHA-256 correcto → migrar a bcrypt automáticamente
+  const newHash = await hashPin(pin)
+  const admin = createAdminClient()
+  await admin.from('profiles').update({ pin_hash: newHash }).eq('id', profileId)
+
+  return true
 }
 
 // ==========================================

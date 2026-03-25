@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 
 export async function PUT(request: NextRequest) {
+  try {
   const supabase = await createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -52,6 +53,10 @@ export async function PUT(request: NextRequest) {
     shipping_country: shipping_country ?? null,
   }).eq('id', client_id)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   return NextResponse.json({ success: true })
+  } catch (err) {
+    console.error('[update-client]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 }

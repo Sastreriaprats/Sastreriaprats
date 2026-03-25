@@ -9,7 +9,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   LayoutDashboard, Users, Scissors, Truck, UserCheck,
   CreditCard, BookOpen, Calendar, Settings, Shirt, Database,
-  Store, ShoppingBag, BarChart3, Mail, ScrollText, CircleDollarSign, Receipt, ClipboardList,
+  Store, ShoppingBag, BarChart3, Mail, ScrollText, CircleDollarSign, Receipt, ClipboardList, Tag,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState, useEffect, useRef } from 'react'
@@ -79,6 +79,7 @@ const navItems: NavItem[] = [
       { label: 'CMS / Contenido',  href: '/admin/cms',                       permission: 'cms.view' },
     ],
   },
+  { label: 'Descuentos',   href: '/admin/descuentos',   icon: Tag,          permission: 'shop.view' },
   { label: 'Emails',       href: '/admin/emails',       icon: Mail,         permission: 'emails.view' },
   {
     label: 'Configuración', href: '/admin/configuracion', icon: Settings,   permission: 'config.view',

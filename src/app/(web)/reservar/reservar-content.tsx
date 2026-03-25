@@ -11,8 +11,8 @@ import { cn } from '@/lib/utils'
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const TIENDAS = [
-  { value: 'el-viso',    label: 'El Viso',    address: 'C/ de la Piedra Fina, El Viso, Madrid' },
-  { value: 'wellington', label: 'Wellington', address: 'C/ Wellington, 4, Madrid' },
+  { value: 'hermanos-pinzon', label: 'Hermanos Pinzón', address: 'Calle Hermanos Pinzón, 4 - 28036 Madrid' },
+  { value: 'wellington',      label: 'Wellington',      address: 'Calle Velázquez, 8 - 28001 Madrid' },
 ]
 
 const SLOTS_WEEKDAY = ['10:00', '11:00', '12:00', '16:00', '17:00', '18:00', '19:00']

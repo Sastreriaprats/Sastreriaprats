@@ -4,6 +4,7 @@
  */
 
 import type { Content } from 'pdfmake'
+import { getOrderStatusLabel } from '@/lib/utils'
 
 /** Tipo del documento para pdfmake (no exportado por @types/pdfmake). */
 interface PdfDocDefinition {
@@ -123,7 +124,7 @@ function getMedidasStr(
     }
   }
   const allDash = parts.every((p) => p.endsWith(': —'))
-  return allDash ? '—' : parts.join(' / ')
+  return allDash ? '—' : parts.join(' - ')
 }
 
 const LABELS_BOTONES: Record<string, string> = {
@@ -210,59 +211,74 @@ function labelPliegues(v: unknown): string {
   return LABELS_PLIEGUES[String(v).trim()] ?? String(v)
 }
 
-function buildDescripcionFromConfig(config: Record<string, unknown>): string {
+function buildDescripcionAndConfig(config: Record<string, unknown>): { descripcion: string; configuracion: string } {
   const partes: string[] = []
+  const confParts: string[] = []
   const slug = String(config.prendaSlug ?? config.prenda ?? '').toLowerCase()
   const isPantalon = slug === 'pantalon'
   const isChaleco = slug === 'chaleco'
   const isAmericana = !isPantalon && !isChaleco
 
   if (isAmericana) {
-    if (config.botones) partes.push(`Botones: ${labelBotones(config.botones)}`)
-    if (config.aberturas) partes.push(`Aberturas: ${labelAberturas(config.aberturas)}`)
+    if (config.botones) partes.push(labelBotones(config.botones))
+    if (config.aberturas) partes.push(labelAberturas(config.aberturas))
 
     const bols: string[] = []
     if (config.bolsilloTipo) bols.push(labelBolsillo(config.bolsilloTipo))
     if (config.cerrilleraExterior) bols.push('cerillera exterior')
-    if (bols.length) partes.push(`Bolsillos: ${bols.join(', ')}`)
+    if (bols.length) partes.push(bols.join(', '))
 
     if (config.primerBoton) partes.push(`1er botón a ${config.primerBoton} cm`)
 
     if (config.solapa) {
       let sol = labelSolapa(config.solapa)
       if (config.anchoSolapa) sol += ` ${config.anchoSolapa} cm`
-      partes.push(`Solapa: ${sol}`)
+      partes.push(sol)
     }
 
-    if (config.manga) partes.push(`Manga: ${labelManga(config.manga)}`)
+    if (config.manga) partes.push(labelManga(config.manga))
     if (config.ojalesAbiertos) partes.push(`Ojales abiertos: ${config.ojalesAbiertos}`)
     if (config.ojalesCerrados) partes.push(`Ojales cerrados: ${config.ojalesCerrados}`)
 
     const hombros: string[] = []
     if (config.medidaHombro) hombros.push('medida hombro')
-    if (config.hTerminado) hombros.push('H. terminado')
-    if (config.escote) hombros.push('escote')
+    if (config.hTerminado) hombros.push(config.hTerminadoVal ? `H. terminado: ${config.hTerminadoVal}` : 'H. terminado')
+    if (config.escote) hombros.push(config.escoteVal ? `escote: ${config.escoteVal}` : 'escote')
     if (config.sinHombreras) hombros.push('sin hombreras')
     if (config.picado34) hombros.push('picado 3/4')
     if (config.sinHombrera) hombros.push('sin hombrera')
     if (config.hombrerasTraseras) hombros.push('hombreras traseras')
     if (config.pocaHombrera) hombros.push('poca hombrera')
-    if (hombros.length) partes.push(`Hombros: ${hombros.join(', ')}`)
+    if (hombros.length) partes.push(hombros.join(', '))
 
     if (config.forro) {
       let f = labelForro(config.forro)
       if (config.forroDesc) f += ` (${config.forroDesc})`
-      partes.push(`Forro: ${f}`)
+      partes.push(f)
     }
+
+    // Configuración → separate field
+    if (config.confF) confParts.push(`F ${config.confF}`)
+    if (config.confD) confParts.push(`D ${config.confD}`)
+    if (config.confFP) confParts.push(`FP ${config.confFP}`)
+    if (config.confFV) confParts.push(`FV ${config.confFV}`)
+    if (config.confHA) confParts.push(`HA ${config.confHA}`)
+    if (config.confHB) confParts.push(`HB ${config.confHB}`)
+    if (config.confVD) confParts.push(`VD ${config.confVD}`)
   }
 
   if (isPantalon) {
-    if (config.vueltas) partes.push(`Vueltas: ${labelVueltas(config.vueltas)}`)
-    if (config.bragueta) partes.push(`Bragueta: ${labelBragueta(config.bragueta)}`)
-    if (config.pliegues) partes.push(`Pliegues: ${labelPliegues(config.pliegues)}`)
+    if (config.vueltas) partes.push(labelVueltas(config.vueltas))
+    if (config.bragueta) partes.push(labelBragueta(config.bragueta))
+    if (config.pliegues) {
+      let pl = labelPliegues(config.pliegues)
+      if (config.plieguesVal) pl += ` (${config.plieguesVal})`
+      partes.push(pl)
+    }
     if (config.pVEnTrasero) partes.push('V en trasero')
     if (config.pretina2Botones) partes.push('Pretina 2 botones')
     if (config.pretinaCorrida) partes.push('Pretina corrida')
+    if (config.pretinaReforzadaDelante) partes.push('Pretina reforzada por delante')
     const bolsP: string[] = []
     if (config.p7pasadores) bolsP.push('7 pasadores')
     if (config.p5bolsillos) bolsP.push('5 bolsillos')
@@ -274,20 +290,45 @@ function buildDescripcionFromConfig(config: Record<string, unknown>): string {
     if (config.pBolCostura) bolsP.push('Bol. costura')
     if (config.pBolFrances) bolsP.push('Bol. francés')
     if (config.pBolVivo) bolsP.push('Bol. vivo')
+    if (config.pBolOreja) bolsP.push('Bol. oreja')
     if (config.pCenidores) bolsP.push('Ceñidores costados')
     if (config.pBotonesTirantes) bolsP.push('Botones tirantes')
-    if (bolsP.length) partes.push(`Bolsillos: ${bolsP.join(', ')}`)
+    if (bolsP.length) partes.push(bolsP.join(', '))
+
+    // Configuración → separate field
+    if (config.confFM) confParts.push(`FM ${config.confFM}`)
+    if (config.confFT) confParts.push(`FT ${config.confFT}`)
+    if (config.confPT) confParts.push(`PT ${config.confPT}`)
+    if (config.confRodalTrasero) confParts.push(`Rodal trasero ${config.confRodalTrasero}`)
+    if (config.confBajadaDelantero) confParts.push(`Bajada delantero ${config.confBajadaDelantero}`)
+    if (config.confAlturaTrasero) confParts.push(`Altura trasero ${config.confAlturaTrasero}`)
+    if (config.confFormaGemelo) confParts.push('Forma gemelo')
+    if (config.confFVSalida) confParts.push(`FV con salida ${config.confFVSalida}`)
   }
 
   if (isChaleco) {
-    if (config.chalecoCorte) partes.push(`Corte: ${config.chalecoCorte}`)
-    if (config.chalecoBolsillo) partes.push(`Bolsillo: ${config.chalecoBolsillo}`)
+    if (config.chalecoCorte) partes.push(config.chalecoCorte as string)
+    if (config.chalecoBolsillo) partes.push(config.chalecoBolsillo as string)
+
+    // Configuración → separate field
+    if (config.confF) confParts.push(`F ${config.confF}`)
+    if (config.confD) confParts.push(`D ${config.confD}`)
+    if (config.confFP) confParts.push(`FP ${config.confFP}`)
+    if (config.confFV) confParts.push(`FV ${config.confFV}`)
+    if (config.confHA) confParts.push(`HA ${config.confHA}`)
+    if (config.confHB) confParts.push(`HB ${config.confHB}`)
+    if (config.confVD) confParts.push(`VD ${config.confVD}`)
   }
 
-  const obs = config.observaciones?.toString().trim()
-  if (obs) partes.push(obs)
+  // Build configuracion: first the conf values, then the free text (caracteristicasPrenda)
+  const caracText = String(config.caracteristicasPrenda ?? '').trim()
+  const confLine = confParts.join(', ')
+  const configuracion = [confLine, caracText].filter(Boolean).join('\n') || '—'
 
-  return partes.join(' // ') || '—'
+  return {
+    descripcion: partes.join(' // ') || '—',
+    configuracion,
+  }
 }
 
 function getFichaFromOrder(order: FichaConfeccionOrder): Record<string, unknown> {
@@ -325,7 +366,7 @@ function getFichaFromOrder(order: FichaConfeccionOrder): Record<string, unknown>
     fechaCompromiso: order.estimated_delivery_date ?? config.fechaCompromiso ?? '',
     fechaCobro: config.fechaCobro ?? '',
     fechaProximaVisita: config.fechaProximaVisita ?? config.fechaCompromiso ?? '',
-    descripcion: buildDescripcionFromConfig(config),
+    ...buildDescripcionAndConfig(config),
     observaciones: config.observaciones ?? '',
     caracteristicas: caracteristicasStr,
     caracteristicasPrenda: String(config.caracteristicasPrenda ?? '').trim(),
@@ -423,9 +464,10 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
     ficha.oficial !== undefined && ficha.oficial !== null && String(ficha.oficial).trim() !== ''
       ? String(ficha.oficial).trim()
       : ''
-  const caracteristicasStr = String(ficha.caracteristicasPrenda ?? ficha.caracteristicas ?? '—').trim() || '—'
+  const caracteristicasStr = String(ficha.caracteristicas ?? '—').trim() || '—'
   const medidasStr = String(ficha.medidas ?? '—').trim() || '—'
   const descripcionStr = String(ficha.descripcion ?? ficha.observaciones ?? '').trim() || '—'
+  const configuracionStr = String(ficha.configuracion ?? '—').trim() || '—'
   const domicilioStr = String(ficha.domicilio ?? client?.address ?? '—').trim()
   const localidadStr = String(ficha.localidad ?? client?.city ?? '—').trim()
   const cpStr = String(ficha.cp ?? client?.postal_code ?? '—').trim()
@@ -484,7 +526,7 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
       body: [
         [
           cellStack('Tipo trabajo:', prendaLabel || '—'),
-          cellStack('Situación trabajo:', String(ficha.situacionTrabajo ?? '—')),
+          cellStack('Situación trabajo:', getOrderStatusLabel(String(ficha.situacionTrabajo ?? '—'))),
           cellStack('Fecha próxima visita:', formatDate(ficha.fechaProximaVisita ?? ficha.fechaCompromiso)),
         ],
       ],
@@ -515,6 +557,15 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
     table: {
       widths: ['25%', '75%'],
       body: [[cellLabel('Descripción:'), cellValue(descripcionStr)]],
+    },
+    layout: tableLayoutBordersPadded,
+  })
+
+  // Configuración
+  content.push({
+    table: {
+      widths: ['25%', '75%'],
+      body: [[cellLabel('Configuración:'), cellValue(configuracionStr)]],
     },
     layout: tableLayoutBordersPadded,
   })
@@ -572,98 +623,104 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
     fontSize: 9,
   })
 
-  // ─── PARTE INFERIOR: TALÓN OFICIAL (2 columnas: 68% | 32%) ──────────────
-  content.push({
-    columns: [
-      {
-        width: '68%',
-        stack: [
-          {
-            table: {
-              widths: ['25%', '75%'],
-              body: [
-                [cellLabel('Nº talón:'), cellValue(String(order.order_number ?? '—'))],
-                [cellLabel('Fecha emisión:'), cellValue(hoy)],
-              ],
-            },
-            layout: tableLayoutBorders,
-          },
-          {
-            table: {
-              widths: ['25%', '75%'],
-              body: [
-                [cellLabel('Cliente:'), cellValue(getClientName(order))],
-                [cellLabel('Cortador:'), cellValue(String(ficha.cortador ?? '—'))],
-                [cellLabel('Prenda:'), cellValue(prendaLabel || '—')],
-              ],
-            },
-            layout: tableLayoutBorders,
-          },
-          {
-            table: {
-              widths: ['33%', '33%', '34%'],
-              body: [
-                [
-                  cellStack('Tipo trabajo:', prendaLabel || '—'),
-                  cellStack('Situación:', String(ficha.situacionTrabajo ?? '—')),
-                  cellStack('Fecha próxima visita:', formatDate(ficha.fechaProximaVisita ?? ficha.fechaCompromiso)),
-                ],
-              ],
-            },
-            layout: tableLayoutBorders,
-          },
-          {
-            table: {
-              widths: ['30%', '70%'],
-              body: [[cellLabel('Características:'), cellValue(caracteristicasStr)]],
-            },
-            layout: tableLayoutBorders,
-          },
-          {
-            table: {
-              widths: ['25%', '75%'],
-              body: [[cellLabel('Medidas:'), cellValue(medidasStr)]],
-            },
-            layout: tableLayoutBordersPadded,
-          },
-          {
-            table: {
-              widths: ['25%', '75%'],
-              body: [[cellLabel('Descripción:'), cellValue(descripcionStr)]],
-            },
-            layout: tableLayoutBordersPadded,
-          },
+  // ─── PARTE INFERIOR: TALÓN OFICIAL (tabla única para igualar alturas) ────
+  const talonLeftStack: Content[] = [
+    {
+      table: {
+        widths: ['25%', '75%'],
+        body: [
+          [cellLabel('Nº talón:'), cellValue(String(order.order_number ?? '—'))],
+          [cellLabel('Fecha emisión:'), cellValue(hoy)],
         ],
       },
-      {
-        width: '32%',
-        table: {
-          widths: ['*'],
-          body: [
-            [
-              {
-                text: 'Talón de cobro',
-                bold: true,
-                alignment: 'center',
-                margin: [4, 4, 4, 2],
-              },
-            ],
-            [
-              {
-                stack: [
-                  { text: `Oficial: ${oficialStr || ' '}`, margin: [4, 2] },
-                  { text: `Prenda: ${prendaLabel || '—'}`, margin: [4, 2] },
-                  { text: `Cliente: ${getClientName(order)}`, margin: [4, 2] },
-                  { text: `Fecha emisión: ${hoy}`, margin: [4, 2, 4, 4] },
-                ],
-              },
-            ],
-          ],
-        },
-        layout: tableLayoutBorders,
+      layout: tableLayoutBorders,
+    },
+    {
+      table: {
+        widths: ['25%', '75%'],
+        body: [
+          [cellLabel('Cliente:'), cellValue(getClientName(order))],
+          [cellLabel('Cortador:'), cellValue(String(ficha.cortador ?? '—'))],
+          [cellLabel('Prenda:'), cellValue(prendaLabel || '—')],
+        ],
       },
-    ],
-    columnGap: 10,
+      layout: tableLayoutBorders,
+    },
+    {
+      table: {
+        widths: ['33%', '33%', '34%'],
+        body: [
+          [
+            cellStack('Tipo trabajo:', prendaLabel || '—'),
+            cellStack('Situación:', getOrderStatusLabel(String(ficha.situacionTrabajo ?? '—'))),
+            cellStack('Fecha próxima visita:', formatDate(ficha.fechaProximaVisita ?? ficha.fechaCompromiso)),
+          ],
+        ],
+      },
+      layout: tableLayoutBorders,
+    },
+    {
+      table: {
+        widths: ['30%', '70%'],
+        body: [[cellLabel('Características:'), cellValue(caracteristicasStr)]],
+      },
+      layout: tableLayoutBorders,
+    },
+    {
+      table: {
+        widths: ['25%', '75%'],
+        body: [[cellLabel('Medidas:'), cellValue(medidasStr)]],
+      },
+      layout: tableLayoutBordersPadded,
+    },
+    {
+      table: {
+        widths: ['25%', '75%'],
+        body: [[cellLabel('Descripción:'), cellValue(descripcionStr)]],
+      },
+      layout: tableLayoutBordersPadded,
+    },
+    {
+      table: {
+        widths: ['25%', '75%'],
+        body: [[cellLabel('Configuración:'), cellValue(configuracionStr)]],
+      },
+      layout: tableLayoutBordersPadded,
+    },
+  ]
+
+  content.push({
+    table: {
+      widths: ['68%', '32%'],
+      body: [
+        [
+          { stack: talonLeftStack, border: [false, false, false, false] },
+          {
+            stack: [
+              { text: 'Talón de cobro', bold: true, alignment: 'center', fontSize: 13, margin: [4, 8, 4, 12] },
+              { text: `Nº talón: ${String(order.order_number ?? '—')}`, bold: true, fontSize: 11, margin: [6, 6, 6, 6] },
+              { text: `Cliente: ${getClientName(order)}`, margin: [6, 6] },
+              { text: `Oficial: ${oficialStr || ' '}`, margin: [6, 6] },
+              { text: `Prenda: ${prendaLabel || '—'}`, margin: [6, 6] },
+              { text: `Situación: ${getOrderStatusLabel(String(ficha.situacionTrabajo ?? '—'))}`, margin: [6, 6] },
+              { text: `F. compromiso: ${formatDate(ficha.fechaProximaVisita ?? ficha.fechaCompromiso)}`, margin: [6, 6] },
+              { text: `Fecha emisión: ${hoy}`, margin: [6, 6, 6, 8] },
+            ],
+            border: [true, true, true, true],
+          },
+        ],
+      ],
+    },
+    layout: {
+      hLineWidth: () => 0.5,
+      vLineWidth: () => 0.5,
+      hLineColor: () => BORDER_COLOR,
+      vLineColor: () => BORDER_COLOR,
+      paddingLeft: () => 0,
+      paddingRight: () => 4,
+      paddingTop: () => 0,
+      paddingBottom: () => 0,
+    },
   })
 
   // ─── PIE DE PÁGINA ─────────────────────────────────────────────────────

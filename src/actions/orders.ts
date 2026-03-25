@@ -796,11 +796,15 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
 
     if (linesError) return failure(linesError.message)
 
+    // Todos los precios incluyen IVA (21%) — desglosar para contabilidad
+    const taxAmountCalc = Math.round((subtotalLines - subtotalLines / 1.21) * 100) / 100
+    const subtotalNoTax = Math.round((subtotalLines / 1.21) * 100) / 100
+
     await ctx.adminClient
       .from('tailoring_orders')
       .update({
-        subtotal: subtotalLines,
-        tax_amount: 0,
+        subtotal: subtotalNoTax,
+        tax_amount: taxAmountCalc,
         total: subtotalLines,
         total_paid: totalPaid,
       })

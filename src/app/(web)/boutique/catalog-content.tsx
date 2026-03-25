@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { Search, Loader2, ShoppingBag, Heart, ChevronDown } from 'lucide-react'
+import { PratsSpinner } from '@/components/ui/prats-spinner'
 import { trackAddToCart } from '@/lib/analytics/events'
 import { useCart } from '@/components/providers/cart-provider'
 import { toast } from 'sonner'
@@ -154,7 +155,7 @@ export function CatalogContent() {
       {/* Grid de productos */}
       {isLoading ? (
         <div className="flex justify-center py-20">
-          <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+          <PratsSpinner />
         </div>
       ) : products.length === 0 ? (
         <div className="text-center py-20">

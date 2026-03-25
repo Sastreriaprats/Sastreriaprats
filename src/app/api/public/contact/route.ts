@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { isRateLimited } from '@/lib/rate-limit'
 
 const TEAM_EMAIL = process.env.CONTACT_TEAM_EMAIL || process.env.RESEND_FROM_EMAIL || 'info@sastreriaprats.es'
 
 const MONTHS_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
 function formatPreferredDate(value: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value?.trim() || '')
   if (!match) return value?.trim() || ''
@@ -13,6 +18,11 @@ function formatPreferredDate(value: string): string {
 }
 
 export async function POST(request: NextRequest) {
+  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+  if (isRateLimited(ip, 'contact', 5, 60)) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+  }
+
   try {
     const body = await request.json()
     const { name, email, phone, service, preferredDate, message } = body
@@ -67,12 +77,12 @@ export async function POST(request: NextRequest) {
             subject: teamSubject,
             html: `
               <h2>Nueva solicitud de contacto</h2>
-              <p><strong>Nombre:</strong> ${name.trim()}</p>
-              <p><strong>Email:</strong> ${email.trim()}</p>
-              ${phone ? `<p><strong>Teléfono:</strong> ${phone}</p>` : ''}
-              ${service ? `<p><strong>Servicio:</strong> ${service}</p>` : ''}
-              ${preferredDate ? `<p><strong>Fecha preferida:</strong> ${formatPreferredDate(preferredDate)}</p>` : ''}
-              ${message ? `<p><strong>Mensaje:</strong><br/>${message.replace(/\n/g, '<br/>')}</p>` : ''}
+              <p><strong>Nombre:</strong> ${escapeHtml(name.trim())}</p>
+              <p><strong>Email:</strong> ${escapeHtml(email.trim())}</p>
+              ${phone ? `<p><strong>Teléfono:</strong> ${escapeHtml(phone)}</p>` : ''}
+              ${service ? `<p><strong>Servicio:</strong> ${escapeHtml(service)}</p>` : ''}
+              ${preferredDate ? `<p><strong>Fecha preferida:</strong> ${escapeHtml(formatPreferredDate(preferredDate))}</p>` : ''}
+              ${message ? `<p><strong>Mensaje:</strong><br/>${escapeHtml(message).replace(/\n/g, '<br/>')}</p>` : ''}
             `,
           }),
         })
@@ -111,7 +121,7 @@ export async function POST(request: NextRequest) {
             subject: userSubject,
             html: `
               <h2>Gracias por contactar con Sastrería Prats</h2>
-              <p>Estimado/a ${name.trim()},</p>
+              <p>Estimado/a ${escapeHtml(name.trim())},</p>
               <p>Hemos recibido tu mensaje correctamente. Nuestro equipo se pondrá en contacto contigo lo antes posible.</p>
               <p>Atentamente,<br/>El equipo de Sastrería Prats</p>
             `,

@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
-import { CreditCard, Loader2, Lock, ShoppingBag, Truck, Store, AlertCircle, FlaskConical } from 'lucide-react'
+import { CreditCard, Loader2, Lock, ShoppingBag, Truck, Store, AlertCircle, FlaskConical, Tag, X } from 'lucide-react'
 import { useCart } from '@/components/providers/cart-provider'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -46,12 +46,21 @@ export function CheckoutContent() {
     address: '', city: '', postal_code: '', province: '', country: 'ES',
   })
 
+  // Descuento
+  const [discountInput, setDiscountInput] = useState('')
+  const [discountLoading, setDiscountLoading] = useState(false)
+  const [appliedDiscount, setAppliedDiscount] = useState<{
+    code: string; discount_type: string; discount_value: number; discount_amount: number; description: string | null
+  } | null>(null)
+
   const freeShippingByAmount = subtotal >= 200
   const isStorePickup = deliveryMethod === 'store'
   const shippingCost = isStorePickup ? 0 : (freeShippingByAmount ? 0 : 9.90)
   const freeShipping = shippingCost === 0
-  const taxAmount = Math.round(subtotal * 0.21 * 100) / 100
-  const total = subtotal + shippingCost
+  const discountAmount = appliedDiscount?.discount_amount || 0
+  const afterDiscount = subtotal - discountAmount
+  const taxAmount = Math.round(afterDiscount * 0.21 * 100) / 100
+  const total = afterDiscount + shippingCost
 
   useEffect(() => {
     if (subtotal > 0) trackBeginCheckout(subtotal)
@@ -97,6 +106,31 @@ export function CheckoutContent() {
   const formatPrice = (p: number) =>
     new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(p)
 
+  const applyDiscount = async () => {
+    const code = discountInput.trim()
+    if (!code) return
+    setDiscountLoading(true)
+    try {
+      const res = await fetch(`/api/public/discount?code=${encodeURIComponent(code)}&subtotal=${subtotal}`)
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error || 'Código no válido')
+        setAppliedDiscount(null)
+      } else {
+        setAppliedDiscount(data)
+        toast.success(`Descuento "${data.code}" aplicado`)
+      }
+    } catch {
+      toast.error('Error al validar el código')
+    }
+    setDiscountLoading(false)
+  }
+
+  const removeDiscount = () => {
+    setAppliedDiscount(null)
+    setDiscountInput('')
+  }
+
   const handlePay = async () => {
     if (!form.first_name || !form.last_name || !form.email) {
       toast.error('Completa los datos de contacto')
@@ -129,6 +163,8 @@ export function CheckoutContent() {
           payment_method: paymentMethod,
           shipping_cost: shippingCost,
           delivery_method: deliveryMethod,
+          discount_code: appliedDiscount?.code || null,
+          discount_amount: discountAmount,
           locale: 'es',
         }),
       })
@@ -361,12 +397,49 @@ export function CheckoutContent() {
                 </div>
               ))}
             </div>
+            {/* Código de descuento */}
+            <div className="mt-4 mb-2">
+              {appliedDiscount ? (
+                <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <Tag className="h-4 w-4 text-green-600" />
+                    <span className="text-sm font-medium text-green-700">{appliedDiscount.code}</span>
+                    <span className="text-xs text-green-600">
+                      −{appliedDiscount.discount_type === 'percentage' ? `${appliedDiscount.discount_value}%` : formatPrice(appliedDiscount.discount_value)}
+                    </span>
+                  </div>
+                  <button onClick={removeDiscount} className="text-green-600 hover:text-green-800">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Código de descuento"
+                    value={discountInput}
+                    onChange={e => setDiscountInput(e.target.value.toUpperCase())}
+                    onKeyDown={e => e.key === 'Enter' && applyDiscount()}
+                    className="uppercase text-sm"
+                  />
+                  <Button variant="outline" size="sm" onClick={applyDiscount} disabled={discountLoading || !discountInput.trim()}>
+                    {discountLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Aplicar'}
+                  </Button>
+                </div>
+              )}
+            </div>
+
             <Separator className="my-4" />
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-gray-500">Subtotal</span>
                 <span>{formatPrice(subtotal)}</span>
               </div>
+              {discountAmount > 0 && (
+                <div className="flex justify-between text-green-600">
+                  <span>Descuento</span>
+                  <span>−{formatPrice(discountAmount)}</span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span className="text-gray-500">Envío</span>
                 <span>{freeShipping ? 'Gratuito' : formatPrice(shippingCost)}</span>

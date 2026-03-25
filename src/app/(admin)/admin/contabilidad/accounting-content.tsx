@@ -2191,15 +2191,77 @@ function MovimientosTab() {
 
 // ─── Tab: Resúmenes de Caja ─────────────────────────────────────────────────
 
+interface CashSession {
+  id: string
+  opened_at: string | null
+  closed_at: string | null
+  opened_by: string | null
+  closed_by: string | null
+  opening_amount: number | null
+  opening_breakdown: Record<string, number> | null
+  closing_breakdown: Record<string, number> | null
+  total_sales: number | null
+  total_cash_sales: number | null
+  total_card_sales: number | null
+  total_bizum_sales: number | null
+  total_transfer_sales: number | null
+  total_voucher_sales: number | null
+  total_returns: number | null
+  total_withdrawals: number | null
+  total_deposits_collected: number | null
+  expected_cash: number | null
+  counted_cash: number | null
+  cash_difference: number | null
+  closing_notes: string | null
+  status: string
+  store_id: string | null
+  opened_by_profile?: { full_name: string } | null
+  closed_by_profile?: { full_name: string } | null
+  stores?: { name: string } | null
+}
+
+interface CajaManualTx {
+  id: string
+  type: string
+  description: string | null
+  category: string | null
+  amount: number | null
+  total: number | null
+  notes: string | null
+  created_at: string
+  created_by: string | null
+  cash_session_id: string | null
+}
+
+interface CashWithdrawal {
+  id: string
+  amount: number | null
+  reason: string | null
+  withdrawn_at: string
+  withdrawn_by: string | null
+  cash_session_id: string | null
+}
+
+interface TimelineEvent {
+  type: string
+  ts: string | null
+  data: Record<string, unknown>
+}
+
+interface PaymentRow {
+  payment_date: string
+  amount: number | null
+}
+
 function CajaSessionsTab() {
   const supabase = useMemo(() => createClient(), [])
   const [vista, setVista] = useState<'list' | 'detail'>('list')
-  const [selectedSession, setSelectedSession] = useState<any | null>(null)
-  const [sessions, setSessions] = useState<any[]>([])
+  const [selectedSession, setSelectedSession] = useState<CashSession | null>(null)
+  const [sessions, setSessions] = useState<CashSession[]>([])
   const [cobrosBySession, setCobrosBySession] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(new Set())
-  const [timelineEvents, setTimelineEvents] = useState<any[]>([])
+  const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailTotalCobrosSastreria, setDetailTotalCobrosSastreria] = useState<number>(0)
 
@@ -2221,10 +2283,10 @@ function CajaSessionsTab() {
         setLoading(false)
         return
       }
-      const list = sessData ?? []
+      const list = (sessData ?? []) as unknown as CashSession[]
       setSessions(list)
       if (list.length > 0) {
-        const ids = list.map((s: any) => s.id).filter(Boolean)
+        const ids = list.map((s: CashSession) => s.id).filter(Boolean)
         const { data: topSums } = await supabase
           .from('tailoring_order_payments')
           .select('cash_session_id, amount')
@@ -2234,12 +2296,12 @@ function CajaSessionsTab() {
           const id = row.cash_session_id
           if (id) bySession[id] = (bySession[id] ?? 0) + Number(row.amount ?? 0)
         }
-        const zeroSessions = list.filter((s: any) => (bySession[s.id] ?? 0) === 0)
+        const zeroSessions = list.filter((s: CashSession) => (bySession[s.id] ?? 0) === 0)
         if (zeroSessions.length > 0) {
-          const openedDates = zeroSessions.map((s: any) => s.opened_at ? s.opened_at.split('T')[0] : null).filter(Boolean)
-          const closedDates = zeroSessions.map((s: any) => s.closed_at ? s.closed_at.split('T')[0] : new Date().toISOString().split('T')[0])
-          const minDate = openedDates.length ? openedDates.reduce((a: string, b: string) => a < b ? a : b) : null
-          const maxDate = closedDates.reduce((a: string, b: string) => a > b ? a : b)
+          const openedDates = zeroSessions.map((s: CashSession) => s.opened_at ? s.opened_at.split('T')[0] : null).filter((d): d is string => d !== null)
+          const closedDates = zeroSessions.map((s: CashSession) => s.closed_at ? s.closed_at.split('T')[0] : new Date().toISOString().split('T')[0])
+          const minDate = openedDates.length ? openedDates.reduce((a, b) => a < b ? a : b) : null
+          const maxDate = closedDates.reduce((a, b) => a > b ? a : b)
           if (minDate) {
             const { data: fallbackRows } = await supabase
               .from('tailoring_order_payments')
@@ -2250,7 +2312,7 @@ function CajaSessionsTab() {
               const openedDate = s.opened_at ? s.opened_at.split('T')[0] : null
               const closedDate = s.closed_at ? s.closed_at.split('T')[0] : new Date().toISOString().split('T')[0]
               if (!openedDate) continue
-              const sum2 = (fallbackRows ?? []).reduce((acc: number, r: any) => {
+              const sum2 = (fallbackRows ?? []).reduce((acc: number, r: PaymentRow) => {
                 const d = r.payment_date
                 if (d >= openedDate && d <= closedDate) return acc + Number(r.amount ?? 0)
                 return acc
@@ -2268,7 +2330,7 @@ function CajaSessionsTab() {
   }, [supabase])
 
   const sessionsByMonth = useMemo(() => {
-    const map: Record<string, any[]> = {}
+    const map: Record<string, CashSession[]> = {}
     for (const s of sessions) {
       const d = s.opened_at ? new Date(s.opened_at) : new Date()
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -2279,7 +2341,7 @@ function CajaSessionsTab() {
     return { keys, map }
   }, [sessions])
 
-  const loadDetail = useCallback(async (session: any) => {
+  const loadDetail = useCallback(async (session: CashSession) => {
     setSelectedSession(session)
     setVista('detail')
     setDetailLoading(true)
@@ -2287,7 +2349,7 @@ function CajaSessionsTab() {
     const openedAtFull = session.opened_at
     const closedAtFull = session.closed_at ?? new Date().toISOString()
 
-    let txData: any[] = []
+    let txData: CajaManualTx[] = []
     const { data: mtRes } = await supabase
       .from('manual_transactions')
       .select('id, type, description, category, amount, total, notes, created_at, created_by, cash_session_id')
@@ -2328,16 +2390,16 @@ function CajaSessionsTab() {
       },
     } : null
 
-    const manual = txData.map((r: any) => ({ type: 'manual', ts: r.created_at, data: r }))
-    const withdrawals = wdData.map((r: any) => ({ type: 'withdrawal', ts: r.withdrawn_at, data: r }))
+    const manual = txData.map((r: CajaManualTx) => ({ type: 'manual', ts: r.created_at, data: r as unknown as Record<string, unknown> }))
+    const withdrawals = wdData.map((r: CashWithdrawal) => ({ type: 'withdrawal', ts: r.withdrawn_at, data: r as unknown as Record<string, unknown> }))
     const merged = [apertura, ...manual, ...withdrawals, ...(cierre ? [cierre] : [])].sort(
-      (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()
+      (a, b) => new Date(a.ts || 0).getTime() - new Date(b.ts || 0).getTime()
     )
     setTimelineEvents(merged)
 
     const sumBySession = txData
-      .filter((r: any) => r.category === 'sastreria')
-      .reduce((acc: number, r: any) => acc + Number(r.total ?? 0), 0)
+      .filter((r: CajaManualTx) => r.category === 'sastreria')
+      .reduce((acc: number, r: CajaManualTx) => acc + Number(r.total ?? 0), 0)
     if (sumBySession > 0) {
       setDetailTotalCobrosSastreria(sumBySession)
     } else if (openedDate) {
@@ -2347,7 +2409,7 @@ function CajaSessionsTab() {
         .eq('category', 'sastreria')
         .gte('created_at', openedAtFull)
         .lte('created_at', closedAtFull)
-      const fallbackSum = (mtSastreriaRange ?? []).reduce((acc: number, r: any) => acc + Number(r.total ?? 0), 0)
+      const fallbackSum = (mtSastreriaRange ?? []).reduce((acc: number, r: { total: number | null }) => acc + Number(r.total ?? 0), 0)
       setDetailTotalCobrosSastreria(fallbackSum)
     } else {
       setDetailTotalCobrosSastreria(0)
@@ -2393,8 +2455,8 @@ function CajaSessionsTab() {
     const totalRetiradas = Number(s.total_withdrawals) ?? 0
     const totalCashSales = Number(s.total_cash_sales) ?? 0
     const efectivoIngresosTimeline = timelineEvents
-      .filter((ev: any) => ev.type === 'manual' && ev.data?.type === 'income' && (ev.data?.notes?.toLowerCase().includes('efectivo') ?? false))
-      .reduce((sum: number, ev: any) => sum + Number(ev.data?.total ?? 0), 0)
+      .filter((ev: TimelineEvent) => ev.type === 'manual' && ev.data?.type === 'income' && (typeof ev.data?.notes === 'string' && ev.data.notes.toLowerCase().includes('efectivo')))
+      .reduce((sum: number, ev: TimelineEvent) => sum + Number(ev.data?.total ?? 0), 0)
     const efectivoEnCaja = openingAmount + efectivoIngresosTimeline - totalRetiradas
     const expectedCash = openingAmount + totalCashSales - totalRetiradas
     const countedCash = s.counted_cash != null ? Number(s.counted_cash) : null
@@ -2489,11 +2551,11 @@ function CajaSessionsTab() {
                       const isCierreEv = ev.type === 'cierre'
                       const d = ev.data
                       const ts = ev.ts
-                      const who = d?.creator?.full_name ?? d?.profiles?.full_name ?? d?.created_by ?? ''
-                      const desc = isAperturaEv ? 'Apertura de caja' : isCierreEv ? 'Cierre de caja' : isManual ? (d?.description ?? '—') : (d?.reason ?? 'Retirada')
+                      const who = (d?.creator as { full_name?: string })?.full_name ?? (d?.profiles as { full_name?: string })?.full_name ?? d?.created_by ?? ''
+                      const desc = String(isAperturaEv ? 'Apertura de caja' : isCierreEv ? 'Cierre de caja' : isManual ? (d?.description ?? '—') : (d?.reason ?? 'Retirada'))
                       const amount = Number(isManual ? d?.total : d?.amount) ?? (isAperturaEv ? Number(d?.total ?? 0) : 0)
                       const isIncome = isManual && d?.type === 'income'
-                      const category = d?.category ?? ''
+                      const category = String(d?.category ?? '')
                       const isApertura = isAperturaEv || (isManual && (desc.includes('Apertura') || (category === 'caja' && !desc.includes('Cierre'))))
                       const isCierre = isCierreEv || (isManual && (desc.includes('Cierre') || (category === 'caja' && desc.includes('Cierre'))))
                       const isRetirada = ev.type === 'withdrawal' || (isManual && d?.type === 'expense')
@@ -2524,16 +2586,16 @@ function CajaSessionsTab() {
                         amountClass = 'text-red-600'
                       }
 
-                      const methodLabel = formatMethod(d?.notes)
+                      const methodLabel = formatMethod(d?.notes as string | null)
                       return (
-                        <div key={ev.type + (d?.id ?? '') + i} className="py-3 first:pt-0">
+                        <div key={ev.type + String(d?.id ?? '') + i} className="py-3 first:pt-0">
                           <div className="flex items-start gap-3">
                             <span className="text-sm text-muted-foreground w-12 shrink-0 tabular-nums">{formatTime(ts)}</span>
                             <span className="text-lg shrink-0">{icon}</span>
                             <div className="min-w-0 flex-1">
                               <p className={`text-sm font-medium ${textClass}`}>{desc}</p>
-                              <p className="text-xs text-muted-foreground mt-0.5">{who}</p>
-                              {isRetirada && (d?.reason || (isManual && d?.description)) && <p className="text-xs text-red-600/80 mt-0.5">{d?.reason || d?.description}</p>}
+                              <p className="text-xs text-muted-foreground mt-0.5">{String(who)}</p>
+                              {isRetirada && !!(d?.reason || (isManual && d?.description)) && <p className="text-xs text-red-600/80 mt-0.5">{String(d?.reason || d?.description)}</p>}
                               {isCobro && methodLabel && <div className="mt-1"><PaymentMethodBadge method={methodLabel} /></div>}
                             </div>
                             <span className={`text-sm font-medium tabular-nums shrink-0 ${amountClass}`}>
@@ -2637,7 +2699,7 @@ function CajaSessionsTab() {
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {list.map((s: any) => {
+                            {list.map((s: CashSession) => {
                               const openedBy = s.opened_by_profile?.full_name ?? '—'
                               const closedBy = s.closed_by_profile?.full_name ?? '—'
                               const cobrosSastreria = cobrosBySession[s.id] ?? 0

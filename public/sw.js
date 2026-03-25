@@ -1,4 +1,4 @@
-var CACHE_VERSION = 'prats-v7'
+var CACHE_VERSION = 'prats-v1774443833836'
 var STATIC_CACHE = CACHE_VERSION + '-static'
 var DYNAMIC_CACHE = CACHE_VERSION + '-dynamic'
 var API_CACHE = CACHE_VERSION + '-api'
@@ -14,7 +14,7 @@ self.addEventListener('install', function (event) {
   event.waitUntil(
     caches.open(STATIC_CACHE).then(function (cache) { return cache.addAll(PRECACHE_ASSETS) })
   )
-  self.skipWaiting()
+  // No hacemos skipWaiting() aquí — el cliente decide cuándo activar el nuevo SW
 })
 
 self.addEventListener('activate', function (event) {
@@ -51,7 +51,7 @@ self.addEventListener('fetch', function (event) {
   }
 
   if (isStaticAsset(url.pathname)) {
-    event.respondWith(cacheFirst(request, STATIC_CACHE))
+    event.respondWith(staleWhileRevalidate(request, STATIC_CACHE))
     return
   }
 

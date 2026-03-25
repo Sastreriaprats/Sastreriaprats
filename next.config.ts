@@ -14,6 +14,7 @@ const nextConfig: NextConfig = {
       },
       { protocol: 'https', hostname: 'www.sastreriaprats.com', port: '', pathname: '/**' },
       { protocol: 'https', hostname: 'cdn.suitsupply.com', port: '', pathname: '/**' },
+      { protocol: 'https', hostname: 'cdn.shopify.com', port: '', pathname: '/**' },
     ],
   },
   experimental: {
@@ -25,6 +26,30 @@ const nextConfig: NextConfig = {
     fetches: {
       fullUrl: true,
     },
+  },
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          {
+            key: 'Strict-Transport-Security',
+            value: 'max-age=31536000; includeSubDomains',
+          },
+          {
+            key: 'Content-Security-Policy-Report-Only',
+            value: [
+              "default-src 'self'",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.supabase.co https://*.stripe.com https://www.googletagmanager.com",
+              "style-src 'self' 'unsafe-inline'",
+              "img-src 'self' data: blob: https://*.supabase.co https://*.supabase.in",
+              "connect-src 'self' https://*.supabase.co https://*.stripe.com https://api.resend.com",
+              "frame-src 'self' https://*.stripe.com",
+            ].join('; '),
+          },
+        ],
+      },
+    ]
   },
   async redirects() {
     return [

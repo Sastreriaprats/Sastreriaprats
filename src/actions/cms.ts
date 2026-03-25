@@ -8,6 +8,7 @@ export type HomeHero = {
   title_es: string
   subtitle_es: string
   image_url: string
+  video_url: string
   button1_label: string
   button1_url: string
   button2_label: string
@@ -52,6 +53,7 @@ const DEFAULT_HERO: HomeHero = {
   title_es: 'SASTRERÍA PRATS',
   subtitle_es: 'Madrid · Est. 1985',
   image_url: 'https://www.sastreriaprats.com/cdn/shop/files/AW25_-_DIEGO_MARTIN-191.jpg?v=1762421411&width=2000',
+  video_url: '',
   button1_label: 'DESCUBRIR COLECCIÓN',
   button1_url: '/boutique',
   button2_label: 'RESERVAR CITA',
@@ -84,8 +86,8 @@ const DEFAULT_EDITORIAL_DOUBLE: HomeEditorialDouble = {
 const DEFAULT_STORES: HomeStores = {
   title_es: 'NUESTRAS TIENDAS',
   blocks: [
-    { title_es: 'El Viso', content_es: 'C/ Menina 22, 28023 Madrid', image_url: 'https://www.sastreriaprats.com/cdn/shop/files/MENINA_-_PRATS_389bd184-3fe5-4fa5-a9f0-0d28a69d5626.jpg?v=1718899181&width=1200', link_url: 'https://maps.app.goo.gl/Vf8puqTToyqvTirq5' },
-    { title_es: 'Wellington', content_es: 'C/ Wellington 26, 28008 Madrid', image_url: 'https://www.sastreriaprats.com/cdn/shop/files/DIEGO_PRATS-76.jpg?v=1718899328&width=1200', link_url: 'https://maps.app.goo.gl/Cd36bN32ctpTmtub8' },
+    { title_es: 'Hermanos Pinzón', content_es: 'Calle Hermanos Pinzón, 4 - 28036 Madrid', image_url: 'https://www.sastreriaprats.com/cdn/shop/files/MENINA_-_PRATS_389bd184-3fe5-4fa5-a9f0-0d28a69d5626.jpg?v=1718899181&width=1200', link_url: 'https://maps.app.goo.gl/Vf8puqTToyqvTirq5' },
+    { title_es: 'Wellington', content_es: 'Calle Velázquez, 8 - 28001 Madrid', image_url: 'https://www.sastreriaprats.com/cdn/shop/files/DIEGO_PRATS-76.jpg?v=1718899328&width=1200', link_url: 'https://maps.app.goo.gl/Cd36bN32ctpTmtub8' },
   ],
 }
 
@@ -143,6 +145,7 @@ export async function getHomeContent(): Promise<HomeContent> {
           title_es: (heroRow.title_es as string) || DEFAULT_HERO.title_es,
           subtitle_es: (heroRow.subtitle_es as string) || DEFAULT_HERO.subtitle_es,
           image_url: ((heroRow.settings as Record<string, string>)?.image_url) || DEFAULT_HERO.image_url,
+          video_url: ((heroRow.settings as Record<string, string>)?.video_url) || '',
           button1_label: ((heroRow.settings as Record<string, string>)?.button1_label) || DEFAULT_HERO.button1_label,
           button1_url: ((heroRow.settings as Record<string, string>)?.button1_url) || DEFAULT_HERO.button1_url,
           button2_label: ((heroRow.settings as Record<string, string>)?.button2_label) || DEFAULT_HERO.button2_label,
@@ -491,20 +494,41 @@ export async function getPublicBlogPost(slug: string) {
 }
 
 /** Categorías visibles en la web para el menú de navegación */
-export type WebCategory = { name: string; slug: string; sort_order: number }
+export type WebCategory = {
+  name: string
+  slug: string
+  sort_order: number
+  children?: { name: string; slug: string; sort_order: number }[]
+}
 
 export async function getWebCategories(): Promise<WebCategory[]> {
   try {
     const { createAdminClient } = await import('@/lib/supabase/admin')
     const admin = createAdminClient()
+    // Obtener categorías principales + subcategorías en una sola query
     const { data } = await admin
       .from('product_categories')
-      .select('name, slug, sort_order')
+      .select('id, name, slug, sort_order, parent_id')
       .eq('is_active', true)
       .eq('is_visible_web', true)
-      .is('parent_id', null)
+      .eq('product_type', 'boutique')
+      // TODO: filtrar is_seasonal según temporada actual
       .order('sort_order', { ascending: true })
-    return (data || []) as WebCategory[]
+
+    if (!data) return []
+
+    // Separar padres e hijos
+    const parents = data.filter(c => !c.parent_id)
+    const children = data.filter(c => c.parent_id)
+
+    return parents.map(p => ({
+      name: p.name,
+      slug: p.slug,
+      sort_order: p.sort_order,
+      children: children
+        .filter(c => c.parent_id === p.id)
+        .map(c => ({ name: c.name, slug: c.slug, sort_order: c.sort_order })),
+    }))
   } catch (err) {
     console.error('[getWebCategories]', err)
     return []

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { getHomeContent } from '@/actions/cms'
+import { NewsletterForm } from '@/components/web/newsletter-form'
 import type { Metadata } from 'next'
 
 export const revalidate = 3600
@@ -21,21 +22,70 @@ export default async function HomePage() {
   const categories = content.categories!
   const editorialDouble = content.editorial_double!
   const processSteps = content.process_steps!
+  const stores = content.stores!
 
   return (
     <main className="bg-white font-sans antialiased">
-      {/* HERO — imagen B/N full-width, sin overlay ni texto */}
-      <section className="relative w-full overflow-hidden">
-        <Image
-          src={hero.image_url}
-          alt=""
-          width={2000}
-          height={1000}
-          className="w-full h-auto object-cover grayscale"
-          sizes="100vw"
-          priority
-        />
+      {/* HERO — imagen o vídeo B/N pantalla completa */}
+      <section className="relative w-full h-screen overflow-hidden">
+        {hero.video_url ? (
+          <video
+            autoPlay
+            loop
+            muted
+            playsInline
+            poster={hero.image_url}
+            className="absolute inset-0 w-full h-full object-cover object-[center_25%] grayscale"
+          >
+            <source src={hero.video_url} type={hero.video_url.endsWith('.webm') ? 'video/webm' : 'video/mp4'} />
+          </video>
+        ) : (
+          <Image
+            src={hero.image_url}
+            alt=""
+            fill
+            className="object-cover object-[center_25%] grayscale"
+            sizes="100vw"
+            priority
+          />
+        )}
         <h1 className="sr-only">{hero.title_es} — {hero.subtitle_es}</h1>
+      </section>
+
+      {/* NUESTRAS TIENDAS */}
+      <section className="py-16 md:py-24 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+        <h2 className="text-3xl md:text-4xl font-bold text-black text-center mb-12">
+          {stores.title_es}
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          {stores.blocks.map((store, i) => (
+            <a
+              key={i}
+              href={store.link_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group relative block aspect-[4/3] overflow-hidden rounded-lg"
+            >
+              <Image
+                src={store.image_url}
+                alt={store.title_es}
+                fill
+                className="object-cover transition-transform duration-500 group-hover:scale-105"
+                sizes="(max-width: 768px) 100vw, 50vw"
+              />
+              <div className="absolute inset-0 bg-black/30 transition-colors duration-300 group-hover:bg-black/40" />
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
+                <h3 className="text-2xl md:text-3xl font-bold uppercase tracking-wide">
+                  {store.title_es}
+                </h3>
+                <p className="mt-2 text-sm text-white/80">{store.content_es}</p>
+                <span className="mt-4 border border-white/80 px-6 py-2 text-xs font-medium tracking-[0.2em] uppercase transition-colors group-hover:bg-white/10">
+                  CÓMO LLEGAR
+                </span>
+              </div>
+            </a>
+          ))}
+        </div>
       </section>
 
       {/* ESPACIOS — 2 columnas con imagen de fondo y botón DESCUBRE */}
@@ -104,6 +154,24 @@ export default async function HomePage() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* NEWSLETTER CTA */}
+      <section className="bg-prats-navy py-20 md:py-28 px-6">
+        <div className="max-w-xl mx-auto text-center">
+          <p className="text-xs tracking-[0.4em] text-white/50 mb-4">NEWSLETTER</p>
+          <h2 className="font-serif text-3xl md:text-4xl font-light text-white leading-tight mb-4">
+            Únete a la familia Prats
+          </h2>
+          <p className="text-sm text-white/60 mb-8 max-w-md mx-auto">
+            Sé el primero en conocer nuestras nuevas colecciones, consejos de estilo y eventos exclusivos.
+          </p>
+          <NewsletterForm dark />
+          <p className="mt-4 text-[11px] text-white/30">
+            Al suscribirte aceptas nuestra{' '}
+            <Link href="/privacidad" className="underline hover:text-white/50">política de privacidad</Link>.
+          </p>
         </div>
       </section>
     </main>

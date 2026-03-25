@@ -343,32 +343,33 @@ export function PaymentHistory({
 
       {/* Dialog: registrar pago */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className={`max-w-md ${variant === 'sastre' ? 'bg-[#0d1629] border border-white/20 text-white' : ''}`}>
           <DialogHeader>
-            <DialogTitle>Registrar pago</DialogTitle>
+            <DialogTitle className={variant === 'sastre' ? 'text-white' : ''}>Registrar pago</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
             {entityType === 'tailoring_order' && (
               <div className="space-y-1.5">
-                <Label htmlFor="pay-date">Fecha</Label>
+                <Label htmlFor="pay-date" className={variant === 'sastre' ? 'text-white/80' : ''}>Fecha</Label>
                 <DatePickerPopover
                   id="pay-date"
                   value={formDate}
                   onChange={(date) => setFormDate(date)}
+                  containerClassName={variant === 'sastre' ? 'bg-white/[0.07] border-white/20 text-white placeholder:text-white/30' : ''}
                 />
               </div>
             )}
 
             <div className="space-y-1.5">
-              <Label>Método de pago</Label>
+              <Label className={variant === 'sastre' ? 'text-white/80' : ''}>Método de pago</Label>
               <Select value={formMethod} onValueChange={(v) => setFormMethod(v as PaymentMethod)}>
-                <SelectTrigger>
+                <SelectTrigger className={variant === 'sastre' ? 'bg-white/[0.07] border-white/20 text-white' : ''}>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-[#0d1629] border border-white/20 text-white">
+                <SelectContent className={variant === 'sastre' ? 'bg-[#0d1629] border border-white/20 text-white' : ''}>
                   {(Object.entries(METHOD_LABELS) as [PaymentMethod, string][]).map(([k, v]) => (
-                    <SelectItem key={k} value={k} className="text-white focus:bg-white/10 focus:text-white">
+                    <SelectItem key={k} value={k} className={variant === 'sastre' ? 'text-white focus:bg-white/10 focus:text-white' : ''}>
                       <span className="flex items-center gap-2">
                         {METHOD_ICONS[k]}
                         {v}
@@ -380,9 +381,9 @@ export function PaymentHistory({
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="pay-amount">
+              <Label htmlFor="pay-amount" className={variant === 'sastre' ? 'text-white/80' : ''}>
                 Importe{' '}
-                <span className="text-muted-foreground font-normal text-xs">
+                <span className={`font-normal text-xs ${variant === 'sastre' ? 'text-white/40' : 'text-muted-foreground'}`}>
                   (pendiente: {formatCurrency(totalPending)})
                 </span>
               </Label>
@@ -395,44 +396,52 @@ export function PaymentHistory({
                 placeholder="0,00"
                 value={formAmount}
                 onChange={(e) => setFormAmount(e.target.value)}
+                className={variant === 'sastre' ? 'bg-white/[0.07] border-white/20 text-white placeholder:text-white/30' : ''}
               />
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="pay-ref">Referencia <span className="text-muted-foreground font-normal text-xs">(opcional)</span></Label>
+              <Label htmlFor="pay-ref" className={variant === 'sastre' ? 'text-white/80' : ''}>
+                Referencia <span className={`font-normal text-xs ${variant === 'sastre' ? 'text-white/40' : 'text-muted-foreground'}`}>(opcional)</span>
+              </Label>
               <Input
                 id="pay-ref"
                 placeholder="Nº transferencia, recibo…"
                 value={formReference}
                 onChange={(e) => setFormReference(e.target.value)}
+                className={variant === 'sastre' ? 'bg-white/[0.07] border-white/20 text-white placeholder:text-white/30' : ''}
               />
             </div>
 
             {entityType === 'tailoring_order' && (
               <div className="space-y-1.5">
-                <Label htmlFor="pay-notes">Notas <span className="text-muted-foreground font-normal text-xs">(opcional)</span></Label>
+                <Label htmlFor="pay-notes" className={variant === 'sastre' ? 'text-white/80' : ''}>
+                  Notas <span className={`font-normal text-xs ${variant === 'sastre' ? 'text-white/40' : 'text-muted-foreground'}`}>(opcional)</span>
+                </Label>
                 <Textarea
                   id="pay-notes"
                   rows={2}
                   placeholder="Observaciones…"
                   value={formNotes}
                   onChange={(e) => setFormNotes(e.target.value)}
+                  className={variant === 'sastre' ? 'bg-white/[0.07] border-white/20 text-white placeholder:text-white/30' : ''}
                 />
               </div>
             )}
 
-            <div className="space-y-1.5 pt-1 border-t">
-              <Label htmlFor="pay-next-date" className="flex items-center gap-1.5">
+            <div className={`space-y-1.5 pt-1 border-t ${variant === 'sastre' ? 'border-white/10' : ''}`}>
+              <Label htmlFor="pay-next-date" className={`flex items-center gap-1.5 ${variant === 'sastre' ? 'text-white/80' : ''}`}>
                 Fecha próximo pago
-                <span className="text-muted-foreground font-normal text-xs">(opcional)</span>
+                <span className={`font-normal text-xs ${variant === 'sastre' ? 'text-white/40' : 'text-muted-foreground'}`}>(opcional)</span>
               </Label>
               <DatePickerPopover
                 id="pay-next-date"
                 value={formNextPaymentDate}
                 min={formDate || today()}
                 onChange={(date) => setFormNextPaymentDate(date)}
+                containerClassName={variant === 'sastre' ? 'bg-white/[0.07] border-white/20 text-white placeholder:text-white/30' : ''}
               />
-              <p className="text-[11px] text-muted-foreground">
+              <p className={`text-[11px] ${variant === 'sastre' ? 'text-white/40' : 'text-muted-foreground'}`}>
                 Si hay saldo pendiente, indica cuándo se espera el siguiente pago.
               </p>
             </div>
@@ -441,14 +450,14 @@ export function PaymentHistory({
           <DialogFooter>
             <Button
               variant={variant === 'sastre' ? undefined : 'outline'}
-              className={variant === 'sastre' ? 'bg-white/[0.06] border border-white/15 text-white/70 font-medium hover:bg-white/10 hover:text-white transition-all' : undefined}
+              className={variant === 'sastre' ? 'bg-white/[0.06] border border-white/15 text-white/70 hover:bg-white/10 hover:text-white' : undefined}
               onClick={() => setDialogOpen(false)}
               disabled={isSaving}
             >
               Cancelar
             </Button>
             <Button
-              className={variant === 'sastre' ? 'bg-[#c9a96e]/15 border border-[#c9a96e]/30 text-[#c9a96e] font-medium hover:bg-[#c9a96e]/25 transition-all' : undefined}
+              className={variant === 'sastre' ? 'bg-[#c9a96e] text-[#0a1020] font-semibold hover:bg-[#c9a96e]/90' : undefined}
               onClick={handleSave}
               disabled={isSaving}
             >

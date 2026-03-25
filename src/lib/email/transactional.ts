@@ -196,6 +196,25 @@ export async function sendWelcomeEmail(client: { name: string; email: string; pa
   `)
 }
 
+export async function sendNewsletterWelcome(subscriber: { email: string }) {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://sastreriaprats.com'
+  await send(subscriber.email, '¡Bienvenido a la familia Prats!', `
+    <h2 style="color:#1a2744;margin:0 0 16px;">¡Bienvenido a la familia Prats!</h2>
+    <p style="color:#6b7280;">Gracias por suscribirte a nuestra newsletter.</p>
+    <p style="color:#6b7280;">Serás el primero en conocer:</p>
+    <ul style="color:#374151;">
+      <li style="padding:4px 0;">Nuevas colecciones y lanzamientos exclusivos</li>
+      <li style="padding:4px 0;">Consejos de estilo y cuidado de prendas</li>
+      <li style="padding:4px 0;">Eventos especiales en nuestras boutiques</li>
+      <li style="padding:4px 0;">Promociones reservadas para suscriptores</li>
+    </ul>
+    <div style="text-align:center;margin:30px 0;">
+      <a href="${appUrl}/boutique" style="background:#1a2744;color:#ffffff;padding:12px 32px;border-radius:8px;text-decoration:none;font-size:14px;letter-spacing:1px;">DESCUBRIR COLECCIÓN</a>
+    </div>
+    <p style="color:#9ca3af;font-size:12px;text-align:center;">Puedes darte de baja en cualquier momento.</p>
+  `)
+}
+
 export async function sendPasswordReset(email: string, resetUrl: string) {
   await send(email, 'Restablecer contraseña — Sastrería Prats', `
     <h2 style="color:#1a2744;margin:0 0 16px;">Restablecer contraseña</h2>

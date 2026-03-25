@@ -15,6 +15,7 @@ import {
   ListOrdered,
   ShoppingCart,
   CircleDollarSign,
+  Scissors,
   MapPin,
 } from 'lucide-react'
 import { useActiveStore } from '@/hooks/use-store'
@@ -109,6 +110,10 @@ export function SastreLayoutWithSidebar({ sastreName, isSastrePlus = false, chil
           <Link href="/sastre/stock" className={navClass(pathname === '/sastre/stock' || pathname.startsWith('/sastre/stock'))}>
             <Package className="h-5 w-5 shrink-0" />
             <span className="text-center leading-tight">Stock</span>
+          </Link>
+          <Link href="/sastre/arreglos" className={navClass(pathname === '/sastre/arreglos' || pathname.startsWith('/sastre/arreglos'))}>
+            <Scissors className="h-5 w-5 shrink-0" />
+            <span className="text-center leading-tight">Arreglos</span>
           </Link>
           <Link href="/sastre/pedidos" className={navClass(pathname === '/sastre/pedidos' || pathname.startsWith('/sastre/pedidos'))}>
             <ListOrdered className="h-5 w-5 shrink-0" />

@@ -209,39 +209,62 @@ export function ContactContent() {
             <div className="flex gap-3">
               <MapPin className="h-5 w-5 shrink-0 text-prats-gold" />
               <div>
-                <p className="font-medium text-prats-navy">Dirección</p>
+                <p className="font-medium text-prats-navy">Hermanos Pinzón</p>
                 <p className="text-sm text-muted-foreground">
-                  Calle de la Sastrería, 1
-                  <br />
-                  28001 Madrid
+                  Calle Hermanos Pinzón, 4 - 28036 Madrid
                 </p>
+                <a href="tel:+34912401845" className="text-sm text-muted-foreground underline hover:text-prats-navy transition-colors">
+                  +34 912 401 845
+                </a>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <MapPin className="h-5 w-5 shrink-0 text-prats-gold" />
+              <div>
+                <p className="font-medium text-prats-navy">Wellington</p>
+                <p className="text-sm text-muted-foreground">
+                  Calle Velázquez, 8 - 28001 Madrid (Wellington Hotel &amp; Spa)
+                </p>
+                <a href="tel:+34671353465" className="text-sm text-muted-foreground underline hover:text-prats-navy transition-colors">
+                  +34 671 35 34 65
+                </a>
               </div>
             </div>
             <div className="flex gap-3">
               <Phone className="h-5 w-5 shrink-0 text-prats-gold" />
               <div>
-                <p className="font-medium text-prats-navy">Teléfono</p>
-                <p className="text-sm text-muted-foreground">+34 911 000 000</p>
+                <p className="font-medium text-prats-navy">Teléfono general</p>
+                <a href="tel:+34669985547" className="text-sm text-muted-foreground underline hover:text-prats-navy transition-colors">
+                  +34 669 98 55 47
+                </a>
               </div>
             </div>
             <div className="flex gap-3">
               <Mail className="h-5 w-5 shrink-0 text-prats-gold" />
               <div>
                 <p className="font-medium text-prats-navy">Email</p>
-                <p className="text-sm text-muted-foreground">
-                  info@sastreriaprats.es
-                </p>
+                <a href="mailto:info@sastreriaprats.com" className="text-sm text-muted-foreground underline hover:text-prats-navy transition-colors">
+                  info@sastreriaprats.com
+                </a>
               </div>
             </div>
             <div className="flex gap-3">
               <Clock className="h-5 w-5 shrink-0 text-prats-gold" />
               <div>
-                <p className="font-medium text-prats-navy">Horario</p>
+                <p className="font-medium text-prats-navy">Horarios</p>
+                <p className="text-sm text-muted-foreground font-medium mt-1">Hermanos Pinzón:</p>
                 <p className="text-sm text-muted-foreground">
-                  Lunes a Viernes: 10:00 - 20:00
+                  Lunes a Viernes: 10:00 – 20:00
                   <br />
-                  Sábados: 10:00 - 14:00
+                  Sábados: 10:00 – 14:00
                 </p>
+                <p className="text-sm text-muted-foreground font-medium mt-2">Wellington:</p>
+                <p className="text-sm text-muted-foreground">
+                  Lunes a Viernes: 10:00 – 14:00 | 16:30 – 20:30
+                  <br />
+                  Sábados: 10:00 – 14:00
+                </p>
+                <p className="text-sm text-muted-foreground font-medium mt-2">Domingos: Cerrado</p>
               </div>
             </div>
           </div>

@@ -599,3 +599,44 @@ export const validateVoucher = protectedAction<string, any>(
     return success(voucher)
   }
 )
+
+/** Valida un código de descuento (discount_codes) desde el POS */
+export const validateDiscountCode = protectedAction<
+  { code: string; subtotal?: number },
+  { code: string; discount_type: string; discount_value: number; discount_amount: number; description: string | null }
+>(
+  { permission: 'pos.access', auditModule: 'pos' },
+  async (ctx, { code, subtotal = 0 }) => {
+    const { data: dc } = await ctx.adminClient
+      .from('discount_codes')
+      .select('*')
+      .eq('code', code.toUpperCase())
+      .eq('is_active', true)
+      .single()
+
+    if (!dc) return failure('Código de descuento no válido')
+
+    const now = new Date().toISOString().split('T')[0]
+    if (dc.valid_from && now < dc.valid_from) return failure('Este código aún no es válido')
+    if (dc.valid_until && now > dc.valid_until) return failure('Este código ha expirado')
+    if (dc.max_uses && dc.current_uses >= dc.max_uses) return failure('Código agotado')
+    if (dc.min_purchase && subtotal < parseFloat(dc.min_purchase)) {
+      return failure(`Compra mínima de ${parseFloat(dc.min_purchase).toFixed(2)}€`)
+    }
+
+    let discountAmount = 0
+    if (dc.discount_type === 'percentage') {
+      discountAmount = Math.round(subtotal * (parseFloat(dc.discount_value) / 100) * 100) / 100
+    } else {
+      discountAmount = Math.min(parseFloat(dc.discount_value), subtotal)
+    }
+
+    return success({
+      code: dc.code,
+      discount_type: dc.discount_type || 'percentage',
+      discount_value: parseFloat(dc.discount_value),
+      discount_amount: discountAmount,
+      description: dc.description,
+    })
+  }
+)
