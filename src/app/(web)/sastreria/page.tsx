@@ -16,7 +16,7 @@ export const metadata: Metadata = {
 
 const SERVICES = [
   {
-    tag: 'SERVICIO 01',
+    tag: 'SASTRERÍA ARTESANAL',
     title: 'Sastrería Artesanal',
     text: 'Guiados por Joaquín Fernández Prats, en nuestro taller se elaboran artesanalmente cada una de las prendas. El proceso comienza con una conversación para comprender al cliente, seguida de una toma de medidas exhaustiva. A partir de ahí, se traza el patrón a mano, se corta el tejido seleccionado y se realiza una primera prueba hilvanada. Tras sucesivos ajustes — cada uno más fino que el anterior — la prenda adquiere su forma definitiva. Un traje verdaderamente a medida que solo las manos expertas pueden crear.',
     image:
@@ -24,7 +24,7 @@ const SERVICES = [
     imageAlt: 'Sastrería artesanal — detalle de tejido',
   },
   {
-    tag: 'SERVICIO 02',
+    tag: 'MADE TO MEASURE',
     title: 'Made to Measure',
     text: 'Tras la toma de medidas, el patrón se ajusta digitalmente y se envía a un plotter antes de confeccionar en taller. La prenda llega a la sastrería, el cliente se la prueba y se realizan los ajustes finales necesarios. Es la opción ideal para quienes buscan introducirse en el mundo de la medida con plazos más cortos o un presupuesto más ajustado, sin renunciar a un resultado personalizado y de calidad.',
     image:
@@ -32,7 +32,7 @@ const SERVICES = [
     imageAlt: 'Made to Measure — proceso de confección',
   },
   {
-    tag: 'SERVICIO 03',
+    tag: 'READY TO WEAR',
     title: 'Ready to Wear',
     text: 'Bajo la marca PRATS, ofrecemos una colección de prendas y complementos de esencia atemporal. Confeccionadas con los mismos tejidos que utilizamos en la sastrería artesanal y con producción nacional, cada pieza mantiene nuestra exigencia de calidad. La colección se complementa con una selección de marcas italianas e inglesas de prestigio, creando un armario masculino completo donde tradición y estilo contemporáneo conviven.',
     image:

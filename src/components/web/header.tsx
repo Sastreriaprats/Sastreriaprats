@@ -41,7 +41,7 @@ function buildNavItems(categories: WebCategory[]): NavItem[] {
       label: 'Nosotros',
       href: '/sobre-nosotros',
       children: [
-        { label: 'Historia de Prats', href: '/sobre-nosotros' },
+        { label: 'Prats', href: '/sobre-nosotros' },
         { label: 'Servicios', href: '/sastreria' },
         { label: 'Reservar cita', href: '/reservar' },
       ],
@@ -80,7 +80,25 @@ function AnnouncementBar({ text }: { text?: string }) {
           <ChevronLeft className="h-4 w-4" />
         </button>
       )}
-      <span className="font-medium">{slides[current]}</span>
+      {(() => {
+        const text = slides[current]
+        const linkMap: [RegExp, string][] = [
+          [/nueva colección/i, '/boutique?category=nueva-coleccion'],
+          [/otoño.*invierno|primavera.*verano|colección/i, '/boutique'],
+          [/reserv/i, '/reservar'],
+          [/envío/i, '/aviso-legal'],
+        ]
+        for (const [pattern, href] of linkMap) {
+          if (pattern.test(text)) {
+            return (
+              <Link href={href} className="font-medium hover:underline">
+                {text}
+              </Link>
+            )
+          }
+        }
+        return <span className="font-medium">{text}</span>
+      })()}
       {slides.length > 1 && (
         <button onClick={next} className="absolute right-2 top-1/2 -translate-y-1/2 text-white/60 hover:text-white transition-colors" aria-label="Siguiente">
           <ChevronRight className="h-4 w-4" />

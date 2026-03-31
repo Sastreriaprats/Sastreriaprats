@@ -61,7 +61,7 @@ export function NewsletterForm({ variant = 'inline', dark = false }: Props) {
           value={email}
           onChange={(e) => { setEmail(e.target.value); if (status === 'error') setStatus('idle') }}
           placeholder="Tu email"
-          className={`text-sm px-4 py-2.5 rounded focus:outline-none transition-colors ${
+          className={`font-sans text-sm px-4 py-2.5 rounded focus:outline-none transition-colors ${
             dark
               ? 'bg-white/10 border border-white/20 text-white placeholder:text-white/40 focus:border-white/50'
               : 'bg-transparent border border-gray-300 text-black placeholder:text-gray-400 focus:border-black'
@@ -71,7 +71,7 @@ export function NewsletterForm({ variant = 'inline', dark = false }: Props) {
         <button
           type="submit"
           disabled={status === 'loading'}
-          className={`text-xs font-medium tracking-[0.15em] uppercase px-6 py-2.5 rounded transition-colors disabled:opacity-50 ${
+          className={`font-sans text-xs font-medium tracking-[0.15em] uppercase px-6 py-2.5 rounded transition-colors disabled:opacity-50 ${
             dark
               ? 'bg-white text-prats-navy hover:bg-white/90'
               : 'bg-prats-navy text-white hover:bg-prats-navy/90'

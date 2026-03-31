@@ -53,40 +53,44 @@ export default async function HomePage() {
       </section>
 
       {/* NUESTRAS TIENDAS */}
-      <section className="py-16 md:py-24 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+      <section className="pt-16 md:pt-24 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
         <h2 className="text-3xl md:text-4xl font-bold text-black text-center mb-12">
           {stores.title_es}
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {stores.blocks.map((store, i) => (
-            <a
-              key={i}
-              href={store.link_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="group relative block aspect-[4/3] overflow-hidden rounded-lg"
-            >
-              <Image
-                src={store.image_url}
-                alt={store.title_es}
-                fill
-                className="object-cover transition-transform duration-500 group-hover:scale-105"
-                sizes="(max-width: 768px) 100vw, 50vw"
-              />
-              <div className="absolute inset-0 bg-black/30 transition-colors duration-300 group-hover:bg-black/40" />
-              <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
-                <h3 className="text-2xl md:text-3xl font-bold uppercase tracking-wide">
-                  {store.title_es}
-                </h3>
-                <p className="mt-2 text-sm text-white/80">{store.content_es}</p>
-                <span className="mt-4 border border-white/80 px-6 py-2 text-xs font-medium tracking-[0.2em] uppercase transition-colors group-hover:bg-white/10">
-                  CÓMO LLEGAR
-                </span>
-              </div>
-            </a>
-          ))}
-        </div>
       </section>
+      <section className="grid grid-cols-1 md:grid-cols-2">
+        {stores.blocks.map((store, i) => (
+          <a
+            key={i}
+            href={store.link_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group relative block aspect-[4/3] overflow-hidden"
+          >
+            <Image
+              src={store.image_url}
+              alt={store.title_es}
+              fill
+              className="object-cover transition-transform duration-500 group-hover:scale-105"
+              sizes="(max-width: 768px) 100vw, 50vw"
+            />
+            <div className="absolute inset-0 bg-black/30 transition-colors duration-300 group-hover:bg-black/40" />
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
+              <p className="text-xs tracking-[0.3em] uppercase mb-2">BOUTIQUE</p>
+              <h3 className="text-3xl md:text-4xl font-bold uppercase tracking-wide mb-2">
+                {store.title_es}
+              </h3>
+              <p className="text-sm text-white/80 mb-6">{store.content_es}</p>
+              <span className="border border-white/80 px-8 py-2.5 text-xs font-medium tracking-[0.2em] uppercase transition-colors group-hover:bg-white/10">
+                CÓMO LLEGAR
+              </span>
+            </div>
+          </a>
+        ))}
+      </section>
+
+      {/* Separador visual */}
+      <div className="py-8 md:py-12" />
 
       {/* ESPACIOS — 2 columnas con imagen de fondo y botón DESCUBRE */}
       <section className="grid grid-cols-1 md:grid-cols-2">
