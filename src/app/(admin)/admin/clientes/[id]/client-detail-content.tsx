@@ -26,9 +26,6 @@ import { ClientCompaniesTab } from './tabs/client-companies-tab'
 const categoryColors: Record<string, string> = {
   standard: 'bg-gray-100 text-gray-700',
   vip: 'bg-amber-100 text-amber-700',
-  premium: 'bg-purple-100 text-purple-700',
-  gold: 'bg-yellow-100 text-yellow-800',
-  ambassador: 'bg-prats-navy/10 text-prats-navy',
 }
 
 function ClientSummaryTab({ client }: { client: any }) {

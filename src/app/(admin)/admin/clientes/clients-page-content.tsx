@@ -27,9 +27,6 @@ import { CreateClientDialog } from './create-client-dialog'
 const categoryColors: Record<string, string> = {
   standard: 'bg-gray-100 text-gray-700',
   vip: 'bg-amber-100 text-amber-700',
-  premium: 'bg-purple-100 text-purple-700',
-  gold: 'bg-yellow-100 text-yellow-800',
-  ambassador: 'bg-prats-navy/10 text-prats-navy',
 }
 
 export function ClientsPageContent({ basePath = '/admin' }: { basePath?: string }) {
@@ -105,11 +102,8 @@ export function ClientsPageContent({ basePath = '/admin' }: { basePath?: string 
           <SelectTrigger className="w-40"><SelectValue placeholder="Categoría" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todas las categorías</SelectItem>
-            <SelectItem value="standard">Standard</SelectItem>
+            <SelectItem value="standard">Normal</SelectItem>
             <SelectItem value="vip">VIP</SelectItem>
-            <SelectItem value="premium">Premium</SelectItem>
-            <SelectItem value="gold">Gold</SelectItem>
-            <SelectItem value="ambassador">Embajador</SelectItem>
           </SelectContent>
         </Select>
         <Select value={statusFilter} onValueChange={applyStatus}>

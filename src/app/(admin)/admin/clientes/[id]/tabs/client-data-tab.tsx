@@ -66,9 +66,8 @@ export function ClientDataTab({ client }: { client: any }) {
                 <Select value={form.category} onValueChange={(v) => set('category', v)} disabled={!canEdit}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="standard">Estándar</SelectItem><SelectItem value="vip">VIP</SelectItem>
-                    <SelectItem value="premium">Premium</SelectItem><SelectItem value="gold">Gold</SelectItem>
-                    <SelectItem value="ambassador">Embajador</SelectItem>
+                    <SelectItem value="standard">Normal</SelectItem>
+                    <SelectItem value="vip">VIP</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
