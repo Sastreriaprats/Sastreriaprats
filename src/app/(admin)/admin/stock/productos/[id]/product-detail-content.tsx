@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { variantSkuFromSize } from '@/lib/constants-sizes'
 import { Textarea } from '@/components/ui/textarea'
 import {
   ArrowLeft, Plus, ArrowUp, Loader2, Image as ImageIcon, Pencil, ArrowLeftRight,
@@ -41,6 +42,7 @@ export function ProductDetailContent({
 
   const [showNewVariant, setShowNewVariant] = useState(false)
   const [variantForm, setVariantForm] = useState({ variant_sku: '', size: '', color: '', barcode: '' })
+  const [variantSkuManuallyEdited, setVariantSkuManuallyEdited] = useState(false)
   const [showTransfer, setShowTransfer] = useState(false)
   const [transferForm, setTransferForm] = useState({ variantId: '', fromWarehouseId: '', toWarehouseId: '', quantity: 0, reason: '' })
   const [showSubtractMeters, setShowSubtractMeters] = useState(false)
@@ -522,16 +524,27 @@ export function ProductDetailContent({
       </Dialog>
 
       {/* New variant dialog */}
-      <Dialog open={showNewVariant} onOpenChange={setShowNewVariant}>
+      <Dialog open={showNewVariant} onOpenChange={(open) => {
+        setShowNewVariant(open)
+        if (!open) { setVariantForm({ variant_sku: '', size: '', color: '', barcode: '' }); setVariantSkuManuallyEdited(false) }
+      }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Nueva variante</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="space-y-2"><Label>SKU variante *</Label>
-              <Input value={variantForm.variant_sku} onChange={(e) => setVariantForm(p => ({ ...p, variant_sku: e.target.value }))} placeholder={`${product.sku}-01`} />
-            </div>
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2"><Label>Talla</Label><Input value={variantForm.size} onChange={(e) => setVariantForm(p => ({ ...p, size: e.target.value }))} placeholder="48, 50, M, L..." /></div>
+              <div className="space-y-2"><Label>Talla</Label><Input value={variantForm.size} onChange={(e) => {
+                const size = e.target.value
+                setVariantForm(p => ({
+                  ...p,
+                  size,
+                  variant_sku: variantSkuManuallyEdited ? p.variant_sku : (size.trim() ? variantSkuFromSize(product.sku, size.trim()) : ''),
+                }))
+              }} placeholder="48, 50, M, L..." /></div>
               <div className="space-y-2"><Label>Color</Label><Input value={variantForm.color} onChange={(e) => setVariantForm(p => ({ ...p, color: e.target.value }))} placeholder="Azul marino" /></div>
+            </div>
+            <div className="space-y-2"><Label>SKU variante *</Label>
+              <Input value={variantForm.variant_sku} onChange={(e) => { setVariantForm(p => ({ ...p, variant_sku: e.target.value })); setVariantSkuManuallyEdited(true) }} placeholder={`${product.sku}-01`} />
+              <p className="text-xs text-muted-foreground">Se genera automáticamente a partir de la talla</p>
             </div>
             <div className="space-y-2"><Label>Código de barras</Label><Input value={variantForm.barcode} onChange={(e) => setVariantForm(p => ({ ...p, barcode: e.target.value }))} /></div>
           </div>

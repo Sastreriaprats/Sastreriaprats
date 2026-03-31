@@ -39,34 +39,36 @@ export const getNextSkuNumber = protectedAction<
   }
 )
 
-/** Genera un SKU completo automático para un producto. Combina generateSkuBase + getNextSkuNumber. */
+/** Genera el siguiente SKU correlativo: PRATS-XXXXX */
 export const generateProductSkuAction = protectedAction<
   { productType: string; productName: string },
   { sku: string }
 >(
   { permission: 'products.view', auditModule: 'stock' },
-  async (ctx, { productType, productName }) => {
+  async (ctx, { productType: _pt, productName }) => {
     const name = String(productName || '').trim()
     if (!name) return failure('Escribe el nombre del producto primero', 'VALIDATION')
-    const skuBase = generateSkuBase(productType, name)
-    const pattern = `${skuBase}-%`
-    const { count } = await ctx.adminClient
+
+    // Buscar el mayor número entre los SKUs PRATS-NNNNN
+    const { data } = await ctx.adminClient
       .from('products')
-      .select('id', { count: 'exact', head: true })
-      .like('sku', pattern)
-    let n = (count ?? 0) + 1
-    for (let i = 0; i < 20; i++) {
-      const numStr = String(n).padStart(3, '0')
-      const fullSku = `${skuBase}-${numStr}`
-      const { data: existing } = await ctx.adminClient
-        .from('products')
-        .select('id')
-        .eq('sku', fullSku)
-        .maybeSingle()
-      if (!existing) return success({ sku: fullSku })
-      n++
+      .select('sku')
+      .like('sku', 'PRATS-%')
+      .order('sku', { ascending: false })
+      .limit(200)
+
+    let maxNum = 0
+    for (const row of data || []) {
+      const match = (row.sku as string).match(/^PRATS-(\d+)$/)
+      if (match) {
+        const num = parseInt(match[1], 10)
+        if (num > maxNum) maxNum = num
+      }
     }
-    return failure('No se pudo generar un SKU único', 'INTERNAL')
+
+    const nextNum = maxNum + 1
+    const sku = `PRATS-${String(nextNum).padStart(5, '0')}`
+    return success({ sku })
   }
 )
 
