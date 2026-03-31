@@ -19,6 +19,7 @@ import {
 } from '@/actions/suppliers'
 import { searchTailoringOrdersByNumber } from '@/actions/orders'
 import { createClient } from '@/lib/supabase/client'
+import { getProductVariantsById } from '@/actions/products'
 import { searchSupplierFabrics, searchSupplierProducts } from '@/actions/suppliers'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { createSupplierDeliveryNote, uploadSupplierDeliveryNoteAttachment, upsertSupplierDeliveryNoteForOrder } from '@/actions/delivery-notes'
@@ -217,16 +218,10 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
   }
   const loadProductVariants = async (productId: string, tempId: string) => {
     setLoadingVariantsForLine((prev) => new Set(prev).add(tempId))
-    const supabase = createClient()
-    const { data } = await supabase
-      .from('product_variants')
-      .select('id, size, color')
-      .eq('product_id', productId)
-      .eq('is_active', true)
-      .order('size')
+    const result = await getProductVariantsById(productId)
     setLoadingVariantsForLine((prev) => { const next = new Set(prev); next.delete(tempId); return next })
-    if (data) {
-      updateOrderLine(tempId, { variants: data, sizeQuantities: {} })
+    if (result?.success && result.data) {
+      updateOrderLine(tempId, { variants: result.data, sizeQuantities: {} })
     }
   }
   const contacts = supplier.supplier_contacts || []

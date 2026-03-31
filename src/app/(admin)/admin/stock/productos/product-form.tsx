@@ -309,7 +309,12 @@ export function ProductForm({
 
   const removeVariant = (id: string) => setVariants((prev) => prev.filter((v) => v.id !== id))
 
-  const applyTemplate = (templateKey: string, replace = false) => {
+  // Plantilla de tallas con checkboxes
+  const [templateSizes, setTemplateSizes] = useState<string[]>([])
+  const [selectedSizes, setSelectedSizes] = useState<Set<string>>(new Set())
+  const [activeTemplateKey, setActiveTemplateKey] = useState<string>('')
+
+  const applyTemplate = (templateKey: string) => {
     const tmpl = SIZE_TEMPLATES[templateKey]
     if (!tmpl) return
     const base = basico.sku.trim()
@@ -317,29 +322,46 @@ export function ProductForm({
       toast.error('Genera el SKU del producto antes de aplicar la plantilla')
       return
     }
-    const existingSizes = new Set(variants.map(v => v.size.toUpperCase()))
-    const newVariants: VariantRow[] = []
-    for (const size of tmpl.sizes) {
-      if (!replace && existingSizes.has(size.toUpperCase())) continue
-      newVariants.push({
-        id: crypto.randomUUID(),
-        size,
-        color: '',
-        variant_sku: variantSkuFromSize(base, size),
-        stock_inicial: 0,
-      })
-    }
-    if (replace) {
-      setVariants(newVariants)
-      toast.success(`${newVariants.length} tallas de "${tmpl.label}" aplicadas`)
-    } else {
-      setVariants(prev => [...prev, ...newVariants])
-      toast.success(`${newVariants.length} tallas añadidas de "${tmpl.label}"`)
-    }
+    setActiveTemplateKey(templateKey)
+    setTemplateSizes(tmpl.sizes)
+    setSelectedSizes(new Set(tmpl.sizes))
+    // Generar variantes para todas las tallas de la plantilla
+    const manualVariants = variants.filter(v => !tmpl.sizes.includes(v.size))
+    const templateVariants: VariantRow[] = tmpl.sizes.map(size => ({
+      id: crypto.randomUUID(),
+      size,
+      color: '',
+      variant_sku: variantSkuFromSize(base, size),
+      stock_inicial: 0,
+    }))
+    setVariants([...templateVariants, ...manualVariants])
     setShowAddVariant(false)
   }
 
-  const [pendingTemplate, setPendingTemplate] = useState<string | null>(null)
+  const toggleSize = (size: string) => {
+    const base = basico.sku.trim()
+    setSelectedSizes(prev => {
+      const next = new Set(prev)
+      if (next.has(size)) {
+        next.delete(size)
+        // Eliminar variante de esta talla
+        setVariants(v => v.filter(row => row.size !== size))
+      } else {
+        next.add(size)
+        // Añadir variante de esta talla
+        if (base) {
+          setVariants(v => [...v, {
+            id: crypto.randomUUID(),
+            size,
+            color: '',
+            variant_sku: variantSkuFromSize(base, size),
+            stock_inicial: 0,
+          }])
+        }
+      }
+      return next
+    })
+  }
 
   const addTag = () => {
     const t = web.tagInput.trim()
@@ -849,36 +871,46 @@ export function ProductForm({
             <CardContent className="space-y-4">
               {/* Plantilla de tallas */}
               {!isEdit && (
-                <div className="rounded-lg border p-3 bg-muted/20 space-y-2">
+                <div className="rounded-lg border p-3 bg-muted/20 space-y-3">
                   <Label className="text-sm">Plantilla de tallas</Label>
-                  <div className="flex gap-2">
-                    <Select onValueChange={(key) => {
-                      if (variants.length > 0) {
-                        setPendingTemplate(key)
-                      } else {
-                        applyTemplate(key)
-                      }
-                    }}>
-                      <SelectTrigger className="flex-1"><SelectValue placeholder="Seleccionar plantilla..." /></SelectTrigger>
-                      <SelectContent>
-                        {Object.entries(SIZE_TEMPLATES).map(([key, tmpl]) => (
-                          <SelectItem key={key} value={key}>{tmpl.label} ({tmpl.sizes.length} tallas)</SelectItem>
+                  <Select value={activeTemplateKey} onValueChange={(key) => applyTemplate(key)}>
+                    <SelectTrigger className="flex-1"><SelectValue placeholder="Seleccionar plantilla..." /></SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(SIZE_TEMPLATES).map(([key, tmpl]) => (
+                        <SelectItem key={key} value={key}>{tmpl.label} ({tmpl.sizes.length} tallas)</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  {templateSizes.length > 0 && (
+                    <div className="rounded-lg border p-4 bg-white space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs text-gray-500">Seleccionar tallas ({selectedSizes.size} de {templateSizes.length})</Label>
+                        <div className="flex gap-3">
+                          <button type="button" onClick={() => { setSelectedSizes(new Set(templateSizes)); const base = basico.sku.trim(); if (base) { const manual = variants.filter(v => !templateSizes.includes(v.size)); const all = templateSizes.map(size => ({ id: crypto.randomUUID(), size, color: '', variant_sku: variantSkuFromSize(base, size), stock_inicial: 0 })); setVariants([...all, ...manual]) } }} className="text-xs text-blue-600 hover:underline">Todas</button>
+                          <button type="button" onClick={() => { setSelectedSizes(new Set()); setVariants(v => v.filter(row => !templateSizes.includes(row.size))) }} className="text-xs text-blue-600 hover:underline">Ninguna</button>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {templateSizes.map(size => (
+                          <label
+                            key={size}
+                            className={`flex items-center gap-1 px-3 py-1.5 rounded-md border cursor-pointer transition-all text-sm font-medium select-none ${
+                              selectedSizes.has(size)
+                                ? 'bg-prats-navy/10 border-prats-navy/40 text-prats-navy'
+                                : 'bg-gray-50 border-gray-200 text-gray-400'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedSizes.has(size)}
+                              onChange={() => toggleSize(size)}
+                              className="sr-only"
+                            />
+                            {size}
+                          </label>
                         ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {pendingTemplate && (
-                    <div className="flex items-center gap-2 rounded border border-amber-200 bg-amber-50 p-2 text-sm">
-                      <span className="flex-1 text-amber-800">Ya hay {variants.length} variantes. ¿Qué quieres hacer?</span>
-                      <Button size="sm" variant="outline" className="text-xs" onClick={() => { applyTemplate(pendingTemplate); setPendingTemplate(null) }}>
-                        Añadir
-                      </Button>
-                      <Button size="sm" variant="destructive" className="text-xs" onClick={() => { applyTemplate(pendingTemplate, true); setPendingTemplate(null) }}>
-                        Reemplazar
-                      </Button>
-                      <Button size="sm" variant="ghost" className="text-xs" onClick={() => setPendingTemplate(null)}>
-                        <X className="h-3 w-3" />
-                      </Button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -976,7 +1008,15 @@ export function ProductForm({
                           <TableCell className="font-mono text-sm">{v.variant_sku}</TableCell>
                           <TableCell>{v.size || '—'}</TableCell>
                           <TableCell>{v.color || '—'}</TableCell>
-                          <TableCell className="text-right">{v.stock_inicial}</TableCell>
+                          <TableCell className="text-right">
+                            <Input
+                              type="number"
+                              min={0}
+                              className="h-8 w-20 text-right ml-auto"
+                              value={v.stock_inicial || ''}
+                              onChange={(e) => setVariants(prev => prev.map(row => row.id === v.id ? { ...row, stock_inicial: parseInt(e.target.value) || 0 } : row))}
+                            />
+                          </TableCell>
                           <TableCell>
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removeVariant(v.id)}>
                               <X className="h-4 w-4" />

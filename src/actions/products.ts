@@ -72,6 +72,25 @@ export const generateProductSkuAction = protectedAction<
   }
 )
 
+/** Obtiene variantes de un producto por ID (usa adminClient para evitar problemas de RLS). */
+export const getProductVariantsById = protectedAction<
+  string,
+  { id: string; size: string | null; color: string | null }[]
+>(
+  { permission: 'products.view', auditModule: 'stock' },
+  async (ctx, productId) => {
+    if (!productId?.trim()) return success([])
+    const { data, error } = await ctx.adminClient
+      .from('product_variants')
+      .select('id, size, color')
+      .eq('product_id', productId.trim())
+      .eq('is_active', true)
+      .order('size')
+    if (error) return failure(error.message)
+    return success((data ?? []) as { id: string; size: string | null; color: string | null }[])
+  }
+)
+
 async function generateDeliveryNoteNumberSafe(adminClient: any): Promise<string> {
   try {
     const { data, error } = await adminClient.rpc('generate_delivery_note_number')
