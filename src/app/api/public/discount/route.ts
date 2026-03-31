@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { isRateLimited } from '@/lib/rate-limit'
 
 /** GET /api/public/discount?code=XXX&subtotal=123.45 — valida un código de descuento */
 export async function GET(request: NextRequest) {
   try {
+    const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+    if (isRateLimited(ip, 'discount', 20, 60)) {
+      return NextResponse.json({ error: 'Demasiados intentos. Inténtalo más tarde.' }, { status: 429 })
+    }
+
     const { searchParams } = new URL(request.url)
     const code = (searchParams.get('code') || '').trim().toUpperCase()
     const subtotal = parseFloat(searchParams.get('subtotal') || '0')

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
+function sanitizeSearchPattern(input: string): string {
+  return input.replace(/[%_\\]/g, '\\$&')
+}
+
 export async function GET(request: NextRequest) {
   try {
   const { searchParams } = new URL(request.url)
@@ -35,7 +39,10 @@ export async function GET(request: NextRequest) {
     .or(`season.is.null,season.eq.all,season.eq.,season.eq.${currentSeason}`)
 
   if (category) query = query.eq('product_categories.slug', category)
-  if (search) query = query.or(`name.ilike.%${search}%,brand.ilike.%${search}%,description.ilike.%${search}%`)
+  if (search) {
+    const s = sanitizeSearchPattern(search)
+    query = query.or(`name.ilike.%${s}%,brand.ilike.%${s}%,description.ilike.%${s}%`)
+  }
   if (minPrice) query = query.gte('base_price', parseFloat(minPrice))
   if (maxPrice) query = query.lte('base_price', parseFloat(maxPrice))
 

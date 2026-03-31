@@ -11,6 +11,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'date and store_id required' }, { status: 400 })
   }
 
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return NextResponse.json({ error: 'Invalid date format (YYYY-MM-DD)' }, { status: 400 })
+  }
+
   const admin = createAdminClient()
 
   const { data: existing } = await admin
@@ -50,6 +54,13 @@ export async function POST(request: NextRequest) {
       { error: 'Campos obligatorios: date, start_time, store_id, client_name, client_email' },
       { status: 400 }
     )
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return NextResponse.json({ error: 'Formato de fecha inválido (YYYY-MM-DD)' }, { status: 400 })
+  }
+  if (!/^\d{2}:\d{2}$/.test(start_time)) {
+    return NextResponse.json({ error: 'Formato de hora inválido (HH:MM)' }, { status: 400 })
   }
 
   const admin = createAdminClient()

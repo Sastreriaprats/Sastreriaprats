@@ -741,11 +741,6 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
 
 export async function generateFichaConfeccionPDF(order: FichaConfeccionOrder): Promise<void> {
   const o = order as unknown as Record<string, unknown>
-  console.log('[PDF] order.configuration:', JSON.stringify(o.configuration, null, 2))
-  console.log('[PDF] fichaData:', JSON.stringify(o.fichaData, null, 2))
-  console.log('[PDF] lines:', JSON.stringify((o.lines as any[])?.map((l: any) => l?.configuration), null, 2))
-  console.log('[PDF] tailoring_order_lines[0].configuration:', JSON.stringify(order.tailoring_order_lines?.[0]?.configuration, null, 2))
-
   const pdfMake = (await import('pdfmake/build/pdfmake')).default
   const vfsModule = await import('pdfmake/build/vfs_fonts')
   const vfs = (vfsModule as { default?: Record<string, string> }).default

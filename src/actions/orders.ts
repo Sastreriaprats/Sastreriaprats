@@ -728,8 +728,6 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
         descripcion: (input.notas ?? input.descripcion ?? '').toString().trim() || undefined,
         observaciones: (input.notas || '').trim(),
       }
-      console.log('[ACTION] fichaData que se guarda:', JSON.stringify(input.fichaData ?? {}, null, 2))
-      console.log('[ACTION] mainConfig:', JSON.stringify(mainConfig, null, 2))
       linesToInsert.push({
         tailoring_order_id: order.id,
         garment_type_id: mainGarmentTypeId,

@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { DatePickerPopover } from '@/components/ui/date-picker-popover'
+import { BRAND, STORE_LOCATIONS } from '@/lib/constants'
 import {
   Select,
   SelectContent,
@@ -211,10 +212,10 @@ export function ContactContent() {
               <div>
                 <p className="font-medium text-prats-navy">Hermanos Pinzón</p>
                 <p className="text-sm text-muted-foreground">
-                  Calle Hermanos Pinzón, 4 - 28036 Madrid
+                  {STORE_LOCATIONS.pinzon.fullAddress}
                 </p>
-                <a href="tel:+34912401845" className="text-sm text-muted-foreground underline hover:text-prats-navy transition-colors">
-                  +34 912 401 845
+                <a href={`tel:${STORE_LOCATIONS.pinzon.phones[0].replace(/\s/g, '')}`} className="text-sm text-muted-foreground underline hover:text-prats-navy transition-colors">
+                  {STORE_LOCATIONS.pinzon.phones[0]}
                 </a>
               </div>
             </div>
@@ -223,10 +224,10 @@ export function ContactContent() {
               <div>
                 <p className="font-medium text-prats-navy">Wellington</p>
                 <p className="text-sm text-muted-foreground">
-                  Calle Velázquez, 8 - 28001 Madrid (Wellington Hotel &amp; Spa)
+                  {STORE_LOCATIONS.wellington.fullAddress} ({STORE_LOCATIONS.wellington.subtitle})
                 </p>
-                <a href="tel:+34671353465" className="text-sm text-muted-foreground underline hover:text-prats-navy transition-colors">
-                  +34 671 35 34 65
+                <a href={`tel:${STORE_LOCATIONS.wellington.phones[0].replace(/\s/g, '')}`} className="text-sm text-muted-foreground underline hover:text-prats-navy transition-colors">
+                  {STORE_LOCATIONS.wellington.phones[0]}
                 </a>
               </div>
             </div>
@@ -234,8 +235,8 @@ export function ContactContent() {
               <Phone className="h-5 w-5 shrink-0 text-prats-gold" />
               <div>
                 <p className="font-medium text-prats-navy">Teléfono general</p>
-                <a href="tel:+34669985547" className="text-sm text-muted-foreground underline hover:text-prats-navy transition-colors">
-                  +34 669 98 55 47
+                <a href={`tel:${BRAND.phone.replace(/\s/g, '')}`} className="text-sm text-muted-foreground underline hover:text-prats-navy transition-colors">
+                  {BRAND.phone}
                 </a>
               </div>
             </div>
@@ -243,8 +244,8 @@ export function ContactContent() {
               <Mail className="h-5 w-5 shrink-0 text-prats-gold" />
               <div>
                 <p className="font-medium text-prats-navy">Email</p>
-                <a href="mailto:info@sastreriaprats.com" className="text-sm text-muted-foreground underline hover:text-prats-navy transition-colors">
-                  info@sastreriaprats.com
+                <a href={`mailto:${BRAND.email}`} className="text-sm text-muted-foreground underline hover:text-prats-navy transition-colors">
+                  {BRAND.email}
                 </a>
               </div>
             </div>
@@ -254,15 +255,15 @@ export function ContactContent() {
                 <p className="font-medium text-prats-navy">Horarios</p>
                 <p className="text-sm text-muted-foreground font-medium mt-1">Hermanos Pinzón:</p>
                 <p className="text-sm text-muted-foreground">
-                  Lunes a Viernes: 10:00 – 20:00
+                  Lunes a Viernes: {STORE_LOCATIONS.pinzon.hours.weekdays}
                   <br />
-                  Sábados: 10:00 – 14:00
+                  Sábados: {STORE_LOCATIONS.pinzon.hours.saturday}
                 </p>
                 <p className="text-sm text-muted-foreground font-medium mt-2">Wellington:</p>
                 <p className="text-sm text-muted-foreground">
-                  Lunes a Viernes: 10:00 – 14:00 | 16:30 – 20:30
+                  Lunes a Viernes: {STORE_LOCATIONS.wellington.hours.weekdays}
                   <br />
-                  Sábados: 10:00 – 14:00
+                  Sábados: {STORE_LOCATIONS.wellington.hours.saturday}
                 </p>
                 <p className="text-sm text-muted-foreground font-medium mt-2">Domingos: Cerrado</p>
               </div>

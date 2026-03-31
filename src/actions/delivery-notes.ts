@@ -667,8 +667,6 @@ export const uploadSupplierDeliveryNoteAttachment = protectedAction<FormData, { 
   async (ctx, formData) => {
     const id = String(formData.get('id') || '')
     const file = formData.get('file') as File | null
-    console.log('[uploadSupplierDeliveryNoteAttachment] formData id:', id)
-    console.log('[uploadSupplierDeliveryNoteAttachment] file:', file?.name, file?.size)
     if (!id) return failure('ID de albarán obligatorio', 'VALIDATION')
     if (!file?.size) return failure('Archivo PDF obligatorio', 'VALIDATION')
 
@@ -696,14 +694,12 @@ export const uploadSupplierDeliveryNoteAttachment = protectedAction<FormData, { 
     let { data: uploadData, error: uploadError } = await doUpload()
     if (uploadError?.message?.toLowerCase().includes('bucket') && uploadError?.message?.toLowerCase().includes('not found')) {
       const { data: bucketData, error: bucketError } = await ctx.adminClient.storage.createBucket(ALBARANES_BUCKET, { public: false })
-      console.log('[storage create bucket result]', { data: bucketData, error: bucketError })
       if (!bucketError || bucketError.message?.toLowerCase().includes('already exists')) {
         const retry = await doUpload()
         uploadData = retry.data
         uploadError = retry.error
       }
     }
-    console.log('[storage upload result]', { data: uploadData, error: uploadError })
     if (uploadError) {
       console.error('[uploadSupplierDeliveryNoteAttachment] upload error', { id, filePath, message: uploadError.message })
       return failure(uploadError.message || 'Error al subir archivo', 'INTERNAL')
@@ -716,7 +712,6 @@ export const uploadSupplierDeliveryNoteAttachment = protectedAction<FormData, { 
       .eq('id', id)
       .select('id, attachment_url')
       .single()
-    console.log('[update attachment_url result]', { data: updateData, error: updateError })
     if (updateError || !updateData?.id) {
       console.error('[uploadSupplierDeliveryNoteAttachment] update error', { id, message: updateError?.message })
       return failure(updateError?.message || 'Error al asociar archivo', 'INTERNAL')

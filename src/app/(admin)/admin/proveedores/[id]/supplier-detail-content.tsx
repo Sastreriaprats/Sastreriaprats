@@ -183,13 +183,10 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
   }, [newOrderOpen, fabricSearchForLine, fabricSearchQuery, supplier.id])
 
   useEffect(() => {
-    console.log('[useEffect productos] triggered, query:', productSearchQuery)
     if (!newOrderOpen || !productSearchForLine) return
     if (productSearchTimeoutRef.current) clearTimeout(productSearchTimeoutRef.current)
     productSearchTimeoutRef.current = setTimeout(() => {
-      console.log('[searchSupplierProducts] query:', productSearchQuery, 'supplierId:', supplier.id)
       searchSupplierProducts({ supplierId: supplier.id, query: productSearchQuery }).then((res) => {
-        console.log('[searchSupplierProducts] result:', res)
         if (res.success) setProductSearchResults(res.data)
         else setProductSearchResults([])
       })
@@ -263,8 +260,6 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
     const fd = new FormData()
     fd.append('id', targetId)
     fd.append('file', file)
-    console.log('[upload-albaran] id del albarán:', targetId)
-    console.log('[upload-albaran] archivo:', file?.name, file?.size, file?.type)
     const uploaded = await uploadSupplierDeliveryNoteAttachment(fd)
     setUploadingDeliveryNoteId(null)
     selectedDeliveryNoteIdRef.current = null
@@ -1418,8 +1413,6 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                   const fd = new FormData()
                   fd.append('id', created.data.id)
                   fd.append('file', deliveryFile)
-                  console.log('[upload-albaran] id del albarán:', created.data.id)
-                  console.log('[upload-albaran] archivo:', deliveryFile?.name, deliveryFile?.size, deliveryFile?.type)
                   const uploaded = await uploadSupplierDeliveryNoteAttachment(fd)
                   if (!uploaded.success) {
                     setCreatingDelivery(false)

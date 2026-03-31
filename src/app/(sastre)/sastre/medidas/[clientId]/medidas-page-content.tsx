@@ -224,12 +224,7 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
     const bodyPromise = getClientMeasurements({ clientId, garmentTypeId: bodyGarmentTypeId }).then((result: any) => {
       if (result?.success && result?.data?.length > 0) {
         const current = result.data.find((m: any) => m.is_current) ?? result.data[0]
-        console.log('[DEBUG] current.values:', JSON.stringify(current.values))
-        console.log('[DEBUG] normalized:', JSON.stringify(normalizeValues(current.values)))
         setValues((prev) => ({ ...prev, ...normalizeValues(current.values) }))
-        setTimeout(() => {
-          console.log('[DEBUG] values en estado tras setValues:', JSON.stringify(values))
-        }, 500)
         setBodyHistorial(result.data)
         setSelectedHistoryId((id) => id ?? current.id)
       } else {
@@ -471,8 +466,6 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
                         if (!byGroup[key]) byGroup[key] = []
                         byGroup[key].push(f)
                       }
-                      console.log('[DEBUG] measurementFields para', currentGroup?.name, ':', measurementFields?.map((f) => ({ code: f.code, vKey: valueKey(groupPrefix, f.code) })))
-                      console.log('[DEBUG] values actuales:', JSON.stringify(values))
                       return Object.entries(byGroup).map(([groupName, groupFields]) => (
                         <div key={groupName}>
                           {groupName !== '__default__' && (

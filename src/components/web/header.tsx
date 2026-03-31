@@ -3,10 +3,10 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { useState, useEffect, useMemo } from 'react'
-import { usePathname } from 'next/navigation'
 import { ShoppingBag, Menu, Search, ChevronLeft, ChevronRight, ChevronDown, Facebook, Instagram, Linkedin, Mail } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
+import { SOCIAL_LINKS } from '@/lib/constants'
 import type { WebCategory } from '@/actions/cms'
 
 type NavChild = {
@@ -98,7 +98,7 @@ function MenuSubItem({ child, onClose }: { child: NavChild; onClose: () => void 
       <Link
         href={child.href}
         onClick={onClose}
-        className="block py-2 text-sm text-gray-600 hover:text-black transition-colors"
+        className="block py-2 text-sm text-gray-600 hover:text-black transition-colors focus-visible:ring-2 focus-visible:ring-prats-gold focus-visible:outline-none rounded"
       >
         {child.label}
       </Link>
@@ -123,7 +123,7 @@ function MenuSubItem({ child, onClose }: { child: NavChild; onClose: () => void 
               key={sub.href}
               href={sub.href}
               onClick={onClose}
-              className="block py-1.5 text-xs text-gray-500 hover:text-black transition-colors"
+              className="block py-1.5 text-xs text-gray-500 hover:text-black transition-colors focus-visible:ring-2 focus-visible:ring-prats-gold focus-visible:outline-none rounded"
             >
               {sub.label}
             </Link>
@@ -142,7 +142,7 @@ function MenuNavItem({ item, onClose }: { item: NavItem; onClose: () => void }) 
       <Link
         href={item.href}
         onClick={onClose}
-        className="block py-3 text-base text-gray-800 hover:text-black transition-colors border-b border-gray-100"
+        className="block py-3 text-base text-gray-800 hover:text-black transition-colors border-b border-gray-100 focus-visible:ring-2 focus-visible:ring-prats-gold focus-visible:outline-none"
       >
         {item.label}
       </Link>
@@ -153,7 +153,7 @@ function MenuNavItem({ item, onClose }: { item: NavItem; onClose: () => void }) 
     <div className="border-b border-gray-100">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center justify-between w-full py-3 text-base text-gray-800 hover:text-black transition-colors"
+        className="flex items-center justify-between w-full py-3 text-base text-gray-800 hover:text-black transition-colors focus-visible:ring-2 focus-visible:ring-prats-gold focus-visible:outline-none"
       >
         <Link href={item.href} onClick={onClose} className="hover:underline">
           {item.label}
@@ -174,7 +174,6 @@ function MenuNavItem({ item, onClose }: { item: NavItem; onClose: () => void }) 
 }
 
 export function WebHeader({ announcementText, categories = [] }: { announcementText?: string; categories?: WebCategory[] }) {
-  const pathname = usePathname()
   const supabase = useMemo(() => createClient(), [])
   const [isOpen, setIsOpen] = useState(false)
   const [cartCount, setCartCount] = useState(0)
@@ -275,9 +274,9 @@ export function WebHeader({ announcementText, categories = [] }: { announcementT
                     <Link
                       href={isLoggedIn ? '/mi-cuenta' : '/auth/login?mode=client'}
                       onClick={() => setIsOpen(false)}
-                      className="block py-3 text-base text-gray-800 hover:text-black transition-colors border-b border-gray-100"
+                      className="block py-3 text-base text-gray-800 hover:text-black transition-colors border-b border-gray-100 focus-visible:ring-2 focus-visible:ring-prats-gold focus-visible:outline-none"
                     >
-                      {isLoggedIn ? 'Mi cuenta' : 'Entrar'}
+                      {isLoggedIn ? 'Mi cuenta' : 'Iniciar sesión'}
                     </Link>
                   </nav>
 
@@ -288,22 +287,22 @@ export function WebHeader({ announcementText, categories = [] }: { announcementT
 
                   {/* Redes sociales */}
                   <div className="px-5 py-4 border-t border-gray-100 flex items-center gap-4">
-                    <a href="https://instagram.com/sastreriaprats" target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="Instagram">
+                    <a href={SOCIAL_LINKS.instagram} target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="Instagram">
                       <Instagram className="h-5 w-5" />
                     </a>
-                    <a href="https://www.facebook.com/sastreriafprats/?locale=es_ES" target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="Facebook">
+                    <a href={SOCIAL_LINKS.facebook} target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="Facebook">
                       <Facebook className="h-5 w-5" />
                     </a>
-                    <a href="https://tiktok.com/@sastreriaprats" target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="TikTok">
+                    <a href={SOCIAL_LINKS.tiktok} target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="TikTok">
                       <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 00-.79-.05A6.34 6.34 0 003.15 15.2a6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V8.71a8.19 8.19 0 004.76 1.52V6.79a4.85 4.85 0 01-1-.1z"/></svg>
                     </a>
-                    <a href="https://www.linkedin.com/company/sastreria-prats/?viewAsMember=true" target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="LinkedIn">
+                    <a href={SOCIAL_LINKS.linkedin} target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="LinkedIn">
                       <Linkedin className="h-5 w-5" />
                     </a>
-                    <a href="https://www.youtube.com/@Sastrer%C3%ADaPrats" target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="YouTube">
+                    <a href={SOCIAL_LINKS.youtube} target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="YouTube">
                       <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.546 12 3.546 12 3.546s-7.505 0-9.377.504A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.122 2.136c1.871.504 9.376.504 9.376.504s7.505 0 9.377-.504a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
                     </a>
-                    <a href="mailto:info@sastreriaprats.com" className="text-gray-800 hover:text-black" aria-label="Email">
+                    <a href={SOCIAL_LINKS.email} className="text-gray-800 hover:text-black" aria-label="Email">
                       <Mail className="h-5 w-5" />
                     </a>
                   </div>

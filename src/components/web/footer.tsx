@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { Facebook, Instagram, Linkedin, Mail } from 'lucide-react'
 import { CookieSettingsButton } from '@/components/legal/cookie-settings-button'
 import { NewsletterForm } from '@/components/web/newsletter-form'
+import { BRAND, STORE_LOCATIONS, SOCIAL_LINKS } from '@/lib/constants'
 
 export function WebFooter() {
   return (
@@ -15,7 +16,7 @@ export function WebFooter() {
               Descubre consejos de estilo, lanzamientos exclusivos y mucho más.
             </p>
             <NewsletterForm />
-            <p className="mt-3 text-[11px] text-gray-400">
+            <p className="mt-3 text-[11px] text-gray-500">
               Al suscribirte aceptas nuestra{' '}
               <Link href="/privacidad" className="underline hover:text-gray-600">política de privacidad</Link>.
               Puedes darte de baja en cualquier momento.
@@ -41,28 +42,28 @@ export function WebFooter() {
           {/* Col 2: Boutiques y contacto */}
           <div className="md:col-span-1">
             <p className="text-sm font-medium text-black mb-3">Nuestras boutiques:</p>
-            <p className="text-sm text-gray-600">Calle Hermanos Pinzón, 4 - 28036 Madrid</p>
+            <p className="text-sm text-gray-600">{STORE_LOCATIONS.pinzon.fullAddress}</p>
             <a href="tel:+34912401845" className="text-sm text-gray-600 underline hover:text-black transition-colors block">
-              +34 912 401 845
+              {STORE_LOCATIONS.pinzon.phones[0]}
             </a>
-            <p className="text-sm text-gray-600 mt-2">Calle Velázquez, 8 - 28001 Madrid (Wellington Hotel &amp; Spa)</p>
+            <p className="text-sm text-gray-600 mt-2">{STORE_LOCATIONS.wellington.fullAddress} (Wellington Hotel &amp; Spa)</p>
             <a href="tel:+34671353465" className="text-sm text-gray-600 underline hover:text-black transition-colors block">
-              +34 671 35 34 65
+              {STORE_LOCATIONS.wellington.phones[0]}
             </a>
 
             <p className="text-sm font-medium text-black mt-6 mb-2">Para consultas generales</p>
-            <a href="mailto:info@sastreriaprats.com" className="text-sm text-gray-600 underline hover:text-black transition-colors block">
-              info@sastreriaprats.com
+            <a href={SOCIAL_LINKS.email} className="text-sm text-gray-600 underline hover:text-black transition-colors block">
+              {BRAND.email}
             </a>
             <a href="tel:+34669985547" className="text-sm text-gray-600 underline hover:text-black transition-colors block mt-1">
-              +34 669 98 55 47
+              {BRAND.phone}
             </a>
 
             <p className="text-sm font-medium text-black mt-6 mb-2">Nuestros horarios</p>
             <p className="text-sm text-gray-600 font-medium">Hermanos Pinzón:</p>
-            <p className="text-sm text-gray-600">Lunes a Viernes 10:00 – 20:00 | Sábados 10:00 – 14:00</p>
+            <p className="text-sm text-gray-600">Lunes a Viernes {STORE_LOCATIONS.pinzon.hours.weekdays} | Sábados {STORE_LOCATIONS.pinzon.hours.saturday}</p>
             <p className="text-sm text-gray-600 font-medium mt-2">Wellington:</p>
-            <p className="text-sm text-gray-600">Lunes a Viernes 10:00 – 14:00 | 16:30 – 20:30 | Sábados 10:00 – 14:00</p>
+            <p className="text-sm text-gray-600">Lunes a Viernes {STORE_LOCATIONS.wellington.hours.weekdays} | Sábados {STORE_LOCATIONS.wellington.hours.saturday}</p>
             <p className="text-sm text-gray-600 font-medium mt-2">Domingos: Cerrado</p>
           </div>
 
@@ -82,34 +83,34 @@ export function WebFooter() {
             <h4 className="text-sm font-bold uppercase tracking-wide text-black mb-4">SÍGUENOS</h4>
             <ul className="space-y-2">
               <li>
-                <a href="https://www.facebook.com/sastreriafprats/?locale=es_ES" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-black transition-colors">
+                <a href={SOCIAL_LINKS.facebook} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-black transition-colors">
                   <Facebook className="h-4 w-4" /> Facebook
                 </a>
               </li>
               <li>
-                <a href="https://instagram.com/sastreriaprats" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-black transition-colors">
+                <a href={SOCIAL_LINKS.instagram} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-black transition-colors">
                   <Instagram className="h-4 w-4" /> Instagram
                 </a>
               </li>
               <li>
-                <a href="https://tiktok.com/@sastreriaprats" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-black transition-colors">
+                <a href={SOCIAL_LINKS.tiktok} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-black transition-colors">
                   <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 00-.79-.05A6.34 6.34 0 003.15 15.2a6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V8.71a8.19 8.19 0 004.76 1.52V6.79a4.85 4.85 0 01-1-.1z"/></svg>
                   TikTok
                 </a>
               </li>
               <li>
-                <a href="https://www.linkedin.com/company/sastreria-prats/?viewAsMember=true" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-black transition-colors">
+                <a href={SOCIAL_LINKS.linkedin} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-black transition-colors">
                   <Linkedin className="h-4 w-4" /> LinkedIn
                 </a>
               </li>
               <li>
-                <a href="https://www.youtube.com/@Sastrer%C3%ADaPrats" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-black transition-colors">
+                <a href={SOCIAL_LINKS.youtube} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-black transition-colors">
                   <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.546 12 3.546 12 3.546s-7.505 0-9.377.504A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.122 2.136c1.871.504 9.376.504 9.376.504s7.505 0 9.377-.504a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
                   YouTube
                 </a>
               </li>
               <li>
-                <a href="mailto:info@sastreriaprats.com" className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-black transition-colors">
+                <a href={SOCIAL_LINKS.email} className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-black transition-colors">
                   <Mail className="h-4 w-4" /> Email
                 </a>
               </li>
@@ -135,12 +136,12 @@ export function WebFooter() {
             ))}
           </div>
 
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-gray-500">
             Derechos de autor © {new Date().getFullYear()} Sastrería Prats.
           </p>
         </div>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4">
-          <div className="flex gap-4 text-xs text-gray-400">
+          <div className="flex gap-4 text-xs text-gray-500">
             <Link href="/privacidad" className="hover:text-gray-600 transition-colors">Privacidad</Link>
             <Link href="/cookies" className="hover:text-gray-600 transition-colors">Cookies</Link>
             <Link href="/aviso-legal" className="hover:text-gray-600 transition-colors">Aviso legal</Link>

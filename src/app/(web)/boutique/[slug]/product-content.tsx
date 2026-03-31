@@ -190,7 +190,7 @@ export function ProductContent({ slug }: { slug: string }) {
                     i === activeImage ? 'border-prats-navy' : 'border-transparent hover:border-gray-300'
                   )}
                 >
-                  <Image src={img.url} alt="" width={80} height={80} className="object-cover" />
+                  <Image src={img.url} alt={img.alt_text || 'Miniatura del producto'} width={80} height={80} className="object-cover" />
                 </button>
               ))}
             </div>

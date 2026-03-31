@@ -84,10 +84,10 @@ export const MAX_PAGE_SIZE = 100
 
 export const BRAND = {
   name: 'Sastrería Prats',
-  legalName: 'Sastrería Prats S.L.',
+  legalName: 'Prast, Eugercios y González S.L.',
   domain: 'sastreriaprats.com',
   email: 'info@sastreriaprats.com',
-  phone: '+34 XXX XXX XXX',
+  phone: '+34 669 98 55 47',
   colors: {
     navy: '#1B2A4A',
     orange: '#C4854C',
@@ -95,4 +95,37 @@ export const BRAND = {
     gold: '#B8944F',
     white: '#FFFFFF',
   },
+} as const
+
+export const STORE_LOCATIONS = {
+  pinzon: {
+    name: 'Hermanos Pinzón',
+    address: 'Calle Hermanos Pinzón, 4',
+    postalCode: '28036',
+    city: 'Madrid',
+    fullAddress: 'Calle Hermanos Pinzón, 4 - 28036 Madrid',
+    phones: ['+34 912 401 845', '+34 669 98 55 47'],
+    hours: { weekdays: '10:00 – 20:00', saturday: '10:00 – 14:00', sunday: 'Cerrado' },
+    mapsUrl: 'https://maps.app.goo.gl/Vf8puqTToyqvTirq5',
+  },
+  wellington: {
+    name: 'Wellington',
+    subtitle: 'Wellington Hotel & Spa',
+    address: 'Calle Velázquez, 8',
+    postalCode: '28001',
+    city: 'Madrid',
+    fullAddress: 'Calle Velázquez, 8 - 28001 Madrid',
+    phones: ['+34 671 35 34 65'],
+    hours: { weekdays: '10:00 – 14:00 | 16:30 – 20:30', saturday: '10:00 – 14:00', sunday: 'Cerrado' },
+    mapsUrl: 'https://maps.app.goo.gl/Cd36bN32ctpTmtub8',
+  },
+} as const
+
+export const SOCIAL_LINKS = {
+  instagram: 'https://www.instagram.com/sastreriaprats/',
+  facebook: 'https://www.facebook.com/sastreriafprats/',
+  tiktok: 'https://www.tiktok.com/@sastreriaprats',
+  linkedin: 'https://www.linkedin.com/company/sastreria-prats/',
+  youtube: 'https://www.youtube.com/@Sastrer%C3%ADaPrats',
+  email: 'mailto:info@sastreriaprats.com',
 } as const

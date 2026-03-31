@@ -1,6 +1,7 @@
 import { Metadata } from 'next'
 import { MapPin, Phone, Clock, ExternalLink } from 'lucide-react'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { BRAND, STORE_LOCATIONS } from '@/lib/constants'
 
 export const revalidate = 3600
 
@@ -22,33 +23,33 @@ type StoreInfo = {
 
 const FALLBACK_STORES: StoreInfo[] = [
   {
-    name: 'Hermanos Pinzón',
-    subtitle: 'Calle Hermanos Pinzón, 4',
-    address: 'Calle Hermanos Pinzón, 4 - 28036 Madrid',
+    name: STORE_LOCATIONS.pinzon.name,
+    subtitle: STORE_LOCATIONS.pinzon.address,
+    address: STORE_LOCATIONS.pinzon.fullAddress,
     phones: [
-      { label: 'Tienda', number: '+34 912 401 845' },
-      { label: 'General', number: '+34 669 98 55 47' },
+      { label: 'Tienda', number: STORE_LOCATIONS.pinzon.phones[0] },
+      { label: 'General', number: BRAND.phone },
     ],
     hours: [
-      { label: 'Lunes a Viernes', detail: '10:00 – 20:00' },
-      { label: 'Sábados', detail: '10:00 – 14:00' },
+      { label: 'Lunes a Viernes', detail: STORE_LOCATIONS.pinzon.hours.weekdays },
+      { label: 'Sábados', detail: STORE_LOCATIONS.pinzon.hours.saturday },
     ],
-    closed: 'Domingos: Cerrado',
-    mapsUrl: 'https://maps.app.goo.gl/Vf8puqTToyqvTirq5',
+    closed: `Domingos: ${STORE_LOCATIONS.pinzon.hours.sunday}`,
+    mapsUrl: STORE_LOCATIONS.pinzon.mapsUrl,
   },
   {
-    name: 'Wellington',
-    subtitle: 'Wellington Hotel & Spa',
-    address: 'Calle Velázquez, 8 - 28001 Madrid',
+    name: STORE_LOCATIONS.wellington.name,
+    subtitle: STORE_LOCATIONS.wellington.subtitle!,
+    address: STORE_LOCATIONS.wellington.fullAddress,
     phones: [
-      { label: 'Tienda', number: '+34 671 35 34 65' },
+      { label: 'Tienda', number: STORE_LOCATIONS.wellington.phones[0] },
     ],
     hours: [
-      { label: 'Lunes a Viernes', detail: '10:00 – 14:00 | 16:30 – 20:30' },
-      { label: 'Sábados', detail: '10:00 – 14:00' },
+      { label: 'Lunes a Viernes', detail: STORE_LOCATIONS.wellington.hours.weekdays },
+      { label: 'Sábados', detail: STORE_LOCATIONS.wellington.hours.saturday },
     ],
-    closed: 'Domingos: Cerrado',
-    mapsUrl: 'https://maps.app.goo.gl/Cd36bN32ctpTmtub8',
+    closed: `Domingos: ${STORE_LOCATIONS.wellington.hours.sunday}`,
+    mapsUrl: STORE_LOCATIONS.wellington.mapsUrl,
   },
 ]
 

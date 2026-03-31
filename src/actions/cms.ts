@@ -457,6 +457,19 @@ export const upsertBlogPost = protectedAction<Record<string, unknown>, unknown>(
   }
 )
 
+export const getBlogPost = protectedAction<string, unknown>(
+  { permission: 'cms.edit', auditModule: 'cms' },
+  async (ctx, id) => {
+    const { data, error } = await ctx.adminClient
+      .from('blog_posts')
+      .select('*')
+      .eq('id', id)
+      .single()
+    if (error) return failure(error.message)
+    return success(data)
+  }
+)
+
 export async function getPublicBlogPosts(limit: number = 10) {
   try {
     const { createAdminClient } = await import('@/lib/supabase/admin')

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import Image from 'next/image'
 import { getPublicBlogPosts } from '@/actions/cms'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
@@ -40,12 +41,14 @@ export default async function BlogPage() {
             className="group flex flex-col"
           >
             <Link href={`/blog/${post.slug}`} className="flex flex-col flex-1">
-              <div className="aspect-[4/3] overflow-hidden rounded-lg bg-prats-cream">
+              <div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-prats-cream">
                 {post.featured_image_url ? (
-                  <img
+                  <Image
                     src={post.featured_image_url}
-                    alt=""
-                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                    alt={post.title_es || 'Imagen del artículo'}
+                    fill
+                    sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                    className="object-cover transition-transform duration-300 group-hover:scale-105"
                   />
                 ) : (
                   <div

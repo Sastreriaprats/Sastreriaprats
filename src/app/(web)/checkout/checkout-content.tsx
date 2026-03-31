@@ -213,7 +213,7 @@ export function CheckoutContent() {
               >
                 <Truck className="h-5 w-5 text-prats-navy mb-2" />
                 <p className="text-sm font-medium">Envío a domicilio</p>
-                <p className="text-xs text-gray-400">Recibe tu pedido en casa</p>
+                <p className="text-xs text-gray-500">Recibe tu pedido en casa</p>
               </button>
               <button
                 type="button"
@@ -225,7 +225,7 @@ export function CheckoutContent() {
               >
                 <Store className="h-5 w-5 text-prats-navy mb-2" />
                 <p className="text-sm font-medium">Recoger en tienda</p>
-                <p className="text-xs text-gray-400">Sin coste de envío</p>
+                <p className="text-xs text-gray-500">Sin coste de envío</p>
               </button>
             </div>
           </section>
@@ -235,24 +235,27 @@ export function CheckoutContent() {
             <h2 className="text-lg font-semibold text-prats-navy mb-4">Contacto</h2>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
-                <Label className="text-xs">Nombre *</Label>
+                <Label className="text-xs" htmlFor="checkout-first-name">Nombre *</Label>
                 <Input
+                  id="checkout-first-name"
                   value={form.first_name}
                   onChange={e => setForm(p => ({ ...p, first_name: e.target.value }))}
                   className="h-11"
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Apellidos *</Label>
+                <Label className="text-xs" htmlFor="checkout-last-name">Apellidos *</Label>
                 <Input
+                  id="checkout-last-name"
                   value={form.last_name}
                   onChange={e => setForm(p => ({ ...p, last_name: e.target.value }))}
                   className="h-11"
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Email *</Label>
+                <Label className="text-xs" htmlFor="checkout-email">Email *</Label>
                 <Input
+                  id="checkout-email"
                   type="email"
                   value={form.email}
                   onChange={e => setForm(p => ({ ...p, email: e.target.value }))}
@@ -260,8 +263,9 @@ export function CheckoutContent() {
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Teléfono</Label>
+                <Label className="text-xs" htmlFor="checkout-phone">Teléfono</Label>
                 <Input
+                  id="checkout-phone"
                   value={form.phone}
                   onChange={e => setForm(p => ({ ...p, phone: e.target.value }))}
                   className="h-11"
@@ -290,8 +294,9 @@ export function CheckoutContent() {
             )}
             <div className="space-y-4">
               <div className="space-y-1">
-                <Label className="text-xs">Dirección *</Label>
+                <Label className="text-xs" htmlFor="checkout-address">Dirección *</Label>
                 <Input
+                  id="checkout-address"
                   value={form.address}
                   onChange={e => setForm(p => ({ ...p, address: e.target.value }))}
                   className="h-11"
@@ -299,24 +304,27 @@ export function CheckoutContent() {
               </div>
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-1">
-                  <Label className="text-xs">Ciudad *</Label>
+                  <Label className="text-xs" htmlFor="checkout-city">Ciudad *</Label>
                   <Input
+                    id="checkout-city"
                     value={form.city}
                     onChange={e => setForm(p => ({ ...p, city: e.target.value }))}
                     className="h-11"
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Código postal *</Label>
+                  <Label className="text-xs" htmlFor="checkout-postal-code">Código postal *</Label>
                   <Input
+                    id="checkout-postal-code"
                     value={form.postal_code}
                     onChange={e => setForm(p => ({ ...p, postal_code: e.target.value }))}
                     className="h-11"
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Provincia</Label>
+                  <Label className="text-xs" htmlFor="checkout-province">Provincia</Label>
                   <Input
+                    id="checkout-province"
                     value={form.province}
                     onChange={e => setForm(p => ({ ...p, province: e.target.value }))}
                     className="h-11"
@@ -342,7 +350,7 @@ export function CheckoutContent() {
               >
                 <CreditCard className="h-5 w-5 text-prats-navy mb-2" />
                 <p className="text-sm font-medium">Tarjeta de crédito/débito</p>
-                <p className="text-xs text-gray-400">Visa, Mastercard, Amex</p>
+                <p className="text-xs text-gray-500">Visa, Mastercard, Amex</p>
               </button>
               <button
                 onClick={() => setPaymentMethod('redsys')}
@@ -355,7 +363,7 @@ export function CheckoutContent() {
                   RS
                 </div>
                 <p className="text-sm font-medium">TPV Virtual (Redsys)</p>
-                <p className="text-xs text-gray-400">Tarjetas españolas</p>
+                <p className="text-xs text-gray-500">Tarjetas españolas</p>
               </button>
               {enableDemoPayment && (
                 <button
@@ -384,12 +392,12 @@ export function CheckoutContent() {
                 <div key={item.variant_id} className="flex items-center gap-3">
                   <div className="w-12 h-14 bg-gray-200 rounded overflow-hidden flex-shrink-0 relative">
                     {item.image_url && (
-                      <Image src={item.image_url} alt="" fill className="object-cover" />
+                      <Image src={item.image_url} alt={item.product_name} fill className="object-cover" />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{item.product_name}</p>
-                    <p className="text-xs text-gray-400">
+                    <p className="text-xs text-gray-500">
                       {item.size && `T.${item.size}`} {item.color && `· ${item.color}`} × {item.quantity}
                     </p>
                   </div>
@@ -467,7 +475,7 @@ export function CheckoutContent() {
               )}
               {isProcessing ? 'Procesando...' : `Pagar ${formatPrice(total)}`}
             </Button>
-            <p className="text-xs text-gray-400 text-center mt-3 flex items-center justify-center gap-1">
+            <p className="text-xs text-gray-500 text-center mt-3 flex items-center justify-center gap-1">
               <Lock className="h-3 w-3" />Pago seguro
             </p>
           </div>

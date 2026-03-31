@@ -53,7 +53,9 @@ export function NewsletterForm({ variant = 'inline', dark = false }: Props) {
   return (
     <form onSubmit={handleSubmit} className={isStacked ? 'space-y-3' : ''}>
       <div className={isStacked ? 'space-y-3' : 'flex gap-2'}>
+        <label htmlFor="newsletter-email" className="sr-only">Email</label>
         <input
+          id="newsletter-email"
           type="email"
           required
           value={email}
