@@ -18,6 +18,7 @@ type VariantForLabel = {
   name: string
   barcode: string | null
   base_price: number
+  price_with_tax?: number
 }
 
 export function ImprimirEtiquetasContent({ variantIdsParam, legacyIdsParam }: { variantIdsParam: string; legacyIdsParam?: string }) {
@@ -155,7 +156,7 @@ export function ImprimirEtiquetasContent({ variantIdsParam, legacyIdsParam }: { 
             barcode={v.barcode!}
             productName={v.size ? `${v.name} · Talla ${v.size}` : v.name}
             sku={v.variant_sku || v.sku}
-            price={v.base_price}
+            price={v.price_with_tax ?? v.base_price}
           />
         ))}
       </div>

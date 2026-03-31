@@ -16,7 +16,7 @@ export default async function WishlistPage() {
 
   const { data: wishlist } = await admin
     .from('client_wishlist')
-    .select('*, products(id, name, web_slug, base_price, main_image_url, brand)')
+    .select('*, products(id, name, web_slug, base_price, price_with_tax, main_image_url, brand)')
     .eq('client_id', client?.id)
     .order('created_at', { ascending: false })
 

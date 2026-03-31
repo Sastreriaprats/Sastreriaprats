@@ -110,7 +110,7 @@ export const getProductsWithVariantsForBarcodes = protectedAction<
       .from('product_variants')
       .select(`
         id, variant_sku, size, color, barcode, price_override, product_id,
-        products!inner(id, sku, name, base_price, tax_rate, is_active)
+        products!inner(id, sku, name, base_price, price_with_tax, tax_rate, is_active)
       `)
       .eq('products.is_active', true)
       .eq('is_active', true)
@@ -216,7 +216,7 @@ export const listVariantsForBarcodes = protectedAction<ListParams, ListResult<an
         barcode,
         price_override,
         product_id,
-        products!inner(id, sku, name, base_price, is_active)
+        products!inner(id, sku, name, base_price, price_with_tax, is_active)
       `, { count: 'exact' })
       .eq('products.is_active', true)
       .eq('is_active', true)
@@ -297,7 +297,7 @@ export const listProducts = protectedAction<ListParams, ListResult<any>>(
       },
     }, `
       id, sku, name, product_type, brand, collection, season,
-      base_price, cost_price, main_image_url, color, fabric_meters_used,
+      base_price, price_with_tax, cost_price, main_image_url, color, fabric_meters_used,
       category_id, supplier_id, is_visible_web, is_active, is_sample,
       created_at,
       suppliers(name),
@@ -318,7 +318,7 @@ export const listProductsForSastre = protectedAction<ListParams, ListResult<any>
       ...params,
       searchFields: ['sku', 'name', 'brand', 'barcode'],
     }, `
-      id, sku, name, base_price, category_id, product_type, material, fabric_meters_used,
+      id, sku, name, base_price, price_with_tax, category_id, product_type, material, fabric_meters_used,
       product_categories!products_category_id_fkey(name),
       product_variants(id, stock_levels(quantity))
     `)
@@ -653,7 +653,7 @@ export const moveStockBetweenWarehouses = protectedAction<
         ctx.adminClient.from('warehouses').select('id, store_id').eq('id', fromWarehouseId).single(),
         ctx.adminClient
           .from('product_variants')
-          .select('id, variant_sku, price_override, products!inner(name, sku, base_price)')
+          .select('id, variant_sku, price_override, products!inner(name, sku, base_price, price_with_tax)')
           .eq('id', variantId)
           .single(),
       ])
@@ -1063,7 +1063,7 @@ export const approveStockTransfer = protectedAction<{ id: string }, void>(
           if (!noteErr && note?.id) {
             const { data: lines } = await ctx.adminClient
               .from('stock_transfer_lines')
-              .select('product_variant_id, quantity_requested, quantity_sent, product_variants(variant_sku, products(name, sku, base_price), price_override)')
+              .select('product_variant_id, quantity_requested, quantity_sent, product_variants(variant_sku, products(name, sku, base_price, price_with_tax), price_override)')
               .eq('transfer_id', id)
             if (lines?.length) {
               const payload = lines
@@ -1374,7 +1374,7 @@ export const getProductByBarcode = protectedAction<
       .from('product_variants')
       .select(`
         id, variant_sku, size, color, price_override, product_id, is_active,
-        products!inner(id, sku, name, base_price, tax_rate, main_image_url, cost_price, is_active),
+        products!inner(id, sku, name, base_price, price_with_tax, tax_rate, main_image_url, cost_price, is_active),
         stock_levels(quantity, available, warehouse_id)
       `)
       .eq('barcode', trimmed)
@@ -1412,7 +1412,7 @@ export const getProductByBarcode = protectedAction<
     // 2) Fallback: buscar por producto (legacy, un código por producto)
     const { data: product } = await ctx.adminClient
       .from('products')
-      .select('id, sku, name, base_price, tax_rate, cost_price, main_image_url')
+      .select('id, sku, name, base_price, price_with_tax, tax_rate, cost_price, main_image_url')
       .eq('barcode', trimmed)
       .eq('is_active', true)
       .single()
@@ -1423,7 +1423,7 @@ export const getProductByBarcode = protectedAction<
       .from('product_variants')
       .select(`
         id, variant_sku, size, color, price_override, is_active,
-        products!inner(id, sku, name, base_price, tax_rate, main_image_url, cost_price),
+        products!inner(id, sku, name, base_price, price_with_tax, tax_rate, main_image_url, cost_price),
         stock_levels(quantity, available, warehouse_id)
       `)
       .eq('product_id', product.id)
@@ -1568,7 +1568,7 @@ export const getVariantsByIdsForLabels = protectedAction<
     if (!variantIds.length) return success([])
     const { data } = await ctx.adminClient
       .from('product_variants')
-      .select('id, variant_sku, size, color, barcode, price_override, product_id, products!inner(sku, name, base_price)')
+      .select('id, variant_sku, size, color, barcode, price_override, product_id, products!inner(sku, name, base_price, price_with_tax)')
       .in('id', variantIds)
       .eq('is_active', true)
     const list = (data || []).map((v: any) => {
@@ -1596,7 +1596,7 @@ export const getProductsByIdsForLabels = protectedAction<string[], { id: string;
     if (!ids.length) return success([])
     const { data } = await ctx.adminClient
       .from('products')
-      .select('id, sku, name, barcode, base_price')
+      .select('id, sku, name, barcode, base_price, price_with_tax')
       .in('id', ids)
       .eq('is_active', true)
     const list = (data || []).filter((p: any) => p.barcode)

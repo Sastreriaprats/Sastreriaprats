@@ -160,7 +160,7 @@ export function StockPageContent({ sastreName }: { sastreName: string }) {
                       </div>
                       <div className="shrink-0 text-right">
                         <p className="font-serif text-xl text-[#c9a96e]">
-                          {formatCurrency(Number(p.base_price ?? 0))}
+                          {formatCurrency(Number(p.price_with_tax ?? p.base_price ?? 0))}
                         </p>
                         <p className="text-xs text-white/50 mt-0.5">PVP</p>
                       </div>

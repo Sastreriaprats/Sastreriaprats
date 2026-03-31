@@ -297,7 +297,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
         l.product_variant_id === variant.id ? { ...l, quantity: l.quantity + 1 } : l
       ))
     } else {
-      const price = variant.price_override || variant.products.base_price
+      const price = variant.price_override || variant.products.price_with_tax || variant.products.base_price
       setTicketLines(prev => [...prev, {
         id: crypto.randomUUID(),
         product_variant_id: variant.id,

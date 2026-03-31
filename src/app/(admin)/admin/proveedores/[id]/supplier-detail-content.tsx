@@ -22,6 +22,7 @@ import { createClient } from '@/lib/supabase/client'
 import { searchSupplierFabrics, searchSupplierProducts } from '@/actions/suppliers'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { createSupplierDeliveryNote, uploadSupplierDeliveryNoteAttachment, upsertSupplierDeliveryNoteForOrder } from '@/actions/delivery-notes'
+import { SIZE_TEMPLATES, variantSkuFromSize } from '@/lib/constants-sizes'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -1279,10 +1280,20 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                 onChange={(e) => setQuickProductForm((f) => ({ ...f, cost_price: e.target.value }))} />
             </div>
             <div className="space-y-2">
-              <Label>Tallas <span className="text-xs text-muted-foreground">(separadas por comas)</span></Label>
-              <Input placeholder="36, 37, 38, 39, 40 — o S, M, L, XL" value={quickProductForm.sizes}
+              <Label>Tallas</Label>
+              <Select onValueChange={(key) => {
+                const tmpl = SIZE_TEMPLATES[key]
+                if (tmpl) setQuickProductForm((f) => ({ ...f, sizes: tmpl.sizes.join(', ') }))
+              }}>
+                <SelectTrigger><SelectValue placeholder="Plantilla de tallas..." /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(SIZE_TEMPLATES).map(([key, tmpl]) => (
+                    <SelectItem key={key} value={key}>{tmpl.label} ({tmpl.sizes.length})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input placeholder="O escribe: 36, 37, 38... S, M, L, XL" value={quickProductForm.sizes}
                 onChange={(e) => setQuickProductForm((f) => ({ ...f, sizes: e.target.value }))} />
-              <p className="text-xs text-muted-foreground">Si no tiene tallas, déjalo vacío.</p>
             </div>
           </div>
           <DialogFooter>
@@ -1317,7 +1328,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                   const variants = sizes.map((size) => ({
                     product_id: newProduct.id,
                     size,
-                    variant_sku: `${sku}-${size.toUpperCase().replace(/\s+/g, '')}`,
+                    variant_sku: variantSkuFromSize(sku, size),
                     is_active: true,
                   }))
                   const { error: varErr } = await supabase.from('product_variants').insert(variants)

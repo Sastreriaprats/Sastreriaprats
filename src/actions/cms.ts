@@ -263,7 +263,7 @@ export async function getFeaturedProductsForHome(): Promise<
     const admin = createAdminClient()
     const { data } = await admin
       .from('products')
-      .select('id, name, web_slug, base_price, main_image_url')
+      .select('id, name, web_slug, base_price, price_with_tax, main_image_url')
       .eq('is_active', true)
       .eq('is_visible_web', true)
       .order('created_at', { ascending: false })

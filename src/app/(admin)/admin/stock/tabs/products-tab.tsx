@@ -214,7 +214,7 @@ export function ProductsTab() {
               <SortHeader field="name">Producto</SortHeader>
               <TableHead>Tipo</TableHead>
               <TableHead>Marca</TableHead>
-              <SortHeader field="base_price">PVP</SortHeader>
+              <SortHeader field="price_with_tax">PVP</SortHeader>
               <SortHeader field="cost_price">Coste</SortHeader>
               <TableHead>Proveedor</TableHead>
               <TableHead>Stock / Almacén</TableHead>
@@ -264,7 +264,7 @@ export function ProductsTab() {
                     </Badge>
                   </TableCell>
                   <TableCell className="text-sm">{p.brand || '-'}</TableCell>
-                  <TableCell className="font-medium">{formatCurrency(p.base_price)}{isFabric ? <span className="text-xs text-muted-foreground">/m</span> : null}</TableCell>
+                  <TableCell className="font-medium">{formatCurrency(p.price_with_tax ?? p.base_price)}{isFabric ? <span className="text-xs text-muted-foreground">/m</span> : null}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{p.cost_price ? formatCurrency(p.cost_price) : '-'}</TableCell>
                   <TableCell className="text-sm">{p.suppliers?.name || '-'}</TableCell>
                   <TableCell>

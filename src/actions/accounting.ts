@@ -326,7 +326,7 @@ export const getProductsForInvoice = protectedAction<
   async (ctx, { search }) => {
     let q = ctx.adminClient
       .from('products')
-      .select('id, name, sku, base_price')
+      .select('id, name, sku, base_price, price_with_tax')
       .eq('is_active', true)
       .order('name')
       .limit(50)

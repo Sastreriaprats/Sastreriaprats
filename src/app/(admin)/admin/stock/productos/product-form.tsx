@@ -32,6 +32,7 @@ import { useAction } from '@/hooks/use-action'
 import { createProductAction, updateProductAction, createVariantAction, adjustStock, listPhysicalWarehouses, generateProductSkuAction } from '@/actions/products'
 import { formatCurrency } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
+import { SIZE_TEMPLATES, variantSkuFromSize } from '@/lib/constants-sizes'
 
 const PRODUCT_TYPES = [
   { value: 'boutique', label: 'Boutique' },
@@ -307,6 +308,38 @@ export function ProductForm({
   }
 
   const removeVariant = (id: string) => setVariants((prev) => prev.filter((v) => v.id !== id))
+
+  const applyTemplate = (templateKey: string, replace = false) => {
+    const tmpl = SIZE_TEMPLATES[templateKey]
+    if (!tmpl) return
+    const base = basico.sku.trim()
+    if (!base) {
+      toast.error('Genera el SKU del producto antes de aplicar la plantilla')
+      return
+    }
+    const existingSizes = new Set(variants.map(v => v.size.toUpperCase()))
+    const newVariants: VariantRow[] = []
+    for (const size of tmpl.sizes) {
+      if (!replace && existingSizes.has(size.toUpperCase())) continue
+      newVariants.push({
+        id: crypto.randomUUID(),
+        size,
+        color: '',
+        variant_sku: variantSkuFromSize(base, size),
+        stock_inicial: 0,
+      })
+    }
+    if (replace) {
+      setVariants(newVariants)
+      toast.success(`${newVariants.length} tallas de "${tmpl.label}" aplicadas`)
+    } else {
+      setVariants(prev => [...prev, ...newVariants])
+      toast.success(`${newVariants.length} tallas añadidas de "${tmpl.label}"`)
+    }
+    setShowAddVariant(false)
+  }
+
+  const [pendingTemplate, setPendingTemplate] = useState<string | null>(null)
 
   const addTag = () => {
     const t = web.tagInput.trim()
@@ -814,6 +847,42 @@ export function ProductForm({
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Plantilla de tallas */}
+              {!isEdit && (
+                <div className="rounded-lg border p-3 bg-muted/20 space-y-2">
+                  <Label className="text-sm">Plantilla de tallas</Label>
+                  <div className="flex gap-2">
+                    <Select onValueChange={(key) => {
+                      if (variants.length > 0) {
+                        setPendingTemplate(key)
+                      } else {
+                        applyTemplate(key)
+                      }
+                    }}>
+                      <SelectTrigger className="flex-1"><SelectValue placeholder="Seleccionar plantilla..." /></SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(SIZE_TEMPLATES).map(([key, tmpl]) => (
+                          <SelectItem key={key} value={key}>{tmpl.label} ({tmpl.sizes.length} tallas)</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {pendingTemplate && (
+                    <div className="flex items-center gap-2 rounded border border-amber-200 bg-amber-50 p-2 text-sm">
+                      <span className="flex-1 text-amber-800">Ya hay {variants.length} variantes. ¿Qué quieres hacer?</span>
+                      <Button size="sm" variant="outline" className="text-xs" onClick={() => { applyTemplate(pendingTemplate); setPendingTemplate(null) }}>
+                        Añadir
+                      </Button>
+                      <Button size="sm" variant="destructive" className="text-xs" onClick={() => { applyTemplate(pendingTemplate, true); setPendingTemplate(null) }}>
+                        Reemplazar
+                      </Button>
+                      <Button size="sm" variant="ghost" className="text-xs" onClick={() => setPendingTemplate(null)}>
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
               {!isEdit && warehouses.length > 0 && (
                 <div className="rounded-lg border p-3 bg-muted/20">
                   <Label className="text-sm">Almacén para stock inicial (variantes)</Label>

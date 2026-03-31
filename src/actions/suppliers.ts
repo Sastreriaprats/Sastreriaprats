@@ -44,27 +44,41 @@ export const searchSupplierFabrics = protectedAction<
   }
 )
 
-/** Busca productos de un proveedor por nombre (ilike). */
+/** Busca productos para pedido a proveedor: primero los del proveedor, luego el resto. */
 export const searchSupplierProducts = protectedAction<
   { supplierId: string; query?: string },
-  { id: string; name: string; sku: string; cost_price: number | null; main_image_url: string | null; images: string[] | null }[]
+  { id: string; name: string; sku: string; cost_price: number | null; main_image_url: string | null; images: string[] | null; supplier_id: string | null }[]
 >(
   { permission: 'suppliers.view' },
   async (ctx, { supplierId, query }) => {
     if (!supplierId?.trim()) return success([])
+    const searchTerm = query?.trim() || ''
+
+    // Buscar en TODOS los productos activos (no filtrar por supplier_id)
     let q = ctx.adminClient
       .from('products')
-      .select('id, name, sku, cost_price, main_image_url, images')
-      .eq('supplier_id', supplierId.trim())
+      .select('id, name, sku, cost_price, main_image_url, images, supplier_id')
       .eq('is_active', true)
       .order('name', { ascending: true })
-      .limit(20)
-    if (query?.trim()) {
-      q = q.ilike('name', `%${query.trim()}%`)
+      .limit(30)
+
+    if (searchTerm) {
+      q = q.or(`name.ilike.%${searchTerm}%,sku.ilike.%${searchTerm}%,brand.ilike.%${searchTerm}%`)
     }
+
     const { data, error } = await q
     if (error) return failure(error.message)
-    return success((data ?? []) as { id: string; name: string; sku: string; cost_price: number | null; main_image_url: string | null; images: string[] | null }[])
+    const rows = (data ?? []) as { id: string; name: string; sku: string; cost_price: number | null; main_image_url: string | null; images: string[] | null; supplier_id: string | null }[]
+
+    // Ordenar: primero los del proveedor actual, luego el resto
+    const sid = supplierId.trim()
+    rows.sort((a, b) => {
+      const aMatch = a.supplier_id === sid ? 0 : 1
+      const bMatch = b.supplier_id === sid ? 0 : 1
+      return aMatch - bMatch
+    })
+
+    return success(rows)
   }
 )
 
@@ -825,6 +839,18 @@ export const createSupplierOrderAction = protectedAction<
           }))
         )
       if (linesError) return failure(linesError.message || 'Pedido creado, pero hubo un error guardando las líneas')
+
+      // Asignar proveedor a productos que no lo tengan
+      const productIdsToAssign = cleanedLines
+        .filter(l => l.product_id)
+        .map(l => l.product_id as string)
+      if (productIdsToAssign.length > 0) {
+        await ctx.adminClient
+          .from('products')
+          .update({ supplier_id: supplier_id.trim() })
+          .in('id', productIdsToAssign)
+          .is('supplier_id', null)
+      }
     }
 
     let apInvoiceId: string | undefined
