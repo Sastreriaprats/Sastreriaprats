@@ -12,7 +12,11 @@ export default async function NewProductPage() {
     admin.from('product_categories').select('id, name, slug, product_type').eq('is_active', true).order('sort_order').order('name'),
     admin.from('suppliers').select('id, name').eq('is_active', true).order('name'),
   ])
-  const excludedCategorySlugs = ['punto', 'ceremonia', 'chaque', 'smoking']
-  const filteredCategories = (categories || []).filter((c: { slug: string }) => !excludedCategorySlugs.includes(c.slug))
-  return <NewProductForm categories={filteredCategories} suppliers={suppliers || []} />
+  // Solo categorías de gestión interna (nivel 0, no tejidos, no servicios, no subcategorías web)
+  const managementSlugs = new Set([
+    'americana', 'camisa', 'complemento', 'pantalon', 'prenda-exterior',
+    'punto', 'ropa-interior-hogar', 'traje-de-bano', 'trajes', 'varios', 'zapato',
+  ])
+  const filtered = (categories || []).filter((c: any) => managementSlugs.has(c.slug))
+  return <NewProductForm categories={filtered} suppliers={suppliers || []} />
 }

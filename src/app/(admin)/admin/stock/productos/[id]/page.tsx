@@ -39,12 +39,15 @@ export default async function ProductDetailPage(props: { params: Promise<{ id: s
   ])
 
   if (!product) notFound()
-  const excludedCategorySlugs = ['punto', 'ceremonia', 'chaque', 'smoking']
-  const filteredCategories = (categories || []).filter((c: { slug: string }) => !excludedCategorySlugs.includes(c.slug))
+  const managementSlugs = new Set([
+    'americana', 'camisa', 'complemento', 'pantalon', 'prenda-exterior',
+    'punto', 'ropa-interior-hogar', 'traje-de-bano', 'trajes', 'varios', 'zapato',
+  ])
+  const filtered = (categories || []).filter((c: any) => managementSlugs.has(c.slug))
   return (
     <ProductDetailContent
       product={product}
-      categories={filteredCategories}
+      categories={filtered}
       suppliers={suppliers || []}
       physicalWarehouses={physicalWarehouses || []}
     />

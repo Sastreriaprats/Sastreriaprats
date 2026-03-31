@@ -426,7 +426,7 @@ export const getSupplierOrderLines = protectedAction<
     if (!supplierOrderId?.trim()) return success([])
     const { data, error } = await ctx.adminClient
       .from('supplier_order_lines')
-      .select('id, supplier_order_id, fabric_id, product_id, description, reference, quantity, quantity_received, unit')
+      .select('id, supplier_order_id, fabric_id, product_id, product_variant_id, description, reference, quantity, quantity_received, unit')
       .eq('supplier_order_id', supplierOrderId)
       .order('sort_order', { ascending: true })
     if (error) return failure(error.message)
@@ -487,7 +487,7 @@ export const receiveSupplierOrderLines = protectedAction<
 
     const { data: dbLines, error: linesErr } = await ctx.adminClient
       .from('supplier_order_lines')
-      .select('id, product_id, fabric_id, quantity, quantity_received')
+      .select('id, product_id, product_variant_id, fabric_id, quantity, quantity_received')
       .eq('supplier_order_id', orderId)
     if (linesErr) return failure(linesErr.message || 'Error al cargar líneas', 'INTERNAL')
 
@@ -526,7 +526,9 @@ export const receiveSupplierOrderLines = protectedAction<
           stockWarnings += 1
         }
       } else if (input.type === 'product' && input.referenceId) {
-        const variantId = await pickVariantForProduct(ctx.adminClient, input.referenceId)
+        // Usar product_variant_id de la línea si existe, sino fallback a pickVariantForProduct
+        const dbLineVariantId = (dbLine as any).product_variant_id as string | null
+        const variantId = dbLineVariantId || await pickVariantForProduct(ctx.adminClient, input.referenceId)
         if (!variantId) {
           stockWarnings += 1
           continue
@@ -717,6 +719,59 @@ export const updateSupplierOrderFinanceAction = protectedAction<
   }
 )
 
+export const deleteSupplierOrderAction = protectedAction<
+  string,
+  { deleted: boolean }
+>(
+  {
+    permission: 'suppliers.create_order',
+    auditModule: 'suppliers',
+    auditAction: 'delete',
+    auditEntity: 'supplier_order',
+    revalidate: ['/admin/proveedores'],
+  },
+  async (ctx, orderId) => {
+    if (!orderId?.trim()) return failure('ID del pedido obligatorio', 'VALIDATION')
+
+    const { data: order, error: orderErr } = await ctx.adminClient
+      .from('supplier_orders')
+      .select('id, order_number, status')
+      .eq('id', orderId.trim())
+      .single()
+    if (orderErr || !order) return failure('Pedido no encontrado', 'NOT_FOUND')
+
+    const status = (order as any).status
+    if (status === 'cancelled') {
+      return failure('Este pedido ya está cancelado', 'VALIDATION')
+    }
+
+    // Delete in FK dependency order
+    // 1. delivery note lines
+    const { data: notes } = await ctx.adminClient
+      .from('supplier_delivery_notes')
+      .select('id')
+      .eq('supplier_order_id', orderId)
+    const noteIds = (notes || []).map((n: any) => n.id)
+    if (noteIds.length > 0) {
+      await ctx.adminClient.from('supplier_delivery_note_lines').delete().in('delivery_note_id', noteIds)
+    }
+    // 2. delivery notes
+    await ctx.adminClient.from('supplier_delivery_notes').delete().eq('supplier_order_id', orderId)
+    // 3. supplier invoices
+    await ctx.adminClient.from('ap_supplier_invoices').delete().eq('supplier_order_id', orderId)
+    // 4. order lines
+    await ctx.adminClient.from('supplier_order_lines').delete().eq('supplier_order_id', orderId)
+    // 5. the order itself
+    const { error: deleteErr } = await ctx.adminClient
+      .from('supplier_orders')
+      .delete()
+      .eq('id', orderId)
+    if (deleteErr) return failure(deleteErr.message || 'Error al eliminar el pedido')
+
+    return success({ deleted: true })
+  }
+)
+
 export type CreateSupplierOrderInput = {
   supplier_id: string
   total?: number
@@ -729,6 +784,7 @@ export type CreateSupplierOrderInput = {
   lines?: Array<{
     fabric_id?: string | null
     product_id?: string | null
+    product_variant_id?: string | null
     description: string
     reference?: string | null
     quantity: number
@@ -756,6 +812,7 @@ export const createSupplierOrderAction = protectedAction<
       .map((l) => ({
         fabric_id: l.fabric_id || null,
         product_id: l.product_id || null,
+        product_variant_id: l.product_variant_id || null,
         description: String(l.description || '').trim(),
         reference: l.reference || null,
         quantity: Number(l.quantity),
@@ -830,6 +887,7 @@ export const createSupplierOrderAction = protectedAction<
             supplier_order_id: order.id,
             fabric_id: line.fabric_id,
             product_id: line.product_id,
+            product_variant_id: line.product_variant_id,
             description: line.description,
             reference: line.reference,
             quantity: line.quantity,

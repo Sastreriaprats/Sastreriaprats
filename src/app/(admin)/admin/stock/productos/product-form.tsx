@@ -549,23 +549,15 @@ export function ProductForm({
                 </div>
                 <div className="space-y-2">
                   <Label>Categoría</Label>
-                  {categories.filter((c) => (c.product_type ?? 'boutique') === basico.product_type).length === 0 && (
-                    <p className="text-xs text-amber-600 mb-1">
-                      No hay categorías para este tipo. Ejecuta en Supabase (SQL Editor) el script{' '}
-                      <code className="bg-muted px-1 rounded">scripts/seed-fabric-and-service-categories.sql</code> y recarga la página.
-                    </p>
-                  )}
                   <Select
                     value={basico.category_id}
                     onValueChange={(v) => setBasico((b) => ({ ...b, category_id: v }))}
                   >
-                    <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="Seleccionar categoría" /></SelectTrigger>
                     <SelectContent>
-                      {categories
-                        .filter((c) => (c.product_type ?? 'boutique') === basico.product_type)
-                        .map((c) => (
-                          <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                        ))}
+                      {categories.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

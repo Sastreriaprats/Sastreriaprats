@@ -12,6 +12,7 @@ import {
   updateSupplierOrderStatusAction,
   createSupplierOrderAction,
   updateSupplierOrderFinanceAction,
+  deleteSupplierOrderAction,
   getSupplierOrderLines,
   receiveSupplierOrderLines,
   type SupplierOrderLineForReceipt,
@@ -37,7 +38,7 @@ import {
 } from '@/components/ui/dialog'
 import {
   ArrowLeft, User, Phone, Mail, MapPin, CreditCard, Truck,
-  AlertTriangle, ShoppingBag, Plus, Loader2, FileText, Package,
+  AlertTriangle, ShoppingBag, Plus, Loader2, FileText, Package, Trash2,
 } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -70,6 +71,20 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
   const [newDeliveryOpen, setNewDeliveryOpen] = useState(false)
   const [creatingDelivery, setCreatingDelivery] = useState(false)
   const [uploadingOrderPdfId, setUploadingOrderPdfId] = useState<string | null>(null)
+  const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null)
+
+  const handleDeleteOrder = async (orderId: string) => {
+    setDeletingOrderId(orderId)
+    const res = await deleteSupplierOrderAction(orderId)
+    setDeletingOrderId(null)
+    if (res.success) {
+      toast.success('Pedido eliminado')
+      router.refresh()
+    } else {
+      toast.error((res as any)?.error || 'Error al eliminar')
+    }
+  }
+
   const [financeOpen, setFinanceOpen] = useState(false)
   const [savingFinance, setSavingFinance] = useState(false)
   const [financeOrderId, setFinanceOrderId] = useState<string>('')
@@ -583,6 +598,18 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                               </Button>
                             </div>
                           )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                            disabled={deletingOrderId === o.id}
+                            onClick={() => {
+                              if (confirm(`¿Eliminar ${o.order_number} y todas sus líneas?`)) handleDeleteOrder(o.id)
+                            }}
+                          >
+                            {deletingOrderId === o.id ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Trash2 className="h-3 w-3 mr-1" />}
+                            Eliminar
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -1158,7 +1185,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
               onClick={async () => {
                 setCreating(true)
                 const supabase = createClient()
-                const finalLines: Array<{ fabric_id?: string | null; product_id?: string | null; description: string; reference?: string | null; quantity: number; unit: string; unit_price: number }> = []
+                const finalLines: Array<{ fabric_id?: string | null; product_id?: string | null; product_variant_id?: string | null; description: string; reference?: string | null; quantity: number; unit: string; unit_price: number }> = []
 
                 for (const l of orderLines) {
                   let fabricId: string | null = l.type === 'fabric' ? (l.fabric_id || null) : null
@@ -1191,9 +1218,12 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                     for (const [sizeKey, qtyStr] of Object.entries(l.sizeQuantities || {})) {
                       const qty = parseInt(qtyStr) || 0
                       if (qty <= 0) continue
+                      // Buscar la variante que corresponde a esta talla
+                      const matchedVariant = l.variants.find(v => (v.size ?? '') === sizeKey)
                       finalLines.push({
                         fabric_id: null,
                         product_id: l.product_id || null,
+                        product_variant_id: matchedVariant?.id || null,
                         description: `${l.description} — Talla ${sizeKey}`,
                         reference: ref,
                         quantity: qty,

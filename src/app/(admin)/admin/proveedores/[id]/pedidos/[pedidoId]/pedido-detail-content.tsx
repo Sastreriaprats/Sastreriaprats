@@ -28,7 +28,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { ArrowLeft, Loader2, Truck, FileText } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
+import { ArrowLeft, Loader2, Truck, FileText, Trash2, AlertTriangle, Check } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import {
@@ -36,6 +39,7 @@ import {
   getSupplierOrderLines,
   receiveSupplierOrderLines,
   markSupplierInvoicePaid,
+  deleteSupplierOrderAction,
   type SupplierOrderLineForReceipt,
   type ReceiveSupplierOrderLineInput,
 } from '@/actions/suppliers'
@@ -104,6 +108,26 @@ export function PedidoDetailContent({
   const [receptionLineState, setReceptionLineState] = useState<
     Record<string, { selected: boolean; quantityReceived: string }>
   >({})
+
+  // Delete
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  // Incident dialog
+  const [incidentLineId, setIncidentLineId] = useState<string | null>(null)
+  const [incidentText, setIncidentText] = useState('')
+
+  async function handleDelete() {
+    setDeleting(true)
+    const res = await deleteSupplierOrderAction(order.id)
+    setDeleting(false)
+    if (res.success) {
+      toast.success('Pedido eliminado')
+      router.push(`/admin/proveedores/${supplier.id}`)
+    } else {
+      toast.error((res as any)?.error || 'Error al eliminar')
+    }
+  }
 
   async function openReceptionDialog() {
     setReceptionLines([])
@@ -249,6 +273,17 @@ export function PedidoDetailContent({
             </Button>
           )}
 
+          {(currentStatus === 'draft' || currentStatus === 'sent' || currentStatus === 'confirmed') && (
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={loading !== null}
+              onClick={() => setDeleteConfirmOpen(true)}
+            >
+              <Trash2 className="h-4 w-4 mr-1" /> Eliminar
+            </Button>
+          )}
+
           {currentStatus === 'received' && !isPaid && currentInvoice?.id && (
             <Button
               size="sm"
@@ -345,45 +380,64 @@ export function PedidoDetailContent({
               <TableHeader>
                 <TableRow>
                   <TableHead>Descripción</TableHead>
-                  <TableHead>Referencia</TableHead>
-                  <TableHead className="text-right">Cantidad</TableHead>
-                  <TableHead>Unidad</TableHead>
-                  <TableHead className="text-right">Precio unit.</TableHead>
-                  <TableHead className="text-right">Subtotal</TableHead>
+                  <TableHead>Talla</TableHead>
+                  <TableHead>Ref.</TableHead>
+                  <TableHead className="text-right">Pedido</TableHead>
                   <TableHead className="text-right">Recibido</TableHead>
+                  <TableHead>Unidad</TableHead>
+                  <TableHead className="text-right">Precio</TableHead>
+                  <TableHead className="text-right">Subtotal</TableHead>
+                  <TableHead>Estado</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {lines.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
                       Sin líneas
                     </TableCell>
                   </TableRow>
                 ) : (
-                  lines.map((line) => (
-                    <TableRow key={line.id} className={line.is_fully_received ? 'opacity-60' : ''}>
-                      <TableCell>{line.description || '-'}</TableCell>
-                      <TableCell className="font-mono text-xs">{line.reference || '-'}</TableCell>
-                      <TableCell className="text-right">{line.quantity}</TableCell>
-                      <TableCell className="text-sm">{line.unit || '-'}</TableCell>
-                      <TableCell className="text-right">
-                        {line.unit_price != null ? formatCurrency(line.unit_price) : '-'}
-                      </TableCell>
-                      <TableCell className="text-right font-medium">
-                        {line.total_price != null ? formatCurrency(line.total_price) : '-'}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <span className={line.quantity_received >= line.quantity ? 'text-green-600 font-medium' : 'text-orange-600'}>
-                          {line.quantity_received} / {line.quantity}
-                        </span>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  lines.map((line) => {
+                    const tallaMatch = (line.description || '').match(/\s*(?:—|–|-)\s*(?:Talla\s+)?(\S+)\s*$/)
+                    const talla = tallaMatch ? tallaMatch[1] : null
+                    const descClean = talla ? line.description.replace(/\s*(?:—|–|-)\s*(?:Talla\s+)?\S+\s*$/, '').trim() : line.description
+
+                    const isComplete = line.quantity_received >= line.quantity
+                    const isPartial = line.quantity_received > 0 && !isComplete
+                    const hasIncident = (line as any).has_incident
+
+                    let statusBadge: React.ReactNode
+                    if (hasIncident) {
+                      statusBadge = <Badge className="bg-red-100 text-red-700 text-xs">Incidencia</Badge>
+                    } else if (isComplete) {
+                      statusBadge = <Badge className="bg-green-100 text-green-700 text-xs">Completo</Badge>
+                    } else if (isPartial) {
+                      statusBadge = <Badge className="bg-amber-100 text-amber-700 text-xs">Parcial</Badge>
+                    } else {
+                      statusBadge = <Badge className="bg-gray-100 text-gray-600 text-xs">Pendiente</Badge>
+                    }
+
+                    return (
+                      <TableRow key={line.id} className={isComplete ? 'opacity-60' : ''}>
+                        <TableCell className="max-w-[200px]"><span className="truncate block">{descClean || '-'}</span></TableCell>
+                        <TableCell className="font-medium">{talla || '-'}</TableCell>
+                        <TableCell className="font-mono text-xs">{line.reference || '-'}</TableCell>
+                        <TableCell className="text-right">{line.quantity}</TableCell>
+                        <TableCell className="text-right font-medium">
+                          <span className={isComplete ? 'text-green-600' : isPartial ? 'text-amber-600' : ''}>{line.quantity_received}</span>
+                        </TableCell>
+                        <TableCell className="text-sm">{line.unit || '-'}</TableCell>
+                        <TableCell className="text-right">{line.unit_price != null ? formatCurrency(line.unit_price) : '-'}</TableCell>
+                        <TableCell className="text-right font-medium">{line.total_price != null ? formatCurrency(line.total_price) : '-'}</TableCell>
+                        <TableCell>{statusBadge}</TableCell>
+                      </TableRow>
+                    )
+                  })
                 )}
                 {lines.length > 0 && (
                   <TableRow className="border-t-2">
-                    <TableCell colSpan={5} className="text-right font-medium">Total</TableCell>
+                    <TableCell colSpan={7} className="text-right font-medium">Total</TableCell>
                     <TableCell className="text-right font-bold">{formatCurrency(order.total ?? total)}</TableCell>
                     <TableCell />
                   </TableRow>
@@ -544,6 +598,28 @@ export function PedidoDetailContent({
             <Button onClick={submitReception} disabled={receptionSubmitting || receptionLinesLoading}>
               {receptionSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Confirmar recepción
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DELETE CONFIRMATION */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <Trash2 className="h-5 w-5" /> Eliminar pedido
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            ¿Eliminar el pedido <span className="font-mono font-bold">{order.order_number}</span> y todas sus líneas?
+            Esta acción no se puede deshacer.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)} disabled={deleting}>Cancelar</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Eliminar pedido
             </Button>
           </DialogFooter>
         </DialogContent>
