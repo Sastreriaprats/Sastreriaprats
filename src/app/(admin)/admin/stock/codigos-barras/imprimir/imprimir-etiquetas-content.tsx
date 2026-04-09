@@ -96,6 +96,7 @@ export function ImprimirEtiquetasContent({ variantIdsParam, legacyIdsParam }: { 
     <>
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
+          * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           body * { visibility: hidden; }
           .print-only, .print-only * { visibility: visible; }
           .print-only { position: absolute; left: 0; top: 0; width: 100%; }
@@ -154,9 +155,10 @@ export function ImprimirEtiquetasContent({ variantIdsParam, legacyIdsParam }: { 
           <BarcodeLabel
             key={`${v.id}-${index}`}
             barcode={v.barcode!}
-            productName={v.size ? `${v.name} · Talla ${v.size}` : v.name}
+            productName={v.name}
             sku={v.variant_sku || v.sku}
             price={v.price_with_tax ?? v.base_price}
+            size={v.size}
           />
         ))}
       </div>

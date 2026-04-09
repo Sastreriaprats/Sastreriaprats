@@ -3,6 +3,7 @@
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { queryList, queryById, getNextNumber } from '@/lib/server/query-helpers'
 import { createProductSchema, updateProductSchema, createVariantSchema } from '@/lib/validations/products'
+import { sortBySize } from '@/lib/utils/sort-sizes'
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { generateEAN13, validateEAN13 } from '@/lib/barcode/ean13'
@@ -87,7 +88,7 @@ export const getProductVariantsById = protectedAction<
       .eq('is_active', true)
       .order('size')
     if (error) return failure(error.message)
-    return success((data ?? []) as { id: string; size: string | null; color: string | null }[])
+    return success(sortBySize((data ?? []) as { id: string; size: string | null; color: string | null }[]))
   }
 )
 

@@ -6,7 +6,7 @@ import Image from 'next/image'
 import { NewsletterForm } from './newsletter-form'
 
 const STORAGE_KEY = 'prats_newsletter_shown'
-const DELAY_MS = 30_000
+const DELAY_MS = 8_000
 
 export function NewsletterPopup() {
   const [open, setOpen] = useState(false)
@@ -33,13 +33,13 @@ export function NewsletterPopup() {
       {/* Modal */}
       <div className="relative bg-white rounded-lg shadow-2xl max-w-2xl w-full grid grid-cols-1 md:grid-cols-2 overflow-hidden animate-in fade-in zoom-in-95 duration-300">
         {/* Imagen lateral */}
-        <div className="relative hidden md:block aspect-[3/4] min-h-[400px]">
+        <div className="relative hidden md:block min-h-[400px] bg-prats-navy flex items-center justify-center">
           <Image
-            src="https://www.sastreriaprats.com/cdn/shop/files/bolsa.jpg?v=1738690195&width=640"
+            src="/images/logo-prats-hd.webp"
             alt="Sastrería Prats"
-            fill
-            className="object-cover"
-            sizes="320px"
+            width={180}
+            height={180}
+            className="object-contain opacity-90 invert brightness-200"
           />
         </div>
 
@@ -54,7 +54,7 @@ export function NewsletterPopup() {
           </button>
 
           <p className="text-[10px] tracking-[0.4em] text-gray-400 uppercase mb-3">Newsletter</p>
-          <h2 className="text-2xl md:text-3xl font-serif font-light text-prats-navy leading-tight mb-3">
+          <h2 className="text-2xl md:text-3xl font-sans font-light text-prats-navy leading-tight mb-3">
             Únete a la familia Prats
           </h2>
           <p className="text-sm text-gray-500 mb-6 leading-relaxed">

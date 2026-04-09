@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { variantSkuFromSize } from '@/lib/constants-sizes'
+import { sortBySize } from '@/lib/utils/sort-sizes'
 import { Textarea } from '@/components/ui/textarea'
 import {
   ArrowLeft, Plus, ArrowUp, Loader2, Image as ImageIcon, Pencil, ArrowLeftRight,
@@ -34,7 +35,7 @@ export function ProductDetailContent({
 }) {
   const router = useRouter()
   const { can } = usePermissions()
-  const variants = product.product_variants || []
+  const variants = sortBySize(product.product_variants || []) as any[]
 
   const [showEditDialog, setShowEditDialog] = useState(false)
   const [showAdjust, setShowAdjust] = useState(false)

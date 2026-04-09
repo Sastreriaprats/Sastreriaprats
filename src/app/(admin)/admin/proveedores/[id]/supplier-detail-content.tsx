@@ -25,6 +25,7 @@ import { searchSupplierFabrics, searchSupplierProducts } from '@/actions/supplie
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { createSupplierDeliveryNote, uploadSupplierDeliveryNoteAttachment, upsertSupplierDeliveryNoteForOrder } from '@/actions/delivery-notes'
 import { SIZE_TEMPLATES, variantSkuFromSize } from '@/lib/constants-sizes'
+import { sortBySize } from '@/lib/utils/sort-sizes'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -1037,7 +1038,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                             <div className="space-y-2">
                               <Label className="text-xs text-gray-500">Cantidades por talla</Label>
                               <div className="flex flex-wrap gap-2">
-                                {line.variants.map((v) => {
+                                {sortBySize(line.variants).map((v) => {
                                   const sizeKey = v.size ?? 'sin talla'
                                   return (
                                     <div key={v.id} className="flex flex-col items-center gap-1">

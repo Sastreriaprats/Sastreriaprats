@@ -1,10 +1,10 @@
 /**
- * FIX CLIENTS — Corregir datos de empresa y eliminar duplicados
+ * FIX CLIENTS v3 — Dedup agresivo + empresas a client_companies
  * npx tsx src/scripts/fix-clients.ts
  * npx tsx src/scripts/fix-clients.ts --dry-run
  */
 
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import * as XLSX from 'xlsx'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -27,245 +27,310 @@ function loadEnv(): void {
 
 loadEnv()
 
-const admin = createClient(
+const admin: SupabaseClient = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
   { auth: { autoRefreshToken: false, persistSession: false } },
 )
 
-function toStr(val: unknown): string | null {
-  if (val === null || val === undefined || val === '') return null
-  const s = String(val).trim()
+// ── Helpers ────────────────────────────────────────────────
+
+function toStr(v: unknown): string | null {
+  if (v === null || v === undefined || v === '') return null
+  const s = String(v).trim()
   if (/^\d+\.0$/.test(s)) return s.replace('.0', '')
   return s || null
 }
 
-function cleanPhone(val: unknown): string | null {
-  const s = toStr(val)
+function cleanPhone(v: unknown): string | null {
+  const s = toStr(v)
   if (!s) return null
-  const cleaned = s.replace(/[^0-9+]/g, '')
-  if (cleaned.length < 6) return null
-  return cleaned
+  const c = s.replace(/[^0-9+]/g, '')
+  return c.length >= 6 && c !== '0' ? c : null
 }
 
-function cleanEmail(val: unknown): string | null {
-  const s = toStr(val)
+function cleanEmail(v: unknown): string | null {
+  const s = toStr(v)
   if (!s) return null
-  const email = s.toLowerCase().trim()
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null
-  return email
+  const e = s.toLowerCase().trim()
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e : null
 }
 
-// Score how "complete" a client record is
-function completenessScore(c: Record<string, unknown>): number {
-  let score = 0
-  const fields = ['email', 'phone', 'phone_secondary', 'address', 'city', 'postal_code',
-    'province', 'company_name', 'company_nif', 'document_number', 'date_of_birth', 'internal_notes']
-  for (const f of fields) {
-    if (c[f] !== null && c[f] !== undefined && c[f] !== '') score++
-  }
-  return score
+function norm(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '').trim()
 }
 
-// Merge two client records: keep non-null values from secondary into primary
-function mergeClientData(primary: Record<string, unknown>, secondary: Record<string, unknown>): Record<string, unknown> {
-  const updates: Record<string, unknown> = {}
-  const mergeFields = ['phone', 'phone_secondary', 'address', 'city', 'postal_code',
-    'province', 'company_name', 'company_nif', 'document_number', 'document_type',
-    'date_of_birth', 'internal_notes', 'nationality']
-  for (const f of mergeFields) {
-    if ((!primary[f] || primary[f] === '') && secondary[f] && secondary[f] !== '') {
-      updates[f] = secondary[f]
+const DEP_TABLES = ['sales', 'tailoring_orders', 'appointments', 'boutique_alterations',
+  'client_measurements', 'vouchers', 'returns', 'contact_requests']
+
+async function reassignAndDelete(keepId: string, dupId: string): Promise<number> {
+  let deps = 0
+  for (const table of DEP_TABLES) {
+    const { count } = await admin.from(table).select('id', { count: 'exact', head: true }).eq('client_id', dupId)
+    if (count && count > 0) {
+      if (!DRY_RUN) await admin.from(table).update({ client_id: keepId }).eq('client_id', dupId)
+      deps += count
     }
   }
-  // Merge notes
-  if (secondary.internal_notes && primary.internal_notes && secondary.internal_notes !== primary.internal_notes) {
-    updates.internal_notes = primary.internal_notes + '\n' + secondary.internal_notes
+  // Move companies
+  if (!DRY_RUN) await admin.from('client_companies').update({ client_id: keepId }).eq('client_id', dupId)
+  // Merge fields
+  if (!DRY_RUN) {
+    const { data: keepData } = await admin.from('clients').select('*').eq('id', keepId).single()
+    const { data: dupData } = await admin.from('clients').select('*').eq('id', dupId).single()
+    if (keepData && dupData) {
+      const updates: Record<string, unknown> = {}
+      for (const f of ['phone', 'phone_secondary', 'email', 'address', 'city', 'postal_code', 'province',
+        'company_name', 'company_nif', 'document_number', 'date_of_birth']) {
+        if ((!keepData[f] || keepData[f] === '') && dupData[f] && dupData[f] !== '') updates[f] = dupData[f]
+      }
+      if (Object.keys(updates).length > 0) await admin.from('clients').update(updates).eq('id', keepId)
+    }
   }
-  return updates
+  // Delete
+  if (!DRY_RUN) await admin.from('clients').delete().eq('id', dupId)
+  return deps
 }
 
-async function loadAllClients(): Promise<Record<string, unknown>[]> {
+async function loadAll(): Promise<Record<string, unknown>[]> {
   let all: Record<string, unknown>[] = []
-  let offset = 0
+  let off = 0
   while (true) {
-    const { data } = await admin.from('clients')
-      .select('*')
-      .eq('source', 'import_excel')
-      .range(offset, offset + 999)
+    const { data } = await admin.from('clients').select('*').eq('source', 'import_excel').range(off, off + 999)
     if (!data || !data.length) break
     all = all.concat(data)
     if (data.length < 1000) break
-    offset += 1000
+    off += 1000
   }
   return all
 }
 
+// ── Main ───────────────────────────────────────────────────
+
 async function main(): Promise<void> {
-  console.log(`=== FIX CLIENTS ${DRY_RUN ? '(DRY-RUN)' : ''} ===\n`)
+  console.log(`=== FIX CLIENTS v3 ${DRY_RUN ? '(DRY-RUN)' : ''} ===\n`)
 
-  // ── FASE 1: Actualizar datos de empresa desde Excel ──────
+  // ── PASO 1: Leer Excel y agrupar por persona ──────────
 
-  console.log('--- FASE 1: Datos de empresa ---')
+  console.log('--- PASO 1: Leer Excel ---')
+  type PersonInfo = {
+    keys: Set<string> // emails + phones para buscar en BD
+    name: string
+    empresas: { nombre: string; cif: string | null }[]
+  }
+
+  const personas = new Map<string, PersonInfo>()
 
   if (fs.existsSync(FILE_PATH)) {
     const wb = XLSX.readFile(FILE_PATH)
     const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(wb.Sheets['Hoja1'], { defval: null })
 
-    let empresaUpdated = 0
-    let empresaSkipped = 0
-
     for (const row of rows) {
-      const empresa = toStr(row['EMPRESA'])
-      if (!empresa) continue
-
       const email = cleanEmail(row['email'])
       const phone = cleanPhone(row['Telefono'])
+      const nombre = toStr(row['Cliente'])
+      const empresa = toStr(row['EMPRESA'])
       const cif = toStr(row['CIF'])
 
-      // Find client by email or phone
-      let clientId: string | null = null
-      if (email) {
-        const { data } = await admin.from('clients').select('id, company_name').eq('email', email).eq('source', 'import_excel').limit(1).maybeSingle()
-        if (data) clientId = data.id
-      }
-      if (!clientId && phone) {
-        const { data } = await admin.from('clients').select('id, company_name').eq('phone', phone).eq('source', 'import_excel').limit(1).maybeSingle()
-        if (data) clientId = data.id
-      }
+      // Clave de agrupación: email > phone > nombre normalizado
+      let groupKey: string
+      if (email) groupKey = `email:${email}`
+      else if (phone) groupKey = `phone:${phone}`
+      else if (nombre) groupKey = `name:${norm(nombre)}`
+      else continue
 
-      if (!clientId) { empresaSkipped++; continue }
-
-      const updatePayload: Record<string, unknown> = {
-        company_name: empresa,
-        client_type: 'company',
+      if (!personas.has(groupKey)) {
+        personas.set(groupKey, { keys: new Set(), name: nombre || empresa || '', empresas: [] })
       }
-      if (cif) updatePayload.company_nif = cif
+      const p = personas.get(groupKey)!
+      if (email) p.keys.add(`email:${email}`)
+      if (phone) p.keys.add(`phone:${phone}`)
+      if (nombre && norm(nombre)) p.keys.add(`name:${norm(nombre)}`)
+      // Nombre más largo = más completo
+      if (nombre && nombre.length > p.name.length) p.name = nombre
 
-      if (!DRY_RUN) {
-        await admin.from('clients').update(updatePayload).eq('id', clientId)
+      if (empresa && !p.empresas.some(e => e.nombre === empresa && e.cif === cif)) {
+        p.empresas.push({ nombre: empresa, cif })
       }
-      empresaUpdated++
     }
-
-    console.log(`  Empresas actualizadas: ${empresaUpdated}`)
-    console.log(`  Sin match: ${empresaSkipped}`)
+    console.log(`  Personas únicas en Excel: ${personas.size}`)
+    console.log(`  Con empresa: ${Array.from(personas.values()).filter(p => p.empresas.length > 0).length}`)
+    console.log(`  Con múltiples empresas: ${Array.from(personas.values()).filter(p => p.empresas.length > 1).length}`)
   } else {
-    console.log('  Excel no encontrado, saltando fase 1')
+    console.log(`  Excel no encontrado: ${FILE_PATH}`)
   }
 
-  // ── FASE 2: Eliminar duplicados ──────────────────────────
+  // ── PASO 2: Dedup en BD ───────────────────────────────
 
-  console.log('\n--- FASE 2: Duplicados por email ---')
+  console.log('\n--- PASO 2: Dedup agresivo ---')
+  const allClients = await loadAll()
+  console.log(`  Clientes en BD: ${allClients.length}`)
 
-  const allClients = await loadAllClients()
-  console.log(`  Total clientes: ${allClients.length}`)
+  // Construir índice: cada cliente → sus claves (email, phone, nombre normalizado)
+  const clientKeys = new Map<string, Set<string>>() // clientId → keys
+  const keyToClients = new Map<string, string[]>()   // key → clientIds
 
-  // Group by email
-  const emailGroups = new Map<string, Record<string, unknown>[]>()
   for (const c of allClients) {
-    const email = c.email as string | null
-    if (!email) continue
-    if (!emailGroups.has(email)) emailGroups.set(email, [])
-    emailGroups.get(email)!.push(c)
+    const id = c.id as string
+    const keys = new Set<string>()
+    const email = (c.email as string || '').toLowerCase().trim()
+    const phone = (c.phone as string || '').trim()
+    const fullName = norm(`${c.first_name || ''} ${c.last_name || ''}`)
+
+    if (email) keys.add(`email:${email}`)
+    if (phone && phone !== '0') keys.add(`phone:${phone}`)
+    if (fullName) keys.add(`name:${fullName}`)
+
+    clientKeys.set(id, keys)
+    for (const k of Array.from(keys)) {
+      if (!keyToClients.has(k)) keyToClients.set(k, [])
+      keyToClients.get(k)!.push(id)
+    }
   }
 
-  let emailDupsRemoved = 0
-  let emailDupsMerged = 0
-  const idsDeleted = new Set<string>()
+  // Union-Find para agrupar clientes que comparten cualquier clave
+  const parent = new Map<string, string>()
+  function find(x: string): string {
+    if (!parent.has(x)) parent.set(x, x)
+    while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x)!)!); x = parent.get(x)! }
+    return x
+  }
+  function union(a: string, b: string): void {
+    const ra = find(a), rb = find(b)
+    if (ra !== rb) parent.set(rb, ra)
+  }
 
-  for (const [email, group] of Array.from(emailGroups.entries())) {
-    if (group.length <= 1) continue
+  // Agrupar clientes que comparten alguna clave
+  for (const [, ids] of Array.from(keyToClients.entries())) {
+    if (ids.length <= 1) continue
+    for (let i = 1; i < ids.length; i++) union(ids[0], ids[i])
+  }
 
-    // Sort by completeness, keep the best
-    group.sort((a, b) => completenessScore(b) - completenessScore(a))
-    const keep = group[0]
-    const remove = group.slice(1)
+  // Construir grupos
+  const groups = new Map<string, string[]>()
+  for (const c of allClients) {
+    const id = c.id as string
+    const root = find(id)
+    if (!groups.has(root)) groups.set(root, [])
+    groups.get(root)!.push(id)
+  }
 
-    // Merge data from duplicates into the keeper
-    let mergedUpdates: Record<string, unknown> = {}
-    for (const dup of remove) {
-      const updates = mergeClientData(keep, dup)
-      mergedUpdates = { ...mergedUpdates, ...updates }
+  const dupGroups = Array.from(groups.values()).filter(g => g.length > 1)
+  const totalDups = dupGroups.reduce((s, g) => s + g.length - 1, 0)
+  console.log(`  Grupos con duplicados: ${dupGroups.length} (${totalDups} registros sobrantes)`)
+
+  let merged = 0
+  let depsReassigned = 0
+
+  const clientById = new Map(allClients.map(c => [c.id as string, c]))
+
+  for (const group of dupGroups) {
+    // Ordenar: el más completo primero, luego el más antiguo
+    const sorted = group
+      .map(id => clientById.get(id)!)
+      .filter(Boolean)
+      .sort((a, b) => {
+        // Más campos rellenos = más completo
+        let scoreA = 0, scoreB = 0
+        for (const f of ['email', 'phone', 'address', 'company_name', 'document_number', 'date_of_birth']) {
+          if (a[f] && a[f] !== '') scoreA++
+          if (b[f] && b[f] !== '') scoreB++
+        }
+        if (scoreB !== scoreA) return scoreB - scoreA
+        return new Date(a.created_at as string).getTime() - new Date(b.created_at as string).getTime()
+      })
+
+    const keep = sorted[0]
+    const dups = sorted.slice(1)
+
+    for (const dup of dups) {
+      const deps = await reassignAndDelete(keep.id as string, dup.id as string)
+      depsReassigned += deps
+      merged++
     }
+  }
 
-    if (Object.keys(mergedUpdates).length > 0 && !DRY_RUN) {
-      await admin.from('clients').update(mergedUpdates).eq('id', keep.id as string)
-      emailDupsMerged++
-    }
+  console.log(`  Fusionados: ${merged}`)
+  console.log(`  Dependencias reasignadas: ${depsReassigned}`)
 
-    // Delete duplicates
-    for (const dup of remove) {
-      const dupId = dup.id as string
-      if (idsDeleted.has(dupId)) continue
-      if (!DRY_RUN) {
-        await admin.from('clients').delete().eq('id', dupId)
+  // ── PASO 3: Empresas a client_companies ────────────────
+
+  console.log('\n--- PASO 3: Empresas a client_companies ---')
+
+  // Recargar clientes tras dedup
+  const freshClients = DRY_RUN ? allClients : await loadAll()
+  let empresasCreated = 0
+  let empresasSkipped = 0
+
+  for (const [, persona] of Array.from(personas.entries())) {
+    if (persona.empresas.length === 0) continue
+
+    // Buscar el cliente en la BD por cualquiera de sus claves
+    let clientId: string | null = null
+    for (const key of Array.from(persona.keys)) {
+      if (clientId) break
+      const [type, value] = key.split(':')
+      if (type === 'email') {
+        const match = freshClients.find(c => (c.email as string || '').toLowerCase() === value)
+        if (match) clientId = match.id as string
+      } else if (type === 'phone') {
+        const match = freshClients.find(c => (c.phone as string) === value)
+        if (match) clientId = match.id as string
+      } else if (type === 'name') {
+        const match = freshClients.find(c => norm(`${c.first_name || ''} ${c.last_name || ''}`) === value)
+        if (match) clientId = match.id as string
       }
-      idsDeleted.add(dupId)
-      emailDupsRemoved++
-    }
-  }
-
-  console.log(`  Duplicados email eliminados: ${emailDupsRemoved}`)
-  console.log(`  Registros combinados: ${emailDupsMerged}`)
-
-  // Reload after email dedup
-  console.log('\n--- FASE 3: Duplicados por teléfono ---')
-
-  const afterEmailDedup = DRY_RUN ? allClients.filter(c => !idsDeleted.has(c.id as string)) : await loadAllClients()
-  console.log(`  Clientes tras dedup email: ${afterEmailDedup.length}`)
-
-  const phoneGroups = new Map<string, Record<string, unknown>[]>()
-  for (const c of afterEmailDedup) {
-    const phone = c.phone as string | null
-    if (!phone) continue
-    if (!phoneGroups.has(phone)) phoneGroups.set(phone, [])
-    phoneGroups.get(phone)!.push(c)
-  }
-
-  let phoneDupsRemoved = 0
-  let phoneDupsMerged = 0
-
-  for (const [phone, group] of Array.from(phoneGroups.entries())) {
-    if (group.length <= 1) continue
-
-    group.sort((a, b) => completenessScore(b) - completenessScore(a))
-    const keep = group[0]
-    const remove = group.slice(1)
-
-    let mergedUpdates: Record<string, unknown> = {}
-    for (const dup of remove) {
-      const updates = mergeClientData(keep, dup)
-      mergedUpdates = { ...mergedUpdates, ...updates }
     }
 
-    if (Object.keys(mergedUpdates).length > 0 && !DRY_RUN) {
-      await admin.from('clients').update(mergedUpdates).eq('id', keep.id as string)
-      phoneDupsMerged++
-    }
+    if (!clientId) { empresasSkipped += persona.empresas.length; continue }
 
-    for (const dup of remove) {
-      const dupId = dup.id as string
-      if (idsDeleted.has(dupId)) continue
-      if (!DRY_RUN) {
-        await admin.from('clients').delete().eq('id', dupId)
+    // Get existing companies
+    const { data: existing } = await admin.from('client_companies').select('nif, company_name').eq('client_id', clientId)
+    const existingNifs = new Set((existing || []).map((c: any) => (c.nif || '').toUpperCase()))
+    const existingNames = new Set((existing || []).map((c: any) => (c.company_name || '').toUpperCase()))
+    let isFirst = !existing || existing.length === 0
+
+    for (const emp of persona.empresas) {
+      const nifU = (emp.cif || '').toUpperCase()
+      const nameU = emp.nombre.toUpperCase()
+      if ((nifU && existingNifs.has(nifU)) || existingNames.has(nameU)) {
+        empresasSkipped++
+        continue
       }
-      idsDeleted.add(dupId)
-      phoneDupsRemoved++
+
+      if (!DRY_RUN) {
+        await admin.from('client_companies').insert({
+          client_id: clientId,
+          company_name: emp.nombre,
+          nif: emp.cif,
+          is_default: isFirst,
+        })
+        await admin.from('clients').update({ client_type: 'company' }).eq('id', clientId)
+      }
+      existingNifs.add(nifU)
+      existingNames.add(nameU)
+      isFirst = false
+      empresasCreated++
     }
   }
 
-  console.log(`  Duplicados teléfono eliminados: ${phoneDupsRemoved}`)
-  console.log(`  Registros combinados: ${phoneDupsMerged}`)
+  console.log(`  Empresas creadas: ${empresasCreated}`)
+  console.log(`  Saltadas: ${empresasSkipped}`)
 
-  // Final count
-  const { count: finalCount } = await admin.from('clients').select('id', { count: 'exact', head: true }).eq('source', 'import_excel')
-  const { count: companyCount } = await admin.from('clients').select('id', { count: 'exact', head: true }).eq('client_type', 'company').eq('source', 'import_excel')
+  // ── Resumen ────────────────────────────────────────────
 
-  console.log(`\n=== RESULTADO ===`)
-  console.log(`  Total clientes: ${finalCount}`)
-  console.log(`  Tipo empresa: ${companyCount}`)
-  console.log(`  Duplicados eliminados: ${idsDeleted.size}`)
+  const { count: total } = await admin.from('clients').select('id', { count: 'exact', head: true }).eq('source', 'import_excel')
+  const { count: companies } = await admin.from('client_companies').select('id', { count: 'exact', head: true })
+
+  console.log(`\n╔════════════════════════════════════════════════╗`)
+  console.log(`║              RESUMEN FINAL                     ║`)
+  console.log(`╠════════════════════════════════════════════════╣`)
+  console.log(`║  Duplicados fusionados:       ${String(merged).padStart(6)}           ║`)
+  console.log(`║  Dependencias reasignadas:    ${String(depsReassigned).padStart(6)}           ║`)
+  console.log(`║  Empresas creadas:            ${String(empresasCreated).padStart(6)}           ║`)
+  console.log(`║  Total clientes:              ${String(total).padStart(6)}           ║`)
+  console.log(`║  Total client_companies:      ${String(companies).padStart(6)}           ║`)
+  console.log(`╚════════════════════════════════════════════════╝`)
   if (DRY_RUN) console.log('  (dry-run, ningún dato modificado)')
 }
 
