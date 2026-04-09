@@ -1,9 +1,11 @@
 'use client'
 
 import { useRef, useEffect } from 'react'
-import { formatCurrency } from '@/lib/utils'
 
-/** Etiqueta Brother QL-700, papel DK 29x68mm (horizontal: 68mm ancho x 29mm alto) */
+/**
+ * Etiqueta de código de barras — réplica exacta del diseño físico de tienda.
+ * Tamaño: 80mm x 30mm. Para Brother QL-700 u similar.
+ */
 export function BarcodeLabel({
   barcode,
   productName,
@@ -19,27 +21,46 @@ export function BarcodeLabel({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
+  // Nombre completo con talla al final (como en la etiqueta física)
+  const fullName = size && size !== 'U'
+    ? `${productName} ${size}`.toUpperCase()
+    : productName.toUpperCase()
+
+  // Código numérico: extraer números del SKU y padear a 6 dígitos
+  const numericCode = (sku.replace(/\D/g, '') || '0').padStart(6, '0')
+
+  // PVP con formato español: "PVP € 590,00"
+  const pvpFormatted = `PVP € ${price.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+  // Determinar formato del barcode
+  const isEan = barcode && /^\d{13}$/.test(barcode)
+
   useEffect(() => {
     if (!barcode || !canvasRef.current) return
     import('jsbarcode').then((JsBarcode) => {
       try {
         JsBarcode.default(canvasRef.current, barcode, {
-          format: 'EAN13',
-          width: 1.8,
-          height: 40,
-          displayValue: false,
+          format: isEan ? 'EAN13' : 'CODE128',
+          width: isEan ? 1.5 : 1.2,
+          height: 35,
+          displayValue: true,
+          fontSize: 10,
+          font: 'Arial',
+          textMargin: 2,
           margin: 0,
           background: '#ffffff',
           lineColor: '#000000',
         })
       } catch {
-        // Fallback: Code128 si EAN13 falla
         try {
           JsBarcode.default(canvasRef.current, barcode, {
             format: 'CODE128',
-            width: 1.5,
-            height: 40,
-            displayValue: false,
+            width: 1.2,
+            height: 35,
+            displayValue: true,
+            fontSize: 10,
+            font: 'Arial',
+            textMargin: 2,
             margin: 0,
             background: '#ffffff',
             lineColor: '#000000',
@@ -47,46 +68,55 @@ export function BarcodeLabel({
         } catch { /* barcode inválido */ }
       }
     })
-  }, [barcode])
+  }, [barcode, isEan])
 
   return (
     <div
       className="barcode-label bg-white text-black flex flex-col justify-between box-border"
       style={{
-        width: '68mm',
-        height: '29mm',
-        minWidth: '68mm',
-        minHeight: '29mm',
-        padding: '2mm',
+        width: '80mm',
+        height: '30mm',
+        minWidth: '80mm',
+        minHeight: '30mm',
+        padding: '3mm',
         fontFamily: 'Arial, Helvetica, sans-serif',
       }}
     >
-      {/* SKU */}
-      <div style={{ fontSize: '9px', fontWeight: 700, lineHeight: 1.1, letterSpacing: '0.02em' }} className="truncate">
-        {sku}
+      {/* NOMBRE — centrado, uppercase, bold, máx 2 líneas */}
+      <div
+        style={{
+          fontSize: '10px',
+          fontWeight: 700,
+          lineHeight: 1.25,
+          textAlign: 'center',
+          textTransform: 'uppercase',
+          overflow: 'hidden',
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical',
+        }}
+      >
+        {fullName}
       </div>
 
-      {/* Barcode */}
-      <div className="flex-1 flex items-center justify-center min-h-0" style={{ margin: '1mm 0' }}>
-        <canvas ref={canvasRef} style={{ width: '60mm', height: 'auto', maxHeight: '100%' }} />
+      {/* BARCODE — centrado */}
+      <div className="flex items-center justify-center" style={{ flex: 1, minHeight: 0, padding: '1mm 0' }}>
+        <canvas ref={canvasRef} style={{ maxWidth: '100%', maxHeight: '100%' }} />
       </div>
 
-      {/* Nombre + PVP */}
-      <div className="flex justify-between items-baseline gap-1" style={{ fontSize: '8px', lineHeight: 1.1 }}>
-        <span className="truncate min-w-0 flex-1">
-          {productName}
-        </span>
-        <span className="shrink-0 font-bold">
-          {formatCurrency(price)}
-        </span>
+      {/* CÓDIGO + PVP — fila inferior */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'baseline',
+          fontSize: '9px',
+          lineHeight: 1.1,
+        }}
+      >
+        <span>{numericCode}</span>
+        <span style={{ fontWeight: 700 }}>{pvpFormatted}</span>
       </div>
-
-      {/* Talla */}
-      {size && size !== 'U' && (
-        <div style={{ fontSize: '8px', fontWeight: 600, lineHeight: 1.1 }}>
-          T:{size}
-        </div>
-      )}
     </div>
   )
 }

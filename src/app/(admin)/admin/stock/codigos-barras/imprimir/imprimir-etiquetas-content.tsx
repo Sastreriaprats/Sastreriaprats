@@ -101,7 +101,7 @@ export function ImprimirEtiquetasContent({ variantIdsParam, legacyIdsParam }: { 
           .print-only, .print-only * { visibility: visible; }
           .print-only { position: absolute; left: 0; top: 0; width: 100%; }
           .no-print { display: none !important; }
-          @page { size: 68mm 29mm; margin: 0; }
+          @page { size: 80mm 30mm; margin: 0; }
           .barcode-label { break-after: page; }
         }
       `}} />
