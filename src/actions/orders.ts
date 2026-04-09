@@ -561,7 +561,7 @@ export interface PrendaLineaInput {
 
 export interface CreateFichaOrderInput {
   clientId: string
-  orderType: 'artesanal' | 'industrial' | 'camiseria'
+  orderType: 'artesanal' | 'industrial' | 'camiseria' | 'camiseria_industrial'
   storeId: string
   precioPrenda?: number
   notas: string

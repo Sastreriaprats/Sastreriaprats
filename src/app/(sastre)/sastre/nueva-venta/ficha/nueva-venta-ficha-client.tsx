@@ -47,6 +47,7 @@ const PRENDA_LABELS: Record<string, string> = {
   gabardina: 'Gabardina',
   camisa: 'Camisa',
   camiseria: 'Camisería',
+  camiseria_industrial: 'Camisería Industrial',
 }
 
 function getPrendasFromSlug(prenda: string): Array<{ slug: string; label: string }> {
@@ -78,6 +79,7 @@ const PRENDAS_DISPONIBLES = [
   { slug: 'abrigo', label: 'Abrigo' },
   { slug: 'gabardina', label: 'Gabardina' },
   { slug: 'frac', label: 'Frac' },
+  { slug: 'camiseria_industrial', label: 'Camisería Industrial' },
 ]
 
 function defaultPrendaConfig(slug: string): Record<string, unknown> {
@@ -257,7 +259,7 @@ export function NuevaVentaFichaClient({
 }) {
   const orderType = tipoProp || orderTypeProp || ''
   const router = useRouter()
-  const isCamiseria = orderType === 'camiseria'
+  const isCamiseria = orderType === 'camiseria' || orderType === 'camiseria_industrial'
 
   // ── Cart ──────────────────────────────────────────────────────────────────
   const [cartItems, setCartItems] = useState<CartItem[]>([])
@@ -564,7 +566,7 @@ export function NuevaVentaFichaClient({
       const usePrendasArquitectura = prendasSastreria.length > 0
       const res = await createFichaOrder({
         clientId,
-        orderType: orderType as 'artesanal' | 'industrial' | 'camiseria',
+        orderType: orderType as 'artesanal' | 'industrial' | 'camiseria' | 'camiseria_industrial',
         storeId: defaultStoreId,
         precioPrenda: usePrendasArquitectura ? undefined : 0,
         notas: notas.trim(),

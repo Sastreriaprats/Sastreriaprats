@@ -33,7 +33,7 @@ import { listFabricsBySupplier } from '@/actions/fabrics'
 import { formatCurrency } from '@/lib/utils'
 import { generateCamiseriaFichaPdf } from '@/lib/camiseria-ficha-pdf'
 
-type OrderType = 'artesanal' | 'industrial' | 'proveedor' | 'oficial' | 'camiseria'
+type OrderType = 'artesanal' | 'industrial' | 'proveedor' | 'oficial' | 'camiseria' | 'camiseria_industrial'
 
 interface OrderLine {
   garment_type_id: string
@@ -72,6 +72,7 @@ const TYPE_CARDS: { type: OrderType; label: string; description: string; bg: str
   { type: 'artesanal', label: 'Pedido de cliente artesanal', description: 'Confección en sastrería o con oficial', bg: 'bg-blue-50', border: 'border-blue-300', icon: Shirt },
   { type: 'camiseria', label: 'Pedido de camisería', description: 'Camisas a medida con ficha de medidas', bg: 'bg-violet-50', border: 'border-violet-300', icon: Shirt },
   { type: 'industrial', label: 'Pedido de cliente industrial', description: 'Envío a fábrica con tela y medidas', bg: 'bg-orange-50', border: 'border-orange-300', icon: Factory },
+  { type: 'camiseria_industrial', label: 'Camisería Industrial', description: 'Camisería de fabricación industrial', bg: 'bg-pink-50', border: 'border-pink-300', icon: Factory },
   { type: 'oficial', label: 'Pedido a oficial', description: 'Encargo de confección a oficial externo', bg: 'bg-green-50', border: 'border-green-300', icon: UserCheck },
 ]
 
@@ -79,6 +80,7 @@ function getRecipientType(orderType: OrderType): 'client' | 'supplier' | 'offici
   switch (orderType) {
     case 'artesanal':
     case 'camiseria':
+    case 'camiseria_industrial':
       return 'client'
     case 'industrial': return 'factory'
     case 'proveedor': return 'supplier'
@@ -93,6 +95,7 @@ function getTotalSteps(orderType: OrderType): number {
     case 'industrial':
     case 'oficial':
     case 'camiseria':
+    case 'camiseria_industrial':
       return 3
     case 'proveedor':
       return 2
@@ -100,12 +103,16 @@ function getTotalSteps(orderType: OrderType): number {
   }
 }
 
+function isCamiseriaType(t: string | null | undefined): boolean {
+  return t === 'camiseria' || t === 'camiseria_industrial'
+}
+
 export function CreateOrderWizard({
   fromSastre = false,
   initialOrderType,
 }: {
   fromSastre?: boolean
-  initialOrderType?: 'artesanal' | 'industrial' | 'camiseria'
+  initialOrderType?: 'artesanal' | 'industrial' | 'camiseria' | 'camiseria_industrial'
 } = {}) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -497,7 +504,7 @@ export function CreateOrderWizard({
     }
     return {
       order: {
-        order_type: orderType === 'camiseria' ? 'artesanal' : orderType,
+        order_type: isCamiseriaType(orderType) ? 'artesanal' : orderType,
         client_id: selectedClient?.id ?? null,
         official_id: selectedOfficial?.id ?? null,
         recipient_type,
@@ -530,7 +537,7 @@ export function CreateOrderWizard({
         finishing_notes: l.finishing_notes || null,
         measurement_id: l.measurement_id,
         official_id: l.official_id,
-      })) : orderType === 'camiseria' ? (() => {
+      })) : isCamiseriaType(orderType) ? (() => {
         const camiseriaType = garmentTypes.find((g: any) => g.name === 'Camisería')
         if (!camiseriaType) return []
         const pvpConIva = camiseriaPvpConIva || 0
@@ -566,7 +573,7 @@ export function CreateOrderWizard({
       toast.error('Añade al menos una prenda')
       return
     }
-    if (orderType === 'camiseria') {
+    if (isCamiseriaType(orderType)) {
       if (!selectedClient?.id) {
         toast.error('Selecciona un cliente')
         return
@@ -693,7 +700,7 @@ export function CreateOrderWizard({
         {Array.from({ length: totalSteps }, (_, i) => i + 1).map((n) => {
           let label = `Paso ${n}`
           if (orderType === 'artesanal') label = n === 1 ? 'Cliente / Oficial' : n === 2 ? 'Detalles' : 'Prendas'
-          if (orderType === 'camiseria') label = n === 1 ? 'Cliente' : n === 2 ? 'Detalles' : 'Ficha camisería'
+          if (isCamiseriaType(orderType)) label = n === 1 ? 'Cliente' : n === 2 ? 'Detalles' : 'Ficha camisería'
           if (orderType === 'industrial') label = n === 1 ? 'Cliente' : n === 2 ? 'Detalles' : 'Confirmar'
           if (orderType === 'proveedor') label = n === 1 ? 'Detalles' : 'Confirmar'
           if (orderType === 'oficial') label = n === 1 ? 'Oficial' : n === 2 ? 'Detalles' : 'Confirmar'
@@ -706,7 +713,7 @@ export function CreateOrderWizard({
       </div>
 
       {/* ————— ARTESANAL ————— */}
-      {(orderType === 'artesanal' || orderType === 'camiseria') && step === 1 && (
+      {(orderType === 'artesanal' || isCamiseriaType(orderType)) && step === 1 && (
         <Card>
           <CardHeader><CardTitle>Cliente y oficial (opcionales)</CardTitle></CardHeader>
           <CardContent className="space-y-6">
@@ -764,12 +771,12 @@ export function CreateOrderWizard({
                 </div>
               )}
             </div>
-            <Button onClick={() => setStep(2)} className="w-full bg-prats-navy hover:bg-prats-navy-light" disabled={orderType === 'camiseria' && !selectedClient?.id}>Continuar</Button>
+            <Button onClick={() => setStep(2)} className="w-full bg-prats-navy hover:bg-prats-navy-light" disabled={isCamiseriaType(orderType) && !selectedClient?.id}>Continuar</Button>
           </CardContent>
         </Card>
       )}
 
-      {(orderType === 'artesanal' || orderType === 'camiseria') && step === 2 && (
+      {(orderType === 'artesanal' || isCamiseriaType(orderType)) && step === 2 && (
         <Card>
           <CardHeader><CardTitle>Detalles del pedido</CardTitle></CardHeader>
           <CardContent className="space-y-4">
@@ -800,14 +807,14 @@ export function CreateOrderWizard({
             <div className="space-y-2"><Label>Notas internas</Label><Textarea value={internalNotes} onChange={(e) => setInternalNotes(e.target.value)} rows={2} placeholder="Solo equipo..." /></div>
             <div className="space-y-2"><Label>Notas para el cliente</Label><Textarea value={clientNotes} onChange={(e) => setClientNotes(e.target.value)} rows={2} placeholder="Visibles para el cliente..." /></div>
             <Button onClick={() => setStep(3)} className="w-full bg-prats-navy hover:bg-prats-navy-light">
-              {orderType === 'camiseria' ? 'Siguiente: Ficha camisería' : 'Siguiente: Prendas'}
+              {isCamiseriaType(orderType) ? 'Siguiente: Ficha camisería' : 'Siguiente: Prendas'}
             </Button>
           </CardContent>
         </Card>
       )}
 
       {/* ————— CAMISERÍA paso 3: Ficha ————— */}
-      {orderType === 'camiseria' && step === 3 && (
+      {isCamiseriaType(orderType) && step === 3 && (
         <Card>
           <CardHeader>
             <CardTitle>Ficha de camisería</CardTitle>

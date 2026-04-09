@@ -26,6 +26,13 @@ const CARDS = [
     icon: Shirt,
     href: '/sastre/nueva-venta/cliente?tipo=camiseria',
   },
+  {
+    tipo: 'camiseria_industrial' as const,
+    label: 'Camisería Industrial',
+    description: 'Camisería de fabricación industrial.',
+    icon: Factory,
+    href: '/sastre/nueva-venta/cliente?tipo=camiseria_industrial',
+  },
 ]
 
 export function NewVentaTipoClient() {
@@ -36,7 +43,7 @@ export function NewVentaTipoClient() {
         <h1 className="text-2xl font-serif text-white text-center">Nueva venta</h1>
         <p className="text-white/60 text-center">Elige el tipo de pedido</p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           {CARDS.map(({ tipo, label, description, icon: Icon, href }) => (
             <Link
               key={tipo}
