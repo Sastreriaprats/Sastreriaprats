@@ -11,9 +11,9 @@ import { formatDateTime } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { generateCamiseriaFichaPdf } from '@/lib/camiseria-ficha-pdf'
 
-const GARMENT_NAMES = ['Americana', 'Pantalón', 'Chaleco', 'Frac', 'Abrigo', 'Camisería']
-/** Índice tab → zona silueta: 0=americana, 1=pantalon, 2=chaleco, 3=frac, 4=abrigo, 5=camiseria (sin zona en silueta) */
-const TAB_TO_ZONE = ['americana', 'pantalon', 'chaleco', 'frac', 'abrigo', 'camiseria'] as const
+const GARMENT_NAMES = ['Americana', 'Pantalón', 'Chaleco', 'Frac', 'Abrigo', 'Camisería', 'Camisería Industrial']
+/** Índice tab → zona silueta: 0=americana, 1=pantalon, 2=chaleco, 3=frac, 4=abrigo, 5=camiseria, 6=camiseria_industrial */
+const TAB_TO_ZONE = ['americana', 'pantalon', 'chaleco', 'frac', 'abrigo', 'camiseria', 'camiseria_industrial'] as const
 
 function getGarmentPrefix(name: string): string {
   return name
@@ -112,7 +112,7 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
         )
       )
       setValues((prev) => ({ ...prev, ...bodyKeys }))
-    } else if (code === 'camiseria' || (entry.garment_types && entry.garment_types.name === 'Camisería')) {
+    } else if (code === 'camiseria' || code === 'camiseria_industrial' || (entry.garment_types && (entry.garment_types.name === 'Camisería' || entry.garment_types.name === 'Camisería Industrial'))) {
       const camisaKeys: Record<string, string | number> = {}
       for (const [k, v] of Object.entries(normalized)) {
         const key = k.startsWith('camiseria_') ? k : valueKey('camiseria', k)

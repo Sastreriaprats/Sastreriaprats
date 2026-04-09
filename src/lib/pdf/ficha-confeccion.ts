@@ -28,6 +28,7 @@ const MEDIDAS_KEYS_POR_PRENDA: Record<string, readonly string[]> = {
   pantalon:  ['largo', 'tiro', 'cintura', 'cadera', 'rodilla', 'bajo'],
   chaleco:   ['talle', 'largo', 'escote', 'largo_delantero', 'pecho', 'cintura'],
   camiseria: ['cuello', 'canesu', 'largo_manga', 'frente_pecho', 'pecho', 'cintura', 'cadera', 'largo_cuerpo', 'hombro', 'puno'],
+  camiseria_industrial: ['cuello', 'canesu', 'largo_manga', 'frente_pecho', 'pecho', 'cintura', 'cadera', 'largo_cuerpo', 'hombro', 'puno'],
 }
 
 export interface FichaConfeccionOrder {
@@ -762,7 +763,7 @@ export type TailoringOrderLine = {
 
 function isLineCamiseria(line: TailoringOrderLine): boolean {
   const cfg = line?.configuration ?? {}
-  if (cfg.tipo === 'camiseria') return true
+  if (cfg.tipo === 'camiseria' || cfg.tipo === 'camiseria_industrial') return true
   const name = (line?.garment_types?.name ?? '').toString().toLowerCase()
   if (name.includes('camiseria')) return true
   if (cfg.puno !== undefined) return true
