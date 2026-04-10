@@ -147,24 +147,33 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
     return () => clearTimeout(timeout)
   }, [searchQuery, activeStoreId])
 
-  // Escáner de códigos de barras: 13 dígitos en menos de 200ms → búsqueda por EAN-13
+  // Escáner de códigos de barras: secuencia rápida de dígitos + Enter → búsqueda por EAN-13
+  // Listener GLOBAL en document para capturar la pistola sin importar el foco
   useEffect(() => {
-    const input = document.getElementById('pos-barcode-scanner') as HTMLInputElement | null
-    if (!input) return
-
     const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      // No interceptar si el usuario está escribiendo en un input/textarea normal
+      const isTyping = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') && target.id !== 'pos-barcode-scanner'
+
       if (e.key === 'Enter') {
         const { digits, firstAt } = barcodeBufferRef.current
         const elapsed = Date.now() - firstAt
-        if (digits.length === 13 && elapsed < 200) {
+        // Pistola: 8-13 dígitos en menos de 300ms (humano no puede)
+        if (digits.length >= 8 && digits.length <= 13 && elapsed < 300) {
           e.preventDefault()
+          e.stopPropagation()
+          const captured = digits
           barcodeBufferRef.current = { digits: '', firstAt: 0 }
-          getProductByBarcode({ barcode: digits, storeId: activeStoreId ?? undefined }).then((result) => {
+          getProductByBarcode({ barcode: captured, storeId: activeStoreId ?? undefined }).then((result) => {
             if (result.success && result.data && result.data.variant) {
               addToTicket(result.data.variant)
+              const v = result.data.variant as any
+              const name = v.products?.name || v.product_name || 'Producto'
+              const size = v.size ? ` · Talla ${v.size}` : ''
+              toast.success(`✓ ${name}${size}`)
               scannerInputRef.current?.focus()
             } else {
-              toast.error('Producto no encontrado')
+              toast.error(`Código no encontrado: ${captured}`)
             }
           }).catch(() => toast.error('Producto no encontrado'))
           return
@@ -172,18 +181,27 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
         barcodeBufferRef.current = { digits: '', firstAt: 0 }
         return
       }
+
+      // Solo capturar dígitos
       if (e.key.length === 1 && e.key >= '0' && e.key <= '9') {
         const now = Date.now()
+        // Si han pasado más de 300ms desde el último dígito, reiniciar (no es la pistola)
+        if (barcodeBufferRef.current.digits.length > 0 && now - barcodeBufferRef.current.firstAt > 300) {
+          barcodeBufferRef.current = { digits: '', firstAt: 0 }
+        }
         if (barcodeBufferRef.current.digits.length === 0) barcodeBufferRef.current.firstAt = now
+        // Si el usuario está escribiendo en un input normal, no interceptar
+        if (isTyping) return
         barcodeBufferRef.current.digits += e.key
         if (barcodeBufferRef.current.digits.length > 13) barcodeBufferRef.current.digits = barcodeBufferRef.current.digits.slice(-13)
-      } else {
+      } else if (e.key.length === 1) {
+        // Cualquier otra tecla rompe la secuencia
         barcodeBufferRef.current = { digits: '', firstAt: 0 }
       }
     }
 
-    input.addEventListener('keydown', handleKeyDown)
-    return () => input.removeEventListener('keydown', handleKeyDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
   }, [activeStoreId])
 
   // Pre-cargar cobro pendiente desde /sastre/cobros → /pos/caja?cobro=...

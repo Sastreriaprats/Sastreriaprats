@@ -41,13 +41,13 @@ export function BarcodeLabel({
       try {
         JsBarcode.default(canvasRef.current, barcode, {
           format: isEan ? 'EAN13' : 'CODE128',
-          width: isEan ? 1.5 : 1.2,
-          height: 35,
+          width: isEan ? 2.2 : 1.8,    // Barras más gruesas para mejor lectura con pistola
+          height: 45,                   // Más altas
           displayValue: true,
-          fontSize: 10,
+          fontSize: 11,
           font: 'Arial',
           textMargin: 2,
-          margin: 0,
+          margin: 8,                    // Quiet zones (~3mm a cada lado)
           background: '#ffffff',
           lineColor: '#000000',
         })
@@ -55,13 +55,13 @@ export function BarcodeLabel({
         try {
           JsBarcode.default(canvasRef.current, barcode, {
             format: 'CODE128',
-            width: 1.2,
-            height: 35,
+            width: 1.8,
+            height: 45,
             displayValue: true,
-            fontSize: 10,
+            fontSize: 11,
             font: 'Arial',
             textMargin: 2,
-            margin: 0,
+            margin: 8,
             background: '#ffffff',
             lineColor: '#000000',
           })
