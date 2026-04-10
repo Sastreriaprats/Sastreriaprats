@@ -19,20 +19,29 @@ import { createAppointment, updateAppointment, cancelAppointment, markAttendance
 import type { CalendarEvent } from './calendar-content'
 
 const typeOptions = [
-  { value: 'fitting', label: 'Prueba de sastrería' },
+  { value: 'consultation', label: 'Cita cliente' },
+  { value: 'fitting', label: 'Prueba' },
   { value: 'delivery', label: 'Entrega de pedido' },
-  { value: 'consultation', label: 'Consulta / Primera visita' },
   { value: 'boutique', label: 'Cita boutique' },
+  { value: 'travel', label: 'Viaje / Ausencia' },
   { value: 'meeting', label: 'Reunión interna' },
+  { value: 'block', label: 'Bloqueo de agenda' },
   { value: 'other', label: 'Otro' },
 ]
 
+// Tipos que NO requieren cliente (eventos internos)
+const NO_CLIENT_TYPES = new Set(['travel', 'block', 'meeting'])
+
 const durationOptions = [
   { value: '30', label: '30 min' },
-  { value: '45', label: '45 min' },
   { value: '60', label: '1 hora' },
-  { value: '90', label: '1h 30min' },
+  { value: '90', label: '1:30 horas' },
   { value: '120', label: '2 horas' },
+  { value: '150', label: '2:30 horas' },
+  { value: '180', label: '3 horas' },
+  { value: '240', label: '4 horas' },
+  { value: '300', label: 'Medio día (5 horas)' },
+  { value: '480', label: 'Día completo (8 horas)' },
 ]
 
 const statusLabels: Record<string, string> = {
@@ -330,6 +339,7 @@ export function AppointmentDialog({
             </Select>
           </div>
 
+          {!NO_CLIENT_TYPES.has(form.type) && (
           <div className="space-y-2">
             <Label>Cliente</Label>
             {selectedClientName ? (
@@ -375,6 +385,7 @@ export function AppointmentDialog({
               </>
             )}
           </div>
+          )}
 
           <div className="space-y-2">
             <Label>Descripción</Label>

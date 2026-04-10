@@ -333,22 +333,65 @@ export const searchProductVariantsForDeliveryNote = protectedAction<{ search?: s
       return success(rows.slice(0, 30))
     }
 
-    let query = ctx.adminClient
+    // Sin warehouseId: buscar en TODOS los productos activos (incluye recién creados sin stock)
+    const s = search?.trim() || ''
+
+    if (s) {
+      // Búsqueda en dos pasos para evitar problemas con .or() sobre joins embebidos
+      // 1. Buscar productos por nombre/sku
+      const { data: prodMatches } = await ctx.adminClient
+        .from('products')
+        .select('id')
+        .or(`name.ilike.%${s}%,sku.ilike.%${s}%,brand.ilike.%${s}%`)
+        .eq('is_active', true)
+        .limit(50)
+
+      const productIds = (prodMatches || []).map((p: any) => p.id)
+
+      // 2. Buscar variantes por variant_sku O cuyo product_id matchee
+      let varQuery = ctx.adminClient
+        .from('product_variants')
+        .select(`
+          id, variant_sku, product_id, price_override,
+          products!inner(id, name, sku, base_price, is_active)
+        `)
+        .eq('is_active', true)
+        .eq('products.is_active', true)
+        .order('created_at', { ascending: false })
+        .limit(50)
+
+      if (productIds.length > 0) {
+        varQuery = varQuery.or(`variant_sku.ilike.%${s}%,product_id.in.(${productIds.join(',')})`)
+      } else {
+        varQuery = varQuery.ilike('variant_sku', `%${s}%`)
+      }
+
+      const { data, error } = await varQuery
+      if (error) return failure(error.message || 'Error buscando variantes', 'INTERNAL')
+
+      return success((data || []).map((v: any) => ({
+        id: v.id,
+        variant_sku: v.variant_sku,
+        product_id: v.product_id,
+        product_name: v.products?.name || '',
+        product_sku: v.products?.sku || '',
+        unit_price: v.price_override != null ? Number(v.price_override) : Number(v.products?.base_price || 0),
+        available: null,
+      })))
+    }
+
+    // Sin búsqueda: traer las variantes más recientes
+    const { data, error } = await ctx.adminClient
       .from('product_variants')
       .select(`
-        id, variant_sku, product_id, price_override,
+        id, variant_sku, product_id, price_override, created_at,
         products!inner(id, name, sku, base_price, is_active)
       `)
       .eq('is_active', true)
       .eq('products.is_active', true)
+      .order('created_at', { ascending: false })
       .limit(30)
 
-    if (search?.trim()) {
-      const s = search.trim()
-      query = query.or(`variant_sku.ilike.%${s}%,products.name.ilike.%${s}%,products.sku.ilike.%${s}%`)
-    }
-
-    const { data, error } = await query
     if (error) return failure(error.message || 'Error buscando variantes', 'INTERNAL')
 
     return success((data || []).map((v: any) => ({

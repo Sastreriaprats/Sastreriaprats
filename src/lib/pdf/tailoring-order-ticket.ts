@@ -68,11 +68,19 @@ export async function generateTailoringOrderTicketPdf(order: TailoringTicketOrde
   const taxAmount = Math.round((total - subtotal) * 100) / 100
   const storeConfig = getStoreConfig(order)
 
-  // Group lines by prendaLabel so "Traje con chaleco" (americana+pantalón+chaleco) shows as one item
+  // Group lines by parent item so "Traje" (americana+pantalón) shows as one line in the ticket.
+  // prendaLabel is like "Americana — Traje 1" or "Pantalón — Traje 1" → group by part after "—".
+  // If there's no "—", the line is standalone (e.g. "Pantalón" solo).
   const grouped = new Map<string, { description: string; unitPrice: number; lineTotal: number; quantity: number }>()
   for (const line of orderLines) {
     const cfg = line.configuration as Record<string, unknown> | null
-    const groupKey = (cfg?.prendaLabel as string) || getLineName(line)
+    const rawLabel = (cfg?.prendaLabel as string) || getLineName(line)
+
+    // Extract group name: "Americana — Traje 1" → "Traje 1", "Pantalón" → "Pantalón"
+    const dashMatch = rawLabel.match(/\s*(?:—|–|-)\s*(.+)$/)
+    const groupKey = dashMatch ? dashMatch[1].trim() : rawLabel
+    const displayName = dashMatch ? dashMatch[1].trim() : rawLabel
+
     const existing = grouped.get(groupKey)
     // unit_price ya incluye IVA
     const unitPrice = Number(line.unit_price ?? 0)
@@ -81,7 +89,7 @@ export async function generateTailoringOrderTicketPdf(order: TailoringTicketOrde
       existing.unitPrice += unitPrice
       existing.lineTotal += lineTotal
     } else {
-      grouped.set(groupKey, { description: groupKey, unitPrice, lineTotal, quantity: Number(line.quantity ?? 1) })
+      grouped.set(groupKey, { description: displayName, unitPrice, lineTotal, quantity: Number(line.quantity ?? 1) })
     }
   }
 

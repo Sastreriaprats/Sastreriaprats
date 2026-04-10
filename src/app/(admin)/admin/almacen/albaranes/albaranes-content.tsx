@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { DatePickerPopover } from '@/components/ui/date-picker-popover'
-import { Eye, FileText, Plus, RefreshCw, Upload, CheckCircle2, Ban } from 'lucide-react'
+import { Eye, FileText, Plus, RefreshCw, Upload, CheckCircle2, Ban, Truck, Info } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   getDeliveryNotes,
@@ -134,14 +134,31 @@ export function AlbaranesContent() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Albaranes</h1>
           <p className="text-muted-foreground">Gestión de albaranes propios y albaranes de proveedor</p>
         </div>
-        <Button className="gap-2 bg-prats-navy hover:bg-prats-navy-light" onClick={() => router.push('/admin/almacen/albaranes/nuevo')}>
-          <Plus className="h-4 w-4" /> Nuevo albarán
-        </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" className="gap-2" onClick={() => router.push('/admin/proveedores')}>
+            <Truck className="h-4 w-4" /> Recibir pedido de proveedor
+          </Button>
+          <Button className="gap-2 bg-prats-navy hover:bg-prats-navy-light" onClick={() => router.push('/admin/almacen/albaranes/nuevo')}>
+            <Plus className="h-4 w-4" /> Nuevo albarán
+          </Button>
+        </div>
+      </div>
+
+      {/* Info banner */}
+      <div className="flex gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+        <Info className="h-5 w-5 shrink-0 text-blue-600 mt-0.5" />
+        <div>
+          <p className="font-medium">¿Cómo registrar la recepción de un pedido a proveedor?</p>
+          <p className="mt-1 text-blue-800">
+            Ve a <strong>Proveedores</strong> → selecciona el proveedor → abre el pedido → pulsa <strong>Registrar recepción</strong>.
+            Allí podrás indicar las cantidades recibidas y el sistema actualizará el stock automáticamente.
+          </p>
+        </div>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
