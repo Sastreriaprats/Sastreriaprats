@@ -1,30 +1,11 @@
 import Link from 'next/link'
 import { Facebook, Instagram, Linkedin, Mail } from 'lucide-react'
 import { CookieSettingsButton } from '@/components/legal/cookie-settings-button'
-import { NewsletterForm } from '@/components/web/newsletter-form'
 import { BRAND, STORE_LOCATIONS, SOCIAL_LINKS } from '@/lib/constants'
 
 export function WebFooter() {
   return (
     <footer className="bg-white border-t border-gray-200">
-      {/* Newsletter */}
-      <div className="border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          <div className="max-w-xl mx-auto text-center">
-            <h3 className="text-lg font-medium text-black">Únete a la familia Prats</h3>
-            <p className="mt-2 mb-5 text-sm text-gray-500">
-              Descubre consejos de estilo, lanzamientos exclusivos y mucho más.
-            </p>
-            <NewsletterForm />
-            <p className="mt-3 text-[11px] text-gray-500">
-              Al suscribirte aceptas nuestra{' '}
-              <Link href="/privacidad" className="underline hover:text-gray-600">política de privacidad</Link>.
-              Puedes darte de baja en cualquier momento.
-            </p>
-          </div>
-        </div>
-      </div>
-
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-12">
           {/* Col 1: Marca */}

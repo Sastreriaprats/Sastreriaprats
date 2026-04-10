@@ -166,7 +166,7 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
     }
   }
 
-  const SASTRE_STATUSES = ['in_workshop', 'pending_first_fitting', 'adjustments', 'finished', 'delivered', 'cancelled'] as const
+  const SASTRE_STATUSES = ['in_production', 'fitting', 'adjustments', 'finished', 'delivered', 'cancelled'] as const
   const statusOptions = SASTRE_STATUSES.includes(order?.status as any)
     ? [...SASTRE_STATUSES]
     : [order?.status, ...SASTRE_STATUSES].filter(Boolean)
@@ -281,7 +281,7 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
                       onChange={(e) => handleLineStatusChange(line.id, e.target.value)}
                       className="bg-white/[0.07] text-white border border-white/15 rounded-lg px-2 py-1 text-xs font-medium hover:bg-white/10 cursor-pointer focus:outline-none focus:border-[#c9a96e]/50 transition-all shrink-0 ml-2 [&>option]:bg-[#0d1629] [&>option]:text-white"
                     >
-                      <option value="in_workshop">En confección</option>
+                      <option value="in_production">En confección</option>
                       <option value="fitting">En prueba</option>
                       <option value="adjustments">Arreglos</option>
                       <option value="finished">Finalizada</option>

@@ -539,7 +539,7 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
   content.push({
     table: {
       widths: ['30%', '70%'],
-      body: [[cellLabel('Características:'), cellValue(caracteristicasStr)]],
+      body: [[cellLabel('Tejido:'), cellValue(caracteristicasStr)]],
     },
     layout: tableLayoutBorders,
   })
@@ -566,7 +566,7 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
   content.push({
     table: {
       widths: ['25%', '75%'],
-      body: [[cellLabel('Configuración:'), cellValue(configuracionStr)]],
+      body: [[cellLabel('Configuraciones:'), cellValue(configuracionStr)]],
     },
     layout: tableLayoutBordersPadded,
   })
@@ -663,7 +663,7 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
     {
       table: {
         widths: ['30%', '70%'],
-        body: [[cellLabel('Características:'), cellValue(caracteristicasStr)]],
+        body: [[cellLabel('Tejido:'), cellValue(caracteristicasStr)]],
       },
       layout: tableLayoutBorders,
     },
@@ -684,7 +684,7 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
     {
       table: {
         widths: ['25%', '75%'],
-        body: [[cellLabel('Configuración:'), cellValue(configuracionStr)]],
+        body: [[cellLabel('Configuraciones:'), cellValue(configuracionStr)]],
       },
       layout: tableLayoutBordersPadded,
     },

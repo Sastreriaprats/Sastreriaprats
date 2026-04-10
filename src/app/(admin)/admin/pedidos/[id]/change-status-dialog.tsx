@@ -13,11 +13,14 @@ import { useAction } from '@/hooks/use-action'
 import { changeOrderStatus } from '@/actions/orders'
 import { getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
 
+// Estados válidos del enum tailoring_order_status:
+// created, fabric_ordered, fabric_received, factory_ordered, in_production,
+// fitting, adjustments, finished, delivered, incident, cancelled
 const allStatusesByType: Record<string, string[]> = {
-  artesanal: ['in_workshop', 'pending_first_fitting', 'adjustments', 'finished', 'delivered', 'cancelled'],
-  industrial: ['note_sent_factory', 'fabric_ordered_supplier', 'fabric_at_factory', 'in_production', 'shipping_to_store', 'fitting', 'adjustments', 'finished', 'delivered', 'cancelled'],
-  oficial: ['created', 'requested', 'in_production', 'supplier_delivered', 'delivered', 'cancelled'],
-  proveedor: ['order_requested', 'shipping_to_store', 'delivered_to_store', 'cancelled'],
+  artesanal: ['created', 'in_production', 'fitting', 'adjustments', 'finished', 'delivered', 'cancelled'],
+  industrial: ['created', 'fabric_ordered', 'fabric_received', 'factory_ordered', 'in_production', 'fitting', 'adjustments', 'finished', 'delivered', 'cancelled'],
+  oficial: ['created', 'in_production', 'finished', 'delivered', 'cancelled'],
+  proveedor: ['created', 'fabric_ordered', 'fabric_received', 'cancelled'],
 }
 
 export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus, lines, orderType = 'artesanal' }: {

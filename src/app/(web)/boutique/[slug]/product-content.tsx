@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
-  ArrowLeft, ShoppingBag, Minus, Plus, Check, Truck, Shield, Ruler, Loader2, Heart,
+  ArrowLeft, ShoppingBag, Minus, Plus, Check, Truck, Shield, Ruler, Loader2, Heart, ChevronDown,
 } from 'lucide-react'
 import { PratsSpinner } from '@/components/ui/prats-spinner'
 import { useCart } from '@/components/providers/cart-provider'
@@ -29,6 +29,7 @@ export function ProductContent({ slug }: { slug: string }) {
   const [quantity, setQuantity] = useState(1)
   const [activeImage, setActiveImage] = useState(0)
   const [justAdded, setJustAdded] = useState(false)
+  const [detailsOpen, setDetailsOpen] = useState(false)
   const [sizeGuideOpen, setSizeGuideOpen] = useState(false)
   const [clientId, setClientId] = useState<string | null>(null)
   const [isInWishlist, setIsInWishlist] = useState(false)
@@ -199,11 +200,21 @@ export function ProductContent({ slug }: { slug: string }) {
 
         {/* Product info */}
         <div>
+          {/* Logo Prats */}
+          <div className="mb-6">
+            <Image
+              src="/images/logo-prats-hd.webp"
+              alt="Sastrería Prats"
+              width={80}
+              height={80}
+              className="object-contain h-12 w-auto"
+            />
+          </div>
           {(product.brand as string) && (
             <p className="text-xs text-prats-gold tracking-[0.3em] uppercase mb-2">{product.brand as string}</p>
           )}
-          <h1 className="text-3xl font-bold text-prats-navy tracking-tight mb-2">{product.name as string}</h1>
-          <p className="text-2xl font-bold text-prats-navy mb-6">{formatPrice(price)}</p>
+          <h1 className="font-serif text-3xl md:text-4xl font-light text-prats-navy tracking-tight mb-3 leading-tight">{product.name as string}</h1>
+          <p className="font-serif text-3xl font-light text-prats-navy mb-8">{formatPrice(price)}</p>
 
           {colors && colors.length > 0 && (
             <div className="mb-6">
@@ -346,9 +357,20 @@ export function ProductContent({ slug }: { slug: string }) {
           <Separator className="my-8" />
 
           {(product.description as string) && (
-            <div className="mb-6">
-              <h3 className="text-sm font-semibold text-prats-navy mb-2">Descripción</h3>
-              <p className="text-sm text-gray-500 leading-relaxed">{product.description as string}</p>
+            <div className="mb-6 border-t border-b border-gray-200">
+              <button
+                type="button"
+                onClick={() => setDetailsOpen(o => !o)}
+                className="w-full flex items-center justify-between py-4 text-left"
+              >
+                <span className="text-sm font-medium uppercase tracking-[0.15em] text-prats-navy">Detalles</span>
+                <ChevronDown className={cn('h-4 w-4 text-prats-navy transition-transform', detailsOpen && 'rotate-180')} />
+              </button>
+              {detailsOpen && (
+                <div className="pb-4">
+                  <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line">{product.description as string}</p>
+                </div>
+              )}
             </div>
           )}
 

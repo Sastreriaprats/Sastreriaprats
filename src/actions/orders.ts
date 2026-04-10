@@ -602,9 +602,9 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
     const orderTypeDb = input.orderType === 'camiseria' ? 'industrial' : input.orderType
 
     const initialStatus =
-      input.orderType === 'artesanal' ? 'in_workshop'
-      : input.orderType === 'industrial' ? 'note_sent_factory'
-      : input.orderType === 'camiseria' ? 'in_workshop'
+      input.orderType === 'artesanal' ? 'in_production'
+      : input.orderType === 'industrial' ? 'factory_ordered'
+      : input.orderType === 'camiseria' ? 'in_production'
       : 'created'
 
     const { data: garmentTypes } = await ctx.adminClient

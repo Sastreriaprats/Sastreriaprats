@@ -97,6 +97,20 @@ export const BRAND = {
   },
 } as const
 
+/**
+ * Configuración del popup de newsletter — editar aquí para cambiar el contenido.
+ * Para hacerlo editable desde el admin, mover a cms_sections (sección "newsletter_popup").
+ */
+export const NEWSLETTER_POPUP = {
+  enabled: true,
+  delaySeconds: 8,
+  imageUrl: '/images/logo-prats-hd.webp', // Imagen lateral (logo o foto)
+  title: 'Únete a la familia Prats',
+  subtitle: 'Sé el primero en conocer nuestras nuevas colecciones, eventos exclusivos y consejos de estilo.',
+  buttonText: 'Suscribirse',
+  disclaimer: 'Puedes darte de baja en cualquier momento. Sin spam, lo prometemos.',
+} as const
+
 export const STORE_LOCATIONS = {
   pinzon: {
     name: 'Hermanos Pinzón',
