@@ -200,21 +200,11 @@ export function ProductContent({ slug }: { slug: string }) {
 
         {/* Product info */}
         <div>
-          {/* Logo Prats */}
-          <div className="mb-6">
-            <Image
-              src="/images/logo-prats-hd.webp"
-              alt="Sastrería Prats"
-              width={80}
-              height={80}
-              className="object-contain h-12 w-auto"
-            />
-          </div>
           {(product.brand as string) && (
             <p className="text-xs text-prats-gold tracking-[0.3em] uppercase mb-2">{product.brand as string}</p>
           )}
-          <h1 className="font-serif text-3xl md:text-4xl font-light text-prats-navy tracking-tight mb-3 leading-tight">{product.name as string}</h1>
-          <p className="font-serif text-3xl font-light text-prats-navy mb-8">{formatPrice(price)}</p>
+          <h1 className="text-3xl md:text-4xl font-bold text-prats-navy tracking-tight mb-3 leading-tight">{product.name as string}</h1>
+          <p className="text-3xl font-bold text-prats-navy mb-8">{formatPrice(price)}</p>
 
           {colors && colors.length > 0 && (
             <div className="mb-6">

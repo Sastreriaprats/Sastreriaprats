@@ -13,16 +13,24 @@ export const metadata: Metadata = {
 }
 
 export default async function BlogPage() {
-  const posts = await getPublicBlogPosts(20)
+  let posts: any[] = []
+  try {
+    posts = await getPublicBlogPosts(20) || []
+  } catch {
+    posts = []
+  }
 
-  if (!posts || posts.length === 0) {
+  if (posts.length === 0) {
     return (
       <div className="container mx-auto px-4 py-20 sm:py-24">
         <div className="flex min-h-[40vh] flex-col items-center justify-center text-center">
-          <p className="text-sm tracking-[0.3em] text-prats-navy/50">Próximamente</p>
-          <h2 className="mt-4 font-display text-2xl font-light text-prats-navy">
-            Estamos preparando contenido para ti
+          <p className="text-sm tracking-[0.3em] text-prats-navy/50">PRATS & CO.</p>
+          <h2 className="mt-4 text-2xl font-light text-prats-navy">
+            Próximamente nuestras historias de estilo
           </h2>
+          <p className="mt-2 text-sm text-gray-400">
+            Estamos preparando contenido exclusivo para ti.
+          </p>
         </div>
       </div>
     )
