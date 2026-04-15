@@ -154,17 +154,24 @@ export function PosCloseCash({ session, onClosed, onCancel }: {
           />
 
           {hasCounted && (
-            <div className={`rounded-xl flex items-center justify-between px-4 py-4 ${
-              isExact ? 'bg-emerald-50 border border-emerald-200' : isMinorDiff ? 'bg-amber-50 border border-amber-200' : 'bg-red-50 border border-red-200'
-            }`}>
-              <div className="flex items-center gap-2">
-                {isExact ? <CheckCircle className="h-5 w-5 text-emerald-600" /> : <AlertTriangle className="h-5 w-5 text-amber-600" />}
-                <span className="text-sm font-medium text-slate-700">Diferencia</span>
+            <>
+              <div className={`rounded-xl flex items-center justify-between px-4 py-4 ${
+                isExact ? 'bg-emerald-50 border border-emerald-200' : isMinorDiff ? 'bg-amber-50 border border-amber-200' : 'bg-red-50 border border-red-200'
+              }`}>
+                <div className="flex items-center gap-2">
+                  {isExact ? <CheckCircle className="h-5 w-5 text-emerald-600" /> : <AlertTriangle className="h-5 w-5 text-amber-600" />}
+                  <span className="text-sm font-medium text-slate-700">Diferencia</span>
+                </div>
+                <span className={`text-xl font-bold tabular-nums ${isExact ? 'text-emerald-600' : difference > 0 ? 'text-amber-600' : 'text-red-600'}`}>
+                  {difference > 0 ? '+' : ''}{formatCurrency(difference)}
+                </span>
               </div>
-              <span className={`text-xl font-bold tabular-nums ${isExact ? 'text-emerald-600' : difference > 0 ? 'text-amber-600' : 'text-red-600'}`}>
-                {difference > 0 ? '+' : ''}{formatCurrency(difference)}
-              </span>
-            </div>
+              {!isExact && (
+                <p className="text-sm text-red-600 font-medium text-center">
+                  No se puede cerrar la caja con un descuadre. Verifica el efectivo contado.
+                </p>
+              )}
+            </>
           )}
 
           <div className="space-y-2">
@@ -191,7 +198,7 @@ export function PosCloseCash({ session, onClosed, onCancel }: {
           </Button>
           <Button
             onClick={handleClose}
-            disabled={isLoading || !hasCounted}
+            disabled={isLoading || !hasCounted || !isExact}
             className="flex-1 h-14 rounded-xl bg-[#1B2A4A] hover:bg-[#253a5c] font-semibold shadow-lg shadow-[#1B2A4A]/20 gap-2"
           >
             {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Lock className="h-5 w-5" />}

@@ -115,6 +115,10 @@ export const closeCashSession = protectedAction<any, any>(
 
     const difference = parsed.data.counted_cash - expectedCash
 
+    if (Math.abs(difference) >= 0.01) {
+      return failure('No se puede cerrar la caja con un descuadre. El efectivo contado debe coincidir con el esperado.')
+    }
+
     const { data: closed, error } = await ctx.adminClient
       .from('cash_sessions')
       .update({
