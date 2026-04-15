@@ -2,9 +2,10 @@
 
 import { cn } from '@/lib/utils'
 import type { CalendarEvent } from '../calendar-content'
+import { getAdminHours, isDayClosed, isSaturday } from '@/lib/schedule-utils'
 
 const HOURS = Array.from({ length: 13 }, (_, i) => i + 8)
-const DAYS_ES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
+const DAYS_ES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
 
 function StatusDot({ status }: { status: string }) {
   if (status === 'completed') return <span className="absolute top-0.5 right-0.5 text-[8px] font-bold text-green-700">✓</span>
@@ -30,7 +31,7 @@ export function WeekView({ currentDate, events, onSlotClick, onEventClick }: {
   const weekStart = new Date(currentDate)
   weekStart.setDate(currentDate.getDate() - dayOfWeek)
 
-  const weekDays = Array.from({ length: 6 }, (_, i) => {
+  const weekDays = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(weekStart)
     d.setDate(weekStart.getDate() + i)
     return d
@@ -54,20 +55,23 @@ export function WeekView({ currentDate, events, onSlotClick, onEventClick }: {
 
   return (
     <div className="border rounded-lg overflow-hidden">
-      <div className="grid grid-cols-[60px_repeat(6,1fr)] border-b bg-muted/50">
+      <div className="grid grid-cols-[60px_repeat(7,1fr)] border-b bg-muted/50">
         <div className="p-2 text-xs text-muted-foreground text-center border-r">Hora</div>
         {weekDays.map((day, i) => {
           const dateStr = day.toISOString().split('T')[0]
           const isToday = dateStr === today
+          const closed = isDayClosed(dateStr)
           return (
-            <div key={i} className={cn('p-2 text-center border-r last:border-r-0', isToday && 'bg-prats-navy/5')}>
-              <p className="text-xs text-muted-foreground">{DAYS_ES[i]}</p>
+            <div key={i} className={cn('p-2 text-center border-r last:border-r-0', isToday && 'bg-prats-navy/5', closed && 'bg-gray-100')}>
+              <p className={cn('text-xs', closed ? 'text-gray-400' : 'text-muted-foreground')}>{DAYS_ES[i]}</p>
               <p className={cn(
                 'text-sm font-bold',
+                closed && 'text-gray-400',
                 isToday && 'bg-prats-navy text-white rounded-full w-7 h-7 flex items-center justify-center mx-auto'
               )}>
                 {day.getDate()}
               </p>
+              {closed && <p className="text-[9px] text-gray-400">Cerrado</p>}
             </div>
           )
         })}
@@ -75,24 +79,35 @@ export function WeekView({ currentDate, events, onSlotClick, onEventClick }: {
 
       <div className="max-h-[600px] overflow-y-auto">
         {HOURS.map(hour => (
-          <div key={hour} className="grid grid-cols-[60px_repeat(6,1fr)] border-b last:border-b-0">
+          <div key={hour} className="grid grid-cols-[60px_repeat(7,1fr)] border-b last:border-b-0">
             <div className="p-1 text-[10px] text-muted-foreground text-right pr-2 border-r h-16 flex items-start justify-end">
               {hour.toString().padStart(2, '0')}:00
             </div>
             {weekDays.map((day, i) => {
               const dateStr = day.toISOString().split('T')[0]
               const isToday = dateStr === today
+              const closed = isDayClosed(dateStr)
+              const satAfternoon = isSaturday(dateStr) && hour >= 14
+              const isBlocked = closed || satAfternoon
               const slotEvents = getEventsForSlot(dateStr, hour)
 
               return (
                 <div
                   key={i}
                   className={cn(
-                    'relative h-16 border-r last:border-r-0 cursor-pointer hover:bg-muted/30 transition-colors',
-                    isToday && 'bg-prats-navy/[0.02]'
+                    'relative h-16 border-r last:border-r-0 transition-colors',
+                    isBlocked
+                      ? 'bg-gray-50 cursor-default'
+                      : 'cursor-pointer hover:bg-muted/30',
+                    isToday && !isBlocked && 'bg-prats-navy/[0.02]'
                   )}
-                  onClick={() => onSlotClick(dateStr, `${hour.toString().padStart(2, '0')}:00`)}
+                  onClick={() => !isBlocked && onSlotClick(dateStr, `${hour.toString().padStart(2, '0')}:00`)}
                 >
+                  {isBlocked && !slotEvents.length && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="text-[9px] text-gray-300">{closed ? '' : 'Cerrado'}</span>
+                    </div>
+                  )}
                   {slotEvents.map(event => (
                     <div
                       key={event.id}

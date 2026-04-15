@@ -2,6 +2,7 @@
 
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
+import { getBusinessHours } from '@/lib/schedule-utils'
 
 export const listAppointments = protectedAction<{
   start_date: string
@@ -256,8 +257,10 @@ export const getTailorAvailability = protectedAction<{
 }, unknown>(
   { permission: 'calendar.view', auditModule: 'calendar' },
   async (ctx, { tailor_id, date }) => {
-    const openTime = '09:00'
-    const closeTime = '20:00'
+    const hours = getBusinessHours(date)
+    if (!hours) return success({ openTime: null, closeTime: null, slots: [], appointments: [], closed: true })
+    const openTime = hours.open
+    const closeTime = hours.close
 
     const { data: appointments } = await ctx.adminClient
       .from('appointments')

@@ -4,8 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { CheckCircle2, XCircle, Ban } from 'lucide-react'
 import type { CalendarEvent } from '../calendar-content'
-
-const HOURS = Array.from({ length: 13 }, (_, i) => i + 8)
+import { getAdminHours, isDayClosed } from '@/lib/schedule-utils'
 
 const typeLabels: Record<string, string> = {
   fitting: 'Prueba', delivery: 'Entrega', consultation: 'Consulta',
@@ -36,6 +35,18 @@ export function DayView({ currentDate, events, onSlotClick, onEventClick }: {
   const dateStr = currentDate.toISOString().split('T')[0]
   const today = new Date().toISOString().split('T')[0]
   const isToday = dateStr === today
+  const closed = isDayClosed(dateStr)
+  const HOURS = getAdminHours(dateStr)
+
+  if (closed) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+        <Ban className="h-10 w-10 mb-3 text-gray-300" />
+        <p className="text-lg font-semibold text-gray-400">Domingo — Cerrado</p>
+        <p className="text-sm text-gray-400 mt-1">No hay horario de atención los domingos</p>
+      </div>
+    )
+  }
 
   const getEventsForHour = (hour: number) => {
     const hourStr = `${hour.toString().padStart(2, '0')}:`

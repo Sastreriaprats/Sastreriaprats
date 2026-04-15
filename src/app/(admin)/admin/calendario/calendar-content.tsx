@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ChevronLeft, ChevronRight, Loader2, Plus } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2, Plus, ShieldBan, Trash2, CalendarOff } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
 import { usePermissions } from '@/hooks/use-permissions'
 import { listAppointments } from '@/actions/calendar'
@@ -13,6 +13,7 @@ import { MonthView } from './views/month-view'
 import { WeekView } from './views/week-view'
 import { DayView } from './views/day-view'
 import { AppointmentDialog } from './appointment-dialog'
+import { ScheduleBlocksPanel } from './schedule-blocks-panel'
 
 const MONTHS_ES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -68,6 +69,7 @@ export function CalendarContent() {
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [selectedSlot, setSelectedSlot] = useState<{ date: string; time: string } | null>(null)
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
+  const [showBlocks, setShowBlocks] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -192,12 +194,21 @@ export function CalendarContent() {
         </div>
         <div className="flex items-center gap-2">
           {can('calendar.edit') && (
-            <Button
-              onClick={() => { setSelectedSlot(null); setSelectedEvent(null); setShowCreateDialog(true) }}
-              className="gap-2 bg-prats-navy hover:bg-prats-navy-light"
-            >
-              <Plus className="h-4 w-4" /> Nueva cita
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                onClick={() => setShowBlocks(!showBlocks)}
+                className="gap-2"
+              >
+                <CalendarOff className="h-4 w-4" /> Bloqueos
+              </Button>
+              <Button
+                onClick={() => { setSelectedSlot(null); setSelectedEvent(null); setShowCreateDialog(true) }}
+                className="gap-2 bg-prats-navy hover:bg-prats-navy-light"
+              >
+                <Plus className="h-4 w-4" /> Nueva cita
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -243,6 +254,8 @@ export function CalendarContent() {
           </span>
         ))}
       </div>
+
+      {showBlocks && <ScheduleBlocksPanel />}
 
       {isLoading ? (
         <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin" /></div>

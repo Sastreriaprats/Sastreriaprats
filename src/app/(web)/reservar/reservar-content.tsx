@@ -19,6 +19,9 @@ const SLOTS_WEEKDAY = [
   '10:00', '10:30', '11:00', '11:30', '12:00', '12:30', '13:00', '13:30',
   '17:00', '17:30', '18:00', '18:30', '19:00', '19:30',
 ]
+const SLOTS_SATURDAY = [
+  '10:00', '10:30', '11:00', '11:30', '12:00', '12:30', '13:00', '13:30',
+]
 
 const DAYS_ES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
@@ -36,8 +39,9 @@ function firstWeekday(y: number, m: number) {
 }
 
 function slotsForDate(iso: string): string[] {
-  const dow = new Date(iso).getDay() // 0=Dom, 6=Sáb
-  if (dow === 0 || dow === 6) return [] // Cerrado sábado y domingo
+  const dow = new Date(iso + 'T12:00:00').getDay() // 0=Dom, 6=Sáb
+  if (dow === 0) return [] // Domingo cerrado
+  if (dow === 6) return SLOTS_SATURDAY // Sábado solo mañana
   return SLOTS_WEEKDAY
 }
 
@@ -238,7 +242,7 @@ export function ReservarContent() {
                   {Array.from({ length: total }, (_, i) => i + 1).map(day => {
                     const iso = `${curYear}-${String(curMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
                     const dow = new Date(iso).getDay() // 0=Dom,6=Sáb
-                    const isWeekend  = dow === 0 || dow === 6
+                    const isWeekend  = dow === 0 // Solo domingo cerrado
                     const isPast     = iso < today
                     const isTooFar   = iso > maxDate
                     const disabled   = isPast || isTooFar || isWeekend
