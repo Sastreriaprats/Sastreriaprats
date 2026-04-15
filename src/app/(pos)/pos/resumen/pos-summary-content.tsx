@@ -27,6 +27,9 @@ export function PosSummaryContent() {
   const [session, setSession] = useState<any>(null)
   const [sales, setSales] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [printingId, setPrintingId] = useState<string | null>(null)
+  const [invoicingId, setInvoicingId] = useState<string | null>(null)
+  const storeName = stores.find((s) => s.storeId === activeStoreId)?.storeName ?? null
 
   useEffect(() => {
     if (!activeStoreId) return
@@ -57,9 +60,6 @@ export function PosSummaryContent() {
 
   const uniqueClients = new Set(sales.filter((s: any) => s.clients).map((s: any) => s.clients.full_name)).size
   const avgTicket = sales.length > 0 ? (session.total_sales || 0) / sales.length : 0
-  const [printingId, setPrintingId] = useState<string | null>(null)
-  const [invoicingId, setInvoicingId] = useState<string | null>(null)
-  const storeName = stores.find((s) => s.storeId === activeStoreId)?.storeName ?? null
 
   const handlePrintTicket = async (sale: any) => {
     setPrintingId(sale.id)
