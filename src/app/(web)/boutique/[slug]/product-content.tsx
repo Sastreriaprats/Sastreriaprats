@@ -142,7 +142,7 @@ export function ProductContent({ slug }: { slug: string }) {
   }
 
   const formatPrice = (p: number) =>
-    new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(p)
+    '€' + new Intl.NumberFormat('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(p)
 
 
   return (
@@ -155,15 +155,15 @@ export function ProductContent({ slug }: { slug: string }) {
       <button
         type="button"
         onClick={() => router.back()}
-        className="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-prats-navy transition-colors mb-8"
+        className="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 transition-colors mb-6"
       >
-        <ArrowLeft className="h-4 w-4" /> Volver a boutique
+        <ArrowLeft className="h-3.5 w-3.5" /> Volver
       </button>
 
       <div className="grid gap-12 lg:grid-cols-2">
         {/* Gallery */}
         <div>
-          <div className="aspect-[3/4] bg-gray-50 rounded-2xl overflow-hidden mb-3 relative">
+          <div className="aspect-[3/4] bg-[#f5f5f5] overflow-hidden mb-3 relative">
             {images[activeImage]?.url ? (
               <Image
                 src={images[activeImage].url}
@@ -200,11 +200,8 @@ export function ProductContent({ slug }: { slug: string }) {
 
         {/* Product info */}
         <div>
-          {(product.brand as string) && (
-            <p className="text-xs text-prats-gold tracking-[0.3em] uppercase mb-2">{product.brand as string}</p>
-          )}
-          <h1 className="text-3xl md:text-4xl font-bold text-prats-navy tracking-tight mb-3 leading-tight">{product.name as string}</h1>
-          <p className="text-3xl font-bold text-prats-navy mb-8">{formatPrice(price)}</p>
+          <h1 className="text-3xl md:text-4xl font-display text-prats-navy mb-4 leading-tight">{product.name as string}</h1>
+          <p className="text-2xl text-gray-900 mb-10">{formatPrice(price)}</p>
 
           {colors && colors.length > 0 && (
             <div className="mb-6">
@@ -229,14 +226,14 @@ export function ProductContent({ slug }: { slug: string }) {
           )}
 
           {sizes.length > 0 && (
-            <div className="mb-6">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-medium text-gray-700">Talla</p>
-                <button type="button" className="text-xs text-prats-gold hover:underline flex items-center gap-1" onClick={() => setSizeGuideOpen(true)}>
+            <div className="mb-8">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-medium text-gray-700">Seleccione Talla</p>
+                <button type="button" className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1" onClick={() => setSizeGuideOpen(true)}>
                   <Ruler className="h-3 w-3" />Guía de tallas
                 </button>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-3">
                 {sizes.map(size => {
                   const variant = variants?.find((v) =>
                     v.size === size && (!selectedColor || v.color === selectedColor)
@@ -248,12 +245,12 @@ export function ProductContent({ slug }: { slug: string }) {
                       onClick={() => available && setSelectedSize(size)}
                       disabled={!available}
                       className={cn(
-                        'h-10 min-w-[44px] px-3 rounded-lg border text-sm font-medium transition-all',
+                        'h-11 w-11 rounded-full border text-sm font-medium transition-all',
                         selectedSize === size
-                          ? 'border-prats-navy bg-prats-navy text-white'
+                          ? 'border-prats-navy ring-1 ring-prats-navy text-prats-navy'
                           : available
-                            ? 'border-gray-200 hover:border-prats-navy text-gray-700'
-                            : 'border-gray-100 text-gray-300 line-through cursor-not-allowed'
+                            ? 'border-gray-300 hover:border-prats-navy text-gray-700'
+                            : 'border-gray-200 text-gray-300 line-through cursor-not-allowed'
                       )}
                     >
                       {size}
@@ -261,49 +258,48 @@ export function ProductContent({ slug }: { slug: string }) {
                   )
                 })}
               </div>
-              {!selectedSize && sizes.length > 0 && (
-                <p className="text-xs text-amber-600 mt-2">Selecciona una talla</p>
-              )}
             </div>
           )}
 
           <div className="mb-6">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center border rounded-lg">
-                <button
-                  className="h-10 w-10 flex items-center justify-center text-gray-500 hover:text-prats-navy"
-                  onClick={() => setQuantity(q => Math.max(1, q - 1))}
-                >
-                  <Minus className="h-4 w-4" />
-                </button>
-                <span className="w-10 text-center text-sm font-medium">{quantity}</span>
-                <button
-                  className="h-10 w-10 flex items-center justify-center text-gray-500 hover:text-prats-navy"
-                  onClick={() => setQuantity(q => Math.min(stock, q + 1))}
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
-              </div>
-              {selectedVariant && (
-                <span className="text-xs text-gray-400">{stock} disponibles</span>
-              )}
+            <div className="flex items-center border border-gray-300 rounded-sm">
+              <button
+                className="h-12 w-14 flex items-center justify-center text-gray-500 hover:text-prats-navy transition-colors"
+                onClick={() => setQuantity(q => Math.max(1, q - 1))}
+              >
+                <Minus className="h-4 w-4" />
+              </button>
+              <span className="flex-1 text-center text-sm font-medium">{quantity}</span>
+              <button
+                className="h-12 w-14 flex items-center justify-center text-gray-500 hover:text-prats-navy transition-colors"
+                onClick={() => setQuantity(q => Math.min(stock, q + 1))}
+              >
+                <Plus className="h-4 w-4" />
+              </button>
             </div>
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex gap-3 mb-3">
             <Button
               size="lg"
+              variant="outline"
               className={cn(
-                'flex-1 h-14 text-sm tracking-wide uppercase transition-all',
-                justAdded ? 'bg-green-600 hover:bg-green-700' : 'bg-prats-navy hover:bg-prats-navy-light'
+                'flex-1 h-14 text-sm tracking-[0.15em] uppercase rounded-sm transition-all',
+                justAdded
+                  ? 'border-green-600 text-green-600 hover:bg-green-50'
+                  : 'border-prats-navy text-prats-navy hover:bg-prats-navy hover:text-white'
               )}
               disabled={!canAdd}
               onClick={handleAddToCart}
             >
               {justAdded ? (
                 <><Check className="h-4 w-4 mr-2" />¡Añadido!</>
+              ) : canAdd ? (
+                'Añadir al carrito'
+              ) : stock <= 0 ? (
+                'Agotado'
               ) : (
-                <><ShoppingBag className="h-4 w-4 mr-2" />{canAdd ? 'Añadir al carrito' : stock <= 0 ? 'Agotado' : 'Selecciona una talla'}</>
+                'Selecciona una talla'
               )}
             </Button>
             {clientId && (
@@ -311,7 +307,7 @@ export function ProductContent({ slug }: { slug: string }) {
                 type="button"
                 variant="outline"
                 size="lg"
-                className="h-14 px-4 border-prats-navy text-prats-navy hover:bg-prats-navy/5"
+                className="h-14 px-4 rounded-sm border-gray-300 text-gray-600 hover:border-prats-navy hover:text-prats-navy"
                 disabled={wishlistLoading}
                 onClick={handleAddToWishlist}
                 title={isInWishlist ? 'En favoritos' : 'Añadir a favoritos'}
@@ -325,7 +321,7 @@ export function ProductContent({ slug }: { slug: string }) {
             )}
           </div>
           {!clientId && (
-            <p className="text-xs text-gray-400 mt-2">
+            <p className="text-xs text-gray-400 mb-6">
               <Link href={`/auth/login?mode=client&redirectTo=${encodeURIComponent(`/boutique/${slug}`)}`} className="text-prats-gold hover:underline">
                 Inicia sesión
               </Link>
@@ -333,21 +329,16 @@ export function ProductContent({ slug }: { slug: string }) {
             </p>
           )}
 
-          <Separator className="my-8" />
-
-          <div className="space-y-3 text-sm text-gray-500">
-            <div className="flex items-center gap-2">
-              <Truck className="h-4 w-4 text-prats-gold" />Envío gratuito a partir de 200€
-            </div>
-            <div className="flex items-center gap-2">
-              <Shield className="h-4 w-4 text-prats-gold" />Devolución en 30 días
-            </div>
-          </div>
-
-          <Separator className="my-8" />
-
           {(product.description as string) && (
-            <div className="mb-6 border-t border-b border-gray-200">
+            <div className="mb-8">
+              <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line">{product.description as string}</p>
+            </div>
+          )}
+
+          <Separator className="my-6" />
+
+          <div className="space-y-4">
+            <div className="border-b border-gray-200">
               <button
                 type="button"
                 onClick={() => setDetailsOpen(o => !o)}
@@ -357,32 +348,37 @@ export function ProductContent({ slug }: { slug: string }) {
                 <ChevronDown className={cn('h-4 w-4 text-prats-navy transition-transform', detailsOpen && 'rotate-180')} />
               </button>
               {detailsOpen && (
-                <div className="pb-4">
-                  <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line">{product.description as string}</p>
+                <div className="pb-4 space-y-2 text-sm">
+                  {(product.brand as string) && (
+                    <div>
+                      <span className="text-gray-400">Marca:</span>{' '}
+                      <span className="text-gray-700 uppercase">{product.brand as string}</span>
+                    </div>
+                  )}
+                  {(product.material as string) && (
+                    <div>
+                      <span className="text-gray-400">Material:</span>{' '}
+                      <span className="text-gray-700">{product.material as string}</span>
+                    </div>
+                  )}
+                  {(product.collection as string) && (
+                    <div>
+                      <span className="text-gray-400">Colección:</span>{' '}
+                      <span className="text-gray-700">{product.collection as string}</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          )}
 
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            {(product.material as string) && (
-              <div>
-                <span className="text-gray-400">Material:</span>{' '}
-                <span className="text-gray-700">{product.material as string}</span>
+            <div className="space-y-2 text-sm text-gray-500 py-2">
+              <div className="flex items-center gap-2">
+                <Truck className="h-4 w-4 text-gray-400" />Envío gratuito a partir de 200€
               </div>
-            )}
-            {(product.brand as string) && (
-              <div>
-                <span className="text-gray-400">Marca:</span>{' '}
-                <span className="text-gray-700">{product.brand as string}</span>
+              <div className="flex items-center gap-2">
+                <Shield className="h-4 w-4 text-gray-400" />Devolución en 30 días
               </div>
-            )}
-            {(product.collection as string) && (
-              <div>
-                <span className="text-gray-400">Colección:</span>{' '}
-                <span className="text-gray-700">{product.collection as string}</span>
-              </div>
-            )}
+            </div>
           </div>
         </div>
       </div>
