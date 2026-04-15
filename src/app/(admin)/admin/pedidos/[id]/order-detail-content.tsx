@@ -22,7 +22,7 @@ import { PaymentHistory } from '@/components/payments/payment-history'
 
 export function OrderDetailContent({ order }: { order: any }) {
   const router = useRouter()
-  const { can } = usePermissions()
+  const { can, isAdmin } = usePermissions()
   const [showStatusDialog, setShowStatusDialog] = useState(false)
 
   const isOverdue = order.estimated_delivery_date && new Date(order.estimated_delivery_date) < new Date() && !['delivered', 'cancelled'].includes(order.status)
@@ -58,7 +58,7 @@ export function OrderDetailContent({ order }: { order: any }) {
           </div>
         </div>
         <div className="flex gap-2">
-          {can('orders.edit') && !['delivered', 'cancelled'].includes(order.status) && (
+          {can('orders.edit') && (isAdmin || !['delivered', 'cancelled'].includes(order.status)) && (
             <Button onClick={() => setShowStatusDialog(true)} className="bg-prats-navy hover:bg-prats-navy-light">
               Cambiar estado
             </Button>
