@@ -1,6 +1,6 @@
 /**
  * Generación automática de SKU para productos.
- * Formato: PRATS-[PREFIJO_TIPO]-[PREFIJO_NOMBRE]
+ * Formato: [PREFIJO_TIPO]-[PREFIJO_NOMBRE]
  */
 
 const PREFIX_MAP: Record<string, string> = {
@@ -13,7 +13,7 @@ const PREFIX_MAP: Record<string, string> = {
 
 /**
  * Genera la base del SKU (sin el número correlativo).
- * Ejemplo: generateSkuBase('boutique', 'Traje Azul Navy') → 'PRATS-BTQ-TRAZULNAV'
+ * Ejemplo: generateSkuBase('boutique', 'Traje Azul Navy') → 'BTQ-TRAZULNAV'
  */
 export function generateSkuBase(productType: string, name: string): string {
   const typePrefix = PREFIX_MAP[productType] || 'PRD'
@@ -29,5 +29,5 @@ export function generateSkuBase(productType: string, name: string): string {
   const words = normalized.split(/\s+/).filter(Boolean).slice(0, 3)
   const namePrefix = words.map((w) => w.slice(0, 3)).join('').slice(0, 9)
 
-  return `PRATS-${typePrefix}-${namePrefix || 'XXX'}`
+  return `${typePrefix}-${namePrefix || 'XXX'}`
 }

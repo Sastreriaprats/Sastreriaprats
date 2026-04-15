@@ -40,7 +40,7 @@ export const getNextSkuNumber = protectedAction<
   }
 )
 
-/** Genera el siguiente SKU correlativo: PRATS-XXXXX */
+/** Genera el siguiente SKU correlativo: XXXXX */
 export const generateProductSkuAction = protectedAction<
   { productType: string; productName: string },
   { sku: string }
@@ -50,17 +50,18 @@ export const generateProductSkuAction = protectedAction<
     const name = String(productName || '').trim()
     if (!name) return failure('Escribe el nombre del producto primero', 'VALIDATION')
 
-    // Buscar el mayor número entre los SKUs PRATS-NNNNN
+    // Buscar el mayor número entre los SKUs (soporta PRATS-NNNNN legacy y NNNNN nuevo)
     const { data } = await ctx.adminClient
       .from('products')
       .select('sku')
-      .like('sku', 'PRATS-%')
       .order('sku', { ascending: false })
-      .limit(200)
+      .limit(500)
 
     let maxNum = 0
     for (const row of data || []) {
-      const match = (row.sku as string).match(/^PRATS-(\d+)$/)
+      const sku = row.sku as string
+      // Soportar formato legacy PRATS-NNNNN y nuevo NNNNN
+      const match = sku.match(/^(?:PRATS-)?(\d+)$/)
       if (match) {
         const num = parseInt(match[1], 10)
         if (num > maxNum) maxNum = num
@@ -68,7 +69,7 @@ export const generateProductSkuAction = protectedAction<
     }
 
     const nextNum = maxNum + 1
-    const sku = `PRATS-${String(nextNum).padStart(5, '0')}`
+    const sku = String(nextNum).padStart(5, '0')
     return success({ sku })
   }
 )

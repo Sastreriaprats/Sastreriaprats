@@ -142,7 +142,7 @@ export function DatePickerPopover({
         className="w-[280px] p-0"
         align="start"
         sideOffset={6}
-        avoidCollisions={false}
+        collisionPadding={8}
       >
         <div className="p-3">
           {/* Navegación: mes (flechas) + año (select) */}

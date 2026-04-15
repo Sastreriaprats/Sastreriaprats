@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -7,10 +8,16 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
-  ArrowLeft, Phone, Mail,
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
+  ArrowLeft, Phone, Mail, Trash2,
   Ruler, StickyNote, Scissors, Shirt, ShoppingBag, History, Pencil, CalendarDays, Receipt, Building2,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { usePermissions } from '@/hooks/use-permissions'
+import { hardDeleteClientAction } from '@/actions/clients'
 import { getInitials, formatCurrency, formatDate } from '@/lib/utils'
 import { ClientDataTab } from './tabs/client-data-tab'
 import { ClientMeasurementsTab } from './tabs/client-measurements-tab'
@@ -70,7 +77,22 @@ function ClientSummaryTab({ client }: { client: any }) {
 
 export function ClientDetailContent({ client, initialTab, basePath = '/admin' }: { client: any; initialTab: string; basePath?: string }) {
   const router = useRouter()
-  const { can } = usePermissions()
+  const { can, isAdmin } = usePermissions()
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+
+  const handleHardDelete = async () => {
+    setIsDeleting(true)
+    const result = await hardDeleteClientAction(client.id)
+    setIsDeleting(false)
+    if (result.success) {
+      toast.success('Cliente eliminado permanentemente')
+      router.push(`${basePath}/clientes`)
+    } else {
+      toast.error(result.error)
+      setShowDeleteDialog(false)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -100,6 +122,11 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
               </div>
             </div>
           </div>
+          {isAdmin && (
+            <Button variant="destructive" size="sm" className="gap-2" onClick={() => setShowDeleteDialog(true)}>
+              <Trash2 className="h-4 w-4" /> Eliminar cliente
+            </Button>
+          )}
         </div>
       </div>
 
@@ -193,6 +220,23 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
           </TabsContent>
         </div>
       </Tabs>
+
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar cliente permanentemente</AlertDialogTitle>
+            <AlertDialogDescription>
+              ¿Estás seguro de que quieres eliminar a <strong>{client.full_name}</strong>? Esta acción no se puede deshacer y se perderán todos los datos asociados al cliente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleHardDelete} disabled={isDeleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {isDeleting ? 'Eliminando...' : 'Eliminar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

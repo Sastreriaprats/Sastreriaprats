@@ -185,6 +185,38 @@ export const deleteClientAction = protectedAction<string, { id: string }>(
   }
 )
 
+export const hardDeleteClientAction = protectedAction<string, { id: string }>(
+  {
+    permission: 'clients.delete',
+    auditModule: 'clients',
+    auditAction: 'delete',
+    auditEntity: 'client',
+    revalidate: ['/admin/clientes'],
+  },
+  async (ctx, clientId) => {
+    // Verificar que el usuario es administrador
+    const { data: userRoles } = await ctx.adminClient
+      .from('user_roles')
+      .select('roles(name)')
+      .eq('user_id', ctx.userId)
+
+    const isAdmin = userRoles?.some((ur: any) => {
+      const r = ur.roles as { name?: string } | null
+      return r?.name && ['administrador', 'super_admin'].includes(r.name)
+    })
+
+    if (!isAdmin) return failure('Solo los administradores pueden eliminar clientes permanentemente')
+
+    const { error } = await ctx.adminClient
+      .from('clients')
+      .delete()
+      .eq('id', clientId)
+
+    if (error) return failure(error.message)
+    return success({ id: clientId })
+  }
+)
+
 export const addClientNote = protectedAction<any, any>(
   {
     permission: 'clients.edit',

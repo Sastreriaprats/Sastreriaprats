@@ -15,12 +15,16 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
-import { Plus, Search, MoreHorizontal, Eye, Pencil, UserX, Download, ChevronLeft, ChevronRight, ArrowUpDown } from 'lucide-react'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Plus, Search, MoreHorizontal, Eye, Pencil, UserX, Trash2, Download, ChevronLeft, ChevronRight, ArrowUpDown } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from 'sonner'
 import { useList } from '@/hooks/use-list'
 import { usePermissions } from '@/hooks/use-permissions'
-import { listClients, deleteClientAction } from '@/actions/clients'
+import { listClients, deleteClientAction, hardDeleteClientAction } from '@/actions/clients'
 import { getInitials, formatCurrency, formatDate } from '@/lib/utils'
 import { CreateClientDialog } from './create-client-dialog'
 
@@ -31,8 +35,10 @@ const categoryColors: Record<string, string> = {
 
 export function ClientsPageContent({ basePath = '/admin' }: { basePath?: string }) {
   const router = useRouter()
-  const { can } = usePermissions()
+  const { can, isAdmin } = usePermissions()
   const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
 
@@ -66,6 +72,16 @@ export function ClientsPageContent({ basePath = '/admin' }: { basePath?: string 
     if (!confirm('¿Desactivar este cliente? Podrás reactivarlo después.')) return
     const result = await deleteClientAction(clientId)
     if (result.success) { toast.success('Cliente desactivado'); refresh() }
+    else toast.error(result.error)
+  }
+
+  const handleHardDelete = async () => {
+    if (!deleteTarget) return
+    setIsDeleting(true)
+    const result = await hardDeleteClientAction(deleteTarget.id)
+    setIsDeleting(false)
+    setDeleteTarget(null)
+    if (result.success) { toast.success('Cliente eliminado permanentemente'); refresh() }
     else toast.error(result.error)
   }
 
@@ -213,6 +229,11 @@ export function ClientsPageContent({ basePath = '/admin' }: { basePath?: string 
                           </DropdownMenuItem>
                         </>
                       )}
+                      {isAdmin && (
+                        <DropdownMenuItem onClick={() => setDeleteTarget({ id: client.id, name: client.full_name })} className="text-destructive">
+                          <Trash2 className="mr-2 h-4 w-4" /> Eliminar cliente
+                        </DropdownMenuItem>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </TableCell>
@@ -240,6 +261,23 @@ export function ClientsPageContent({ basePath = '/admin' }: { basePath?: string 
       )}
 
       <CreateClientDialog open={showCreateDialog} onOpenChange={setShowCreateDialog} onSuccess={refresh} />
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar cliente permanentemente</AlertDialogTitle>
+            <AlertDialogDescription>
+              ¿Estás seguro de que quieres eliminar a <strong>{deleteTarget?.name}</strong>? Esta acción no se puede deshacer y se perderán todos los datos asociados al cliente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleHardDelete} disabled={isDeleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {isDeleting ? 'Eliminando...' : 'Eliminar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
