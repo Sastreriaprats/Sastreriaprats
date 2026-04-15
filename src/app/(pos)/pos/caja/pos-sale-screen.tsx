@@ -537,7 +537,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
     await generateTicketPdf({
       sale: {
         ticket_number: completedSale.ticket_number,
-        created_at: completedSale.created_at,
+        created_at: completedSale.created_at || new Date().toISOString(),
         client_id: completedSale.client_id,
         subtotal: completedSale.subtotal,
         discount_amount: completedSale.discount_amount,
@@ -553,10 +553,13 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
         unit_price: l.unit_price,
         discount_percentage: l.discount_percentage,
         line_total: lineTotal(l),
+        tax_rate: l.tax_rate,
+        sku: l.sku || null,
       })),
       payments,
       clientName: selectedClientName || null,
       clientCode: null,
+      attendedBy: lastSaleSalespersonName || null,
       storeAddress: storeConfig.address,
       storeSubtitle: storeConfig.subtitle ?? null,
       storePhones: storeConfig.phones,
@@ -603,7 +606,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
       toast.error('Selecciona quién realiza la venta')
       return
     }
-    setLastSaleSalespersonName(posEmployees.find((e) => e.id === salespersonId)?.full_name ?? (profile?.id === salespersonId ? (profile?.fullName ?? null) : null))
+    setLastSaleSalespersonName(posEmployees.find((e) => e.id === salespersonId)?.full_name ?? profile?.fullName ?? null)
     cobroPaymentMethodRef.current = payments[0]?.payment_method ?? 'cash'
     let paymentsToSend: Payment[] = [...payments]
     if (usePartialFromInput) {
@@ -788,7 +791,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
             <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
             <Input
               ref={searchRef}
-              placeholder="Escanea código de barras o busca producto..."
+              placeholder="Buscar por nombre, referencia, EAN o código de barras..."
               className="h-12 pl-10 text-sm border-0 rounded-none focus:ring-0 bg-slate-100 placeholder:text-slate-500 text-slate-800"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -796,24 +799,53 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
             />
             {isSearching && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 animate-spin text-slate-400" />}
           </div>
+          {searchQuery.length >= 2 && !isSearching && searchResults.length === 0 && (
+            <div className="bg-white border-b border-slate-200 px-4 py-3 shrink-0">
+              <span className="text-sm text-slate-500">No se encontraron resultados para &ldquo;{searchQuery}&rdquo;</span>
+            </div>
+          )}
           {searchResults.length > 0 && (
-            <div className="bg-white border-b border-slate-200 max-h-48 overflow-y-auto shrink-0">
+            <div className="bg-white border-b border-slate-200 max-h-64 overflow-y-auto shrink-0 shadow-sm">
               {searchResults.map((v: any) => {
                 const stock = Array.isArray(v.stock_levels) ? (v.stock_levels[0]?.available ?? 0) : (v.stock_levels?.[0]?.available || 0)
                 const price = v.products?.price_with_tax ?? 0
                 const name = v.products?.name ?? ''
+                const sku = v.products?.sku ?? ''
+                const variantSku = v.variant_sku ?? ''
+                const barcode = v.barcode ?? ''
+                const size = v.size ?? ''
+                const color = v.color ?? ''
                 return (
-                  <button key={v.id} type="button" className="w-full flex justify-between px-4 py-3 hover:bg-slate-50 cursor-pointer border-b border-slate-200 last:border-b-0 text-left disabled:opacity-60" onClick={() => stock > 0 && addToTicket(v)} disabled={stock <= 0}>
-                    <span className="text-sm font-medium text-slate-800 truncate">{name}</span>
-                    <span className="text-xs text-slate-400 shrink-0 ml-2">{v.variant_sku}</span>
-                    <span className="text-sm font-semibold text-slate-700 tabular-nums shrink-0 ml-2">{formatCurrency(price)}</span>
+                  <button key={v.id} type="button" className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-blue-50 cursor-pointer border-b border-slate-100 last:border-b-0 text-left disabled:opacity-40 disabled:cursor-not-allowed transition-colors" onClick={() => stock > 0 && addToTicket(v)} disabled={stock <= 0}>
+                    {v.products?.main_image_url ? (
+                      <img src={v.products.main_image_url} alt="" className="w-10 h-10 rounded object-cover shrink-0 bg-slate-100" />
+                    ) : (
+                      <div className="w-10 h-10 rounded bg-slate-100 flex items-center justify-center shrink-0"><ImageOff className="h-4 w-4 text-slate-300" /></div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-800 truncate">{name}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-xs text-slate-500 font-mono">Ref: {sku || variantSku}</span>
+                        {barcode && <span className="text-xs text-slate-400 font-mono">EAN: {barcode}</span>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {size && <span className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">T.{size}</span>}
+                      {color && <span className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{color}</span>}
+                    </div>
+                    <div className="text-right shrink-0 ml-2 min-w-[80px]">
+                      <p className="text-sm font-semibold text-slate-700 tabular-nums">{formatCurrency(price)}</p>
+                      <p className={`text-xs tabular-nums ${stock > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                        {stock > 0 ? `${stock} uds` : 'Sin stock'}
+                      </p>
+                    </div>
                   </button>
                 )
               })}
             </div>
           )}
           <div className="flex-1 flex flex-col min-h-0">
-            <div className="bg-red-700 text-white text-xs uppercase tracking-wide px-4 py-2.5 shrink-0 grid grid-cols-[48px_90px_1fr_40px_1fr_90px_56px_80px_40px] gap-2 items-center">
+            <div className="bg-red-700 text-white text-xs uppercase tracking-wide px-4 py-2.5 shrink-0 grid grid-cols-[48px_90px_1fr_40px_1fr_90px_72px_80px_40px] gap-2 items-center">
               <span>U</span>
               <span>CÓDIGO</span>
               <span>ARTÍCULO</span>
@@ -834,7 +866,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
                 const pvpConIva = line.unit_price * (1 + (line.tax_rate || 21) / 100)
                 const ivaIncl = line.unit_price * ((line.tax_rate || 21) / 100)
                 return (
-                <div key={line.id} className="group flex px-4 py-2 border-b border-slate-200 hover:bg-slate-50 items-center gap-3 text-sm grid grid-cols-[48px_90px_1fr_40px_1fr_90px_56px_80px_40px] gap-2">
+                <div key={line.id} className="group flex px-4 py-2 border-b border-slate-200 hover:bg-slate-50 items-center gap-3 text-sm grid grid-cols-[48px_90px_1fr_40px_1fr_90px_72px_80px_40px] gap-2">
                   <div className="flex items-center gap-0">
                     <Button variant="ghost" size="icon" className="rounded-full w-6 h-6 bg-slate-100 hover:bg-slate-200 text-slate-600" onClick={() => updateLine(line.id, 'quantity', Math.max(1, line.quantity - 1))}><Minus className="h-2.5 w-2.5" /></Button>
                     <span className="w-5 text-center text-xs tabular-nums text-slate-700">{line.quantity}</span>
@@ -856,7 +888,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
                       <Input type="number" step="0.01" value={line.unit_price || ''} onChange={(e) => updateLine(line.id, 'unit_price', parseFloat(e.target.value) || 0)} className="h-6 w-14 text-xs text-right border-slate-200" />
                     )}
                   </div>
-                  <Input type="number" min={0} max={100} value={line.discount_percentage || ''} onChange={(e) => updateLine(line.id, 'discount_percentage', parseFloat(e.target.value) || 0)} className="h-6 w-12 text-xs text-center rounded border-slate-200" />
+                  <Input type="number" min={0} max={100} value={line.discount_percentage || ''} onChange={(e) => updateLine(line.id, 'discount_percentage', parseFloat(e.target.value) || 0)} className="h-6 w-16 text-xs text-center rounded border-slate-200" />
                   <span className="text-slate-800 font-medium tabular-nums text-xs">{formatCurrency(lineTotal)}</span>
                   <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 text-red-600 hover:text-red-700" onClick={() => removeLine(line.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
                 </div>

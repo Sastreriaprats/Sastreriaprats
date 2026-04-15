@@ -20,6 +20,8 @@ export interface TicketLinePayload {
   unit_price: number
   discount_percentage: number
   line_total?: number
+  tax_rate?: number
+  sku?: string | null
 }
 
 export interface TicketPaymentPayload {
@@ -150,7 +152,7 @@ export async function generateTicketPdf(data: TicketPdfData): Promise<void> {
     ...(data.attendedBy
       ? [
           {
-            text: `Atendido por: ${data.attendedBy}`,
+            text: `Vendedor: ${data.attendedBy}`,
             fontSize: FONT_SMALL,
             margin: [0, 0, 0, 8] as [number, number, number, number],
           } as Content,
@@ -172,22 +174,42 @@ export async function generateTicketPdf(data: TicketPdfData): Promise<void> {
   ]
 
   for (const line of data.lines) {
-    const lineTotal = line.line_total ?? line.unit_price * line.quantity * (1 - (line.discount_percentage || 0) / 100)
+    const taxMultiplier = 1 + (line.tax_rate ?? 21) / 100
+    const unitPriceWithTax = line.unit_price * taxMultiplier
+    const lineTotalWithTax = line.line_total
+      ? line.line_total * taxMultiplier
+      : unitPriceWithTax * line.quantity * (1 - (line.discount_percentage || 0) / 100)
     const desc = truncate(line.description, 32)
+    const hasDiscount = (line.discount_percentage || 0) > 0
+    const discountAmountWithTax = unitPriceWithTax * line.quantity * (line.discount_percentage || 0) / 100
+
+    const rows: any[][] = [
+      [
+        { text: desc, fontSize: FONT_BODY },
+        { text: fmt(lineTotalWithTax), fontSize: FONT_BODY, alignment: 'right' },
+      ],
+      [
+        { text: `${line.quantity} x ${fmt(unitPriceWithTax)}`, fontSize: FONT_SMALL, color: '#555', colSpan: 2 },
+        {},
+      ],
+    ]
+
+    if (line.sku) {
+      rows.push([
+        { text: `Ref: ${line.sku}`, fontSize: FONT_SMALL, color: '#555', colSpan: 2 },
+        {},
+      ])
+    }
+
+    if (hasDiscount) {
+      rows.push([
+        { text: `Dto: -${line.discount_percentage}%`, fontSize: FONT_SMALL, color: '#c00' },
+        { text: `-${fmt(discountAmountWithTax)}`, fontSize: FONT_SMALL, color: '#c00', alignment: 'right' },
+      ])
+    }
+
     content.push({
-      table: {
-        widths: ['*', 50],
-        body: [
-          [
-            { text: desc, fontSize: FONT_BODY },
-            { text: fmt(lineTotal), fontSize: FONT_BODY, alignment: 'right' },
-          ],
-          [
-            { text: `${line.quantity} x ${fmt(line.unit_price)}`, fontSize: FONT_SMALL, color: '#555', colSpan: 2 },
-            {},
-          ],
-        ],
-      },
+      table: { widths: ['*', 50], body: rows },
       layout: 'noBorders',
       margin: [0, 0, 0, 6] as [number, number, number, number],
     })
