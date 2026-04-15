@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
@@ -41,6 +41,7 @@ export function CodigosBarrasContent() {
   const { can } = usePermissions()
   const [filter, setFilter] = useState<FilterBarcode>('all')
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [page, setPage] = useState(1)
   const [products, setProducts] = useState<ProductGroup[]>([])
   const [total, setTotal] = useState(0)
@@ -55,22 +56,32 @@ export function CodigosBarrasContent() {
   const [generating, setGenerating] = useState(false)
 
   const pageSize = 50
+  const fetchIdRef = useRef(0)
+
+  // Debounce search: esperar 350ms tras dejar de teclear
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 350)
+    return () => clearTimeout(timer)
+  }, [search])
 
   const fetchData = useCallback(async () => {
+    const id = ++fetchIdRef.current
     setIsLoading(true)
     try {
       const result = await getProductsWithVariantsForBarcodes({
         page,
         pageSize,
-        search: search || undefined,
+        search: debouncedSearch || undefined,
         filter,
       })
+      // Ignorar respuestas obsoletas (race condition)
+      if (id !== fetchIdRef.current) return
       if (result.success && result.data) {
         setProducts(result.data.data)
         setTotal(result.data.total)
         setTotalPages(result.data.totalPages)
         setWithoutBarcodeCount(result.data.withoutBarcodeCount ?? 0)
-        if (search.trim()) {
+        if (debouncedSearch.trim()) {
           setExpanded((prev) => {
             const next = new Set(prev)
             result.data.data.forEach((p: ProductGroup) => next.add(p.product_id))
@@ -79,11 +90,11 @@ export function CodigosBarrasContent() {
         }
       }
     } catch {
-      toast.error('Error al cargar datos')
+      if (id === fetchIdRef.current) toast.error('Error al cargar datos')
     } finally {
-      setIsLoading(false)
+      if (id === fetchIdRef.current) setIsLoading(false)
     }
-  }, [page, pageSize, search, filter])
+  }, [page, pageSize, debouncedSearch, filter])
 
   useEffect(() => {
     fetchData()
@@ -91,7 +102,7 @@ export function CodigosBarrasContent() {
 
   useEffect(() => {
     setPage(1)
-  }, [search, filter])
+  }, [debouncedSearch, filter])
 
   const handleGenerateAll = useCallback(async () => {
     if (!can('products.edit')) return
