@@ -138,12 +138,6 @@ export const getProductsWithVariantsForBarcodes = protectedAction<
       .eq('products.is_active', true)
       .eq('is_active', true)
 
-    if (search) {
-      query = query.or(
-        `barcode.ilike.%${search}%,variant_sku.ilike.%${search}%,products.sku.ilike.%${search}%,products.name.ilike.%${search}%`
-      )
-    }
-
     const { data: raw, error } = await query.order('product_id', { ascending: true }).order('size', { ascending: true }).limit(5000)
 
     if (error) {
@@ -190,7 +184,21 @@ export const getProductsWithVariantsForBarcodes = protectedAction<
     }
 
     const products = Array.from(byProduct.values())
-    const filtered = products.filter((prod) => {
+
+    // Búsqueda por nombre, SKU producto, SKU variante, barcode o referencia
+    const searchLower = search?.toLowerCase()
+    const searched = searchLower
+      ? products.filter((prod) =>
+          prod.product_name.toLowerCase().includes(searchLower) ||
+          prod.product_sku.toLowerCase().includes(searchLower) ||
+          prod.variants.some((v: any) =>
+            (v.variant_sku && v.variant_sku.toLowerCase().includes(searchLower)) ||
+            (v.barcode && v.barcode.toLowerCase().includes(searchLower))
+          )
+        )
+      : products
+
+    const filtered = searched.filter((prod) => {
       const allWith = prod.variants.every((v: any) => v.has_barcode)
       const allWithout = prod.variants.every((v: any) => !v.has_barcode)
       const partial = !allWith && !allWithout
