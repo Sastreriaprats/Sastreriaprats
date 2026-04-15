@@ -2,7 +2,6 @@ import { redirect } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { getServerProfile } from '@/actions/auth'
 import { AuthProvider } from '@/components/providers/auth-provider'
-import { Toaster } from '@/components/ui/sonner'
 
 export default async function PosLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createServerSupabaseClient()
@@ -24,7 +23,6 @@ export default async function PosLayout({ children }: { children: React.ReactNod
           {children}
         </div>
       </div>
-      <Toaster richColors position="top-center" />
     </AuthProvider>
   )
 }
