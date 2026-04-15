@@ -41,13 +41,13 @@ export function BarcodeLabel({
       try {
         JsBarcode.default(canvasRef.current, barcode, {
           format: isEan ? 'EAN13' : 'CODE128',
-          width: isEan ? 2.2 : 1.8,    // Barras más gruesas para mejor lectura con pistola
-          height: 45,                   // Más altas
+          width: isEan ? 2.0 : 1.6,
+          height: 40,
           displayValue: true,
-          fontSize: 11,
+          fontSize: 13,
           font: 'Arial',
-          textMargin: 2,
-          margin: 8,                    // Quiet zones (~3mm a cada lado)
+          textMargin: 1,
+          margin: 5,
           background: '#ffffff',
           lineColor: '#000000',
         })
@@ -55,13 +55,13 @@ export function BarcodeLabel({
         try {
           JsBarcode.default(canvasRef.current, barcode, {
             format: 'CODE128',
-            width: 1.8,
-            height: 45,
+            width: 1.6,
+            height: 40,
             displayValue: true,
-            fontSize: 11,
+            fontSize: 13,
             font: 'Arial',
-            textMargin: 2,
-            margin: 8,
+            textMargin: 1,
+            margin: 5,
             background: '#ffffff',
             lineColor: '#000000',
           })
@@ -78,16 +78,16 @@ export function BarcodeLabel({
         height: '30mm',
         minWidth: '80mm',
         minHeight: '30mm',
-        padding: '3mm',
+        padding: '2mm',
         fontFamily: 'Arial, Helvetica, sans-serif',
       }}
     >
       {/* NOMBRE — centrado, uppercase, bold, máx 2 líneas */}
       <div
         style={{
-          fontSize: '10px',
+          fontSize: '13px',
           fontWeight: 700,
-          lineHeight: 1.25,
+          lineHeight: 1.2,
           textAlign: 'center',
           textTransform: 'uppercase',
           overflow: 'hidden',
@@ -100,7 +100,7 @@ export function BarcodeLabel({
       </div>
 
       {/* BARCODE — centrado */}
-      <div className="flex items-center justify-center" style={{ flex: 1, minHeight: 0, padding: '1mm 0' }}>
+      <div className="flex items-center justify-center" style={{ flex: 1, minHeight: 0, padding: '0.5mm 0' }}>
         <canvas ref={canvasRef} style={{ maxWidth: '100%', maxHeight: '100%' }} />
       </div>
 
@@ -110,7 +110,7 @@ export function BarcodeLabel({
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'baseline',
-          fontSize: '9px',
+          fontSize: '12px',
           lineHeight: 1.1,
         }}
       >
