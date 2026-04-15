@@ -7,10 +7,14 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { ArrowLeft, Loader2, TrendingUp, ShoppingBag, CreditCard, Users } from 'lucide-react'
+import { ArrowLeft, Loader2, TrendingUp, ShoppingBag, CreditCard, Users, Printer, FileText } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { PaymentMethodBadge } from '@/components/ui/payment-method-badge'
+import { generateTicketPdf } from '@/components/pos/ticket-pdf'
+import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
+import { getStorePdfData } from '@/lib/pdf/pdf-company'
+import { toast } from 'sonner'
 
 const saleTypeLabels: Record<string, string> = {
   boutique: 'Boutique', tailoring_deposit: 'Señal', tailoring_final: 'Pago final', alteration: 'Arreglo', online: 'Online',
@@ -19,7 +23,7 @@ const saleTypeLabels: Record<string, string> = {
 export function PosSummaryContent() {
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
-  const { activeStoreId } = useAuth()
+  const { activeStoreId, stores } = useAuth()
   const [session, setSession] = useState<any>(null)
   const [sales, setSales] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -33,7 +37,7 @@ export function PosSummaryContent() {
 
       if (sess) {
         const { data: salesData } = await supabase.from('sales')
-          .select('id, ticket_number, sale_type, total, payment_method, status, created_at, clients(full_name), profiles!sales_salesperson_id_fkey(full_name)')
+          .select('id, ticket_number, sale_type, subtotal, discount_amount, tax_amount, total, payment_method, is_tax_free, status, created_at, clients(full_name), profiles!sales_salesperson_id_fkey(full_name)')
           .eq('cash_session_id', sess.id)
           .order('created_at', { ascending: false })
         if (salesData) setSales(salesData)
@@ -53,6 +57,76 @@ export function PosSummaryContent() {
 
   const uniqueClients = new Set(sales.filter((s: any) => s.clients).map((s: any) => s.clients.full_name)).size
   const avgTicket = sales.length > 0 ? (session.total_sales || 0) / sales.length : 0
+  const [printingId, setPrintingId] = useState<string | null>(null)
+  const [invoicingId, setInvoicingId] = useState<string | null>(null)
+  const storeName = stores.find((s) => s.storeId === activeStoreId)?.storeName ?? null
+
+  const handlePrintTicket = async (sale: any) => {
+    setPrintingId(sale.id)
+    try {
+      const { data: lines } = await supabase.from('sale_lines')
+        .select('description, sku, quantity, unit_price, discount_percentage, tax_rate, line_total')
+        .eq('sale_id', sale.id)
+      const { data: payments } = await supabase.from('sale_payments')
+        .select('payment_method, amount')
+        .eq('sale_id', sale.id)
+      const storeConfig = getStorePdfData(storeName)
+      await generateTicketPdf({
+        sale: {
+          ticket_number: sale.ticket_number,
+          created_at: sale.created_at || new Date().toISOString(),
+          client_id: sale.clients?.full_name ? undefined : null,
+          subtotal: Number(sale.subtotal ?? 0),
+          discount_amount: Number(sale.discount_amount ?? 0),
+          tax_amount: Number(sale.tax_amount ?? 0),
+          total: Number(sale.total),
+          payment_method: sale.payment_method,
+          is_tax_free: sale.is_tax_free ?? false,
+        },
+        lines: (lines || []).map((l: any) => ({
+          description: l.description,
+          quantity: l.quantity,
+          unit_price: Number(l.unit_price),
+          discount_percentage: Number(l.discount_percentage || 0),
+          line_total: Number(l.line_total || 0),
+          tax_rate: Number(l.tax_rate ?? 21),
+          sku: l.sku || null,
+        })),
+        payments: (payments || []).map((p: any) => ({ payment_method: p.payment_method, amount: Number(p.amount) })),
+        clientName: sale.clients?.full_name || null,
+        attendedBy: (sale.profiles as any)?.full_name || null,
+        storeAddress: storeConfig.address,
+        storeSubtitle: storeConfig.subtitle ?? null,
+        storePhones: storeConfig.phones,
+      })
+    } catch (e) {
+      toast.error('Error al generar el ticket')
+    } finally {
+      setPrintingId(null)
+    }
+  }
+
+  const handleInvoice = async (sale: any) => {
+    setInvoicingId(sale.id)
+    try {
+      const createRes = await createInvoiceFromSaleAction(sale.id)
+      if (!createRes.success || !createRes.data) {
+        toast.error('error' in createRes ? createRes.error : 'Error al crear la factura')
+        return
+      }
+      const pdfRes = await generateInvoicePdfAction(createRes.data.id)
+      if (!pdfRes.success || !pdfRes.data?.url) {
+        toast.error('error' in pdfRes ? pdfRes.error : 'Error al generar el PDF')
+        return
+      }
+      window.open(pdfRes.data.url, '_blank', 'noopener,noreferrer')
+      toast.success(`Factura ${createRes.data.invoice_number} generada`)
+    } catch (e) {
+      toast.error('Error al emitir la factura')
+    } finally {
+      setInvoicingId(null)
+    }
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -128,11 +202,12 @@ export function PosSummaryContent() {
                     <TableHead>Ticket</TableHead><TableHead>Tipo</TableHead><TableHead>Cliente</TableHead>
                     <TableHead>Vendedor</TableHead>
                     <TableHead>Total</TableHead><TableHead>Pago</TableHead><TableHead>Hora</TableHead>
+                    <TableHead className="text-right">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {sales.length === 0 ? (
-                    <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">Sin ventas aún</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">Sin ventas aún</TableCell></TableRow>
                   ) : sales.map((s: any) => (
                     <TableRow key={s.id}>
                       <TableCell className="font-mono text-sm">{s.ticket_number}</TableCell>
@@ -142,6 +217,30 @@ export function PosSummaryContent() {
                       <TableCell className="font-medium">{formatCurrency(s.total)}</TableCell>
                       <TableCell><PaymentMethodBadge method={s.payment_method} /></TableCell>
                       <TableCell className="text-xs text-muted-foreground">{new Date(s.created_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            title="Imprimir ticket"
+                            disabled={printingId === s.id}
+                            onClick={() => handlePrintTicket(s)}
+                          >
+                            {printingId === s.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            title="Emitir factura"
+                            disabled={invoicingId === s.id}
+                            onClick={() => handleInvoice(s)}
+                          >
+                            {invoicingId === s.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                          </Button>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
