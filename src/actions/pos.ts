@@ -543,31 +543,55 @@ export const searchProductsForPos = protectedAction<{
   async (ctx, { query, storeId }) => {
     const q = (query || '').trim()
     if (!q) return success([])
-    if (!storeId) {
-      console.error('[searchProductsForPos] storeId vacío')
-      return success([])
-    }
+    if (!storeId) return success([])
 
     const { data: warehouse } = await ctx.adminClient
       .from('warehouses').select('id')
       .eq('store_id', storeId).eq('is_main', true).single()
 
-    if (!warehouse) {
-      console.error('[searchProductsForPos] sin almacén principal para tienda', storeId)
-      return success([])
-    }
+    if (!warehouse) return success([])
 
-    const { data, error } = await ctx.adminClient.rpc('search_pos_products', {
-      p_query: q,
-      p_warehouse_id: warehouse.id,
-      p_limit: 20,
+    // Intentar RPC primero (más eficiente), fallback a query directa
+    const { data: rpcData, error: rpcError } = await ctx.adminClient.rpc('search_pos_products', {
+      p_query: q, p_warehouse_id: warehouse.id, p_limit: 20,
     })
 
+    if (!rpcError && Array.isArray(rpcData) && rpcData.length >= 0) {
+      return success(rpcData)
+    }
+
+    // Fallback: búsqueda directa con queries de Supabase
+    const pattern = `%${q}%`
+    const { data: variants, error } = await ctx.adminClient
+      .from('product_variants')
+      .select(`
+        id, variant_sku, size, color, barcode, price_override, is_active,
+        products!inner (id, sku, name, base_price, price_with_tax, tax_rate, main_image_url, product_type, brand, cost_price),
+        stock_levels!inner (quantity, available, warehouse_id)
+      `)
+      .eq('is_active', true)
+      .eq('stock_levels.warehouse_id', warehouse.id)
+      .or(`variant_sku.ilike.${pattern},barcode.ilike.${pattern},products.name.ilike.${pattern},products.sku.ilike.${pattern},products.brand.ilike.${pattern}`)
+      .limit(20)
+
     if (error) {
-      console.error('[searchProductsForPos] error RPC:', error.message, error.code)
+      console.error('[searchProductsForPos] fallback error:', error.message)
       return success([])
     }
-    return success(Array.isArray(data) ? data : [])
+
+    // Transformar al formato esperado por el frontend
+    const results = (variants || []).map((v: any) => ({
+      id: v.id,
+      variant_sku: v.variant_sku,
+      size: v.size,
+      color: v.color,
+      barcode: v.barcode,
+      price_override: v.price_override,
+      is_active: v.is_active,
+      products: v.products,
+      stock_levels: v.stock_levels,
+    }))
+    return success(results)
   }
 )
 
