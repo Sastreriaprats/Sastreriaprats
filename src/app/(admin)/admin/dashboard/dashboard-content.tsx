@@ -8,11 +8,12 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   TrendingUp, TrendingDown, DollarSign, Scissors, Users,
-  AlertTriangle, Calendar, Truck, RefreshCw, ArrowRight, ServerCrash,
+  AlertTriangle, Calendar, Truck, RefreshCw, ArrowRight, ServerCrash, Clock, User,
 } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
 import { usePermissions } from '@/hooks/use-permissions'
-import { getDashboardStats, getSalesChartData, getRecentActivity } from '@/actions/dashboard'
+import { getDashboardStats, getSalesChartData, getRecentActivity, getDashboardAppointments } from '@/actions/dashboard'
+import type { DashboardAppointment } from '@/actions/dashboard'
 import { getOverdueSupplierInvoicesCount } from '@/actions/supplier-invoices'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 
@@ -143,6 +144,11 @@ export function DashboardContent() {
   const [activity, setActivity] = useState<any[]>([])
   const [overdueSupplierInvoicesCount, setOverdueSupplierInvoicesCount] = useState(0)
 
+  const [appointments, setAppointments] = useState<DashboardAppointment[]>([])
+  const [appointmentsTodayCount, setAppointmentsTodayCount] = useState(0)
+  const [appointmentsWeekCount, setAppointmentsWeekCount] = useState(0)
+  const [appointmentsLoading, setAppointmentsLoading] = useState(true)
+
   const [statsLoading, setStatsLoading] = useState(true)
   const [chartLoading, setChartLoading] = useState(true)
   const [activityLoading, setActivityLoading] = useState(true)
@@ -176,16 +182,31 @@ export function DashboardContent() {
       .finally(() => setActivityLoading(false))
   }, [])
 
+  const loadAppointments = useCallback(() => {
+    setAppointmentsLoading(true)
+    getDashboardAppointments()
+      .then(res => {
+        if (res.success && res.data) {
+          setAppointments(res.data.appointments)
+          setAppointmentsTodayCount(res.data.todayCount)
+          setAppointmentsWeekCount(res.data.weekCount)
+        }
+      })
+      .catch(() => {})
+      .finally(() => setAppointmentsLoading(false))
+  }, [])
+
   const loadData = useCallback(() => {
     loadStats()
     loadChart()
     loadActivity()
+    loadAppointments()
     if (can('supplier_invoices.manage')) {
       getOverdueSupplierInvoicesCount()
         .then((r) => r?.success && typeof r.data === 'number' && setOverdueSupplierInvoicesCount(r.data))
         .catch(() => {})
     }
-  }, [loadStats, loadChart, loadActivity, can])
+  }, [loadStats, loadChart, loadActivity, loadAppointments, can])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -326,7 +347,7 @@ export function DashboardContent() {
             <p className="text-xs text-muted-foreground">Pedidos, pagos y stock que requieren atención</p>
           </CardHeader>
           <CardContent>
-            {stats.ordersOverdue === 0 && stats.overduePayments === 0 && stats.lowStockCount === 0 && overdueSupplierInvoicesCount === 0 ? (
+            {stats.ordersOverdue === 0 && stats.overduePayments === 0 && stats.lowStockCount === 0 && overdueSupplierInvoicesCount === 0 && appointmentsTodayCount === 0 ? (
               <p className="text-sm text-muted-foreground py-2">Ninguna alerta pendiente</p>
             ) : (
               <ul className="space-y-2">
@@ -366,7 +387,134 @@ export function DashboardContent() {
                     </button>
                   </li>
                 )}
+                {appointmentsTodayCount > 0 && (
+                  <li>
+                    <button type="button" onClick={() => router.push('/admin/calendario')}
+                      className="text-sm text-blue-700 hover:underline flex items-center gap-2 w-full text-left">
+                      <Calendar className="h-3.5 w-3.5 shrink-0" />
+                      <span className="font-medium">{appointmentsTodayCount} cita{appointmentsTodayCount > 1 ? 's' : ''} hoy</span>
+                      <ArrowRight className="h-3 w-3 shrink-0" />
+                    </button>
+                  </li>
+                )}
               </ul>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Calendario de citas de la semana */}
+      {appointmentsLoading ? (
+        <Card>
+          <CardHeader className="pb-2">
+            <Skeleton className="h-5 w-48" />
+            <Skeleton className="h-3 w-64 mt-1" />
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <Skeleton className="h-10 w-16 rounded shrink-0" />
+                  <Skeleton className="h-10 flex-1 rounded" />
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Calendar className="h-4 w-4 text-blue-500" /> Citas de la semana
+              </CardTitle>
+              <Button variant="ghost" size="sm" className="gap-1 text-xs shrink-0" onClick={() => router.push('/admin/calendario')}>
+                Ver calendario <ArrowRight className="h-3 w-3" />
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {appointmentsWeekCount} cita{appointmentsWeekCount !== 1 ? 's' : ''} esta semana
+              {appointmentsTodayCount > 0 && ` · ${appointmentsTodayCount} hoy`}
+            </p>
+          </CardHeader>
+          <CardContent>
+            {appointments.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-6">No hay citas programadas esta semana</p>
+            ) : (
+              <div className="space-y-1">
+                {(() => {
+                  const today = new Date().toISOString().split('T')[0]
+                  let lastDate = ''
+                  return appointments.map((apt) => {
+                    const showDateHeader = apt.date !== lastDate
+                    lastDate = apt.date
+                    const isToday = apt.date === today
+                    const dateLabel = isToday
+                      ? 'Hoy'
+                      : new Date(apt.date + 'T00:00:00').toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })
+
+                    const typeColors: Record<string, string> = {
+                      fitting: 'bg-purple-100 text-purple-700 border-purple-200',
+                      delivery: 'bg-green-100 text-green-700 border-green-200',
+                      consultation: 'bg-blue-100 text-blue-700 border-blue-200',
+                      boutique: 'bg-pink-100 text-pink-700 border-pink-200',
+                      meeting: 'bg-amber-100 text-amber-700 border-amber-200',
+                      other: 'bg-gray-100 text-gray-700 border-gray-200',
+                    }
+                    const typeLabels: Record<string, string> = {
+                      fitting: 'Prueba', delivery: 'Entrega', consultation: 'Consulta',
+                      boutique: 'Boutique', meeting: 'Reunión', other: 'Otro',
+                      travel: 'Viaje', block: 'Bloqueo',
+                    }
+                    const colorClass = typeColors[apt.type] || typeColors.other
+
+                    return (
+                      <div key={apt.id}>
+                        {showDateHeader && (
+                          <div className={`text-xs font-semibold py-1.5 mt-1 first:mt-0 ${isToday ? 'text-blue-600' : 'text-muted-foreground'}`}>
+                            {dateLabel}
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          className="w-full text-left rounded-lg border p-2.5 hover:shadow-sm hover:bg-accent/50 transition-all flex items-center gap-3 group"
+                          onClick={() => router.push(`/admin/calendario?date=${apt.date}`)}
+                        >
+                          <div className="text-center shrink-0 w-14">
+                            <p className="text-sm font-semibold tabular-nums">{apt.start_time}</p>
+                            <p className="text-[10px] text-muted-foreground">{apt.end_time}</p>
+                          </div>
+                          <div className={`w-1 self-stretch rounded-full ${colorClass.split(' ')[0]}`} />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium truncate">{apt.title}</p>
+                              <Badge variant="outline" className={`text-[10px] px-1.5 py-0 shrink-0 ${colorClass}`}>
+                                {typeLabels[apt.type] || apt.type}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center gap-3 mt-0.5">
+                              {apt.client_name && (
+                                <span className="text-xs text-muted-foreground flex items-center gap-1 truncate">
+                                  <User className="h-3 w-3 shrink-0" /> {apt.client_name}
+                                </span>
+                              )}
+                              {apt.tailor_name && (
+                                <span className="text-xs text-muted-foreground flex items-center gap-1 truncate">
+                                  <Scissors className="h-3 w-3 shrink-0" /> {apt.tailor_name}
+                                </span>
+                              )}
+                              {apt.store_name && (
+                                <span className="text-xs text-muted-foreground truncate hidden sm:inline">{apt.store_name}</span>
+                              )}
+                            </div>
+                          </div>
+                          <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                        </button>
+                      </div>
+                    )
+                  })
+                })()}
+              </div>
             )}
           </CardContent>
         </Card>

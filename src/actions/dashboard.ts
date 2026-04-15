@@ -327,3 +327,72 @@ export const getStoresWithStats = protectedAction<void, StoreStats[]>(
     return success(JSON.parse(JSON.stringify(result)))
   }
 )
+
+// ── Citas para el widget de calendario del dashboard ─────────────────────
+
+export interface DashboardAppointment {
+  id: string
+  type: string
+  title: string
+  date: string
+  start_time: string
+  end_time: string
+  status: string
+  client_name: string | null
+  client_id: string | null
+  tailor_name: string | null
+  store_name: string | null
+  order_number: string | null
+}
+
+export const getDashboardAppointments = protectedAction<void, { appointments: DashboardAppointment[]; todayCount: number; weekCount: number }>(
+  { auditModule: 'dashboard' },
+  async (ctx) => {
+    const today = new Date().toISOString().split('T')[0]
+    // Calcular fin de semana (domingo)
+    const now = new Date()
+    const dayOfWeek = now.getDay()
+    const daysUntilSunday = dayOfWeek === 0 ? 6 : 7 - dayOfWeek
+    const endOfWeek = new Date(now)
+    endOfWeek.setDate(now.getDate() + daysUntilSunday)
+    const endDate = endOfWeek.toISOString().split('T')[0]
+
+    const { data, error } = await ctx.adminClient
+      .from('appointments')
+      .select(`
+        id, type, title, date, start_time, end_time, status,
+        client_id,
+        clients ( full_name ),
+        profiles!appointments_tailor_id_fkey ( full_name ),
+        stores ( name ),
+        tailoring_orders ( order_number )
+      `)
+      .gte('date', today)
+      .lte('date', endDate)
+      .neq('status', 'cancelled')
+      .order('date')
+      .order('start_time')
+
+    if (error) return failure(error.message)
+
+    const appointments: DashboardAppointment[] = ((data || []) as Record<string, unknown>[]).map((a) => ({
+      id: String(a.id),
+      type: String(a.type),
+      title: String(a.title),
+      date: String(a.date),
+      start_time: String(a.start_time || '').slice(0, 5),
+      end_time: String(a.end_time || '').slice(0, 5),
+      status: String(a.status),
+      client_name: (a.clients as Record<string, unknown> | null)?.full_name as string | null,
+      client_id: a.client_id as string | null,
+      tailor_name: (a.profiles as Record<string, unknown> | null)?.full_name as string | null,
+      store_name: (a.stores as Record<string, unknown> | null)?.name as string | null,
+      order_number: (a.tailoring_orders as Record<string, unknown> | null)?.order_number as string | null,
+    }))
+
+    const todayCount = appointments.filter(a => a.date === today).length
+    const weekCount = appointments.length
+
+    return success(JSON.parse(JSON.stringify({ appointments, todayCount, weekCount })))
+  }
+)
