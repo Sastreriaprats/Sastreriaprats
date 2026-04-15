@@ -24,13 +24,16 @@ export async function GET(request: NextRequest) {
     .eq('store_id', storeId)
     .neq('status', 'cancelled')
 
-  const openH = 10
-  const closeH = 20
+  const slotTimes = [
+    '10:00', '10:30', '11:00', '11:30', '12:00', '12:30', '13:00', '13:30',
+    '17:00', '17:30', '18:00', '18:30', '19:00', '19:30',
+  ]
   const slots: { time: string; available: boolean }[] = []
 
-  for (let h = openH; h < closeH; h++) {
-    const timeStr = `${h.toString().padStart(2, '0')}:00`
-    const endStr = `${(h + 1).toString().padStart(2, '0')}:00`
+  for (const timeStr of slotTimes) {
+    const [h, m] = timeStr.split(':').map(Number)
+    const endMin = h * 60 + m + 30
+    const endStr = `${Math.floor(endMin / 60).toString().padStart(2, '0')}:${(endMin % 60).toString().padStart(2, '0')}`
     const conflict = (existing || []).find(
       (a: Record<string, unknown>) => String(a.start_time) < endStr && String(a.end_time) > timeStr
     )

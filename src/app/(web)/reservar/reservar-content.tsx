@@ -15,7 +15,10 @@ const TIENDAS = [
   { value: 'wellington',      label: 'Wellington',      address: 'Calle Velázquez, 8 - 28001 Madrid' },
 ]
 
-const SLOTS_WEEKDAY = ['10:00', '11:00', '12:00', '16:00', '17:00', '18:00', '19:00']
+const SLOTS_WEEKDAY = [
+  '10:00', '10:30', '11:00', '11:30', '12:00', '12:30', '13:00', '13:30',
+  '17:00', '17:30', '18:00', '18:30', '19:00', '19:30',
+]
 
 const DAYS_ES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
