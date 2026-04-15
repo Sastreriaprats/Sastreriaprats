@@ -37,13 +37,13 @@ function buildNavItems(categories: WebCategory[]): NavItem[] {
   ]
 
   return [
+    { label: 'Inicio', href: '/' },
     {
       label: 'Nosotros',
       href: '/sobre-nosotros',
       children: [
-        { label: 'Prats', href: '/sobre-nosotros' },
         { label: 'Servicios', href: '/sastreria' },
-        { label: 'Reservar cita', href: '/reservar' },
+        { label: 'Prats', href: '/sobre-nosotros' },
       ],
     },
     {
@@ -116,7 +116,7 @@ function MenuSubItem({ child, onClose }: { child: NavChild; onClose: () => void 
       <Link
         href={child.href}
         onClick={onClose}
-        className="block py-2 text-sm text-gray-600 hover:text-black transition-colors focus-visible:ring-2 focus-visible:ring-prats-gold focus-visible:outline-none rounded"
+        className="block py-2 text-[15px] text-gray-600 hover:text-black transition-colors focus-visible:ring-2 focus-visible:ring-prats-gold focus-visible:outline-none rounded"
       >
         {child.label}
       </Link>
@@ -127,7 +127,7 @@ function MenuSubItem({ child, onClose }: { child: NavChild; onClose: () => void 
     <div>
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center justify-between w-full py-2 text-sm text-gray-600 hover:text-black transition-colors"
+        className="flex items-center justify-between w-full py-2 text-[15px] text-gray-600 hover:text-black transition-colors"
       >
         <Link href={child.href} onClick={onClose} className="hover:underline">
           {child.label}
@@ -141,7 +141,7 @@ function MenuSubItem({ child, onClose }: { child: NavChild; onClose: () => void 
               key={sub.href}
               href={sub.href}
               onClick={onClose}
-              className="block py-1.5 text-xs text-gray-500 hover:text-black transition-colors focus-visible:ring-2 focus-visible:ring-prats-gold focus-visible:outline-none rounded"
+              className="block py-1.5 text-sm text-gray-500 hover:text-black transition-colors focus-visible:ring-2 focus-visible:ring-prats-gold focus-visible:outline-none rounded"
             >
               {sub.label}
             </Link>
@@ -160,7 +160,7 @@ function MenuNavItem({ item, onClose }: { item: NavItem; onClose: () => void }) 
       <Link
         href={item.href}
         onClick={onClose}
-        className="block py-3 text-base text-gray-800 hover:text-black transition-colors border-b border-gray-100 focus-visible:ring-2 focus-visible:ring-prats-gold focus-visible:outline-none"
+        className="block py-3.5 text-[17px] tracking-wide text-gray-900 hover:text-black transition-colors focus-visible:ring-2 focus-visible:ring-prats-gold focus-visible:outline-none"
       >
         {item.label}
       </Link>
@@ -168,10 +168,10 @@ function MenuNavItem({ item, onClose }: { item: NavItem; onClose: () => void }) 
   }
 
   return (
-    <div className="border-b border-gray-100">
+    <div>
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center justify-between w-full py-3 text-base text-gray-800 hover:text-black transition-colors focus-visible:ring-2 focus-visible:ring-prats-gold focus-visible:outline-none"
+        className="flex items-center justify-between w-full py-3.5 text-[17px] tracking-wide text-gray-900 hover:text-black transition-colors focus-visible:ring-2 focus-visible:ring-prats-gold focus-visible:outline-none"
       >
         <Link href={item.href} onClick={onClose} className="hover:underline">
           {item.label}
@@ -181,7 +181,7 @@ function MenuNavItem({ item, onClose }: { item: NavItem; onClose: () => void }) 
       <div
         className={`overflow-hidden transition-all duration-300 ${open ? 'max-h-[800px] opacity-100' : 'max-h-0 opacity-0'}`}
       >
-        <div className="pl-4 pb-3 space-y-1">
+        <div className="pl-6 pb-3 space-y-1">
           {item.children.map(child => (
             <MenuSubItem key={child.href} child={child} onClose={onClose} />
           ))}
@@ -273,43 +273,43 @@ export function WebHeader({ announcementText, categories = [] }: { announcementT
                     <Menu className="h-6 w-6" />
                   </button>
                 </SheetTrigger>
-                <SheetContent side="right" className="w-[340px] p-0 flex flex-col">
+                <SheetContent side="right" className="w-[85vw] sm:w-[420px] sm:max-w-[420px] p-0 flex flex-col">
                   {/* Título MENÚ */}
-                  <div className="p-5 border-b border-gray-100">
-                    <span className="text-sm font-bold tracking-wider uppercase">MENÚ</span>
+                  <div className="px-7 pt-7 pb-5 border-b border-gray-200">
+                    <span className="text-base font-bold tracking-[0.25em] uppercase">MENÚ</span>
                   </div>
 
                   {/* Navegación — key={String(isOpen)} resetea acordeones al reabrir */}
-                  <nav key={String(isOpen)} className="flex-1 overflow-y-auto px-5 py-4">
+                  <nav key={String(isOpen)} className="flex-1 overflow-y-auto px-7 py-5">
                     {navItems.map(item => (
                       <MenuNavItem key={item.label} item={item} onClose={() => setIsOpen(false)} />
                     ))}
 
                     {/* Espacio separador */}
-                    <div className="h-6" />
+                    <div className="h-8" />
 
                     {/* Entrar / Mi cuenta — link simple */}
                     <Link
                       href={isLoggedIn ? '/mi-cuenta' : '/auth/login?mode=client'}
                       onClick={() => setIsOpen(false)}
-                      className="block py-3 text-base text-gray-800 hover:text-black transition-colors border-b border-gray-100 focus-visible:ring-2 focus-visible:ring-prats-gold focus-visible:outline-none"
+                      className="block py-3.5 text-[17px] tracking-wide text-gray-900 hover:text-black transition-colors focus-visible:ring-2 focus-visible:ring-prats-gold focus-visible:outline-none"
                     >
-                      {isLoggedIn ? 'Mi cuenta' : 'Iniciar sesión'}
+                      {isLoggedIn ? 'Mi cuenta' : 'Entrar'}
                     </Link>
                   </nav>
 
                   {/* Selector moneda */}
-                  <div className="px-5 py-3 border-t border-gray-100">
-                    <span className="text-sm text-gray-600">(EUR €) <ChevronDown className="h-3 w-3 inline" /></span>
+                  <div className="px-7 py-4 border-t border-gray-200">
+                    <span className="text-[15px] text-gray-700">(EUR €) <ChevronDown className="h-3.5 w-3.5 inline ml-0.5" /></span>
                   </div>
 
                   {/* Redes sociales */}
-                  <div className="px-5 py-4 border-t border-gray-100 flex items-center gap-4">
-                    <a href={SOCIAL_LINKS.instagram} target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="Instagram">
-                      <Instagram className="h-5 w-5" />
-                    </a>
+                  <div className="px-7 py-4 border-t border-gray-200 flex items-center gap-5">
                     <a href={SOCIAL_LINKS.facebook} target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="Facebook">
                       <Facebook className="h-5 w-5" />
+                    </a>
+                    <a href={SOCIAL_LINKS.instagram} target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="Instagram">
+                      <Instagram className="h-5 w-5" />
                     </a>
                     <a href={SOCIAL_LINKS.tiktok} target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="TikTok">
                       <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 00-.79-.05A6.34 6.34 0 003.15 15.2a6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V8.71a8.19 8.19 0 004.76 1.52V6.79a4.85 4.85 0 01-1-.1z"/></svg>
@@ -317,16 +317,13 @@ export function WebHeader({ announcementText, categories = [] }: { announcementT
                     <a href={SOCIAL_LINKS.linkedin} target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="LinkedIn">
                       <Linkedin className="h-5 w-5" />
                     </a>
-                    <a href={SOCIAL_LINKS.youtube} target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-black" aria-label="YouTube">
-                      <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.546 12 3.546 12 3.546s-7.505 0-9.377.504A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.122 2.136c1.871.504 9.376.504 9.376.504s7.505 0 9.377-.504a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-                    </a>
                     <a href={SOCIAL_LINKS.email} className="text-gray-800 hover:text-black" aria-label="Email">
                       <Mail className="h-5 w-5" />
                     </a>
                   </div>
 
                   {/* Copyright */}
-                  <div className="px-5 py-3 text-xs text-gray-400">
+                  <div className="px-7 py-4 text-xs text-gray-400">
                     Derechos de autor © {new Date().getFullYear()} Sastrería Prats
                   </div>
                 </SheetContent>
