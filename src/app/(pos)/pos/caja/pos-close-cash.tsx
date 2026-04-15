@@ -25,7 +25,7 @@ export function PosCloseCash({ session, onClosed, onCancel }: {
     - (session.total_withdrawals || 0)
 
   const difference = counted - expectedCash
-  const hasCounted = counted > 0
+  const hasCounted = counted > 0 || expectedCash === 0
   const isExact = hasCounted && Math.abs(difference) < 0.01
   const isMinorDiff = hasCounted && !isExact && Math.abs(difference) <= 5
 

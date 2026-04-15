@@ -672,7 +672,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
       {/* FILA 1 — Cabecera (igual que referencia: espaciosa, recuadro teal cuadrado, Caja abierta en verde, botones definidos) */}
       <div className="bg-[#1A2436] min-h-[5rem] px-6 py-4 flex items-center justify-between shrink-0">
         <div className="flex flex-col gap-1.5">
-          <span className="text-[10px] text-slate-400 uppercase tracking-widest font-medium">ESTADO</span>
+          <span className="text-white font-semibold text-sm leading-tight">{activeStoreName}</span>
           <div className="flex items-center gap-3">
             <div className="flex items-center justify-center w-9 h-9 rounded bg-[#1E5257] border border-[#2a6b70]" aria-hidden>
               <div className="h-2.5 w-2.5 rounded-full bg-[#2DE6AA] shadow-[0_0_6px_#2DE6AA]" />
