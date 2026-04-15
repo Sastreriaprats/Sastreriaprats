@@ -193,7 +193,7 @@ export const getProductsWithVariantsForBarcodes = protectedAction<
           prod.product_sku.toLowerCase().includes(searchLower) ||
           prod.variants.some((v: any) =>
             (v.variant_sku && v.variant_sku.toLowerCase().includes(searchLower)) ||
-            (v.barcode && v.barcode.toLowerCase().includes(searchLower))
+            (v.barcode && v.barcode.startsWith(searchLower))
           )
         )
       : products
