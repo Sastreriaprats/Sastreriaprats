@@ -339,18 +339,22 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
     await new Promise<void>((resolve) => {
       (pdf as any).getBlob((blob: Blob) => {
         const url = URL.createObjectURL(blob)
-        const iframe = document.createElement('iframe')
-        iframe.style.display = 'none'
-        iframe.src = url
-        document.body.appendChild(iframe)
-        iframe.onload = () => {
-          iframe.contentWindow?.print()
-          setTimeout(() => {
-            document.body.removeChild(iframe)
-            URL.revokeObjectURL(url)
-            resolve()
-          }, 1000)
+        const win = window.open(url, '_blank')
+        if (win) {
+          win.addEventListener('load', () => {
+            win.print()
+            // No cerrar automáticamente: el usuario puede querer revisar
+          })
+          // Fallback por si el evento load no dispara
+          setTimeout(() => { try { win.print() } catch {} }, 500)
+        } else {
+          // Si el popup está bloqueado, descargar como fallback
+          const a = document.createElement('a')
+          a.href = url
+          a.download = `ticket-${data.sale.ticket_number}.pdf`
+          a.click()
         }
+        resolve()
       })
     })
   } else {
