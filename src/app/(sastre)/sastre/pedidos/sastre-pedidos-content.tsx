@@ -182,7 +182,7 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
                   size="sm"
                   className="bg-white/[0.06] border border-white/15 text-white/70 font-medium hover:bg-white/10 hover:text-white transition-all"
                   disabled={page <= 1}
-                  onClick={() => setPage((p: number) => p - 1)}
+                  onClick={() => setPage(page - 1)}
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
@@ -190,7 +190,7 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
                   size="sm"
                   className="bg-white/[0.06] border border-white/15 text-white/70 font-medium hover:bg-white/10 hover:text-white transition-all"
                   disabled={page >= totalPages}
-                  onClick={() => setPage((p: number) => p + 1)}
+                  onClick={() => setPage(page + 1)}
                 >
                   <ChevronRight className="h-4 w-4" />
                 </Button>
