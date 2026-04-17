@@ -197,10 +197,10 @@ export function ArreglosContent({ sastreName }: { sastreName: string }) {
             <div className="flex items-center justify-between">
               <p className="text-sm text-white/50">Página {page} de {totalPages}</p>
               <div className="flex gap-2">
-                <Button size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="bg-white/10 border-white/20 text-white hover:bg-white/20">
+                <Button size="sm" disabled={page <= 1} onClick={() => setPage((p: number) => p - 1)} className="bg-white/10 border-white/20 text-white hover:bg-white/20">
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
-                <Button size="sm" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)} className="bg-white/10 border-white/20 text-white hover:bg-white/20">
+                <Button size="sm" disabled={page >= totalPages} onClick={() => setPage((p: number) => p + 1)} className="bg-white/10 border-white/20 text-white hover:bg-white/20">
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
