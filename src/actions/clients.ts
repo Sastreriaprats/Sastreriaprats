@@ -212,7 +212,12 @@ export const hardDeleteClientAction = protectedAction<string, { id: string }>(
       .delete()
       .eq('id', clientId)
 
-    if (error) return failure(error.message)
+    if (error) {
+      if (error.message?.includes('fkey') || error.code === '23503') {
+        return failure('No se puede eliminar este cliente porque tiene pedidos, ventas u otros registros asociados. Puedes desactivarlo en su lugar.')
+      }
+      return failure(error.message)
+    }
     return success({ id: clientId })
   }
 )
