@@ -162,6 +162,7 @@ type CamisaItem = {
   iniciales: boolean; inicialesTexto: string; modCuello: string
   puno: 'sencillo' | 'gemelo' | 'mixto' | 'mosquetero' | 'otro'
   tejido: string; precio: number; cantidad: number; obs: string
+  cortador: string; oficial: string
 }
 
 function defaultCamisa(): CamisaItem {
@@ -173,6 +174,7 @@ function defaultCamisa(): CamisaItem {
     hombrosAltos: false, hombrosBajos: false, erguido: false, cargado: false,
     espaldaLisa: false, espPliegues: false, espTablonCentr: false, espPinzas: false,
     iniciales: false, inicialesTexto: '', modCuello: '', puno: 'sencillo', tejido: '', precio: 0, cantidad: 1, obs: '',
+    cortador: '', oficial: '',
   }
 }
 
@@ -595,6 +597,7 @@ export function NuevaVentaFichaClient({
             espTablonCentr: c.espTablonCentr, espPinzas: c.espPinzas,
             iniciales: c.iniciales, inicialesTexto: c.inicialesTexto, modCuello: c.modCuello, puno: c.puno,
             tejido: c.tejido, precio: Number(c.precio) || 0, obs: c.obs,
+            cortador: c.cortador || undefined, oficial: c.oficial || undefined,
           }))
         ),
         complementos: complementos.map((c) => ({
@@ -1216,9 +1219,31 @@ export function NuevaVentaFichaClient({
                   <div key={camisa.id} className="rounded-lg border border-[#c9a96e]/15 bg-[#0d1629] p-4 space-y-4">
                     <div className="flex items-center justify-between">
                       <h3 className="text-[#c9a96e] font-medium">CAMISA #{index + 1}</h3>
-                      <Button type="button" variant="ghost" size="sm" className="text-red-400 hover:text-red-300" onClick={() => removeCamisa(camisa.id)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2">
+                          <Label className="text-white/60 text-xs whitespace-nowrap">Cortador</Label>
+                          <Select value={camisa.cortador || '__none__'} onValueChange={(v) => updateCamisa(camisa.id, 'cortador', v === '__none__' ? '' : v)}>
+                            <SelectTrigger className="min-h-[36px] h-9 bg-[#0d1629] border-[#c9a96e]/20 text-white text-xs w-36"><SelectValue placeholder="—" /></SelectTrigger>
+                            <SelectContent className="bg-[#0d1629] border border-white/20 text-white">
+                              <SelectItem value="__none__" className="text-white focus:bg-white/10 focus:text-white">—</SelectItem>
+                              {officials.filter(o => o.specialty?.split(',').some(s => s.trim().toLowerCase() === 'cortador')).map(o => <SelectItem key={o.id} value={o.name} className="text-white focus:bg-white/10 focus:text-white">{o.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Label className="text-white/60 text-xs whitespace-nowrap">Oficial</Label>
+                          <Select value={camisa.oficial || '__none__'} onValueChange={(v) => updateCamisa(camisa.id, 'oficial', v === '__none__' ? '' : v)}>
+                            <SelectTrigger className="min-h-[36px] h-9 bg-[#0d1629] border-[#c9a96e]/20 text-white text-xs w-36"><SelectValue placeholder="—" /></SelectTrigger>
+                            <SelectContent className="bg-[#0d1629] border border-white/20 text-white">
+                              <SelectItem value="__none__" className="text-white focus:bg-white/10 focus:text-white">—</SelectItem>
+                              {officials.filter(o => o.specialty?.split(',').some(s => s.trim().toLowerCase() === 'camisería')).map(o => <SelectItem key={o.id} value={o.name} className="text-white focus:bg-white/10 focus:text-white">{o.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <Button type="button" variant="ghost" size="sm" className="text-red-400 hover:text-red-300" onClick={() => removeCamisa(camisa.id)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                     <div>
                       <Label className="text-white/60 text-xs mb-2 block">Medidas</Label>
