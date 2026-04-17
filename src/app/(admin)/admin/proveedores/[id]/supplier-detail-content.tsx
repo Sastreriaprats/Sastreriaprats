@@ -354,7 +354,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
         </Card>
         <Card><CardContent className="pt-4 pb-3"><p className="text-xs text-muted-foreground">Tejidos</p><p className="text-xl font-bold">{fabrics.length}</p></CardContent></Card>
         <Card><CardContent className="pt-4 pb-3"><p className="text-xs text-muted-foreground">Pedidos</p><p className="text-xl font-bold">{orders.length}</p></CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3"><p className="text-xs text-muted-foreground">Cond. pago</p><p className="text-lg font-bold">{supplier.payment_days || 30} días</p></CardContent></Card>
+        <Card><CardContent className="pt-4 pb-3"><p className="text-xs text-muted-foreground">Cond. pago</p><p className="text-lg font-bold">{{ immediate: 'Al contado', net_15: '15 días', net_30: '30 días', net_60: '60 días', net_90: '90 días', custom: 'Personalizado' }[supplier.payment_terms as string] || `${supplier.payment_days || 30} días`}</p></CardContent></Card>
       </div>
 
       <Tabs defaultValue="info">

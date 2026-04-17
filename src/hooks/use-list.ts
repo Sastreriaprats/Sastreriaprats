@@ -101,7 +101,8 @@ export function useList<T>(
       isFirstRender.current = false
       return
     }
-    setPage(1)
+    // Solo resetear el state de página, sin actualizar URL (ya lo hace setSearch/setFilters)
+    setPageState(1)
   }, [search, filters])
 
   // Sincronizar estado con URL cuando el usuario navega con atrás/adelante

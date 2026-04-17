@@ -47,6 +47,8 @@ interface TicketLine {
   tax_rate: number
   cost_price: number
   image_url?: string
+  /** Stock disponible para esta variante (para limitar cantidad) */
+  available_stock?: number
   /** Si la línea es un cobro de un pedido/venta pendiente, se registra el pago en onSuccess. */
   cobro_ref?: { entity_type: 'tailoring_order' | 'sale'; entity_id: string }
 }
@@ -313,13 +315,20 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
   const canCobrar = ticketLines.length > 0 && (!!selectedClientId || saleWithoutClient)
 
   const addToTicket = (variant: any) => {
+    const stock = Array.isArray(variant.stock_levels) ? (variant.stock_levels[0]?.available ?? 0) : 0
     const existing = ticketLines.find(l => l.product_variant_id === variant.id)
     if (existing) {
+      if (existing.available_stock != null && existing.quantity >= existing.available_stock) return
       setTicketLines(prev => prev.map(l =>
         l.product_variant_id === variant.id ? { ...l, quantity: l.quantity + 1 } : l
       ))
     } else {
-      const price = variant.price_override || variant.products.price_with_tax || variant.products.base_price
+      // price_with_tax ES el PVP (IVA incluido); si no existe, calcular desde base_price
+      const taxRate = Number(variant.products.tax_rate) || 21
+      const priceOverride = Number(variant.price_override) || 0
+      const priceWithTax = Number(variant.products.price_with_tax) || 0
+      const basePrice = Number(variant.products.base_price) || 0
+      const price = priceOverride || priceWithTax || (basePrice ? basePrice * (1 + taxRate / 100) : 0)
       setTicketLines(prev => [...prev, {
         id: crypto.randomUUID(),
         product_variant_id: variant.id,
@@ -328,9 +337,10 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
         quantity: 1,
         unit_price: price,
         discount_percentage: 0,
-        tax_rate: variant.products.tax_rate || 21,
+        tax_rate: taxRate,
         cost_price: variant.products.cost_price || 0,
         image_url: variant.products.main_image_url,
+        available_stock: stock,
       }])
     }
     setSearchQuery('')
@@ -812,7 +822,11 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
             <div className="bg-white border-b border-slate-200 max-h-64 overflow-y-auto shrink-0 shadow-sm">
               {searchResults.map((v: any) => {
                 const stock = Array.isArray(v.stock_levels) ? (v.stock_levels[0]?.available ?? 0) : (v.stock_levels?.[0]?.available || 0)
-                const price = v.products?.price_with_tax ?? 0
+                const taxRate = Number(v.products?.tax_rate) || 21
+                const priceOverride = Number(v.price_override) || 0
+                const priceWithTax = Number(v.products?.price_with_tax) || 0
+                const basePrice = Number(v.products?.base_price) || 0
+                const price = priceOverride || priceWithTax || (basePrice ? basePrice * (1 + taxRate / 100) : 0)
                 const name = v.products?.name ?? ''
                 const sku = v.products?.sku ?? ''
                 const variantSku = v.variant_sku ?? ''
@@ -876,7 +890,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
                   <div className="flex items-center gap-0">
                     <Button variant="ghost" size="icon" className="rounded-full w-6 h-6 bg-slate-100 hover:bg-slate-200 text-slate-600" onClick={() => updateLine(line.id, 'quantity', Math.max(1, line.quantity - 1))}><Minus className="h-2.5 w-2.5" /></Button>
                     <span className="w-5 text-center text-xs tabular-nums text-slate-700">{line.quantity}</span>
-                    <Button variant="ghost" size="icon" className="rounded-full w-6 h-6 bg-slate-100 hover:bg-slate-200 text-slate-600" onClick={() => updateLine(line.id, 'quantity', line.quantity + 1)}><Plus className="h-2.5 w-2.5" /></Button>
+                    <Button variant="ghost" size="icon" className={`rounded-full w-6 h-6 bg-slate-100 hover:bg-slate-200 text-slate-600 ${line.available_stock != null && line.quantity >= line.available_stock ? 'opacity-30 cursor-not-allowed' : ''}`} onClick={() => { if (line.available_stock != null && line.quantity >= line.available_stock) return; updateLine(line.id, 'quantity', line.quantity + 1) }}><Plus className="h-2.5 w-2.5" /></Button>
                   </div>
                   <span className="text-slate-500 text-xs truncate">{line.sku || '—'}</span>
                   <div className="min-w-0">
