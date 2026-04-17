@@ -261,6 +261,52 @@ export async function updateAdminUser(input: UpdateUserInput): Promise<{ data?: 
   }
 }
 
+export async function deleteAdminUser(userId: string): Promise<{ error?: string }> {
+  try {
+    const supabase = await createServerSupabaseClient()
+    const { data: { user: currentUser } } = await supabase.auth.getUser()
+    if (!currentUser) return { error: 'No autenticado' }
+    if (currentUser.id === userId) return { error: 'No puedes eliminarte a ti mismo' }
+
+    const admin = createAdminClient()
+    const hasPerm = await checkUserPermission(currentUser.id, 'config.users')
+    if (!hasPerm) return { error: 'Sin permisos' }
+
+    // Obtener datos del usuario antes de eliminar (para auditoría)
+    const { data: profile } = await admin.from('profiles').select('full_name, email').eq('id', userId).single()
+
+    // Eliminar relaciones
+    await admin.from('user_roles').delete().eq('user_id', userId)
+    await admin.from('user_stores').delete().eq('user_id', userId)
+
+    // Eliminar perfil
+    await admin.from('profiles').delete().eq('id', userId)
+
+    // Eliminar usuario de auth
+    const { error: authErr } = await admin.auth.admin.deleteUser(userId)
+    if (authErr) {
+      console.error('[deleteAdminUser] Error eliminando auth user:', authErr)
+      return { error: 'Error al eliminar usuario de autenticación: ' + authErr.message }
+    }
+
+    await logAudit({
+      userId: currentUser.id,
+      userName: currentUser.email ?? 'Admin',
+      action: 'delete',
+      entityType: 'user',
+      entityId: userId,
+      entityLabel: profile ? `${profile.full_name ?? ''} <${profile.email ?? ''}>` : userId,
+      changes: {},
+    })
+
+    revalidatePath('/admin/configuracion')
+    return {}
+  } catch (err) {
+    console.error('[deleteAdminUser]', err)
+    return { error: err instanceof Error ? err.message : 'Error al eliminar usuario' }
+  }
+}
+
 export async function listRoles(): Promise<{ data?: { id: string; name: string; display_name: string | null; color: string | null }[]; error?: string }> {
   try {
     const admin = createAdminClient()

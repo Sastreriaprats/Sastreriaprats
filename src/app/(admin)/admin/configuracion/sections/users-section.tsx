@@ -9,9 +9,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Switch } from '@/components/ui/switch'
-import { Loader2, UserPlus, KeyRound, Pencil, Copy, Check } from 'lucide-react'
-import { listAdminUsers, createAdminUser, updateAdminUser, type UserRow } from '@/actions/users'
+import { Loader2, UserPlus, KeyRound, Pencil, Copy, Check, Trash2 } from 'lucide-react'
+import { listAdminUsers, createAdminUser, updateAdminUser, deleteAdminUser, type UserRow } from '@/actions/users'
 import { useStores, useRolesAndPermissions } from '@/hooks/use-cached-queries'
 import { formatDateTime } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -34,6 +35,8 @@ export function UsersSection() {
   const [loading, setLoading] = useState(true)
   const [createOpen, setCreateOpen] = useState(false)
   const [editUser, setEditUser] = useState<UserRow | null>(null)
+  const [deleteUser, setDeleteUser] = useState<UserRow | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const [tempPassword, setTempPassword] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
@@ -168,9 +171,12 @@ export function UsersSection() {
                       <TableCell className="text-xs text-muted-foreground">
                         {u.last_login_at ? formatDateTime(u.last_login_at) : 'Nunca'}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-right space-x-1">
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditUser(u)}>
                           <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => setDeleteUser(u)}>
+                          <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -181,6 +187,38 @@ export function UsersSection() {
           </CardContent>
         </Card>
       )}
+
+      {/* Delete confirmation */}
+      <AlertDialog open={!!deleteUser} onOpenChange={(open) => { if (!open) setDeleteUser(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar usuario</AlertDialogTitle>
+            <AlertDialogDescription>
+              ¿Estás seguro de que quieres eliminar a <strong>{deleteUser?.full_name ?? deleteUser?.email}</strong>? Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleting}
+              onClick={async (e) => {
+                e.preventDefault()
+                if (!deleteUser) return
+                setDeleting(true)
+                const res = await deleteAdminUser(deleteUser.id)
+                setDeleting(false)
+                if (res.error) { toast.error(res.error); return }
+                toast.success('Usuario eliminado')
+                setDeleteUser(null)
+                await load()
+              }}
+            >
+              {deleting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Eliminando...</> : 'Eliminar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Edit dialog */}
       {editUser && (
