@@ -46,6 +46,7 @@ interface TicketLine {
   discount_percentage: number
   tax_rate: number
   cost_price: number
+  original_price?: number
   image_url?: string
   /** Stock disponible para esta variante (para limitar cantidad) */
   available_stock?: number
@@ -336,6 +337,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
         sku: variant.variant_sku,
         quantity: 1,
         unit_price: price,
+        original_price: price,
         discount_percentage: 0,
         tax_rate: taxRate,
         cost_price: variant.products.cost_price || 0,
@@ -901,8 +903,10 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
                   <div className="text-slate-700 text-xs">
                     {line.product_variant_id ? (
                       <div>
-                        <span className="tabular-nums font-medium">{formatCurrency(pvpConIva)}</span>
-                        <p className="text-slate-500 text-[10px] mt-0.5">IVA incl. {formatCurrency(ivaIncl)}</p>
+                        {line.original_price && line.unit_price !== line.original_price && (
+                          <span className="tabular-nums text-slate-400 line-through mr-1">{formatCurrency(line.original_price)}</span>
+                        )}
+                        <Input type="number" step="0.01" value={line.unit_price || ''} onChange={(e) => updateLine(line.id, 'unit_price', parseFloat(e.target.value) || 0)} className="h-6 w-20 text-xs text-right border-slate-200 tabular-nums font-medium" />
                       </div>
                     ) : (
                       <Input type="number" step="0.01" value={line.unit_price || ''} onChange={(e) => updateLine(line.id, 'unit_price', parseFloat(e.target.value) || 0)} className="h-6 w-20 text-xs text-right border-slate-200" />
