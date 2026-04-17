@@ -270,10 +270,10 @@ export function TicketsContent() {
                     {total} ticket{total !== 1 ? 's' : ''} · Página {page} de {totalPages}
                   </p>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
+                    <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p: number) => Math.max(1, p - 1))}>
                       <ChevronLeft className="h-4 w-4" />
                     </Button>
-                    <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+                    <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p: number) => p + 1)}>
                       <ChevronRight className="h-4 w-4" />
                     </Button>
                   </div>

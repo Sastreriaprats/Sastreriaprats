@@ -112,9 +112,9 @@ export function MovementsTab() {
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{total} movimientos</p>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}><ChevronLeft className="h-4 w-4" /></Button>
+          <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p: number) => p - 1)}><ChevronLeft className="h-4 w-4" /></Button>
           <span className="text-sm">{page + 1} / {totalPages || 1}</span>
-          <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}><ChevronRight className="h-4 w-4" /></Button>
+          <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage((p: number) => p + 1)}><ChevronRight className="h-4 w-4" /></Button>
         </div>
       </div>
     </div>

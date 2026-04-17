@@ -238,10 +238,10 @@ export function AuditoriaContent() {
         <div className="flex items-center justify-between">
           <p className="text-sm text-muted-foreground">Página {page} de {totalPages}</p>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1 || loading}>
+            <Button variant="outline" size="sm" onClick={() => setPage((p: number) => Math.max(1, p - 1))} disabled={page === 1 || loading}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages || loading}>
+            <Button variant="outline" size="sm" onClick={() => setPage((p: number) => Math.min(totalPages, p + 1))} disabled={page === totalPages || loading}>
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>

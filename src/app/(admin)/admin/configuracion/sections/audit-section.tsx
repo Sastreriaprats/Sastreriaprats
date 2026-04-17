@@ -126,11 +126,11 @@ export function AuditSection() {
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{total} registros en total</p>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}>
+          <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p: number) => p - 1)}>
             <ChevronLeft className="h-4 w-4" /> Anterior
           </Button>
           <span className="text-sm text-muted-foreground">Página {page + 1} de {totalPages || 1}</span>
-          <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>
+          <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage((p: number) => p + 1)}>
             Siguiente <ChevronRight className="h-4 w-4" />
           </Button>
         </div>
