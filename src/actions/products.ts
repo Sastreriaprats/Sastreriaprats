@@ -332,6 +332,7 @@ export const listProducts = protectedAction<ListParams, ListResult<any>>(
       category_id, supplier_id, is_visible_web, is_active, is_sample,
       created_at,
       suppliers(name),
+      product_categories!products_category_id_fkey(name),
       product_variants(
         id,
         stock_levels(quantity, warehouse_id, warehouses(id, name, code))

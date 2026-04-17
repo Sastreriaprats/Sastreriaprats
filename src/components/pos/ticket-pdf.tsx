@@ -118,7 +118,8 @@ export async function generateTicketPdf(data: TicketPdfData): Promise<void> {
     ...(storeSubtitle
       ? [{ text: storeSubtitle, fontSize: FONT_SMALL, alignment: 'center', margin: [0, 0, 0, 2] as [number, number, number, number] } as Content]
       : []),
-    { text: storePhones, fontSize: FONT_SMALL, alignment: 'center', margin: [0, 0, 0, 4] as [number, number, number, number] },
+    { text: storePhones, fontSize: FONT_SMALL, alignment: 'center', margin: [0, 0, 0, 2] as [number, number, number, number] },
+    { text: `CIF: ${COMPANY.nif}`, fontSize: FONT_SMALL, alignment: 'center', margin: [0, 0, 0, 4] as [number, number, number, number] },
     { canvas: [{ type: 'line', x1: 0, y1: 0, x2: W_PT - 2 * MARGIN_PT, y2: 0, lineWidth: 0.5 }], margin: [0, 0, 0, 8] as [number, number, number, number] },
     {
       table: {
@@ -174,14 +175,13 @@ export async function generateTicketPdf(data: TicketPdfData): Promise<void> {
   ]
 
   for (const line of data.lines) {
-    const taxMultiplier = 1 + (line.tax_rate ?? 21) / 100
-    const unitPriceWithTax = line.unit_price * taxMultiplier
+    // unit_price YA es PVP (IVA incluido), no multiplicar por taxMultiplier
+    const unitPriceWithTax = line.unit_price
     const lineTotalWithTax = line.line_total
-      ? line.line_total * taxMultiplier
-      : unitPriceWithTax * line.quantity * (1 - (line.discount_percentage || 0) / 100)
+      ?? (line.unit_price * line.quantity * (1 - (line.discount_percentage || 0) / 100))
     const desc = truncate(line.description, 32)
     const hasDiscount = (line.discount_percentage || 0) > 0
-    const discountAmountWithTax = unitPriceWithTax * line.quantity * (line.discount_percentage || 0) / 100
+    const discountAmountWithTax = line.unit_price * line.quantity * (line.discount_percentage || 0) / 100
 
     const rows: any[][] = [
       [

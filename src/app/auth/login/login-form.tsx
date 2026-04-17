@@ -22,6 +22,7 @@ export function LoginForm({ redirectTo, mode }: LoginFormProps) {
   const [password, setPassword] = useState('')
   const [resendLoading, setResendLoading] = useState(false)
   const [lastEmailNotConfirmed, setLastEmailNotConfirmed] = useState(false)
+  const [errors, setErrors] = useState<{ email?: string; password?: string }>({})
 
   async function handleResendConfirmation() {
     if (!email?.trim()) return
@@ -35,8 +36,18 @@ export function LoginForm({ redirectTo, mode }: LoginFormProps) {
     toast.success('Correo de confirmación reenviado. Revisa tu bandeja de entrada.')
   }
 
+  function validate(): boolean {
+    const newErrors: { email?: string; password?: string } = {}
+    if (!email.trim()) newErrors.email = 'Introduce tu email'
+    else if (!/\S+@\S+\.\S+/.test(email)) newErrors.email = 'Email no válido'
+    if (!password) newErrors.password = 'Introduce tu contraseña'
+    setErrors(newErrors)
+    return Object.keys(newErrors).length === 0
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (!validate()) return
     setIsLoading(true)
 
     const timeoutMs = 15000
@@ -101,7 +112,7 @@ export function LoginForm({ redirectTo, mode }: LoginFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} noValidate className="space-y-4">
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
         <Input
@@ -109,11 +120,12 @@ export function LoginForm({ redirectTo, mode }: LoginFormProps) {
           type="email"
           placeholder="tu@email.com"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
+          onChange={(e) => { setEmail(e.target.value); if (errors.email) setErrors(prev => ({ ...prev, email: undefined })) }}
           autoComplete="email"
           disabled={isLoading}
+          className={errors.email ? 'border-red-400 focus-visible:ring-red-400' : ''}
         />
+        {errors.email && <p className="text-xs text-red-500">{errors.email}</p>}
       </div>
 
       <div className="space-y-2">
@@ -124,10 +136,10 @@ export function LoginForm({ redirectTo, mode }: LoginFormProps) {
             type={showPassword ? 'text' : 'password'}
             placeholder="••••••••"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
+            onChange={(e) => { setPassword(e.target.value); if (errors.password) setErrors(prev => ({ ...prev, password: undefined })) }}
             autoComplete="current-password"
             disabled={isLoading}
+            className={errors.password ? 'border-red-400 focus-visible:ring-red-400' : ''}
           />
           <button
             type="button"
@@ -137,6 +149,7 @@ export function LoginForm({ redirectTo, mode }: LoginFormProps) {
             {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           </button>
         </div>
+        {errors.password && <p className="text-xs text-red-500">{errors.password}</p>}
       </div>
 
       {redirectTo && (

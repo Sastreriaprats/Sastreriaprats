@@ -384,6 +384,9 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                   <p><span className="text-muted-foreground">Banco:</span> {supplier.bank_name || '-'}</p>
                   <p><span className="text-muted-foreground">IBAN:</span> {supplier.bank_iban || '-'}</p>
                   <p><span className="text-muted-foreground">SWIFT:</span> {supplier.bank_swift || '-'}</p>
+                  <p><span className="text-muted-foreground">Método de pago:</span> {
+                    { transfer: 'Transferencia', direct_debit: 'Domiciliación', check: 'Cheque', cash: 'Efectivo', card: 'Tarjeta', bank_draft: 'Giro' }[supplier.payment_method as string] || supplier.payment_method || '-'
+                  }</p>
                   <p><span className="text-muted-foreground">Pedido mínimo:</span> {supplier.minimum_order ? formatCurrency(supplier.minimum_order) : 'Sin mínimo'}</p>
                   <p><span className="text-muted-foreground">Envío incluido:</span> {supplier.shipping_included ? 'Sí' : 'No'}</p>
                 </CardContent>

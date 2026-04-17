@@ -57,6 +57,20 @@ const SUPPLIER_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'other', label: 'Otros' },
 ]
 
+const PAYMENT_METHOD_OPTIONS = [
+  { value: 'transfer', label: 'Transferencia' },
+  { value: 'direct_debit', label: 'Domiciliación' },
+  { value: 'check', label: 'Cheque' },
+  { value: 'cash', label: 'Efectivo' },
+  { value: 'card', label: 'Tarjeta' },
+  { value: 'bank_draft', label: 'Giro' },
+]
+
+const paymentMethodLabels: Record<string, string> = {
+  transfer: 'Transferencia', direct_debit: 'Domiciliación', check: 'Cheque',
+  cash: 'Efectivo', card: 'Tarjeta', bank_draft: 'Giro',
+}
+
 const emptyForm = {
   name: '',
   legal_name: '',
@@ -71,6 +85,7 @@ const emptyForm = {
   country: 'España',
   supplier_types: [] as string[],
   payment_terms: '',
+  payment_method: '',
   bank_iban: '',
   internal_notes: '',
   is_active: true,
@@ -117,6 +132,7 @@ export function SuppliersPageContent() {
       country: form.country?.trim() || 'España',
       supplier_types: form.supplier_types,
       payment_terms: (form.payment_terms || 'net_30') as 'immediate' | 'net_15' | 'net_30' | 'net_60' | 'net_90' | 'custom',
+      payment_method: form.payment_method || null,
       payment_days: 30,
       bank_iban: form.bank_iban?.trim() || null,
       internal_notes: form.internal_notes?.trim() || null,
@@ -168,6 +184,7 @@ export function SuppliersPageContent() {
               <TableHead>Tipo</TableHead>
               <TableHead>Contacto</TableHead>
               <TableHead>Condiciones pago</TableHead>
+              <TableHead>Método pago</TableHead>
               <SortHeader field="total_debt">Deuda</SortHeader>
               <SortHeader field="total_paid">Total pagado</SortHeader>
               <TableHead>Estado</TableHead>
@@ -182,6 +199,7 @@ export function SuppliersPageContent() {
                   <TableCell><Skeleton className="h-5 w-20 rounded-full" /></TableCell>
                   <TableCell><div className="space-y-1"><Skeleton className="h-4 w-28" /><Skeleton className="h-3 w-36" /></div></TableCell>
                   <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-16" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-16" /></TableCell>
                   <TableCell><Skeleton className="h-5 w-14 rounded-full" /></TableCell>
@@ -189,7 +207,7 @@ export function SuppliersPageContent() {
                 </TableRow>
               ))
             ) : suppliers.length === 0 ? (
-              <TableRow><TableCell colSpan={8} className="h-40 text-center text-muted-foreground">No hay proveedores</TableCell></TableRow>
+              <TableRow><TableCell colSpan={9} className="h-40 text-center text-muted-foreground">No hay proveedores</TableCell></TableRow>
             ) : suppliers.map((s: any) => (
               <TableRow key={s.id} className="cursor-pointer hover:bg-muted/50" onClick={() => router.push(`/admin/proveedores/${s.id}`)}>
                 <TableCell>
@@ -209,6 +227,7 @@ export function SuppliersPageContent() {
                   {s.contact_email && <p className="text-xs text-muted-foreground">{s.contact_email}</p>}
                 </TableCell>
                 <TableCell className="text-sm">{paymentTermsLabels[s.payment_terms] || s.payment_terms}</TableCell>
+                <TableCell className="text-sm">{paymentMethodLabels[s.payment_method] || s.payment_method || '—'}</TableCell>
                 <TableCell>
                   <span className={`font-medium ${(s.total_debt || 0) > 0 ? 'text-red-600' : ''}`}>
                     {formatCurrency(s.total_debt || 0)}
@@ -318,6 +337,17 @@ export function SuppliersPageContent() {
               </Select>
             </div>
             <div className="space-y-2">
+              <Label>Método de pago</Label>
+              <Select value={form.payment_method || 'transfer'} onValueChange={(v) => setForm((f) => ({ ...f, payment_method: v }))}>
+                <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                <SelectContent>
+                  {PAYMENT_METHOD_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="bank_iban">IBAN</Label>
               <Input id="bank_iban" value={form.bank_iban} onChange={(e) => setForm((f) => ({ ...f, bank_iban: e.target.value }))} placeholder="ES00 0000 0000 0000 0000 0000" />
             </div>

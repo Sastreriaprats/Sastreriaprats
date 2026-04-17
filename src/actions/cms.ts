@@ -524,8 +524,7 @@ export async function getWebCategories(): Promise<WebCategory[]> {
       .select('id, name, slug, sort_order, parent_id')
       .eq('is_active', true)
       .eq('is_visible_web', true)
-      .eq('product_type', 'boutique')
-      // TODO: filtrar is_seasonal según temporada actual
+      .in('product_type', ['boutique', 'accessory'])
       .order('sort_order', { ascending: true })
 
     if (!data) return []

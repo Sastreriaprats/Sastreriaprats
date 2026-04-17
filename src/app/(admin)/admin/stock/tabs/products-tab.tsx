@@ -67,7 +67,7 @@ export function ProductsTab() {
     data: products, total, totalPages, page, setPage,
     search, setSearch, sortBy, toggleSort, isLoading, pageSize,
     setFilters,
-  } = useList(listProducts, { pageSize: 25, defaultSort: 'created_at', defaultOrder: 'desc' })
+  } = useList(listProducts, { pageSize: 25, defaultSort: 'created_at', defaultOrder: 'desc', syncUrl: true })
 
   const applyType = (v: string) => {
     setTypeFilter(v)
@@ -205,6 +205,17 @@ export function ProductsTab() {
         )}
       </div>
 
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">{(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} de {total}</p>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronLeft className="h-4 w-4" /></Button>
+            <span className="text-sm">{page} / {totalPages}</span>
+            <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}><ChevronRight className="h-4 w-4" /></Button>
+          </div>
+        </div>
+      )}
+
       <div className="rounded-lg border overflow-x-auto">
         <Table>
           <TableHeader>
@@ -213,6 +224,7 @@ export function ProductsTab() {
               <SortHeader field="sku">SKU</SortHeader>
               <SortHeader field="name">Producto</SortHeader>
               <TableHead>Tipo</TableHead>
+              <TableHead>Categoría</TableHead>
               <TableHead>Marca</TableHead>
               <SortHeader field="price_with_tax">PVP</SortHeader>
               <SortHeader field="cost_price">Coste</SortHeader>
@@ -230,6 +242,7 @@ export function ProductsTab() {
                   <TableCell><Skeleton className="h-4 w-16" /></TableCell>
                   <TableCell><div className="space-y-1"><Skeleton className="h-4 w-36" /><Skeleton className="h-3 w-24" /></div></TableCell>
                   <TableCell><Skeleton className="h-5 w-20 rounded-full" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-16" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-14" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-14" /></TableCell>
@@ -240,7 +253,7 @@ export function ProductsTab() {
                 </TableRow>
               ))
             ) : displayedProducts.length === 0 ? (
-              <TableRow><TableCell colSpan={11} className="h-40 text-center text-muted-foreground">{hasActiveFilters ? 'No hay productos con los filtros aplicados.' : 'No hay productos'}</TableCell></TableRow>
+              <TableRow><TableCell colSpan={12} className="h-40 text-center text-muted-foreground">{hasActiveFilters ? 'No hay productos con los filtros aplicados.' : 'No hay productos'}</TableCell></TableRow>
             ) : displayedProducts.map((p: any) => {
               const isFabric = p.product_type === 'tailoring_fabric'
               const { total: stockTotal, warehouses } = getProductStockSummary(p)
@@ -263,6 +276,7 @@ export function ProductsTab() {
                       {productTypeLabels[p.product_type] || p.product_type}
                     </Badge>
                   </TableCell>
+                  <TableCell className="text-sm">{p.product_categories?.name || '-'}</TableCell>
                   <TableCell className="text-sm">{p.brand || '-'}</TableCell>
                   <TableCell className="font-medium">{formatCurrency(p.price_with_tax ?? p.base_price)}{isFabric ? <span className="text-xs text-muted-foreground">/m</span> : null}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{p.cost_price ? formatCurrency(p.cost_price) : '-'}</TableCell>

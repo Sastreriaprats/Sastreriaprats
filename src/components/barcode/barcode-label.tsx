@@ -85,7 +85,7 @@ export function BarcodeLabel({
       {/* NOMBRE — centrado, uppercase, bold, máx 2 líneas */}
       <div
         style={{
-          fontSize: '13px',
+          fontSize: '15px',
           fontWeight: 700,
           lineHeight: 1.2,
           textAlign: 'center',
@@ -110,7 +110,7 @@ export function BarcodeLabel({
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'baseline',
-          fontSize: '12px',
+          fontSize: '14px',
           lineHeight: 1.1,
         }}
       >

@@ -135,8 +135,26 @@ export async function createAdminUser(input: CreateUserInput): Promise<{ data?: 
 
   const userId = authUser.user.id
 
-  await admin.from('user_roles').insert({ user_id: userId, role_id: input.roleId })
-  await admin.from('user_stores').insert({ user_id: userId, store_id: input.storeId, is_primary: true })
+  // Esperar a que el trigger handle_new_user cree el perfil antes de insertar relaciones
+  let profileReady = false
+  for (let i = 0; i < 10; i++) {
+    const { data: profile } = await admin.from('profiles').select('id').eq('id', userId).single()
+    if (profile) { profileReady = true; break }
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  if (!profileReady) {
+    return { error: 'Error: el perfil del usuario no se creó correctamente. Inténtalo de nuevo.' }
+  }
+
+  const { error: roleErr } = await admin.from('user_roles').insert({ user_id: userId, role_id: input.roleId })
+  if (roleErr) {
+    console.error('[createAdminUser] Error asignando rol:', roleErr)
+    return { error: 'Usuario creado pero error al asignar rol: ' + roleErr.message }
+  }
+  const { error: storeErr } = await admin.from('user_stores').insert({ user_id: userId, store_id: input.storeId, is_primary: true })
+  if (storeErr) {
+    console.error('[createAdminUser] Error asignando tienda:', storeErr)
+  }
 
   const { data: role } = await admin.from('roles').select('name').eq('id', input.roleId).single()
 

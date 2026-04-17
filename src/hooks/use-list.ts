@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { toast } from 'sonner'
 import type { ActionResult } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
@@ -13,20 +14,59 @@ export function useList<T>(
     defaultOrder?: 'asc' | 'desc'
     defaultFilters?: Record<string, any>
     autoFetch?: boolean
+    syncUrl?: boolean
   } = {},
 ) {
   const pageSize = options.pageSize || 20
+  const sync = options.syncUrl ?? false
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
   const [data, setData] = useState<T[]>([])
   const [total, setTotal] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
-  const [page, setPage] = useState(1)
-  const [search, setSearch] = useState('')
+  const [page, setPageState] = useState(() => {
+    if (sync) {
+      const p = parseInt(searchParams.get('page') || '1')
+      return isNaN(p) || p < 1 ? 1 : p
+    }
+    return 1
+  })
+  const [search, setSearchState] = useState(() => {
+    if (sync) return searchParams.get('search') || ''
+    return ''
+  })
   const [sortBy, setSortBy] = useState(options.defaultSort || 'created_at')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>(options.defaultOrder || 'desc')
   const [filters, setFilters] = useState<Record<string, any>>(options.defaultFilters || {})
   const [isLoading, setIsLoading] = useState(true)
   const [statusCounts, setStatusCounts] = useState<Record<string, number> | undefined>(undefined)
   const [totalAll, setTotalAll] = useState<number | undefined>(undefined)
+
+  const updateUrl = useCallback((params: Record<string, string | null>) => {
+    if (!sync) return
+    const newParams = new URLSearchParams(searchParams.toString())
+    for (const [key, value] of Object.entries(params)) {
+      if (value === null || value === '' || value === '1') {
+        newParams.delete(key)
+      } else {
+        newParams.set(key, value)
+      }
+    }
+    const qs = newParams.toString()
+    router.replace(`${pathname}${qs ? `?${qs}` : ''}`, { scroll: false })
+  }, [sync, router, pathname, searchParams])
+
+  const setPage = useCallback((p: number) => {
+    setPageState(p)
+    updateUrl({ page: String(p) })
+  }, [updateUrl])
+
+  const setSearch = useCallback((s: string) => {
+    setSearchState(s)
+    updateUrl({ search: s || null, page: null })
+  }, [updateUrl])
 
   const fetchData = useCallback(async () => {
     setIsLoading(true)
@@ -55,7 +95,23 @@ export function useList<T>(
     if (options.autoFetch !== false) fetchData()
   }, [fetchData, options.autoFetch])
 
-  useEffect(() => { setPage(1) }, [search, filters])
+  const isFirstRender = useRef(true)
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false
+      return
+    }
+    setPage(1)
+  }, [search, filters])
+
+  // Sincronizar estado con URL cuando el usuario navega con atrás/adelante
+  useEffect(() => {
+    if (!sync) return
+    const urlPage = parseInt(searchParams.get('page') || '1')
+    const urlSearch = searchParams.get('search') || ''
+    if (!isNaN(urlPage) && urlPage !== page) setPageState(urlPage)
+    if (urlSearch !== search) setSearchState(urlSearch)
+  }, [searchParams])
 
   const refresh = useCallback(() => fetchData(), [fetchData])
 

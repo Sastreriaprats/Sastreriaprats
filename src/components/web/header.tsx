@@ -129,9 +129,7 @@ function MenuSubItem({ child, onClose }: { child: NavChild; onClose: () => void 
         onClick={() => setOpen(!open)}
         className="flex items-center justify-between w-full py-2 text-[15px] text-gray-600 hover:text-black transition-colors"
       >
-        <Link href={child.href} onClick={onClose} className="hover:underline">
-          {child.label}
-        </Link>
+        <span>{child.label}</span>
         <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
       </button>
       <div className={`overflow-hidden transition-all duration-300 ${open ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'}`}>
@@ -173,9 +171,7 @@ function MenuNavItem({ item, onClose }: { item: NavItem; onClose: () => void }) 
         onClick={() => setOpen(!open)}
         className="flex items-center justify-between w-full py-3.5 text-[17px] tracking-wide text-gray-900 hover:text-black transition-colors focus-visible:ring-2 focus-visible:ring-prats-gold focus-visible:outline-none"
       >
-        <Link href={item.href} onClick={onClose} className="hover:underline">
-          {item.label}
-        </Link>
+        <span>{item.label}</span>
         <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
       </button>
       <div

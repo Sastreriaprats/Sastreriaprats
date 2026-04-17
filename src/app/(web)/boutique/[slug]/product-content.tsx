@@ -10,7 +10,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import {
   ArrowLeft, ShoppingBag, Minus, Plus, Check, Truck, Shield, Ruler, Loader2, Heart, ChevronDown,
 } from 'lucide-react'
-import { PratsSpinner } from '@/components/ui/prats-spinner'
 import { useCart } from '@/components/providers/cart-provider'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -71,8 +70,26 @@ export function ProductContent({ slug }: { slug: string }) {
 
   if (isLoading) {
     return (
-      <div className="flex justify-center py-32">
-        <PratsSpinner />
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 animate-pulse">
+        <div className="h-4 w-16 bg-gray-200 rounded mb-6" />
+        <div className="grid gap-12 lg:grid-cols-2">
+          <div className="aspect-[3/4] bg-gray-200 rounded" />
+          <div className="space-y-6 pt-4">
+            <div className="h-8 w-3/4 bg-gray-200 rounded" />
+            <div className="h-6 w-24 bg-gray-200 rounded" />
+            <div className="space-y-2">
+              <div className="h-4 w-full bg-gray-200 rounded" />
+              <div className="h-4 w-5/6 bg-gray-200 rounded" />
+              <div className="h-4 w-2/3 bg-gray-200 rounded" />
+            </div>
+            <div className="flex gap-2">
+              <div className="h-10 w-10 bg-gray-200 rounded-full" />
+              <div className="h-10 w-10 bg-gray-200 rounded-full" />
+              <div className="h-10 w-10 bg-gray-200 rounded-full" />
+            </div>
+            <div className="h-12 w-full bg-gray-200 rounded" />
+          </div>
+        </div>
       </div>
     )
   }

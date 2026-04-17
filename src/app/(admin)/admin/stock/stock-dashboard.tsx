@@ -34,13 +34,18 @@ export function StockDashboard() {
   const handleTabChange = (tab: string) => {
     setActiveTab(tab)
     if (tab !== 'almacenes') setOutOfStockFilter(false)
-    window.history.replaceState(null, '', `/admin/stock?tab=${tab}`)
+    const params = new URLSearchParams(window.location.search)
+    params.set('tab', tab)
+    // Al cambiar de pestaña, resetear paginación
+    params.delete('page')
+    params.delete('search')
+    router.replace(`/admin/stock?${params.toString()}`, { scroll: false })
   }
 
   const goToOutOfStock = () => {
     setOutOfStockFilter(true)
     setActiveTab('almacenes')
-    window.history.replaceState(null, '', `/admin/stock?tab=almacenes`)
+    router.replace('/admin/stock?tab=almacenes', { scroll: false })
   }
 
   useEffect(() => {

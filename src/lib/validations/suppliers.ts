@@ -17,6 +17,7 @@ export const createSupplierSchema = z.object({
   bank_iban: z.string().optional().nullable(),
   bank_swift: z.string().optional().nullable(),
   payment_terms: z.enum(['immediate', 'net_15', 'net_30', 'net_60', 'net_90', 'custom']).default('net_30'),
+  payment_method: z.enum(['transfer', 'direct_debit', 'check', 'cash', 'card', 'bank_draft']).optional().nullable(),
   payment_days: z.number().default(30),
   minimum_order: z.number().optional().nullable(),
   shipping_included: z.boolean().default(false),

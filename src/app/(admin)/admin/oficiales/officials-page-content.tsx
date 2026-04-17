@@ -31,10 +31,39 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { Plus, Pencil, Loader2 } from 'lucide-react'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Plus, Pencil, Trash2, Loader2 } from 'lucide-react'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
 import { usePermissions } from '@/hooks/use-permissions'
 import { formatCurrency } from '@/lib/utils'
+
+const SPECIALTIES = [
+  'Americana',
+  'Chaqué',
+  'Abrigo',
+  'Frac',
+  'Chaleco',
+  'Pantalón',
+  'Teba',
+  'Camisería',
+  'Americana Industrial',
+  'Pantalón Industrial',
+  'Chaqué Industrial',
+  'Chaleco Industrial',
+  'Camisería Industrial',
+  'Gabardina',
+  'Cortador',
+]
 
 const PAYMENT_TERMS_OPTIONS = [
   { value: 'immediate', label: 'Al contado' },
@@ -51,7 +80,7 @@ const emptyForm = {
   nif_cif: '',
   phone: '',
   email: '',
-  specialty: '',
+  specialty: [] as string[],
   price_per_garment: '',
   address: '',
   city: '',
@@ -66,9 +95,10 @@ const emptyForm = {
 
 export function OfficialsPageContent() {
   const supabase = useMemo(() => createClient(), [])
-  const { can } = usePermissions()
+  const { can, isAdmin } = usePermissions()
   const canEdit = can('officials.edit')
   const canCreate = can('officials.create')
+  const canDelete = isAdmin
 
   const [officials, setOfficials] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -76,6 +106,7 @@ export function OfficialsPageContent() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState(emptyForm)
   const [isSaving, setIsSaving] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
 
   const fetchOfficials = useCallback(async () => {
     setIsLoading(true)
@@ -113,7 +144,11 @@ export function OfficialsPageContent() {
       nif_cif: o.nif_cif ?? '',
       phone: o.phone ?? '',
       email: o.email ?? '',
-      specialty: o.specialty ?? '',
+      specialty: o.specialty
+        ? o.specialty.split(',').map((s: string) => s.trim()).map((s: string) =>
+            SPECIALTIES.find(sp => sp.toLowerCase() === s.toLowerCase()) || ''
+          ).filter(Boolean)
+        : [],
       price_per_garment: o.price_per_garment != null ? String(o.price_per_garment) : '',
       address: o.address ?? '',
       city: o.city ?? '',
@@ -140,7 +175,7 @@ export function OfficialsPageContent() {
       nif_cif: form.nif_cif.trim() || null,
       phone: form.phone.trim() || null,
       email: form.email.trim() || null,
-      specialty: form.specialty.trim() || null,
+      specialty: form.specialty.length > 0 ? form.specialty.join(', ') : null,
       price_per_garment: form.price_per_garment ? parseFloat(form.price_per_garment) : null,
       address: form.address.trim() || null,
       city: form.city.trim() || null,
@@ -185,6 +220,17 @@ export function OfficialsPageContent() {
       toast.success(o.is_active ? 'Oficial desactivado' : 'Oficial activado')
       fetchOfficials()
     }
+  }
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return
+    const { error } = await supabase.from('officials').delete().eq('id', deleteTarget.id)
+    if (error) toast.error(error.message)
+    else {
+      toast.success(`Oficial "${deleteTarget.name}" eliminado`)
+      fetchOfficials()
+    }
+    setDeleteTarget(null)
   }
 
   return (
@@ -233,7 +279,17 @@ export function OfficialsPageContent() {
                     <TableCell className="text-sm text-muted-foreground">{o.nif_cif ?? '—'}</TableCell>
                     <TableCell className="text-sm">{o.phone ?? '—'}</TableCell>
                     <TableCell className="text-sm">{o.email ?? '—'}</TableCell>
-                    <TableCell className="text-sm">{o.specialty ?? '—'}</TableCell>
+                    <TableCell className="text-sm">
+                      {o.specialty ? (
+                        <div className="flex flex-wrap gap-1">
+                          {o.specialty.split(',').map((s: string) => s.trim()).filter(Boolean).map((s: string) => (
+                            <Badge key={s} variant="outline" className="text-xs font-normal whitespace-nowrap">
+                              {s}
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : '—'}
+                    </TableCell>
                     <TableCell className="text-sm">{o.price_per_garment != null ? formatCurrency(o.price_per_garment) : '—'}</TableCell>
                     <TableCell>
                       {canEdit ? (
@@ -248,11 +304,18 @@ export function OfficialsPageContent() {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      {canEdit && (
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-prats-navy hover:text-prats-gold" onClick={() => openEdit(o)}>
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                      )}
+                      <div className="flex items-center justify-end gap-1">
+                        {canEdit && (
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-prats-navy hover:text-prats-gold" onClick={() => openEdit(o)}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {canDelete && (
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-700" onClick={() => setDeleteTarget({ id: o.id, name: o.name })}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
@@ -288,9 +351,26 @@ export function OfficialsPageContent() {
               <Label htmlFor="email">Email</Label>
               <Input id="email" type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="specialty">Especialidad</Label>
-              <Input id="specialty" value={form.specialty} onChange={(e) => setForm((f) => ({ ...f, specialty: e.target.value }))} placeholder="Ej. Americana, pantalón" />
+            <div className="space-y-2 sm:col-span-2">
+              <Label>Especialidad</Label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 rounded-md border p-3">
+                {SPECIALTIES.map((sp) => (
+                  <label key={sp} className="flex items-center gap-2 cursor-pointer text-sm">
+                    <Checkbox
+                      checked={form.specialty.includes(sp)}
+                      onCheckedChange={() =>
+                        setForm((f) => ({
+                          ...f,
+                          specialty: f.specialty.includes(sp)
+                            ? f.specialty.filter((s) => s !== sp)
+                            : [...f.specialty, sp],
+                        }))
+                      }
+                    />
+                    {sp}
+                  </label>
+                ))}
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="price_per_garment">Precio por prenda (€)</Label>
@@ -349,6 +429,23 @@ export function OfficialsPageContent() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar oficial</AlertDialogTitle>
+            <AlertDialogDescription>
+              ¿Estás seguro de que quieres eliminar a <strong>{deleteTarget?.name}</strong>? Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700 text-white">
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

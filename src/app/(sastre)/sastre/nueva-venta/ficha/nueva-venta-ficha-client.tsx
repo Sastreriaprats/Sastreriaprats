@@ -108,6 +108,17 @@ function defaultPrendaConfig(slug: string): Record<string, unknown> {
   }
 }
 
+const SLUG_TO_SPECIALTY: Record<string, string> = {
+  americana: 'Americana',
+  pantalon: 'Pantalón',
+  chaleco: 'Chaleco',
+  teba: 'Teba',
+  chaque: 'Chaqué',
+  abrigo: 'Abrigo',
+  gabardina: 'Gabardina',
+  camiseria_industrial: 'Camisería Industrial',
+}
+
 const SITUACION_TRABAJO = [
   'in_workshop',
   'pending_first_fitting',
@@ -281,7 +292,7 @@ export function NuevaVentaFichaClient({
   const [addingComplementQty, setAddingComplementQty] = useState<Record<string, number>>({})
   const [submitting, setSubmitting] = useState(false)
   const [sastres, setSastres] = useState<{ id: string; full_name: string }[]>([])
-  const [officials, setOfficials] = useState<{ id: string; name: string }[]>([])
+  const [officials, setOfficials] = useState<{ id: string; name: string; specialty: string | null }[]>([])
   const [fabricsStock, setFabricsStock] = useState<{ id: string; fabric_code: string | null; name: string }[]>([])
   const [client, setClient] = useState<Record<string, unknown> | null>(null)
   const [clientLoading, setClientLoading] = useState(false)
@@ -382,7 +393,7 @@ export function NuevaVentaFichaClient({
           cp: String(c.postal_code ?? '').trim(),
           telefono1: String(c.phone ?? '').trim(),
           telefono2: String(c.phone_secondary ?? '').trim(),
-          cortador: prev.cortador || sastreName,
+          cortador: prev.cortador || '',
         }))
       }
     }).finally(() => { if (!cancelled) setClientLoading(false) })
@@ -412,8 +423,8 @@ export function NuevaVentaFichaClient({
       try {
         const { createClient } = await import('@/lib/supabase/client')
         const supabase = createClient()
-        const { data } = await supabase.from('officials').select('id, name').eq('is_active', true).order('name')
-        if (!cancelled && data) setOfficials(data as { id: string; name: string }[])
+        const { data } = await supabase.from('officials').select('id, name, specialty').eq('is_active', true).order('name')
+        if (!cancelled && data) setOfficials(data as { id: string; name: string; specialty: string | null }[])
       } catch (err) { console.error('[FichaClient] loadOfficials error:', err) }
     }
     loadOfficials()
@@ -721,12 +732,13 @@ export function NuevaVentaFichaClient({
                   </div>
                   <div>
                     <Label className="text-white/60 text-xs">Cortador</Label>
-                    <Select value={ficha.cortador} onValueChange={(v) => setFichaField('cortador', v)}>
+                    <Select value={ficha.cortador || '__none__'} onValueChange={(v) => setFichaField('cortador', v === '__none__' ? '' : v)}>
                       <SelectTrigger className="mt-1 min-h-[44px] bg-[#0d1629] border-[#c9a96e]/20 text-white">
                         <SelectValue placeholder="Selecciona cortador" />
                       </SelectTrigger>
                       <SelectContent className="bg-[#0d1629] border border-white/20 text-white">
-                        {sastres.map((s) => <SelectItem key={s.id} value={s.full_name} className="text-white focus:bg-white/10 focus:text-white">{s.full_name}</SelectItem>)}
+                        <SelectItem value="__none__" className="text-white focus:bg-white/10 focus:text-white">—</SelectItem>
+                        {officials.filter(o => o.specialty?.split(',').some(s => s.trim().toLowerCase() === 'cortador')).map((o) => <SelectItem key={o.id} value={o.name} className="text-white focus:bg-white/10 focus:text-white">{o.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -789,6 +801,10 @@ export function NuevaVentaFichaClient({
                     const setField = (field: string, value: unknown) => setPCField(item.id, sp.slug, field, value)
                     const itemDisplayLabel = getCartItemDisplayLabel(item, cartItems)
                     const sectionTitle = sp.label === item.label ? itemDisplayLabel : `${sp.label} — ${itemDisplayLabel}`
+                    const specialtyForSlug = SLUG_TO_SPECIALTY[sp.slug]
+                    const filteredOfficials = specialtyForSlug
+                      ? officials.filter(o => o.specialty?.split(',').some(s => s.trim().toLowerCase() === specialtyForSlug.toLowerCase()))
+                      : officials
 
                     return (
                       <div key={key} className="space-y-4 border-t border-[#c9a96e]/20 pt-4">
@@ -800,7 +816,7 @@ export function NuevaVentaFichaClient({
                               <SelectTrigger className="min-h-[36px] h-9 bg-[#0d1629] border-[#c9a96e]/20 text-white text-xs w-40"><SelectValue placeholder="—" /></SelectTrigger>
                               <SelectContent className="bg-[#0d1629] border border-white/20 text-white">
                                 <SelectItem value="__none__" className="text-white focus:bg-white/10 focus:text-white">—</SelectItem>
-                                {officials.map(o => <SelectItem key={o.id} value={o.name} className="text-white focus:bg-white/10 focus:text-white">{o.name}</SelectItem>)}
+                                {filteredOfficials.map(o => <SelectItem key={o.id} value={o.name} className="text-white focus:bg-white/10 focus:text-white">{o.name}</SelectItem>)}
                               </SelectContent>
                             </Select>
                           </div>

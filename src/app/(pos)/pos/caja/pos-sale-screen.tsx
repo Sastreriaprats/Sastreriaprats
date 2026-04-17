@@ -294,14 +294,18 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
     } catch { /* ignore */ }
   }
 
+  // unit_price ES el PVP (IVA incluido), NO añadir IVA encima
   const subtotal = ticketLines.reduce((sum, l) => {
     const lineDiscount = l.unit_price * l.quantity * (l.discount_percentage / 100)
     return sum + (l.unit_price * l.quantity - lineDiscount)
   }, 0)
   const globalDiscountAmount = subtotal * (globalDiscount / 100)
-  const taxableAmount = subtotal - globalDiscountAmount
-  const taxAmount = isTaxFree ? 0 : taxableAmount * 0.21
-  const total = taxableAmount + taxAmount
+  const total = subtotal - globalDiscountAmount
+  const taxAmount = isTaxFree ? 0 : ticketLines.reduce((sum, l) => {
+    const lineNet = l.unit_price * l.quantity * (1 - l.discount_percentage / 100) * (1 - globalDiscount / 100)
+    const taxRate = l.tax_rate ?? 21
+    return sum + lineNet * taxRate / (100 + taxRate)
+  }, 0)
   const totalUnits = ticketLines.reduce((s, l) => s + l.quantity, 0)
   const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0)
   const remaining = total - totalPaid
@@ -343,7 +347,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
       quantity: 1,
       unit_price: 0,
       discount_percentage: 0,
-      tax_rate: 21,
+      tax_rate: 0,
       cost_price: 0,
     }])
   }
@@ -862,9 +866,11 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
             </button>
             <div className="flex-1 min-h-0 overflow-auto">
               {ticketLines.map((line) => {
-                const lineTotal = line.unit_price * line.quantity * (1 - (line.discount_percentage || 0) / 100) * (1 + (line.tax_rate || 21) / 100)
-                const pvpConIva = line.unit_price * (1 + (line.tax_rate || 21) / 100)
-                const ivaIncl = line.unit_price * ((line.tax_rate || 21) / 100)
+                // unit_price YA es PVP (IVA incluido)
+                const lineTotal = line.unit_price * line.quantity * (1 - (line.discount_percentage || 0) / 100)
+                const pvpConIva = line.unit_price
+                const taxRate = line.tax_rate || 21
+                const ivaIncl = line.unit_price * taxRate / (100 + taxRate)
                 return (
                 <div key={line.id} className="group flex px-4 py-2 border-b border-slate-200 hover:bg-slate-50 items-center gap-3 text-sm grid grid-cols-[48px_90px_1fr_40px_1fr_90px_72px_80px_40px] gap-2">
                   <div className="flex items-center gap-0">
@@ -874,7 +880,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
                   </div>
                   <span className="text-slate-500 text-xs truncate">{line.sku || '—'}</span>
                   <div className="min-w-0">
-                    {line.product_variant_id ? <p className="font-medium truncate text-slate-800">{line.description}</p> : <Input value={line.description} onChange={(e) => updateLine(line.id, 'description', e.target.value)} className="h-7 text-sm border-slate-200 placeholder:text-slate-400" placeholder="Artículo..." />}
+                    {line.product_variant_id ? <p className="font-medium truncate text-slate-800">{line.description}</p> : <Input value={line.description} onChange={(e) => updateLine(line.id, 'description', e.target.value)} onFocus={(e) => { if (e.target.value === 'Artículo manual') e.target.select() }} className="h-7 text-sm border-slate-200 placeholder:text-slate-400" placeholder="Artículo..." />}
                   </div>
                   <span className="text-slate-400 text-xs">—</span>
                   <div className="min-w-0"><span className="text-xs text-slate-400 truncate">—</span></div>
@@ -885,7 +891,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
                         <p className="text-slate-500 text-[10px] mt-0.5">IVA incl. {formatCurrency(ivaIncl)}</p>
                       </div>
                     ) : (
-                      <Input type="number" step="0.01" value={line.unit_price || ''} onChange={(e) => updateLine(line.id, 'unit_price', parseFloat(e.target.value) || 0)} className="h-6 w-14 text-xs text-right border-slate-200" />
+                      <Input type="number" step="0.01" value={line.unit_price || ''} onChange={(e) => updateLine(line.id, 'unit_price', parseFloat(e.target.value) || 0)} className="h-6 w-20 text-xs text-right border-slate-200" />
                     )}
                   </div>
                   <Input type="number" min={0} max={100} value={line.discount_percentage || ''} onChange={(e) => updateLine(line.id, 'discount_percentage', parseFloat(e.target.value) || 0)} className="h-6 w-16 text-xs text-center rounded border-slate-200" />
@@ -931,8 +937,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
             {ticketLines.length === 0 ? null : (
               <div className={ticketLines.length === 1 ? 'space-y-2' : 'grid grid-cols-2 gap-2 content-start'}>
                 {ticketLines.map((line) => {
-                  const taxRate = line.tax_rate ?? 21
-                  const pvpConIva = line.unit_price * (1 + taxRate / 100)
+                  const pvpConIva = line.unit_price
                   const lineTotalConIva = line.quantity * pvpConIva * (1 - line.discount_percentage / 100)
                   return (
                     <div key={line.id} className="rounded border border-slate-300 bg-white p-2 flex flex-col shrink-0">

@@ -24,6 +24,34 @@ export async function GET(request: NextRequest) {
   const currentMonth = new Date().getMonth() + 1 // 1-12
   const currentSeason = currentMonth >= 4 && currentMonth <= 9 ? 'ss' : 'aw'
 
+  // Si hay filtro de categoría, buscar su ID + IDs de todas las descendientes (hijas y nietas)
+  let categoryIds: string[] | null = null
+  if (category) {
+    const { data: cat } = await admin
+      .from('product_categories')
+      .select('id')
+      .eq('slug', category)
+      .single()
+    if (cat) {
+      categoryIds = [cat.id]
+      // Hijas directas
+      const { data: children } = await admin
+        .from('product_categories')
+        .select('id')
+        .eq('parent_id', cat.id)
+      if (children && children.length > 0) {
+        const childIds = children.map(c => c.id)
+        categoryIds.push(...childIds)
+        // Nietas (hijas de las hijas)
+        const { data: grandchildren } = await admin
+          .from('product_categories')
+          .select('id')
+          .in('parent_id', childIds)
+        if (grandchildren) categoryIds.push(...grandchildren.map(c => c.id))
+      }
+    }
+  }
+
   let query = admin
     .from('products')
     .select(`
@@ -38,7 +66,7 @@ export async function GET(request: NextRequest) {
     .eq('is_visible_web', true)
     .or(`season.is.null,season.eq.all,season.eq.,season.eq.${currentSeason}`)
 
-  if (category) query = query.eq('product_categories.slug', category)
+  if (categoryIds && categoryIds.length > 0) query = query.in('category_id', categoryIds)
   if (search) {
     const s = sanitizeSearchPattern(search)
     query = query.or(`name.ilike.%${s}%,brand.ilike.%${s}%,description.ilike.%${s}%`)

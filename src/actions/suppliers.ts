@@ -91,7 +91,7 @@ export const listSuppliers = protectedAction<ListParams, ListResult<any>>(
     }, `
       id, supplier_code, name, legal_name, nif_cif, supplier_types,
       contact_name, contact_email, contact_phone, city,
-      payment_terms, total_debt, total_paid, is_active, created_at
+      payment_terms, payment_method, total_debt, total_paid, is_active, created_at
     `)
     return success(result)
   }
