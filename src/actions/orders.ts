@@ -964,3 +964,41 @@ export const searchComplementProducts = protectedAction<
     return success(result)
   }
 )
+
+export const deleteOrder = protectedAction<string, void>(
+  { permission: 'orders.delete', auditModule: 'orders', auditAction: 'delete' },
+  async (ctx, orderId) => {
+    const admin = ctx.adminClient
+
+    // Verificar que el pedido existe
+    const { data: order, error: fetchError } = await admin
+      .from('tailoring_orders')
+      .select('id, order_number')
+      .eq('id', orderId)
+      .single()
+
+    if (fetchError || !order) {
+      return failure('Pedido no encontrado', 'NOT_FOUND')
+    }
+
+    // Borrar líneas del pedido
+    await admin.from('tailoring_order_lines').delete().eq('tailoring_order_id', orderId)
+
+    // Borrar pagos asociados
+    await admin.from('payments').delete().eq('tailoring_order_id', orderId)
+
+    // Borrar el pedido
+    const { error: deleteError } = await admin
+      .from('tailoring_orders')
+      .delete()
+      .eq('id', orderId)
+
+    if (deleteError) {
+      console.error('[deleteOrder]', deleteError)
+      return failure('Error al eliminar el pedido')
+    }
+
+    revalidatePath('/admin/pedidos')
+    return success(undefined)
+  }
+)

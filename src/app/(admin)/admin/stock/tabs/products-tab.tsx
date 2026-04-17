@@ -15,7 +15,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
-  Search, MoreHorizontal, Eye, Pencil, ChevronLeft, ChevronRight, ArrowUpDown, Image as ImageIcon, SlidersHorizontal, X,
+  Search, MoreHorizontal, Eye, Pencil, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, ArrowUpDown, Image as ImageIcon, SlidersHorizontal, X,
 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useList } from '@/hooks/use-list'
@@ -209,9 +209,11 @@ export function ProductsTab() {
         <div className="flex items-center justify-between">
           <p className="text-sm text-muted-foreground">{(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} de {total}</p>
           <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(1)}><ChevronsLeft className="h-4 w-4" /></Button>
             <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronLeft className="h-4 w-4" /></Button>
             <span className="text-sm">{page} / {totalPages}</span>
             <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}><ChevronRight className="h-4 w-4" /></Button>
+            <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(totalPages)}><ChevronsRight className="h-4 w-4" /></Button>
           </div>
         </div>
       )}
@@ -323,9 +325,11 @@ export function ProductsTab() {
         <div className="flex items-center justify-between">
           <p className="text-sm text-muted-foreground">{(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} de {total}</p>
           <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(1)}><ChevronsLeft className="h-4 w-4" /></Button>
             <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronLeft className="h-4 w-4" /></Button>
             <span className="text-sm">{page} / {totalPages}</span>
             <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}><ChevronRight className="h-4 w-4" /></Button>
+            <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(totalPages)}><ChevronsRight className="h-4 w-4" /></Button>
           </div>
         </div>
       )}

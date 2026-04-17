@@ -12,18 +12,19 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
-  Plus, Search, MoreHorizontal, Eye, ChevronLeft, ChevronRight,
+  Plus, Search, MoreHorizontal, Eye, Trash2, ChevronLeft, ChevronRight,
   LayoutList, Kanban, ArrowUpDown, AlertTriangle, SlidersHorizontal, X,
 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useList } from '@/hooks/use-list'
 import { usePermissions } from '@/hooks/use-permissions'
-import { listOrders } from '@/actions/orders'
+import { listOrders, deleteOrder } from '@/actions/orders'
 import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
+import { toast } from 'sonner'
 import { OrdersPipeline } from './orders-pipeline'
 
 const orderStatuses = [
@@ -376,6 +377,22 @@ export function OrdersPageContent({ initialView, initialStatus, initialType }: {
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => router.push(`/admin/pedidos/${order.id}`)}>
                               <Eye className="mr-2 h-4 w-4" /> Ver ficha
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="text-red-600 focus:text-red-600"
+                              onClick={async () => {
+                                if (!confirm(`¿Eliminar pedido ${order.order_number}? Esta acción no se puede deshacer.`)) return
+                                const res = await deleteOrder(order.id)
+                                if (res.success) {
+                                  toast.success('Pedido eliminado')
+                                  refresh()
+                                } else {
+                                  toast.error(res.error ?? 'Error al eliminar')
+                                }
+                              }}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" /> Eliminar
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>

@@ -478,7 +478,7 @@ export function NuevaVentaFichaClient({
   // ── Camisa ops ────────────────────────────────────────────────────────────
   const addCamisa = () => {
     const m = getMeasuresFromRecord(camiseriaMeasurements ?? undefined)
-    setCamisas((prev) => [...prev, { id: crypto.randomUUID(), ...m, jareton: false, bolsillo: false, hombroCaido: false, derecho: false, izquierdo: false, hombrosAltos: false, hombrosBajos: false, erguido: false, cargado: false, espaldaLisa: false, espPliegues: false, espTablonCentr: false, espPinzas: false, iniciales: false, inicialesTexto: '', modCuello: '', puno: 'sencillo', tejido: '', precio: 0, cantidad: 1, obs: '' }])
+    setCamisas((prev) => [...prev, { id: crypto.randomUUID(), ...m, jareton: false, bolsillo: false, hombroCaido: false, derecho: false, izquierdo: false, hombrosAltos: false, hombrosBajos: false, erguido: false, cargado: false, espaldaLisa: false, espPliegues: false, espTablonCentr: false, espPinzas: false, iniciales: false, inicialesTexto: '', modCuello: '', puno: 'sencillo', tejido: '', precio: 0, cantidad: 1, obs: '', cortador: '', oficial: '' }])
   }
   const removeCamisa = (id: string) => setCamisas((prev) => prev.filter((c) => c.id !== id))
   const updateCamisa = (id: string, field: keyof CamisaItem, value: string | number | boolean) => {
