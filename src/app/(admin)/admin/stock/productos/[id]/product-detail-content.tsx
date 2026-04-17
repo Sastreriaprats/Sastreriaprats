@@ -14,12 +14,13 @@ import { variantSkuFromSize } from '@/lib/constants-sizes'
 import { sortBySize } from '@/lib/utils/sort-sizes'
 import { Textarea } from '@/components/ui/textarea'
 import {
-  ArrowLeft, Plus, ArrowUp, Loader2, Image as ImageIcon, Pencil, ArrowLeftRight,
+  ArrowLeft, Plus, ArrowUp, Loader2, Image as ImageIcon, Pencil, ArrowLeftRight, Trash2,
 } from 'lucide-react'
 import { useAction } from '@/hooks/use-action'
 import { usePermissions } from '@/hooks/use-permissions'
-import { adjustStock, createVariantAction, moveStockBetweenWarehouses, updateProductAction } from '@/actions/products'
+import { adjustStock, createVariantAction, deleteVariantAction, moveStockBetweenWarehouses, updateProductAction } from '@/actions/products'
 import { formatCurrency } from '@/lib/utils'
+import { toast } from 'sonner'
 import { ProductForm } from '../product-form'
 
 export function ProductDetailContent({
@@ -257,6 +258,7 @@ export function ProductDetailContent({
                   <TableHead>Código barras</TableHead><TableHead>Precio</TableHead>
                   {warehousesToShow.map(w => <TableHead key={w.id} className="text-center">{w.storeName ? `${w.name} (${w.storeName})` : w.name}</TableHead>)}
                   <TableHead className="text-center">Total</TableHead>
+                  {can('products.delete') && <TableHead className="w-10" />}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -285,6 +287,28 @@ export function ProductDetailContent({
                         )
                       })}
                       <TableCell className="text-center font-bold">{variantTotal}</TableCell>
+                      {can('products.delete') && (
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-red-600"
+                            title="Eliminar variante"
+                            onClick={async () => {
+                              if (!confirm(`¿Eliminar variante ${v.variant_sku}? Esta acción no se puede deshacer.`)) return
+                              const res = await deleteVariantAction(v.id)
+                              if (res.success) {
+                                toast.success('Variante eliminada')
+                                router.refresh()
+                              } else {
+                                toast.error(res.error ?? 'Error al eliminar')
+                              }
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      )}
                     </TableRow>
                   )
                 })}

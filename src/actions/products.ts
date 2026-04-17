@@ -523,6 +523,34 @@ export const createVariantAction = protectedAction<any, any>(
   }
 )
 
+export const deleteVariantAction = protectedAction<string, void>(
+  {
+    permission: 'products.delete',
+    auditModule: 'stock',
+    auditAction: 'delete',
+    auditEntity: 'product_variant',
+    revalidate: ['/admin/stock'],
+  },
+  async (ctx, variantId) => {
+    // Verificar que la variante existe
+    const { data: variant, error: fetchErr } = await ctx.adminClient
+      .from('product_variants')
+      .select('id, variant_sku')
+      .eq('id', variantId)
+      .single()
+    if (fetchErr || !variant) return failure('Variante no encontrada', 'NOT_FOUND')
+
+    // Eliminar movimientos de stock asociados para evitar restrict
+    await ctx.adminClient.from('stock_movements').delete().eq('product_variant_id', variantId)
+
+    // stock_levels se eliminan en cascada
+    const { error } = await ctx.adminClient.from('product_variants').delete().eq('id', variantId)
+    if (error) return failure(error.message)
+
+    return success(undefined)
+  }
+)
+
 export const adjustStock = protectedAction<{
   variantId: string; warehouseId: string; quantity: number;
   reason: string; movementType: 'adjustment_positive' | 'adjustment_negative';
