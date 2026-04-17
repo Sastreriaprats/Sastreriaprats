@@ -76,7 +76,7 @@ function truncate(str: string, max: number): string {
   return str.slice(0, max - 1) + '…'
 }
 
-export async function generateTicketPdf(data: TicketPdfData): Promise<void> {
+export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 'print' = 'download'): Promise<void> {
   const pdfMake = (await import('pdfmake/build/pdfmake')).default
   const vfsModule = await import('pdfmake/build/vfs_fonts')
   const vfs = (vfsModule as { default?: Record<string, string> }).default
@@ -334,6 +334,32 @@ export async function generateTicketPdf(data: TicketPdfData): Promise<void> {
   }
 
   const pdf = pdfMake.createPdf(docDef as Parameters<typeof pdfMake.createPdf>[0])
-  const fileName = `ticket-${data.sale.ticket_number}.pdf`
-  await (pdf as { download: (name: string) => void }).download(fileName)
+
+  if (mode === 'print') {
+    await new Promise<void>((resolve) => {
+      (pdf as any).getBlob((blob: Blob) => {
+        const url = URL.createObjectURL(blob)
+        const iframe = document.createElement('iframe')
+        iframe.style.display = 'none'
+        iframe.src = url
+        document.body.appendChild(iframe)
+        iframe.onload = () => {
+          iframe.contentWindow?.print()
+          setTimeout(() => {
+            document.body.removeChild(iframe)
+            URL.revokeObjectURL(url)
+            resolve()
+          }, 1000)
+        }
+      })
+    })
+  } else {
+    const fileName = `ticket-${data.sale.ticket_number}.pdf`
+    await (pdf as { download: (name: string) => void }).download(fileName)
+  }
+}
+
+/** Genera el ticket PDF y abre el diálogo de impresión del navegador */
+export async function printTicketPdf(data: TicketPdfData): Promise<void> {
+  return generateTicketPdf(data, 'print')
 }

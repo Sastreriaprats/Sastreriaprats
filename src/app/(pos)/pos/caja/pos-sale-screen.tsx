@@ -21,7 +21,7 @@ import {
 import {
   Search, X, Plus, Minus, Trash2, User, ShoppingBag, CreditCard,
   Banknote, Smartphone, ArrowRightLeft, Receipt, FileText,
-  LogOut, Clock, BarChart3, Loader2, Percent, UserPlus, CalendarClock, AlertCircle, Lock, Check, ImageOff, ChevronLeft,
+  LogOut, Clock, BarChart3, Loader2, Percent, UserPlus, CalendarClock, AlertCircle, Lock, Check, ImageOff, ChevronLeft, Printer,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/components/providers/auth-provider'
@@ -32,7 +32,7 @@ import { getProductByBarcode } from '@/actions/products'
 import { listClients } from '@/actions/clients'
 import { CreateClientDialog } from '@/app/(admin)/admin/clientes/create-client-dialog'
 import { formatCurrency } from '@/lib/utils'
-import { generateTicketPdf } from '@/components/pos/ticket-pdf'
+import { generateTicketPdf, printTicketPdf } from '@/components/pos/ticket-pdf'
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
 import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
 
@@ -551,6 +551,43 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
       l.unit_price * l.quantity * (1 - (l.discount_percentage || 0) / 100)
     const storeConfig = getStorePdfData(activeStoreName)
     await generateTicketPdf({
+      sale: {
+        ticket_number: completedSale.ticket_number,
+        created_at: completedSale.created_at || new Date().toISOString(),
+        client_id: completedSale.client_id,
+        subtotal: completedSale.subtotal,
+        discount_amount: completedSale.discount_amount,
+        discount_percentage: completedSale.discount_percentage,
+        tax_amount: completedSale.tax_amount,
+        total: completedSale.total,
+        payment_method: completedSale.payment_method,
+        is_tax_free: completedSale.is_tax_free,
+      },
+      lines: ticketLines.map(l => ({
+        description: l.description,
+        quantity: l.quantity,
+        unit_price: l.unit_price,
+        discount_percentage: l.discount_percentage,
+        line_total: lineTotal(l),
+        tax_rate: l.tax_rate,
+        sku: l.sku || null,
+      })),
+      payments,
+      clientName: selectedClientName || null,
+      clientCode: null,
+      attendedBy: lastSaleSalespersonName || null,
+      storeAddress: storeConfig.address,
+      storeSubtitle: storeConfig.subtitle ?? null,
+      storePhones: storeConfig.phones,
+    })
+  }
+
+  const handlePrintTicket = async () => {
+    if (!completedSale) return
+    const lineTotal = (l: TicketLine) =>
+      l.unit_price * l.quantity * (1 - (l.discount_percentage || 0) / 100)
+    const storeConfig = getStorePdfData(activeStoreName)
+    await printTicketPdf({
       sale: {
         ticket_number: completedSale.ticket_number,
         created_at: completedSale.created_at || new Date().toISOString(),
@@ -1439,6 +1476,10 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
             </div>
           )}
           <DialogFooter className="flex flex-wrap gap-2 sm:flex-row border-t pt-4">
+            <Button className="flex-1 min-w-[140px] gap-2 bg-prats-gold hover:bg-prats-gold/90 text-prats-navy font-semibold" onClick={handlePrintTicket}>
+              <Printer className="h-4 w-4" />
+              Imprimir ticket
+            </Button>
             <Button variant="outline" className="flex-1 min-w-[140px] gap-2" onClick={handleDownloadTicketPdf}>
               <Receipt className="h-4 w-4" />
               Descargar ticket PDF
