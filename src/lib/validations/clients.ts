@@ -3,8 +3,8 @@ import { z } from 'zod'
 export const createClientSchema = z.object({
   first_name: z.string().min(1, 'Nombre requerido'),
   last_name: z.string().min(1, 'Apellido requerido'),
-  email: z.string().email('Email inválido').optional().nullable(),
-  phone: z.string().optional().nullable(),
+  email: z.string().min(1, 'Email requerido').email('Email inválido'),
+  phone: z.string().min(1, 'Teléfono requerido'),
   phone_secondary: z.string().optional().nullable(),
   date_of_birth: z.string().optional().nullable(),
   gender: z.enum(['male', 'female', 'other', 'unspecified']).default('male'),

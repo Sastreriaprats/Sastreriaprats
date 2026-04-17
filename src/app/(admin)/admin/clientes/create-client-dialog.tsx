@@ -236,8 +236,8 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess, onSuccessWit
 
           <TabsContent value="contact" className="space-y-4 mt-4">
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2"><Label>Email</Label><Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} /></div>
-              <div className="space-y-2"><Label>Teléfono</Label><Input value={form.phone} onChange={(e) => set('phone', e.target.value)} /></div>
+              <div className="space-y-2"><Label>Email <span className="text-red-500">*</span></Label><Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} required /></div>
+              <div className="space-y-2"><Label>Teléfono <span className="text-red-500">*</span></Label><Input value={form.phone} onChange={(e) => set('phone', e.target.value)} required /></div>
             </div>
             <div className="space-y-2"><Label>Teléfono secundario</Label><Input value={form.phone_secondary} onChange={(e) => set('phone_secondary', e.target.value)} /></div>
             <div className="space-y-2"><Label>Dirección</Label><Input value={form.address} onChange={(e) => set('address', e.target.value)} /></div>
@@ -293,7 +293,7 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess, onSuccessWit
               ? form.date_of_birth
               : null
             execute({ ...form, date_of_birth: dateOfBirth })
-          }} disabled={isLoading || !form.first_name || !form.last_name || !form.source}
+          }} disabled={isLoading || !form.first_name || !form.last_name || !form.source || !form.email || !form.phone}
             className="bg-prats-navy hover:bg-prats-navy-light">
             {isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creando...</> : 'Crear cliente'}
           </Button>
