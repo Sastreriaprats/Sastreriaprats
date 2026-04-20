@@ -26,7 +26,7 @@ import {
 import { toast } from 'sonner'
 import { useAuth } from '@/components/providers/auth-provider'
 import { useAction } from '@/hooks/use-action'
-import { searchProductsForPos, createSale, cashWithdrawal, listPosEmployees, validateDiscountCode } from '@/actions/pos'
+import { searchProductsForPos, createSale, cashWithdrawal, listPosEmployees, validateDiscountCode, getPhysicalStoresForCaja } from '@/actions/pos'
 import { addOrderPayment, addSalePayment, getClientPendingDebt } from '@/actions/payments'
 import { getProductByBarcode } from '@/actions/products'
 import { listClients } from '@/actions/clients'
@@ -62,10 +62,24 @@ interface Payment {
   next_payment_date?: string | null
 }
 
-export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session: any; onCloseCash: () => void; initialCobro?: { entity_type: 'tailoring_order' | 'sale'; entity_id: string; amount: number; client_id: string; client_name: string; reference: string } | null }) {
+export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStore }: { session: any; onCloseCash: () => void; initialCobro?: { entity_type: 'tailoring_order' | 'sale'; entity_id: string; amount: number; client_id: string; client_name: string; reference: string } | null; onSwitchStore?: (storeId: string) => void }) {
   const router = useRouter()
-  const { profile, activeStoreId, stores } = useAuth()
-  const activeStoreName = stores.find((s) => s.storeId === activeStoreId)?.storeName ?? 'Caja'
+  const { profile, activeStoreId, stores, isAdmin } = useAuth()
+  const [adminStores, setAdminStores] = useState<Array<{ storeId: string; storeName: string }>>([])
+  useEffect(() => {
+    if (!isAdmin) return
+    let cancelled = false
+    getPhysicalStoresForCaja()
+      .then((r) => {
+        if (cancelled) return
+        if (r?.success && r.data) setAdminStores(r.data)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [isAdmin])
+  const activeStoreName = (isAdmin ? adminStores : stores).find((s) => s.storeId === activeStoreId)?.storeName
+    ?? stores.find((s) => s.storeId === activeStoreId)?.storeName
+    ?? 'Caja'
   const searchRef = useRef<HTMLInputElement>(null)
   const barcodeBufferRef = useRef({ digits: '', firstAt: 0 })
   const scannerInputRef = useRef<HTMLInputElement>(null)
@@ -725,7 +739,24 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro }: { session:
       {/* FILA 1 — Cabecera (igual que referencia: espaciosa, recuadro teal cuadrado, Caja abierta en verde, botones definidos) */}
       <div className="bg-[#1A2436] min-h-[5rem] px-6 py-4 flex items-center justify-between shrink-0">
         <div className="flex flex-col gap-1.5">
-          <span className="text-white font-semibold text-sm leading-tight">{activeStoreName}</span>
+          {isAdmin && adminStores.length > 1 && onSwitchStore ? (
+            <Select value={activeStoreId ?? ''} onValueChange={(v) => { if (v && v !== activeStoreId) onSwitchStore(v) }}>
+              <SelectTrigger
+                className="h-7 w-auto min-w-[160px] max-w-[240px] border border-[rgba(201,169,110,0.3)] bg-transparent text-white font-semibold text-sm px-2 hover:bg-white/5 focus:ring-0 focus:ring-offset-0"
+              >
+                <SelectValue placeholder="Tienda" />
+              </SelectTrigger>
+              <SelectContent className="border-[rgba(201,169,110,0.3)] bg-[#1a2744] text-white">
+                {adminStores.map((s) => (
+                  <SelectItem key={s.storeId} value={s.storeId} className="text-white focus:bg-white/10 focus:text-white">
+                    {s.storeName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <span className="text-white font-semibold text-sm leading-tight">{activeStoreName}</span>
+          )}
           <div className="flex items-center gap-3">
             <div className="flex items-center justify-center w-9 h-9 rounded bg-[#1E5257] border border-[#2a6b70]" aria-hidden>
               <div className="h-2.5 w-2.5 rounded-full bg-[#2DE6AA] shadow-[0_0_6px_#2DE6AA]" />

@@ -120,6 +120,31 @@ export function PosMainContent() {
     setView('open_cash')
   }
 
+  const handleSwitchStore = async (storeId: string) => {
+    if (!storeId || storeId === activeStoreId) return
+    setActiveStoreId(storeId)
+    setView('loading')
+    try {
+      const result = await getCurrentSession(storeId)
+      if (result.success && result.data) {
+        setSession(result.data)
+        setView('sale')
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.setItem(POS_LAST_Caja_STORE_KEY, storeId)
+        }
+      } else {
+        setSession(null)
+        setStoreIdForOpenCash(storeId)
+        setView('open_cash')
+      }
+    } catch (err) {
+      console.error('[pos-main] handleSwitchStore:', err)
+      setSession(null)
+      setStoreIdForOpenCash(storeId)
+      setView('open_cash')
+    }
+  }
+
   const handleCloseCash = () => setView('close_cash')
 
   const handleCashClosed = () => {
@@ -158,7 +183,7 @@ export function PosMainContent() {
   }
 
   if (view === 'sale' && session) {
-    return <PosSaleScreen session={session} onCloseCash={handleCloseCash} initialCobro={initialCobro} />
+    return <PosSaleScreen session={session} onCloseCash={handleCloseCash} initialCobro={initialCobro} onSwitchStore={handleSwitchStore} />
   }
 
   return null
