@@ -710,6 +710,9 @@ export const entryStatusEnum = pgEnum('entry_status', ['draft', 'posted', 'cance
 export const invoiceTypeEnum = pgEnum('invoice_type', ['issued', 'received'])
 export const invoiceStatusEnum = pgEnum('invoice_status', ['draft', 'issued', 'paid', 'partially_paid', 'overdue', 'cancelled', 'rectified'])
 export const expenseStatusEnum = pgEnum('expense_status', ['pending', 'approved', 'paid', 'rejected'])
+export const reservationStatusEnum = pgEnum('reservation_status', [
+  'active', 'pending_stock', 'fulfilled', 'cancelled', 'expired',
+])
 
 // ========== TABLAS 003a: PRODUCTOS Y STOCK ==========
 
@@ -845,6 +848,28 @@ export const stockTransferLines = pgTable('stock_transfer_lines', {
   quantityReceived: integer('quantity_received').default(0),
   notes: text('notes'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const productReservations = pgTable('product_reservations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  reservationNumber: varchar('reservation_number', { length: 30 }).notNull().unique(),
+  clientId: uuid('client_id').notNull().references(() => clients.id, { onDelete: 'restrict' }),
+  productVariantId: uuid('product_variant_id').notNull().references(() => productVariants.id, { onDelete: 'restrict' }),
+  warehouseId: uuid('warehouse_id').notNull().references(() => warehouses.id, { onDelete: 'restrict' }),
+  storeId: uuid('store_id').references(() => stores.id, { onDelete: 'set null' }),
+  quantity: integer('quantity').notNull(),
+  status: reservationStatusEnum('status').default('active').notNull(),
+  notes: text('notes'),
+  reason: text('reason'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  fulfilledSaleId: uuid('fulfilled_sale_id').references(() => sales.id, { onDelete: 'set null' }),
+  fulfilledAt: timestamp('fulfilled_at', { withTimezone: true }),
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  cancelledReason: text('cancelled_reason'),
+  stockReservedAt: timestamp('stock_reserved_at', { withTimezone: true }),
+  createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
 export const deliveryNotes = pgTable('delivery_notes', {
@@ -1612,6 +1637,15 @@ export const stockTransferLinesRelations = relations(stockTransferLines, ({ one 
   productVariant: one(productVariants, { fields: [stockTransferLines.productVariantId], references: [productVariants.id] }),
 }))
 
+export const productReservationsRelations = relations(productReservations, ({ one }) => ({
+  client: one(clients, { fields: [productReservations.clientId], references: [clients.id] }),
+  productVariant: one(productVariants, { fields: [productReservations.productVariantId], references: [productVariants.id] }),
+  warehouse: one(warehouses, { fields: [productReservations.warehouseId], references: [warehouses.id] }),
+  store: one(stores, { fields: [productReservations.storeId], references: [stores.id] }),
+  fulfilledSale: one(sales, { fields: [productReservations.fulfilledSaleId], references: [sales.id] }),
+  createdByProfile: one(profiles, { fields: [productReservations.createdBy], references: [profiles.id] }),
+}))
+
 export const inventoriesRelations = relations(inventories, ({ one, many }) => ({
   warehouse: one(warehouses, { fields: [inventories.warehouseId], references: [warehouses.id] }),
   categoryFilter: one(productCategories, { fields: [inventories.categoryFilter], references: [productCategories.id] }),
@@ -1837,6 +1871,8 @@ export type StockTransfer = typeof stockTransfers.$inferSelect
 export type NewStockTransfer = typeof stockTransfers.$inferInsert
 export type StockTransferLine = typeof stockTransferLines.$inferSelect
 export type NewStockTransferLine = typeof stockTransferLines.$inferInsert
+export type ProductReservation = typeof productReservations.$inferSelect
+export type NewProductReservation = typeof productReservations.$inferInsert
 export type Inventory = typeof inventories.$inferSelect
 export type NewInventory = typeof inventories.$inferInsert
 export type InventoryLine = typeof inventoryLines.$inferSelect

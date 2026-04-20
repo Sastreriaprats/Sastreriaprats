@@ -752,7 +752,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
         linesToInsert.push({
           tailoring_order_id: order.id,
           garment_type_id: gtId,
-          line_type: 'artesanal',
+          line_type: orderTypeDb,
           unit_price: Number(prendaInput.precio) || 0,
           line_total: Number(prendaInput.precio) || 0,
           finishing_notes: (input.notas || '').trim() || null,
@@ -782,7 +782,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
       linesToInsert.push({
         tailoring_order_id: order.id,
         garment_type_id: mainGarmentTypeId,
-        line_type: 'artesanal',
+        line_type: orderTypeDb,
         unit_price: Number(input.precioPrenda) || 0,
         line_total: Number(input.precioPrenda) || 0,
         finishing_notes: (input.notas || '').trim() || null,

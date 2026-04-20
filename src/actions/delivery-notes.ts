@@ -3,6 +3,7 @@
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { revalidatePath } from 'next/cache'
+import { notifyReservationStockAvailable } from '@/lib/notifications/create-notification'
 
 const ALBARANES_BUCKET = 'albaranes'
 
@@ -865,6 +866,46 @@ export const markSupplierDeliveryNoteReceived = protectedAction<
             store_id: destinationStoreId,
           })
         if (movErr) return failure(movErr.message || 'Error al registrar movimiento de stock', 'INTERNAL')
+
+        // Activar reservas pendientes de esta variante (si el stock recibido
+        // cubre ahora la cantidad reservada) y notificar a los admins.
+        try {
+          const { data: activatedRows, error: activateErr } = await ctx.adminClient
+            .rpc('fn_activate_pending_reservations', {
+              p_product_variant_id: variantId,
+              p_warehouse_id: warehouseId,
+              p_user_id: ctx.userId !== 'system' ? ctx.userId : null,
+            })
+          if (activateErr) {
+            console.error('[markSupplierDeliveryNoteReceived] fn_activate_pending_reservations:', activateErr.message)
+          } else if (Array.isArray(activatedRows) && activatedRows.length > 0) {
+            const productName = String((line as any).product_name || (line as any).reference || 'producto')
+            for (const row of activatedRows) {
+              let clientName = 'un cliente'
+              if (row?.client_id) {
+                const { data: c } = await ctx.adminClient
+                  .from('clients')
+                  .select('full_name, first_name, last_name')
+                  .eq('id', row.client_id)
+                  .maybeSingle()
+                if (c) {
+                  clientName = (c as any).full_name
+                    || [c.first_name, c.last_name].filter(Boolean).join(' ')
+                    || 'un cliente'
+                }
+              }
+              await notifyReservationStockAvailable({
+                reservation_id: String(row.reservation_id),
+                reservation_number: String(row.reservation_number),
+                product_name: productName,
+                client_name: clientName,
+                activated: Boolean(row.activated),
+              })
+            }
+          }
+        } catch (notifyErr) {
+          console.error('[markSupplierDeliveryNoteReceived] reservations notify:', notifyErr)
+        }
       }
     } else {
       stockWarnings += (lines || []).length

@@ -5,19 +5,22 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Package, AlertTriangle, TrendingDown, Truck, Plus, Warehouse, ArrowLeftRight, ClipboardList, Download, Loader2 } from 'lucide-react'
+import { Package, AlertTriangle, TrendingDown, Truck, Plus, Warehouse, ArrowLeftRight, ClipboardList, Download, Loader2, Bookmark } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
 import { Skeleton } from '@/components/ui/skeleton'
 import { usePermissions } from '@/hooks/use-permissions'
 import { getStockDashboardStats, getPendingTransfersCount } from '@/actions/products'
+import { listReservations } from '@/actions/reservations'
 import { ProductsTab } from './tabs/products-tab'
 import { MovementsTab } from './tabs/movements-tab'
 import { FabricsTab } from './tabs/fabrics-tab'
 import { WarehousesTab } from './tabs/warehouses-tab'
 import { TransfersTab } from './tabs/transfers-tab'
+import { ReservationsTab } from './tabs/reservations-tab'
 import { AlbaranesContent } from '../almacen/albaranes/albaranes-content'
 
-const VALID_TABS = ['productos', 'almacenes', 'tejidos', 'movimientos', 'traspasos', 'albaranes']
+const VALID_TABS = ['productos', 'almacenes', 'tejidos', 'movimientos', 'traspasos', 'reservas', 'albaranes']
 
 export function StockDashboard() {
   const router = useRouter()
@@ -29,6 +32,7 @@ export function StockDashboard() {
   const [activeTab, setActiveTab] = useState(initialTab)
   const [stats, setStats] = useState({ totalProducts: 0, lowStock: 0, outOfStock: 0, pendingOrders: 0 })
   const [pendingTransfersCount, setPendingTransfersCount] = useState(0)
+  const [pendingReservationsCount, setPendingReservationsCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   const [outOfStockFilter, setOutOfStockFilter] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
@@ -106,6 +110,12 @@ export function StockDashboard() {
     }
     window.addEventListener('stock-transfers-updated', onUpdate)
     return () => window.removeEventListener('stock-transfers-updated', onUpdate)
+  }, [])
+
+  useEffect(() => {
+    listReservations({ status: 'pending_stock', page: 0, pageSize: 1 })
+      .then(r => { if (r?.success && r.data) setPendingReservationsCount(r.data.total) })
+      .catch(() => {})
   }, [])
 
   return (
@@ -199,6 +209,12 @@ export function StockDashboard() {
             Movimientos
           </TabsTrigger>
           <TabsTrigger value="traspasos" className="gap-1"><ArrowLeftRight className="h-4 w-4" /> Traspasos</TabsTrigger>
+          <TabsTrigger value="reservas" className="gap-1">
+            <Bookmark className="h-4 w-4" /> Reservas
+            {pendingReservationsCount > 0 && (
+              <Badge variant="destructive" className="ml-1 h-4 min-w-4 px-1 text-[10px]">{pendingReservationsCount}</Badge>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="albaranes" className="gap-1"><ClipboardList className="h-4 w-4" /> Albaranes</TabsTrigger>
         </TabsList>
         <div className="mt-6">
@@ -208,6 +224,9 @@ export function StockDashboard() {
           <TabsContent value="movimientos"><MovementsTab /></TabsContent>
           <TabsContent value="traspasos">
             <TransfersTab />
+          </TabsContent>
+          <TabsContent value="reservas">
+            <ReservationsTab />
           </TabsContent>
           <TabsContent value="albaranes">
             <AlbaranesContent />

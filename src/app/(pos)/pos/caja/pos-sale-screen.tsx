@@ -22,6 +22,7 @@ import {
   Search, X, Plus, Minus, Trash2, User, ShoppingBag, CreditCard,
   Banknote, Smartphone, ArrowRightLeft, Receipt, FileText,
   LogOut, Clock, BarChart3, Loader2, Percent, UserPlus, CalendarClock, AlertCircle, Lock, Check, ImageOff, ChevronLeft, Printer,
+  Bookmark,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/components/providers/auth-provider'
@@ -35,6 +36,8 @@ import { formatCurrency } from '@/lib/utils'
 import { generateTicketPdf, printTicketPdf } from '@/components/pos/ticket-pdf'
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
 import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
+import { getActiveReservationsForVariant } from '@/actions/reservations'
+import { ReservationDialog } from './reservation-dialog'
 
 interface TicketLine {
   id: string
@@ -126,6 +129,8 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const [posEmployeesLoading, setPosEmployeesLoading] = useState(false)
   const [selectedSalespersonId, setSelectedSalespersonId] = useState<string | null>(null)
   const [lastSaleSalespersonName, setLastSaleSalespersonName] = useState<string | null>(null)
+  const [showReservationDialog, setShowReservationDialog] = useState(false)
+  const [reservedVariantsForClient, setReservedVariantsForClient] = useState<Record<string, number>>({})
 
   // Totales de sesión para la cabecera
   const [sessionTotals, setSessionTotals] = useState({
@@ -348,6 +353,27 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
       .finally(() => { if (!cancelled) setClientDebtLoading(false) })
     return () => { cancelled = true }
   }, [selectedClientId])
+
+  // Mapa de reservas activas del cliente por variante (para mostrar badge "De reserva" en las líneas)
+  useEffect(() => {
+    if (!selectedClientId) { setReservedVariantsForClient({}); return }
+    const variantIds = Array.from(new Set(ticketLines.map(l => l.product_variant_id).filter((x): x is string => Boolean(x))))
+    if (variantIds.length === 0) { setReservedVariantsForClient({}); return }
+    let cancelled = false
+    Promise.all(variantIds.map(async (variantId) => {
+      const res = await getActiveReservationsForVariant({ productVariantId: variantId, clientId: selectedClientId })
+      if (!res.success) return [variantId, 0] as const
+      return [variantId, res.data.totalReserved] as const
+    }))
+      .then((entries) => {
+        if (cancelled) return
+        const map: Record<string, number> = {}
+        for (const [id, qty] of entries) map[id] = qty
+        setReservedVariantsForClient(map)
+      })
+      .catch(() => { if (!cancelled) setReservedVariantsForClient({}) })
+    return () => { cancelled = true }
+  }, [selectedClientId, ticketLines])
 
   // A partir de las 21:00 mostrar aviso "¿Quieres cerrar ya la caja?" (una vez o cada 60 min si dice "Más tarde")
   useEffect(() => {
@@ -721,7 +747,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
       Math.max(0, parseFloat(String(paymentAmountInput).replace(',', '.')) || 0),
       total
     )
-    const usePartialFromInput = leaveAsPending && payments.length === 0 && partialAmountFromInput >= 0.01
+    const usePartialFromInput = leaveAsPending && payments.length === 0 && partialAmountFromInput >= 0
     const allowedPartial = (leaveAsPending && payments.length > 0) || usePartialFromInput
     if (!hasEnough && !allowedPartial) {
       toast.error('Completa el pago o marca "Dejar pendiente" e indica el importe a cobrar ahora')
@@ -1023,7 +1049,18 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
                   </div>
                   <span className="text-slate-500 text-xs truncate">{line.sku || '—'}</span>
                   <div className="min-w-0">
-                    {line.product_variant_id ? <p className="font-medium truncate text-slate-800">{line.description}</p> : <Input value={line.description} onChange={(e) => updateLine(line.id, 'description', e.target.value)} onFocus={(e) => { if (e.target.value === 'Artículo manual') e.target.select() }} className="h-7 text-sm border-slate-200 placeholder:text-slate-400" placeholder="Artículo..." />}
+                    {line.product_variant_id ? (
+                      <div className="flex items-center gap-1 min-w-0">
+                        <p className="font-medium truncate text-slate-800">{line.description}</p>
+                        {line.product_variant_id && reservedVariantsForClient[line.product_variant_id] >= line.quantity && (
+                          <Badge variant="secondary" className="bg-purple-100 text-purple-800 border-purple-200 text-[10px] px-1.5 py-0 shrink-0">
+                            <Bookmark className="h-2.5 w-2.5 mr-0.5" /> De reserva
+                          </Badge>
+                        )}
+                      </div>
+                    ) : (
+                      <Input value={line.description} onChange={(e) => updateLine(line.id, 'description', e.target.value)} onFocus={(e) => { if (e.target.value === 'Artículo manual') e.target.select() }} className="h-7 text-sm border-slate-200 placeholder:text-slate-400" placeholder="Artículo..." />
+                    )}
                   </div>
                   <span className="text-slate-400 text-xs">—</span>
                   <div className="min-w-0"><span className="text-xs text-slate-400 truncate">—</span></div>
@@ -1152,6 +1189,14 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
           <Button variant="ghost" className="flex flex-col items-center justify-center gap-0.5 min-w-[4rem] py-2 h-auto text-emerald-300 hover:text-emerald-200 hover:bg-white/5 rounded" onClick={() => setShowWithdrawal(true)}>
             <Banknote className="h-5 w-5" />
             <span className="text-[10px] font-medium uppercase tracking-wide">Retirada</span>
+          </Button>
+          <Button
+            variant="ghost"
+            className="flex flex-col items-center justify-center gap-0.5 min-w-[4rem] py-2 h-auto text-purple-300 hover:text-purple-200 hover:bg-white/5 rounded"
+            onClick={() => setShowReservationDialog(true)}
+          >
+            <Bookmark className="h-5 w-5" />
+            <span className="text-[10px] font-medium uppercase tracking-wide">Reservar</span>
           </Button>
           <Button variant="ghost" className="flex flex-col items-center justify-center gap-0.5 min-w-[4rem] py-2 h-auto text-slate-300 hover:text-white hover:bg-white/5 rounded" onClick={() => router.back()}>
             <LogOut className="h-5 w-5" />
@@ -1506,7 +1551,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
                       ))}
                     </div>
                   )}
-                  <Button className="w-full h-12 rounded-xl bg-[#1B2A4A] hover:bg-[#243860] text-white font-bold disabled:opacity-40" disabled={payments.length === 0 || isProcessing} onClick={() => handleProcessSale()}>
+                  <Button className="w-full h-12 rounded-xl bg-[#1B2A4A] hover:bg-[#243860] text-white font-bold disabled:opacity-40" disabled={isProcessing || (payments.length === 0 && !leaveAsPending)} onClick={() => handleProcessSale()}>
                     {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4" />}
                     Registrar cobro parcial
                   </Button>
@@ -1611,6 +1656,15 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
 
       {/* Withdrawal Dialog */}
       <WithdrawalDialog open={showWithdrawal} onOpenChange={setShowWithdrawal} sessionId={session.id} />
+
+      {/* Reservation Dialog */}
+      <ReservationDialog
+        open={showReservationDialog}
+        onOpenChange={setShowReservationDialog}
+        storeId={activeStoreId}
+        defaultClientId={selectedClientId}
+        defaultClientName={selectedClientName}
+      />
     </div>
   )
 }

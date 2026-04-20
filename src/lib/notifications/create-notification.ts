@@ -102,3 +102,25 @@ export async function notifyCampaignSent(campaignName: string, sentCount: number
     module: 'emails',
   })
 }
+
+export async function notifyReservationStockAvailable(params: {
+  reservation_id: string
+  reservation_number: string
+  product_name: string
+  client_name: string
+  activated: boolean
+}) {
+  await createNotification({
+    type: 'stock_alert',
+    title: params.activated
+      ? `Reserva activada: ${params.reservation_number}`
+      : `Reserva pendiente sin stock suficiente aún`,
+    message: params.activated
+      ? `Ya se bloqueó stock de ${params.product_name} para ${params.client_name}. Avísale para recogerlo.`
+      : `Se recibió mercancía de ${params.product_name} pero aún falta cantidad para cubrir la reserva de ${params.client_name}.`,
+    link: '/admin/stock?tab=reservas',
+    module: 'stock',
+    entity_type: 'product_reservation',
+    entity_id: params.reservation_id,
+  })
+}
