@@ -230,22 +230,22 @@ export function ReservationFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) resetForm() }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="max-w-2xl w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto overflow-x-hidden">
+        <DialogHeader className="min-w-0">
           <DialogTitle className="flex items-center gap-2">
             <Bookmark className="h-5 w-5 text-purple-600" /> Nueva reserva
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-4 min-w-0">
           {/* Cliente */}
           <div className="space-y-1">
             <Label className="flex items-center gap-1"><User className="h-3.5 w-3.5" /> Cliente</Label>
             {clientId && clientName ? (
-              <div className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
-                <span className="font-medium">{clientName}</span>
+              <div className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
+                <span className="font-medium truncate min-w-0">{clientName}</span>
                 {!lockClient && (
-                  <Button variant="ghost" size="sm" className="gap-1" onClick={() => { setClientId(null); setClientName('') }}>
+                  <Button variant="ghost" size="sm" className="gap-1 shrink-0" onClick={() => { setClientId(null); setClientName('') }}>
                     <X className="h-3 w-3" /> Cambiar
                   </Button>
                 )}
@@ -319,7 +319,7 @@ export function ReservationFormDialog({
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="font-medium truncate">{selectedVariant.products?.name || '—'}</div>
-                  <div className="text-xs text-muted-foreground font-mono">
+                  <div className="text-xs text-muted-foreground font-mono truncate">
                     {selectedVariant.products?.sku || ''} {selectedVariant.variant_sku ? `· ${selectedVariant.variant_sku}` : ''}
                   </div>
                   <div className="text-xs mt-0.5 flex gap-1 flex-wrap">
@@ -330,7 +330,7 @@ export function ReservationFormDialog({
                     </span>
                   </div>
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => setSelectedVariant(null)}>
+                <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setSelectedVariant(null)}>
                   <X className="h-3 w-3" />
                 </Button>
               </div>
@@ -376,7 +376,7 @@ export function ReservationFormDialog({
                           )}
                           <div className="flex-1 min-w-0">
                             <div className="truncate font-medium">{v.products?.name || '—'}</div>
-                            <div className="text-xs text-muted-foreground font-mono">
+                            <div className="text-xs text-muted-foreground font-mono truncate">
                               {v.products?.sku || ''} {v.variant_sku ? `· ${v.variant_sku}` : ''}
                             </div>
                           </div>
@@ -450,7 +450,7 @@ export function ReservationFormDialog({
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="min-w-0 gap-2 sm:gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             Cancelar
           </Button>
