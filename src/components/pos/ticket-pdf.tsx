@@ -339,21 +339,50 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
     await new Promise<void>((resolve) => {
       (pdf as any).getBlob((blob: Blob) => {
         const url = URL.createObjectURL(blob)
-        const win = window.open(url, '_blank')
-        if (win) {
-          win.addEventListener('load', () => {
-            win.print()
-            // No cerrar automáticamente: el usuario puede querer revisar
-          })
-          // Fallback por si el evento load no dispara
-          setTimeout(() => { try { win.print() } catch {} }, 500)
-        } else {
-          // Si el popup está bloqueado, descargar como fallback
-          const a = document.createElement('a')
-          a.href = url
-          a.download = `ticket-${data.sale.ticket_number}.pdf`
-          a.click()
+        const iframe = document.createElement('iframe')
+        iframe.style.position = 'fixed'
+        iframe.style.right = '0'
+        iframe.style.bottom = '0'
+        iframe.style.width = '0'
+        iframe.style.height = '0'
+        iframe.style.border = '0'
+        iframe.setAttribute('aria-hidden', 'true')
+        iframe.src = url
+
+        let printed = false
+        const triggerPrint = () => {
+          if (printed) return
+          printed = true
+          try {
+            iframe.contentWindow?.focus()
+            iframe.contentWindow?.print()
+          } catch {
+            // Fallback: descargar si el navegador bloquea la impresión
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `ticket-${data.sale.ticket_number}.pdf`
+            a.click()
+          }
         }
+
+        iframe.addEventListener('load', () => {
+          // Pequeño delay para que el visor PDF del iframe termine de montar
+          setTimeout(triggerPrint, 250)
+        })
+        // Fallback por si el evento load no dispara
+        setTimeout(triggerPrint, 1500)
+
+        // Limpieza: retirar iframe y revocar blob cuando la ventana recupere el foco
+        const cleanup = () => {
+          setTimeout(() => {
+            try { document.body.removeChild(iframe) } catch {}
+            try { URL.revokeObjectURL(url) } catch {}
+            window.removeEventListener('focus', cleanup)
+          }, 1000)
+        }
+        window.addEventListener('focus', cleanup)
+
+        document.body.appendChild(iframe)
         resolve()
       })
     })
