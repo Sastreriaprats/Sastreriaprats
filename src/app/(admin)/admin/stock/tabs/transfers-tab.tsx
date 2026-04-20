@@ -20,6 +20,7 @@ import {
   createStockTransfer,
   listPhysicalWarehouses,
   listTransferCandidates,
+  searchTransferProducts,
 } from '@/actions/products'
 import { createDeliveryNoteFromTransfer } from '@/actions/delivery-notes'
 import { useAuth } from '@/components/providers/auth-provider'
@@ -164,17 +165,18 @@ export function TransfersTab() {
     if (!loaded.length) toast.warning('No hay productos con stock para ese filtro')
   }
 
-  const loadSearchResults = async () => {
-    if (!fromWarehouseId) {
-      toast.error('Selecciona almacén origen')
+  const loadSearchResults = useCallback(async () => {
+    if (!fromWarehouseId) return
+    const term = searchTerm.trim()
+    if (term.length < 3) {
+      setSearchResults([])
       return
     }
     setLoadingSearch(true)
-    const result = await listTransferCandidates({
-      warehouseId: fromWarehouseId,
-      category: 'all',
-      search: searchTerm,
-      limit: 80,
+    const result = await searchTransferProducts({
+      search: term,
+      fromWarehouseId,
+      limit: 50,
     })
     setLoadingSearch(false)
     if (!result.success) {
@@ -182,7 +184,18 @@ export function TransfersTab() {
       return
     }
     setSearchResults(result.data || [])
-  }
+  }, [fromWarehouseId, searchTerm])
+
+  useEffect(() => {
+    if (isMassive) return
+    const term = searchTerm.trim()
+    if (term.length < 3 || !fromWarehouseId) {
+      setSearchResults([])
+      return
+    }
+    const timer = setTimeout(() => { loadSearchResults() }, 350)
+    return () => clearTimeout(timer)
+  }, [searchTerm, fromWarehouseId, isMassive, loadSearchResults])
 
   const addManualLine = (row: any) => {
     setLines((prev) => {
@@ -469,13 +482,21 @@ export function TransfersTab() {
                   <Input
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Nombre, SKU o variante"
+                    placeholder="Nombre, SKU, variante o EAN (mín. 3 caracteres)"
+                    disabled={!fromWarehouseId}
                   />
+                  <p className="text-xs text-muted-foreground">
+                    {!fromWarehouseId
+                      ? 'Selecciona un almacén origen para buscar.'
+                      : searchTerm.trim().length > 0 && searchTerm.trim().length < 3
+                        ? 'Escribe al menos 3 caracteres.'
+                        : loadingSearch
+                          ? 'Buscando…'
+                          : searchTerm.trim().length >= 3 && searchResults.length === 0 && !loadingSearch
+                            ? 'Sin resultados con stock en el almacén origen.'
+                            : 'Se busca automáticamente mientras escribes.'}
+                  </p>
                 </div>
-                <Button variant="outline" onClick={loadSearchResults} disabled={loadingSearch || !fromWarehouseId}>
-                  {loadingSearch ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-                  Buscar
-                </Button>
               </div>
               {searchResults.length > 0 ? (
                 <div className="rounded-md border">
@@ -483,19 +504,47 @@ export function TransfersTab() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Producto</TableHead>
-                        <TableHead>SKU</TableHead>
-                        <TableHead>Disponible</TableHead>
+                        <TableHead>SKU / EAN</TableHead>
+                        <TableHead>Variante</TableHead>
+                        <TableHead>Stock por tienda</TableHead>
                         <TableHead className="text-right">Acción</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {searchResults.map((r: any) => (
                         <TableRow key={r.product_variant_id}>
-                          <TableCell>{r.product_name}</TableCell>
-                          <TableCell className="font-mono text-xs">{r.variant_sku || r.product_sku}</TableCell>
-                          <TableCell>{r.available}</TableCell>
+                          <TableCell>
+                            <div className="font-medium">{r.product_name}</div>
+                            <div className="text-xs text-muted-foreground font-mono">{r.product_sku}</div>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">
+                            <div>{r.variant_sku || '—'}</div>
+                            {r.barcode ? <div className="text-muted-foreground">{r.barcode}</div> : null}
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            {[r.size, r.color].filter(Boolean).join(' · ') || '—'}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap gap-1">
+                              {(r.stocks || []).filter((s: any) => s.available > 0).length === 0 ? (
+                                <span className="text-xs text-muted-foreground">Sin stock</span>
+                              ) : (
+                                (r.stocks || [])
+                                  .filter((s: any) => s.available > 0)
+                                  .map((s: any) => (
+                                    <Badge
+                                      key={s.warehouse_id}
+                                      variant={s.warehouse_id === fromWarehouseId ? 'default' : 'secondary'}
+                                      className="text-[11px] font-normal"
+                                    >
+                                      {s.warehouse_name}: {s.available}
+                                    </Badge>
+                                  ))
+                              )}
+                            </div>
+                          </TableCell>
                           <TableCell className="text-right">
-                            <Button size="sm" variant="outline" onClick={() => addManualLine(r)}>Añadir</Button>
+                            <Button size="sm" variant="outline" onClick={() => addManualLine(r)} disabled={!r.available}>Añadir</Button>
                           </TableCell>
                         </TableRow>
                       ))}

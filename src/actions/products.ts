@@ -866,20 +866,26 @@ export const listTransferCandidates = protectedAction<
     const variantIds = Array.from(stockMap.keys())
     if (!variantIds.length) return success([])
 
-    const { data: variants, error: variantError } = await ctx.adminClient
-      .from('product_variants')
-      .select(`
-        id, variant_sku, product_id, is_active,
-        products!inner(id, sku, name, product_type, is_active)
-      `)
-      .in('id', variantIds)
-      .eq('is_active', true)
-      .eq('products.is_active', true)
+    const BATCH_SIZE = 150
+    const allVariants: any[] = []
+    for (let i = 0; i < variantIds.length; i += BATCH_SIZE) {
+      const batch = variantIds.slice(i, i + BATCH_SIZE)
+      const { data: variants, error: variantError } = await ctx.adminClient
+        .from('product_variants')
+        .select(`
+          id, variant_sku, product_id, is_active,
+          products!inner(id, sku, name, product_type, is_active)
+        `)
+        .in('id', batch)
+        .eq('is_active', true)
+        .eq('products.is_active', true)
 
-    if (variantError) return failure(variantError.message || 'Error al cargar variantes', 'INTERNAL')
+      if (variantError) return failure(variantError.message || 'Error al cargar variantes', 'INTERNAL')
+      if (variants?.length) allVariants.push(...variants)
+    }
 
     const s = (search || '').trim().toLowerCase()
-    const rows = (variants || [])
+    const rows = allVariants
       .map((v: any) => ({
         product_variant_id: v.id,
         variant_sku: v.variant_sku || '',
@@ -903,6 +909,123 @@ export const listTransferCandidates = protectedAction<
       .sort((a: any, b: any) => `${a.product_name} ${a.variant_sku}`.localeCompare(`${b.product_name} ${b.variant_sku}`))
 
     return success(rows.slice(0, max))
+  }
+)
+
+export const searchTransferProducts = protectedAction<
+  { search: string; fromWarehouseId: string; limit?: number },
+  any[]
+>(
+  { permission: ['products.view', 'stock.view'], auditModule: 'stock' },
+  async (ctx, { search, fromWarehouseId, limit = 30 }) => {
+    const s = String(search || '').trim()
+    if (s.length < 3) return success([])
+    if (!fromWarehouseId) return failure('Almacén de origen obligatorio', 'VALIDATION')
+    const max = Math.min(Math.max(Number(limit) || 30, 1), 100)
+    const safe = s.replace(/[,()%*]/g, ' ').trim()
+    if (!safe) return success([])
+    const like = `%${safe}%`
+
+    const { data: byVariant, error: vErr } = await ctx.adminClient
+      .from('product_variants')
+      .select(`
+        id, variant_sku, barcode, size, color, product_id, is_active,
+        products!inner(id, sku, name, product_type, is_active)
+      `)
+      .or(`variant_sku.ilike.${like},barcode.ilike.${like}`)
+      .eq('is_active', true)
+      .eq('products.is_active', true)
+      .limit(max)
+    if (vErr) return failure(vErr.message || 'Error buscando variantes', 'INTERNAL')
+
+    const { data: byProduct, error: pErr } = await ctx.adminClient
+      .from('products')
+      .select('id')
+      .or(`sku.ilike.${like},name.ilike.${like},barcode.ilike.${like}`)
+      .eq('is_active', true)
+      .limit(max)
+    if (pErr) return failure(pErr.message || 'Error buscando productos', 'INTERNAL')
+
+    const productIds = (byProduct || []).map((p: any) => p.id)
+    let byProductVariants: any[] = []
+    if (productIds.length) {
+      const { data: variantsByProduct, error: vpErr } = await ctx.adminClient
+        .from('product_variants')
+        .select(`
+          id, variant_sku, barcode, size, color, product_id, is_active,
+          products!inner(id, sku, name, product_type, is_active)
+        `)
+        .in('product_id', productIds)
+        .eq('is_active', true)
+        .eq('products.is_active', true)
+        .limit(max * 4)
+      if (vpErr) return failure(vpErr.message || 'Error buscando variantes por producto', 'INTERNAL')
+      byProductVariants = variantsByProduct || []
+    }
+
+    const variantMap = new Map<string, any>()
+    for (const v of [...(byVariant || []), ...byProductVariants]) {
+      variantMap.set(String((v as any).id), v)
+    }
+    const variantIds = Array.from(variantMap.keys())
+    if (!variantIds.length) return success([])
+
+    const BATCH = 150
+    const stockRows: any[] = []
+    for (let i = 0; i < variantIds.length; i += BATCH) {
+      const batch = variantIds.slice(i, i + BATCH)
+      const { data: levels, error: lErr } = await ctx.adminClient
+        .from('stock_levels')
+        .select('product_variant_id, warehouse_id, quantity, reserved')
+        .in('product_variant_id', batch)
+      if (lErr) return failure(lErr.message || 'Error al cargar stock', 'INTERNAL')
+      if (levels?.length) stockRows.push(...levels)
+    }
+
+    const { data: warehouses, error: wErr } = await ctx.adminClient
+      .from('warehouses')
+      .select('id, name, code')
+      .eq('is_active', true)
+    if (wErr) return failure(wErr.message || 'Error al cargar almacenes', 'INTERNAL')
+    const warehouseMap = new Map<string, { id: string; name: string; code: string }>()
+    for (const w of warehouses || []) warehouseMap.set(String((w as any).id), w as any)
+
+    const stockByVariant = new Map<string, Array<{ warehouse_id: string; warehouse_name: string; warehouse_code: string; available: number }>>()
+    for (const row of stockRows) {
+      const vid = String((row as any).product_variant_id)
+      const wid = String((row as any).warehouse_id)
+      const w = warehouseMap.get(wid)
+      if (!w) continue
+      const available = Math.max(0, Number((row as any).quantity || 0) - Number((row as any).reserved || 0))
+      const list = stockByVariant.get(vid) || []
+      list.push({ warehouse_id: wid, warehouse_name: w.name, warehouse_code: w.code, available })
+      stockByVariant.set(vid, list)
+    }
+
+    const rows = variantIds
+      .map((vid) => {
+        const v = variantMap.get(vid)
+        const stocks = (stockByVariant.get(vid) || []).sort((a, b) => a.warehouse_name.localeCompare(b.warehouse_name))
+        const originStock = stocks.find((x) => x.warehouse_id === fromWarehouseId)
+        return {
+          product_variant_id: v.id,
+          variant_sku: v.variant_sku || '',
+          barcode: v.barcode || '',
+          size: v.size || '',
+          color: v.color || '',
+          product_id: v.product_id,
+          product_sku: v.products?.sku || '',
+          product_name: v.products?.name || '',
+          product_type: v.products?.product_type || '',
+          available: originStock?.available || 0,
+          stocks,
+        }
+      })
+      .filter((r) => r.available > 0)
+      .sort((a, b) => `${a.product_name} ${a.variant_sku}`.localeCompare(`${b.product_name} ${b.variant_sku}`))
+      .slice(0, max)
+
+    return success(rows)
   }
 )
 
