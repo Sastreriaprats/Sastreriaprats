@@ -1155,6 +1155,7 @@ export const saleLines = pgTable('sale_lines', {
   id: uuid('id').primaryKey().defaultRandom(),
   saleId: uuid('sale_id').notNull().references(() => sales.id, { onDelete: 'cascade' }),
   productVariantId: uuid('product_variant_id').references(() => productVariants.id, { onDelete: 'set null' }),
+  reservationId: uuid('reservation_id').references(() => productReservations.id, { onDelete: 'set null' }),
   description: text('description').notNull(),
   sku: text('sku'),
   quantity: integer('quantity').notNull().default(1),

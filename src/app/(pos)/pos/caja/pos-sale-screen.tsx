@@ -55,6 +55,14 @@ interface TicketLine {
   available_stock?: number
   /** Si la línea es un cobro de un pedido/venta pendiente, se registra el pago en onSuccess. */
   cobro_ref?: { entity_type: 'tailoring_order' | 'sale'; entity_id: string }
+  /** Si la línea corresponde a la recogida de una reserva, su id. */
+  reservation_id?: string | null
+  /** Número legible de la reserva (p.ej. RSV-2026-0003) para mostrar badge. */
+  reservation_number?: string | null
+  /** Total de la reserva (solo informativo, para desglosar en ticket). */
+  reservation_total?: number
+  /** Importe ya pagado previamente en la reserva (no entra en caja hoy). */
+  reservation_already_paid?: number
 }
 
 interface Payment {
@@ -463,6 +471,53 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
     }])
   }
 
+  const addReservationPickup = (payload: {
+    reservation_id: string
+    reservation_number: string
+    product_variant_id: string
+    description: string
+    sku: string
+    size: string | null
+    color: string | null
+    image_url: string | null
+    quantity: number
+    unit_price: number
+    tax_rate: number
+    cost_price: number
+    reservation_total: number
+    reservation_already_paid: number
+    client_id: string | null
+    client_name: string | null
+  }) => {
+    // Evitar duplicar: si ya existe una línea con este reservation_id, avisar y no volver a añadir
+    if (ticketLines.some((l) => l.reservation_id === payload.reservation_id)) {
+      toast.warning(`Reserva ${payload.reservation_number} ya está en el ticket`)
+      return
+    }
+    // Si hay cliente asociado y no hay cliente asignado aún, asignarlo automáticamente
+    if (payload.client_id && !selectedClientId) {
+      setSelectedClientId(payload.client_id)
+      setSelectedClientName(payload.client_name || '')
+    }
+    setTicketLines(prev => [...prev, {
+      id: crypto.randomUUID(),
+      product_variant_id: payload.product_variant_id || null,
+      description: payload.description,
+      sku: payload.sku || '',
+      quantity: payload.quantity,
+      unit_price: payload.unit_price,
+      discount_percentage: 0,
+      tax_rate: payload.tax_rate,
+      cost_price: payload.cost_price,
+      image_url: payload.image_url || undefined,
+      reservation_id: payload.reservation_id,
+      reservation_number: payload.reservation_number,
+      reservation_total: payload.reservation_total,
+      reservation_already_paid: payload.reservation_already_paid,
+    }])
+    toast.success(`Reserva ${payload.reservation_number} añadida al ticket`)
+  }
+
   const updateLine = (id: string, field: string, value: any) => {
     setTicketLines(prev => prev.map(l => l.id === id ? { ...l, [field]: value } : l))
   }
@@ -787,6 +842,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
       },
       lines: ticketLines.map(l => ({
         product_variant_id: l.product_variant_id,
+        reservation_id: l.reservation_id ?? null,
         description: l.description,
         sku: l.sku,
         quantity: l.quantity,
@@ -1052,10 +1108,16 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
                     {line.product_variant_id ? (
                       <div className="flex items-center gap-1 min-w-0">
                         <p className="font-medium truncate text-slate-800">{line.description}</p>
-                        {line.product_variant_id && reservedVariantsForClient[line.product_variant_id] >= line.quantity && (
+                        {line.reservation_id ? (
                           <Badge variant="secondary" className="bg-purple-100 text-purple-800 border-purple-200 text-[10px] px-1.5 py-0 shrink-0">
-                            <Bookmark className="h-2.5 w-2.5 mr-0.5" /> De reserva
+                            <Bookmark className="h-2.5 w-2.5 mr-0.5" /> {line.reservation_number || 'Reserva'}
                           </Badge>
+                        ) : (
+                          line.product_variant_id && reservedVariantsForClient[line.product_variant_id] >= line.quantity && (
+                            <Badge variant="secondary" className="bg-purple-100 text-purple-800 border-purple-200 text-[10px] px-1.5 py-0 shrink-0">
+                              <Bookmark className="h-2.5 w-2.5 mr-0.5" /> De reserva
+                            </Badge>
+                          )
                         )}
                       </div>
                     ) : (
@@ -1667,6 +1729,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
         attendedBy={profile?.fullName || profile?.email || null}
         defaultClientId={selectedClientId}
         defaultClientName={selectedClientName}
+        onAddReservationToTicket={addReservationPickup}
       />
     </div>
   )

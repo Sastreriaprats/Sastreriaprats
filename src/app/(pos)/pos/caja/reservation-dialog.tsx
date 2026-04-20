@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Bookmark, Plus, Search } from 'lucide-react'
 import { ReservationFormDialog, type ReservationSuccessPayload } from '@/components/reservations/reservation-form-dialog'
 import { ReservationSuccessDialog } from '@/components/reservations/reservation-success-dialog'
-import { ReservationPickupDialog } from './reservation-pickup-dialog'
+import { ReservationPickupDialog, type ReservationTicketLinePayload } from './reservation-pickup-dialog'
 
 interface ReservationDialogProps {
   open: boolean
@@ -17,6 +17,8 @@ interface ReservationDialogProps {
   defaultClientId: string | null
   defaultClientName: string
   onCreated?: () => void
+  /** El POS añade la línea al ticket (recogida de reserva). */
+  onAddReservationToTicket?: (payload: ReservationTicketLinePayload) => void
 }
 
 type Mode = 'menu' | 'new' | 'pickup'
@@ -31,6 +33,7 @@ export function ReservationDialog({
   defaultClientId,
   defaultClientName,
   onCreated,
+  onAddReservationToTicket,
 }: ReservationDialogProps) {
   const [mode, setMode] = useState<Mode>('menu')
   const [successPayload, setSuccessPayload] = useState<ReservationSuccessPayload | null>(null)
@@ -105,14 +108,16 @@ export function ReservationDialog({
         }}
       />
 
-      {/* Buscar reserva (entregar / cobrar) */}
+      {/* Buscar reserva (añadir al ticket / cobro parcial) */}
       <ReservationPickupDialog
         open={open && mode === 'pickup'}
         onOpenChange={(v) => { if (!v) closeAll() }}
         storeId={storeId}
         cashSessionId={cashSessionId}
-        storeName={storeName}
-        attendedBy={attendedBy}
+        onAddToTicket={(payload) => {
+          onAddReservationToTicket?.(payload)
+          closeAll()
+        }}
       />
 
       {/* Ticket de nueva reserva */}

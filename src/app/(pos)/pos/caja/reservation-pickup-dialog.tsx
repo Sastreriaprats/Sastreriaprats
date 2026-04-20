@@ -7,8 +7,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import {
-  Loader2, Search, Bookmark, Clock, Check, ChevronLeft,
-  Banknote, CreditCard, Smartphone, ArrowRightLeft, Printer, Download, ImageOff,
+  Loader2, Search, Bookmark, Clock, Check, ChevronLeft, ShoppingCart,
+  Banknote, CreditCard, Smartphone, ArrowRightLeft, Euro, ImageOff,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -16,22 +16,40 @@ import {
   listReservations,
   getReservation,
   addReservationPayment,
-  fulfillReservation,
 } from '@/actions/reservations'
 import type { ReservationPaymentMethod } from '@/lib/validations/reservations'
-import {
-  generateReservationPdf, printReservationPdf,
-  type ReservationTicketData,
-} from '@/components/pos/ticket-pdf'
-import { getStorePdfData } from '@/lib/pdf/pdf-company'
+
+export interface ReservationTicketLinePayload {
+  reservation_id: string
+  reservation_number: string
+  product_variant_id: string
+  description: string
+  sku: string
+  size: string | null
+  color: string | null
+  image_url: string | null
+  quantity: number
+  /** Unit price = pending / quantity */
+  unit_price: number
+  tax_rate: number
+  cost_price: number
+  /** Precio total de la reserva (informativo). */
+  reservation_total: number
+  /** Importe ya pagado en la reserva (no entra en caja hoy). */
+  reservation_already_paid: number
+  /** Cliente asociado (para asignarlo al POS si aún no hay cliente). */
+  client_id: string | null
+  client_name: string | null
+}
 
 interface ReservationPickupDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   storeId?: string | null
   cashSessionId?: string | null
-  storeName?: string | null
-  attendedBy?: string | null
+  /** Llamado cuando el usuario pulsa "Añadir al ticket". El padre debe añadir
+   *  la línea al ticket del POS y cerrar el diálogo. */
+  onAddToTicket?: (payload: ReservationTicketLinePayload) => void
 }
 
 type ReservationListRow = {
@@ -49,7 +67,7 @@ type ReservationListRow = {
     variant_sku?: string | null
     size?: string | null
     color?: string | null
-    product?: { id?: string; name?: string; sku?: string; main_image_url?: string | null } | null
+    product?: { id?: string; name?: string; sku?: string; main_image_url?: string | null; tax_rate?: number | string | null } | null
   } | null
   store?: { id: string; name?: string | null; display_name?: string | null } | null
 }
@@ -58,8 +76,8 @@ type ReservationDetail = ReservationListRow & {
   created_at: string
   reason: string | null
   notes: string | null
+  unit_price: number | string
   payments?: Array<{ id: string; payment_date: string; payment_method: string; amount: number | string; reference: string | null; created_at: string }>
-  client?: ReservationListRow['client'] & { client_code?: string | null }
 }
 
 const PAYMENT_METHODS: Array<{ value: ReservationPaymentMethod; label: string; icon: React.ComponentType<{ className?: string }> }> = [
@@ -91,8 +109,7 @@ export function ReservationPickupDialog({
   onOpenChange,
   storeId,
   cashSessionId,
-  storeName,
-  attendedBy,
+  onAddToTicket,
 }: ReservationPickupDialogProps) {
   const [step, setStep] = useState<'search' | 'detail'>('search')
   const [search, setSearch] = useState('')
@@ -102,24 +119,26 @@ export function ReservationPickupDialog({
   const [selected, setSelected] = useState<ReservationDetail | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
 
-  const [paymentMethod, setPaymentMethod] = useState<ReservationPaymentMethod>('cash')
-  const [paymentAmount, setPaymentAmount] = useState('')
-  const [submitting, setSubmitting] = useState(false)
+  // Pago parcial a cuenta
+  const [partialOpen, setPartialOpen] = useState(false)
+  const [partialMethod, setPartialMethod] = useState<ReservationPaymentMethod>('cash')
+  const [partialAmount, setPartialAmount] = useState('')
+  const [partialSubmitting, setPartialSubmitting] = useState(false)
 
   const resetAll = useCallback(() => {
     setStep('search')
     setSearch('')
     setResults([])
     setSelected(null)
-    setPaymentMethod('cash')
-    setPaymentAmount('')
+    setPartialOpen(false)
+    setPartialMethod('cash')
+    setPartialAmount('')
   }, [])
 
   useEffect(() => {
     if (!open) resetAll()
   }, [open, resetAll])
 
-  // Cargar reservas activas / pendientes al abrir (sin filtrar por tienda, pero priorizando la actual)
   const fetchList = useCallback(async (term: string) => {
     setLoading(true)
     try {
@@ -132,7 +151,6 @@ export function ReservationPickupDialog({
       })
       if (!res.success) { setResults([]); return }
       const rows = (res.data.data || []) as ReservationListRow[]
-      // Filtrar solo activas o pendientes de stock (las que aún se pueden entregar)
       setResults(rows.filter((r) => r.status === 'active' || r.status === 'pending_stock'))
     } finally {
       setLoading(false)
@@ -150,10 +168,7 @@ export function ReservationPickupDialog({
     const res = await getReservation({ id: row.id })
     setLoadingDetail(false)
     if (!res.success) { toast.error(res.error || 'No se pudo cargar la reserva'); return }
-    const detail = res.data as ReservationDetail
-    setSelected(detail)
-    const pending = Math.max(0, Number(detail.total) - Number(detail.total_paid))
-    setPaymentAmount(pending > 0 ? pending.toFixed(2) : '0')
+    setSelected(res.data as ReservationDetail)
     setStep('detail')
   }
 
@@ -162,127 +177,75 @@ export function ReservationPickupDialog({
     return Math.max(0, Number(selected.total) - Number(selected.total_paid))
   }, [selected])
 
-  const todayAmountToPay = useMemo(() => {
-    if (pendingAmount <= 0) return 0
-    const n = Number(paymentAmount.replace(',', '.'))
-    return Number.isFinite(n) && n > 0 ? Math.min(n, pendingAmount) : 0
-  }, [paymentAmount, pendingAmount])
+  const canAddToTicket = Boolean(selected && selected.status === 'active' && onAddToTicket)
 
-  const canFinalize = Boolean(selected)
-  const finalizeLabel = pendingAmount > 0
-    ? `Cobrar ${formatCurrency(todayAmountToPay)} y entregar`
-    : 'Entregar al cliente'
-
-  const handleFinalize = async () => {
-    if (!selected) return
-    if (pendingAmount > 0 && todayAmountToPay <= 0) {
-      toast.error('Introduce un importe a cobrar (o pon 0 si no cobras nada hoy)')
+  const handleAddToTicket = () => {
+    if (!selected || !onAddToTicket) return
+    if (selected.status !== 'active') {
+      toast.error('Solo se pueden recoger reservas activas (con stock bloqueado)')
       return
     }
+    const qty = selected.quantity
+    const unitPriceForLine = qty > 0 ? Math.round((pendingAmount / qty) * 100) / 100 : 0
+    const pName = selected.product_variant?.product?.name || '—'
+    const variantBits = [selected.product_variant?.size ? `T.${selected.product_variant.size}` : null, selected.product_variant?.color].filter(Boolean).join(' · ')
+    const description = `${pName}${variantBits ? ' (' + variantBits + ')' : ''} · Reserva ${selected.reservation_number}`
+    const taxRate = Number(selected.product_variant?.product?.tax_rate ?? 21)
 
-    setSubmitting(true)
-    try {
-      // 1. Registrar pago de hoy si procede
-      if (todayAmountToPay > 0) {
-        const payRes = await addReservationPayment({
-          reservation_id: selected.id,
-          payment_method: paymentMethod,
-          amount: todayAmountToPay,
-          store_id: storeId ?? null,
-          cash_session_id: cashSessionId ?? null,
-        })
-        if (!payRes.success) {
-          toast.error(payRes.error || 'No se pudo registrar el pago')
-          return
-        }
-      }
-
-      // 2. Si la reserva está en pending_stock no podemos hacer fulfill (stock no bloqueado)
-      //    En ese caso avisamos y dejamos solo el pago registrado.
-      if (selected.status === 'pending_stock') {
-        toast.warning('La reserva estaba pendiente de stock — pago registrado pero no se puede entregar.')
-        const updated = await getReservation({ id: selected.id })
-        if (updated.success) setSelected(updated.data as ReservationDetail)
-        return
-      }
-
-      // 3. Cumplir reserva (descontar stock)
-      const fulfillRes = await fulfillReservation({ id: selected.id, sale_id: null })
-      if (!fulfillRes.success) {
-        toast.error(fulfillRes.error || 'No se pudo cerrar la reserva')
-        return
-      }
-
-      toast.success(`Reserva ${selected.reservation_number} entregada`)
-
-      // 4. Generar ticket automáticamente (imprimir)
-      const updated = await getReservation({ id: selected.id })
-      if (updated.success) {
-        const ticketData = buildTicketData(updated.data as ReservationDetail, {
-          today_amount: todayAmountToPay,
-          today_method: paymentMethod,
-          is_pickup: true,
-        })
-        try { await printReservationPdf(ticketData) } catch { /* ignore */ }
-        setSelected(updated.data as ReservationDetail)
-      }
-
-      // 5. Cerrar diálogo tras pequeña espera para que el usuario vea el toast
-      setTimeout(() => onOpenChange(false), 500)
-    } finally {
-      setSubmitting(false)
+    const payload: ReservationTicketLinePayload = {
+      reservation_id: selected.id,
+      reservation_number: selected.reservation_number,
+      product_variant_id: selected.product_variant?.id || '',
+      description,
+      sku: selected.product_variant?.variant_sku || selected.product_variant?.product?.sku || '',
+      size: selected.product_variant?.size ?? null,
+      color: selected.product_variant?.color ?? null,
+      image_url: selected.product_variant?.product?.main_image_url ?? null,
+      quantity: qty,
+      unit_price: unitPriceForLine,
+      tax_rate: Number.isFinite(taxRate) ? taxRate : 21,
+      cost_price: 0,
+      reservation_total: Number(selected.total),
+      reservation_already_paid: Number(selected.total_paid),
+      client_id: selected.client?.id || null,
+      client_name: clientName(selected.client ?? null),
     }
+    onAddToTicket(payload)
+    onOpenChange(false)
   }
 
-  const buildTicketData = (
-    r: ReservationDetail,
-    opts: { today_amount: number; today_method: ReservationPaymentMethod; is_pickup: boolean },
-  ): ReservationTicketData => {
-    const storeConfig = getStorePdfData(storeName || undefined)
-    const pName = r.product_variant?.product?.name || '—'
-    const variantBits = [r.product_variant?.size ? `T.${r.product_variant.size}` : null, r.product_variant?.color].filter(Boolean).join(' · ')
-    const payments = (r.payments || []).map((p) => ({
-      payment_method: p.payment_method,
-      amount: Number(p.amount),
-      payment_date: p.payment_date,
-    }))
-    return {
-      reservation_number: r.reservation_number,
-      created_at: r.created_at,
-      expires_at: r.expires_at,
-      status: r.status,
-      payment_status: r.payment_status,
-      line: {
-        description: variantBits ? `${pName} (${variantBits})` : pName,
-        sku: r.product_variant?.variant_sku || r.product_variant?.product?.sku || null,
-        size: r.product_variant?.size || null,
-        color: r.product_variant?.color || null,
-        quantity: r.quantity,
-        unit_price: Number(r.total) / Math.max(1, r.quantity),
-        line_total: Number(r.total),
-      },
-      total: Number(r.total),
-      total_paid: Number(r.total_paid),
-      payments,
-      todayPaid: opts.today_amount,
-      todayPaymentMethod: opts.today_amount > 0 ? opts.today_method : null,
-      isPickup: opts.is_pickup,
-      clientName: clientName(r.client ?? null),
-      clientCode: r.client?.client_code ?? null,
-      attendedBy: attendedBy ?? null,
-      storeAddress: storeConfig.address,
-      storeSubtitle: storeConfig.subtitle,
-      storePhones: storeConfig.phones,
-      reason: r.reason,
-      notes: r.notes,
-    }
+  const openPartial = () => {
+    setPartialMethod('cash')
+    setPartialAmount('')
+    setPartialOpen(true)
   }
 
-  const handleReprintCurrent = async (mode: 'print' | 'download') => {
+  const confirmPartial = async () => {
     if (!selected) return
-    const data = buildTicketData(selected, { today_amount: 0, today_method: 'cash', is_pickup: false })
-    if (mode === 'print') await printReservationPdf(data)
-    else await generateReservationPdf(data, 'download')
+    const amount = Number(partialAmount.replace(',', '.'))
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error('Introduce un importe válido')
+      return
+    }
+    if (amount > pendingAmount) {
+      toast.error('El importe no puede superar el pendiente')
+      return
+    }
+    setPartialSubmitting(true)
+    const res = await addReservationPayment({
+      reservation_id: selected.id,
+      payment_method: partialMethod,
+      amount,
+      store_id: storeId ?? null,
+      cash_session_id: cashSessionId ?? null,
+    })
+    setPartialSubmitting(false)
+    if (!res.success) { toast.error(res.error || 'No se pudo registrar el pago'); return }
+    toast.success(`Pago a cuenta registrado (${formatCurrency(amount)})`)
+    setPartialOpen(false)
+    // Refrescar detalle
+    const updated = await getReservation({ id: selected.id })
+    if (updated.success) setSelected(updated.data as ReservationDetail)
   }
 
   return (
@@ -372,7 +335,7 @@ export function ReservationPickupDialog({
         )}
 
         {step === 'detail' && selected && (
-          <div className="space-y-4 min-w-0">
+          <div className="space-y-3 min-w-0">
             {loadingDetail ? (
               <div className="flex justify-center py-6">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -412,6 +375,13 @@ export function ReservationPickupDialog({
                   </div>
                 </div>
 
+                {selected.status === 'pending_stock' && (
+                  <div className="rounded-md border bg-amber-50 border-amber-200 px-3 py-2 text-xs text-amber-800 flex items-center gap-2">
+                    <Clock className="h-4 w-4" />
+                    Reserva pendiente de stock — no se puede entregar aún. Puedes registrar pagos a cuenta.
+                  </div>
+                )}
+
                 {selected.payments && selected.payments.length > 0 && (
                   <div className="rounded-md border px-3 py-2 text-xs space-y-1">
                     <div className="font-medium text-slate-700">Pagos previos</div>
@@ -425,69 +395,84 @@ export function ReservationPickupDialog({
                     ))}
                   </div>
                 )}
-
-                {pendingAmount > 0 ? (
-                  <div className="space-y-2 rounded-md border px-3 py-3">
-                    <Label className="text-sm">Cobro de hoy</Label>
-                    <div className="grid grid-cols-4 gap-2">
-                      {PAYMENT_METHODS.map((m) => {
-                        const Icon = m.icon
-                        return (
-                          <button
-                            key={m.value}
-                            type="button"
-                            onClick={() => setPaymentMethod(m.value)}
-                            className={`flex flex-col items-center justify-center gap-1 rounded-md border px-2 py-2 text-xs transition-colors ${
-                              paymentMethod === m.value
-                                ? 'border-purple-600 bg-purple-50 text-purple-800'
-                                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                            }`}
-                          >
-                            <Icon className="h-4 w-4" />
-                            {m.label}
-                          </button>
-                        )
-                      })}
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Importe</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min={0}
-                        max={pendingAmount}
-                        value={paymentAmount}
-                        onChange={(e) => setPaymentAmount(e.target.value)}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Máximo pendiente: <span className="font-semibold">{formatCurrency(pendingAmount)}</span>
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="rounded-md border bg-emerald-50 border-emerald-200 px-3 py-3 text-sm text-emerald-800 flex items-center gap-2">
-                    <Check className="h-4 w-4" />
-                    Esta reserva ya está totalmente pagada. Solo queda entregar.
-                  </div>
-                )}
               </>
             )}
 
             <DialogFooter className="gap-2 sm:gap-2 min-w-0">
-              <Button variant="outline" onClick={() => handleReprintCurrent('download')} disabled={submitting} className="gap-1">
-                <Download className="h-4 w-4" /> PDF actual
-              </Button>
-              <Button variant="outline" onClick={() => handleReprintCurrent('print')} disabled={submitting} className="gap-1">
-                <Printer className="h-4 w-4" /> Imprimir actual
-              </Button>
-              <Button onClick={handleFinalize} disabled={!canFinalize || submitting} className="gap-1 bg-purple-600 hover:bg-purple-700 text-white">
-                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                {finalizeLabel}
+              {pendingAmount > 0 && (
+                <Button variant="outline" onClick={openPartial} disabled={loadingDetail} className="gap-1">
+                  <Euro className="h-4 w-4" /> Cobro parcial
+                </Button>
+              )}
+              <Button
+                onClick={handleAddToTicket}
+                disabled={!canAddToTicket || loadingDetail}
+                className="gap-1 bg-purple-600 hover:bg-purple-700 text-white"
+                title={!canAddToTicket ? 'Sólo reservas activas se pueden añadir al ticket' : undefined}
+              >
+                <ShoppingCart className="h-4 w-4" />
+                {pendingAmount > 0
+                  ? `Añadir al ticket (${formatCurrency(pendingAmount)})`
+                  : 'Añadir al ticket (entregar)'}
               </Button>
             </DialogFooter>
           </div>
         )}
       </DialogContent>
+
+      {/* Mini dialog de cobro parcial */}
+      <Dialog open={partialOpen} onOpenChange={setPartialOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Cobro parcial — {selected?.reservation_number}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Registra un pago a cuenta sin entregar el producto. Pendiente actual: <span className="font-semibold text-slate-900">{formatCurrency(pendingAmount)}</span>
+            </p>
+            <div className="space-y-1">
+              <Label>Método</Label>
+              <div className="grid grid-cols-4 gap-2">
+                {PAYMENT_METHODS.map((m) => {
+                  const Icon = m.icon
+                  return (
+                    <button
+                      key={m.value}
+                      type="button"
+                      onClick={() => setPartialMethod(m.value)}
+                      className={`flex flex-col items-center justify-center gap-1 rounded-md border px-2 py-2 text-xs transition-colors ${
+                        partialMethod === m.value ? 'border-purple-600 bg-purple-50 text-purple-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {m.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Importe</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min={0}
+                max={pendingAmount}
+                value={partialAmount}
+                onChange={(e) => setPartialAmount(e.target.value)}
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPartialOpen(false)} disabled={partialSubmitting}>Cancelar</Button>
+            <Button onClick={confirmPartial} disabled={partialSubmitting} className="gap-1">
+              {partialSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              Registrar pago
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   )
 }

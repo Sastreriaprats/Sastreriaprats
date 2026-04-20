@@ -29,6 +29,7 @@ export const createSaleSchema = z.object({
 
 export const saleLineSchema = z.object({
   product_variant_id: z.string().uuid().optional().nullable(),
+  reservation_id: z.string().uuid().optional().nullable(),
   description: z.string().min(1),
   sku: z.string().optional().nullable(),
   quantity: z.number().int().min(1).default(1),
