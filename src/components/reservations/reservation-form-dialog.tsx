@@ -8,12 +8,14 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Loader2, Search, User, X, Bookmark, AlertCircle, ImageOff, Check } from 'lucide-react'
+import { Loader2, Search, User, X, Bookmark, AlertCircle, ImageOff, Check, Banknote, CreditCard, Smartphone, ArrowRightLeft } from 'lucide-react'
 import { toast } from 'sonner'
 import { createReservation, getMainWarehouseForStore } from '@/actions/reservations'
 import { listClients } from '@/actions/clients'
 import { searchProductsForPos } from '@/actions/pos'
 import { listPhysicalWarehouses } from '@/actions/products'
+import type { ReservationPaymentMethod } from '@/lib/validations/reservations'
+import { formatCurrency } from '@/lib/utils'
 
 type ProductVariantResult = {
   id: string
@@ -21,8 +23,42 @@ type ProductVariantResult = {
   size?: string | null
   color?: string | null
   barcode?: string | null
-  products?: { id?: string; name?: string; sku?: string; main_image_url?: string | null; brand?: string }
+  price_override?: number | string | null
+  products?: {
+    id?: string
+    name?: string
+    sku?: string
+    main_image_url?: string | null
+    brand?: string
+    base_price?: number | string | null
+    price_with_tax?: number | string | null
+    tax_rate?: number | string | null
+  }
   stock_levels?: Array<{ quantity?: number; available?: number; warehouse_id?: string }>
+}
+
+export type ReservationSuccessPayload = {
+  id: string
+  reservation_number: string
+  status: 'active' | 'pending_stock' | 'fulfilled' | 'cancelled' | 'expired' | string
+  had_stock: boolean
+  unit_price: number
+  total: number
+  total_paid: number
+  payment_status: 'pending' | 'partial' | 'paid'
+  quantity: number
+  expires_at: string | null
+  reason: string | null
+  notes: string | null
+  client: { id: string; name: string; code: string | null } | null
+  product: {
+    variant_id: string
+    product_name: string
+    sku: string | null
+    size: string | null
+    color: string | null
+  }
+  initial_payment: { method: ReservationPaymentMethod; amount: number } | null
 }
 
 type ClientResult = {
@@ -41,6 +77,8 @@ export interface ReservationFormDialogProps {
   onOpenChange: (open: boolean) => void
   /** Cuando viene desde el POS se fija al almacén principal de esta tienda. */
   storeId?: string | null
+  /** Sesión de caja abierta (para registrar pagos). */
+  cashSessionId?: string | null
   /** Precargar cliente (asignado en el POS). */
   defaultClientId?: string | null
   defaultClientName?: string | null
@@ -48,13 +86,21 @@ export interface ReservationFormDialogProps {
   lockClient?: boolean
   /** Permite al admin elegir almacén explícitamente. */
   allowWarehouseSelection?: boolean
-  onSuccess?: (result: { id: string; reservation_number: string; status: string; had_stock: boolean }) => void
+  onSuccess?: (result: ReservationSuccessPayload) => void
 }
+
+const PAYMENT_METHODS: Array<{ value: ReservationPaymentMethod; label: string; icon: React.ComponentType<{ className?: string }> }> = [
+  { value: 'cash',     label: 'Efectivo',       icon: Banknote },
+  { value: 'card',     label: 'Tarjeta',        icon: CreditCard },
+  { value: 'bizum',    label: 'Bizum',          icon: Smartphone },
+  { value: 'transfer', label: 'Transferencia',  icon: ArrowRightLeft },
+]
 
 export function ReservationFormDialog({
   open,
   onOpenChange,
   storeId,
+  cashSessionId,
   defaultClientId,
   defaultClientName,
   lockClient,
@@ -77,9 +123,14 @@ export function ReservationFormDialog({
   const [clientSearching, setClientSearching] = useState(false)
 
   const [quantity, setQuantity] = useState<number>(1)
+  const [unitPrice, setUnitPrice] = useState<number>(0)
+  const [unitPriceInput, setUnitPriceInput] = useState<string>('0')
   const [reason, setReason] = useState('')
   const [notes, setNotes] = useState('')
   const [expiresAt, setExpiresAt] = useState('')
+  const [paymentMode, setPaymentMode] = useState<'none' | 'partial' | 'full'>('none')
+  const [paymentMethod, setPaymentMethod] = useState<ReservationPaymentMethod>('cash')
+  const [partialAmount, setPartialAmount] = useState<string>('')
   const [submitting, setSubmitting] = useState(false)
 
   const resetForm = useCallback(() => {
@@ -93,9 +144,14 @@ export function ReservationFormDialog({
       setClientName(defaultClientName ?? '')
     }
     setQuantity(1)
+    setUnitPrice(0)
+    setUnitPriceInput('0')
     setReason('')
     setNotes('')
     setExpiresAt('')
+    setPaymentMode('none')
+    setPaymentMethod('cash')
+    setPartialAmount('')
   }, [defaultClientId, defaultClientName, lockClient])
 
   useEffect(() => {
@@ -189,6 +245,35 @@ export function ReservationFormDialog({
     return Number(row.quantity ?? 0)
   }, [selectedVariant])
 
+  // Prellenar precio al seleccionar variante (PVP con IVA)
+  useEffect(() => {
+    if (!selectedVariant) return
+    const override = Number(selectedVariant.price_override ?? 0)
+    const withTax = Number(selectedVariant.products?.price_with_tax ?? 0)
+    const base = Number(selectedVariant.products?.base_price ?? 0)
+    const taxRate = Number(selectedVariant.products?.tax_rate ?? 21)
+    const price = override > 0
+      ? override
+      : withTax > 0
+        ? withTax
+        : base > 0
+          ? Math.round(base * (1 + taxRate / 100) * 100) / 100
+          : 0
+    setUnitPrice(price)
+    setUnitPriceInput(price ? price.toFixed(2) : '0')
+  }, [selectedVariant])
+
+  const totalAmount = useMemo(() => {
+    return Math.round(unitPrice * quantity * 100) / 100
+  }, [unitPrice, quantity])
+
+  const paymentAmount = useMemo(() => {
+    if (paymentMode === 'none') return 0
+    if (paymentMode === 'full') return totalAmount
+    const n = Number(partialAmount.replace(',', '.'))
+    return Number.isFinite(n) && n > 0 ? Math.min(n, totalAmount) : 0
+  }, [paymentMode, partialAmount, totalAmount])
+
   const canSubmit = Boolean(
     clientId && selectedVariant && warehouseId && quantity > 0 && !submitting,
   )
@@ -198,6 +283,20 @@ export function ReservationFormDialog({
     if (!selectedVariant) { toast.error('Selecciona un producto'); return }
     if (!warehouseId) { toast.error('No se pudo determinar el almacén'); return }
     if (quantity <= 0) { toast.error('La cantidad debe ser mayor que 0'); return }
+    if (unitPrice < 0) { toast.error('El precio no puede ser negativo'); return }
+
+    if (paymentMode !== 'none' && totalAmount <= 0) {
+      toast.error('No puedes registrar un pago sobre una reserva sin precio')
+      return
+    }
+    if (paymentMode === 'partial' && paymentAmount <= 0) {
+      toast.error('Introduce el importe del pago parcial')
+      return
+    }
+
+    const initial_payment = paymentMode === 'none' || paymentAmount <= 0
+      ? null
+      : { method: paymentMethod, amount: paymentAmount }
 
     setSubmitting(true)
     const result = await createReservation({
@@ -205,10 +304,13 @@ export function ReservationFormDialog({
       product_variant_id: selectedVariant.id,
       warehouse_id: warehouseId,
       store_id: storeId ?? null,
+      cash_session_id: cashSessionId ?? null,
       quantity,
+      unit_price: unitPrice,
       notes: notes || null,
       reason: reason || null,
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
+      initial_payment,
     })
     setSubmitting(false)
 
@@ -217,13 +319,39 @@ export function ReservationFormDialog({
       return
     }
 
-    const payload = result.data
-    if (payload.status === 'active') {
-      toast.success(`Reserva ${payload.reservation_number} creada (stock bloqueado)`)
+    const data = result.data
+    if (data.status === 'active') {
+      toast.success(`Reserva ${data.reservation_number} creada (stock bloqueado)`)
     } else {
-      toast.warning(`Reserva ${payload.reservation_number} pendiente de stock — avisaremos al recibir mercancía`)
+      toast.warning(`Reserva ${data.reservation_number} pendiente de stock — avisaremos al recibir mercancía`)
     }
-    onSuccess?.(payload)
+
+    const successPayload: ReservationSuccessPayload = {
+      id: data.id,
+      reservation_number: data.reservation_number,
+      status: data.status,
+      had_stock: data.had_stock,
+      unit_price: data.unit_price,
+      total: data.total,
+      total_paid: data.total_paid,
+      payment_status: data.payment_status,
+      quantity,
+      expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
+      reason: reason || null,
+      notes: notes || null,
+      client: clientId
+        ? { id: clientId, name: clientName, code: null }
+        : null,
+      product: {
+        variant_id: selectedVariant.id,
+        product_name: selectedVariant.products?.name || '—',
+        sku: selectedVariant.variant_sku || selectedVariant.products?.sku || null,
+        size: selectedVariant.size || null,
+        color: selectedVariant.color || null,
+      },
+      initial_payment,
+    }
+    onSuccess?.(successPayload)
     resetForm()
     onOpenChange(false)
   }
@@ -396,8 +524,8 @@ export function ReservationFormDialog({
             )}
           </div>
 
-          {/* Cantidad */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Cantidad + Precio */}
+          <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1">
               <Label>Cantidad</Label>
               <Input
@@ -412,18 +540,111 @@ export function ReservationFormDialog({
               {selectedVariant && variantAvailable < quantity && (
                 <p className="text-xs text-amber-700 flex items-center gap-1">
                   <AlertCircle className="h-3 w-3" />
-                  Solo {variantAvailable} disponibles — la reserva quedará pendiente de stock.
+                  Solo {variantAvailable} disponibles — reserva pendiente.
                 </p>
               )}
             </div>
             <div className="space-y-1">
-              <Label>Fecha límite (opcional)</Label>
+              <Label>PVP unitario (IVA incl.)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min={0}
+                value={unitPriceInput}
+                onChange={(e) => {
+                  setUnitPriceInput(e.target.value)
+                  const n = Number(e.target.value.replace(',', '.'))
+                  setUnitPrice(Number.isFinite(n) && n >= 0 ? n : 0)
+                }}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Fecha límite</Label>
               <Input
                 type="date"
                 value={expiresAt}
                 onChange={(e) => setExpiresAt(e.target.value)}
               />
             </div>
+          </div>
+
+          {/* Total */}
+          <div className="flex items-center justify-between rounded-md border bg-slate-50 px-3 py-2">
+            <span className="text-sm font-medium">Total reserva</span>
+            <span className="text-base font-bold tabular-nums">{formatCurrency(totalAmount)}</span>
+          </div>
+
+          {/* Pago */}
+          <div className="space-y-2 rounded-md border px-3 py-3">
+            <Label>Pago al crear la reserva</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { v: 'none',    label: 'Sin pago' },
+                { v: 'partial', label: 'Parcial' },
+                { v: 'full',    label: 'Completo' },
+              ] as const).map((opt) => (
+                <button
+                  key={opt.v}
+                  type="button"
+                  onClick={() => setPaymentMode(opt.v)}
+                  className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                    paymentMode === opt.v
+                      ? 'border-purple-600 bg-purple-50 text-purple-800'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                  disabled={totalAmount <= 0 && opt.v !== 'none'}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            {paymentMode !== 'none' && (
+              <div className="space-y-2 pt-2">
+                <div className="space-y-1">
+                  <Label className="text-xs">Método de pago</Label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {PAYMENT_METHODS.map((m) => {
+                      const Icon = m.icon
+                      return (
+                        <button
+                          key={m.value}
+                          type="button"
+                          onClick={() => setPaymentMethod(m.value)}
+                          className={`flex flex-col items-center justify-center gap-1 rounded-md border px-2 py-2 text-xs transition-colors ${
+                            paymentMethod === m.value
+                              ? 'border-purple-600 bg-purple-50 text-purple-800'
+                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          <Icon className="h-4 w-4" />
+                          {m.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {paymentMode === 'partial' ? (
+                  <div className="space-y-1">
+                    <Label className="text-xs">Importe entregado</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      max={totalAmount}
+                      value={partialAmount}
+                      placeholder={`Máximo ${formatCurrency(totalAmount)}`}
+                      onChange={(e) => setPartialAmount(e.target.value)}
+                    />
+                  </div>
+                ) : (
+                  <div className="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    Se registrará un pago de <span className="font-semibold">{formatCurrency(totalAmount)}</span> por {PAYMENT_METHODS.find((m) => m.value === paymentMethod)?.label.toLowerCase()}.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Motivo */}

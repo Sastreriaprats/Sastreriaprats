@@ -10,16 +10,20 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Loader2, Plus, ChevronLeft, ChevronRight, X, Check, Pencil, Bookmark, Clock } from 'lucide-react'
+import { Loader2, Plus, ChevronLeft, ChevronRight, X, Check, Pencil, Bookmark, Clock, Printer, Euro, Banknote, CreditCard, Smartphone, ArrowRightLeft } from 'lucide-react'
 import { toast } from 'sonner'
-import { formatDate, formatDateTime } from '@/lib/utils'
+import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import {
   listReservations,
   cancelReservation,
   updateReservation,
   fulfillReservation,
+  addReservationPayment,
 } from '@/actions/reservations'
 import { ReservationFormDialog } from '@/components/reservations/reservation-form-dialog'
+import { generateReservationPdf, printReservationPdf, type ReservationTicketData } from '@/components/pos/ticket-pdf'
+import { getStorePdfData } from '@/lib/pdf/pdf-company'
+import type { ReservationPaymentMethod } from '@/lib/validations/reservations'
 
 const PAGE_SIZE = 20
 
@@ -45,6 +49,10 @@ type Reservation = {
   reservation_number: string
   status: keyof typeof STATUS_BADGE
   quantity: number
+  unit_price: number | string
+  total: number | string
+  total_paid: number | string
+  payment_status: 'pending' | 'partial' | 'paid'
   notes: string | null
   reason: string | null
   expires_at: string | null
@@ -62,6 +70,20 @@ type Reservation = {
   } | null
   warehouse?: { id: string; code?: string | null; name?: string | null } | null
   store?: { id: string; code?: string | null; name?: string | null; display_name?: string | null } | null
+  payments?: Array<{ id: string; payment_date: string; payment_method: string; amount: number | string; reference: string | null; notes: string | null; created_at: string }>
+}
+
+const PAYMENT_METHOD_OPTIONS: Array<{ value: ReservationPaymentMethod; label: string; icon: React.ComponentType<{ className?: string }> }> = [
+  { value: 'cash',     label: 'Efectivo',      icon: Banknote },
+  { value: 'card',     label: 'Tarjeta',       icon: CreditCard },
+  { value: 'bizum',    label: 'Bizum',         icon: Smartphone },
+  { value: 'transfer', label: 'Transferencia', icon: ArrowRightLeft },
+]
+
+const PAYMENT_STATUS_BADGE: Record<string, { label: string; className: string }> = {
+  pending: { label: 'Sin pago',   className: 'bg-slate-100 text-slate-700 border-slate-200' },
+  partial: { label: 'Parcial',    className: 'bg-amber-100 text-amber-800 border-amber-200' },
+  paid:    { label: 'Pagada',     className: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
 }
 
 function getClientName(c: Reservation['client']): string {
@@ -96,6 +118,14 @@ export function ReservationsTab() {
   const [cancelTarget, setCancelTarget] = useState<Reservation | null>(null)
   const [cancelReasonInput, setCancelReasonInput] = useState('')
   const [cancelling, setCancelling] = useState(false)
+
+  const [paymentTarget, setPaymentTarget] = useState<Reservation | null>(null)
+  const [paymentMethod, setPaymentMethod] = useState<ReservationPaymentMethod>('cash')
+  const [paymentAmount, setPaymentAmount] = useState('')
+  const [paymentReference, setPaymentReference] = useState('')
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false)
+
+  const [printingId, setPrintingId] = useState<string | null>(null)
 
   const [actioningId, setActioningId] = useState<string | null>(null)
 
@@ -166,6 +196,84 @@ export function ReservationsTab() {
     fetchData()
   }
 
+  const openAddPayment = (r: Reservation) => {
+    setPaymentTarget(r)
+    setPaymentMethod('cash')
+    const pending = Number(r.total) - Number(r.total_paid)
+    setPaymentAmount(pending > 0 ? pending.toFixed(2) : '')
+    setPaymentReference('')
+  }
+
+  const confirmAddPayment = async () => {
+    if (!paymentTarget) return
+    const amount = Number(paymentAmount.replace(',', '.'))
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error('Introduce un importe válido')
+      return
+    }
+    setPaymentSubmitting(true)
+    const res = await addReservationPayment({
+      reservation_id: paymentTarget.id,
+      payment_method: paymentMethod,
+      amount,
+      reference: paymentReference || null,
+      store_id: paymentTarget.store?.id ?? null,
+    })
+    setPaymentSubmitting(false)
+    if (!res.success) { toast.error(res.error || 'No se pudo registrar el pago'); return }
+    toast.success(`Pago registrado (${formatCurrency(amount)})`)
+    setPaymentTarget(null)
+    fetchData()
+  }
+
+  const buildReservationTicketData = (r: Reservation): ReservationTicketData => {
+    const storeConfig = getStorePdfData(r.store?.display_name || r.store?.name || undefined)
+    const productName = r.product_variant?.product?.name || '—'
+    const variantBits = [r.product_variant?.size ? `T.${r.product_variant.size}` : null, r.product_variant?.color].filter(Boolean).join(' · ')
+    const clientName = r.client
+      ? (r.client.full_name || [r.client.first_name, r.client.last_name].filter(Boolean).join(' ') || null)
+      : null
+    return {
+      reservation_number: r.reservation_number,
+      created_at: r.created_at,
+      expires_at: r.expires_at,
+      status: r.status,
+      payment_status: r.payment_status,
+      line: {
+        description: variantBits ? `${productName} (${variantBits})` : productName,
+        sku: r.product_variant?.variant_sku || r.product_variant?.product?.sku || null,
+        size: r.product_variant?.size || null,
+        color: r.product_variant?.color || null,
+        quantity: r.quantity,
+        unit_price: Number(r.unit_price),
+        line_total: Number(r.total),
+      },
+      total: Number(r.total),
+      total_paid: Number(r.total_paid),
+      payments: (r.payments || []).map((p) => ({ payment_method: p.payment_method, amount: Number(p.amount) })),
+      clientName,
+      clientCode: r.client?.client_code ?? null,
+      storeAddress: storeConfig.address,
+      storeSubtitle: storeConfig.subtitle,
+      storePhones: storeConfig.phones,
+      reason: r.reason,
+      notes: r.notes,
+    }
+  }
+
+  const handlePrintTicket = async (r: Reservation, mode: 'print' | 'download') => {
+    setPrintingId(r.id)
+    try {
+      if (mode === 'print') {
+        await printReservationPdf(buildReservationTicketData(r))
+      } else {
+        await generateReservationPdf(buildReservationTicketData(r), 'download')
+      }
+    } finally {
+      setPrintingId(null)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -203,9 +311,9 @@ export function ReservationsTab() {
               <TableHead>Producto</TableHead>
               <TableHead className="text-center">Cant.</TableHead>
               <TableHead>Estado</TableHead>
+              <TableHead className="text-right">Total / Pagado</TableHead>
               <TableHead>Fecha</TableHead>
               <TableHead>Expira</TableHead>
-              <TableHead>Tienda</TableHead>
               <TableHead className="text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
@@ -224,6 +332,12 @@ export function ReservationsTab() {
               </TableRow>
             ) : reservations.map((r) => {
               const badge = STATUS_BADGE[r.status] || { label: r.status, className: 'bg-slate-100 text-slate-700 border-slate-200' }
+              const payBadge = PAYMENT_STATUS_BADGE[r.payment_status] || PAYMENT_STATUS_BADGE.pending
+              const totalNum = Number(r.total)
+              const paidNum = Number(r.total_paid)
+              const pendingNum = Math.max(0, totalNum - paidNum)
+              const canEdit = r.status === 'active' || r.status === 'pending_stock'
+              const canPay  = canEdit && pendingNum > 0
               return (
                 <TableRow key={r.id}>
                   <TableCell className="font-mono text-sm">{r.reservation_number}</TableCell>
@@ -239,22 +353,46 @@ export function ReservationsTab() {
                   </TableCell>
                   <TableCell className="text-center tabular-nums">{r.quantity}</TableCell>
                   <TableCell>
-                    <Badge variant="outline" className={`text-xs ${badge.className}`}>
-                      {r.status === 'pending_stock' && <Clock className="h-3 w-3 mr-0.5" />}
-                      {r.status === 'active' && <Bookmark className="h-3 w-3 mr-0.5" />}
-                      {badge.label}
-                    </Badge>
+                    <div className="flex flex-col gap-1">
+                      <Badge variant="outline" className={`text-xs w-fit ${badge.className}`}>
+                        {r.status === 'pending_stock' && <Clock className="h-3 w-3 mr-0.5" />}
+                        {r.status === 'active' && <Bookmark className="h-3 w-3 mr-0.5" />}
+                        {badge.label}
+                      </Badge>
+                      <Badge variant="outline" className={`text-xs w-fit ${payBadge.className}`}>
+                        {payBadge.label}
+                      </Badge>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right text-xs whitespace-nowrap">
+                    <div className="font-semibold tabular-nums">{formatCurrency(totalNum)}</div>
+                    <div className="text-emerald-700 tabular-nums">+{formatCurrency(paidNum)}</div>
+                    {pendingNum > 0 && (
+                      <div className="text-rose-700 tabular-nums">-{formatCurrency(pendingNum)}</div>
+                    )}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDateTime(r.created_at)}</TableCell>
                   <TableCell className="text-xs whitespace-nowrap">
                     {r.expires_at ? formatDate(r.expires_at) : <span className="text-muted-foreground">—</span>}
                   </TableCell>
-                  <TableCell className="text-xs">
-                    {r.store?.display_name || r.store?.name || r.store?.code || '—'}
-                  </TableCell>
                   <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      {(r.status === 'active' || r.status === 'pending_stock') && (
+                    <div className="flex justify-end gap-1 flex-wrap">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1"
+                        disabled={printingId === r.id}
+                        title="Reimprimir ticket"
+                        onClick={() => handlePrintTicket(r, 'print')}
+                      >
+                        {printingId === r.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Printer className="h-3 w-3" />}
+                      </Button>
+                      {canPay && (
+                        <Button size="sm" variant="outline" className="gap-1" onClick={() => openAddPayment(r)}>
+                          <Euro className="h-3 w-3" /> Pago
+                        </Button>
+                      )}
+                      {canEdit && (
                         <>
                           <Button size="sm" variant="outline" className="gap-1" onClick={() => openEdit(r)}>
                             <Pencil className="h-3 w-3" /> Editar
@@ -339,6 +477,72 @@ export function ReservationsTab() {
             <Button onClick={saveEdit} disabled={editSubmitting} className="gap-1">
               {editSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
               Guardar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Añadir pago */}
+      <Dialog open={Boolean(paymentTarget)} onOpenChange={(v) => { if (!v) setPaymentTarget(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Añadir pago — {paymentTarget?.reservation_number}</DialogTitle>
+          </DialogHeader>
+          {paymentTarget && (() => {
+            const totalNum = Number(paymentTarget.total)
+            const paidNum = Number(paymentTarget.total_paid)
+            const pending = Math.max(0, totalNum - paidNum)
+            return (
+              <div className="space-y-3">
+                <div className="rounded-md border bg-slate-50 px-3 py-2 text-sm">
+                  <div className="flex justify-between"><span className="text-slate-600">Total</span><span className="font-semibold">{formatCurrency(totalNum)}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-600">Pagado</span><span className="text-emerald-700">{formatCurrency(paidNum)}</span></div>
+                  <div className="flex justify-between border-t border-slate-200 mt-1 pt-1"><span className="font-medium">Pendiente</span><span className="font-bold text-rose-700">{formatCurrency(pending)}</span></div>
+                </div>
+                <div className="space-y-1">
+                  <Label>Método de pago</Label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {PAYMENT_METHOD_OPTIONS.map((m) => {
+                      const Icon = m.icon
+                      return (
+                        <button
+                          key={m.value}
+                          type="button"
+                          onClick={() => setPaymentMethod(m.value)}
+                          className={`flex flex-col items-center justify-center gap-1 rounded-md border px-2 py-2 text-xs transition-colors ${
+                            paymentMethod === m.value ? 'border-purple-600 bg-purple-50 text-purple-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          <Icon className="h-4 w-4" />
+                          {m.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label>Importe</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    max={pending}
+                    value={paymentAmount}
+                    onChange={(e) => setPaymentAmount(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Referencia (opcional)</Label>
+                  <Input value={paymentReference} onChange={(e) => setPaymentReference(e.target.value)} maxLength={100} />
+                </div>
+              </div>
+            )
+          })()}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPaymentTarget(null)} disabled={paymentSubmitting}>Cancelar</Button>
+            <Button onClick={confirmAddPayment} disabled={paymentSubmitting} className="gap-1">
+              {paymentSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              Registrar pago
             </Button>
           </DialogFooter>
         </DialogContent>

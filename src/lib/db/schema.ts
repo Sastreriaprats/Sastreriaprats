@@ -858,6 +858,10 @@ export const productReservations = pgTable('product_reservations', {
   warehouseId: uuid('warehouse_id').notNull().references(() => warehouses.id, { onDelete: 'restrict' }),
   storeId: uuid('store_id').references(() => stores.id, { onDelete: 'set null' }),
   quantity: integer('quantity').notNull(),
+  unitPrice: decimal('unit_price', { precision: 10, scale: 2 }).default('0').notNull(),
+  total: decimal('total', { precision: 12, scale: 2 }).default('0').notNull(),
+  totalPaid: decimal('total_paid', { precision: 12, scale: 2 }).default('0').notNull(),
+  paymentStatus: text('payment_status').default('pending').notNull(),
   status: reservationStatusEnum('status').default('active').notNull(),
   notes: text('notes'),
   reason: text('reason'),
@@ -870,6 +874,19 @@ export const productReservations = pgTable('product_reservations', {
   createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const productReservationPayments = pgTable('product_reservation_payments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  productReservationId: uuid('product_reservation_id').notNull().references(() => productReservations.id, { onDelete: 'cascade' }),
+  paymentDate: date('payment_date').defaultNow().notNull(),
+  paymentMethod: text('payment_method').notNull(),
+  amount: decimal('amount', { precision: 10, scale: 2 }).notNull(),
+  reference: text('reference'),
+  notes: text('notes'),
+  cashSessionId: uuid('cash_session_id').references(() => cashSessions.id, { onDelete: 'set null' }),
+  createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
 export const deliveryNotes = pgTable('delivery_notes', {
@@ -1637,13 +1654,20 @@ export const stockTransferLinesRelations = relations(stockTransferLines, ({ one 
   productVariant: one(productVariants, { fields: [stockTransferLines.productVariantId], references: [productVariants.id] }),
 }))
 
-export const productReservationsRelations = relations(productReservations, ({ one }) => ({
+export const productReservationsRelations = relations(productReservations, ({ one, many }) => ({
   client: one(clients, { fields: [productReservations.clientId], references: [clients.id] }),
   productVariant: one(productVariants, { fields: [productReservations.productVariantId], references: [productVariants.id] }),
   warehouse: one(warehouses, { fields: [productReservations.warehouseId], references: [warehouses.id] }),
   store: one(stores, { fields: [productReservations.storeId], references: [stores.id] }),
   fulfilledSale: one(sales, { fields: [productReservations.fulfilledSaleId], references: [sales.id] }),
   createdByProfile: one(profiles, { fields: [productReservations.createdBy], references: [profiles.id] }),
+  payments: many(productReservationPayments),
+}))
+
+export const productReservationPaymentsRelations = relations(productReservationPayments, ({ one }) => ({
+  reservation: one(productReservations, { fields: [productReservationPayments.productReservationId], references: [productReservations.id] }),
+  cashSession: one(cashSessions, { fields: [productReservationPayments.cashSessionId], references: [cashSessions.id] }),
+  createdByProfile: one(profiles, { fields: [productReservationPayments.createdBy], references: [profiles.id] }),
 }))
 
 export const inventoriesRelations = relations(inventories, ({ one, many }) => ({
@@ -1873,6 +1897,8 @@ export type StockTransferLine = typeof stockTransferLines.$inferSelect
 export type NewStockTransferLine = typeof stockTransferLines.$inferInsert
 export type ProductReservation = typeof productReservations.$inferSelect
 export type NewProductReservation = typeof productReservations.$inferInsert
+export type ProductReservationPayment = typeof productReservationPayments.$inferSelect
+export type NewProductReservationPayment = typeof productReservationPayments.$inferInsert
 export type Inventory = typeof inventories.$inferSelect
 export type NewInventory = typeof inventories.$inferInsert
 export type InventoryLine = typeof inventoryLines.$inferSelect

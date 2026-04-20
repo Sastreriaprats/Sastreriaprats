@@ -8,27 +8,31 @@ import {
   cancelReservationSchema,
   fulfillReservationSchema,
   listReservationsSchema,
+  addReservationPaymentSchema,
   type CreateReservationInput,
   type UpdateReservationInput,
   type CancelReservationInput,
   type FulfillReservationInput,
   type ListReservationsInput,
+  type AddReservationPaymentInput,
 } from '@/lib/validations/reservations'
 
 type ListResult<T> = { data: T[]; total: number; page: number; pageSize: number }
 
 const RESERVATION_SELECT = `
   id, reservation_number, client_id, product_variant_id, warehouse_id, store_id,
-  quantity, status, notes, reason, expires_at,
+  quantity, unit_price, total, total_paid, payment_status,
+  status, notes, reason, expires_at,
   fulfilled_sale_id, fulfilled_at, cancelled_at, cancelled_reason,
   stock_reserved_at, created_by, created_at, updated_at,
   client:clients ( id, client_code, full_name, first_name, last_name, phone ),
   product_variant:product_variants (
     id, variant_sku, size, color, barcode, image_url,
-    product:products ( id, sku, name, brand, main_image_url )
+    product:products ( id, sku, name, brand, main_image_url, base_price, price_with_tax, tax_rate )
   ),
   warehouse:warehouses ( id, code, name ),
   store:stores ( id, code, name, display_name ),
+  payments:product_reservation_payments ( id, payment_date, payment_method, amount, reference, notes, created_at ),
   created_by_profile:profiles!product_reservations_created_by_fkey ( id, full_name )
 `
 
@@ -89,10 +93,19 @@ export const getReservation = protectedAction<{ id: string }, any>(
   }
 )
 
-export const createReservation = protectedAction<
-  CreateReservationInput,
-  { id: string; reservation_number: string; status: string; had_stock: boolean }
->(
+type CreateReservationResult = {
+  id: string
+  reservation_number: string
+  status: string
+  had_stock: boolean
+  unit_price: number
+  total: number
+  total_paid: number
+  payment_status: 'pending' | 'partial' | 'paid'
+  payment_id: string | null
+}
+
+export const createReservation = protectedAction<CreateReservationInput, CreateReservationResult>(
   {
     permission: 'reservations.create',
     auditModule: 'reservations',
@@ -103,15 +116,25 @@ export const createReservation = protectedAction<
   async (ctx, rawInput) => {
     const input = createReservationSchema.parse(rawInput)
 
-    const payload = {
+    const payload: Record<string, unknown> = {
       client_id: input.client_id,
       product_variant_id: input.product_variant_id,
       warehouse_id: input.warehouse_id,
       store_id: input.store_id ?? null,
+      cash_session_id: input.cash_session_id ?? null,
       quantity: input.quantity,
+      unit_price: input.unit_price,
       notes: input.notes ?? null,
       reason: input.reason ?? null,
       expires_at: input.expires_at ?? null,
+    }
+    if (input.initial_payment) {
+      payload.initial_payment = {
+        method: input.initial_payment.method,
+        amount: input.initial_payment.amount,
+        reference: input.initial_payment.reference ?? null,
+        notes: input.initial_payment.notes ?? null,
+      }
     }
 
     const { data, error } = await ctx.adminClient.rpc('rpc_create_reservation', {
@@ -120,7 +143,7 @@ export const createReservation = protectedAction<
     })
 
     if (error) return failure(error.message || 'Error al crear la reserva', 'INTERNAL')
-    const result = data as { id: string; reservation_number: string; status: string; had_stock: boolean } | null
+    const result = data as CreateReservationResult | null
     if (!result?.id) return failure('Respuesta inválida del servidor', 'INTERNAL')
 
     return success({
@@ -128,6 +151,60 @@ export const createReservation = protectedAction<
       reservation_number: result.reservation_number,
       status: result.status,
       had_stock: result.had_stock,
+      unit_price: Number(result.unit_price ?? 0),
+      total: Number(result.total ?? 0),
+      total_paid: Number(result.total_paid ?? 0),
+      payment_status: result.payment_status ?? 'pending',
+      payment_id: result.payment_id ?? null,
+    })
+  }
+)
+
+type AddReservationPaymentResult = {
+  id: string
+  reservation_id: string
+  reservation_number: string
+  amount: number
+  payment_method: string
+  total_paid: number
+  payment_status: 'pending' | 'partial' | 'paid'
+  created_at: string
+}
+
+export const addReservationPayment = protectedAction<
+  AddReservationPaymentInput,
+  AddReservationPaymentResult
+>(
+  {
+    permission: 'reservations.edit',
+    auditModule: 'reservations',
+    auditAction: 'payment',
+    auditEntity: 'product_reservation',
+    revalidate: ['/admin/stock'],
+  },
+  async (ctx, rawInput) => {
+    const input = addReservationPaymentSchema.parse(rawInput)
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_add_reservation_payment', {
+      p_reservation_id: input.reservation_id,
+      p_payment_date: input.payment_date || new Date().toISOString().slice(0, 10),
+      p_payment_method: input.payment_method,
+      p_amount: input.amount,
+      p_reference: input.reference ?? null,
+      p_notes: input.notes ?? null,
+      p_store_id: input.store_id ?? null,
+      p_cash_session_id: input.cash_session_id ?? null,
+      p_user_id: ctx.userId !== 'system' ? ctx.userId : null,
+    })
+
+    if (error) return failure(error.message || 'Error al registrar el pago', 'INTERNAL')
+    const result = data as AddReservationPaymentResult | null
+    if (!result?.id) return failure('Respuesta inválida del servidor', 'INTERNAL')
+
+    return success({
+      ...result,
+      amount: Number(result.amount),
+      total_paid: Number(result.total_paid),
     })
   }
 )

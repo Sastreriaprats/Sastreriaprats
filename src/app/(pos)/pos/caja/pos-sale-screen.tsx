@@ -1662,6 +1662,9 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
         open={showReservationDialog}
         onOpenChange={setShowReservationDialog}
         storeId={activeStoreId}
+        cashSessionId={session.id}
+        storeName={activeStoreName}
+        attendedBy={profile?.fullName || profile?.email || null}
         defaultClientId={selectedClientId}
         defaultClientName={selectedClientName}
       />
