@@ -650,7 +650,8 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
     revalidate: ['/sastre/pedidos'],
   },
   async (ctx, input) => {
-    const orderTypeDb = input.orderType === 'camiseria' ? 'industrial' : input.orderType
+    const orderTypeDb: 'artesanal' | 'industrial' =
+      input.orderType === 'artesanal' ? 'artesanal' : 'industrial'
 
     const initialStatus =
       input.orderType === 'artesanal' ? 'in_production'
