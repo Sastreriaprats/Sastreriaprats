@@ -143,6 +143,7 @@ export function AuditoriaContent() {
     cost_price: 'Precio coste',
     cost_price_override: 'Precio coste',
     tax_rate_pct: 'IVA %',
+    tax_rate: 'IVA %',
     size: 'Talla',
     color: 'Color',
     quantity: 'Cantidad',
@@ -170,38 +171,160 @@ export function AuditoriaContent() {
     total_permisos: 'Total permisos',
     agregados: 'Añadidos',
     eliminados: 'Eliminados',
+    // Ventas / TPV
+    sale: 'Venta',
+    lines: 'Líneas',
+    payments: 'Pagos',
+    sale_type: 'Tipo de venta',
+    is_tax_free: 'Exenta de IVA',
+    discount_code: 'Código descuento',
+    discount_percentage: 'Descuento',
+    discount_amount: 'Importe descuento',
+    unit_price: 'Precio unitario',
+    line_total: 'Total línea',
+    subtotal: 'Subtotal',
+    tax_amount: 'Importe IVA',
+    total: 'Total',
+    payment_method: 'Método de pago',
+    amount: 'Importe',
+    reference: 'Referencia',
+    ticket_number: 'Nº ticket',
+    // Cajas
+    opening_amount: 'Fondo inicial',
+    counted_cash: 'Efectivo contado',
+    closing_notes: 'Notas de cierre',
   }
 
-  const formatAuditValue = (val: unknown): string => {
-    if (val === null || val === undefined || val === '') return '—'
-    if (typeof val === 'boolean') return val ? 'Sí' : 'No'
-    if (Array.isArray(val)) return val.length === 0 ? '—' : val.map((x) => String(x)).join(', ')
-    if (typeof val === 'object') {
-      try { return JSON.stringify(val) } catch { return String(val) }
-    }
-    return String(val)
+  // IDs/UUIDs técnicos que no aportan valor visual al admin
+  const HIDDEN_FIELDS = new Set([
+    'id', 'store_id', 'client_id', 'salesperson_id', 'cash_session_id',
+    'sale_id', 'product_variant_id', 'variant_id', 'product_id',
+    'tailoring_order_id', 'warehouse_id', 'user_id', 'profile_id',
+    'created_by', 'updated_by', 'supplier_id',
+  ])
+
+  const PAYMENT_METHODS_ES: Record<string, string> = {
+    cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia',
+    voucher: 'Vale', bizum: 'Bizum', cheque: 'Cheque',
+    financing: 'Financiación', mixed: 'Mixto', other: 'Otro',
   }
+
+  const SALE_TYPES_ES: Record<string, string> = {
+    boutique: 'Boutique', tailor: 'Sastrería', tailoring: 'Sastrería',
+    alteration: 'Arreglo', mixed: 'Mixta', online: 'Tienda online',
+  }
+
+  const PRICE_FIELDS = new Set([
+    'unit_price', 'line_total', 'total', 'subtotal', 'amount',
+    'tax_amount', 'discount_amount', 'base_price', 'price_with_tax',
+    'price_override', 'cost_price', 'cost_price_override',
+    'opening_amount', 'counted_cash', 'expected_cash', 'cash_difference',
+  ])
 
   const labelize = (field: string) =>
     FIELD_LABELS[field] ?? field.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 
+  // Formatea un primitivo según el nombre del campo (precio, %, método de pago, etc.)
+  const formatPrimitive = (field: string, val: unknown): string => {
+    if (val === null || val === undefined || val === '') return '—'
+    if (typeof val === 'boolean') return val ? 'Sí' : 'No'
+    if (field === 'payment_method' && typeof val === 'string') return PAYMENT_METHODS_ES[val] ?? val
+    if (field === 'sale_type' && typeof val === 'string') return SALE_TYPES_ES[val] ?? val
+    if (PRICE_FIELDS.has(field)) {
+      const n = Number(val)
+      if (!Number.isNaN(n)) return `${n.toFixed(2)} €`
+    }
+    if (field === 'discount_percentage' || field === 'tax_rate' || field === 'tax_rate_pct') {
+      const n = Number(val)
+      if (!Number.isNaN(n)) return `${n}%`
+    }
+    return String(val)
+  }
+
+  const isPrimitive = (val: unknown) =>
+    val === null || val === undefined || (typeof val !== 'object')
+
+  // Renderiza recursivamente un valor (primitivo, objeto o array) como JSX legible.
+  // Para objetos muestra filas "Label: valor". Para arrays de objetos muestra bloques numerados.
+  const renderValue = (val: unknown, field = ''): React.ReactNode => {
+    if (val === null || val === undefined || val === '') return <span className="text-muted-foreground">—</span>
+    if (isPrimitive(val)) return <span>{formatPrimitive(field, val)}</span>
+    if (Array.isArray(val)) {
+      if (val.length === 0) return <span className="text-muted-foreground">—</span>
+      const allPrimitive = val.every(isPrimitive)
+      if (allPrimitive) return <span>{val.map(v => formatPrimitive(field, v)).join(', ')}</span>
+      return (
+        <div className="space-y-1.5">
+          {val.map((item, i) => (
+            <div key={i} className="rounded border border-muted bg-background/60 px-2 py-1.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-0.5">#{i + 1}</p>
+              {renderValue(item)}
+            </div>
+          ))}
+        </div>
+      )
+    }
+    // objeto
+    const entries = Object.entries(val as Record<string, unknown>)
+      .filter(([k, v]) => !HIDDEN_FIELDS.has(k) && v !== null && v !== undefined && v !== '')
+    if (entries.length === 0) return <span className="text-muted-foreground">—</span>
+    return (
+      <div className="space-y-0.5">
+        {entries.map(([k, v]) => (
+          <div key={k} className="text-xs flex flex-wrap gap-1">
+            <span className="font-medium text-muted-foreground">{labelize(k)}:</span>
+            {isPrimitive(v)
+              ? <span>{formatPrimitive(k, v)}</span>
+              : <div className="w-full pl-2 mt-0.5">{renderValue(v, k)}</div>}
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  const isComplex = (v: unknown) => v !== null && typeof v === 'object'
+
   const renderChanges = (changes: Record<string, unknown> | null) => {
     if (!changes) return <span className="text-muted-foreground">—</span>
     return (
-      <div className="space-y-1">
+      <div className="space-y-2">
         {Object.entries(changes).map(([field, val]) => {
           const v = val as { old: unknown; new: unknown }
-          const oldStr = formatAuditValue(v?.old)
-          const newStr = formatAuditValue(v?.new)
-          const onlyNew = (v?.old === undefined || v?.old === null) && v?.new !== undefined && v?.new !== null
-          const onlyOld = v?.old !== undefined && v?.old !== null && (v?.new === undefined || v?.new === null)
+          const hasOld = v?.old !== undefined && v?.old !== null && v?.old !== ''
+          const hasNew = v?.new !== undefined && v?.new !== null && v?.new !== ''
+          const complex = isComplex(v?.old) || isComplex(v?.new)
+
+          if (complex) {
+            return (
+              <div key={field} className="rounded-md border border-muted bg-muted/30 p-2">
+                <p className="text-xs font-semibold mb-1">{labelize(field)}</p>
+                {hasOld && (
+                  <div className="text-xs mb-1">
+                    <span className="inline-block text-[10px] font-semibold uppercase tracking-wide text-red-600 mb-0.5">Anterior</span>
+                    <div>{renderValue(v.old, field)}</div>
+                  </div>
+                )}
+                {hasNew && (
+                  <div className="text-xs">
+                    <span className="inline-block text-[10px] font-semibold uppercase tracking-wide text-green-700 mb-0.5">
+                      {hasOld ? 'Nuevo' : 'Valor'}
+                    </span>
+                    <div>{renderValue(v.new, field)}</div>
+                  </div>
+                )}
+              </div>
+            )
+          }
+
+          const oldStr = formatPrimitive(field, v?.old)
+          const newStr = formatPrimitive(field, v?.new)
           return (
             <div key={field} className="text-xs flex flex-wrap items-center gap-1">
               <span className="font-medium text-muted-foreground">{labelize(field)}:</span>
-              {onlyNew ? (
-                <span className="text-green-700">{newStr}</span>
-              ) : onlyOld ? (
+              {hasOld && !hasNew ? (
                 <span className="line-through text-red-600">{oldStr}</span>
+              ) : !hasOld && hasNew ? (
+                <span className="text-green-700">{newStr}</span>
               ) : (
                 <>
                   <span className="line-through text-red-600">{oldStr}</span>
@@ -317,11 +440,13 @@ export function AuditoriaContent() {
                           {log.metadata && Object.keys(log.metadata).length > 0 && (
                             <div className={log.changes ? 'mt-3' : ''}>
                               <p className="text-xs font-medium text-muted-foreground mb-1">Información adicional:</p>
-                              <div className="space-y-0.5">
+                              <div className="space-y-1">
                                 {Object.entries(log.metadata).map(([k, v]) => (
                                   <div key={k} className="text-xs">
-                                    <span className="font-medium text-muted-foreground">{labelize(k)}:</span>{' '}
-                                    <span>{formatAuditValue(v)}</span>
+                                    <span className="font-medium text-muted-foreground">{labelize(k)}:</span>
+                                    {isPrimitive(v)
+                                      ? <span className="ml-1">{formatPrimitive(k, v)}</span>
+                                      : <div className="mt-0.5 pl-2">{renderValue(v, k)}</div>}
                                   </div>
                                 ))}
                               </div>
