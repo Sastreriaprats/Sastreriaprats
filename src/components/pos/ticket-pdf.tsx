@@ -414,6 +414,8 @@ export interface ReservationTicketLine {
 export interface ReservationTicketPayment {
   payment_method: string
   amount: number
+  /** Fecha ISO del pago (para separar "pagos previos" del "pago de hoy") */
+  payment_date?: string | null
 }
 
 export interface ReservationTicketData {
@@ -426,6 +428,11 @@ export interface ReservationTicketData {
   total: number
   total_paid: number
   payments: ReservationTicketPayment[]
+  /** Importe pagado hoy (se destaca en el ticket; el resto queda como pagos previos) */
+  todayPaid?: number
+  todayPaymentMethod?: string | null
+  /** Si true, el ticket se titula "ENTREGA" en lugar de "RESERVA" (recogida del producto). */
+  isPickup?: boolean
   clientName?: string | null
   clientCode?: string | null
   attendedBy?: string | null
@@ -482,7 +489,13 @@ export async function generateReservationPdf(
     { text: storePhones, fontSize: FONT_SMALL, alignment: 'center', margin: [0, 0, 0, 2] as [number, number, number, number] },
     { text: `CIF: ${COMPANY.nif}`, fontSize: FONT_SMALL, alignment: 'center', margin: [0, 0, 0, 4] as [number, number, number, number] },
     { canvas: [{ type: 'line', x1: 0, y1: 0, x2: W_PT - 2 * MARGIN_PT, y2: 0, lineWidth: 0.5 }], margin: [0, 0, 0, 6] as [number, number, number, number] },
-    { text: 'RESERVA', fontSize: 13, bold: true, alignment: 'center', margin: [0, 0, 0, 4] as [number, number, number, number] },
+    {
+      text: data.isPickup ? 'ENTREGA DE RESERVA' : 'RESERVA',
+      fontSize: 13,
+      bold: true,
+      alignment: 'center',
+      margin: [0, 0, 0, 4] as [number, number, number, number],
+    },
     {
       table: {
         widths: ['*', 60],
@@ -564,16 +577,52 @@ export async function generateReservationPdf(
     },
   ]
 
-  if (data.payments.length > 0) {
+  const today = new Date().toISOString().slice(0, 10)
+  const priorPayments = data.payments.filter((p) => {
+    if (!p.payment_date) return true
+    return String(p.payment_date).slice(0, 10) !== today
+  })
+  const todayPaymentsFromList = data.payments.filter((p) => {
+    if (!p.payment_date) return false
+    return String(p.payment_date).slice(0, 10) === today
+  })
+
+  if (priorPayments.length > 0) {
     content.push(
-      { text: 'Pagos:', fontSize: FONT_SMALL, bold: true, margin: [0, 2, 0, 2] as [number, number, number, number] },
-      ...data.payments.map<Content>((p) => ({
+      { text: 'Pagos previos:', fontSize: FONT_SMALL, bold: true, margin: [0, 2, 0, 2] as [number, number, number, number] },
+      ...priorPayments.map<Content>((p) => ({
         columns: [
-          { text: PAYMENT_LABELS[p.payment_method] || p.payment_method, fontSize: FONT_SMALL },
+          {
+            text: `${PAYMENT_LABELS[p.payment_method] || p.payment_method}${p.payment_date ? ' · ' + new Date(p.payment_date).toLocaleDateString('es-ES') : ''}`,
+            fontSize: FONT_SMALL,
+          },
           { text: fmt(p.amount), fontSize: FONT_SMALL, alignment: 'right' },
         ],
         margin: [0, 0, 0, 1] as [number, number, number, number],
       })),
+    )
+  }
+
+  const todayTotal = (data.todayPaid ?? 0) > 0
+    ? (data.todayPaid ?? 0)
+    : todayPaymentsFromList.reduce((acc, p) => acc + p.amount, 0)
+
+  if (todayTotal > 0) {
+    content.push(
+      { text: 'Pago de hoy:', fontSize: FONT_SMALL, bold: true, margin: [0, 4, 0, 2] as [number, number, number, number] },
+      {
+        columns: [
+          {
+            text: data.todayPaymentMethod
+              ? (PAYMENT_LABELS[data.todayPaymentMethod] || data.todayPaymentMethod)
+              : todayPaymentsFromList.map((p) => PAYMENT_LABELS[p.payment_method] || p.payment_method).join(', '),
+            fontSize: FONT_SMALL,
+            bold: true,
+          },
+          { text: fmt(todayTotal), fontSize: FONT_SMALL, bold: true, alignment: 'right' },
+        ],
+        margin: [0, 0, 0, 1] as [number, number, number, number],
+      },
     )
   }
 
