@@ -79,7 +79,7 @@ export function AppointmentDialog({
   open, onOpenChange, selectedSlot, selectedEvent, tailors, onSaved,
 }: AppointmentDialogProps) {
   const supabase = useMemo(() => createClient(), [])
-  const { activeStoreId } = useAuth()
+  const { activeStoreId, stores } = useAuth()
   const { can } = usePermissions()
   const isEditing = !!selectedEvent
 
@@ -92,6 +92,7 @@ export function AppointmentDialog({
     tailor_id: '',
     client_id: '',
     order_id: '',
+    store_id: '',
     description: '',
     notes: '',
   })
@@ -120,6 +121,7 @@ export function AppointmentDialog({
         tailor_id: (raw.tailor_id as string) || '',
         client_id: (raw.client_id as string) || '',
         order_id: (raw.order_id as string) || '',
+        store_id: (raw.store_id as string) || activeStoreId || '',
         description: (raw.description as string) || '',
         notes: (raw.notes as string) || '',
       })
@@ -135,10 +137,11 @@ export function AppointmentDialog({
         client_id: '',
         order_id: '',
         tailor_id: '',
+        store_id: activeStoreId || '',
       }))
       setSelectedClientName('')
     }
-  }, [selectedEvent, selectedSlot])
+  }, [selectedEvent, selectedSlot, activeStoreId])
 
   useEffect(() => {
     if (!isEditing && form.type) {
@@ -198,9 +201,13 @@ export function AppointmentDialog({
       toast.error('Completa fecha, hora y título')
       return
     }
+    if (!form.store_id) {
+      toast.error('Selecciona una tienda')
+      return
+    }
     const payload = {
       ...form,
-      store_id: activeStoreId,
+      store_id: form.store_id,
       tailor_id: form.tailor_id || null,
       client_id: form.client_id || null,
       order_id: form.order_id || null,
@@ -326,17 +333,30 @@ export function AppointmentDialog({
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label>Sastre asignado</Label>
-            <Select value={form.tailor_id || '_none'} onValueChange={(v) => setForm(p => ({ ...p, tailor_id: v === '_none' ? '' : v }))}>
-              <SelectTrigger><SelectValue placeholder="Sin asignar" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="_none">Sin asignar</SelectItem>
-                {tailors.map(t => (
-                  <SelectItem key={t.id} value={t.id}>{t.full_name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Tienda *</Label>
+              <Select value={form.store_id} onValueChange={(v) => setForm(p => ({ ...p, store_id: v }))}>
+                <SelectTrigger><SelectValue placeholder="Selecciona tienda" /></SelectTrigger>
+                <SelectContent>
+                  {stores.map(s => (
+                    <SelectItem key={s.storeId} value={s.storeId}>{s.storeName}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Sastre asignado</Label>
+              <Select value={form.tailor_id || '_none'} onValueChange={(v) => setForm(p => ({ ...p, tailor_id: v === '_none' ? '' : v }))}>
+                <SelectTrigger><SelectValue placeholder="Sin asignar" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">Sin asignar</SelectItem>
+                  {tailors.map(t => (
+                    <SelectItem key={t.id} value={t.id}>{t.full_name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {!NO_CLIENT_TYPES.has(form.type) && (
