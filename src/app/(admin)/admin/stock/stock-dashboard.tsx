@@ -132,18 +132,16 @@ export function StockDashboard() {
           <p className="text-muted-foreground">Gestión de catálogo, inventario y proveedores</p>
         </div>
         <div className="flex gap-2">
-          {can('products.view') && (
-            <Button
-              variant="outline"
-              onClick={handleExportInventory}
-              disabled={isExporting}
-              className="gap-2"
-              title="Descargar CSV del inventario por variante y almacén"
-            >
-              {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              Descargar inventario
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            onClick={handleExportInventory}
+            disabled={isExporting}
+            className="gap-2"
+            title="Descargar CSV del inventario por variante y almacén"
+          >
+            {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            Descargar inventario
+          </Button>
           {activeTab === 'tejidos' && can('products.create') ? (
             <Button onClick={() => fabricTabRef.current?.openNewFabricDialog()} className="gap-2 bg-prats-navy hover:bg-prats-navy-light">
               <Plus className="h-4 w-4" /> Nuevo tejido
