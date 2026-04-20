@@ -10,10 +10,17 @@ import { closeCashSession } from '@/actions/pos'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { CashCounter } from '@/components/cash/cash-counter'
 import { generateCashSessionReport } from '@/lib/pdf/cash-session-report'
+import { useAuth } from '@/components/providers/auth-provider'
 
 export function PosCloseCash({ session, onClosed, onCancel }: {
   session: any; onClosed: () => void; onCancel: () => void
 }) {
+  const { isAdmin } = useAuth()
+  const openingBreakdown: Record<string, number> | null =
+    session.opening_breakdown && typeof session.opening_breakdown === 'object'
+      ? session.opening_breakdown
+      : null
+  const hasOpeningBreakdown = !!openingBreakdown && Object.values(openingBreakdown).some((v) => (v || 0) > 0)
   const [cashBreakdown, setCashBreakdown] = useState<Record<string, number>>({})
   const [counted, setCounted] = useState(0)
   const [closingNotes, setClosingNotes] = useState('')
@@ -134,6 +141,27 @@ export function PosCloseCash({ session, onClosed, onCancel }: {
             </div>
           </div>
         </div>
+
+        {/* Desglose de apertura (solo admin) */}
+        {isAdmin && hasOpeningBreakdown && (
+          <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm space-y-5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-slate-800">Desglose de apertura</h2>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-[#c9a96e] bg-[#c9a96e]/10 px-2 py-0.5 rounded-full">
+                Solo admin
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 -mt-3">
+              Billetes y monedas con los que se abrió la caja.
+            </p>
+            <CashCounter
+              value={openingBreakdown ?? {}}
+              onChange={() => {}}
+              readOnly
+              variant="light"
+            />
+          </div>
+        )}
 
         {/* Arqueo */}
         <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm space-y-5">
