@@ -18,6 +18,25 @@ import { toast } from 'sonner'
 
 const saleTypeLabels: Record<string, string> = {
   boutique: 'Boutique', tailoring_deposit: 'Señal', tailoring_final: 'Pago final', alteration: 'Arreglo', online: 'Online',
+  order_payment: 'Pago pedido',
+}
+
+type SessionMovement = {
+  id: string
+  kind: 'sale' | 'order_payment'
+  ticket_number: string
+  sale_type: string
+  subtotal: number
+  discount_amount: number
+  tax_amount: number
+  total: number
+  payment_method: string
+  is_tax_free: boolean
+  status: string
+  created_at: string
+  clients: { full_name: string } | null
+  profiles: { full_name: string } | null
+  tailoring_order_id?: string
 }
 
 export function PosSummaryContent() {
@@ -25,7 +44,7 @@ export function PosSummaryContent() {
   const supabase = useMemo(() => createClient(), [])
   const { activeStoreId, stores } = useAuth()
   const [session, setSession] = useState<any>(null)
-  const [sales, setSales] = useState<any[]>([])
+  const [sales, setSales] = useState<SessionMovement[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [printingId, setPrintingId] = useState<string | null>(null)
   const [invoicingId, setInvoicingId] = useState<string | null>(null)
@@ -39,11 +58,56 @@ export function PosSummaryContent() {
       setSession(sess)
 
       if (sess) {
-        const { data: salesData } = await supabase.from('sales')
-          .select('id, ticket_number, sale_type, subtotal, discount_amount, tax_amount, total, payment_method, is_tax_free, status, created_at, clients(full_name), profiles!sales_salesperson_id_fkey(full_name)')
-          .eq('cash_session_id', sess.id)
-          .order('created_at', { ascending: false })
-        if (salesData) setSales(salesData)
+        const [salesRes, orderPaymentsRes] = await Promise.all([
+          supabase.from('sales')
+            .select('id, ticket_number, sale_type, subtotal, discount_amount, tax_amount, total, payment_method, is_tax_free, status, created_at, clients(full_name), profiles!sales_salesperson_id_fkey(full_name)')
+            .eq('cash_session_id', sess.id)
+            .order('created_at', { ascending: false }),
+          supabase.from('tailoring_order_payments')
+            .select('id, tailoring_order_id, payment_method, amount, created_at, tailoring_orders(order_number, clients(full_name))')
+            .eq('cash_session_id', sess.id)
+            .order('created_at', { ascending: false }),
+        ])
+
+        const saleRows: SessionMovement[] = (salesRes.data ?? []).map((s: any) => ({
+          id: s.id,
+          kind: 'sale',
+          ticket_number: s.ticket_number,
+          sale_type: s.sale_type,
+          subtotal: Number(s.subtotal ?? 0),
+          discount_amount: Number(s.discount_amount ?? 0),
+          tax_amount: Number(s.tax_amount ?? 0),
+          total: Number(s.total ?? 0),
+          payment_method: s.payment_method,
+          is_tax_free: s.is_tax_free ?? false,
+          status: s.status,
+          created_at: s.created_at,
+          clients: s.clients ?? null,
+          profiles: s.profiles ?? null,
+        }))
+
+        const orderRows: SessionMovement[] = (orderPaymentsRes.data ?? []).map((p: any) => ({
+          id: p.id,
+          kind: 'order_payment',
+          ticket_number: p.tailoring_orders?.order_number ?? '—',
+          sale_type: 'order_payment',
+          subtotal: 0,
+          discount_amount: 0,
+          tax_amount: 0,
+          total: Number(p.amount ?? 0),
+          payment_method: p.payment_method,
+          is_tax_free: false,
+          status: 'paid',
+          created_at: p.created_at,
+          clients: p.tailoring_orders?.clients ?? null,
+          profiles: null,
+          tailoring_order_id: p.tailoring_order_id,
+        }))
+
+        const merged = [...saleRows, ...orderRows].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        )
+        setSales(merged)
       }
       setIsLoading(false)
     }
@@ -208,37 +272,55 @@ export function PosSummaryContent() {
                 <TableBody>
                   {sales.length === 0 ? (
                     <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">Sin ventas aún</TableCell></TableRow>
-                  ) : sales.map((s: any) => (
-                    <TableRow key={s.id}>
+                  ) : sales.map((s) => (
+                    <TableRow key={`${s.kind}:${s.id}`}>
                       <TableCell className="font-mono text-sm">{s.ticket_number}</TableCell>
-                      <TableCell><Badge variant="outline" className="text-xs">{saleTypeLabels[s.sale_type] || s.sale_type}</Badge></TableCell>
+                      <TableCell>
+                        <Badge variant={s.kind === 'order_payment' ? 'secondary' : 'outline'} className="text-xs">
+                          {saleTypeLabels[s.sale_type] || s.sale_type}
+                        </Badge>
+                      </TableCell>
                       <TableCell className="text-sm">{s.clients?.full_name || '\u2014'}</TableCell>
-                      <TableCell className="text-sm text-slate-600">{(s.profiles as any)?.full_name ?? '\u2014'}</TableCell>
+                      <TableCell className="text-sm text-slate-600">{s.profiles?.full_name ?? '\u2014'}</TableCell>
                       <TableCell className="font-medium">{formatCurrency(s.total)}</TableCell>
                       <TableCell><PaymentMethodBadge method={s.payment_method} /></TableCell>
                       <TableCell className="text-xs text-muted-foreground">{new Date(s.created_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            title="Imprimir ticket"
-                            disabled={printingId === s.id}
-                            onClick={() => handlePrintTicket(s)}
-                          >
-                            {printingId === s.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            title="Emitir factura"
-                            disabled={invoicingId === s.id}
-                            onClick={() => handleInvoice(s)}
-                          >
-                            {invoicingId === s.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-                          </Button>
+                          {s.kind === 'sale' ? (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                title="Imprimir ticket"
+                                disabled={printingId === s.id}
+                                onClick={() => handlePrintTicket(s)}
+                              >
+                                {printingId === s.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                title="Emitir factura"
+                                disabled={invoicingId === s.id}
+                                onClick={() => handleInvoice(s)}
+                              >
+                                {invoicingId === s.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              title="Ver pedido"
+                              onClick={() => s.tailoring_order_id && router.push(`/sastre/pedidos/${s.tailoring_order_id}`)}
+                            >
+                              <FileText className="h-4 w-4" />
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
