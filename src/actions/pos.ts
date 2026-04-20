@@ -428,6 +428,27 @@ export const cashWithdrawal = protectedAction<{
   }
 )
 
+/** Busca una venta completada por su número de ticket (p. ej. "TICK-2026-0001"). */
+export const findSaleByTicketNumber = protectedAction<
+  { ticketNumber: string },
+  { sale: any } | null
+>(
+  { permission: 'pos.access', auditModule: 'pos' },
+  async (ctx, { ticketNumber }) => {
+    const trimmed = (ticketNumber ?? '').trim()
+    if (!trimmed) return success(null)
+
+    const { data: sale } = await ctx.adminClient
+      .from('sales')
+      .select('*, sale_lines(*), clients(full_name)')
+      .eq('ticket_number', trimmed)
+      .eq('status', 'completed')
+      .maybeSingle()
+
+    return success(sale ? { sale } : null)
+  }
+)
+
 /** Busca la venta completada más reciente que contiene una línea con el código de barras dado (para devoluciones por escáner/etiqueta). */
 export const findSaleByBarcode = protectedAction<
   { barcode: string; storeId?: string },

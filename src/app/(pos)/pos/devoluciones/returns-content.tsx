@@ -1,8 +1,7 @@
 'use client'
 
-import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -14,12 +13,11 @@ import { ArrowLeft, Search, Loader2, ArrowRightLeft, Ticket, ShoppingBag, Barcod
 import { toast } from 'sonner'
 import { useAuth } from '@/components/providers/auth-provider'
 import { useAction } from '@/hooks/use-action'
-import { createReturn, findSaleByBarcode } from '@/actions/pos'
+import { createReturn, findSaleByBarcode, findSaleByTicketNumber } from '@/actions/pos'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 
 export function ReturnsContent() {
   const router = useRouter()
-  const supabase = useMemo(() => createClient(), [])
   const { activeStoreId } = useAuth()
 
   const [ticketSearch, setTicketSearch] = useState('')
@@ -92,14 +90,23 @@ export function ReturnsContent() {
     const search = ticketSearch.trim()
     if (!search) return
     setIsSearching(true)
-    const { data } = await supabase.from('sales')
-      .select('*, sale_lines(*), clients(full_name)')
-      .or(`ticket_number.eq.${search},id.eq.${search}`)
-      .eq('status', 'completed')
-      .single()
-    if (data) { setFoundSale(data); setSelectedLineIds([]) }
-    else toast.error('Ticket no encontrado o ya devuelto')
-    setIsSearching(false)
+    try {
+      const result = await findSaleByTicketNumber({ ticketNumber: search })
+      if (!result?.success && result && 'error' in result) {
+        toast.error(result.error ?? 'Error al buscar el ticket')
+        return
+      }
+      if (result?.data?.sale) {
+        setFoundSale(result.data.sale)
+        setSelectedLineIds([])
+      } else {
+        toast.error('Ticket no encontrado o ya devuelto')
+      }
+    } catch {
+      toast.error('Error al buscar el ticket')
+    } finally {
+      setIsSearching(false)
+    }
   }
 
   const toggleLine = (lineId: string) => {
