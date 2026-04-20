@@ -30,6 +30,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Loader2,
   Plus,
@@ -40,6 +50,9 @@ import {
   Pencil,
   Trash2,
   FileText,
+  Check,
+  ChevronsUpDown,
+  Package,
 } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -51,9 +64,14 @@ import {
   updateSupplierInvoiceAction,
   markSupplierInvoicePaidAction,
   importSupplierInvoicesCsvAction,
+  listSuppliersForInvoice,
+  listUnlinkedDeliveryNotesForSupplier,
+  getSupplierInvoiceDeliveryNoteIds,
   type ApSupplierInvoiceRow,
   type ApSupplierInvoiceInput,
   type SupplierInvoicesKpis,
+  type SupplierOptionForInvoice,
+  type UnlinkedDeliveryNoteOption,
 } from '@/actions/supplier-invoices'
 
 const STATUS_OPTIONS = [
@@ -71,8 +89,6 @@ const STATUS_BADGE: Record<string, { label: string; className: string }> = {
   pagada: { label: 'Pagada', className: 'bg-green-100 text-green-800' },
 }
 
-const PAYMENT_METHODS = ['Efectivo', 'Transferencia', 'Tarjeta', 'Bizum', 'Otro']
-
 function today() {
   return new Date().toISOString().slice(0, 10)
 }
@@ -81,6 +97,22 @@ function addDays(dateStr: string, days: number) {
   const d = new Date(dateStr)
   d.setDate(d.getDate() + days)
   return d.toISOString().slice(0, 10)
+}
+
+function computeDueFromSupplier(invoiceDate: string, supplier: SupplierOptionForInvoice | null): string {
+  if (!supplier) return addDays(invoiceDate, 30)
+  if (supplier.payment_terms === 'immediate') return invoiceDate
+  const days = Number(supplier.payment_days ?? 30)
+  return addDays(invoiceDate, Number.isFinite(days) && days >= 0 ? days : 30)
+}
+
+const PAYMENT_TERMS_LABEL: Record<string, string> = {
+  immediate: 'Al contado',
+  net_15: '15 días',
+  net_30: '30 días',
+  net_60: '60 días',
+  net_90: '90 días',
+  custom: 'Personalizado',
 }
 
 export function SupplierInvoicesContent() {
@@ -100,6 +132,7 @@ export function SupplierInvoicesContent() {
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null)
 
   const [form, setForm] = useState({
+    supplier_id: '',
     supplier_name: '',
     supplier_cif: '',
     invoice_number: '',
@@ -112,6 +145,15 @@ export function SupplierInvoicesContent() {
     notes: '',
     attachment_url: '',
   })
+
+  const [suppliers, setSuppliers] = useState<SupplierOptionForInvoice[]>([])
+  const [supplierPopoverOpen, setSupplierPopoverOpen] = useState(false)
+  const [deliveryNotes, setDeliveryNotes] = useState<UnlinkedDeliveryNoteOption[]>([])
+  const [deliveryNotesLoading, setDeliveryNotesLoading] = useState(false)
+  const [selectedDeliveryNoteIds, setSelectedDeliveryNoteIds] = useState<string[]>([])
+  const [totalTouched, setTotalTouched] = useState(false)
+
+  const selectedSupplier = suppliers.find((s) => s.id === form.supplier_id) || null
 
   const loadKpis = useCallback(async () => {
     const r = await getSupplierInvoicesKpis()
@@ -130,6 +172,11 @@ export function SupplierInvoicesContent() {
     setLoading(false)
   }, [statusFilter, supplierSearch, dateFrom, dateTo])
 
+  const loadSuppliers = useCallback(async () => {
+    const r = await listSuppliersForInvoice()
+    if (r.success) setSuppliers(r.data)
+  }, [])
+
   useEffect(() => {
     loadKpis()
   }, [loadKpis])
@@ -138,14 +185,37 @@ export function SupplierInvoicesContent() {
     loadList()
   }, [loadList])
 
+  useEffect(() => {
+    loadSuppliers()
+  }, [loadSuppliers])
+
+  const loadDeliveryNotesForSupplier = useCallback(
+    async (supplierId: string, excludeInvoiceId: string | null) => {
+      if (!supplierId) {
+        setDeliveryNotes([])
+        return
+      }
+      setDeliveryNotesLoading(true)
+      const r = await listUnlinkedDeliveryNotesForSupplier({
+        supplierId,
+        excludeInvoiceId: excludeInvoiceId ?? undefined,
+      })
+      setDeliveryNotesLoading(false)
+      if (r.success) setDeliveryNotes(r.data)
+      else setDeliveryNotes([])
+    },
+    [],
+  )
+
   const openCreate = () => {
     setEditingId(null)
     setForm({
+      supplier_id: '',
       supplier_name: '',
       supplier_cif: '',
       invoice_number: '',
       invoice_date: today(),
-      due_date: addDays(today(), 15),
+      due_date: addDays(today(), 30),
       amount: '',
       tax_rate: '21',
       total_amount: '',
@@ -153,12 +223,16 @@ export function SupplierInvoicesContent() {
       notes: '',
       attachment_url: '',
     })
+    setSelectedDeliveryNoteIds([])
+    setDeliveryNotes([])
+    setTotalTouched(false)
     setDialogOpen(true)
   }
 
-  const openEdit = (row: ApSupplierInvoiceRow) => {
+  const openEdit = async (row: ApSupplierInvoiceRow) => {
     setEditingId(row.id)
     setForm({
+      supplier_id: row.supplier_id || '',
       supplier_name: row.supplier_name,
       supplier_cif: row.supplier_cif || '',
       invoice_number: row.invoice_number,
@@ -171,7 +245,51 @@ export function SupplierInvoicesContent() {
       notes: row.notes || '',
       attachment_url: row.attachment_url || '',
     })
+    setTotalTouched(true)
     setDialogOpen(true)
+    if (row.supplier_id) {
+      await loadDeliveryNotesForSupplier(row.supplier_id, row.id)
+      const linked = await getSupplierInvoiceDeliveryNoteIds(row.id)
+      if (linked.success) setSelectedDeliveryNoteIds(linked.data)
+      else setSelectedDeliveryNoteIds([])
+    } else {
+      setDeliveryNotes([])
+      setSelectedDeliveryNoteIds([])
+    }
+  }
+
+  const handleSelectSupplier = (supplierId: string) => {
+    const supplier = suppliers.find((s) => s.id === supplierId) || null
+    setForm((f) => ({
+      ...f,
+      supplier_id: supplierId,
+      supplier_name: supplier?.name ?? f.supplier_name,
+      supplier_cif: supplier?.nif_cif ?? f.supplier_cif,
+      due_date: computeDueFromSupplier(f.invoice_date, supplier),
+      payment_method: supplier?.payment_method ?? f.payment_method,
+    }))
+    setSupplierPopoverOpen(false)
+    setSelectedDeliveryNoteIds([])
+    loadDeliveryNotesForSupplier(supplierId, editingId)
+  }
+
+  const toggleDeliveryNote = (noteId: string) => {
+    setSelectedDeliveryNoteIds((prev) =>
+      prev.includes(noteId) ? prev.filter((id) => id !== noteId) : [...prev, noteId],
+    )
+  }
+
+  const selectedDeliveryNotesTotal = selectedDeliveryNoteIds.reduce((sum, id) => {
+    const note = deliveryNotes.find((n) => n.id === id)
+    return sum + (note?.total_amount ?? 0)
+  }, 0)
+
+  const applyDeliveryNotesTotal = () => {
+    const rate = parseFloat(String(form.tax_rate).replace(',', '.')) || 21
+    const base = Math.round(selectedDeliveryNotesTotal * 100) / 100
+    const total = Math.round(base * (1 + rate / 100) * 100) / 100
+    setForm((f) => ({ ...f, amount: String(base), total_amount: String(total) }))
+    setTotalTouched(true)
   }
 
   const amountNum = parseFloat(String(form.amount).replace(',', '.')) || 0
@@ -180,26 +298,31 @@ export function SupplierInvoicesContent() {
   const totalNum = parseFloat(String(form.total_amount).replace(',', '.')) || computedTotal
 
   const handleSave = async () => {
-    if (!form.supplier_name.trim()) {
-      toast.error('El nombre del proveedor es obligatorio')
+    if (!form.supplier_id && !form.supplier_name.trim()) {
+      toast.error('Selecciona un proveedor')
       return
     }
     if (!form.invoice_number.trim()) {
       toast.error('El número de factura es obligatorio')
       return
     }
-    if (new Date(form.due_date) <= new Date(form.invoice_date)) {
-      toast.error('La fecha de vencimiento debe ser posterior a la fecha de factura')
+    if (new Date(form.due_date) < new Date(form.invoice_date)) {
+      toast.error('La fecha de vencimiento no puede ser anterior a la fecha de factura')
       return
     }
     if (totalNum <= 0) {
       toast.error('El total debe ser mayor que 0')
       return
     }
+    if (selectedDeliveryNoteIds.length > 0 && !form.supplier_id) {
+      toast.error('Selecciona un proveedor registrado para vincular albaranes')
+      return
+    }
 
     setSaving(true)
     const tax_amount = totalNum - amountNum
     const payload: ApSupplierInvoiceInput = {
+      supplier_id: form.supplier_id || null,
       supplier_name: form.supplier_name.trim(),
       supplier_cif: form.supplier_cif.trim() || null,
       invoice_number: form.invoice_number.trim(),
@@ -211,6 +334,7 @@ export function SupplierInvoicesContent() {
       payment_method: form.payment_method.trim() || null,
       notes: form.notes.trim() || null,
       attachment_url: form.attachment_url.trim() || null,
+      delivery_note_ids: selectedDeliveryNoteIds,
     }
 
     if (editingId) {
@@ -483,11 +607,49 @@ export function SupplierInvoicesContent() {
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2 sm:col-span-1">
                 <Label>Proveedor *</Label>
-                <Input
-                  value={form.supplier_name}
-                  onChange={(e) => setForm((f) => ({ ...f, supplier_name: e.target.value }))}
-                  placeholder="Nombre del proveedor"
-                />
+                <Popover open={supplierPopoverOpen} onOpenChange={setSupplierPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={supplierPopoverOpen}
+                      className="w-full justify-between font-normal"
+                    >
+                      <span className="truncate text-left">
+                        {selectedSupplier?.name || form.supplier_name || 'Selecciona proveedor...'}
+                      </span>
+                      <ChevronsUpDown className="h-4 w-4 opacity-50 shrink-0" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[320px] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Buscar proveedor..." />
+                      <CommandList>
+                        <CommandEmpty>Sin resultados</CommandEmpty>
+                        <CommandGroup>
+                          {suppliers.map((s) => (
+                            <CommandItem
+                              key={s.id}
+                              value={`${s.name} ${s.nif_cif ?? ''}`}
+                              onSelect={() => handleSelectSupplier(s.id)}
+                            >
+                              <Check
+                                className={`h-4 w-4 mr-2 ${form.supplier_id === s.id ? 'opacity-100' : 'opacity-0'}`}
+                              />
+                              <div className="flex flex-col">
+                                <span className="font-medium">{s.name}</span>
+                                <span className="text-xs text-muted-foreground">
+                                  {s.nif_cif ?? '—'} · {PAYMENT_TERMS_LABEL[s.payment_terms ?? 'net_30'] ?? `${s.payment_days ?? 30} días`}
+                                </span>
+                              </div>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
               <div>
                 <Label>CIF / NIF</Label>
@@ -496,6 +658,69 @@ export function SupplierInvoicesContent() {
                   onChange={(e) => setForm((f) => ({ ...f, supplier_cif: e.target.value }))}
                   placeholder="B12345678"
                 />
+              </div>
+              <div className="col-span-2">
+                <div className="flex items-center justify-between">
+                  <Label className="flex items-center gap-1">
+                    <Package className="h-3.5 w-3.5" /> Albaranes a facturar
+                  </Label>
+                  {selectedDeliveryNoteIds.length > 0 && (
+                    <button
+                      type="button"
+                      className="text-xs text-blue-600 hover:underline"
+                      onClick={applyDeliveryNotesTotal}
+                    >
+                      Sumar al total ({formatCurrency(selectedDeliveryNotesTotal)})
+                    </button>
+                  )}
+                </div>
+                <div className="border rounded-md mt-1 max-h-44 overflow-y-auto divide-y">
+                  {!form.supplier_id ? (
+                    <p className="text-xs text-muted-foreground px-3 py-4 text-center">
+                      Selecciona un proveedor para ver sus albaranes pendientes
+                    </p>
+                  ) : deliveryNotesLoading ? (
+                    <div className="flex justify-center py-4">
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : deliveryNotes.length === 0 ? (
+                    <p className="text-xs text-muted-foreground px-3 py-4 text-center">
+                      No hay albaranes pendientes de este proveedor
+                    </p>
+                  ) : (
+                    deliveryNotes.map((note) => {
+                      const checked = selectedDeliveryNoteIds.includes(note.id)
+                      return (
+                        <label
+                          key={note.id}
+                          className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-muted/50"
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={() => toggleDeliveryNote(note.id)}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-sm font-medium truncate">
+                                {note.supplier_reference || `Albarán ${note.id.slice(0, 8)}`}
+                              </span>
+                              <span className="text-sm font-semibold text-right whitespace-nowrap">
+                                {note.total_amount > 0 ? formatCurrency(note.total_amount) : (
+                                  <span className="text-xs text-muted-foreground">sin importe</span>
+                                )}
+                              </span>
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {note.delivery_date ? formatDate(note.delivery_date) : 'sin fecha'}
+                              {' · '}{note.line_count} línea{note.line_count === 1 ? '' : 's'}
+                              {' · '}{note.status}
+                            </div>
+                          </div>
+                        </label>
+                      )
+                    })
+                  )}
+                </div>
               </div>
               <div>
                 <Label>Nº factura *</Label>
@@ -509,23 +734,12 @@ export function SupplierInvoicesContent() {
                 <Label>Fecha factura *</Label>
                 <DatePickerPopover
                   value={form.invoice_date}
-                  onChange={(date) => setForm((f) => ({ ...f, invoice_date: date }))}
+                  onChange={(date) => setForm((f) => ({
+                    ...f,
+                    invoice_date: date,
+                    due_date: computeDueFromSupplier(date, selectedSupplier),
+                  }))}
                 />
-              </div>
-              <div>
-                <Label>Fecha vencimiento *</Label>
-                <div className="flex gap-1">
-                  <DatePickerPopover
-                    value={form.due_date}
-                    onChange={(date) => setForm((f) => ({ ...f, due_date: date }))}
-                  />
-                  <Button type="button" size="sm" variant="outline" onClick={() => setForm((f) => ({ ...f, due_date: addDays(f.invoice_date, 15) }))}>
-                    +15
-                  </Button>
-                  <Button type="button" size="sm" variant="outline" onClick={() => setForm((f) => ({ ...f, due_date: addDays(f.invoice_date, 30) }))}>
-                    +30
-                  </Button>
-                </div>
               </div>
               <div>
                 <Label>Base imponible (€)</Label>
@@ -564,21 +778,29 @@ export function SupplierInvoicesContent() {
                   type="number"
                   step="0.01"
                   value={form.total_amount}
-                  onChange={(e) => setForm((f) => ({ ...f, total_amount: e.target.value }))}
+                  onChange={(e) => { setTotalTouched(true); setForm((f) => ({ ...f, total_amount: e.target.value })) }}
                 />
               </div>
-              <div>
-                <Label>Método de pago</Label>
-                <Select value={form.payment_method} onValueChange={(v) => setForm((f) => ({ ...f, payment_method: v }))}>
-                  <SelectTrigger><SelectValue placeholder="Opcional" /></SelectTrigger>
-                  <SelectContent>
-                    {PAYMENT_METHODS.map((m) => (
-                      <SelectItem key={m} value={m}>{m}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
             </div>
+
+            {selectedSupplier && (
+              <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs flex flex-wrap gap-x-4 gap-y-1">
+                <span>
+                  <span className="text-muted-foreground">Vence:</span>{' '}
+                  <span className="font-medium">{formatDate(form.due_date)}</span>
+                </span>
+                <span>
+                  <span className="text-muted-foreground">Condiciones:</span>{' '}
+                  <span className="font-medium">
+                    {PAYMENT_TERMS_LABEL[selectedSupplier.payment_terms ?? 'net_30'] ?? `${selectedSupplier.payment_days ?? 30} días`}
+                  </span>
+                </span>
+                <span>
+                  <span className="text-muted-foreground">Pago:</span>{' '}
+                  <span className="font-medium">{selectedSupplier.payment_method ?? '—'}</span>
+                </span>
+              </div>
+            )}
             <div>
               <Label>Notas</Label>
               <Textarea

@@ -6,6 +6,65 @@ import { revalidatePath } from 'next/cache'
 
 const ALBARANES_BUCKET = 'albaranes'
 
+function toNumber(value: unknown): number {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
+}
+
+async function pickWarehouseForDeliveryReceipt(
+  adminClient: any,
+  hints: { destination_warehouse_id?: string | null; destination_store_id?: string | null; store_id?: string | null },
+): Promise<string | null> {
+  if (hints.destination_warehouse_id) {
+    const { data } = await adminClient
+      .from('warehouses')
+      .select('id')
+      .eq('id', hints.destination_warehouse_id)
+      .eq('is_active', true)
+      .maybeSingle()
+    if (data?.id) return String(data.id)
+  }
+  const storeId = hints.destination_store_id || hints.store_id
+  if (storeId) {
+    const { data } = await adminClient
+      .from('warehouses')
+      .select('id')
+      .eq('store_id', storeId)
+      .eq('is_main', true)
+      .eq('is_active', true)
+      .maybeSingle()
+    if (data?.id) return String(data.id)
+  }
+  const { data } = await adminClient
+    .from('warehouses')
+    .select('id')
+    .eq('is_active', true)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+  return data?.id ? String(data.id) : null
+}
+
+async function pickVariantForDeliveryProduct(adminClient: any, productId: string): Promise<string | null> {
+  const def = await adminClient
+    .from('product_variants')
+    .select('id')
+    .eq('product_id', productId)
+    .eq('is_default', true)
+    .limit(1)
+    .maybeSingle()
+  if (def.data?.id) return String(def.data.id)
+  const first = await adminClient
+    .from('product_variants')
+    .select('id')
+    .eq('product_id', productId)
+    .eq('is_active', true)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+  return first.data?.id ? String(first.data.id) : null
+}
+
 type DeliveryNoteLineInput = {
   product_variant_id?: string | null
   product_name?: string | null
@@ -681,21 +740,146 @@ export const updateSupplierDeliveryNote = protectedAction<{ id: string; data: Pa
   }
 )
 
-export const markSupplierDeliveryNoteReceived = protectedAction<string, { id: string }>(
+export const markSupplierDeliveryNoteReceived = protectedAction<
+  string,
+  { id: string; stock_warnings: number; stock_update_skipped: boolean }
+>(
   {
     permission: 'suppliers.create_order',
     auditModule: 'suppliers',
     auditAction: 'state_change',
     auditEntity: 'supplier_delivery_note',
-    revalidate: ['/admin/almacen/albaranes', '/admin/proveedores'],
+    revalidate: ['/admin/almacen/albaranes', '/admin/proveedores', '/admin/contabilidad/facturas-proveedores'],
   },
   async (ctx, id) => {
-    const { error } = await ctx.adminClient
+    const { data: note, error: noteErr } = await ctx.adminClient
       .from('supplier_delivery_notes')
-      .update({ status: 'recibido' })
+      .select('id, store_id, supplier_id, supplier_order_id, stock_updated_at, supplier_reference')
       .eq('id', id)
-    if (error) return failure(error.message || 'Error al marcar recibido', 'INTERNAL')
-    return success({ id })
+      .single()
+    if (noteErr || !note) return failure('Albarán de proveedor no encontrado', 'NOT_FOUND')
+
+    if ((note as any).stock_updated_at) {
+      const { error: statusErr } = await ctx.adminClient
+        .from('supplier_delivery_notes')
+        .update({ status: 'recibido' })
+        .eq('id', id)
+      if (statusErr) return failure(statusErr.message || 'Error al marcar recibido', 'INTERNAL')
+      return success({ id, stock_warnings: 0, stock_update_skipped: true })
+    }
+
+    let destinationStoreId: string | null = (note as any).store_id || null
+    let destinationWarehouseId: string | null = null
+    if ((note as any).supplier_order_id) {
+      const { data: order } = await ctx.adminClient
+        .from('supplier_orders')
+        .select('destination_store_id, destination_warehouse_id')
+        .eq('id', (note as any).supplier_order_id)
+        .maybeSingle()
+      if (order) {
+        destinationStoreId = destinationStoreId || (order as any).destination_store_id || null
+        destinationWarehouseId = (order as any).destination_warehouse_id || null
+      }
+    }
+
+    const warehouseId = await pickWarehouseForDeliveryReceipt(ctx.adminClient, {
+      destination_warehouse_id: destinationWarehouseId,
+      destination_store_id: destinationStoreId,
+      store_id: (note as any).store_id || null,
+    })
+
+    const { data: lines, error: linesErr } = await ctx.adminClient
+      .from('supplier_delivery_note_lines')
+      .select('id, product_id, fabric_id, product_name, reference, quantity_ordered, quantity_received, unit_price')
+      .eq('supplier_delivery_note_id', id)
+    if (linesErr) return failure(linesErr.message || 'Error al cargar líneas del albarán', 'INTERNAL')
+
+    let stockWarnings = 0
+    const now = new Date().toISOString()
+    const reasonLabel = `Recepción albarán ${(note as any).supplier_reference || id}`
+
+    if (warehouseId) {
+      for (const line of lines || []) {
+        const qtyReceived = toNumber((line as any).quantity_received)
+        const qtyOrdered = toNumber((line as any).quantity_ordered)
+        const qtyToAdd = qtyReceived > 0 ? qtyReceived : qtyOrdered
+        if (qtyToAdd <= 0) continue
+        if (!Number.isInteger(qtyToAdd)) {
+          stockWarnings += 1
+          continue
+        }
+
+        const productId = (line as any).product_id ? String((line as any).product_id) : null
+        if (!productId) {
+          stockWarnings += 1
+          continue
+        }
+        const variantId = await pickVariantForDeliveryProduct(ctx.adminClient, productId)
+        if (!variantId) {
+          stockWarnings += 1
+          continue
+        }
+
+        const { data: currentLevel } = await ctx.adminClient
+          .from('stock_levels')
+          .select('id, quantity')
+          .eq('product_variant_id', variantId)
+          .eq('warehouse_id', warehouseId)
+          .maybeSingle()
+
+        const stockBefore = toNumber((currentLevel as any)?.quantity)
+        const stockAfter = stockBefore + qtyToAdd
+        if (currentLevel?.id) {
+          const { error: updErr } = await ctx.adminClient
+            .from('stock_levels')
+            .update({ quantity: stockAfter, updated_at: now, last_movement_at: now })
+            .eq('id', currentLevel.id)
+          if (updErr) return failure(updErr.message || 'Error al actualizar stock', 'INTERNAL')
+        } else {
+          const { error: insErr } = await ctx.adminClient
+            .from('stock_levels')
+            .insert({
+              product_variant_id: variantId,
+              warehouse_id: warehouseId,
+              quantity: qtyToAdd,
+              reserved: 0,
+              updated_at: now,
+              last_movement_at: now,
+            })
+          if (insErr) return failure(insErr.message || 'Error al crear stock', 'INTERNAL')
+        }
+
+        const { error: movErr } = await ctx.adminClient
+          .from('stock_movements')
+          .insert({
+            product_variant_id: variantId,
+            warehouse_id: warehouseId,
+            movement_type: 'purchase_receipt',
+            quantity: qtyToAdd,
+            stock_before: stockBefore,
+            stock_after: stockAfter,
+            reason: reasonLabel,
+            reference_type: 'supplier_delivery_note',
+            reference_id: id,
+            created_by: ctx.userId !== 'system' ? ctx.userId : null,
+            store_id: destinationStoreId,
+          })
+        if (movErr) return failure(movErr.message || 'Error al registrar movimiento de stock', 'INTERNAL')
+      }
+    } else {
+      stockWarnings += (lines || []).length
+    }
+
+    const { error: updateErr } = await ctx.adminClient
+      .from('supplier_delivery_notes')
+      .update({
+        status: 'recibido',
+        stock_updated_at: warehouseId ? now : null,
+      })
+      .eq('id', id)
+    if (updateErr) return failure(updateErr.message || 'Error al marcar recibido', 'INTERNAL')
+
+    return success({ id, stock_warnings: stockWarnings, stock_update_skipped: !warehouseId })
   }
 )
 

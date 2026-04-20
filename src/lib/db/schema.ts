@@ -885,9 +885,17 @@ export const supplierDeliveryNotes = pgTable('supplier_delivery_notes', {
   status: supplierDeliveryNoteStatusEnum('status').default('pendiente').notNull(),
   attachmentUrl: text('attachment_url'),
   notes: text('notes'),
+  stockUpdatedAt: timestamp('stock_updated_at', { withTimezone: true }),
   createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const apSupplierInvoiceDeliveryNotes = pgTable('ap_supplier_invoice_delivery_notes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  supplierInvoiceId: uuid('supplier_invoice_id').notNull(),
+  supplierDeliveryNoteId: uuid('supplier_delivery_note_id').notNull().references(() => supplierDeliveryNotes.id, { onDelete: 'restrict' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
 export const supplierDeliveryNoteLines = pgTable('supplier_delivery_note_lines', {

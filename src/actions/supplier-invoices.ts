@@ -5,10 +5,12 @@ import { success, failure } from '@/lib/errors'
 
 const PERMISSION = 'supplier_invoices.manage'
 const TABLE = 'ap_supplier_invoices'
+const LINK_TABLE = 'ap_supplier_invoice_delivery_notes'
 
 export type ApSupplierInvoiceRow = {
   id: string
   store_id: string | null
+  supplier_id: string | null
   supplier_name: string
   supplier_cif: string | null
   invoice_number: string
@@ -28,17 +30,68 @@ export type ApSupplierInvoiceRow = {
 
 export type ApSupplierInvoiceInput = {
   store_id?: string | null
+  supplier_id?: string | null
   supplier_name: string
   supplier_cif?: string | null
   invoice_number: string
   invoice_date: string
-  due_date: string
+  due_date?: string | null
   amount: number
   tax_amount?: number
   total_amount: number
   payment_method?: string | null
   notes?: string | null
   attachment_url?: string | null
+  delivery_note_ids?: string[]
+}
+
+export type SupplierOptionForInvoice = {
+  id: string
+  name: string
+  nif_cif: string | null
+  payment_terms: string | null
+  payment_days: number | null
+  payment_method: string | null
+}
+
+const SUPPLIER_PAYMENT_METHOD_LABEL: Record<string, string> = {
+  transfer: 'Transferencia',
+  direct_debit: 'Domiciliación',
+  check: 'Cheque',
+  cash: 'Efectivo',
+  card: 'Tarjeta',
+  bank_draft: 'Pagaré',
+}
+
+function supplierPaymentMethodLabel(code: string | null | undefined): string | null {
+  if (!code) return null
+  return SUPPLIER_PAYMENT_METHOD_LABEL[code] ?? null
+}
+
+export type UnlinkedDeliveryNoteOption = {
+  id: string
+  supplier_reference: string | null
+  delivery_date: string | null
+  status: string
+  total_amount: number
+  line_count: number
+}
+
+function addDaysISO(dateStr: string, days: number): string {
+  const d = new Date(dateStr)
+  d.setDate(d.getDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+function computeDueDate(
+  invoiceDate: string,
+  supplier: { payment_terms: string | null; payment_days: number | null } | null,
+): string {
+  if (!supplier) return addDaysISO(invoiceDate, 30)
+  const terms = supplier.payment_terms ?? 'net_30'
+  if (terms === 'immediate') return invoiceDate
+  const days = Number(supplier.payment_days ?? 30)
+  return addDaysISO(invoiceDate, Number.isFinite(days) && days >= 0 ? days : 30)
 }
 
 export type SupplierInvoicesKpis = {
@@ -128,6 +181,7 @@ export const listSupplierInvoices = protectedAction<
     const list = (data || []).map((r: Record<string, unknown>) => ({
       id: String(r.id),
       store_id: r.store_id != null ? String(r.store_id) : null,
+      supplier_id: r.supplier_id != null ? String(r.supplier_id) : null,
       supplier_name: String(r.supplier_name ?? ''),
       supplier_cif: r.supplier_cif != null ? String(r.supplier_cif) : null,
       invoice_number: String(r.invoice_number ?? ''),
@@ -148,6 +202,152 @@ export const listSupplierInvoices = protectedAction<
   }
 )
 
+export const listSuppliersForInvoice = protectedAction<void, SupplierOptionForInvoice[]>(
+  { permission: PERMISSION, auditModule: 'accounting' },
+  async (ctx) => {
+    const { data, error } = await ctx.adminClient
+      .from('suppliers')
+      .select('id, name, nif_cif, payment_terms, payment_days, payment_method')
+      .eq('is_active', true)
+      .order('name', { ascending: true })
+    if (error) return failure(error.message)
+    const list = (data || []).map((r: Record<string, unknown>) => ({
+      id: String(r.id),
+      name: String(r.name ?? ''),
+      nif_cif: r.nif_cif != null ? String(r.nif_cif) : null,
+      payment_terms: r.payment_terms != null ? String(r.payment_terms) : null,
+      payment_days: r.payment_days != null ? Number(r.payment_days) : null,
+      payment_method: supplierPaymentMethodLabel(r.payment_method as string | null),
+    }))
+    return success(list)
+  }
+)
+
+export const listUnlinkedDeliveryNotesForSupplier = protectedAction<
+  { supplierId: string; excludeInvoiceId?: string | null },
+  UnlinkedDeliveryNoteOption[]
+>(
+  { permission: PERMISSION, auditModule: 'accounting' },
+  async (ctx, { supplierId, excludeInvoiceId }) => {
+    if (!supplierId?.trim()) return success([])
+
+    const { data: linkedRows, error: linkedErr } = await ctx.adminClient
+      .from(LINK_TABLE)
+      .select('supplier_delivery_note_id, supplier_invoice_id')
+    if (linkedErr) return failure(linkedErr.message)
+
+    const linkedIds = new Set<string>()
+    for (const r of (linkedRows || []) as any[]) {
+      if (excludeInvoiceId && String(r.supplier_invoice_id) === excludeInvoiceId) continue
+      linkedIds.add(String(r.supplier_delivery_note_id))
+    }
+
+    let query = ctx.adminClient
+      .from('supplier_delivery_notes')
+      .select(`
+        id, supplier_reference, delivery_date, status,
+        lines:supplier_delivery_note_lines(quantity_ordered, quantity_received, unit_price)
+      `)
+      .eq('supplier_id', supplierId.trim())
+      .order('delivery_date', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false })
+      .limit(200)
+
+    const { data, error } = await query
+    if (error) return failure(error.message)
+
+    const list: UnlinkedDeliveryNoteOption[] = []
+    for (const row of (data || []) as any[]) {
+      if (linkedIds.has(String(row.id))) continue
+      const lines = (row.lines || []) as Array<{ quantity_ordered: number | null; quantity_received: number | null; unit_price: string | number | null }>
+      let total = 0
+      for (const l of lines) {
+        const qty = l.quantity_received != null ? Number(l.quantity_received) : Number(l.quantity_ordered ?? 0)
+        const unit = l.unit_price != null ? Number(l.unit_price) : 0
+        if (Number.isFinite(qty) && Number.isFinite(unit)) total += qty * unit
+      }
+      list.push({
+        id: String(row.id),
+        supplier_reference: row.supplier_reference ?? null,
+        delivery_date: row.delivery_date ?? null,
+        status: String(row.status ?? 'pendiente'),
+        total_amount: Math.round(total * 100) / 100,
+        line_count: lines.length,
+      })
+    }
+    return success(list)
+  }
+)
+
+export const getSupplierInvoiceDeliveryNoteIds = protectedAction<string, string[]>(
+  { permission: PERMISSION, auditModule: 'accounting' },
+  async (ctx, invoiceId) => {
+    if (!invoiceId?.trim()) return success([])
+    const { data, error } = await ctx.adminClient
+      .from(LINK_TABLE)
+      .select('supplier_delivery_note_id')
+      .eq('supplier_invoice_id', invoiceId)
+    if (error) return failure(error.message)
+    return success((data || []).map((r: any) => String(r.supplier_delivery_note_id)))
+  }
+)
+
+async function resolveSupplierDefaults(
+  adminClient: any,
+  supplierId: string | null | undefined,
+): Promise<{
+  supplier_name: string
+  supplier_cif: string | null
+  payment_terms: string | null
+  payment_days: number | null
+  payment_method: string | null
+} | null> {
+  if (!supplierId?.trim()) return null
+  const { data } = await adminClient
+    .from('suppliers')
+    .select('id, name, nif_cif, payment_terms, payment_days, payment_method')
+    .eq('id', supplierId.trim())
+    .maybeSingle()
+  if (!data) return null
+  return {
+    supplier_name: String((data as any).name ?? ''),
+    supplier_cif: (data as any).nif_cif != null ? String((data as any).nif_cif) : null,
+    payment_terms: (data as any).payment_terms != null ? String((data as any).payment_terms) : null,
+    payment_days: (data as any).payment_days != null ? Number((data as any).payment_days) : null,
+    payment_method: supplierPaymentMethodLabel((data as any).payment_method as string | null),
+  }
+}
+
+async function validateDeliveryNoteLink(
+  adminClient: any,
+  deliveryNoteIds: string[],
+  supplierId: string,
+  excludeInvoiceId: string | null,
+): Promise<string | null> {
+  if (deliveryNoteIds.length === 0) return null
+
+  const { data: notes } = await adminClient
+    .from('supplier_delivery_notes')
+    .select('id, supplier_id')
+    .in('id', deliveryNoteIds)
+  const byId = new Map<string, string | null>((notes || []).map((n: any) => [String(n.id), n.supplier_id ? String(n.supplier_id) : null]))
+  for (const id of deliveryNoteIds) {
+    const owner = byId.get(id)
+    if (!owner) return `Albarán ${id} no encontrado`
+    if (owner !== supplierId) return 'Todos los albaranes deben pertenecer al proveedor seleccionado'
+  }
+
+  const { data: links } = await adminClient
+    .from(LINK_TABLE)
+    .select('supplier_delivery_note_id, supplier_invoice_id')
+    .in('supplier_delivery_note_id', deliveryNoteIds)
+  for (const l of (links || []) as any[]) {
+    if (excludeInvoiceId && String(l.supplier_invoice_id) === excludeInvoiceId) continue
+    return 'Alguno de los albaranes ya está vinculado a otra factura'
+  }
+  return null
+}
+
 export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInput, { id: string }>(
   {
     permission: PERMISSION,
@@ -156,26 +356,44 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
     auditEntity: 'supplier_invoice',
   },
   async (ctx, input) => {
-    if (!input.supplier_name?.trim()) return failure('El nombre del proveedor es obligatorio')
+    const supplierDefaults = await resolveSupplierDefaults(ctx.adminClient, input.supplier_id)
+
+    const supplierName = (supplierDefaults?.supplier_name || input.supplier_name || '').trim()
+    const supplierCif = input.supplier_cif?.trim() || supplierDefaults?.supplier_cif || null
+
+    if (!supplierName) return failure('El proveedor es obligatorio')
     if (!input.invoice_number?.trim()) return failure('El número de factura es obligatorio')
-    if (new Date(input.due_date) <= new Date(input.invoice_date)) {
-      return failure('La fecha de vencimiento debe ser posterior a la fecha de factura')
+
+    const dueDate = input.due_date?.trim()
+      ? input.due_date
+      : computeDueDate(input.invoice_date, supplierDefaults)
+
+    if (new Date(dueDate) < new Date(input.invoice_date)) {
+      return failure('La fecha de vencimiento no puede ser anterior a la fecha de factura')
     }
     if (Number(input.total_amount) <= 0) return failure('El total debe ser mayor que 0')
+
+    const deliveryNoteIds = Array.from(new Set((input.delivery_note_ids || []).map((s) => String(s).trim()).filter(Boolean)))
+    if (deliveryNoteIds.length > 0) {
+      if (!input.supplier_id?.trim()) return failure('Selecciona un proveedor registrado para vincular albaranes')
+      const errMsg = await validateDeliveryNoteLink(ctx.adminClient, deliveryNoteIds, input.supplier_id.trim(), null)
+      if (errMsg) return failure(errMsg, 'VALIDATION')
+    }
 
     const { data, error } = await ctx.adminClient
       .from(TABLE)
       .insert({
         store_id: input.store_id || null,
-        supplier_name: input.supplier_name.trim(),
-        supplier_cif: input.supplier_cif?.trim() || null,
+        supplier_id: input.supplier_id?.trim() || null,
+        supplier_name: supplierName,
+        supplier_cif: supplierCif,
         invoice_number: input.invoice_number.trim(),
         invoice_date: input.invoice_date,
-        due_date: input.due_date,
+        due_date: dueDate,
         amount: Number(input.amount),
         tax_amount: Number(input.tax_amount ?? 0),
         total_amount: Number(input.total_amount),
-        payment_method: input.payment_method?.trim() || null,
+        payment_method: input.payment_method?.trim() || supplierDefaults?.payment_method || null,
         notes: input.notes?.trim() || null,
         attachment_url: input.attachment_url?.trim() || null,
         created_by: ctx.userId,
@@ -184,6 +402,19 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
       .single()
 
     if (error) return failure(error.message)
+
+    if (deliveryNoteIds.length > 0) {
+      const rows = deliveryNoteIds.map((noteId) => ({
+        supplier_invoice_id: String(data.id),
+        supplier_delivery_note_id: noteId,
+      }))
+      const { error: linkErr } = await ctx.adminClient.from(LINK_TABLE).insert(rows)
+      if (linkErr) {
+        await ctx.adminClient.from(TABLE).delete().eq('id', data.id)
+        return failure(linkErr.message || 'Error al vincular albaranes', 'INTERNAL')
+      }
+    }
+
     return success({ id: String(data.id) })
   }
 )
@@ -197,25 +428,43 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
   },
   async (ctx, input) => {
     const { id, ...rest } = input
-    if (!rest.supplier_name?.trim()) return failure('El nombre del proveedor es obligatorio')
-    if (new Date(rest.due_date) <= new Date(rest.invoice_date)) {
-      return failure('La fecha de vencimiento debe ser posterior a la fecha de factura')
+    const supplierDefaults = await resolveSupplierDefaults(ctx.adminClient, rest.supplier_id)
+
+    const supplierName = (supplierDefaults?.supplier_name || rest.supplier_name || '').trim()
+    const supplierCif = rest.supplier_cif?.trim() || supplierDefaults?.supplier_cif || null
+
+    if (!supplierName) return failure('El proveedor es obligatorio')
+
+    const dueDate = rest.due_date?.trim()
+      ? rest.due_date
+      : computeDueDate(rest.invoice_date, supplierDefaults)
+
+    if (new Date(dueDate) < new Date(rest.invoice_date)) {
+      return failure('La fecha de vencimiento no puede ser anterior a la fecha de factura')
     }
     if (Number(rest.total_amount) <= 0) return failure('El total debe ser mayor que 0')
+
+    const deliveryNoteIds = Array.from(new Set((rest.delivery_note_ids || []).map((s) => String(s).trim()).filter(Boolean)))
+    if (deliveryNoteIds.length > 0) {
+      if (!rest.supplier_id?.trim()) return failure('Selecciona un proveedor registrado para vincular albaranes')
+      const errMsg = await validateDeliveryNoteLink(ctx.adminClient, deliveryNoteIds, rest.supplier_id.trim(), id)
+      if (errMsg) return failure(errMsg, 'VALIDATION')
+    }
 
     const { error } = await ctx.adminClient
       .from(TABLE)
       .update({
         store_id: rest.store_id || null,
-        supplier_name: rest.supplier_name.trim(),
-        supplier_cif: rest.supplier_cif?.trim() || null,
+        supplier_id: rest.supplier_id?.trim() || null,
+        supplier_name: supplierName,
+        supplier_cif: supplierCif,
         invoice_number: rest.invoice_number.trim(),
         invoice_date: rest.invoice_date,
-        due_date: rest.due_date,
+        due_date: dueDate,
         amount: Number(rest.amount),
         tax_amount: Number(rest.tax_amount ?? 0),
         total_amount: Number(rest.total_amount),
-        payment_method: rest.payment_method?.trim() || null,
+        payment_method: rest.payment_method?.trim() || supplierDefaults?.payment_method || null,
         notes: rest.notes?.trim() || null,
         attachment_url: rest.attachment_url?.trim() || null,
         updated_at: new Date().toISOString(),
@@ -223,6 +472,22 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
       .eq('id', id)
 
     if (error) return failure(error.message)
+
+    const { error: delErr } = await ctx.adminClient
+      .from(LINK_TABLE)
+      .delete()
+      .eq('supplier_invoice_id', id)
+    if (delErr) return failure(delErr.message || 'Error al actualizar vínculos de albaranes', 'INTERNAL')
+
+    if (deliveryNoteIds.length > 0) {
+      const rows = deliveryNoteIds.map((noteId) => ({
+        supplier_invoice_id: id,
+        supplier_delivery_note_id: noteId,
+      }))
+      const { error: insErr } = await ctx.adminClient.from(LINK_TABLE).insert(rows)
+      if (insErr) return failure(insErr.message || 'Error al vincular albaranes', 'INTERNAL')
+    }
+
     return success(undefined)
   }
 )
