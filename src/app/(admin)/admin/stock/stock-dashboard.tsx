@@ -5,7 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Package, AlertTriangle, TrendingDown, Truck, Plus, Warehouse, ArrowLeftRight, ClipboardList } from 'lucide-react'
+import { Package, AlertTriangle, TrendingDown, Truck, Plus, Warehouse, ArrowLeftRight, ClipboardList, Download, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Skeleton } from '@/components/ui/skeleton'
 import { usePermissions } from '@/hooks/use-permissions'
 import { getStockDashboardStats, getPendingTransfersCount } from '@/actions/products'
@@ -30,6 +31,35 @@ export function StockDashboard() {
   const [pendingTransfersCount, setPendingTransfersCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   const [outOfStockFilter, setOutOfStockFilter] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
+
+  const handleExportInventory = async () => {
+    setIsExporting(true)
+    try {
+      const res = await fetch('/api/reports/export-inventory')
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: 'Error al exportar' }))
+        toast.error(body.error || 'Error al exportar el inventario')
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const dispo = res.headers.get('Content-Disposition') || ''
+      const match = dispo.match(/filename="([^"]+)"/)
+      a.download = match ? match[1] : `inventario-prats-${new Date().toISOString().slice(0, 10)}.csv`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      toast.success('Inventario descargado')
+    } catch {
+      toast.error('Error al descargar el inventario')
+    } finally {
+      setIsExporting(false)
+    }
+  }
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab)
@@ -102,6 +132,18 @@ export function StockDashboard() {
           <p className="text-muted-foreground">Gestión de catálogo, inventario y proveedores</p>
         </div>
         <div className="flex gap-2">
+          {can('products.view') && (
+            <Button
+              variant="outline"
+              onClick={handleExportInventory}
+              disabled={isExporting}
+              className="gap-2"
+              title="Descargar CSV del inventario por variante y almacén"
+            >
+              {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Descargar inventario
+            </Button>
+          )}
           {activeTab === 'tejidos' && can('products.create') ? (
             <Button onClick={() => fabricTabRef.current?.openNewFabricDialog()} className="gap-2 bg-prats-navy hover:bg-prats-navy-light">
               <Plus className="h-4 w-4" /> Nuevo tejido
