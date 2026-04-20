@@ -19,11 +19,12 @@ import { toast } from 'sonner'
 const saleTypeLabels: Record<string, string> = {
   boutique: 'Boutique', tailoring_deposit: 'Señal', tailoring_final: 'Pago final', alteration: 'Arreglo', online: 'Online',
   order_payment: 'Pago pedido',
+  return_voucher: 'Devolución · Vale', return_exchange: 'Devolución · Cambio',
 }
 
 type SessionMovement = {
   id: string
-  kind: 'sale' | 'order_payment'
+  kind: 'sale' | 'order_payment' | 'return'
   ticket_number: string
   sale_type: string
   subtotal: number
@@ -37,6 +38,7 @@ type SessionMovement = {
   clients: { full_name: string } | null
   profiles: { full_name: string } | null
   tailoring_order_id?: string
+  return_voucher_code?: string | null
 }
 
 export function PosSummaryContent() {
@@ -58,7 +60,9 @@ export function PosSummaryContent() {
       setSession(sess)
 
       if (sess) {
-        const [salesRes, orderPaymentsRes] = await Promise.all([
+        const openedAt = sess.opened_at ?? new Date(0).toISOString()
+        const closedAt = sess.closed_at ?? new Date().toISOString()
+        const [salesRes, orderPaymentsRes, returnsRes] = await Promise.all([
           supabase.from('sales')
             .select('id, ticket_number, sale_type, subtotal, discount_amount, tax_amount, total, payment_method, is_tax_free, status, created_at, clients(full_name), profiles!sales_salesperson_id_fkey(full_name)')
             .eq('cash_session_id', sess.id)
@@ -66,6 +70,13 @@ export function PosSummaryContent() {
           supabase.from('tailoring_order_payments')
             .select('id, tailoring_order_id, payment_method, amount, created_at, tailoring_orders(order_number, clients(full_name))')
             .eq('cash_session_id', sess.id)
+            .order('created_at', { ascending: false }),
+          // Devoluciones de la sesión: filtrar por tienda y por rango temporal de la caja
+          supabase.from('returns')
+            .select('id, return_type, total_returned, reason, created_at, original_sale_id, voucher_id, profiles!returns_processed_by_fkey(full_name), sales!returns_original_sale_id_fkey(ticket_number, clients(full_name)), vouchers(code)')
+            .eq('store_id', activeStoreId)
+            .gte('created_at', openedAt)
+            .lte('created_at', closedAt)
             .order('created_at', { ascending: false }),
         ])
 
@@ -104,7 +115,25 @@ export function PosSummaryContent() {
           tailoring_order_id: p.tailoring_order_id,
         }))
 
-        const merged = [...saleRows, ...orderRows].sort(
+        const returnRows: SessionMovement[] = (returnsRes.data ?? []).map((r: any) => ({
+          id: r.id,
+          kind: 'return',
+          ticket_number: r.sales?.ticket_number ?? '—',
+          sale_type: r.return_type === 'voucher' ? 'return_voucher' : 'return_exchange',
+          subtotal: 0,
+          discount_amount: 0,
+          tax_amount: 0,
+          total: -Number(r.total_returned ?? 0),
+          payment_method: r.return_type === 'voucher' ? 'voucher' : 'mixed',
+          is_tax_free: false,
+          status: 'refunded',
+          created_at: r.created_at,
+          clients: r.sales?.clients ?? null,
+          profiles: r.profiles ?? null,
+          return_voucher_code: r.vouchers?.code ?? null,
+        }))
+
+        const merged = [...saleRows, ...orderRows, ...returnRows].sort(
           (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         )
         setSales(merged)

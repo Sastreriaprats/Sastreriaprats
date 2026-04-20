@@ -664,9 +664,41 @@ export const createReturn = protectedAction<{
 
     if (rpcError) return failure(rpcError.message)
 
+    // Cargar datos completos para el modal/ticket de devolución
+    const [{ data: returnRow }, { data: originalSale }, { data: lines }] = await Promise.all([
+      ctx.adminClient
+        .from('returns')
+        .select('id, return_type, total_returned, reason, created_at')
+        .eq('id', result.return_id)
+        .maybeSingle(),
+      ctx.adminClient
+        .from('sales')
+        .select('ticket_number, clients(full_name)')
+        .eq('id', input.original_sale_id)
+        .maybeSingle(),
+      ctx.adminClient
+        .from('sale_lines')
+        .select('description, sku, quantity, unit_price, line_total')
+        .in('id', input.line_ids),
+    ])
+
+    const originalClientName = (originalSale as any)?.clients?.full_name ?? null
+
     return success({
       ...result,
       voucher_code: result.voucher_code ?? null,
+      original_ticket_number: (originalSale as any)?.ticket_number ?? null,
+      original_client_name: originalClientName,
+      return_created_at: returnRow?.created_at ?? new Date().toISOString(),
+      return_type: input.return_type,
+      reason: input.reason,
+      returned_lines: (lines ?? []).map((l: any) => ({
+        description: l.description,
+        sku: l.sku,
+        quantity: l.quantity,
+        unit_price: Number(l.unit_price ?? 0),
+        line_total: Number(l.line_total ?? 0),
+      })),
     })
   }
 )

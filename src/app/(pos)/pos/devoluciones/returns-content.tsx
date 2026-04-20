@@ -9,7 +9,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { ArrowLeft, Search, Loader2, ArrowRightLeft, Ticket, ShoppingBag, Barcode, X, Package } from 'lucide-react'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { ArrowLeft, Search, Loader2, ArrowRightLeft, Ticket, ShoppingBag, Barcode, X, Package, Printer, Receipt } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/components/providers/auth-provider'
 import { useAction } from '@/hooks/use-action'
@@ -22,6 +23,8 @@ import {
   searchSalesByTicketPrefix,
 } from '@/actions/pos'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { generateReturnTicketPdf, printReturnTicketPdf, type ReturnTicketData } from '@/components/pos/return-ticket-pdf'
+import { getStorePdfData } from '@/lib/pdf/pdf-company'
 
 interface TicketCandidate {
   id: string
@@ -43,7 +46,10 @@ interface ReplacementItem {
 
 export function ReturnsContent() {
   const router = useRouter()
-  const { activeStoreId } = useAuth()
+  const { activeStoreId, stores } = useAuth()
+  const activeStoreName = stores.find((s) => s.storeId === activeStoreId)?.storeName ?? null
+
+  const [completedReturn, setCompletedReturn] = useState<ReturnTicketData & { voucher_code: string | null; exchange_payload?: any } | null>(null)
 
   const [ticketSearch, setTicketSearch] = useState('')
   const [barcodeSearch, setBarcodeSearch] = useState('')
@@ -254,14 +260,34 @@ export function ReturnsContent() {
   const { execute, isLoading: isProcessing } = useAction(createReturn, {
     successMessage: returnType === 'voucher' ? 'Vale de devolución generado' : 'Devolución registrada',
     onSuccess: (data: any) => {
-      if (returnType === 'voucher') {
-        if (data.voucher_code) toast.success(`Código del vale: ${data.voucher_code}`, { duration: 10000 })
-        setFoundSale(null); setSelectedLineIds([]); setReason(''); setTicketSearch(''); setBarcodeSearch('')
-        return
+      const storeConfig = getStorePdfData(activeStoreName)
+      const ticketData: ReturnTicketData & { voucher_code: string | null; exchange_payload?: any } = {
+        return_type: returnType,
+        original_ticket_number: data?.original_ticket_number ?? foundSale?.ticket_number ?? null,
+        client_name: data?.original_client_name ?? foundSale?.clients?.full_name ?? null,
+        total_returned: Number(data?.total_returned ?? selectedTotal ?? 0),
+        voucher_code: data?.voucher_code ?? null,
+        reason: reason,
+        created_at: data?.return_created_at ?? new Date().toISOString(),
+        lines: Array.isArray(data?.returned_lines) && data.returned_lines.length > 0
+          ? data.returned_lines
+          : (foundSale?.sale_lines ?? [])
+              .filter((l: any) => selectedLineIds.includes(l.id))
+              .map((l: any) => ({
+                description: l.description,
+                sku: l.sku,
+                quantity: l.quantity,
+                unit_price: Number(l.unit_price ?? 0),
+                line_total: Number(l.line_total ?? 0),
+              })),
+        storeAddress: storeConfig.address,
+        storeSubtitle: storeConfig.subtitle ?? null,
+        storePhones: storeConfig.phones,
       }
-      // Cambio directo: guardar reemplazos + crédito en sessionStorage y llevar a caja
-      try {
-        const payload = {
+
+      if (returnType === 'exchange') {
+        // Guardar payload del cambio para aplicarlo en caja cuando el usuario continúe
+        ticketData.exchange_payload = {
           created_at: Date.now(),
           origin_ticket: foundSale?.ticket_number ?? null,
           return_id: data?.return_id ?? null,
@@ -276,14 +302,54 @@ export function ReturnsContent() {
             image_url: r.imageUrl ?? null,
           })),
         }
-        sessionStorage.setItem('pos_pending_exchange', JSON.stringify(payload))
-        toast.success('Redirigiendo a caja para completar el cambio…')
-        router.push('/pos/caja')
-      } catch {
-        toast.error('No se pudo redirigir a caja. Añade el artículo manualmente.')
+      } else if (data?.voucher_code) {
+        toast.success(`Código del vale: ${data.voucher_code}`, { duration: 10000 })
       }
+
+      setCompletedReturn(ticketData)
     },
   })
+
+  const resetAfterReturn = () => {
+    setCompletedReturn(null)
+    setFoundSale(null)
+    setSelectedLineIds([])
+    setReason('')
+    setTicketSearch('')
+    setBarcodeSearch('')
+    setReplacements([])
+    setProductQuery('')
+    setProductResults([])
+  }
+
+  const continueToExchangeCaja = () => {
+    if (!completedReturn?.exchange_payload) return
+    try {
+      sessionStorage.setItem('pos_pending_exchange', JSON.stringify(completedReturn.exchange_payload))
+      toast.success('Redirigiendo a caja para completar el cambio…')
+      router.push('/pos/caja')
+    } catch {
+      toast.error('No se pudo redirigir a caja. Añade el artículo manualmente.')
+    }
+  }
+
+  const handlePrintReturnTicket = async () => {
+    if (!completedReturn) return
+    try {
+      await printReturnTicketPdf(completedReturn)
+    } catch {
+      toast.error('Error al imprimir el ticket de devolución')
+    }
+  }
+
+  const handleDownloadReturnTicket = async () => {
+    if (!completedReturn) return
+    try {
+      await generateReturnTicketPdf(completedReturn)
+    } catch {
+      toast.error('Error al generar el ticket de devolución')
+    }
+  }
 
   const canProcess = () => {
     if (!reason) return false
@@ -529,6 +595,69 @@ export function ReturnsContent() {
           )}
         </div>
       </div>
+
+      <Dialog open={!!completedReturn} onOpenChange={(open) => {
+        if (open) return
+        if (completedReturn?.return_type === 'exchange' && completedReturn.exchange_payload) {
+          // No permitir cerrar sin decidir en caso de cambio directo
+          return
+        }
+        resetAfterReturn()
+      }}>
+        <DialogContent className="max-w-md" onPointerDownOutside={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Receipt className="h-5 w-5 text-green-600" />
+              {completedReturn?.return_type === 'voucher' ? 'Vale de devolución generado' : 'Devolución registrada'}
+            </DialogTitle>
+          </DialogHeader>
+          {completedReturn && (
+            <div className="space-y-4 py-2">
+              <div className="rounded-lg bg-slate-50 border border-slate-200 p-4">
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Ticket origen</p>
+                <p className="text-lg font-mono font-bold text-slate-900 mt-0.5">{completedReturn.original_ticket_number ?? '—'}</p>
+              </div>
+              <dl className="grid grid-cols-1 gap-3 text-sm">
+                <div className="flex justify-between items-center py-2 border-b border-slate-100">
+                  <dt className="text-slate-600">Total devuelto</dt>
+                  <dd className="font-semibold tabular-nums">{formatCurrency(completedReturn.total_returned)}</dd>
+                </div>
+                {completedReturn.client_name && (
+                  <div className="flex justify-between items-center py-2 border-b border-slate-100">
+                    <dt className="text-slate-600">Cliente</dt>
+                    <dd className="text-slate-800">{completedReturn.client_name}</dd>
+                  </div>
+                )}
+                {completedReturn.voucher_code && (
+                  <div className="flex justify-between items-center py-2">
+                    <dt className="text-slate-600">Código del vale</dt>
+                    <dd className="font-mono font-semibold">{completedReturn.voucher_code}</dd>
+                  </div>
+                )}
+              </dl>
+            </div>
+          )}
+          <DialogFooter className="flex flex-wrap gap-2 sm:flex-row border-t pt-4">
+            <Button className="flex-1 min-w-[140px] gap-2 bg-prats-gold hover:bg-prats-gold/90 text-prats-navy font-semibold" onClick={handlePrintReturnTicket}>
+              <Printer className="h-4 w-4" />
+              Imprimir ticket
+            </Button>
+            <Button variant="outline" className="flex-1 min-w-[140px] gap-2" onClick={handleDownloadReturnTicket}>
+              <Receipt className="h-4 w-4" />
+              Descargar PDF
+            </Button>
+            {completedReturn?.return_type === 'exchange' ? (
+              <Button className="flex-1 min-w-[140px] bg-prats-navy hover:bg-prats-navy-light" onClick={continueToExchangeCaja}>
+                Continuar a caja
+              </Button>
+            ) : (
+              <Button className="flex-1 min-w-[140px] bg-prats-navy hover:bg-prats-navy-light" onClick={resetAfterReturn}>
+                Nueva devolución
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
