@@ -306,7 +306,7 @@ export const getSalesByEmployee = protectedAction<
     const [saleLinesRes, paymentsRes] = await Promise.all([
       ctx.adminClient
         .from('sale_lines')
-        .select('sale_id, line_total, sales!inner(created_by, status, created_at)')
+        .select('sale_id, line_total, sales!inner(salesperson_id, status, created_at)')
         .gte('sales.created_at', start_date)
         .lte('sales.created_at', end_date + 'T23:59:59')
         .eq('sales.status', 'completed'),
@@ -321,7 +321,7 @@ export const getSalesByEmployee = protectedAction<
 
     for (const line of saleLinesRes.data || []) {
       const sale = line.sales as any
-      const empId = sale?.created_by || 'unknown'
+      const empId = sale?.salesperson_id || 'unknown'
       if (!employees[empId]) employees[empId] = { name: empId, saleIds: new Set(), pos_total: 0, tailoring_ops: 0, tailoring_total: 0 }
       if (line.sale_id) employees[empId].saleIds.add(String(line.sale_id))
       employees[empId].pos_total += (line.line_total as number) || 0
