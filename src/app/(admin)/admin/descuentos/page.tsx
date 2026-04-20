@@ -1,7 +1,12 @@
 'use client'
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { useState, useEffect, useCallback } from 'react'
+import {
+  listDiscountCodes,
+  createDiscountCode,
+  toggleDiscountCodeActive,
+  deleteDiscountCode,
+} from '@/actions/discounts'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -55,7 +60,6 @@ function generateCode(): string {
 }
 
 export default function DescuentosPage() {
-  const supabase = useMemo(() => createClient(), [])
   const [codes, setCodes] = useState<DiscountCode[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -63,12 +67,10 @@ export default function DescuentosPage() {
   const [form, setForm] = useState(EMPTY_FORM)
 
   const fetchCodes = useCallback(async () => {
-    const { data } = await supabase
-      .from('discount_codes')
-      .select('*')
-      .order('created_at', { ascending: false })
-    if (data) setCodes(data)
-  }, [supabase])
+    const res = await listDiscountCodes()
+    if (res.success) setCodes(res.data as DiscountCode[])
+    else toast.error(res.error || 'Error al cargar los códigos')
+  }, [])
 
   useEffect(() => {
     fetchCodes().finally(() => setLoading(false))
@@ -85,41 +87,34 @@ export default function DescuentosPage() {
 
     setSaving(true)
     try {
-      const payload = {
-        code: form.code.trim().toUpperCase(),
+      const res = await createDiscountCode({
+        code: form.code,
         description: form.description.trim() || null,
-        discount_type: form.discount_type,
+        discount_type: form.discount_type as 'percentage' | 'fixed',
         discount_value: parseFloat(form.discount_value),
         min_purchase: form.min_purchase ? parseFloat(form.min_purchase) : null,
         max_uses: form.max_uses ? parseInt(form.max_uses) : null,
         valid_from: form.valid_from || null,
         valid_until: form.valid_until || null,
-        applies_to: form.applies_to,
-        is_active: true,
-        current_uses: 0,
+        applies_to: form.applies_to as 'all' | 'online' | 'boutique',
+      })
+      if (!res.success) {
+        toast.error(res.error || 'Error al crear')
+        return
       }
-
-      const { error } = await supabase.from('discount_codes').insert(payload)
-      if (error) throw error
-
       toast.success('Código de descuento creado')
       setDialogOpen(false)
       setForm(EMPTY_FORM)
       await fetchCodes()
-    } catch (err: any) {
-      toast.error(err?.message?.includes('unique') ? 'Este código ya existe' : (err?.message || 'Error al crear'))
     } finally {
       setSaving(false)
     }
   }
 
   const toggleActive = async (id: string, current: boolean) => {
-    const { error } = await supabase
-      .from('discount_codes')
-      .update({ is_active: !current, updated_at: new Date().toISOString() })
-      .eq('id', id)
-    if (error) {
-      toast.error('Error al actualizar')
+    const res = await toggleDiscountCodeActive({ id, is_active: !current })
+    if (!res.success) {
+      toast.error(res.error || 'Error al actualizar')
     } else {
       toast.success(current ? 'Código desactivado' : 'Código activado')
       await fetchCodes()
@@ -128,9 +123,9 @@ export default function DescuentosPage() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('¿Eliminar este código de descuento?')) return
-    const { error } = await supabase.from('discount_codes').delete().eq('id', id)
-    if (error) {
-      toast.error('Error al eliminar')
+    const res = await deleteDiscountCode({ id })
+    if (!res.success) {
+      toast.error(res.error || 'Error al eliminar')
     } else {
       toast.success('Código eliminado')
       await fetchCodes()
