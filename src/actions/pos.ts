@@ -451,23 +451,82 @@ export const cashWithdrawal = protectedAction<{
   }
 )
 
-/** Busca una venta completada por su número de ticket (p. ej. "TICK-2026-0001"). */
+/**
+ * Busca una venta por su número de ticket de forma flexible:
+ *  - case-insensitive (ILIKE)
+ *  - coincidencia parcial (busca en cualquier parte del número)
+ *  - incluye ventas con devoluciones parciales (no solo 'completed')
+ *
+ * Devuelve:
+ *  - { sale }   si hay un único match exacto o un único candidato
+ *  - { matches } si hay varios candidatos (para que el UI muestre selector)
+ *  - null       si no hay ninguno
+ */
 export const findSaleByTicketNumber = protectedAction<
   { ticketNumber: string },
-  { sale: any } | null
+  { sale: any } | { matches: Array<{ id: string; ticket_number: string; created_at: string; total: number; client_name: string | null }> } | null
 >(
   { permission: 'pos.access', auditModule: 'pos' },
   async (ctx, { ticketNumber }) => {
     const trimmed = (ticketNumber ?? '').trim()
     if (!trimmed) return success(null)
 
+    // Intento 1: match exacto (case-insensitive) en estados devolvibles
+    const { data: exactMatch } = await ctx.adminClient
+      .from('sales')
+      .select('*, sale_lines(*), clients(full_name)')
+      .ilike('ticket_number', trimmed)
+      .in('status', ['completed', 'partially_returned'])
+      .maybeSingle()
+
+    if (exactMatch) return success({ sale: exactMatch })
+
+    // Intento 2: coincidencia parcial — listar candidatos
+    const pattern = `%${trimmed}%`
+    const { data: candidates } = await ctx.adminClient
+      .from('sales')
+      .select('id, ticket_number, created_at, total, clients(full_name)')
+      .ilike('ticket_number', pattern)
+      .in('status', ['completed', 'partially_returned'])
+      .order('created_at', { ascending: false })
+      .limit(10)
+
+    if (!candidates?.length) return success(null)
+
+    if (candidates.length === 1) {
+      // Cargar la venta completa
+      const { data: sale } = await ctx.adminClient
+        .from('sales')
+        .select('*, sale_lines(*), clients(full_name)')
+        .eq('id', candidates[0].id)
+        .maybeSingle()
+      return success(sale ? { sale } : null)
+    }
+
+    return success({
+      matches: candidates.map((c: any) => ({
+        id: c.id,
+        ticket_number: c.ticket_number,
+        created_at: c.created_at,
+        total: c.total,
+        client_name: c.clients?.full_name ?? null,
+      })),
+    })
+  }
+)
+
+/** Carga una venta completa por id (para selector de candidatos en devoluciones). */
+export const getSaleByIdForReturn = protectedAction<
+  { saleId: string },
+  { sale: any } | null
+>(
+  { permission: 'pos.access', auditModule: 'pos' },
+  async (ctx, { saleId }) => {
     const { data: sale } = await ctx.adminClient
       .from('sales')
       .select('*, sale_lines(*), clients(full_name)')
-      .eq('ticket_number', trimmed)
-      .eq('status', 'completed')
+      .eq('id', saleId)
       .maybeSingle()
-
     return success(sale ? { sale } : null)
   }
 )

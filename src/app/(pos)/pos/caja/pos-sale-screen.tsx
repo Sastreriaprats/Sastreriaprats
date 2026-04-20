@@ -84,6 +84,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const barcodeBufferRef = useRef({ digits: '', firstAt: 0 })
   const scannerInputRef = useRef<HTMLInputElement>(null)
   const appliedCobroRef = useRef(false)
+  const appliedExchangeRef = useRef(false)
   const lastCobroLinesRef = useRef<Array<{ entity_type: 'tailoring_order' | 'sale'; entity_id: string; amount: number }>>([])
   const cobroPaymentMethodRef = useRef<'cash' | 'card' | 'bizum' | 'transfer' | 'voucher'>('cash')
   const integroSubmitRef = useRef(false)
@@ -244,6 +245,64 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
     setSaleType(initialCobro.entity_type === 'tailoring_order' ? 'tailoring_final' : 'boutique')
     router.replace('/pos/caja')
   }, [initialCobro, router])
+
+  // Pre-carga desde "Cambio directo" (devoluciones): lee sessionStorage 'pos_pending_exchange'
+  // y añade los artículos de reemplazo + una línea de crédito negativa por el importe devuelto.
+  useEffect(() => {
+    if (appliedExchangeRef.current) return
+    if (typeof window === 'undefined') return
+    let raw: string | null = null
+    try { raw = sessionStorage.getItem('pos_pending_exchange') } catch { return }
+    if (!raw) return
+    try {
+      const payload = JSON.parse(raw) as {
+        created_at: number
+        origin_ticket: string | null
+        return_id: string | null
+        credit: number
+        items: Array<{ variant_id: string; description: string; sku: string; unit_price: number; quantity: number; tax_rate: number; image_url: string | null }>
+      }
+      // Caducar si tiene más de 15 minutos
+      if (!payload || Date.now() - (payload.created_at ?? 0) > 15 * 60 * 1000) {
+        sessionStorage.removeItem('pos_pending_exchange')
+        return
+      }
+      if (!Array.isArray(payload.items) || payload.items.length === 0) return
+
+      appliedExchangeRef.current = true
+      const newLines: TicketLine[] = payload.items.map((it) => ({
+        id: crypto.randomUUID(),
+        product_variant_id: it.variant_id,
+        description: it.description,
+        sku: it.sku,
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+        original_price: it.unit_price,
+        discount_percentage: 0,
+        tax_rate: it.tax_rate ?? 21,
+        cost_price: 0,
+        image_url: it.image_url ?? undefined,
+      }))
+      if (payload.credit > 0) {
+        newLines.push({
+          id: crypto.randomUUID(),
+          product_variant_id: null,
+          description: `Crédito por devolución${payload.origin_ticket ? ` (${payload.origin_ticket})` : ''}`,
+          sku: '',
+          quantity: 1,
+          unit_price: -payload.credit,
+          discount_percentage: 0,
+          tax_rate: 0,
+          cost_price: 0,
+        })
+      }
+      setTicketLines(newLines)
+      sessionStorage.removeItem('pos_pending_exchange')
+      toast.success(`Cambio cargado${payload.origin_ticket ? ` — ticket ${payload.origin_ticket}` : ''}`)
+    } catch {
+      try { sessionStorage.removeItem('pos_pending_exchange') } catch { /* ignore */ }
+    }
+  }, [])
 
   // Búsqueda de clientes para asignar a la venta
   useEffect(() => {
