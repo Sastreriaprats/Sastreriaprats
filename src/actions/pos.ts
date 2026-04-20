@@ -515,6 +515,38 @@ export const findSaleByTicketNumber = protectedAction<
   }
 )
 
+/**
+ * Autocomplete en vivo para buscador de tickets (mín. 3 caracteres).
+ * Siempre devuelve un array de coincidencias (hasta 15) sin cargar la venta completa.
+ */
+export const searchSalesByTicketPrefix = protectedAction<
+  { prefix: string },
+  Array<{ id: string; ticket_number: string; created_at: string; total: number; client_name: string | null }>
+>(
+  { permission: 'pos.access', auditModule: 'pos' },
+  async (ctx, { prefix }) => {
+    const trimmed = (prefix ?? '').trim()
+    if (trimmed.length < 3) return success([])
+
+    const { data } = await ctx.adminClient
+      .from('sales')
+      .select('id, ticket_number, created_at, total, clients(full_name)')
+      .ilike('ticket_number', `%${trimmed}%`)
+      .in('status', ['completed', 'partially_returned'])
+      .order('created_at', { ascending: false })
+      .limit(15)
+
+    const list = (data ?? []).map((c: any) => ({
+      id: c.id,
+      ticket_number: c.ticket_number,
+      created_at: c.created_at,
+      total: Number(c.total ?? 0),
+      client_name: c.clients?.full_name ?? null,
+    }))
+    return success(list)
+  }
+)
+
 /** Carga una venta completa por id (para selector de candidatos en devoluciones). */
 export const getSaleByIdForReturn = protectedAction<
   { saleId: string },

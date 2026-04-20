@@ -19,6 +19,7 @@ import {
   findSaleByTicketNumber,
   getSaleByIdForReturn,
   searchProductsForPos,
+  searchSalesByTicketPrefix,
 } from '@/actions/pos'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 
@@ -117,6 +118,20 @@ export function ReturnsContent() {
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [activeStoreId, searchSaleByBarcode])
+
+  // Autocomplete: al escribir ≥3 caracteres, mostrar tickets coincidentes (debounce 250ms)
+  useEffect(() => {
+    if (foundSale) return
+    const q = ticketSearch.trim()
+    if (q.length < 3) { setTicketCandidates([]); return }
+    const t = setTimeout(async () => {
+      try {
+        const res = await searchSalesByTicketPrefix({ prefix: q })
+        if (res?.success && Array.isArray(res.data)) setTicketCandidates(res.data)
+      } catch { /* ignorar */ }
+    }, 250)
+    return () => clearTimeout(t)
+  }, [ticketSearch, foundSale])
 
   const searchSale = async () => {
     const search = ticketSearch.trim()
