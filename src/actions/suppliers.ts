@@ -1044,32 +1044,6 @@ export const getSupplierOrderDetail = protectedAction<
   }
 )
 
-/** Actualización simple del estado de un pedido a proveedor (sin lógica de stock). */
-export const updateSupplierOrderStatus = protectedAction<
-  { orderId: string; status: typeof SUPPLIER_ORDER_STATUSES[number] },
-  any
->(
-  {
-    permission: 'suppliers.create_order',
-    auditModule: 'suppliers',
-    auditAction: 'update',
-    auditEntity: 'supplier_order',
-    revalidate: ['/admin/proveedores'],
-  },
-  async (ctx, { orderId, status }) => {
-    if (!SUPPLIER_ORDER_STATUSES.includes(status)) return failure('Estado no válido', 'VALIDATION')
-    const { data: order, error } = await ctx.adminClient
-      .from('supplier_orders')
-      .update({ status })
-      .eq('id', orderId)
-      .select()
-      .single()
-    if (error) return failure(error.message)
-    if (!order) return failure('Pedido no encontrado', 'NOT_FOUND')
-    return success(order)
-  }
-)
-
 /** Marca la factura de un pedido como pagada. */
 export const markSupplierInvoicePaid = protectedAction<
   { orderId: string },

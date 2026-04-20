@@ -35,7 +35,7 @@ import { ArrowLeft, Loader2, Truck, FileText, Trash2, AlertTriangle, Check } fro
 import { toast } from 'sonner'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import {
-  updateSupplierOrderStatus,
+  updateSupplierOrderStatusAction,
   getSupplierOrderLines,
   receiveSupplierOrderLines,
   markSupplierInvoicePaid,
@@ -188,11 +188,23 @@ export function PedidoDetailContent({
 
   async function changeStatus(newStatus: string) {
     setLoading(newStatus)
-    const res = await updateSupplierOrderStatus({ orderId: order.id, status: newStatus as any })
+    const res = await updateSupplierOrderStatusAction({ supplierOrderId: order.id, status: newStatus as any })
     setLoading(null)
     if (res.success) {
       setCurrentStatus(newStatus)
-      toast.success(`Estado actualizado: ${STATUS_LABELS[newStatus] || newStatus}`)
+      if (newStatus === 'received') {
+        const warnings = Number((res as any)?.data?.stock_warnings || 0)
+        const skipped = Boolean((res as any)?.data?.stock_update_skipped)
+        if (skipped) {
+          toast.success('Estado actualizado: Recibido (stock ya actualizado previamente)')
+        } else if (warnings > 0) {
+          toast.warning('Recibido. Algunas líneas no actualizaron stock (sin variante asociada).')
+        } else {
+          toast.success('Recibido. Stock actualizado correctamente.')
+        }
+      } else {
+        toast.success(`Estado actualizado: ${STATUS_LABELS[newStatus] || newStatus}`)
+      }
       router.refresh()
     } else {
       toast.error((res as any)?.error || 'Error al actualizar el estado')
