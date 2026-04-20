@@ -89,7 +89,7 @@ export function protectedAction<TInput, TOutput>(
 
       if (result.success && options.auditAction && options.auditAction !== 'read' && user) {
         const data = result.data as Record<string, unknown> | undefined
-        const entityId = data?.id != null ? (data.id as string) : undefined
+        const entityId = data?.id != null ? (data.id as string) : (typeof data?.auditEntityId === 'string' ? data.auditEntityId as string : undefined)
         // Descripción legible: la acción puede devolver auditDescription y audit_entity_display (no se envían al cliente)
         const auditDescription = data?.auditDescription ?? data?.audit_description
         const auditEntityDisplay = data?.auditEntityDisplay ?? data?.audit_entity_display
@@ -108,6 +108,18 @@ export function protectedAction<TInput, TOutput>(
               return `${actionEs[options.auditAction] ?? options.auditAction} ${entityEs[e] ?? e}`
             })()
 
+        // Datos antes/después provistos explícitamente por el handler para registrar diff detallado
+        const auditOldData = data?.auditOldData ?? data?.audit_old_data
+        const auditNewData = data?.auditNewData ?? data?.audit_new_data
+        const auditMetadata = data?.auditMetadata ?? data?.audit_metadata
+
+        const pOldData = auditOldData !== undefined ? auditOldData : undefined
+        const pNewData = auditNewData !== undefined
+          ? auditNewData
+          : options.auditAction === 'create'
+            ? input
+            : undefined
+
         try {
           await adminClient.rpc('log_audit', {
             p_user_id: user.id,
@@ -117,15 +129,31 @@ export function protectedAction<TInput, TOutput>(
             p_entity_id: entityId,
             p_entity_display: entityDisplay ?? undefined,
             p_description: description,
-            p_new_data: options.auditAction === 'create' ? input : undefined,
+            p_old_data: pOldData,
+            p_new_data: pNewData,
+            p_metadata: auditMetadata,
           })
         } catch (auditError) {
           console.error('[Audit Error]', auditError)
         }
 
         // Quitar campos de auditoría para no enviarlos al cliente
-        if (data && (data.auditDescription !== undefined || data.audit_description !== undefined || data.auditEntityDisplay !== undefined || data.audit_entity_display !== undefined)) {
-          const { auditDescription: _1, auditEntityDisplay: _2, audit_description: _3, audit_entity_display: _4, ...rest } = data
+        if (data && (
+          data.auditDescription !== undefined || data.audit_description !== undefined ||
+          data.auditEntityDisplay !== undefined || data.audit_entity_display !== undefined ||
+          data.auditEntityId !== undefined ||
+          data.auditOldData !== undefined || data.audit_old_data !== undefined ||
+          data.auditNewData !== undefined || data.audit_new_data !== undefined ||
+          data.auditMetadata !== undefined || data.audit_metadata !== undefined
+        )) {
+          const {
+            auditDescription: _1, auditEntityDisplay: _2, audit_description: _3, audit_entity_display: _4,
+            auditEntityId: _5,
+            auditOldData: _6, audit_old_data: _7,
+            auditNewData: _8, audit_new_data: _9,
+            auditMetadata: _10, audit_metadata: _11,
+            ...rest
+          } = data
           result.data = rest as TOutput
         }
       }

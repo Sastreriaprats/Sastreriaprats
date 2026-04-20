@@ -6,6 +6,7 @@ import { createClientSchema, updateClientSchema, clientNoteSchema, clientMeasure
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { sendWelcomeEmail } from '@/lib/email/transactional'
+import { buildAuditDiff } from '@/lib/audit'
 
 export const listClients = protectedAction<ListParams, ListResult<any>>(
   { permission: 'clients.view', auditModule: 'clients' },
@@ -154,6 +155,12 @@ export const updateClientAction = protectedAction<{ id: string; data: any }, any
     const updateData: any = { ...parsed.data }
     delete updateData.full_name
 
+    const { data: before } = await ctx.adminClient
+      .from('clients')
+      .select('*')
+      .eq('id', id)
+      .single()
+
     const { data: client, error } = await ctx.adminClient
       .from('clients')
       .update(updateData)
@@ -162,7 +169,14 @@ export const updateClientAction = protectedAction<{ id: string; data: any }, any
       .single()
 
     if (error) return failure(error.message)
-    return success(client)
+    const diff = buildAuditDiff(before as Record<string, unknown> | null, client as Record<string, unknown> | null)
+    const fullName = (client as any)?.full_name || [(client as any)?.first_name, (client as any)?.last_name].filter(Boolean).join(' ') || 'Cliente'
+    return success({
+      ...(client as Record<string, unknown>),
+      auditDescription: `Cliente: ${fullName}`,
+      auditOldData: diff?.auditOldData,
+      auditNewData: diff?.auditNewData,
+    })
   }
 )
 
@@ -312,6 +326,19 @@ export const saveBodyMeasurements = protectedAction<{ client_id: string; values:
     revalidate: ['/admin/clientes'],
   },
   async (ctx, input) => {
+    // Leer medidas actuales (antes del cambio) para calcular diff detallado
+    const { data: prev } = await ctx.adminClient
+      .from('client_measurements')
+      .select('id, values, version')
+      .eq('client_id', input.client_id)
+      .eq('garment_type_id', input.garment_type_id)
+      .eq('is_current', true)
+      .order('version', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    const prevValues = (prev?.values ?? {}) as Record<string, unknown>
+
     // Desactivar medidas anteriores
     const { error: updateError } = await ctx.adminClient
       .from('client_measurements')
@@ -352,6 +379,40 @@ export const saveBodyMeasurements = protectedAction<{ client_id: string; values:
       .single()
 
     if (error) return failure(error.message)
-    return success(data)
+
+    // Diff de medidas: solo los campos (cm) que cambiaron
+    const newValues = (input.values ?? {}) as Record<string, unknown>
+    const keys = new Set([...Object.keys(prevValues), ...Object.keys(newValues)])
+    const oldDiff: Record<string, unknown> = {}
+    const newDiff: Record<string, unknown> = {}
+    for (const k of keys) {
+      if (String(prevValues[k] ?? '') !== String(newValues[k] ?? '')) {
+        oldDiff[k] = prevValues[k] ?? null
+        newDiff[k] = newValues[k] ?? null
+      }
+    }
+
+    // Resolver nombre del cliente y prenda para descripción
+    const { data: clientRow } = await ctx.adminClient
+      .from('clients')
+      .select('full_name, first_name, last_name')
+      .eq('id', input.client_id)
+      .single()
+    const clientName = (clientRow as any)?.full_name
+      || [(clientRow as any)?.first_name, (clientRow as any)?.last_name].filter(Boolean).join(' ')
+      || 'Cliente'
+    const { data: garmentRow } = await ctx.adminClient
+      .from('garment_types')
+      .select('name')
+      .eq('id', input.garment_type_id)
+      .single()
+    const garmentName = (garmentRow as any)?.name ?? 'Prenda'
+
+    return success({
+      ...(data as Record<string, unknown>),
+      auditDescription: `Medidas · ${clientName} · ${garmentName}`,
+      auditOldData: Object.keys(oldDiff).length ? oldDiff : undefined,
+      auditNewData: Object.keys(newDiff).length ? newDiff : undefined,
+    })
   }
 )

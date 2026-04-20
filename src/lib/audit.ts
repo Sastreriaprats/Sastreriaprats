@@ -51,3 +51,33 @@ export function diffObjects(
   }
   return changes
 }
+
+/**
+ * Construye los campos `auditOldData` y `auditNewData` solo con los campos que cambiaron
+ * entre antes y después. Devuelve `null` si no hay cambios. Los valores resultantes
+ * se pasan al wrapper `protectedAction` para registrar un diff legible en audit_logs.
+ *
+ * @param before Objeto con el estado anterior (ej. fila leída antes del update).
+ * @param after  Objeto con el estado nuevo (ej. fila devuelta tras el update).
+ * @param skip   Campos a ignorar (por defecto timestamps, id y metadatos irrelevantes).
+ */
+export function buildAuditDiff(
+  before: Record<string, unknown> | null | undefined,
+  after: Record<string, unknown> | null | undefined,
+  skip: string[] = ['id', 'created_at', 'updated_at', 'last_movement_at']
+): { auditOldData: Record<string, unknown>; auditNewData: Record<string, unknown> } | null {
+  const oldObj = (before ?? {}) as Record<string, unknown>
+  const newObj = (after ?? {}) as Record<string, unknown>
+  const oldData: Record<string, unknown> = {}
+  const newData: Record<string, unknown> = {}
+  const keys = new Set([...Object.keys(oldObj), ...Object.keys(newObj)])
+  for (const key of keys) {
+    if (skip.includes(key)) continue
+    if (JSON.stringify(oldObj[key]) !== JSON.stringify(newObj[key])) {
+      oldData[key] = oldObj[key] ?? null
+      newData[key] = newObj[key] ?? null
+    }
+  }
+  if (Object.keys(newData).length === 0) return null
+  return { auditOldData: oldData, auditNewData: newData }
+}

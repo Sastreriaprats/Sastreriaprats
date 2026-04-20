@@ -9,6 +9,7 @@ import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { generateEAN13, validateEAN13 } from '@/lib/barcode/ean13'
 import { generateSkuBase } from '@/lib/utils/sku'
 import { generateFabricCode } from '@/actions/fabrics'
+import { buildAuditDiff } from '@/lib/audit'
 
 /** Obtiene el siguiente número correlativo para un SKU base. Cuenta productos con sku LIKE 'skuBase-%' y retorna (count+1) con pad 3. Si el SKU completo ya existe (race), reintenta con el siguiente. */
 export const getNextSkuNumber = protectedAction<
@@ -473,11 +474,20 @@ export const updateProductAction = protectedAction<{ id: string; data: any }, an
 
     const { metros_iniciales, ...updateFields } = parsed.data
 
+    const { data: before } = await ctx.adminClient
+      .from('products').select('*').eq('id', id).single()
+
     const { data: product, error } = await ctx.adminClient
       .from('products').update(updateFields).eq('id', id).select().single()
 
     if (error) return failure(error.message)
-    return success(product)
+    const diff = buildAuditDiff(before as Record<string, unknown> | null, product as Record<string, unknown> | null)
+    return success({
+      ...(product as Record<string, unknown>),
+      auditDescription: `Producto: ${(product as any)?.name ?? (product as any)?.sku ?? id}`,
+      auditOldData: diff?.auditOldData,
+      auditNewData: diff?.auditNewData,
+    })
   }
 )
 
@@ -601,7 +611,7 @@ export const adjustStock = protectedAction<{
     if (error) return failure(error.message)
     const { data: variant } = await ctx.adminClient
       .from('product_variants')
-      .select('id, product_id')
+      .select('id, product_id, variant_sku, size, color')
       .eq('id', variantId)
       .single()
     let productName = 'Producto'
@@ -613,8 +623,26 @@ export const adjustStock = protectedAction<{
         .single()
       if (product) productName = (product as any).name ?? productName
     }
-    const auditDescription = `Stock: ${productName} · Cantidad: ${delta >= 0 ? '+' : ''}${delta}`
-    return success({ ...movement, auditDescription })
+    const { data: warehouse } = await ctx.adminClient
+      .from('warehouses')
+      .select('name, code')
+      .eq('id', warehouseId)
+      .single()
+    const warehouseName = (warehouse as any)?.name ?? 'Almacén'
+    const variantDesc = [(variant as any)?.size, (variant as any)?.color].filter(Boolean).join(' · ')
+    const auditDescription = `Stock: ${productName}${variantDesc ? ` (${variantDesc})` : ''} · ${delta >= 0 ? '+' : ''}${delta} uds · ${warehouseName}`
+    return success({
+      ...movement,
+      auditDescription,
+      auditOldData: { cantidad: stockBefore, almacén: warehouseName },
+      auditNewData: { cantidad: stockAfter, almacén: warehouseName },
+      auditMetadata: {
+        tipo_movimiento: movementType,
+        delta,
+        motivo: reason,
+        sku_variante: (variant as any)?.variant_sku,
+      },
+    })
   }
 )
 
@@ -751,7 +779,30 @@ export const moveStockBetweenWarehouses = protectedAction<
       console.error('[moveStockBetweenWarehouses] auto delivery note:', e)
     }
 
-    return success({ fromAfter, toAfter })
+    // Resolver nombres para auditoría
+    const [{ data: fromWh2 }, { data: toWh2 }, { data: variantInfo }] = await Promise.all([
+      ctx.adminClient.from('warehouses').select('name').eq('id', fromWarehouseId).single(),
+      ctx.adminClient.from('warehouses').select('name').eq('id', toWarehouseId).single(),
+      ctx.adminClient
+        .from('product_variants')
+        .select('variant_sku, size, color, product_id, products(name)')
+        .eq('id', variantId)
+        .single(),
+    ])
+    const fromName = (fromWh2 as any)?.name ?? 'Origen'
+    const toName = (toWh2 as any)?.name ?? 'Destino'
+    const productName = (variantInfo as any)?.products?.name ?? 'Producto'
+    const variantDesc = [(variantInfo as any)?.size, (variantInfo as any)?.color].filter(Boolean).join(' · ')
+    const auditDescription = `Traspaso: ${productName}${variantDesc ? ` (${variantDesc})` : ''} · ${quantity} uds · ${fromName} → ${toName}`
+
+    return success({
+      fromAfter,
+      toAfter,
+      auditDescription,
+      auditOldData: { [fromName]: fromBefore, [toName]: toBefore },
+      auditNewData: { [fromName]: fromAfter, [toName]: toAfter },
+      auditMetadata: { cantidad: quantity, motivo: reasonText, sku_variante: (variantInfo as any)?.variant_sku },
+    })
   }
 )
 

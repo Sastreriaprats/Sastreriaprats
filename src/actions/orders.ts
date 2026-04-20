@@ -368,10 +368,12 @@ export const changeOrderStatus = protectedAction<any, any>(
 
     const { order_id, line_id, new_status, notes } = parsed.data
 
+    let fromStatus: string | null = null
     if (line_id) {
       const { data: line } = await ctx.adminClient
         .from('tailoring_order_lines').select('status').eq('id', line_id).single()
       if (!line) return failure('Línea de pedido no encontrada')
+      fromStatus = (line as any).status ?? null
 
       await ctx.adminClient
         .from('tailoring_order_lines').update({ status: new_status }).eq('id', line_id)
@@ -389,6 +391,7 @@ export const changeOrderStatus = protectedAction<any, any>(
       const { data: order } = await ctx.adminClient
         .from('tailoring_orders').select('status').eq('id', order_id).single()
       if (!order) return failure('Pedido no encontrado')
+      fromStatus = (order as any).status ?? null
 
       await ctx.adminClient
         .from('tailoring_orders')
@@ -400,6 +403,7 @@ export const changeOrderStatus = protectedAction<any, any>(
 
       await ctx.adminClient
         .from('tailoring_order_lines').update({ status: new_status }).eq('tailoring_order_id', order_id).eq('status', 'created')
+      fromStatus = fromStatus ?? (order as any).status ?? null
 
       await ctx.adminClient.from('tailoring_order_state_history').insert({
         tailoring_order_id: order_id,
@@ -433,7 +437,25 @@ export const changeOrderStatus = protectedAction<any, any>(
       }
     }
 
-    return success({ order_id, new_status })
+    // Resolver número de pedido para descripción legible
+    const { data: orderRow } = await ctx.adminClient
+      .from('tailoring_orders').select('order_number').eq('id', order_id).single()
+    const orderNumber = (orderRow as any)?.order_number ?? order_id
+    const statusEs: Record<string, string> = {
+      created: 'Creado', in_progress: 'En progreso', in_production: 'En producción',
+      ready: 'Listo', delivered: 'Entregado', cancelled: 'Cancelado', pending: 'Pendiente',
+    }
+    const fromEs = fromStatus ? (statusEs[fromStatus] ?? fromStatus) : '—'
+    const toEs = statusEs[new_status] ?? new_status
+    return success({
+      order_id,
+      new_status,
+      auditEntityId: order_id,
+      auditDescription: `Pedido ${orderNumber}: ${fromEs} → ${toEs}${line_id ? ' (línea)' : ''}`,
+      auditOldData: { estado: fromStatus },
+      auditNewData: { estado: new_status },
+      auditMetadata: notes ? { notas: notes, linea_id: line_id ?? null } : { linea_id: line_id ?? null },
+    })
   }
 )
 
@@ -527,7 +549,14 @@ export const updateOrderStatus = protectedAction<
   async (ctx, { orderId, newStatus, lineId }) => {
     if (!orderId?.trim() || !newStatus?.trim()) return failure('Parámetros no válidos', 'VALIDATION')
 
+    let fromStatus: string | null = null
     if (lineId?.trim()) {
+      const { data: prevLine } = await ctx.adminClient
+        .from('tailoring_order_lines')
+        .select('status')
+        .eq('id', lineId.trim())
+        .single()
+      fromStatus = (prevLine as any)?.status ?? null
       const { error } = await ctx.adminClient
         .from('tailoring_order_lines')
         .update({ status: newStatus.trim() })
@@ -536,6 +565,12 @@ export const updateOrderStatus = protectedAction<
 
       if (error) return failure(error.message, 'INTERNAL')
     } else {
+      const { data: prevOrder } = await ctx.adminClient
+        .from('tailoring_orders')
+        .select('status')
+        .eq('id', orderId.trim())
+        .single()
+      fromStatus = (prevOrder as any)?.status ?? null
       const { error } = await ctx.adminClient
         .from('tailoring_orders')
         .update({ status: newStatus.trim() })
@@ -545,7 +580,23 @@ export const updateOrderStatus = protectedAction<
     }
 
     revalidatePath(`/sastre/pedidos/${orderId}`)
-    return success({ orderId })
+    const { data: ord } = await ctx.adminClient
+      .from('tailoring_orders').select('order_number').eq('id', orderId.trim()).single()
+    const orderNumber = (ord as any)?.order_number ?? orderId
+    const statusEs: Record<string, string> = {
+      created: 'Creado', in_progress: 'En progreso', in_production: 'En producción',
+      ready: 'Listo', delivered: 'Entregado', cancelled: 'Cancelado', pending: 'Pendiente',
+    }
+    const fromEs = fromStatus ? (statusEs[fromStatus] ?? fromStatus) : '—'
+    const toEs = statusEs[newStatus.trim()] ?? newStatus.trim()
+    return success({
+      orderId,
+      auditEntityId: orderId,
+      auditDescription: `Pedido ${orderNumber}: ${fromEs} → ${toEs}${lineId ? ' (línea)' : ''}`,
+      auditOldData: { estado: fromStatus },
+      auditNewData: { estado: newStatus.trim() },
+      auditMetadata: { linea_id: lineId ?? null },
+    })
   }
 )
 

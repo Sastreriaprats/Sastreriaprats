@@ -7,6 +7,7 @@ import { success, failure } from '@/lib/errors'
 import { createPurchaseJournalEntry } from '@/actions/accounting-triggers'
 import { checkUserPermission } from '@/actions/auth'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
+import { buildAuditDiff } from '@/lib/audit'
 
 export const listSupplierOrders = protectedAction<void, any[]>(
   { permission: 'orders.view' },
@@ -149,11 +150,20 @@ export const updateSupplierAction = protectedAction<{ id: string; data: any }, a
     const parsed = updateSupplierSchema.safeParse(input)
     if (!parsed.success) return failure(parsed.error.issues[0].message, 'VALIDATION')
 
+    const { data: before } = await ctx.adminClient
+      .from('suppliers').select('*').eq('id', id).single()
+
     const { data: supplier, error } = await ctx.adminClient
       .from('suppliers').update(parsed.data).eq('id', id).select().single()
 
     if (error) return failure(error.message)
-    return success(supplier)
+    const diff = buildAuditDiff(before as Record<string, unknown> | null, supplier as Record<string, unknown> | null)
+    return success({
+      ...(supplier as Record<string, unknown>),
+      auditDescription: `Proveedor: ${(supplier as any)?.name ?? id}`,
+      auditOldData: diff?.auditOldData,
+      auditNewData: diff?.auditNewData,
+    })
   }
 )
 
@@ -234,6 +244,14 @@ export const updateSupplierOrderStatusAction = protectedAction<
   async (ctx, { supplierOrderId, status }) => {
     if (!SUPPLIER_ORDER_STATUSES.includes(status)) return failure('Estado no válido', 'VALIDATION')
 
+    const { data: prev } = await ctx.adminClient
+      .from('supplier_orders')
+      .select('status, order_number')
+      .eq('id', supplierOrderId)
+      .single()
+    const prevStatus = (prev as any)?.status ?? null
+    const orderNum = (prev as any)?.order_number ?? supplierOrderId
+
     const { data: order, error } = await ctx.adminClient
       .from('supplier_orders')
       .update({ status })
@@ -244,11 +262,23 @@ export const updateSupplierOrderStatusAction = protectedAction<
     if (error) return failure(error.message)
     if (!order) return failure('Pedido no encontrado', 'NOT_FOUND')
 
+    const supplierStatusEs: Record<string, string> = {
+      draft: 'Borrador', sent: 'Enviado', confirmed: 'Confirmado',
+      partially_received: 'Recibido parcial', received: 'Recibido',
+      incident: 'Incidencia', cancelled: 'Cancelado',
+    }
+    const auditDescription = `Pedido proveedor ${orderNum}: ${supplierStatusEs[prevStatus ?? ''] ?? prevStatus ?? '—'} → ${supplierStatusEs[status] ?? status}`
+    const auditEnvelope = {
+      auditDescription,
+      auditOldData: { estado: prevStatus },
+      auditNewData: { estado: status },
+    }
+
     if (status === 'received') {
       const stockUpdatedAt = (order as any).stock_updated_at as string | null | undefined
       if (stockUpdatedAt) {
         console.warn('[updateSupplierOrderStatusAction] stock ya actualizado previamente', { supplierOrderId, stockUpdatedAt })
-        return success({ ...order, stock_update_skipped: true, stock_warnings: 0 })
+        return success({ ...order, stock_update_skipped: true, stock_warnings: 0, ...auditEnvelope })
       }
 
       const warehouseId = await pickWarehouseForReceipt(ctx.adminClient, order)
@@ -397,10 +427,10 @@ export const updateSupplierOrderStatusAction = protectedAction<
       if (stockUpdatedAtErr) return failure(stockUpdatedAtErr.message || 'Error al marcar actualización de stock', 'INTERNAL')
 
       createPurchaseJournalEntry(supplierOrderId).catch(() => {})
-      return success({ ...order, stock_update_skipped: false, stock_warnings: stockWarnings })
+      return success({ ...order, stock_update_skipped: false, stock_warnings: stockWarnings, ...auditEnvelope })
     }
 
-    return success(order)
+    return success({ ...order, ...auditEnvelope })
   }
 )
 

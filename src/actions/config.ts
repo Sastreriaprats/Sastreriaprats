@@ -345,6 +345,31 @@ export async function updateRolePermissionsAction(
     if (!hasPerm) return { error: 'Sin permisos para gestionar roles' }
 
     const admin = createAdminClient()
+
+    // Capturar permisos anteriores para mostrar diff en seguimiento
+    const { data: prevRows } = await admin
+      .from('role_permissions')
+      .select('permission_id')
+      .eq('role_id', roleId)
+    const prevIds = (prevRows ?? []).map((r: any) => String(r.permission_id))
+    const newIds = permissionIds.map(String)
+    const added = newIds.filter((id) => !prevIds.includes(id))
+    const removed = prevIds.filter((id) => !newIds.includes(id))
+
+    // Resolver nombres de permisos afectados y del rol
+    const affectedIds = [...new Set([...added, ...removed])]
+    const [{ data: permRows }, { data: roleRow }] = await Promise.all([
+      affectedIds.length > 0
+        ? admin.from('permissions').select('id, code, name').in('id', affectedIds)
+        : Promise.resolve({ data: [] as any[] }),
+      admin.from('roles').select('display_name, name').eq('id', roleId).single(),
+    ])
+    const nameById = new Map<string, string>()
+    for (const p of (permRows as any[]) ?? []) nameById.set(String(p.id), p.name || p.code || String(p.id))
+    const addedNames = added.map((id) => nameById.get(id) ?? id)
+    const removedNames = removed.map((id) => nameById.get(id) ?? id)
+    const roleLabel = (roleRow as any)?.display_name || (roleRow as any)?.name || 'rol'
+
     await admin.from('role_permissions').delete().eq('role_id', roleId)
 
     if (permissionIds.length > 0) {
@@ -357,13 +382,22 @@ export async function updateRolePermissionsAction(
       if (error) return { error: error.message }
     }
 
+    const summaryParts: string[] = []
+    if (added.length) summaryParts.push(`+${added.length}`)
+    if (removed.length) summaryParts.push(`-${removed.length}`)
+    const summary = summaryParts.length > 0 ? ` (${summaryParts.join(' / ')})` : ''
+
     await admin.rpc('log_audit', {
       p_user_id: user.id,
       p_action: 'update',
       p_module: 'config',
       p_entity_type: 'role',
       p_entity_id: roleId,
-      p_description: `Actualizados ${permissionIds.length} permisos del rol`,
+      p_entity_display: `Rol: ${roleLabel}`,
+      p_description: `Permisos de "${roleLabel}": ${permissionIds.length} total${summary}`,
+      p_old_data: removed.length > 0 ? { permisos_eliminados: removedNames } : undefined,
+      p_new_data: added.length > 0 ? { permisos_agregados: addedNames } : undefined,
+      p_metadata: { total_permisos: permissionIds.length, agregados: added.length, eliminados: removed.length },
     })
 
     revalidatePath('/admin/configuracion')

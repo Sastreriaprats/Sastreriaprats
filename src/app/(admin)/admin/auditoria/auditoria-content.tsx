@@ -22,6 +22,7 @@ type LogRow = {
   entity_id: string | null
   entity_label: string | null
   changes: Record<string, unknown> | null
+  metadata?: Record<string, unknown> | null
   created_at: string
 }
 
@@ -110,18 +111,104 @@ export function AuditoriaContent() {
 
   const totalPages = Math.ceil(count / 50)
 
+  const FIELD_LABELS: Record<string, string> = {
+    // Clientes
+    first_name: 'Nombre',
+    last_name: 'Apellidos',
+    full_name: 'Nombre completo',
+    email: 'Email',
+    phone: 'Teléfono',
+    document_number: 'DNI / NIF',
+    address: 'Dirección',
+    city: 'Ciudad',
+    postal_code: 'Código postal',
+    province: 'Provincia',
+    country: 'País',
+    birthdate: 'Fecha de nacimiento',
+    notes: 'Notas',
+    category: 'Categoría',
+    client_type: 'Tipo de cliente',
+    is_active: 'Activo',
+    tags: 'Etiquetas',
+    home_store_id: 'Tienda',
+    assigned_salesperson_id: 'Vendedor asignado',
+    // Productos / variantes / stock
+    name: 'Nombre',
+    sku: 'SKU',
+    variant_sku: 'SKU variante',
+    barcode: 'Código de barras',
+    base_price: 'Precio base',
+    price_with_tax: 'Precio con IVA',
+    price_override: 'Precio',
+    cost_price: 'Precio coste',
+    cost_price_override: 'Precio coste',
+    tax_rate_pct: 'IVA %',
+    size: 'Talla',
+    color: 'Color',
+    quantity: 'Cantidad',
+    cantidad: 'Cantidad',
+    stock: 'Stock',
+    category_id: 'Categoría',
+    supplier_id: 'Proveedor',
+    description: 'Descripción',
+    product_type: 'Tipo producto',
+    collection: 'Colección',
+    season: 'Temporada',
+    // Pedidos / estados
+    estado: 'Estado',
+    status: 'Estado',
+    linea_id: 'Línea',
+    notas: 'Notas',
+    motivo: 'Motivo',
+    delta: 'Delta',
+    tipo_movimiento: 'Tipo movimiento',
+    sku_variante: 'SKU variante',
+    almacén: 'Almacén',
+    // Roles
+    permisos_agregados: 'Permisos añadidos',
+    permisos_eliminados: 'Permisos eliminados',
+    total_permisos: 'Total permisos',
+    agregados: 'Añadidos',
+    eliminados: 'Eliminados',
+  }
+
+  const formatAuditValue = (val: unknown): string => {
+    if (val === null || val === undefined || val === '') return '—'
+    if (typeof val === 'boolean') return val ? 'Sí' : 'No'
+    if (Array.isArray(val)) return val.length === 0 ? '—' : val.map((x) => String(x)).join(', ')
+    if (typeof val === 'object') {
+      try { return JSON.stringify(val) } catch { return String(val) }
+    }
+    return String(val)
+  }
+
+  const labelize = (field: string) =>
+    FIELD_LABELS[field] ?? field.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+
   const renderChanges = (changes: Record<string, unknown> | null) => {
     if (!changes) return <span className="text-muted-foreground">—</span>
     return (
       <div className="space-y-1">
         {Object.entries(changes).map(([field, val]) => {
           const v = val as { old: unknown; new: unknown }
+          const oldStr = formatAuditValue(v?.old)
+          const newStr = formatAuditValue(v?.new)
+          const onlyNew = (v?.old === undefined || v?.old === null) && v?.new !== undefined && v?.new !== null
+          const onlyOld = v?.old !== undefined && v?.old !== null && (v?.new === undefined || v?.new === null)
           return (
-            <div key={field} className="text-xs">
-              <span className="font-medium text-muted-foreground">{field}:</span>{' '}
-              <span className="line-through text-red-600">{String(v?.old ?? '—')}</span>
-              {' → '}
-              <span className="text-green-600">{String(v?.new ?? '—')}</span>
+            <div key={field} className="text-xs flex flex-wrap items-center gap-1">
+              <span className="font-medium text-muted-foreground">{labelize(field)}:</span>
+              {onlyNew ? (
+                <span className="text-green-700">{newStr}</span>
+              ) : onlyOld ? (
+                <span className="line-through text-red-600">{oldStr}</span>
+              ) : (
+                <>
+                  <span className="line-through text-red-600">{oldStr}</span>
+                  <span className="text-muted-foreground">→</span>
+                  <span className="text-green-700">{newStr}</span>
+                </>
+              )}
             </div>
           )
         })}
@@ -215,14 +302,31 @@ export function AuditoriaContent() {
                       <TableCell className="text-sm">{getEntityTypeLabel(log)}</TableCell>
                       <TableCell className="text-sm text-muted-foreground max-w-xs truncate">{log.entity_label ?? log.entity_id ?? '—'}</TableCell>
                       <TableCell>
-                        {log.changes ? (expandedId === log.id ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />) : null}
+                        {log.changes || log.metadata ? (expandedId === log.id ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />) : null}
                       </TableCell>
                     </TableRow>
-                    {expandedId === log.id && log.changes && (
+                    {expandedId === log.id && (log.changes || log.metadata) && (
                       <TableRow key={`${log.id}-expand`} className="bg-muted/30">
                         <TableCell colSpan={6} className="py-3 px-6">
-                          <p className="text-xs font-medium text-muted-foreground mb-1">Cambios:</p>
-                          {renderChanges(log.changes)}
+                          {log.changes && (
+                            <>
+                              <p className="text-xs font-medium text-muted-foreground mb-1">Cambios:</p>
+                              {renderChanges(log.changes)}
+                            </>
+                          )}
+                          {log.metadata && Object.keys(log.metadata).length > 0 && (
+                            <div className={log.changes ? 'mt-3' : ''}>
+                              <p className="text-xs font-medium text-muted-foreground mb-1">Información adicional:</p>
+                              <div className="space-y-0.5">
+                                {Object.entries(log.metadata).map(([k, v]) => (
+                                  <div key={k} className="text-xs">
+                                    <span className="font-medium text-muted-foreground">{labelize(k)}:</span>{' '}
+                                    <span>{formatAuditValue(v)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </TableCell>
                       </TableRow>
                     )}

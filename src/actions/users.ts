@@ -342,7 +342,7 @@ export async function getAuditLogs(filters: {
   action?: string
   dateFrom?: string
   dateTo?: string
-} = {}): Promise<{ data?: { id: string; user_name: string; action: string; action_display: string; entity_type: string; entity_type_display: string; entity_id: string | null; entity_label: string | null; changes: Record<string, unknown> | null; created_at: string }[]; count?: number; error?: string }> {
+} = {}): Promise<{ data?: { id: string; user_name: string; action: string; action_display: string; entity_type: string; entity_type_display: string; entity_id: string | null; entity_label: string | null; changes: Record<string, unknown> | null; metadata: Record<string, unknown> | null; created_at: string }[]; count?: number; error?: string }> {
   // Traducción de acciones y entidades al español (columnas Acción y Entidad)
   const ACTION_DISPLAY_ES: Record<string, string> = {
     create: 'Crear',
@@ -415,7 +415,7 @@ export async function getAuditLogs(filters: {
     // Excluir login y logout del seguimiento (not in)
     let q = admin
       .from('audit_logs')
-      .select('id, user_id, user_full_name, user_email, action, module, entity_type, entity_id, entity_display, description, old_data, new_data, created_at', { count: 'exact' })
+      .select('id, user_id, user_full_name, user_email, action, module, entity_type, entity_id, entity_display, description, old_data, new_data, metadata, created_at', { count: 'exact' })
       .not('action', 'in', '(login,logout)')
       .order('created_at', { ascending: false })
       .range(from, from + limit - 1)
@@ -442,6 +442,7 @@ export async function getAuditLogs(filters: {
       description: string | null
       old_data: Record<string, unknown> | null
       new_data: Record<string, unknown> | null
+      metadata: Record<string, unknown> | null
       created_at: string
     }>
 
@@ -479,6 +480,7 @@ export async function getAuditLogs(filters: {
         entity_label: entityLabel,
         _resolve: needsResolution && row.entity_id ? { entity_type: row.entity_type ?? row.module, action: row.action, entity_id: row.entity_id } : null,
         changes,
+        metadata: row.metadata,
         created_at: row.created_at,
       }
     })
