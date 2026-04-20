@@ -8,7 +8,12 @@ import {
 import { success, failure } from '@/lib/errors'
 import { createSaleJournalEntry } from '@/actions/accounting-triggers'
 
-/** Lista de empleados que pueden realizar ventas en la tienda (usuarios asignados a la tienda). */
+/**
+ * Lista de empleados que pueden realizar ventas en una tienda.
+ * - Si hay asignaciones en `user_stores` para la tienda: devuelve solo esos empleados activos.
+ * - Si no hay ninguna asignación: devuelve todos los usuarios activos (fallback).
+ * La configuración se gestiona desde /admin/configuracion → "Empleados por tienda".
+ */
 export const listPosEmployees = protectedAction<
   { store_id: string },
   { id: string; full_name: string }[]
@@ -16,21 +21,39 @@ export const listPosEmployees = protectedAction<
   { permission: 'pos.access', auditModule: 'pos' },
   async (ctx, { store_id }) => {
     if (!store_id) return success([])
-    const { data: rows, error } = await ctx.adminClient
+
+    const { data: assigned, error: assignedError } = await ctx.adminClient
       .from('user_stores')
-      .select('user_id, profiles!user_stores_user_id_fkey(id, full_name)')
+      .select('user_id, profiles!user_stores_user_id_fkey(id, full_name, is_active)')
       .eq('store_id', store_id)
-    if (error) return failure(error.message)
+    if (assignedError) return failure(assignedError.message)
+
     const list: { id: string; full_name: string }[] = []
     const seen = new Set<string>()
-    for (const r of rows ?? []) {
-      const profile = (r as any).profiles
-      const id = profile?.id ?? (r as any).user_id
-      if (id && !seen.has(id)) {
-        seen.add(id)
-        list.push({ id, full_name: profile?.full_name ?? 'Sin nombre' })
+
+    if ((assigned?.length ?? 0) > 0) {
+      for (const r of assigned ?? []) {
+        const profile = (r as any).profiles
+        const id = profile?.id ?? (r as any).user_id
+        if (id && !seen.has(id) && profile?.is_active !== false) {
+          seen.add(id)
+          list.push({ id, full_name: profile?.full_name ?? 'Sin nombre' })
+        }
+      }
+    } else {
+      const { data: allProfiles, error: profilesError } = await ctx.adminClient
+        .from('profiles')
+        .select('id, full_name')
+        .eq('is_active', true)
+      if (profilesError) return failure(profilesError.message)
+      for (const p of allProfiles ?? []) {
+        if (!seen.has(p.id)) {
+          seen.add(p.id)
+          list.push({ id: p.id, full_name: p.full_name ?? 'Sin nombre' })
+        }
       }
     }
+
     list.sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''))
     return success(list)
   },

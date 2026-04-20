@@ -3,10 +3,11 @@
 import { useState, useCallback } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/components/providers/auth-provider'
-import { Users, Shield, Store, Settings, Shirt } from 'lucide-react'
+import { Users, Shield, Store, Settings, Shirt, UserCog } from 'lucide-react'
 import { UsersSection } from './sections/users-section'
 import { RolesSection } from './sections/roles-section'
 import { StoresSection } from './sections/stores-section'
+import { StoreEmployeesSection } from './sections/store-employees-section'
 import { GarmentTypesSection } from './sections/garment-types-section'
 import { SettingsSection } from './sections/settings-section'
 
@@ -29,6 +30,12 @@ const ALL_TABS = [
     value: 'stores',
     label: 'Tiendas',
     icon: Store,
+    perms: ['config.edit', 'config.manage_stores', 'config.view', 'config.access'],
+  },
+  {
+    value: 'store-employees',
+    label: 'Empleados por tienda',
+    icon: UserCog,
     perms: ['config.edit', 'config.manage_stores', 'config.view', 'config.access'],
   },
   {
@@ -100,6 +107,7 @@ export function ConfigTabs({ activeTab }: { activeTab: string }) {
         <TabsContent value="users"><UsersSection /></TabsContent>
         <TabsContent value="roles"><RolesSection /></TabsContent>
         <TabsContent value="stores"><StoresSection /></TabsContent>
+        <TabsContent value="store-employees"><StoreEmployeesSection /></TabsContent>
         <TabsContent value="garments"><GarmentTypesSection /></TabsContent>
         <TabsContent value="settings"><SettingsSection /></TabsContent>
       </div>
