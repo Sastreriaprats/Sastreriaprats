@@ -22,7 +22,7 @@ import {
   Search, X, Plus, Minus, Trash2, User, ShoppingBag, CreditCard,
   Banknote, Smartphone, ArrowRightLeft, Receipt, FileText,
   LogOut, Clock, BarChart3, Loader2, Percent, UserPlus, CalendarClock, AlertCircle, Lock, Check, ImageOff, ChevronLeft, Printer,
-  Bookmark,
+  Bookmark, Gift,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/components/providers/auth-provider'
@@ -33,7 +33,7 @@ import { getProductByBarcode } from '@/actions/products'
 import { listClients } from '@/actions/clients'
 import { CreateClientDialog } from '@/app/(admin)/admin/clientes/create-client-dialog'
 import { formatCurrency } from '@/lib/utils'
-import { generateTicketPdf, printTicketPdf } from '@/components/pos/ticket-pdf'
+import { generateTicketPdf, printTicketPdf, printGiftTicketPdf } from '@/components/pos/ticket-pdf'
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
 import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
 import { getActiveReservationsForVariant } from '@/actions/reservations'
@@ -736,12 +736,12 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
     })
   }
 
-  const handlePrintTicket = async () => {
-    if (!completedSale) return
+  const buildTicketPdfData = () => {
+    if (!completedSale) return null
     const lineTotal = (l: TicketLine) =>
       l.unit_price * l.quantity * (1 - (l.discount_percentage || 0) / 100)
     const storeConfig = getStorePdfData(activeStoreName)
-    await printTicketPdf({
+    return {
       sale: {
         ticket_number: completedSale.ticket_number,
         created_at: completedSale.created_at || new Date().toISOString(),
@@ -770,7 +770,19 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
       storeAddress: storeConfig.address,
       storeSubtitle: storeConfig.subtitle ?? null,
       storePhones: storeConfig.phones,
-    })
+    }
+  }
+
+  const handlePrintTicket = async () => {
+    const data = buildTicketPdfData()
+    if (!data) return
+    await printTicketPdf(data)
+  }
+
+  const handlePrintGiftTicket = async () => {
+    const data = buildTicketPdfData()
+    if (!data) return
+    await printGiftTicketPdf(data)
   }
 
   const handleDownloadFactura = async () => {
@@ -1676,6 +1688,10 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
             <Button className="flex-1 min-w-[140px] gap-2 bg-prats-gold hover:bg-prats-gold/90 text-prats-navy font-semibold" onClick={handlePrintTicket}>
               <Printer className="h-4 w-4" />
               Imprimir ticket
+            </Button>
+            <Button variant="outline" className="flex-1 min-w-[140px] gap-2" onClick={handlePrintGiftTicket}>
+              <Gift className="h-4 w-4" />
+              Imprimir Regalo
             </Button>
             <Button variant="outline" className="flex-1 min-w-[140px] gap-2" onClick={handleDownloadTicketPdf}>
               <Receipt className="h-4 w-4" />

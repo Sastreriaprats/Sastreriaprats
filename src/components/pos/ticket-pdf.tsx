@@ -56,6 +56,8 @@ export interface TicketPdfData {
   storeSubtitle?: string | null
   /** Teléfonos de la tienda (opcional) */
   storePhones?: string | null
+  /** Si true, se genera un ticket regalo: sin precios, descuentos ni totales */
+  giftMode?: boolean
 }
 
 function fmt(value: number): string {
@@ -101,6 +103,7 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
   const discountAmount = data.sale.discount_amount ?? 0
   const tax = data.sale.tax_amount ?? 0
   const totalArticles = data.lines.reduce((acc, l) => acc + (l.quantity || 1), 0)
+  const giftMode = data.giftMode === true
   const logoBase64 = await getLogoBase64Client()
 
   const content: Content[] = [
@@ -121,6 +124,17 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
     { text: storePhones, fontSize: FONT_SMALL, alignment: 'center', margin: [0, 0, 0, 2] as [number, number, number, number] },
     { text: `CIF: ${COMPANY.nif}`, fontSize: FONT_SMALL, alignment: 'center', margin: [0, 0, 0, 4] as [number, number, number, number] },
     { canvas: [{ type: 'line', x1: 0, y1: 0, x2: W_PT - 2 * MARGIN_PT, y2: 0, lineWidth: 0.5 }], margin: [0, 0, 0, 8] as [number, number, number, number] },
+    ...(giftMode
+      ? [
+          {
+            text: 'TICKET REGALO',
+            fontSize: 13,
+            bold: true,
+            alignment: 'center',
+            margin: [0, 0, 0, 6] as [number, number, number, number],
+          } as Content,
+        ]
+      : []),
     {
       table: {
         widths: ['*', 50],
@@ -183,16 +197,27 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
     const hasDiscount = (line.discount_percentage || 0) > 0
     const discountAmountWithTax = line.unit_price * line.quantity * (line.discount_percentage || 0) / 100
 
-    const rows: any[][] = [
-      [
-        { text: desc, fontSize: FONT_BODY },
-        { text: fmt(lineTotalWithTax), fontSize: FONT_BODY, alignment: 'right' },
-      ],
-      [
-        { text: `${line.quantity} x ${fmt(unitPriceWithTax)}`, fontSize: FONT_SMALL, color: '#555', colSpan: 2 },
-        {},
-      ],
-    ]
+    const rows: any[][] = giftMode
+      ? [
+          [
+            { text: desc, fontSize: FONT_BODY, colSpan: 2 },
+            {},
+          ],
+          [
+            { text: `Cantidad: ${line.quantity}`, fontSize: FONT_SMALL, color: '#555', colSpan: 2 },
+            {},
+          ],
+        ]
+      : [
+          [
+            { text: desc, fontSize: FONT_BODY },
+            { text: fmt(lineTotalWithTax), fontSize: FONT_BODY, alignment: 'right' },
+          ],
+          [
+            { text: `${line.quantity} x ${fmt(unitPriceWithTax)}`, fontSize: FONT_SMALL, color: '#555', colSpan: 2 },
+            {},
+          ],
+        ]
 
     if (line.sku) {
       rows.push([
@@ -201,7 +226,7 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
       ])
     }
 
-    if (hasDiscount) {
+    if (!giftMode && hasDiscount) {
       rows.push([
         { text: `Dto: -${line.discount_percentage}%`, fontSize: FONT_SMALL, color: '#c00' },
         { text: `-${fmt(discountAmountWithTax)}`, fontSize: FONT_SMALL, color: '#c00', alignment: 'right' },
@@ -222,15 +247,17 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
       ],
       margin: [0, 0, 0, 8] as [number, number, number, number],
     },
-    {
+  )
+  if (!giftMode) {
+    content.push({
       columns: [
         { text: 'Subtotal:', fontSize: FONT_BODY },
         { text: fmt(data.sale.subtotal), fontSize: FONT_BODY, alignment: 'right' },
       ],
       margin: [0, 0, 0, 2] as [number, number, number, number],
-    }
-  )
-  if (discountAmount > 0) {
+    })
+  }
+  if (!giftMode && discountAmount > 0) {
     content.push({
       columns: [
         { text: 'Descuento:', fontSize: FONT_BODY },
@@ -239,7 +266,7 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
       margin: [0, 0, 0, 2] as [number, number, number, number],
     })
   }
-  if (!data.sale.is_tax_free && tax > 0) {
+  if (!giftMode && !data.sale.is_tax_free && tax > 0) {
     content.push({
       columns: [
         { text: 'IVA 21%:', fontSize: FONT_BODY },
@@ -248,30 +275,36 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
       margin: [0, 0, 0, 2] as [number, number, number, number],
     })
   }
-  content.push(
-    {
+  if (!giftMode) {
+    content.push({
       columns: [
         { text: 'TOTAL:', fontSize: FONT_HEAD, bold: true },
         { text: fmt(data.sale.total), fontSize: FONT_HEAD, bold: true, alignment: 'right' },
       ],
       margin: [0, 4, 0, 2] as [number, number, number, number],
-    },
+    })
+  }
+  content.push(
     {
       text: `Artículos: ${totalArticles}`,
       fontSize: FONT_BODY,
-      margin: [0, 0, 0, 2] as [number, number, number, number],
+      margin: [0, giftMode ? 4 : 0, 0, 2] as [number, number, number, number],
     },
-    {
+  )
+  if (!giftMode) {
+    content.push({
       text: `Pago: ${payLabel}`,
       fontSize: FONT_BODY,
       margin: [0, 0, 0, 12] as [number, number, number, number],
-    },
+    })
+  }
+  content.push(
     {
       text: '¡Gracias por elegir Sastrería Prats!',
       fontSize: FONT_BODY,
       bold: true,
       alignment: 'center',
-      margin: [0, 0, 0, 8] as [number, number, number, number],
+      margin: [0, giftMode ? 8 : 0, 0, 8] as [number, number, number, number],
     },
     {
       canvas: [
@@ -360,7 +393,7 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
             // Fallback: descargar si el navegador bloquea la impresión
             const a = document.createElement('a')
             a.href = url
-            a.download = `ticket-${data.sale.ticket_number}.pdf`
+            a.download = `${giftMode ? 'ticket-regalo' : 'ticket'}-${data.sale.ticket_number}.pdf`
             a.click()
           }
         }
@@ -387,7 +420,7 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
       })
     })
   } else {
-    const fileName = `ticket-${data.sale.ticket_number}.pdf`
+    const fileName = `${giftMode ? 'ticket-regalo' : 'ticket'}-${data.sale.ticket_number}.pdf`
     await (pdf as { download: (name: string) => void }).download(fileName)
   }
 }
@@ -395,6 +428,11 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
 /** Genera el ticket PDF y abre el diálogo de impresión del navegador */
 export async function printTicketPdf(data: TicketPdfData): Promise<void> {
   return generateTicketPdf(data, 'print')
+}
+
+/** Imprime un ticket regalo (sin precios) */
+export async function printGiftTicketPdf(data: TicketPdfData): Promise<void> {
+  return generateTicketPdf({ ...data, giftMode: true }, 'print')
 }
 
 // ============================================================
