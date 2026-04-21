@@ -3,27 +3,14 @@
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { serializeForServerAction } from '@/lib/server/serialize'
+import {
+  SUPPLIER_PAYMENT_METHOD_LABEL,
+  type SupplierPaymentMethod,
+} from '@/lib/constants/supplier-payment-methods'
 
 const PERMISSION = 'supplier_invoices.manage'
 const TABLE = 'ap_supplier_invoice_payments'
 const INVOICES_TABLE = 'ap_supplier_invoices'
-
-export type SupplierPaymentMethod =
-  | 'transfer'
-  | 'direct_debit'
-  | 'check'
-  | 'cash'
-  | 'card'
-  | 'bank_draft'
-
-export const SUPPLIER_PAYMENT_METHOD_LABEL: Record<SupplierPaymentMethod, string> = {
-  transfer: 'Transferencia',
-  direct_debit: 'Domiciliación',
-  check: 'Cheque',
-  cash: 'Efectivo',
-  card: 'Tarjeta',
-  bank_draft: 'Pagaré',
-}
 
 export type SupplierInvoicePayment = {
   id: string

@@ -22,10 +22,12 @@ import {
   registerSupplierInvoicePayment,
   listSupplierInvoicePayments,
   deleteSupplierInvoicePayment,
-  SUPPLIER_PAYMENT_METHOD_LABEL,
   type SupplierInvoicePayment,
-  type SupplierPaymentMethod,
 } from '@/actions/supplier-invoice-payments'
+import {
+  SUPPLIER_PAYMENT_METHOD_LABEL,
+  type SupplierPaymentMethod,
+} from '@/lib/constants/supplier-payment-methods'
 
 const METHOD_ICON: Record<string, React.ReactNode> = {
   transfer: <ArrowRightLeft className="h-3.5 w-3.5" />,
