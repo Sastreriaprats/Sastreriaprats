@@ -8,7 +8,7 @@ import { Toaster } from '@/components/ui/sonner'
 export const dynamic = 'force-dynamic'
 
 const STAFF_ROLES = [
-  'administrador', 'sastre_plus', 'vendedor_avanzado',
+  'administrador', 'sastre_plus', 'vendedor_avanzado', 'vendedor_basico',
   'super_admin', 'admin', 'accountant', 'tailor', 'salesperson', 'web_manager', 'manager',
 ]
 

@@ -708,7 +708,7 @@ export async function requirePermission(permissionCode: string) {
 // COMPROBAR SI USUARIO ES STAFF (admin/panel)
 // ==========================================
 
-const STAFF_ROLES = ['administrador', 'sastre_plus', 'vendedor_avanzado',
+const STAFF_ROLES = ['administrador', 'sastre_plus', 'vendedor_avanzado', 'vendedor_basico',
   // legacy (por si hay usuarios migrados)
   'super_admin', 'admin', 'accountant', 'tailor', 'salesperson', 'web_manager']
 

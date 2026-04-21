@@ -97,7 +97,7 @@ export function LoginForm({ redirectTo, mode }: LoginFormProps) {
           return Array.isArray(ur.roles) ? ur.roles.map((r: { name: string }) => r.name) : [ur.roles.name]
         })
         const isSastre = roleNames.some((r) => r === 'sastre_plus')
-        const isVendedor = roleNames.some((r) => r === 'vendedor_avanzado')
+        const isVendedor = roleNames.some((r) => r === 'vendedor_avanzado' || r === 'vendedor_basico')
         destination = isSastre ? '/sastre' : isVendedor ? '/vendedor' : '/admin/dashboard'
       }
       window.location.href = destination

@@ -3,9 +3,9 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { getRolesFromCookie, clearRolesCookie } from '@/lib/auth/role-cookie'
 
 const SASTRE_ROLES = ['sastre_plus']
-const VENDEDOR_ROLES = ['vendedor_avanzado']
+const VENDEDOR_ROLES = ['vendedor_avanzado', 'vendedor_basico']
 const STAFF_ROLES = [
-  'administrador', 'sastre_plus', 'vendedor_avanzado',
+  'administrador', 'sastre_plus', 'vendedor_avanzado', 'vendedor_basico',
   'super_admin', 'admin', 'accountant', 'tailor', 'salesperson', 'web_manager', 'manager',
 ]
 

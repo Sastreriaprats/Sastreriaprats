@@ -6,7 +6,7 @@ import { Toaster } from '@/components/ui/sonner'
 
 export const dynamic = 'force-dynamic'
 
-const VENDEDOR_ROLES = ['vendedor_avanzado']
+const VENDEDOR_ROLES = ['vendedor_avanzado', 'vendedor_basico']
 
 function getUserRoles(userId: string): Promise<string[]> {
   return unstable_cache(

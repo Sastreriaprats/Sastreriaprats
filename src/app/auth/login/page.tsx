@@ -12,10 +12,11 @@ export const metadata: Metadata = {
 }
 
 const STAFF_ROLES = [
-  'administrador', 'sastre_plus', 'vendedor_avanzado',
+  'administrador', 'sastre_plus', 'vendedor_avanzado', 'vendedor_basico',
   'super_admin', 'admin', 'accountant', 'tailor', 'salesperson', 'web_manager', 'manager',
 ]
 const SASTRE_ROLES = ['sastre_plus']
+const VENDEDOR_ROLES = ['vendedor_avanzado', 'vendedor_basico']
 
 export default async function LoginPage({
   searchParams,
@@ -29,6 +30,7 @@ export default async function LoginPage({
   let displayName: string | null = null
   let isStaff = false
   let isSastre = false
+  let isVendedor = false
 
   if (user) {
     const admin = createAdminClient()
@@ -43,6 +45,7 @@ export default async function LoginPage({
     })
     isStaff = roleNames.some((n: string) => STAFF_ROLES.includes(n))
     isSastre = roleNames.some((n: string) => SASTRE_ROLES.includes(n))
+    isVendedor = roleNames.some((n: string) => VENDEDOR_ROLES.includes(n))
   }
 
   return (
@@ -81,12 +84,12 @@ export default async function LoginPage({
                   <Link
                     href={
                       isStaff
-                        ? (isSastre ? '/sastre' : '/admin/dashboard')
+                        ? (isSastre ? '/sastre' : isVendedor ? '/vendedor' : '/admin/dashboard')
                         : (params.redirectTo && params.redirectTo.startsWith('/') ? params.redirectTo : '/mi-cuenta')
                     }
                   >
                     {isStaff
-                      ? (isSastre ? 'Ir al panel del sastre' : 'Ir al panel')
+                      ? (isSastre ? 'Ir al panel del sastre' : isVendedor ? 'Ir al panel de vendedor' : 'Ir al panel')
                       : params.redirectTo === '/reservar'
                         ? 'Continuar a reservar cita'
                         : 'Ir a mi cuenta'}
