@@ -617,6 +617,7 @@ export const supplierOrderLines = pgTable('supplier_order_lines', {
   supplierOrderId: uuid('supplier_order_id').notNull().references(() => supplierOrders.id, { onDelete: 'cascade' }),
   fabricId: uuid('fabric_id').references(() => fabrics.id, { onDelete: 'set null' }),
   productId: uuid('product_id'),
+  productVariantId: uuid('product_variant_id').references(() => productVariants.id, { onDelete: 'set null' }),
   description: text('description').notNull(),
   reference: text('reference'),
   quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull(),

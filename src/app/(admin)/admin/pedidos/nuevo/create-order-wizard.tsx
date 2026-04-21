@@ -62,10 +62,26 @@ interface SupplierRequestLine {
   item_type: 'fabric' | 'product' | ''
   fabric_id: string | null
   product_id: string | null
+  product_variant_id: string | null
   description: string
   reference: string
   quantity: number
   unit: string
+}
+
+interface SupplierProductVariant {
+  id: string
+  size: string | null
+  color: string | null
+  variant_sku: string | null
+}
+
+interface SupplierProduct {
+  id: string
+  sku: string
+  name: string
+  supplier_reference: string | null
+  variants?: SupplierProductVariant[]
 }
 
 const TYPE_CARDS: { type: OrderType; label: string; description: string; bg: string; border: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -152,7 +168,7 @@ export function CreateOrderWizard({
   const [selectedSupplier, setSelectedSupplier] = useState<any>(null)
   const [isSearchingSupplier, setIsSearchingSupplier] = useState(false)
   const [supplierFabrics, setSupplierFabrics] = useState<any[]>([])
-  const [supplierProducts, setSupplierProducts] = useState<any[]>([])
+  const [supplierProducts, setSupplierProducts] = useState<SupplierProduct[]>([])
   const [loadingSupplierItems, setLoadingSupplierItems] = useState(false)
   const [supplierFabricsError, setSupplierFabricsError] = useState<string | null>(null)
   const [paymentDueDate, setPaymentDueDate] = useState('')
@@ -296,12 +312,26 @@ export function CreateOrderWizard({
 
     const { data: productsData } = await supabase
       .from('products')
-      .select('id, sku, name, supplier_reference')
+      .select('id, sku, name, supplier_reference, product_variants(id, size, color, variant_sku, is_active)')
       .eq('supplier_id', supplierId)
       .eq('is_active', true)
       .order('name', { ascending: true })
       .limit(300)
-    setSupplierProducts(productsData || [])
+    const normalizedProducts: SupplierProduct[] = (productsData || []).map((p: any) => ({
+      id: p.id,
+      sku: p.sku,
+      name: p.name,
+      supplier_reference: p.supplier_reference ?? null,
+      variants: (p.product_variants || [])
+        .filter((v: any) => v?.is_active !== false)
+        .map((v: any) => ({
+          id: v.id,
+          size: v.size ?? null,
+          color: v.color ?? null,
+          variant_sku: v.variant_sku ?? null,
+        })),
+    }))
+    setSupplierProducts(normalizedProducts)
     setLoadingSupplierItems(false)
   }
 
@@ -454,6 +484,7 @@ export function CreateOrderWizard({
       item_type: '',
       fabric_id: null,
       product_id: null,
+      product_variant_id: null,
       description: '',
       reference: '',
       quantity: 1,
@@ -616,6 +647,7 @@ export function CreateOrderWizard({
           item_type: line.item_type,
           fabric_id: line.item_type === 'fabric' ? line.fabric_id : null,
           product_id: line.item_type === 'product' ? line.product_id : null,
+          product_variant_id: line.item_type === 'product' ? line.product_variant_id : null,
           description: line.description.trim(),
           reference: line.reference.trim(),
           quantity: Number(line.quantity),
@@ -624,6 +656,16 @@ export function CreateOrderWizard({
         .filter((line) => line.item_type && line.description && Number.isFinite(line.quantity) && line.quantity > 0)
       if (cleanedLines.length === 0) {
         toast.error('Añade al menos un producto solicitado')
+        return
+      }
+      const productLinesMissingVariant = cleanedLines.filter((line) => {
+        if (line.item_type !== 'product' || !line.product_id) return false
+        const product = supplierProducts.find((p) => p.id === line.product_id)
+        const hasVariants = (product?.variants?.length ?? 0) > 0
+        return hasVariants && !line.product_variant_id
+      })
+      if (productLinesMissingVariant.length > 0) {
+        toast.error('Selecciona una talla/variante en cada línea de producto')
         return
       }
       const notes = [orderDescription, internalNotes].filter(Boolean).join('\n') || null
@@ -638,6 +680,7 @@ export function CreateOrderWizard({
         lines: cleanedLines.map((line) => ({
           fabric_id: line.fabric_id,
           product_id: line.product_id,
+          product_variant_id: line.product_variant_id,
           description: line.description,
           reference: line.reference,
           quantity: line.quantity,
@@ -1355,6 +1398,7 @@ export function CreateOrderWizard({
                               item_type: '',
                               fabric_id: null,
                               product_id: null,
+                              product_variant_id: null,
                               description: '',
                               reference: '',
                               unit: '',
@@ -1366,6 +1410,7 @@ export function CreateOrderWizard({
                             item_type: isFabric ? 'fabric' : 'product',
                             fabric_id: null,
                             product_id: null,
+                            product_variant_id: null,
                             description: '',
                             reference: '',
                             unit: '',
@@ -1380,7 +1425,7 @@ export function CreateOrderWizard({
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="col-span-12 sm:col-span-4 space-y-1">
+                    <div className="col-span-12 sm:col-span-3 space-y-1">
                       <Label className="text-xs">
                         {line.item_type === 'fabric' ? 'Tejido' : line.item_type === 'product' ? 'Producto' : 'Elemento'}
                       </Label>
@@ -1396,6 +1441,7 @@ export function CreateOrderWizard({
                             updateSupplierRequestLine(idx, {
                               fabric_id: value,
                               product_id: null,
+                              product_variant_id: null,
                               description: fabric ? `${fabric.name}${fabric.composition ? ` - ${fabric.composition}` : ''}` : line.description,
                               reference: fabric?.fabric_code || line.reference,
                               unit: line.unit || 'metros',
@@ -1417,12 +1463,13 @@ export function CreateOrderWizard({
                           value={line.product_id || 'none'}
                           onValueChange={(value) => {
                             if (value === 'none') {
-                              updateSupplierRequestLine(idx, { product_id: null })
+                              updateSupplierRequestLine(idx, { product_id: null, product_variant_id: null })
                               return
                             }
-                            const product = supplierProducts.find((p: any) => p.id === value)
+                            const product = supplierProducts.find((p) => p.id === value)
                             updateSupplierRequestLine(idx, {
                               product_id: value,
+                              product_variant_id: null,
                               fabric_id: null,
                               description: product?.name || line.description,
                               reference: product?.supplier_reference || product?.sku || line.reference,
@@ -1433,7 +1480,7 @@ export function CreateOrderWizard({
                           <SelectTrigger><SelectValue placeholder="Selecciona producto" /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none">Sin seleccionar</SelectItem>
-                            {supplierProducts.map((p: any) => (
+                            {supplierProducts.map((p) => (
                               <SelectItem key={p.id} value={p.id}>
                                 {p.sku} - {p.name}
                               </SelectItem>
@@ -1444,7 +1491,65 @@ export function CreateOrderWizard({
                         <Input value="" disabled placeholder="Primero elige tipo" />
                       )}
                     </div>
-                    <div className="col-span-12 sm:col-span-3 space-y-1">
+                    <div className="col-span-12 sm:col-span-2 space-y-1">
+                      <Label className="text-xs">
+                        {line.item_type === 'product' ? 'Talla/Variante *' : 'Talla'}
+                      </Label>
+                      {line.item_type === 'product' ? (
+                        (() => {
+                          const product = supplierProducts.find((p) => p.id === line.product_id)
+                          const variants = product?.variants || []
+                          const disabled = !line.product_id
+                          if (disabled) {
+                            return <Input value="" disabled placeholder="Elige producto" />
+                          }
+                          if (variants.length === 0) {
+                            return <Input value="" disabled placeholder="Sin variantes" />
+                          }
+                          return (
+                            <Select
+                              value={line.product_variant_id || 'none'}
+                              onValueChange={(value) => {
+                                if (value === 'none') {
+                                  const baseDesc = product?.name || line.description.split(' — ')[0]
+                                  updateSupplierRequestLine(idx, {
+                                    product_variant_id: null,
+                                    description: baseDesc,
+                                    reference: product?.supplier_reference || product?.sku || '',
+                                  })
+                                  return
+                                }
+                                const variant = variants.find((v) => v.id === value)
+                                const sizeLabel = variant?.size?.trim() || null
+                                const colorLabel = variant?.color?.trim() || null
+                                const baseDesc = product?.name || line.description.split(' — ')[0]
+                                const suffixParts = [sizeLabel, colorLabel].filter(Boolean)
+                                const suffix = suffixParts.length > 0 ? ` — ${suffixParts.join(' / ')}` : ''
+                                updateSupplierRequestLine(idx, {
+                                  product_variant_id: value,
+                                  description: `${baseDesc}${suffix}`,
+                                  reference: variant?.variant_sku || product?.supplier_reference || product?.sku || '',
+                                })
+                              }}
+                            >
+                              <SelectTrigger><SelectValue placeholder="Elige talla" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">Sin seleccionar</SelectItem>
+                                {variants.map((v) => {
+                                  const label = [v.size, v.color].filter(Boolean).join(' / ') || v.variant_sku || v.id
+                                  return (
+                                    <SelectItem key={v.id} value={v.id}>{label}</SelectItem>
+                                  )
+                                })}
+                              </SelectContent>
+                            </Select>
+                          )
+                        })()
+                      ) : (
+                        <Input value="" disabled placeholder="—" />
+                      )}
+                    </div>
+                    <div className="col-span-12 sm:col-span-2 space-y-1">
                       <Label className="text-xs">Descripción *</Label>
                       <Input
                         value={line.description}
