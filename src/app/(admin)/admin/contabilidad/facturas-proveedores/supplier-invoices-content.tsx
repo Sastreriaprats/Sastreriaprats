@@ -46,7 +46,7 @@ import {
   FileDown,
   Upload,
   Calendar,
-  CheckCircle,
+  CreditCard,
   Pencil,
   Trash2,
   FileText,
@@ -63,7 +63,6 @@ import {
   listSupplierInvoices,
   createSupplierInvoiceAction,
   updateSupplierInvoiceAction,
-  markSupplierInvoicePaidAction,
   deleteSupplierInvoiceAction,
   importSupplierInvoicesCsvAction,
   listSuppliersForInvoice,
@@ -75,6 +74,11 @@ import {
   type SupplierOptionForInvoice,
   type UnlinkedDeliveryNoteOption,
 } from '@/actions/supplier-invoices'
+import { getSupplierInvoicesPaidMap } from '@/actions/supplier-invoice-payments'
+import {
+  SupplierPaymentDialog,
+  type SupplierPaymentDialogInvoice,
+} from '@/components/payments/supplier-payment-dialog'
 
 const STATUS_OPTIONS = [
   { value: 'all', label: 'Todos' },
@@ -132,7 +136,9 @@ export function SupplierInvoicesContent() {
   const [importOpen, setImportOpen] = useState(false)
   const [importFile, setImportFile] = useState<File | null>(null)
   const [importing, setImporting] = useState(false)
-  const [markingPaidId, setMarkingPaidId] = useState<string | null>(null)
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false)
+  const [paymentInvoice, setPaymentInvoice] = useState<SupplierPaymentDialogInvoice | null>(null)
+  const [paidMap, setPaidMap] = useState<Record<string, number>>({})
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const [form, setForm] = useState({
@@ -173,7 +179,16 @@ export function SupplierInvoicesContent() {
       dateFrom: dateFrom || undefined,
       dateTo: dateTo || undefined,
     })
-    if (r.success) setRows(r.data)
+    if (r.success) {
+      setRows(r.data)
+      const ids = r.data.map((x) => x.id)
+      if (ids.length > 0) {
+        const pm = await getSupplierInvoicesPaidMap({ invoice_ids: ids })
+        if (pm.success) setPaidMap(pm.data)
+      } else {
+        setPaidMap({})
+      }
+    }
     setLoading(false)
   }, [statusFilter, supplierSearch, dateFrom, dateTo])
 
@@ -403,21 +418,19 @@ export function SupplierInvoicesContent() {
     setSaving(false)
   }
 
-  const handleMarkPaid = async (id: string) => {
-    setMarkingPaidId(id)
-    const r = await markSupplierInvoicePaidAction({
-      id,
-      payment_date: today(),
-      payment_method: 'Transferencia',
+  const openPaymentDialog = (row: ApSupplierInvoiceRow) => {
+    const paid = paidMap[row.id] ?? 0
+    const pending = Math.max(0, Math.round((row.total_amount - paid) * 100) / 100)
+    setPaymentInvoice({
+      id: row.id,
+      supplier_name: row.supplier_name,
+      invoice_number: row.invoice_number,
+      total_amount: row.total_amount,
+      amount_paid: paid,
+      amount_pending: pending,
+      default_payment_method: row.payment_method ?? 'transfer',
     })
-    setMarkingPaidId(null)
-    if (r.success) {
-      toast.success('Marcada como pagada')
-      loadList()
-      loadKpis()
-    } else {
-      toast.error(r.error)
-    }
+    setPaymentDialogOpen(true)
   }
 
   const handleDelete = async (row: ApSupplierInvoiceRow) => {
@@ -504,6 +517,11 @@ export function SupplierInvoicesContent() {
           <p className="text-muted-foreground text-sm mt-1">Cuentas por pagar. Gestiona vencimientos y pagos.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" asChild>
+            <Link href="/admin/contabilidad/vencimientos">
+              <CreditCard className="h-4 w-4 mr-1" /> Vencimientos
+            </Link>
+          </Button>
           <Button variant="outline" asChild>
             <Link href="/admin/contabilidad/facturas-proveedores/calendario">
               <Calendar className="h-4 w-4 mr-1" /> Ver calendario
@@ -603,7 +621,9 @@ export function SupplierInvoicesContent() {
                 <TableHead>Nº factura</TableHead>
                 <TableHead>Fecha factura</TableHead>
                 <TableHead>Vencimiento</TableHead>
-                <TableHead className="text-right">Importe</TableHead>
+                <TableHead className="text-right">Total</TableHead>
+                <TableHead className="text-right">Pagado</TableHead>
+                <TableHead className="text-right">Pendiente</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead className="w-32">Acciones</TableHead>
               </TableRow>
@@ -611,6 +631,8 @@ export function SupplierInvoicesContent() {
             <TableBody>
               {rows.map((row) => {
                 const badge = displayStatus(row)
+                const paid = paidMap[row.id] ?? 0
+                const pending = Math.max(0, Math.round((row.total_amount - paid) * 100) / 100)
                 return (
                   <TableRow key={row.id}>
                     <TableCell>
@@ -622,7 +644,11 @@ export function SupplierInvoicesContent() {
                     <TableCell className="font-mono text-sm">{row.invoice_number}</TableCell>
                     <TableCell className="text-muted-foreground">{formatDate(row.invoice_date)}</TableCell>
                     <TableCell className="text-muted-foreground">{formatDate(row.due_date)}</TableCell>
-                    <TableCell className="text-right font-semibold">{formatCurrency(row.total_amount)}</TableCell>
+                    <TableCell className="text-right font-semibold tabular-nums">{formatCurrency(row.total_amount)}</TableCell>
+                    <TableCell className="text-right tabular-nums text-green-600">{formatCurrency(paid)}</TableCell>
+                    <TableCell className={`text-right tabular-nums font-semibold ${pending > 0 ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                      {formatCurrency(pending)}
+                    </TableCell>
                     <TableCell>
                       <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${badge.className}`}>
                         {badge.label}
@@ -633,17 +659,15 @@ export function SupplierInvoicesContent() {
                         <Button size="sm" variant="ghost" className="h-8" onClick={() => openEdit(row)}>
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
-                        {(row.status === 'pendiente' || row.status === 'vencida') && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-8 text-green-600"
-                            onClick={() => handleMarkPaid(row.id)}
-                            disabled={markingPaidId === row.id}
-                          >
-                            {markingPaidId === row.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
-                          </Button>
-                        )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 text-amber-600"
+                          onClick={() => openPaymentDialog(row)}
+                          title={pending > 0 ? 'Registrar pago' : 'Ver pagos'}
+                        >
+                          <CreditCard className="h-3.5 w-3.5" />
+                        </Button>
                         {isAdmin && (
                           <Button
                             size="sm"
@@ -910,6 +934,14 @@ export function SupplierInvoicesContent() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Modal Pagos */}
+      <SupplierPaymentDialog
+        open={paymentDialogOpen}
+        onOpenChange={(open) => { setPaymentDialogOpen(open); if (!open) setPaymentInvoice(null) }}
+        invoice={paymentInvoice}
+        onChanged={() => { loadList(); loadKpis() }}
+      />
 
       {/* Modal Importar CSV */}
       <Dialog open={importOpen} onOpenChange={setImportOpen}>

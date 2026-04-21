@@ -60,6 +60,7 @@ const navItems: NavItem[] = [
     children: [
       { label: 'Facturas / Presupuestos / Movimientos', href: '/admin/contabilidad' },
       { label: 'Facturas proveedores', href: '/admin/contabilidad/facturas-proveedores', permission: 'supplier_invoices.manage' },
+      { label: 'Vencimientos', href: '/admin/contabilidad/vencimientos', permission: 'supplier_invoices.manage' },
     ],
   },
   { label: 'Cobros pendientes',       href: '/admin/cobros',       icon: CircleDollarSign, permission: 'orders.view' },
@@ -146,8 +147,11 @@ export function AdminSidebar({ collapsed = false }: { collapsed?: boolean }) {
       fetchOverdueCount.current()
     }
 
-    // Al entrar en facturas proveedores, refrescar conteo
-    if (pathname.startsWith('/admin/contabilidad/facturas-proveedores')) {
+    // Al entrar en facturas proveedores o vencimientos, refrescar conteo
+    if (
+      pathname.startsWith('/admin/contabilidad/facturas-proveedores') ||
+      pathname.startsWith('/admin/contabilidad/vencimientos')
+    ) {
       getOverdueSupplierInvoicesCount()
         .then((r) => r?.success && typeof r.data === 'number' && setOverdueSupplierInvoicesCount(r.data))
         .catch(() => {})
@@ -236,8 +240,8 @@ export function AdminSidebar({ collapsed = false }: { collapsed?: boolean }) {
                         return !c.permission || can(c.permission) || (c.permission === 'barcodes.manage' && isAdmin)
                       })
                       .map((child) => {
-                        const isFacturasProveedores = child.href === '/admin/contabilidad/facturas-proveedores'
-                        const childBadge = isFacturasProveedores ? overdueSupplierInvoicesCount : 0
+                        const isVencimientos = child.href === '/admin/contabilidad/vencimientos'
+                        const childBadge = isVencimientos ? overdueSupplierInvoicesCount : 0
                         const ChildIcon = child.icon
                         return (
                           <Link

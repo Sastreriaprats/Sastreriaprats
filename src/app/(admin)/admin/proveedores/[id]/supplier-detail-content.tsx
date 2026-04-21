@@ -44,6 +44,14 @@ import {
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { toast } from 'sonner'
 import { usePermissions } from '@/hooks/use-permissions'
+import {
+  getSupplierPendingAp,
+  type SupplierVencimientoRow,
+} from '@/actions/supplier-invoice-payments'
+import {
+  SupplierPaymentDialog,
+  type SupplierPaymentDialogInvoice,
+} from '@/components/payments/supplier-payment-dialog'
 
 const orderStatusLabels: Record<string, string> = {
   draft: 'Borrador', sent: 'Enviado', confirmed: 'Confirmado',
@@ -260,6 +268,39 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
   const totalPendingDebt = pendingDueDates.reduce((sum: number, d: any) => sum + d.amount, 0)
   const overdueDates = pendingDueDates.filter((d: any) => new Date(d.due_date) < new Date())
 
+  const [apPending, setApPending] = useState<{
+    total_pending: number
+    count_pending: number
+    count_overdue: number
+    overdue_pending: number
+    invoices: SupplierVencimientoRow[]
+  }>({ total_pending: 0, count_pending: 0, count_overdue: 0, overdue_pending: 0, invoices: [] })
+  const [apLoading, setApLoading] = useState(true)
+  const [apPaymentOpen, setApPaymentOpen] = useState(false)
+  const [apPaymentInvoice, setApPaymentInvoice] = useState<SupplierPaymentDialogInvoice | null>(null)
+
+  const loadApPending = async () => {
+    setApLoading(true)
+    const r = await getSupplierPendingAp({ supplier_id: supplier.id })
+    setApLoading(false)
+    if (r.success) setApPending(r.data)
+  }
+
+  useEffect(() => { loadApPending() }, [supplier.id])
+
+  const openApPayment = (row: SupplierVencimientoRow) => {
+    setApPaymentInvoice({
+      id: row.id,
+      supplier_name: row.supplier_name,
+      invoice_number: row.invoice_number,
+      total_amount: row.total_amount,
+      amount_paid: row.amount_paid,
+      amount_pending: row.amount_pending,
+      default_payment_method: row.last_payment_method ?? supplier.payment_method ?? 'transfer',
+    })
+    setApPaymentOpen(true)
+  }
+
   const requestUploadForDeliveryNote = (deliveryNoteId: string) => {
     selectedDeliveryNoteIdRef.current = deliveryNoteId
     setSelectedDeliveryNoteId(deliveryNoteId)
@@ -353,10 +394,18 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <Card><CardContent className="pt-4 pb-3"><p className="text-xs text-muted-foreground">Total pagado</p><p className="text-xl font-bold">{formatCurrency(supplier.total_paid || 0)}</p></CardContent></Card>
-        <Card className={totalPendingDebt > 0 ? 'ring-1 ring-red-300' : ''}>
-          <CardContent className="pt-4 pb-3"><p className="text-xs text-muted-foreground">Deuda pendiente</p><p className={`text-xl font-bold ${totalPendingDebt > 0 ? 'text-red-600' : ''}`}>{formatCurrency(totalPendingDebt)}</p></CardContent>
+        <Card className={apPending.total_pending > 0 ? 'ring-1 ring-amber-300' : ''}>
+          <CardContent className="pt-4 pb-3">
+            <p className="text-xs text-muted-foreground">Pendiente facturas</p>
+            <p className={`text-xl font-bold ${apPending.total_pending > 0 ? 'text-amber-600' : ''}`}>{formatCurrency(apPending.total_pending)}</p>
+            {apPending.count_overdue > 0 && (
+              <p className="text-[11px] text-red-600 mt-0.5">{apPending.count_overdue} vencidas ({formatCurrency(apPending.overdue_pending)})</p>
+            )}
+          </CardContent>
         </Card>
-        <Card><CardContent className="pt-4 pb-3"><p className="text-xs text-muted-foreground">Tejidos</p><p className="text-xl font-bold">{fabrics.length}</p></CardContent></Card>
+        <Card className={totalPendingDebt > 0 ? 'ring-1 ring-red-300' : ''}>
+          <CardContent className="pt-4 pb-3"><p className="text-xs text-muted-foreground">Plazos pedidos</p><p className={`text-xl font-bold ${totalPendingDebt > 0 ? 'text-red-600' : ''}`}>{formatCurrency(totalPendingDebt)}</p></CardContent>
+        </Card>
         <Card><CardContent className="pt-4 pb-3"><p className="text-xs text-muted-foreground">Pedidos</p><p className="text-xl font-bold">{orders.length}</p></CardContent></Card>
         <Card><CardContent className="pt-4 pb-3"><p className="text-xs text-muted-foreground">Cond. pago</p><p className="text-lg font-bold">{{ immediate: 'Al contado', net_15: '15 días', net_30: '30 días', net_60: '60 días', net_90: '90 días', custom: 'Personalizado' }[supplier.payment_terms as string] || `${supplier.payment_days || 30} días`}</p></CardContent></Card>
       </div>
@@ -703,32 +752,93 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
           </TabsContent>
 
           <TabsContent value="payments">
-            <div className="rounded-lg border">
-              <Table>
-                <TableHeader><TableRow>
-                  <TableHead>Vencimiento</TableHead><TableHead>Importe</TableHead>
-                  <TableHead>Estado</TableHead><TableHead>Alerta</TableHead>
-                </TableRow></TableHeader>
-                <TableBody>
-                  {dueDates.length === 0 ? (
-                    <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground py-8">Sin vencimientos</TableCell></TableRow>
-                  ) : [...dueDates].sort((a: any, b: any) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime()).map((d: any) => {
-                    const isOverdue = !d.is_paid && new Date(d.due_date) < new Date()
-                    return (
-                      <TableRow key={d.id} className={isOverdue ? 'bg-red-50' : ''}>
-                        <TableCell className={`font-medium ${isOverdue ? 'text-red-600' : ''}`}>{formatDate(d.due_date)}</TableCell>
-                        <TableCell className="font-medium">{formatCurrency(d.amount)}</TableCell>
-                        <TableCell>
-                          {d.is_paid ? <Badge className="bg-green-100 text-green-700 text-xs">Pagado</Badge>
-                            : isOverdue ? <Badge variant="destructive" className="text-xs gap-1"><AlertTriangle className="h-3 w-3" /> Vencido</Badge>
-                            : <Badge variant="outline" className="text-xs">Pendiente</Badge>}
-                        </TableCell>
-                        <TableCell>{d.alert_sent ? <Badge variant="secondary" className="text-xs">Enviada</Badge> : <span className="text-xs text-muted-foreground">No</span>}</TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
+            <div className="space-y-6">
+              <div className="rounded-lg border">
+                <div className="flex items-center justify-between border-b px-4 py-3">
+                  <h3 className="text-sm font-semibold">Facturas con saldo pendiente</h3>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary">{apPending.invoices.length}</Badge>
+                    <Button variant="outline" size="sm" asChild>
+                      <Link href="/admin/contabilidad/vencimientos">Ir a Vencimientos</Link>
+                    </Button>
+                  </div>
+                </div>
+                <Table>
+                  <TableHeader><TableRow>
+                    <TableHead>Nº factura</TableHead>
+                    <TableHead>Vencimiento</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
+                    <TableHead className="text-right">Pagado</TableHead>
+                    <TableHead className="text-right">Pendiente</TableHead>
+                    <TableHead>Estado</TableHead>
+                    <TableHead className="w-36 text-right">Acciones</TableHead>
+                  </TableRow></TableHeader>
+                  <TableBody>
+                    {apLoading ? (
+                      <TableRow><TableCell colSpan={7} className="text-center py-6"><Loader2 className="h-4 w-4 animate-spin inline-block" /></TableCell></TableRow>
+                    ) : apPending.invoices.length === 0 ? (
+                      <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">Sin facturas con saldo pendiente</TableCell></TableRow>
+                    ) : apPending.invoices.map((inv) => {
+                      const overdue = inv.days_overdue > 0
+                      return (
+                        <TableRow key={inv.id} className={overdue ? 'bg-red-50' : ''}>
+                          <TableCell className="font-mono text-xs">{inv.invoice_number}</TableCell>
+                          <TableCell className={`text-sm ${overdue ? 'text-red-600 font-medium' : ''}`}>{formatDate(inv.due_date)}</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatCurrency(inv.total_amount)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-green-600">{formatCurrency(inv.amount_paid)}</TableCell>
+                          <TableCell className="text-right tabular-nums font-semibold text-amber-600">{formatCurrency(inv.amount_pending)}</TableCell>
+                          <TableCell>
+                            {overdue ? (
+                              <Badge variant="destructive" className="text-xs">{inv.days_overdue}d vencida</Badge>
+                            ) : inv.status === 'parcial' ? (
+                              <Badge className="bg-blue-100 text-blue-800 text-xs">Parcial</Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-xs">Pendiente</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button size="sm" variant="outline" className="h-8 text-xs gap-1" onClick={() => openApPayment(inv)}>
+                              <CreditCard className="h-3.5 w-3.5" /> Registrar pago
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <div className="rounded-lg border">
+                <div className="flex items-center justify-between border-b px-4 py-3">
+                  <h3 className="text-sm font-semibold">Plazos de pedido a proveedor</h3>
+                  <Badge variant="secondary">{dueDates.length}</Badge>
+                </div>
+                <Table>
+                  <TableHeader><TableRow>
+                    <TableHead>Vencimiento</TableHead><TableHead>Importe</TableHead>
+                    <TableHead>Estado</TableHead><TableHead>Alerta</TableHead>
+                  </TableRow></TableHeader>
+                  <TableBody>
+                    {dueDates.length === 0 ? (
+                      <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground py-8">Sin plazos de pago</TableCell></TableRow>
+                    ) : [...dueDates].sort((a: any, b: any) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime()).map((d: any) => {
+                      const isOverdue = !d.is_paid && new Date(d.due_date) < new Date()
+                      return (
+                        <TableRow key={d.id} className={isOverdue ? 'bg-red-50' : ''}>
+                          <TableCell className={`font-medium ${isOverdue ? 'text-red-600' : ''}`}>{formatDate(d.due_date)}</TableCell>
+                          <TableCell className="font-medium">{formatCurrency(d.amount)}</TableCell>
+                          <TableCell>
+                            {d.is_paid ? <Badge className="bg-green-100 text-green-700 text-xs">Pagado</Badge>
+                              : isOverdue ? <Badge variant="destructive" className="text-xs gap-1"><AlertTriangle className="h-3 w-3" /> Vencido</Badge>
+                              : <Badge variant="outline" className="text-xs">Pendiente</Badge>}
+                          </TableCell>
+                          <TableCell>{d.alert_sent ? <Badge variant="secondary" className="text-xs">Enviada</Badge> : <span className="text-xs text-muted-foreground">No</span>}</TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           </TabsContent>
         </div>
@@ -1812,6 +1922,13 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
           if (!file) return
           handleUploadOrderPdf(file)
         }}
+      />
+
+      <SupplierPaymentDialog
+        open={apPaymentOpen}
+        onOpenChange={(open) => { setApPaymentOpen(open); if (!open) setApPaymentInvoice(null) }}
+        invoice={apPaymentInvoice}
+        onChanged={() => { loadApPending(); router.refresh() }}
       />
     </div>
   )
