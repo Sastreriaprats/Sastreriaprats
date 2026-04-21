@@ -80,20 +80,42 @@ export function VencimientosContent() {
   const [selected, setSelected] = useState<SupplierPaymentDialogInvoice | null>(null)
 
   const loadKpis = useCallback(async () => {
-    const r = await getSupplierVencimientosKpis()
-    if (r.success) setKpis(r.data)
+    try {
+      const r = await getSupplierVencimientosKpis()
+      if (r.success) setKpis(r.data)
+      else {
+        setKpis({
+          totalPendiente: 0, totalVencidas: 0, totalProximas30: 0,
+          countPendientes: 0, countVencidas: 0, countProximas30: 0, countPagadasEsteMes: 0,
+        })
+        toast.error(r.error || 'Error al cargar KPIs')
+      }
+    } catch (e) {
+      console.error('[Vencimientos] loadKpis:', e)
+      setKpis({
+        totalPendiente: 0, totalVencidas: 0, totalProximas30: 0,
+        countPendientes: 0, countVencidas: 0, countProximas30: 0, countPagadasEsteMes: 0,
+      })
+      toast.error('Error inesperado al cargar KPIs')
+    }
   }, [])
 
   const loadList = useCallback(async () => {
     setLoading(true)
-    const r = await listSupplierVencimientos({
-      search: search.trim() || undefined,
-      status: statusFilter as any,
-      onlyOverdue,
-    })
-    setLoading(false)
-    if (r.success) setRows(r.data)
-    else toast.error(r.error || 'Error al cargar vencimientos')
+    try {
+      const r = await listSupplierVencimientos({
+        search: search.trim() || undefined,
+        status: statusFilter as any,
+        onlyOverdue,
+      })
+      if (r.success) setRows(r.data)
+      else toast.error(r.error || 'Error al cargar vencimientos')
+    } catch (e) {
+      console.error('[Vencimientos] loadList:', e)
+      toast.error('Error inesperado al cargar vencimientos')
+    } finally {
+      setLoading(false)
+    }
   }, [search, statusFilter, onlyOverdue])
 
   useEffect(() => { loadKpis() }, [loadKpis])
