@@ -52,6 +52,19 @@ export const createVariantSchema = z.object({
   weight_grams: coerceOptionalNumber.pipe(z.number().int().optional().nullable()),
 })
 
+export const updateVariantSchema = z.object({
+  id: z.string().uuid(),
+  variant_sku: z.string().min(1, 'SKU variante requerido').optional(),
+  size: z.string().nullable().optional().transform(v => (v == null || v === '' ? null : v)),
+  color: z.string().nullable().optional().transform(v => (v == null || v === '' ? null : v)),
+  barcode: z.string().nullable().optional().transform(v => (v == null || v === '' ? null : v)),
+  price_override: coerceOptionalNumber,
+  cost_price_override: coerceOptionalNumber,
+  weight_grams: coerceOptionalNumber.pipe(z.number().int().optional().nullable()),
+  is_active: z.boolean().optional(),
+})
+
 export type CreateProductInput = z.infer<typeof createProductSchema>
 export type UpdateProductInput = z.infer<typeof updateProductSchema>
 export type CreateVariantInput = z.infer<typeof createVariantSchema>
+export type UpdateVariantInput = z.infer<typeof updateVariantSchema>

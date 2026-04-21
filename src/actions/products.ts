@@ -2,7 +2,7 @@
 
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { queryList, queryById, getNextNumber } from '@/lib/server/query-helpers'
-import { createProductSchema, updateProductSchema, createVariantSchema } from '@/lib/validations/products'
+import { createProductSchema, updateProductSchema, createVariantSchema, updateVariantSchema } from '@/lib/validations/products'
 import { sortBySize } from '@/lib/utils/sort-sizes'
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
@@ -530,6 +530,43 @@ export const createVariantAction = protectedAction<any, any>(
     }
 
     return success(variant)
+  }
+)
+
+export const updateVariantAction = protectedAction<any, any>(
+  {
+    permission: 'products.edit',
+    auditModule: 'stock',
+    auditAction: 'update',
+    auditEntity: 'product_variant',
+    revalidate: ['/admin/stock'],
+  },
+  async (ctx, input) => {
+    const parsed = updateVariantSchema.safeParse(input)
+    if (!parsed.success) return failure(parsed.error.issues[0].message, 'VALIDATION')
+
+    const { id, ...fields } = parsed.data
+    const updateFields: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(fields)) {
+      if (v !== undefined) updateFields[k] = v
+    }
+    if (Object.keys(updateFields).length === 0) {
+      return failure('Sin cambios', 'VALIDATION')
+    }
+    updateFields.updated_at = new Date().toISOString()
+
+    const { data: variant, error } = await ctx.adminClient
+      .from('product_variants')
+      .update(updateFields)
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) return failure(error.message)
+    return success({
+      ...(variant as Record<string, unknown>),
+      auditDescription: `Variante: ${(variant as any)?.variant_sku ?? id}`,
+    })
   }
 )
 
