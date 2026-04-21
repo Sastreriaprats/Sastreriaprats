@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import {
   Dialog,
   DialogContent,
@@ -16,6 +16,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   Select,
   SelectContent,
@@ -25,13 +29,13 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Plus, Search, MoreHorizontal, Eye, Loader2, ChevronLeft, ChevronRight, ArrowUpDown } from 'lucide-react'
+import { Plus, Search, MoreHorizontal, Eye, Pencil, Trash2, Loader2, ChevronLeft, ChevronRight, ArrowUpDown } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from 'sonner'
 import { useList } from '@/hooks/use-list'
 import { usePermissions } from '@/hooks/use-permissions'
 import { useAction } from '@/hooks/use-action'
-import { listSuppliers, createSupplierAction } from '@/actions/suppliers'
+import { listSuppliers, createSupplierAction, updateSupplierAction, deleteSupplierAction } from '@/actions/suppliers'
 import { formatCurrency } from '@/lib/utils'
 
 const paymentTermsLabels: Record<string, string> = {
@@ -96,7 +100,9 @@ export function SuppliersPageContent() {
   const { can } = usePermissions()
 
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState(emptyForm)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
 
   const {
     data: suppliers, total, totalPages, page, setPage,
@@ -112,6 +118,54 @@ export function SuppliersPageContent() {
       if (data?.id) router.push(`/admin/proveedores/${data.id}`)
     },
   })
+
+  const { execute: updateSupplier, isLoading: isUpdating } = useAction(updateSupplierAction, {
+    successMessage: 'Proveedor actualizado correctamente',
+    onSuccess: () => {
+      setDialogOpen(false)
+      setEditingId(null)
+      setForm(emptyForm)
+      refresh()
+    },
+  })
+
+  const { execute: deleteSupplier, isLoading: isDeleting } = useAction(deleteSupplierAction, {
+    successMessage: 'Proveedor eliminado correctamente',
+    onSuccess: () => {
+      setDeleteTarget(null)
+      refresh()
+    },
+  })
+
+  const openCreate = () => {
+    setEditingId(null)
+    setForm(emptyForm)
+    setDialogOpen(true)
+  }
+
+  const openEdit = (s: any) => {
+    setEditingId(String(s.id))
+    setForm({
+      name: s.name ?? '',
+      legal_name: s.legal_name ?? '',
+      nif_cif: s.nif_cif ?? '',
+      phone: s.contact_phone ?? '',
+      email: s.contact_email ?? '',
+      contact_person: s.contact_name ?? '',
+      address: s.address ?? '',
+      city: s.city ?? '',
+      postal_code: s.postal_code ?? '',
+      province: s.province ?? '',
+      country: s.country ?? 'España',
+      supplier_types: Array.isArray(s.supplier_types) ? s.supplier_types : [],
+      payment_terms: s.payment_terms ?? '',
+      payment_method: s.payment_method ?? '',
+      bank_iban: s.bank_iban ?? '',
+      internal_notes: s.internal_notes ?? '',
+      is_active: s.is_active !== false,
+    })
+    setDialogOpen(true)
+  }
 
   const handleSave = () => {
     if (!form.name?.trim()) {
@@ -138,7 +192,11 @@ export function SuppliersPageContent() {
       internal_notes: form.internal_notes?.trim() || null,
       is_active: form.is_active,
     }
-    createSupplier(payload)
+    if (editingId) {
+      updateSupplier({ id: editingId, data: payload })
+    } else {
+      createSupplier(payload)
+    }
   }
 
   const toggleSupplierType = (value: string) => {
@@ -164,7 +222,7 @@ export function SuppliersPageContent() {
           <p className="text-muted-foreground">{total} proveedores</p>
         </div>
         {can('suppliers.create') && (
-          <Button className="gap-2 bg-prats-navy hover:bg-prats-navy/90 text-white" onClick={() => { setForm(emptyForm); setDialogOpen(true) }}>
+          <Button className="gap-2 bg-prats-navy hover:bg-prats-navy/90 text-white" onClick={openCreate}>
             <Plus className="h-4 w-4" /> Nuevo proveedor
           </Button>
         )}
@@ -240,6 +298,20 @@ export function SuppliersPageContent() {
                     <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem onClick={() => router.push(`/admin/proveedores/${s.id}`)}><Eye className="mr-2 h-4 w-4" /> Ver ficha</DropdownMenuItem>
+                      {can('suppliers.edit') && (
+                        <DropdownMenuItem onClick={() => openEdit(s)}><Pencil className="mr-2 h-4 w-4" /> Editar</DropdownMenuItem>
+                      )}
+                      {can('suppliers.edit') && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="text-red-600 focus:text-red-600"
+                            onClick={() => setDeleteTarget({ id: String(s.id), name: s.name })}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" /> Eliminar
+                          </DropdownMenuItem>
+                        </>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </TableCell>

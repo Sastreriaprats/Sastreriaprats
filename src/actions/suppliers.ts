@@ -205,6 +205,56 @@ export const createSupplierAction = protectedAction<any, any>(
   }
 )
 
+export const deleteSupplierAction = protectedAction<string, { deleted: boolean }>(
+  {
+    permission: 'suppliers.edit',
+    auditModule: 'suppliers',
+    auditAction: 'delete',
+    auditEntity: 'supplier',
+    revalidate: ['/admin/proveedores'],
+  },
+  async (ctx, supplierId) => {
+    if (!supplierId?.trim()) return failure('ID del proveedor obligatorio', 'VALIDATION')
+
+    const { data: supplier, error: fetchErr } = await ctx.adminClient
+      .from('suppliers')
+      .select('id, name')
+      .eq('id', supplierId.trim())
+      .single()
+    if (fetchErr || !supplier) return failure('Proveedor no encontrado', 'NOT_FOUND')
+
+    const { count: ordersCount } = await ctx.adminClient
+      .from('supplier_orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('supplier_id', supplierId.trim())
+    if ((ordersCount ?? 0) > 0) {
+      return failure('No se puede eliminar: el proveedor tiene pedidos asociados', 'CONFLICT')
+    }
+
+    const { count: invoicesCount } = await ctx.adminClient
+      .from('ap_supplier_invoices')
+      .select('id', { count: 'exact', head: true })
+      .eq('supplier_id', supplierId.trim())
+    if ((invoicesCount ?? 0) > 0) {
+      return failure('No se puede eliminar: el proveedor tiene facturas asociadas', 'CONFLICT')
+    }
+
+    await ctx.adminClient.from('supplier_contacts').delete().eq('supplier_id', supplierId.trim())
+    await ctx.adminClient.from('supplier_due_dates').delete().eq('supplier_id', supplierId.trim())
+
+    const { error: deleteErr } = await ctx.adminClient
+      .from('suppliers')
+      .delete()
+      .eq('id', supplierId.trim())
+    if (deleteErr) return failure(deleteErr.message || 'Error al eliminar el proveedor')
+
+    return success({
+      deleted: true,
+      auditDescription: `Proveedor eliminado: ${(supplier as any).name ?? supplierId}`,
+    } as any)
+  }
+)
+
 export const updateSupplierAction = protectedAction<{ id: string; data: any }, any>(
   {
     permission: 'suppliers.edit',
@@ -353,7 +403,7 @@ export const updateSupplierOrderStatusAction = protectedAction<
 
       const { data: lines, error: linesError } = await ctx.adminClient
         .from('supplier_order_lines')
-        .select('id, supplier_order_id, product_id, fabric_id, description, reference, quantity, quantity_received')
+        .select('id, supplier_order_id, product_id, product_variant_id, fabric_id, description, reference, quantity, quantity_received')
         .eq('supplier_order_id', supplierOrderId)
       if (linesError) return failure(linesError.message || 'Error al cargar líneas del pedido', 'INTERNAL')
 
@@ -393,7 +443,9 @@ export const updateSupplierOrderStatusAction = protectedAction<
         if (qtyToAdd <= 0) continue
 
         let productId = ((line as any).product_id ? String((line as any).product_id) : null) as string | null
-        if (!productId && (line as any).fabric_id) {
+        const declaredVariantId = (line as any).product_variant_id ? String((line as any).product_variant_id) : null
+        const isFabricLine = !productId && !!(line as any).fabric_id
+        if (isFabricLine) {
           const byName = fabricCandidates.get(`name:${String((line as any).description || '').trim().toLowerCase()}`)
           const byRef = fabricCandidates.get(`ref:${String((line as any).reference || '').trim().toLowerCase()}`)
           const bySku = fabricCandidates.get(`sku:${String((line as any).reference || '').trim().toLowerCase()}`)
@@ -411,10 +463,18 @@ export const updateSupplierOrderStatusAction = protectedAction<
         }
 
         if (!productId) continue
-        const variantId = await pickVariantForProduct(ctx.adminClient, productId)
+
+        // Para productos normales exigimos la variante explícita guardada en la línea
+        // (talla/color). Antes se hacía fallback a la primera variante creada, lo que
+        // provocaba que todo el stock entrara en XS. Solo los tejidos resueltos
+        // dinámicamente desde fabric_id usan pickVariantForProduct (una sola variante).
+        let variantId: string | null = declaredVariantId
+        if (!variantId && isFabricLine) {
+          variantId = await pickVariantForProduct(ctx.adminClient, productId)
+        }
         if (!variantId) {
           stockWarnings += 1
-          console.warn('[supplier receipt] producto sin variante activa para recepción', {
+          console.warn('[supplier receipt] línea de producto sin variante asignada; no se actualiza stock', {
             supplierOrderId,
             lineId: (line as any).id,
             productId,
@@ -623,12 +683,16 @@ export const receiveSupplierOrderLines = protectedAction<
           stockWarnings += 1
         }
       } else if (input.type === 'product' && input.referenceId) {
-        // Usar product_variant_id de la línea si existe, sino fallback a pickVariantForProduct
-        const dbLineVariantId = (dbLine as any).product_variant_id as string | null
-        const variantId = dbLineVariantId || await pickVariantForProduct(ctx.adminClient, input.referenceId)
+        // La línea del pedido debe tener asignada una variante explícita (talla/color).
+        // Si no la tiene, no inventamos una: devolvemos error para que el usuario
+        // complete el pedido correctamente. Antes se hacía fallback a la primera
+        // variante creada, lo que provocaba que el stock se metiera en XS.
+        const variantId = (dbLine as any).product_variant_id as string | null
         if (!variantId) {
-          stockWarnings += 1
-          continue
+          return failure(
+            `La línea "${(dbLine as any).description ?? ''}" no tiene talla/variante asignada. Edita el pedido y selecciona la talla antes de recepcionar.`,
+            'VALIDATION'
+          )
         }
         const { data: currentLevel } = await ctx.adminClient
           .from('stock_levels')
@@ -1020,7 +1084,7 @@ export const getSupplierOrderDetail = protectedAction<
     const [linesRes, notesRes, invoiceRes, scheduleRes] = await Promise.all([
       ctx.adminClient
         .from('supplier_order_lines')
-        .select('id, description, reference, quantity, quantity_received, unit, unit_price, total_price, fabric_id, product_id, is_fully_received, sort_order')
+        .select('id, description, reference, quantity, quantity_received, unit, unit_price, total_price, fabric_id, product_id, product_variant_id, is_fully_received, sort_order, product_variants(id, size, color, variant_sku)')
         .eq('supplier_order_id', orderId)
         .order('sort_order', { ascending: true }),
       ctx.adminClient

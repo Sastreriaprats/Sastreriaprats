@@ -75,6 +75,13 @@ type LineType = {
   total_price: number | null
   fabric_id: string | null
   product_id: string | null
+  product_variant_id?: string | null
+  product_variants?: {
+    id: string
+    size: string | null
+    color: string | null
+    variant_sku: string | null
+  } | null
   is_fully_received: boolean
 }
 
@@ -433,9 +440,18 @@ export function PedidoDetailContent({
                   </TableRow>
                 ) : (
                   lines.map((line) => {
-                    const tallaMatch = (line.description || '').match(/\s*(?:—|–|-)\s*(?:Talla\s+)?(\S+)\s*$/)
-                    const talla = tallaMatch ? tallaMatch[1] : null
-                    const descClean = talla ? line.description.replace(/\s*(?:—|–|-)\s*(?:Talla\s+)?\S+\s*$/, '').trim() : line.description
+                    const variantSize = line.product_variants?.size?.trim() || null
+                    const variantColor = line.product_variants?.color?.trim() || null
+                    let talla: string | null = null
+                    let descClean = line.description
+                    if (variantSize || variantColor) {
+                      talla = [variantSize, variantColor].filter(Boolean).join(' / ')
+                      descClean = line.description.replace(/\s*(?:—|–|-)\s*.+$/, '').trim() || line.description
+                    } else {
+                      const tallaMatch = (line.description || '').match(/\s*(?:—|–|-)\s*(?:Talla\s+)?(\S+)\s*$/)
+                      talla = tallaMatch ? tallaMatch[1] : null
+                      descClean = talla ? line.description.replace(/\s*(?:—|–|-)\s*(?:Talla\s+)?\S+\s*$/, '').trim() : line.description
+                    }
 
                     const isComplete = line.quantity_received >= line.quantity
                     const isPartial = line.quantity_received > 0 && !isComplete
