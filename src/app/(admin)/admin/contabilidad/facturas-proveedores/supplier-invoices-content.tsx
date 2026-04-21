@@ -518,11 +518,6 @@ export function SupplierInvoicesContent() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" asChild>
-            <Link href="/admin/contabilidad/vencimientos">
-              <CreditCard className="h-4 w-4 mr-1" /> Vencimientos
-            </Link>
-          </Button>
-          <Button variant="outline" asChild>
             <Link href="/admin/contabilidad/facturas-proveedores/calendario">
               <Calendar className="h-4 w-4 mr-1" /> Ver calendario
             </Link>
