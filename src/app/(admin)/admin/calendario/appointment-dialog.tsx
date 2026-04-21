@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { useAction } from '@/hooks/use-action'
 import { useAuth } from '@/components/providers/auth-provider'
+import { useStores } from '@/hooks/use-cached-queries'
 import { usePermissions } from '@/hooks/use-permissions'
 import { createAppointment, updateAppointment, cancelAppointment, markAttendance } from '@/actions/calendar'
 import type { CalendarEvent } from './calendar-content'
@@ -79,7 +80,8 @@ export function AppointmentDialog({
   open, onOpenChange, selectedSlot, selectedEvent, tailors, onSaved,
 }: AppointmentDialogProps) {
   const supabase = useMemo(() => createClient(), [])
-  const { activeStoreId, stores } = useAuth()
+  const { activeStoreId } = useAuth()
+  const { data: allStores } = useStores()
   const { can } = usePermissions()
   const isEditing = !!selectedEvent
 
@@ -339,8 +341,8 @@ export function AppointmentDialog({
               <Select value={form.store_id} onValueChange={(v) => setForm(p => ({ ...p, store_id: v }))}>
                 <SelectTrigger><SelectValue placeholder="Selecciona tienda" /></SelectTrigger>
                 <SelectContent>
-                  {stores.map(s => (
-                    <SelectItem key={s.storeId} value={s.storeId}>{s.storeName}</SelectItem>
+                  {(allStores ?? []).map(s => (
+                    <SelectItem key={s.id} value={s.id}>{s.display_name || s.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

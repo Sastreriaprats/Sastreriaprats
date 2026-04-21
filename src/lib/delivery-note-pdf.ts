@@ -3,6 +3,8 @@ type DeliveryNotePdfLine = {
   sku?: string | null
   quantity?: number | null
   unit_price?: number | null
+  unit_price_with_tax?: number | null
+  tax_rate?: number | null
 }
 
 type DeliveryNotePdfData = {
@@ -74,8 +76,8 @@ export async function generateDeliveryNotePdf(data: DeliveryNotePdfData): Promis
   doc.text('Producto', colX.product + 1, y + 5.4)
   doc.text('SKU', colX.sku + 1, y + 5.4)
   doc.text('Cantidad', colX.qty + 1, y + 5.4)
-  doc.text('Precio Unit.', colX.unit + 1, y + 5.4)
-  doc.text('Total', colX.total + 1, y + 5.4)
+  doc.text('P.Unit. (IVA)', colX.unit + 1, y + 5.4)
+  doc.text('Total (IVA)', colX.total + 1, y + 5.4)
   y += 8
 
   let grandTotal = 0
@@ -83,7 +85,11 @@ export async function generateDeliveryNotePdf(data: DeliveryNotePdfData): Promis
   const lines = data.lines || []
   for (const line of lines) {
     const qty = Number(line.quantity || 0)
-    const unitPrice = Number(line.unit_price || 0)
+    const net = Number(line.unit_price || 0)
+    const taxRate = Number(line.tax_rate ?? 21)
+    const unitPrice = line.unit_price_with_tax != null
+      ? Number(line.unit_price_with_tax)
+      : net * (1 + taxRate / 100)
     const lineTotal = qty * unitPrice
     grandTotal += lineTotal
 
@@ -91,8 +97,8 @@ export async function generateDeliveryNotePdf(data: DeliveryNotePdfData): Promis
     doc.text(String(line.product_name || '-').slice(0, 38), colX.product + 1, y + 5.2)
     doc.text(String(line.sku || '-').slice(0, 18), colX.sku + 1, y + 5.2)
     doc.text(String(qty), colX.qty + 1, y + 5.2)
-    doc.text(unitPrice ? euro(unitPrice) : '-', colX.unit + 1, y + 5.2)
-    doc.text(unitPrice ? euro(lineTotal) : '-', colX.total + 1, y + 5.2)
+    doc.text(net ? euro(unitPrice) : '-', colX.unit + 1, y + 5.2)
+    doc.text(net ? euro(lineTotal) : '-', colX.total + 1, y + 5.2)
     doc.setDrawColor(230)
     doc.line(margin, y + 7, right, y + 7)
     y += 7

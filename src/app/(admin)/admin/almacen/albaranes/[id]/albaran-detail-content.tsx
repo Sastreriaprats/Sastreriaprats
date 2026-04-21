@@ -98,8 +98,8 @@ export function AlbaranDetailContent({ id }: { id: string }) {
                   <TableHead>Producto</TableHead>
                   <TableHead>SKU</TableHead>
                   <TableHead>Cantidad</TableHead>
-                  <TableHead>P.Unit.</TableHead>
-                  <TableHead>Total</TableHead>
+                  <TableHead>P.Unit. (IVA incl.)</TableHead>
+                  <TableHead>Total (IVA incl.)</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -107,14 +107,18 @@ export function AlbaranDetailContent({ id }: { id: string }) {
                   <TableRow><TableCell colSpan={5} className="h-20 text-center text-muted-foreground">Sin líneas</TableCell></TableRow>
                 ) : (note.lines || []).map((line: any) => {
                   const qty = Number(line.quantity || 0)
-                  const p = Number(line.unit_price || 0)
+                  const net = Number(line.unit_price || 0)
+                  const taxRate = Number(line.tax_rate ?? 21)
+                  const gross = line.unit_price_with_tax != null
+                    ? Number(line.unit_price_with_tax)
+                    : net * (1 + taxRate / 100)
                   return (
                     <TableRow key={line.id}>
                       <TableCell>{line.product_name || '-'}</TableCell>
                       <TableCell className="font-mono text-xs">{line.sku || '-'}</TableCell>
                       <TableCell>{qty}</TableCell>
-                      <TableCell>{p ? formatCurrency(p) : '-'}</TableCell>
-                      <TableCell>{p ? formatCurrency(qty * p) : '-'}</TableCell>
+                      <TableCell>{net ? formatCurrency(gross) : '-'}</TableCell>
+                      <TableCell>{net ? formatCurrency(qty * gross) : '-'}</TableCell>
                     </TableRow>
                   )
                 })}

@@ -172,14 +172,26 @@ export const getDeliveryNote = protectedAction<string, any>(
         store:stores!store_id(id, name, code),
         profiles!created_by(full_name),
         lines:delivery_note_lines(
-          id, product_variant_id, product_name, sku, quantity, unit_price, notes, sort_order
+          id, product_variant_id, product_name, sku, quantity, unit_price, notes, sort_order,
+          product_variants(products(tax_rate))
         )
       `)
       .eq('id', id)
       .single()
     if (error || !data) return failure('Albarán no encontrado', 'NOT_FOUND')
+    const lines = ((data as any).lines || []).map((l: any) => {
+      const taxRate = Number(l.product_variants?.products?.tax_rate ?? 21)
+      const net = l.unit_price != null ? Number(l.unit_price) : null
+      const gross = net != null ? Number((net * (1 + taxRate / 100)).toFixed(2)) : null
+      return {
+        ...l,
+        tax_rate: taxRate,
+        unit_price_with_tax: gross,
+      }
+    })
     return success({
       ...data,
+      lines,
       created_by_name: (data as any)?.profiles?.full_name || null,
     })
   }
