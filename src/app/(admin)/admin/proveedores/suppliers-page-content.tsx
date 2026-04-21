@@ -332,10 +332,10 @@ export function SuppliersPageContent() {
         </div>
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) { setEditingId(null); setForm(emptyForm) } }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-prats-navy">Nuevo proveedor</DialogTitle>
+            <DialogTitle className="text-prats-navy">{editingId ? 'Editar proveedor' : 'Nuevo proveedor'}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-4 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2">
@@ -434,13 +434,39 @@ export function SuppliersPageContent() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-            <Button className="bg-prats-navy hover:bg-prats-navy/90 text-white" onClick={handleSave} disabled={isCreating}>
-              {isCreating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Crear proveedor
+            <Button className="bg-prats-navy hover:bg-prats-navy/90 text-white" onClick={handleSave} disabled={isCreating || isUpdating}>
+              {(isCreating || isUpdating) ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {editingId ? 'Guardar cambios' : 'Crear proveedor'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar proveedor?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Vas a eliminar permanentemente <strong>{deleteTarget?.name}</strong>. Esta acción no se puede deshacer.
+              Si el proveedor tiene pedidos o facturas asociadas, la eliminación se bloqueará.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 text-white"
+              disabled={isDeleting}
+              onClick={(e) => {
+                e.preventDefault()
+                if (deleteTarget) deleteSupplier(deleteTarget.id)
+              }}
+            >
+              {isDeleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
