@@ -697,7 +697,10 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
       ? { efectivo: 'cash', tarjeta: 'card', transferencia: 'transfer', bizum: 'card' }[input.metodoPago] ?? 'cash'
       : 'cash'
 
-    const orderNumber = await getNextNumber('tailoring_orders', 'order_number', 'PED')
+    const { data: store } = await ctx.adminClient
+      .from('stores').select('order_prefix').eq('id', input.storeId).single()
+    const prefix = store?.order_prefix || 'ORD'
+    const orderNumber = await getNextNumber('tailoring_orders', 'order_number', prefix)
 
     const precioConfeccion = input.prendasSastreria !== undefined
       ? input.prendasSastreria.reduce((s, p) => s + (Number(p.precio) || 0), 0)
