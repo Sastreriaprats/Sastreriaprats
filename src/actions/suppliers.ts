@@ -82,10 +82,63 @@ export const searchSupplierProducts = protectedAction<
   }
 )
 
+type SupplierTotals = { total_debt: number; total_paid: number }
+
+const DEBT_STATUSES = new Set(['pendiente', 'vencida', 'parcial'])
+
+async function computeSupplierTotals(
+  adminClient: any,
+  suppliers: Array<{ id: string; nif_cif?: string | null }>,
+): Promise<Map<string, SupplierTotals>> {
+  const totals = new Map<string, SupplierTotals>()
+  if (suppliers.length === 0) return totals
+
+  const supplierIds = suppliers.map((s) => s.id)
+  const cifToId = new Map<string, string>()
+  for (const s of suppliers) {
+    const cif = (s.nif_cif || '').trim()
+    if (cif) cifToId.set(cif, s.id)
+  }
+
+  const addRow = (id: string, row: { status?: string | null; total_amount?: number | string | null }) => {
+    const amt = Number(row.total_amount ?? 0)
+    if (!Number.isFinite(amt)) return
+    const cur = totals.get(id) ?? { total_debt: 0, total_paid: 0 }
+    const status = String(row.status ?? 'pendiente')
+    if (status === 'pagada') cur.total_paid += amt
+    else if (DEBT_STATUSES.has(status)) cur.total_debt += amt
+    totals.set(id, cur)
+  }
+
+  const { data: byId } = await adminClient
+    .from('ap_supplier_invoices')
+    .select('supplier_id, supplier_cif, status, total_amount')
+    .in('supplier_id', supplierIds)
+  for (const r of (byId || []) as any[]) {
+    if (r.supplier_id) addRow(String(r.supplier_id), r)
+  }
+
+  const cifs = Array.from(cifToId.keys())
+  if (cifs.length > 0) {
+    const { data: byCif } = await adminClient
+      .from('ap_supplier_invoices')
+      .select('supplier_id, supplier_cif, status, total_amount')
+      .is('supplier_id', null)
+      .in('supplier_cif', cifs)
+    for (const r of (byCif || []) as any[]) {
+      const cif = String(r.supplier_cif ?? '').trim()
+      const id = cifToId.get(cif)
+      if (id) addRow(id, r)
+    }
+  }
+
+  return totals
+}
+
 export const listSuppliers = protectedAction<ListParams, ListResult<any>>(
   { permission: 'suppliers.view', auditModule: 'suppliers' },
   async (ctx, params) => {
-    const result = await queryList('suppliers', {
+    const result = await queryList<any>('suppliers', {
       ...params,
       searchFields: ['name', 'legal_name', 'contact_email', 'contact_name', 'nif_cif'],
     }, `
@@ -93,14 +146,23 @@ export const listSuppliers = protectedAction<ListParams, ListResult<any>>(
       contact_name, contact_email, contact_phone, city,
       payment_terms, payment_method, total_debt, total_paid, is_active, created_at
     `)
-    return success(result)
+
+    const totals = await computeSupplierTotals(
+      ctx.adminClient,
+      (result.data || []).map((s: any) => ({ id: String(s.id), nif_cif: s.nif_cif })),
+    )
+    const enriched = (result.data || []).map((s: any) => {
+      const t = totals.get(String(s.id)) ?? { total_debt: 0, total_paid: 0 }
+      return { ...s, total_debt: t.total_debt, total_paid: t.total_paid }
+    })
+    return success({ ...result, data: enriched })
   }
 )
 
 export const getSupplier = protectedAction<string, any>(
   { permission: 'suppliers.view', auditModule: 'suppliers' },
   async (ctx, supplierId) => {
-    const supplier = await queryById('suppliers', supplierId, `
+    const supplier = await queryById<any>('suppliers', supplierId, `
       *,
       supplier_contacts (*),
       fabrics ( id, fabric_code, name, composition, price_per_meter, stock_meters, status ),
@@ -108,7 +170,13 @@ export const getSupplier = protectedAction<string, any>(
       supplier_due_dates ( id, due_date, amount, is_paid, alert_sent )
     `)
     if (!supplier) return failure('Proveedor no encontrado', 'NOT_FOUND')
-    return success(supplier)
+
+    const totals = await computeSupplierTotals(
+      ctx.adminClient,
+      [{ id: String((supplier as any).id), nif_cif: (supplier as any).nif_cif }],
+    )
+    const t = totals.get(String((supplier as any).id)) ?? { total_debt: 0, total_paid: 0 }
+    return success({ ...(supplier as any), total_debt: t.total_debt, total_paid: t.total_paid })
   }
 )
 

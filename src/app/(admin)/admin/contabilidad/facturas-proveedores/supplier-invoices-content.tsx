@@ -144,6 +144,7 @@ export function SupplierInvoicesContent() {
     due_date: addDays(today(), 15),
     amount: '',
     tax_rate: '21',
+    shipping_amount: '',
     total_amount: '',
     payment_method: '',
     notes: '',
@@ -222,6 +223,7 @@ export function SupplierInvoicesContent() {
       due_date: addDays(today(), 30),
       amount: '',
       tax_rate: '21',
+      shipping_amount: '',
       total_amount: '',
       payment_method: '',
       notes: '',
@@ -244,6 +246,7 @@ export function SupplierInvoicesContent() {
       due_date: row.due_date,
       amount: String(row.amount),
       tax_rate: '21',
+      shipping_amount: row.shipping_amount ? String(row.shipping_amount) : '',
       total_amount: String(row.total_amount),
       payment_method: row.payment_method || '',
       notes: row.notes || '',
@@ -264,6 +267,7 @@ export function SupplierInvoicesContent() {
 
   const handleSelectSupplier = (supplierId: string) => {
     const supplier = suppliers.find((s) => s.id === supplierId) || null
+    const supplierTaxRate = supplier?.default_tax_rate != null ? String(supplier.default_tax_rate) : '21'
     setForm((f) => ({
       ...f,
       supplier_id: supplierId,
@@ -271,16 +275,43 @@ export function SupplierInvoicesContent() {
       supplier_cif: supplier?.nif_cif ?? f.supplier_cif,
       due_date: computeDueFromSupplier(f.invoice_date, supplier),
       payment_method: supplier?.payment_method ?? f.payment_method,
+      tax_rate: supplierTaxRate,
     }))
     setSupplierPopoverOpen(false)
     setSelectedDeliveryNoteIds([])
     loadDeliveryNotesForSupplier(supplierId, editingId)
   }
 
+  // Suma de los albaranes marcados con su importe computado
+  const computeDeliveryNotesBase = useCallback(
+    (ids: string[]) =>
+      ids.reduce((sum, id) => {
+        const note = deliveryNotes.find((n) => n.id === id)
+        return sum + (note?.total_amount ?? 0)
+      }, 0),
+    [deliveryNotes],
+  )
+
   const toggleDeliveryNote = (noteId: string) => {
-    setSelectedDeliveryNoteIds((prev) =>
-      prev.includes(noteId) ? prev.filter((id) => id !== noteId) : [...prev, noteId],
-    )
+    setSelectedDeliveryNoteIds((prev) => {
+      const next = prev.includes(noteId) ? prev.filter((id) => id !== noteId) : [...prev, noteId]
+      // Auto-rellenar base y total a partir de los albaranes seleccionados.
+      // El usuario puede ajustar después; al volver a tildar/destildar se
+      // recalcula según el nuevo conjunto.
+      const base = Math.round(computeDeliveryNotesBase(next) * 100) / 100
+      setForm((f) => {
+        const rate = parseFloat(String(f.tax_rate).replace(',', '.')) || 21
+        const shipping = parseFloat(String(f.shipping_amount).replace(',', '.')) || 0
+        const total = Math.round((base * (1 + rate / 100) + shipping) * 100) / 100
+        return {
+          ...f,
+          amount: base > 0 ? String(base) : '',
+          total_amount: total > 0 ? String(total) : '',
+        }
+      })
+      setTotalTouched(true)
+      return next
+    })
   }
 
   const selectedDeliveryNotesTotal = selectedDeliveryNoteIds.reduce((sum, id) => {
@@ -288,18 +319,24 @@ export function SupplierInvoicesContent() {
     return sum + (note?.total_amount ?? 0)
   }, 0)
 
-  const applyDeliveryNotesTotal = () => {
-    const rate = parseFloat(String(form.tax_rate).replace(',', '.')) || 21
-    const base = Math.round(selectedDeliveryNotesTotal * 100) / 100
-    const total = Math.round(base * (1 + rate / 100) * 100) / 100
-    setForm((f) => ({ ...f, amount: String(base), total_amount: String(total) }))
-    setTotalTouched(true)
-  }
-
   const amountNum = parseFloat(String(form.amount).replace(',', '.')) || 0
   const taxRateNum = parseFloat(String(form.tax_rate).replace(',', '.')) || 21
-  const computedTotal = amountNum * (1 + taxRateNum / 100)
+  const shippingNum = parseFloat(String(form.shipping_amount).replace(',', '.')) || 0
+  const computedTotal = amountNum * (1 + taxRateNum / 100) + shippingNum
   const totalNum = parseFloat(String(form.total_amount).replace(',', '.')) || computedTotal
+
+  // Si hay albaranes seleccionados y el usuario cambia el IVA o el envío,
+  // recalcular el total automáticamente sobre la base derivada de los albaranes.
+  useEffect(() => {
+    if (selectedDeliveryNoteIds.length === 0) return
+    const base = Math.round(selectedDeliveryNotesTotal * 100) / 100
+    const total = Math.round((base * (1 + taxRateNum / 100) + shippingNum) * 100) / 100
+    setForm((f) => ({
+      ...f,
+      amount: base > 0 ? String(base) : f.amount,
+      total_amount: total > 0 ? String(total) : f.total_amount,
+    }))
+  }, [taxRateNum, shippingNum, selectedDeliveryNoteIds.length, selectedDeliveryNotesTotal])
 
   const handleSave = async () => {
     if (!form.supplier_id && !form.supplier_name.trim()) {
@@ -324,7 +361,7 @@ export function SupplierInvoicesContent() {
     }
 
     setSaving(true)
-    const tax_amount = totalNum - amountNum
+    const tax_amount = totalNum - amountNum - shippingNum
     const payload: ApSupplierInvoiceInput = {
       supplier_id: form.supplier_id || null,
       supplier_name: form.supplier_name.trim(),
@@ -334,6 +371,7 @@ export function SupplierInvoicesContent() {
       due_date: form.due_date,
       amount: amountNum,
       tax_amount,
+      shipping_amount: shippingNum,
       total_amount: totalNum,
       payment_method: form.payment_method.trim() || null,
       notes: form.notes.trim() || null,
@@ -696,13 +734,9 @@ export function SupplierInvoicesContent() {
                     <Package className="h-3.5 w-3.5" /> Albaranes a facturar
                   </Label>
                   {selectedDeliveryNoteIds.length > 0 && (
-                    <button
-                      type="button"
-                      className="text-xs text-blue-600 hover:underline"
-                      onClick={applyDeliveryNotesTotal}
-                    >
-                      Sumar al total ({formatCurrency(selectedDeliveryNotesTotal)})
-                    </button>
+                    <span className="text-xs text-muted-foreground">
+                      Base albaranes: {formatCurrency(selectedDeliveryNotesTotal)}
+                    </span>
                   )}
                 </div>
                 <div className="border rounded-md mt-1 max-h-44 overflow-y-auto divide-y">
@@ -782,7 +816,8 @@ export function SupplierInvoicesContent() {
                     const v = e.target.value
                     const amt = parseFloat(v.replace(',', '.')) || 0
                     const rate = parseFloat(String(form.tax_rate).replace(',', '.')) || 21
-                    setForm((f) => ({ ...f, amount: v, total_amount: String(amt * (1 + rate / 100)) }))
+                    const ship = parseFloat(String(form.shipping_amount).replace(',', '.')) || 0
+                    setForm((f) => ({ ...f, amount: v, total_amount: String(amt * (1 + rate / 100) + ship) }))
                   }}
                 />
               </div>
@@ -792,7 +827,8 @@ export function SupplierInvoicesContent() {
                   value={form.tax_rate}
                   onValueChange={(v) => {
                     const amt = parseFloat(String(form.amount).replace(',', '.')) || 0
-                    setForm((f) => ({ ...f, tax_rate: v, total_amount: String(amt * (1 + parseFloat(v) / 100)) }))
+                    const ship = parseFloat(String(form.shipping_amount).replace(',', '.')) || 0
+                    setForm((f) => ({ ...f, tax_rate: v, total_amount: String(amt * (1 + parseFloat(v) / 100) + ship) }))
                   }}
                 >
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -802,6 +838,22 @@ export function SupplierInvoicesContent() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div>
+                <Label>Transporte (€)</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={form.shipping_amount}
+                  placeholder="0.00"
+                  onChange={(e) => {
+                    const v = e.target.value
+                    const ship = parseFloat(v.replace(',', '.')) || 0
+                    const amt = parseFloat(String(form.amount).replace(',', '.')) || 0
+                    const rate = parseFloat(String(form.tax_rate).replace(',', '.')) || 21
+                    setForm((f) => ({ ...f, shipping_amount: v, total_amount: String(amt * (1 + rate / 100) + ship) }))
+                  }}
+                />
               </div>
               <div>
                 <Label>Total (€) *</Label>

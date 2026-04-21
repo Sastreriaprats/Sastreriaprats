@@ -513,6 +513,7 @@ export const suppliers = pgTable('suppliers', {
   bankSwift: text('bank_swift'),
   paymentTerms: paymentTermTypeEnum('payment_terms').default('net_30'),
   paymentDays: integer('payment_days').default(30),
+  defaultTaxRate: decimal('default_tax_rate', { precision: 5, scale: 2 }).default('21.00'),
   minimumOrder: decimal('minimum_order', { precision: 10, scale: 2 }),
   shippingIncluded: boolean('shipping_included').default(false),
   shippingCost: decimal('shipping_cost', { precision: 10, scale: 2 }),

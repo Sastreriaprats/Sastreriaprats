@@ -30,7 +30,8 @@ export default async function SupplierDetailPage(props: { params: Promise<{ id: 
   const notesByOrder: Record<string, any[]> = {}
   const invoiceByOrder: Record<string, any> = {}
 
-  const [notesResult, invoicesResult] = await Promise.all([
+  const supplierCif = String((supplier as any).nif_cif || '').trim()
+  const [notesResult, invoicesResult, allInvoicesResult, allInvoicesByCifResult] = await Promise.all([
     admin
       .from('supplier_delivery_notes')
       .select('id, supplier_id, supplier_order_id, supplier_reference, delivery_date, status, attachment_url, notes, created_at')
@@ -43,7 +44,30 @@ export default async function SupplierDetailPage(props: { params: Promise<{ id: 
           .in('supplier_order_id', orderIds)
           .order('created_at', { ascending: false })
       : Promise.resolve({ data: [] as any[], error: null }),
+    admin
+      .from('ap_supplier_invoices')
+      .select('status, total_amount')
+      .eq('supplier_id', params.id),
+    supplierCif
+      ? admin
+          .from('ap_supplier_invoices')
+          .select('status, total_amount')
+          .is('supplier_id', null)
+          .eq('supplier_cif', supplierCif)
+      : Promise.resolve({ data: [] as any[], error: null }),
   ])
+
+  let totalDebt = 0
+  let totalPaid = 0
+  const debtStatuses = new Set(['pendiente', 'vencida', 'parcial'])
+  for (const inv of [...(allInvoicesResult.data || []), ...(allInvoicesByCifResult.data || [])] as any[]) {
+    const amt = Number(inv.total_amount ?? 0)
+    if (!Number.isFinite(amt)) continue
+    if (inv.status === 'pagada') totalPaid += amt
+    else if (debtStatuses.has(String(inv.status ?? ''))) totalDebt += amt
+  }
+  supplier.total_debt = totalDebt
+  supplier.total_paid = totalPaid
 
   const allSupplierNotes = notesResult.data
   for (const n of allSupplierNotes || []) {

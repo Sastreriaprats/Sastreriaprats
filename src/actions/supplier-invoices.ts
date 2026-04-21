@@ -18,6 +18,7 @@ export type ApSupplierInvoiceRow = {
   due_date: string
   amount: number
   tax_amount: number
+  shipping_amount: number
   total_amount: number
   currency: string
   status: string
@@ -38,6 +39,7 @@ export type ApSupplierInvoiceInput = {
   due_date?: string | null
   amount: number
   tax_amount?: number
+  shipping_amount?: number
   total_amount: number
   payment_method?: string | null
   notes?: string | null
@@ -52,6 +54,7 @@ export type SupplierOptionForInvoice = {
   payment_terms: string | null
   payment_days: number | null
   payment_method: string | null
+  default_tax_rate: number
 }
 
 const SUPPLIER_PAYMENT_METHOD_LABEL: Record<string, string> = {
@@ -189,6 +192,7 @@ export const listSupplierInvoices = protectedAction<
       due_date: String(r.due_date ?? ''),
       amount: Number(r.amount ?? 0),
       tax_amount: Number(r.tax_amount ?? 0),
+      shipping_amount: Number(r.shipping_amount ?? 0),
       total_amount: Number(r.total_amount ?? 0),
       currency: String(r.currency ?? 'EUR'),
       status: String(r.status ?? 'pendiente'),
@@ -207,7 +211,7 @@ export const listSuppliersForInvoice = protectedAction<void, SupplierOptionForIn
   async (ctx) => {
     const { data, error } = await ctx.adminClient
       .from('suppliers')
-      .select('id, name, nif_cif, payment_terms, payment_days, payment_method')
+      .select('id, name, nif_cif, payment_terms, payment_days, payment_method, default_tax_rate')
       .eq('is_active', true)
       .order('name', { ascending: true })
     if (error) return failure(error.message)
@@ -218,6 +222,7 @@ export const listSuppliersForInvoice = protectedAction<void, SupplierOptionForIn
       payment_terms: r.payment_terms != null ? String(r.payment_terms) : null,
       payment_days: r.payment_days != null ? Number(r.payment_days) : null,
       payment_method: supplierPaymentMethodLabel(r.payment_method as string | null),
+      default_tax_rate: r.default_tax_rate != null ? Number(r.default_tax_rate) : 21,
     }))
     return success(list)
   }
@@ -245,7 +250,7 @@ export const listUnlinkedDeliveryNotesForSupplier = protectedAction<
     let query = ctx.adminClient
       .from('supplier_delivery_notes')
       .select(`
-        id, supplier_reference, delivery_date, status,
+        id, supplier_reference, delivery_date, status, supplier_order_id,
         lines:supplier_delivery_note_lines(quantity_ordered, quantity_received, unit_price)
       `)
       .eq('supplier_id', supplierId.trim())
@@ -256,8 +261,26 @@ export const listUnlinkedDeliveryNotesForSupplier = protectedAction<
     const { data, error } = await query
     if (error) return failure(error.message)
 
+    const rows = (data || []) as any[]
+    // Prefetch del total de los pedidos de proveedor asociados para usarlo
+    // como fallback cuando el albarán no tiene líneas con importe propio
+    // (flujo habitual: el importe vive en el pedido PEDPROV, no en el albarán).
+    const orderIds = Array.from(
+      new Set(rows.map((r) => (r.supplier_order_id ? String(r.supplier_order_id) : null)).filter(Boolean) as string[]),
+    )
+    const orderTotals = new Map<string, number>()
+    if (orderIds.length > 0) {
+      const { data: orders } = await ctx.adminClient
+        .from('supplier_orders')
+        .select('id, total')
+        .in('id', orderIds)
+      for (const o of (orders || []) as any[]) {
+        orderTotals.set(String(o.id), Number(o.total ?? 0))
+      }
+    }
+
     const list: UnlinkedDeliveryNoteOption[] = []
-    for (const row of (data || []) as any[]) {
+    for (const row of rows) {
       if (linkedIds.has(String(row.id))) continue
       const lines = (row.lines || []) as Array<{ quantity_ordered: number | null; quantity_received: number | null; unit_price: string | number | null }>
       let total = 0
@@ -265,6 +288,10 @@ export const listUnlinkedDeliveryNotesForSupplier = protectedAction<
         const qty = l.quantity_received != null ? Number(l.quantity_received) : Number(l.quantity_ordered ?? 0)
         const unit = l.unit_price != null ? Number(l.unit_price) : 0
         if (Number.isFinite(qty) && Number.isFinite(unit)) total += qty * unit
+      }
+      if (total <= 0 && row.supplier_order_id) {
+        const fallback = orderTotals.get(String(row.supplier_order_id))
+        if (fallback && Number.isFinite(fallback)) total = fallback
       }
       list.push({
         id: String(row.id),
@@ -392,6 +419,7 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
         due_date: dueDate,
         amount: Number(input.amount),
         tax_amount: Number(input.tax_amount ?? 0),
+        shipping_amount: Number(input.shipping_amount ?? 0),
         total_amount: Number(input.total_amount),
         payment_method: input.payment_method?.trim() || supplierDefaults?.payment_method || null,
         notes: input.notes?.trim() || null,
@@ -463,6 +491,7 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
         due_date: dueDate,
         amount: Number(rest.amount),
         tax_amount: Number(rest.tax_amount ?? 0),
+        shipping_amount: Number(rest.shipping_amount ?? 0),
         total_amount: Number(rest.total_amount),
         payment_method: rest.payment_method?.trim() || supplierDefaults?.payment_method || null,
         notes: rest.notes?.trim() || null,
