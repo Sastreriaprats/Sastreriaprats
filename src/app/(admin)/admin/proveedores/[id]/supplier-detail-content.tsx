@@ -110,6 +110,10 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
     notes: '',
     tailoring_order_id: '',
   })
+  /** Hasta 3 plazos de pago (fecha + importe). El primero se mantiene sincronizado con payment_due_date. */
+  const [paymentSchedule, setPaymentSchedule] = useState<Array<{ due_date: string; amount: string }>>([
+    { due_date: '', amount: '' },
+  ])
   const [orderLines, setOrderLines] = useState<Array<{
     tempId: string
     type: 'fabric' | 'product' | 'custom'
@@ -741,6 +745,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
             setTailoringSearchResults([])
             setTailoringSearchOpen(false)
             setOrderLines([])
+            setPaymentSchedule([{ due_date: '', amount: '' }])
           }
         }}
       >
@@ -753,24 +758,102 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
 
           <div className="grid gap-6 py-2">
             {/* ── SECCIÓN 1: CABECERA ───────────────────────────────── */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="new-order-delivery">Fecha de entrega estimada *</Label>
-                <DatePickerPopover
-                  id="new-order-delivery"
-                  value={newOrderForm.estimated_delivery_date}
-                  onChange={(date) => setNewOrderForm((f) => ({ ...f, estimated_delivery_date: date }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="new-order-payment">Fecha de pago al proveedor</Label>
-                <DatePickerPopover
-                  id="new-order-payment"
-                  value={newOrderForm.payment_due_date}
-                  onChange={(date) => setNewOrderForm((f) => ({ ...f, payment_due_date: date }))}
-                />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="new-order-delivery">Fecha de entrega estimada *</Label>
+              <DatePickerPopover
+                id="new-order-delivery"
+                value={newOrderForm.estimated_delivery_date}
+                onChange={(date) => setNewOrderForm((f) => ({ ...f, estimated_delivery_date: date }))}
+              />
             </div>
+
+            {/* ── PLAZOS DE PAGO (1-3) ─────────────────────────────── */}
+            {(() => {
+              const orderTotal = orderLines.reduce((s, l) => {
+                const qty = parseFloat(l.quantity) || 0
+                const up = parseFloat(l.unit_price) || 0
+                const sizeSum = l.sizeQuantities
+                  ? Object.values(l.sizeQuantities).reduce((a, v) => a + (parseInt(v) || 0), 0)
+                  : 0
+                const finalQty = l.type === 'product' && sizeSum > 0 ? sizeSum : qty
+                return s + finalQty * up
+              }, 0)
+              const scheduleSum = paymentSchedule.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
+              const diff = Math.round((orderTotal - scheduleSum) * 100) / 100
+              const multipleInstalments = paymentSchedule.length > 1
+              return (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <Label>
+                      {multipleInstalments ? 'Plazos de pago al proveedor' : 'Fecha de pago al proveedor'}
+                    </Label>
+                    {paymentSchedule.length < 3 && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-1 text-xs"
+                        onClick={() => setPaymentSchedule((prev) => [...prev, { due_date: '', amount: '' }])}
+                      >
+                        + Añadir plazo
+                      </Button>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    {paymentSchedule.map((p, idx) => (
+                      <div key={idx} className="grid grid-cols-1 sm:grid-cols-[1fr_160px_auto] gap-2 items-end">
+                        <div className="space-y-1">
+                          {multipleInstalments && (
+                            <span className="text-xs text-muted-foreground">Plazo {idx + 1} — Fecha</span>
+                          )}
+                          <DatePickerPopover
+                            value={p.due_date}
+                            onChange={(date) => {
+                              setPaymentSchedule((prev) => prev.map((x, i) => i === idx ? { ...x, due_date: date } : x))
+                              if (idx === 0) setNewOrderForm((f) => ({ ...f, payment_due_date: date }))
+                            }}
+                          />
+                        </div>
+                        {multipleInstalments && (
+                          <div className="space-y-1">
+                            <span className="text-xs text-muted-foreground">Importe (€)</span>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              placeholder="0,00"
+                              value={p.amount}
+                              onChange={(e) => setPaymentSchedule((prev) => prev.map((x, i) => i === idx ? { ...x, amount: e.target.value } : x))}
+                            />
+                          </div>
+                        )}
+                        {multipleInstalments && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-10 text-muted-foreground hover:text-destructive"
+                            onClick={() => setPaymentSchedule((prev) => {
+                              const next = prev.filter((_, i) => i !== idx)
+                              if (idx === 0 && next.length > 0) {
+                                setNewOrderForm((f) => ({ ...f, payment_due_date: next[0].due_date }))
+                              }
+                              return next.length === 0 ? [{ due_date: '', amount: '' }] : next
+                            })}
+                          >×</Button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {multipleInstalments && orderTotal > 0 && (
+                    <p className={`text-xs ${Math.abs(diff) < 0.01 ? 'text-green-600' : 'text-amber-600'}`}>
+                      Suma de plazos: {scheduleSum.toFixed(2)} € · Total pedido: {orderTotal.toFixed(2)} €
+                      {Math.abs(diff) >= 0.01 && ` · Diferencia: ${diff.toFixed(2)} €`}
+                    </p>
+                  )}
+                </div>
+              )
+            })()}
 
             <div className="space-y-2">
               <Label htmlFor="new-order-tailoring">Pedido de sastrería vinculado (opcional)</Label>
@@ -1256,16 +1339,29 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                   return
                 }
 
+                const orderTotalValue = finalLines.reduce((s, l) => s + l.quantity * l.unit_price, 0)
+                const cleanedSchedule = paymentSchedule
+                  .map((p) => ({
+                    due_date: p.due_date?.trim() || '',
+                    amount: parseFloat(p.amount) || 0,
+                  }))
+                  .filter((p) => p.due_date)
+                // Si solo hay 1 plazo y no se especificó importe, se toma el total del pedido
+                if (cleanedSchedule.length === 1 && !cleanedSchedule[0].amount) {
+                  cleanedSchedule[0].amount = orderTotalValue
+                }
+
                 const res = await createSupplierOrderAction({
                   supplier_id: supplier.id,
-                  total: finalLines.reduce((s, l) => s + l.quantity * l.unit_price, 0),
-                  payment_due_date: newOrderForm.payment_due_date || null,
+                  total: orderTotalValue,
+                  payment_due_date: cleanedSchedule[0]?.due_date || newOrderForm.payment_due_date || null,
                   estimated_delivery_date: newOrderForm.estimated_delivery_date,
                   notes: newOrderForm.notes?.trim() || null,
                   alert_on_payment: true,
                   alert_on_delivery: true,
                   tailoring_order_id: newOrderForm.tailoring_order_id?.trim() || undefined,
                   lines: finalLines,
+                  payment_schedule: cleanedSchedule.length > 0 ? cleanedSchedule : undefined,
                 })
                 setCreating(false)
                 if (res?.success && res.data) {

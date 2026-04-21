@@ -17,6 +17,7 @@ import { toast } from 'sonner'
 import {
   getSupplierInvoicesForCalendar,
   markSupplierInvoicePaidAction,
+  markSupplierOrderScheduleItemPaidAction,
 } from '@/actions/supplier-invoices'
 
 const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
@@ -28,6 +29,9 @@ type CalendarEvent = {
   status: string
   total_amount: number
   supplier_name: string
+  kind: 'invoice' | 'schedule'
+  order_number?: string | null
+  installment?: number | null
 }
 
 function today() {
@@ -97,15 +101,21 @@ export function SupplierInvoicesCalendarContent() {
   const handleMarkPaid = async () => {
     if (!selectedEvent) return
     setMarkingPaid(true)
-    const r = await markSupplierInvoicePaidAction({
-      id: selectedEvent.id,
-      payment_date: today(),
-      payment_method: 'Transferencia',
-    })
+    const r = selectedEvent.kind === 'schedule'
+      ? await markSupplierOrderScheduleItemPaidAction({
+          id: selectedEvent.id.replace(/^sch:/, ''),
+          payment_date: today(),
+          payment_method: 'Transferencia',
+        })
+      : await markSupplierInvoicePaidAction({
+          id: selectedEvent.id,
+          payment_date: today(),
+          payment_method: 'Transferencia',
+        })
     setMarkingPaid(false)
     setSelectedEvent(null)
     if (r.success) {
-      toast.success('Marcada como pagada')
+      toast.success('Marcado como pagado')
       load()
     } else {
       toast.error(r.error)
@@ -120,7 +130,7 @@ export function SupplierInvoicesCalendarContent() {
             <Calendar className="h-7 w-7" />
             Calendario de vencimientos
           </h1>
-          <p className="text-muted-foreground text-sm mt-1">Facturas de proveedores por fecha de vencimiento.</p>
+          <p className="text-muted-foreground text-sm mt-1">Facturas y plazos de pago a proveedores por fecha de vencimiento.</p>
         </div>
         <Button variant="outline" onClick={() => router.back()}>
           Volver al listado
@@ -198,16 +208,21 @@ export function SupplierInvoicesCalendarContent() {
       <Dialog open={!!selectedEvent} onOpenChange={(open) => !open && setSelectedEvent(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Detalle factura</DialogTitle>
+            <DialogTitle>
+              {selectedEvent?.kind === 'schedule' ? 'Plazo de pago de pedido' : 'Detalle factura'}
+            </DialogTitle>
           </DialogHeader>
           {selectedEvent && (
             <div className="space-y-2">
               <p><span className="font-medium">Proveedor:</span> {selectedEvent.supplier_name}</p>
+              {selectedEvent.kind === 'schedule' && selectedEvent.order_number && (
+                <p><span className="font-medium">Pedido:</span> {selectedEvent.order_number}{selectedEvent.installment ? ` · Plazo ${selectedEvent.installment}` : ''}</p>
+              )}
               <p><span className="font-medium">Vencimiento:</span> {formatDate(selectedEvent.start)}</p>
               <p><span className="font-medium">Importe:</span> {formatCurrency(selectedEvent.total_amount)}</p>
               <p>
                 <span className="font-medium">Estado:</span>{' '}
-                <span className={selectedEvent.start < today() ? 'text-red-600' : 'text-amber-600'}>
+                <span className={selectedEvent.status === 'pagada' ? 'text-green-600' : selectedEvent.start < today() ? 'text-red-600' : 'text-amber-600'}>
                   {selectedEvent.status === 'pagada' ? 'Pagada' : selectedEvent.start < today() ? 'Vencida' : 'Pendiente'}
                 </span>
               </p>

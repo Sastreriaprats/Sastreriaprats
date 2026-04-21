@@ -836,6 +836,8 @@ export type CreateSupplierOrderInput = {
     unit?: string | null
     unit_price?: number
   }>
+  /** Plazos de pago (hasta 3). Si se omite, se usa payment_due_date con el total entero. */
+  payment_schedule?: Array<{ due_date: string; amount: number }>
 }
 
 export const createSupplierOrderAction = protectedAction<
@@ -849,7 +851,7 @@ export const createSupplierOrderAction = protectedAction<
     auditEntity: 'supplier_order',
     revalidate: ['/admin/proveedores', '/admin/contabilidad/facturas-proveedores'],
   },
-  async (ctx, { supplier_id, total, payment_due_date, estimated_delivery_date, notes, alert_on_payment, alert_on_delivery, tailoring_order_id, lines }) => {
+  async (ctx, { supplier_id, total, payment_due_date, estimated_delivery_date, notes, alert_on_payment, alert_on_delivery, tailoring_order_id, lines, payment_schedule }) => {
     if (!supplier_id?.trim()) return failure('Proveedor obligatorio', 'VALIDATION')
     if (!estimated_delivery_date?.trim()) return failure('Fecha de entrega estimada obligatoria', 'VALIDATION')
 
@@ -961,6 +963,31 @@ export const createSupplierOrderAction = protectedAction<
     // y, si corresponde, vincular el albarán de este pedido.
     void alert_on_payment
 
+    // Plazos de pago (tabla supplier_order_payment_schedule). Si no se pasa
+    // payment_schedule, creamos 1 plazo con total entero cuando haya payment_due_date.
+    const scheduleRows = (payment_schedule && payment_schedule.length > 0
+      ? payment_schedule
+      : (paymentDue ? [{ due_date: paymentDue, amount: totalNum }] : [])
+    )
+      .map((p, idx) => ({
+        supplier_order_id: order.id,
+        due_date: p.due_date,
+        amount: Number.isFinite(p.amount) && p.amount > 0 ? p.amount : 0,
+        sort_order: idx,
+      }))
+      .filter((r) => !!r.due_date)
+
+    if (scheduleRows.length > 0) {
+      const { error: schedErr } = await ctx.adminClient
+        .from('supplier_order_payment_schedule')
+        .insert(scheduleRows)
+      // Si la tabla aún no existe (migración pendiente) ignoramos el error para no romper la creación.
+      if (schedErr && !/supplier_order_payment_schedule/.test(schedErr.message || '')) {
+        // Otros errores sí los reportamos para no perder visibilidad.
+        return failure(schedErr.message || 'Pedido creado, pero hubo un error guardando los plazos de pago')
+      }
+    }
+
     return success({
       id: String(order.id),
       order_number: order.order_number,
@@ -990,7 +1017,7 @@ export const getSupplierOrderDetail = protectedAction<
       .single()
     if (error || !order) return failure('Pedido no encontrado', 'NOT_FOUND')
 
-    const [linesRes, notesRes, invoiceRes] = await Promise.all([
+    const [linesRes, notesRes, invoiceRes, scheduleRes] = await Promise.all([
       ctx.adminClient
         .from('supplier_order_lines')
         .select('id, description, reference, quantity, quantity_received, unit, unit_price, total_price, fabric_id, product_id, is_fully_received, sort_order')
@@ -1006,6 +1033,11 @@ export const getSupplierOrderDetail = protectedAction<
         .select('id, status, due_date, payment_date, total_amount')
         .eq('supplier_order_id', orderId)
         .maybeSingle(),
+      ctx.adminClient
+        .from('supplier_order_payment_schedule')
+        .select('id, due_date, amount, sort_order, is_paid, paid_at, payment_method')
+        .eq('supplier_order_id', orderId)
+        .order('sort_order', { ascending: true }),
     ])
 
     let tailoringOrder = null
@@ -1023,6 +1055,7 @@ export const getSupplierOrderDetail = protectedAction<
       lines: linesRes.data ?? [],
       delivery_notes: notesRes.data ?? [],
       ap_invoice: invoiceRes.data ?? null,
+      payment_schedule: scheduleRes.data ?? [],
       tailoring_order: tailoringOrder,
     })
   }

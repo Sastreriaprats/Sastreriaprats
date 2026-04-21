@@ -116,9 +116,14 @@ export const getSupplierInvoicesKpis = protectedAction<void, SupplierInvoicesKpi
     in30.setDate(in30.getDate() + 30)
     const in30Str = in30.toISOString().slice(0, 10)
 
-    const { data: all } = await ctx.adminClient
-      .from(TABLE)
-      .select('total_amount, status, due_date, payment_date')
+    const [{ data: all }, { data: schedAll }] = await Promise.all([
+      ctx.adminClient
+        .from(TABLE)
+        .select('total_amount, status, due_date, payment_date'),
+      ctx.adminClient
+        .from('supplier_order_payment_schedule')
+        .select('amount, is_paid, due_date, paid_at'),
+    ])
 
     const rows = (all || []) as { total_amount: number; status: string; due_date: string; payment_date: string | null }[]
     let totalPendiente = 0
@@ -138,6 +143,19 @@ export const getSupplierInvoicesKpis = protectedAction<void, SupplierInvoicesKpi
       }
     }
 
+    // Plazos de pago de pedidos (además de facturas AP)
+    const schedRows = (schedAll || []) as { amount: number; is_paid: boolean; due_date: string; paid_at: string | null }[]
+    for (const s of schedRows) {
+      const amt = Number(s.amount ?? 0)
+      if (!s.is_paid) {
+        totalPendiente += amt
+        if (s.due_date < t) countVencidas++
+        else if (s.due_date <= in30Str) countProximas30++
+      } else if (s.paid_at && s.paid_at >= startMonth && s.paid_at <= endMonth) {
+        countPagadasEsteMes++
+      }
+    }
+
     return success({
       totalPendiente,
       countVencidas,
@@ -151,12 +169,19 @@ export const getOverdueSupplierInvoicesCount = protectedAction<void, number>(
   { permission: PERMISSION, auditModule: 'accounting' },
   async (ctx) => {
     const t = today()
-    const { count } = await ctx.adminClient
-      .from(TABLE)
-      .select('*', { count: 'exact', head: true })
-      .lt('due_date', t)
-      .in('status', ['pendiente', 'vencida'])
-    return success(count ?? 0)
+    const [{ count: invCount }, { count: schedCount }] = await Promise.all([
+      ctx.adminClient
+        .from(TABLE)
+        .select('*', { count: 'exact', head: true })
+        .lt('due_date', t)
+        .in('status', ['pendiente', 'vencida']),
+      ctx.adminClient
+        .from('supplier_order_payment_schedule')
+        .select('*', { count: 'exact', head: true })
+        .lt('due_date', t)
+        .eq('is_paid', false),
+    ])
+    return success((invCount ?? 0) + (schedCount ?? 0))
   }
 )
 
@@ -547,6 +572,32 @@ export const markSupplierInvoicePaidAction = protectedAction<
   }
 )
 
+/** Marca un plazo de pago de pedido a proveedor como pagado. */
+export const markSupplierOrderScheduleItemPaidAction = protectedAction<
+  { id: string; payment_date: string; payment_method?: string },
+  void
+>(
+  {
+    permission: PERMISSION,
+    auditModule: 'accounting',
+    auditAction: 'payment',
+    auditEntity: 'supplier_order_payment_schedule',
+  },
+  async (ctx, { id, payment_date, payment_method }) => {
+    const { error } = await ctx.adminClient
+      .from('supplier_order_payment_schedule')
+      .update({
+        is_paid: true,
+        paid_at: payment_date,
+        payment_method: payment_method || null,
+      })
+      .eq('id', id)
+
+    if (error) return failure(error.message)
+    return success(undefined)
+  }
+)
+
 export const importSupplierInvoicesCsvAction = protectedAction<
   { rows: Array<Record<string, string>> },
   { created: number; errors: string[] }
@@ -611,10 +662,23 @@ export const importSupplierInvoicesCsvAction = protectedAction<
   }
 )
 
-/** Eventos para calendario: id, title, start (date), status, total_amount */
+/** Eventos para calendario: facturas AP + plazos de pedidos a proveedor. */
 export const getSupplierInvoicesForCalendar = protectedAction<
   { year: number; month: number },
-  { id: string; title: string; start: string; status: string; total_amount: number; supplier_name: string }[]
+  {
+    id: string
+    title: string
+    start: string
+    status: string
+    total_amount: number
+    supplier_name: string
+    /** 'invoice' = ap_supplier_invoices · 'schedule' = supplier_order_payment_schedule */
+    kind: 'invoice' | 'schedule'
+    /** Nº del pedido (solo cuando kind=schedule) */
+    order_number?: string | null
+    /** Posición del plazo (1, 2, 3) cuando kind=schedule */
+    installment?: number | null
+  }[]
 >(
   { permission: PERMISSION, auditModule: 'accounting' },
   async (ctx, { year, month }) => {
@@ -622,21 +686,59 @@ export const getSupplierInvoicesForCalendar = protectedAction<
     const endDate = new Date(year, month, 0)
     const end = `${year}-${String(month).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`
 
-    const { data } = await ctx.adminClient
-      .from(TABLE)
-      .select('id, due_date, supplier_name, invoice_number, total_amount, status')
-      .gte('due_date', start)
-      .lte('due_date', end)
-      .order('due_date')
+    const [{ data }, { data: scheduleData }] = await Promise.all([
+      ctx.adminClient
+        .from(TABLE)
+        .select('id, due_date, supplier_name, invoice_number, total_amount, status')
+        .gte('due_date', start)
+        .lte('due_date', end)
+        .order('due_date'),
+      ctx.adminClient
+        .from('supplier_order_payment_schedule')
+        .select('id, due_date, amount, is_paid, sort_order, supplier_order_id, supplier_orders!inner(order_number, suppliers(name))')
+        .gte('due_date', start)
+        .lte('due_date', end)
+        .order('due_date'),
+    ])
 
-    const list = (data || []).map((r: Record<string, unknown>) => ({
+    const list: Array<{
+      id: string
+      title: string
+      start: string
+      status: string
+      total_amount: number
+      supplier_name: string
+      kind: 'invoice' | 'schedule'
+      order_number?: string | null
+      installment?: number | null
+    }> = (data || []).map((r: Record<string, unknown>) => ({
       id: String(r.id),
       title: `${(r as any).supplier_name ?? ''} - ${(r as any).invoice_number ?? ''} (${Number((r as any).total_amount ?? 0).toFixed(2)} €)`,
       start: String(r.due_date),
       status: String(r.status ?? 'pendiente'),
       total_amount: Number((r as any).total_amount ?? 0),
       supplier_name: String((r as any).supplier_name ?? ''),
+      kind: 'invoice' as const,
     }))
+
+    for (const s of (scheduleData || []) as any[]) {
+      const supplierName = s.supplier_orders?.suppliers?.name ?? ''
+      const orderNumber = s.supplier_orders?.order_number ?? null
+      const installment = (Number(s.sort_order) || 0) + 1
+      list.push({
+        id: `sch:${s.id}`,
+        title: `${supplierName} · ${orderNumber ?? ''} · Plazo ${installment} (${Number(s.amount ?? 0).toFixed(2)} €)`,
+        start: String(s.due_date),
+        status: s.is_paid ? 'pagada' : 'pendiente',
+        total_amount: Number(s.amount ?? 0),
+        supplier_name: supplierName,
+        kind: 'schedule' as const,
+        order_number: orderNumber,
+        installment,
+      })
+    }
+
+    list.sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0))
     return success(list)
   }
 )

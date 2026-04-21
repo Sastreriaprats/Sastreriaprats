@@ -350,19 +350,41 @@ export function PedidoDetailContent({
             <CardTitle className="text-base">Pago y notas</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
-            {order.payment_due_date && (
+            {Array.isArray(order.payment_schedule) && order.payment_schedule.length > 0 ? (
+              <div className="space-y-1">
+                <span className="text-muted-foreground">{order.payment_schedule.length > 1 ? 'Plazos de pago' : 'Fecha de pago'}</span>
+                <ul className="space-y-1">
+                  {order.payment_schedule.map((p: any, idx: number) => (
+                    <li key={p.id || idx} className="flex items-center justify-between text-sm">
+                      <span>
+                        {order.payment_schedule.length > 1 && (
+                          <span className="text-xs text-muted-foreground mr-2">Plazo {idx + 1}</span>
+                        )}
+                        {formatDate(p.due_date)}
+                      </span>
+                      <span className="flex items-center gap-2">
+                        <span className="tabular-nums">{Number(p.amount ?? 0).toFixed(2)} €</span>
+                        <Badge variant={p.is_paid ? 'default' : 'destructive'} className="text-xs">
+                          {p.is_paid ? 'Pagado' : 'Pendiente'}
+                        </Badge>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : order.payment_due_date ? (
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Fecha pago</span>
                 <span>{formatDate(order.payment_due_date)}</span>
               </div>
-            )}
+            ) : null}
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Estado pago</span>
+              <span className="text-muted-foreground">Estado factura</span>
               <Badge
                 variant={isPaid ? 'default' : 'destructive'}
                 className="text-xs"
               >
-                {isPaid ? 'Pagado' : 'No pagado'}
+                {isPaid ? 'Pagada' : 'No pagada'}
               </Badge>
             </div>
             {currentInvoice?.payment_date && (
