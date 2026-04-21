@@ -478,10 +478,9 @@ export function CreateOrderWizard({
   })
 
   const { execute: submitSupplierOrder, isLoading: isSubmittingSupplier } = useAction(createSupplierOrderAction, {
-    onSuccess: (data: any) => {
-      if (data?.ap_invoice_id) toast.success('Pedido y factura creados. Redirigiendo a Facturas proveedores.')
-      else toast.success('Pedido creado.')
-      router.push(data?.ap_invoice_id ? '/admin/contabilidad/facturas-proveedores' : `/admin/proveedores/${selectedSupplier?.id}`)
+    onSuccess: () => {
+      toast.success('Pedido creado.')
+      router.push(`/admin/proveedores/${selectedSupplier?.id}`)
     },
   })
 

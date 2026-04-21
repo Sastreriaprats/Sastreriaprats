@@ -48,7 +48,8 @@ type TransferLine = {
 }
 
 export function TransfersTab() {
-  const { profile } = useAuth()
+  const { profile, stores, isAdmin } = useAuth()
+  const userStoreIds = new Set(stores.map((s) => s.storeId))
   const [transfers, setTransfers] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [page, setPage] = useState(0)
@@ -114,13 +115,22 @@ export function TransfersTab() {
     if (newOpen && warehouses.length === 0 && !loadingWarehouses) loadWarehouses()
   }, [newOpen, warehouses.length, loadingWarehouses, loadWarehouses])
 
-  const handleApprove = async (id: string) => {
+  const handleApprove = async (id: string, as: 'admin' | 'destination') => {
     setActioningId(id)
     try {
-      const result = await approveStockTransfer({ id })
+      const result = await approveStockTransfer({ id, as })
       if (result.success) {
+        if (result.data?.status === 'approved') {
+          toast.success('Traspaso aprobado y stock movido al almacén destino')
+        } else if (result.data?.status === 'admin_approved') {
+          toast.success('Aprobación de admin registrada. Falta la aprobación de la tienda destino')
+        } else if (result.data?.status === 'destination_approved') {
+          toast.success('Aprobación de tienda destino registrada. Falta la aprobación de admin')
+        }
         fetchTransfers()
         if (typeof window !== 'undefined') window.dispatchEvent(new Event('stock-transfers-updated'))
+      } else {
+        toast.error(result.error || 'No se pudo aprobar el traspaso')
       }
     } finally {
       setActioningId(null)
@@ -308,6 +318,14 @@ export function TransfersTab() {
               </TableRow>
             ) : transfers.map((t: any) => {
               const isOwnRequest = t.requested_by === profile?.id
+              const adminDone = !!t.admin_approved_at
+              const destDone = !!t.destination_approved_at
+              const destStoreId = t.to_warehouse?.store_id ?? null
+              const userIsDestStoreMember = destStoreId ? userStoreIds.has(destStoreId) : false
+              const canApproveAsAdmin = !isOwnRequest && isAdmin && !adminDone
+                && (!destDone || t.destination_approved_by !== profile?.id)
+              const canApproveAsDest = !isOwnRequest && userIsDestStoreMember && !destDone
+                && (!adminDone || t.admin_approved_by !== profile?.id)
               return (
                 <TableRow key={t.id}>
                   <TableCell className="font-mono text-sm">{t.transfer_number}</TableCell>
@@ -316,9 +334,21 @@ export function TransfersTab() {
                   <TableCell className="text-sm">{t.requested_by_name || '-'}</TableCell>
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDateTime(t.created_at)}</TableCell>
                   <TableCell>
-                    <Badge variant={t.status === 'requested' ? 'default' : 'secondary'} className="text-xs">
-                      {statusLabels[t.status] || t.status}
-                    </Badge>
+                    <div className="flex flex-col gap-1">
+                      <Badge variant={t.status === 'requested' ? 'default' : 'secondary'} className="text-xs w-fit">
+                        {statusLabels[t.status] || t.status}
+                      </Badge>
+                      {t.status === 'requested' && (
+                        <div className="flex flex-col gap-0.5 text-[11px] text-muted-foreground">
+                          <span className={adminDone ? 'text-green-600' : ''}>
+                            {adminDone ? '✓' : '○'} Admin{adminDone && t.admin_approved_by_name ? ` (${t.admin_approved_by_name})` : ''}
+                          </span>
+                          <span className={destDone ? 'text-green-600' : ''}>
+                            {destDone ? '✓' : '○'} Destino{destDone && t.destination_approved_by_name ? ` (${t.destination_approved_by_name})` : ''}
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
@@ -351,27 +381,49 @@ export function TransfersTab() {
                       ) : null}
                       {t.status === 'requested' && (
                         <>
-                          <Button
-                            size="sm"
-                            variant="default"
-                            className="gap-1"
-                            disabled={actioningId !== null || isOwnRequest}
-                            title={isOwnRequest ? 'No puedes aprobar un traspaso creado por ti' : undefined}
-                            onClick={() => handleApprove(t.id)}
-                          >
-                            {actioningId === t.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-                            Aprobar
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="gap-1"
-                            disabled={actioningId !== null}
-                            onClick={() => handleReject(t.id)}
-                          >
-                            {actioningId === t.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
-                            Rechazar
-                          </Button>
+                          {canApproveAsAdmin && (
+                            <Button
+                              size="sm"
+                              variant="default"
+                              className="gap-1"
+                              disabled={actioningId !== null}
+                              onClick={() => handleApprove(t.id, 'admin')}
+                              title="Aprobar como administrador"
+                            >
+                              {actioningId === t.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                              Aprobar (admin)
+                            </Button>
+                          )}
+                          {canApproveAsDest && (
+                            <Button
+                              size="sm"
+                              variant="default"
+                              className="gap-1"
+                              disabled={actioningId !== null}
+                              onClick={() => handleApprove(t.id, 'destination')}
+                              title="Aprobar como tienda destino"
+                            >
+                              {actioningId === t.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                              Aprobar (destino)
+                            </Button>
+                          )}
+                          {(canApproveAsAdmin || canApproveAsDest) && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-1"
+                              disabled={actioningId !== null}
+                              onClick={() => handleReject(t.id)}
+                            >
+                              {actioningId === t.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
+                              Rechazar
+                            </Button>
+                          )}
+                          {!canApproveAsAdmin && !canApproveAsDest && (
+                            <span className="text-xs text-muted-foreground italic">
+                              {isOwnRequest ? 'Traspaso creado por ti' : 'Sin permisos para aprobar'}
+                            </span>
+                          )}
                         </>
                       )}
                     </div>

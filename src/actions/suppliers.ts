@@ -5,7 +5,6 @@ import { queryList, queryById, getNextNumber } from '@/lib/server/query-helpers'
 import { createSupplierSchema, updateSupplierSchema } from '@/lib/validations/suppliers'
 import { success, failure } from '@/lib/errors'
 import { createPurchaseJournalEntry } from '@/actions/accounting-triggers'
-import { checkUserPermission } from '@/actions/auth'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { buildAuditDiff } from '@/lib/audit'
 
@@ -656,7 +655,7 @@ export const receiveSupplierOrderLines = protectedAction<
 
 export const updateSupplierOrderFinanceAction = protectedAction<
   { supplierOrderId: string; total: number; payment_due_date?: string | null; notes?: string | null; alert_on_payment?: boolean },
-  { id: string; ap_invoice_id?: string }
+  { id: string }
 >(
   {
     permission: 'suppliers.create_order',
@@ -689,63 +688,11 @@ export const updateSupplierOrderFinanceAction = protectedAction<
       .single()
     if (orderError || !order) return failure(orderError?.message || 'Pedido no encontrado', 'NOT_FOUND')
 
-    let apInvoiceId: string | undefined
-    const canManageInvoices = await checkUserPermission(ctx.userId, 'supplier_invoices.manage').catch(() => false)
-    if (canManageInvoices && totalNum > 0 && paymentDue) {
-      const { data: existingInv } = await ctx.adminClient
-        .from('ap_supplier_invoices')
-        .select('id, status')
-        .eq('supplier_order_id', supplierOrderId)
-        .maybeSingle()
+    // No se crea/actualiza automáticamente la factura en ap_supplier_invoices.
+    // La gestión de facturas es manual desde /admin/contabilidad/facturas-proveedores.
+    void alert_on_payment
 
-      if (existingInv?.id) {
-        const payload: Record<string, unknown> = {
-          amount: totalNum,
-          tax_amount: 0,
-          total_amount: totalNum,
-          due_date: paymentDue,
-          notes: notes?.trim() || null,
-        }
-        if (existingInv.status !== 'pagada') payload.status = 'pendiente'
-        const { error: invUpErr } = await ctx.adminClient.from('ap_supplier_invoices').update(payload).eq('id', existingInv.id)
-        if (invUpErr) return failure(invUpErr.message || 'No se pudo actualizar factura de proveedor')
-        apInvoiceId = existingInv.id
-      } else {
-        const { data: supplier } = await ctx.adminClient
-          .from('suppliers')
-          .select('name, legal_name, nif_cif')
-          .eq('id', order.supplier_id)
-          .single()
-
-        const today = new Date().toISOString().slice(0, 10)
-        const supplierName = (supplier?.legal_name || supplier?.name || 'Proveedor').trim()
-        const supplierCif = supplier?.nif_cif?.trim() || null
-
-        const { data: inv, error: invErr } = await ctx.adminClient
-          .from('ap_supplier_invoices')
-          .insert({
-            supplier_order_id: supplierOrderId,
-            supplier_name: supplierName,
-            supplier_cif: supplierCif,
-            invoice_number: order.order_number,
-            invoice_date: today,
-            due_date: paymentDue,
-            amount: totalNum,
-            tax_amount: 0,
-            total_amount: totalNum,
-            status: 'pendiente',
-            notes: notes?.trim() || null,
-            created_by: ctx.userId !== 'system' ? ctx.userId : null,
-            alert_on_payment: alert_on_payment !== false,
-          })
-          .select('id')
-          .single()
-        if (invErr) return failure(invErr.message || 'No se pudo crear factura de proveedor')
-        apInvoiceId = inv?.id
-      }
-    }
-
-    return success({ id: order.id, ap_invoice_id: apInvoiceId })
+    return success({ id: order.id })
   }
 )
 
@@ -825,7 +772,7 @@ export type CreateSupplierOrderInput = {
 
 export const createSupplierOrderAction = protectedAction<
   CreateSupplierOrderInput,
-  { id: string; order_number: string; ap_invoice_id?: string }
+  { id: string; order_number: string }
 >(
   {
     permission: 'suppliers.create_order',
@@ -941,45 +888,14 @@ export const createSupplierOrderAction = protectedAction<
       }
     }
 
-    let apInvoiceId: string | undefined
-    const canManageInvoices = await checkUserPermission(ctx.userId, 'supplier_invoices.manage').catch(() => false)
-    if (canManageInvoices && totalNum > 0 && paymentDue) {
-      const { data: supplier } = await ctx.adminClient
-        .from('suppliers')
-        .select('name, legal_name, nif_cif')
-        .eq('id', supplier_id)
-        .single()
-
-      const supplierName = (supplier?.legal_name || supplier?.name || 'Proveedor').trim()
-      const supplierCif = supplier?.nif_cif?.trim() || null
-
-      const { data: inv, error: invError } = await ctx.adminClient
-        .from('ap_supplier_invoices')
-        .insert({
-          supplier_order_id: order.id,
-          supplier_name: supplierName,
-          supplier_cif: supplierCif,
-          invoice_number: orderNumber,
-          invoice_date: today,
-          due_date: paymentDue,
-          amount: totalNum,
-          tax_amount: 0,
-          total_amount: totalNum,
-          status: 'pendiente',
-          notes: notes?.trim() || null,
-          created_by: ctx.userId !== 'system' ? ctx.userId : null,
-          alert_on_payment: alert_on_payment !== false,
-        })
-        .select('id')
-        .single()
-
-      if (!invError && inv?.id) apInvoiceId = String(inv.id)
-    }
+    // La factura de proveedor NO se crea automáticamente: debe crearla
+    // manualmente el admin desde /admin/contabilidad/facturas-proveedores
+    // y, si corresponde, vincular el albarán de este pedido.
+    void alert_on_payment
 
     return success({
       id: String(order.id),
       order_number: order.order_number,
-      ap_invoice_id: apInvoiceId,
     })
   }
 )

@@ -611,3 +611,28 @@ export const getSupplierInvoicesForCalendar = protectedAction<
     return success(list)
   }
 )
+
+/**
+ * Eliminar una factura de proveedor. Solo accesible con permiso
+ * `supplier_invoices.manage` (asignado al rol administrador).
+ * Los vínculos con albaranes se borran en cascada por FK.
+ */
+export const deleteSupplierInvoiceAction = protectedAction<{ id: string }, void>(
+  {
+    permission: PERMISSION,
+    auditModule: 'accounting',
+    auditAction: 'delete',
+    auditEntity: 'supplier_invoice',
+  },
+  async (ctx, { id }) => {
+    if (!id) return failure('Falta el identificador de la factura', 'VALIDATION')
+
+    const { error } = await ctx.adminClient
+      .from(TABLE)
+      .delete()
+      .eq('id', id)
+
+    if (error) return failure(error.message || 'Error al eliminar la factura', 'INTERNAL')
+    return success(undefined)
+  }
+)

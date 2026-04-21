@@ -1137,10 +1137,14 @@ export const listStockTransfers = protectedAction<
       .from('stock_transfers')
       .select(
         `
-        id, transfer_number, from_warehouse_id, to_warehouse_id, status, requested_by, approved_by, approved_at, notes, created_at,
-        from_warehouse:warehouses!from_warehouse_id ( id, name, code ),
-        to_warehouse:warehouses!to_warehouse_id ( id, name, code ),
+        id, transfer_number, from_warehouse_id, to_warehouse_id, status, requested_by, approved_by, approved_at,
+        admin_approved_by, admin_approved_at, destination_approved_by, destination_approved_at,
+        notes, created_at,
+        from_warehouse:warehouses!from_warehouse_id ( id, name, code, store_id ),
+        to_warehouse:warehouses!to_warehouse_id ( id, name, code, store_id ),
         profiles!requested_by ( full_name ),
+        admin_approver:profiles!admin_approved_by ( full_name ),
+        destination_approver:profiles!destination_approved_by ( full_name ),
         delivery_notes ( id )
         `,
         { count: 'exact' }
@@ -1156,21 +1160,33 @@ export const listStockTransfers = protectedAction<
     const rows = (data ?? []).map((t: any) => ({
       ...t,
       requested_by_name: t.profiles?.full_name,
+      admin_approved_by_name: t.admin_approver?.full_name ?? null,
+      destination_approved_by_name: t.destination_approver?.full_name ?? null,
       delivery_note_id: t.delivery_notes?.[0]?.id ?? null,
     }))
     return success({ data: rows, total: count ?? 0 })
   }
 )
 
-/** Aprobar un traspaso (status → approved). Mueve el stock y registra movimientos (transfer_out/transfer_in). */
-export const approveStockTransfer = protectedAction<{ id: string }, void>(
+/**
+ * Aprobar un traspaso. Requiere DOBLE aprobación:
+ *   - admin: un usuario con rol administrador / admin / super_admin
+ *   - destination: un usuario asignado a la tienda del almacén destino
+ * Cada llamada marca UNA de las dos aprobaciones (según el rol del usuario,
+ * o el parámetro `as`). El stock solo se mueve y el status pasa a 'approved'
+ * cuando ambas aprobaciones están registradas. El creador nunca puede aprobar.
+ */
+export const approveStockTransfer = protectedAction<
+  { id: string; as?: 'admin' | 'destination' },
+  { status: 'admin_approved' | 'destination_approved' | 'approved' }
+>(
   { permission: 'products.edit', auditModule: 'stock' },
-  async (ctx, { id }) => {
+  async (ctx, { id, as }) => {
     const profileId = ctx.userId
     if (!profileId) return failure('No hay sesión', 'UNAUTHORIZED')
     const { data: transfer, error: transferError } = await ctx.adminClient
       .from('stock_transfers')
-      .select('id, requested_by, status, from_warehouse_id, to_warehouse_id, transfer_number, notes')
+      .select('id, requested_by, status, from_warehouse_id, to_warehouse_id, transfer_number, notes, admin_approved_by, admin_approved_at, destination_approved_by, destination_approved_at')
       .eq('id', id)
       .single()
     if (transferError || !transfer) return failure('Traspaso no encontrado', 'NOT_FOUND')
@@ -1178,8 +1194,91 @@ export const approveStockTransfer = protectedAction<{ id: string }, void>(
     if ((transfer as any).requested_by === profileId) {
       return failure('No puedes aprobar un traspaso solicitado por ti mismo', 'FORBIDDEN')
     }
-    const fromWarehouseId = (transfer as any).from_warehouse_id
+
+    const adminApprovedAt = (transfer as any).admin_approved_at
+    const adminApprovedBy = (transfer as any).admin_approved_by
+    const destApprovedAt = (transfer as any).destination_approved_at
     const toWarehouseId = (transfer as any).to_warehouse_id
+    const fromWarehouseId = (transfer as any).from_warehouse_id
+
+    // ¿Es admin? (mismo criterio que auth-provider)
+    const { data: roleRows } = await ctx.adminClient
+      .from('user_roles')
+      .select('role:roles ( name, system_role )')
+      .eq('user_id', profileId)
+    const roleNames = (roleRows || []).flatMap((r: any) => [r.role?.name, r.role?.system_role]).filter(Boolean) as string[]
+    const isAdminUser = roleNames.some((n) => ['administrador', 'admin', 'super_admin'].includes(n))
+
+    // ¿Está asignado a la tienda destino?
+    const { data: destStore } = await ctx.adminClient
+      .from('warehouses')
+      .select('store_id')
+      .eq('id', toWarehouseId)
+      .single()
+    const destStoreId = (destStore as any)?.store_id || null
+    let isDestinationUser = false
+    if (destStoreId) {
+      const { data: storeAssignment } = await ctx.adminClient
+        .from('user_stores')
+        .select('id')
+        .eq('user_id', profileId)
+        .eq('store_id', destStoreId)
+        .maybeSingle()
+      isDestinationUser = !!storeAssignment
+    }
+
+    // Resolver qué aprobación aplica
+    let role: 'admin' | 'destination'
+    if (as === 'admin' || as === 'destination') {
+      role = as
+    } else if (isAdminUser && isDestinationUser) {
+      role = !adminApprovedAt ? 'admin' : 'destination'
+    } else if (isAdminUser) {
+      role = 'admin'
+    } else if (isDestinationUser) {
+      role = 'destination'
+    } else {
+      return failure('No tienes permiso para aprobar este traspaso (se requiere rol admin o pertenecer a la tienda destino)', 'FORBIDDEN')
+    }
+
+    if (role === 'admin' && !isAdminUser) return failure('No tienes rol admin para aprobar como admin', 'FORBIDDEN')
+    if (role === 'destination' && !isDestinationUser) return failure('No estás asignado a la tienda destino', 'FORBIDDEN')
+
+    if (role === 'admin' && adminApprovedAt) return failure('Este traspaso ya tiene la aprobación del admin', 'CONFLICT')
+    if (role === 'destination' && destApprovedAt) return failure('Este traspaso ya tiene la aprobación de la tienda destino', 'CONFLICT')
+
+    // Evitar que una misma persona haga las dos aprobaciones
+    if (role === 'admin' && destApprovedAt && (transfer as any).destination_approved_by === profileId) {
+      return failure('Un mismo usuario no puede firmar ambas aprobaciones; que otro admin apruebe', 'FORBIDDEN')
+    }
+    if (role === 'destination' && adminApprovedAt && adminApprovedBy === profileId) {
+      return failure('Un mismo usuario no puede firmar ambas aprobaciones; que otro usuario de la tienda apruebe', 'FORBIDDEN')
+    }
+
+    const nowIso = new Date().toISOString()
+    const update: Record<string, any> = { updated_at: nowIso }
+    if (role === 'admin') {
+      update.admin_approved_by = profileId
+      update.admin_approved_at = nowIso
+    } else {
+      update.destination_approved_by = profileId
+      update.destination_approved_at = nowIso
+    }
+
+    // Si con esta aprobación se completan las dos, se mueve el stock.
+    const willBeFullyApproved = role === 'admin' ? !!destApprovedAt : !!adminApprovedAt
+
+    if (!willBeFullyApproved) {
+      const { error: partialErr } = await ctx.adminClient
+        .from('stock_transfers')
+        .update(update)
+        .eq('id', id)
+        .eq('status', 'requested')
+      if (partialErr) return failure(partialErr.message || 'Error al registrar aprobación', 'INTERNAL')
+      return success({ status: role === 'admin' ? 'admin_approved' as const : 'destination_approved' as const })
+    }
+
+    // Llegados aquí, esta aprobación completa el par → mover stock
     const reasonText = ((transfer as any).notes || '').trim() || `Traspaso ${(transfer as any).transfer_number || id}`
     const requestedBy = (transfer as any).requested_by ?? null
 
@@ -1251,10 +1350,10 @@ export const approveStockTransfer = protectedAction<{ id: string }, void>(
     const { error } = await ctx.adminClient
       .from('stock_transfers')
       .update({
+        ...update,
         status: 'approved',
         approved_by: profileId,
-        approved_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        approved_at: nowIso,
       })
       .eq('id', id)
       .eq('status', 'requested')
@@ -1322,7 +1421,7 @@ export const approveStockTransfer = protectedAction<{ id: string }, void>(
       console.error('[approveStockTransfer] auto delivery note:', e)
     }
 
-    return success(undefined)
+    return success({ status: 'approved' as const })
   }
 )
 

@@ -57,12 +57,14 @@ import {
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { toast } from 'sonner'
 import Papa from 'papaparse'
+import { useAuth } from '@/components/providers/auth-provider'
 import {
   getSupplierInvoicesKpis,
   listSupplierInvoices,
   createSupplierInvoiceAction,
   updateSupplierInvoiceAction,
   markSupplierInvoicePaidAction,
+  deleteSupplierInvoiceAction,
   importSupplierInvoicesCsvAction,
   listSuppliersForInvoice,
   listUnlinkedDeliveryNotesForSupplier,
@@ -116,6 +118,7 @@ const PAYMENT_TERMS_LABEL: Record<string, string> = {
 }
 
 export function SupplierInvoicesContent() {
+  const { isAdmin } = useAuth()
   const [kpis, setKpis] = useState<SupplierInvoicesKpis | null>(null)
   const [rows, setRows] = useState<ApSupplierInvoiceRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -130,6 +133,7 @@ export function SupplierInvoicesContent() {
   const [importFile, setImportFile] = useState<File | null>(null)
   const [importing, setImporting] = useState(false)
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const [form, setForm] = useState({
     supplier_id: '',
@@ -378,6 +382,21 @@ export function SupplierInvoicesContent() {
     }
   }
 
+  const handleDelete = async (row: ApSupplierInvoiceRow) => {
+    const label = `${row.supplier_name} · ${row.invoice_number}`
+    if (!window.confirm(`¿Eliminar la factura ${label}?\n\nEsta acción no se puede deshacer.`)) return
+    setDeletingId(row.id)
+    const r = await deleteSupplierInvoiceAction({ id: row.id })
+    setDeletingId(null)
+    if (r.success) {
+      toast.success('Factura eliminada')
+      loadList()
+      loadKpis()
+    } else {
+      toast.error(r.error || 'No se pudo eliminar la factura')
+    }
+  }
+
   const downloadTemplate = () => {
     const headers = ['proveedor', 'cif', 'numero_factura', 'fecha_factura', 'fecha_vencimiento', 'base', 'iva', 'total', 'notas']
     const example = ['Proveedor Ejemplo S.L.', 'B12345678', 'FAC-2025-001', '2025-01-15', '2025-02-15', '100', '21', '121', '']
@@ -585,6 +604,18 @@ export function SupplierInvoicesContent() {
                             disabled={markingPaidId === row.id}
                           >
                             {markingPaidId === row.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
+                          </Button>
+                        )}
+                        {isAdmin && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 text-destructive hover:text-destructive"
+                            onClick={() => handleDelete(row)}
+                            disabled={deletingId === row.id}
+                            title="Eliminar factura"
+                          >
+                            {deletingId === row.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                           </Button>
                         )}
                       </div>

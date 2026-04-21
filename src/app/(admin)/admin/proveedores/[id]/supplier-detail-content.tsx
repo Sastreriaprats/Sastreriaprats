@@ -1271,9 +1271,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                 if (res?.success && res.data) {
                   setNewOrderOpen(false)
                   router.refresh()
-                  toast.success(res.data.ap_invoice_id
-                    ? 'Pedido creado. Factura generada en Facturas proveedores.'
-                    : 'Pedido creado.')
+                  toast.success('Pedido creado.')
                 } else {
                   toast.error(res && 'error' in res ? res.error : 'Error al crear el pedido')
                 }
