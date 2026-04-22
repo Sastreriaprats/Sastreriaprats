@@ -3,6 +3,7 @@ import { unstable_cache } from 'next/cache'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { Toaster } from '@/components/ui/sonner'
+import { StoreGate } from '@/components/store-gate'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,7 +48,9 @@ export default async function VendedorLayout({
 
   return (
     <>
-      {children}
+      <StoreGate theme="light">
+        {children}
+      </StoreGate>
       <Toaster richColors position="top-right" />
     </>
   )

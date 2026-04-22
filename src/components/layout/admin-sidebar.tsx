@@ -34,7 +34,7 @@ const navItems: NavItem[] = [
   { label: 'Dashboard',    href: '/admin/dashboard',    icon: LayoutDashboard },
   { label: 'Clientes',     href: '/admin/clientes',     icon: Users,        permission: 'clients.view' },
   {
-    label: 'Pedidos', href: '/admin/pedidos', icon: Scissors, permission: 'orders.view',
+    label: 'Pedidos y Reservas', href: '/admin/pedidos', icon: Scissors, permission: 'orders.view',
     children: [
       { label: 'Todos los pedidos', href: '/admin/pedidos' },
       { label: 'Nuevo pedido',      href: '/admin/pedidos/nuevo', permission: 'orders.create' },

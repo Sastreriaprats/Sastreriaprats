@@ -18,16 +18,21 @@ import { OrderHistoryTab } from './tabs/order-history-tab'
 import { OrderFittingsTab } from './tabs/order-fittings-tab'
 import { OrderPaymentsTab } from './tabs/order-payments-tab'
 import { ChangeStatusDialog } from './change-status-dialog'
+import { EditOrderDialog } from '@/components/orders/edit-order-dialog'
 import { PaymentHistory } from '@/components/payments/payment-history'
+import { Pencil } from 'lucide-react'
 
 export function OrderDetailContent({ order }: { order: any }) {
   const router = useRouter()
   const { can, isAdmin } = usePermissions()
   const [showStatusDialog, setShowStatusDialog] = useState(false)
+  const [showEditDialog, setShowEditDialog] = useState(false)
 
   const isOverdue = order.estimated_delivery_date && new Date(order.estimated_delivery_date) < new Date() && !['delivered', 'cancelled'].includes(order.status)
   const totalCost = (order.total_material_cost || 0) + (order.total_labor_cost || 0) + (order.total_factory_cost || 0)
-  const margin = order.total > 0 ? ((order.total - totalCost) / order.total * 100) : 0
+  const marginAmount = Number(order.total ?? 0) - totalCost
+  const marginPct = order.total > 0 ? (marginAmount / Number(order.total) * 100) : 0
+  const marginColor = marginPct >= 20 ? 'text-green-600' : marginPct >= 10 ? 'text-amber-600' : 'text-red-600'
   const garmentCount = order.tailoring_order_lines?.length || 0
 
   return (
@@ -58,6 +63,11 @@ export function OrderDetailContent({ order }: { order: any }) {
           </div>
         </div>
         <div className="flex gap-2">
+          {can('orders.edit') && !['delivered', 'cancelled'].includes(order.status) && (
+            <Button onClick={() => setShowEditDialog(true)} variant="outline" className="gap-1">
+              <Pencil className="h-4 w-4" /> Editar pedido
+            </Button>
+          )}
           {can('orders.edit') && (isAdmin || !['delivered', 'cancelled'].includes(order.status)) && (
             <Button onClick={() => setShowStatusDialog(true)} className="bg-prats-navy hover:bg-prats-navy-light">
               Cambiar estado
@@ -85,7 +95,8 @@ export function OrderDetailContent({ order }: { order: any }) {
         </CardContent></Card>
         <Card><CardContent className="pt-4 pb-3">
           <p className="text-xs text-muted-foreground">Margen</p>
-          <p className={`text-xl font-bold ${margin > 50 ? 'text-green-600' : margin > 30 ? 'text-amber-600' : 'text-red-600'}`}>{margin.toFixed(1)}%</p>
+          <p className={`text-xl font-bold ${marginColor}`}>{formatCurrency(marginAmount)}</p>
+          <p className={`text-xs font-medium ${marginColor}`}>{marginPct.toFixed(1)}%</p>
         </CardContent></Card>
         <Card><CardContent className="pt-4 pb-3">
           <p className="text-xs text-muted-foreground">Entrega est.</p>
@@ -121,6 +132,13 @@ export function OrderDetailContent({ order }: { order: any }) {
         open={showStatusDialog} onOpenChange={setShowStatusDialog}
         orderId={order.id} currentStatus={order.status} lines={order.tailoring_order_lines || []}
         orderType={order.order_type}
+      />
+
+      <EditOrderDialog
+        open={showEditDialog}
+        onOpenChange={setShowEditDialog}
+        order={order}
+        onSaved={() => router.refresh()}
       />
     </div>
   )

@@ -1,10 +1,10 @@
 import { Metadata } from 'next'
 import { requirePermission } from '@/actions/auth'
-import { CreateOrderWizard } from './create-order-wizard'
+import { AdminNewOrderWizard } from './admin-new-order-wizard'
 
 export const metadata: Metadata = { title: 'Nuevo pedido' }
 
 export default async function NewOrderPage() {
   await requirePermission('orders.create')
-  return <CreateOrderWizard />
+  return <AdminNewOrderWizard />
 }

@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { getServerProfile } from '@/actions/auth'
 import { AuthProvider } from '@/components/providers/auth-provider'
+import { StoreGate } from '@/components/store-gate'
 
 export default async function PosLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createServerSupabaseClient()
@@ -18,11 +19,13 @@ export default async function PosLayout({ children }: { children: React.ReactNod
 
   return (
     <AuthProvider>
-      <div className="h-screen w-screen flex flex-col bg-gray-50">
-        <div className="flex-1 min-h-0 overflow-auto">
-          {children}
+      <StoreGate theme="dark">
+        <div className="h-screen w-screen flex flex-col bg-gray-50">
+          <div className="flex-1 min-h-0 overflow-auto">
+            {children}
+          </div>
         </div>
-      </div>
+      </StoreGate>
     </AuthProvider>
   )
 }

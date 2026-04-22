@@ -163,6 +163,8 @@ type CamisaItem = {
   puno: 'sencillo' | 'gemelo' | 'mixto' | 'mosquetero' | 'otro'
   tejido: string; precio: number; cantidad: number; obs: string
   cortador: string; oficial: string
+  /** Coste estimado opcional (material_cost). */
+  coste?: number
 }
 
 function defaultCamisa(): CamisaItem {
@@ -174,7 +176,7 @@ function defaultCamisa(): CamisaItem {
     hombrosAltos: false, hombrosBajos: false, erguido: false, cargado: false,
     espaldaLisa: false, espPliegues: false, espTablonCentr: false, espPinzas: false,
     iniciales: false, inicialesTexto: '', modCuello: '', puno: 'sencillo', tejido: '', precio: 0, cantidad: 1, obs: '',
-    cortador: '', oficial: '',
+    cortador: '', oficial: '', coste: undefined,
   }
 }
 
@@ -199,8 +201,8 @@ function getMeasuresFromRecord(
   return out
 }
 
-type ComplementoItem = { id: string; product_variant_id: string; nombre: string; cantidad: number; precio: number }
-type ComplementResult = { id: string; name: string; sku: string; price_with_tax: number; tax_rate: number; stock: number }
+type ComplementoItem = { id: string; product_variant_id: string; nombre: string; cantidad: number; precio: number; cost_price?: number }
+type ComplementResult = { id: string; name: string; sku: string; price_with_tax: number; tax_rate: number; cost_price: number; stock: number }
 
 function add15WorkingDays(from: Date): string {
   let count = 0
@@ -246,7 +248,7 @@ function TejidoInput({ value, onChange, placeholder }: { value: string; onChange
   )
 }
 
-interface CartItem { id: string; slug: string; label: string; precio: number }
+interface CartItem { id: string; slug: string; label: string; precio: number; coste?: number }
 
 function getCartItemDisplayLabel(item: CartItem, allItems: CartItem[]): string {
   const sameType = allItems.filter(c => c.slug === item.slug)
@@ -262,6 +264,9 @@ export function NuevaVentaFichaClient({
   prenda = '',
   sastreName = 'Sastre',
   defaultStoreId,
+  onCreated,
+  onBack,
+  backLabel,
 }: {
   clientId: string
   tipo?: string
@@ -269,6 +274,12 @@ export function NuevaVentaFichaClient({
   prenda?: string
   sastreName?: string
   defaultStoreId: string
+  /** Callback ejecutado tras crear el pedido con éxito. Si se pasa, el componente NO redirige automáticamente. */
+  onCreated?: (orderId: string) => void
+  /** Callback del botón "Volver". Si se pasa, reemplaza la navegación por defecto a medidas. */
+  onBack?: () => void
+  /** Etiqueta del botón volver. */
+  backLabel?: string
 }) {
   const orderType = tipoProp || orderTypeProp || ''
   const router = useRouter()
@@ -481,13 +492,20 @@ export function NuevaVentaFichaClient({
     setCamisas((prev) => [...prev, { id: crypto.randomUUID(), ...m, jareton: false, bolsillo: false, hombroCaido: false, derecho: false, izquierdo: false, hombrosAltos: false, hombrosBajos: false, erguido: false, cargado: false, espaldaLisa: false, espPliegues: false, espTablonCentr: false, espPinzas: false, iniciales: false, inicialesTexto: '', modCuello: '', puno: 'sencillo', tejido: '', precio: 0, cantidad: 1, obs: '', cortador: '', oficial: '' }])
   }
   const removeCamisa = (id: string) => setCamisas((prev) => prev.filter((c) => c.id !== id))
-  const updateCamisa = (id: string, field: keyof CamisaItem, value: string | number | boolean) => {
+  const updateCamisa = (id: string, field: keyof CamisaItem, value: string | number | boolean | undefined) => {
     setCamisas((prev) => prev.map((c) => (c.id === id ? { ...c, [field]: value } : c)))
   }
 
   // ── Complement ops ────────────────────────────────────────────────────────
   const addComplementFromSearch = (item: ComplementResult, cantidad: number) => {
-    setComplementos((prev) => [...prev, { id: crypto.randomUUID(), product_variant_id: item.id, nombre: item.name, cantidad: Math.max(1, cantidad), precio: item.price_with_tax }])
+    setComplementos((prev) => [...prev, {
+      id: crypto.randomUUID(),
+      product_variant_id: item.id,
+      nombre: item.name,
+      cantidad: Math.max(1, cantidad),
+      precio: item.price_with_tax,
+      cost_price: Number(item.cost_price) || 0,
+    }])
     setAddingComplementQty((prev) => ({ ...prev, [item.id]: 0 }))
     setShowComplementSearch(false); setComplementSearchQuery(''); setComplementResults([])
   }
@@ -526,7 +544,7 @@ export function NuevaVentaFichaClient({
   // ── Build functions ───────────────────────────────────────────────────────
   const buildPrendasSastreria = () => {
     if (cartItems.length === 0) return []
-    const result: Array<{ slug: string; label: string; precio: number; oficial: string; configuration: Record<string, unknown> }> = []
+    const result: Array<{ slug: string; label: string; precio: number; oficial: string; configuration: Record<string, unknown>; coste?: number }> = []
     for (const item of cartItems) {
       const sections = getSubSections(item.slug, item.label)
       const itemDisplayLabel = getCartItemDisplayLabel(item, cartItems)
@@ -538,6 +556,8 @@ export function NuevaVentaFichaClient({
           slug: sp.slug,
           label: lineLabel,
           precio: idx === 0 ? item.precio : 0,
+          // El coste estimado solo se aplica a la primera sub-prenda (la que recoge el importe)
+          coste: idx === 0 ? (Number(item.coste) || 0) : 0,
           oficial: oficiales[key] ?? '',
           configuration: { ...config, prendaLabel: lineLabel, prendaSlug: sp.slug },
         })
@@ -598,11 +618,13 @@ export function NuevaVentaFichaClient({
             iniciales: c.iniciales, inicialesTexto: c.inicialesTexto, modCuello: c.modCuello, puno: c.puno,
             tejido: c.tejido, precio: Number(c.precio) || 0, obs: c.obs,
             cortador: c.cortador || undefined, oficial: c.oficial || undefined,
+            coste: Number(c.coste) || 0,
           }))
         ),
         complementos: complementos.map((c) => ({
           product_variant_id: c.product_variant_id, nombre: c.nombre,
           cantidad: c.cantidad, precio: Number(c.precio) || 0,
+          cost_price: Number(c.cost_price) || 0,
         })),
         entregaACuenta: entrega,
         metodoPago: entrega > 0 ? metodoPago : undefined,
@@ -629,7 +651,11 @@ export function NuevaVentaFichaClient({
             }
           }
         } catch (e) { console.error('[Ficha] PDF:', e) }
-        router.push(`/sastre/nueva-venta/confirmacion?orderId=${encodeURIComponent(res.data.orderId)}`)
+        if (onCreated) {
+          onCreated(res.data.orderId)
+        } else {
+          router.push(`/sastre/nueva-venta/confirmacion?orderId=${encodeURIComponent(res.data.orderId)}`)
+        }
         return
       }
       toast.error(res && !res.success && 'error' in res ? String((res as { error: string }).error) : 'Error al crear el pedido.')
@@ -664,9 +690,12 @@ export function NuevaVentaFichaClient({
         <h1 className="text-2xl font-serif text-white">Nueva venta — Ficha de confección</h1>
 
         <Button type="button" variant="outline" className="min-h-[48px] gap-2 !border-[#c9a96e]/50 !bg-[#1a2744] text-[#c9a96e] hover:!bg-[#1e2d4a] hover:!border-[#c9a96e]/70"
-          onClick={() => router.push(`/sastre/nueva-venta/medidas?tipo=${encodeURIComponent(orderType)}&clientId=${encodeURIComponent(clientId)}`)}>
+          onClick={() => {
+            if (onBack) onBack()
+            else router.push(`/sastre/nueva-venta/medidas?tipo=${encodeURIComponent(orderType)}&clientId=${encodeURIComponent(clientId)}`)
+          }}>
           <ArrowLeft className="h-5 w-5" />
-          Volver
+          {backLabel ?? 'Volver'}
         </Button>
 
         {/* ── CARRITO DE PRENDAS ── */}
@@ -675,16 +704,30 @@ export function NuevaVentaFichaClient({
             <h2 className="font-serif text-lg text-[#c9a96e]">Prendas</h2>
 
             {cartItems.map(item => (
-              <div key={item.id} className="flex items-center gap-3 py-2 border-b border-white/[0.06] last:border-0">
-                <span className="text-white flex-1 min-w-0 font-medium">{getCartItemDisplayLabel(item, cartItems)}</span>
-                <Input
-                  type="number" min={0} step={0.01} placeholder="0"
-                  className="w-28 h-9 bg-white/[0.07] border-white/20 text-white text-sm"
-                  value={item.precio || ''}
-                  onChange={e => setCartItems(prev => prev.map(c => c.id === item.id ? { ...c, precio: parseFloat(e.target.value) || 0 } : c))}
-                />
-                <span className="text-white/40 text-sm shrink-0">€</span>
-                <button type="button" onClick={() => removeFromCart(item.id)} className="text-red-400 hover:text-red-300 shrink-0 text-lg leading-none">✕</button>
+              <div key={item.id} className="flex items-start gap-3 py-2 border-b border-white/[0.06] last:border-0">
+                <span className="text-white flex-1 min-w-0 font-medium pt-2">{getCartItemDisplayLabel(item, cartItems)}</span>
+                <div className="flex flex-col gap-1">
+                  <Input
+                    type="number" min={0} step={0.01} placeholder="PVP"
+                    className="w-28 h-9 bg-white/[0.07] border-white/20 text-white text-sm"
+                    value={item.precio || ''}
+                    onChange={e => setCartItems(prev => prev.map(c => c.id === item.id ? { ...c, precio: parseFloat(e.target.value) || 0 } : c))}
+                  />
+                  <Input
+                    type="number" min={0} step={0.01} placeholder="Opcional"
+                    title="Coste estimado (material + mano de obra)"
+                    className="w-28 h-7 bg-transparent border-white/10 text-white/70 text-xs"
+                    value={item.coste ?? ''}
+                    onChange={e => {
+                      const raw = e.target.value
+                      const value = raw === '' ? undefined : (parseFloat(raw) || 0)
+                      setCartItems(prev => prev.map(c => c.id === item.id ? { ...c, coste: value } : c))
+                    }}
+                  />
+                  <span className="text-[10px] text-white/40 text-right -mt-0.5">Coste est. (€)</span>
+                </div>
+                <span className="text-white/40 text-sm shrink-0 pt-2">€</span>
+                <button type="button" onClick={() => removeFromCart(item.id)} className="text-red-400 hover:text-red-300 shrink-0 text-lg leading-none pt-2">✕</button>
               </div>
             ))}
 
@@ -1338,6 +1381,19 @@ export function NuevaVentaFichaClient({
                           <Label className="text-white/50 text-xs">Cantidad</Label>
                           <Input type="number" min={1} className="mt-1 h-10 bg-[#1a2744] border-[#c9a96e]/20 text-white" value={camisa.cantidad} onChange={(e) => updateCamisa(camisa.id, 'cantidad', Math.max(1, parseInt(e.target.value, 10) || 1))} />
                         </div>
+                      </div>
+                      <div className="mt-2">
+                        <Label className="text-white/50 text-xs">Coste est. (€)</Label>
+                        <Input
+                          type="number" min={0} step={0.01} placeholder="Opcional"
+                          className="mt-1 h-8 bg-transparent border-white/10 text-white/70 text-xs"
+                          value={camisa.coste ?? ''}
+                          onChange={(e) => {
+                            const raw = e.target.value
+                            const value = raw === '' ? undefined : (parseFloat(raw) || 0)
+                            updateCamisa(camisa.id, 'coste', value)
+                          }}
+                        />
                       </div>
                     </div>
                     <div>

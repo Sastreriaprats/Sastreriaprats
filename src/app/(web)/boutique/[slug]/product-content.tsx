@@ -50,7 +50,7 @@ export function ProductContent({ slug }: { slug: string }) {
           return
         }
         setProduct(data)
-        trackViewItem(data.name, data.price_with_tax || data.base_price)
+        trackViewItem(data.name, data.price_with_tax)
         const variants = data.product_variants as Record<string, unknown>[] | undefined
         const colorsList = [...new Set(variants?.map((v) => v.color as string).filter(Boolean))]
         if (colorsList.length > 0) setSelectedColor(colorsList[0])
@@ -112,7 +112,7 @@ export function ProductContent({ slug }: { slug: string }) {
     .map((v) => ({ color: v.color as string, hex: v.color_hex as string }))
     .filter((v, i, arr) => arr.findIndex(a => a.hex === v.hex) === i)
 
-  const price = (selectedVariant?.price_override as number) || (product.price_with_tax as number) || (product.base_price as number)
+  const price = (selectedVariant?.price_override as number) || (product.price_with_tax as number)
   const stock = (selectedVariant?.total_stock as number) || 0
   const canAdd = selectedVariant && stock > 0 && (sizes.length === 0 || selectedSize)
 

@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
@@ -15,12 +16,24 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
-  Search, MoreHorizontal, Eye, Pencil, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, ArrowUpDown, Image as ImageIcon, SlidersHorizontal, X,
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
+  Search, MoreHorizontal, Eye, Pencil, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight,
+  ArrowUpDown, Image as ImageIcon, SlidersHorizontal, X, Globe, EyeOff, Loader2,
 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
+import { toast } from 'sonner'
 import { useList } from '@/hooks/use-list'
 import { usePermissions } from '@/hooks/use-permissions'
-import { listProducts } from '@/actions/products'
+import {
+  listProducts,
+  listProductCollections,
+  listProductSeasons,
+  listProductIdsByFilters,
+  updateProductsBulkAction,
+} from '@/actions/products'
 import { formatCurrency } from '@/lib/utils'
 
 const productTypeLabels: Record<string, string> = {
@@ -59,15 +72,33 @@ export function ProductsTab() {
   // Filtros server-side
   const [typeFilter, setTypeFilter] = useState('all')
   const [webFilter, setWebFilter] = useState<WebFilterValue>('all')
+  const [collectionFilter, setCollectionFilter] = useState('all')
+  const [seasonFilter, setSeasonFilter] = useState('all')
 
   // Filtros client-side (sobre la página cargada)
   const [stockFilter, setStockFilter] = useState<StockFilterValue>('all')
 
+  // Opciones dinámicas de los selects
+  const [collectionOptions, setCollectionOptions] = useState<string[]>([])
+  const [seasonOptions, setSeasonOptions] = useState<string[]>([])
+
+  // Selección múltiple (se conserva entre páginas)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState<'publish' | 'unpublish' | null>(null)
+  const [bulkLoading, setBulkLoading] = useState(false)
+  const [selectAllFilteredLoading, setSelectAllFilteredLoading] = useState(false)
+
   const {
     data: products, total, totalPages, page, setPage,
     search, setSearch, sortBy, toggleSort, isLoading, pageSize,
-    setFilters,
+    setFilters, refresh,
   } = useList(listProducts, { pageSize: 25, defaultSort: 'created_at', defaultOrder: 'desc', syncUrl: true })
+
+  // Cargar opciones de colección y temporada al montar
+  useEffect(() => {
+    listProductCollections().then((r) => { if (r.success) setCollectionOptions(r.data as string[]) })
+    listProductSeasons().then((r) => { if (r.success) setSeasonOptions(r.data as string[]) })
+  }, [])
 
   const applyType = (v: string) => {
     setTypeFilter(v)
@@ -82,12 +113,25 @@ export function ProductsTab() {
     }))
   }
 
-  const hasActiveFilters = typeFilter !== 'all' || webFilter !== 'all' || stockFilter !== 'all'
+  const applyCollection = (v: string) => {
+    setCollectionFilter(v)
+    setFilters(prev => ({ ...prev, ...(v !== 'all' ? { collection: v } : { collection: undefined }) }))
+  }
+
+  const applySeason = (v: string) => {
+    setSeasonFilter(v)
+    setFilters(prev => ({ ...prev, ...(v !== 'all' ? { season: v } : { season: undefined }) }))
+  }
+
+  const hasActiveFilters = typeFilter !== 'all' || webFilter !== 'all' || stockFilter !== 'all' || collectionFilter !== 'all' || seasonFilter !== 'all' || Boolean(search.trim())
 
   const clearAllFilters = () => {
     applyType('all')
     applyWeb('all')
+    applyCollection('all')
+    applySeason('all')
     setStockFilter('all')
+    setSearch('')
   }
 
   // Filtro de stock client-side sobre la página cargada
@@ -102,6 +146,65 @@ export function ProductsTab() {
     })
   }, [products, stockFilter])
 
+  // ─── Selección múltiple ─────────────────────────────────────────
+  const displayedIds = useMemo(() => displayedProducts.map((p: any) => p.id as string), [displayedProducts])
+  const pageAllSelected = displayedIds.length > 0 && displayedIds.every((id) => selectedIds.has(id))
+  const pageSomeSelected = displayedIds.some((id) => selectedIds.has(id))
+
+  const toggleRow = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const togglePage = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (pageAllSelected) {
+        displayedIds.forEach((id) => next.delete(id))
+      } else {
+        displayedIds.forEach((id) => next.add(id))
+      }
+      return next
+    })
+  }
+
+  const clearSelection = () => setSelectedIds(new Set())
+
+  const selectAllFiltered = useCallback(async () => {
+    setSelectAllFilteredLoading(true)
+    const res = await listProductIdsByFilters({
+      search: search.trim() || null,
+      product_type: typeFilter !== 'all' ? typeFilter : null,
+      is_visible_web: webFilter === 'yes' ? true : webFilter === 'no' ? false : null,
+      collection: collectionFilter !== 'all' ? collectionFilter : null,
+      season: seasonFilter !== 'all' ? seasonFilter : null,
+    })
+    setSelectAllFilteredLoading(false)
+    if (!res.success) { toast.error(res.error || 'No se pudieron cargar los productos'); return }
+    setSelectedIds(new Set(res.data as string[]))
+    toast.success(`${(res.data as string[]).length} productos seleccionados`)
+  }, [search, typeFilter, webFilter, collectionFilter, seasonFilter])
+
+  // ─── Acciones masivas ─────────────────────────────────────────
+  const runBulk = async (publish: boolean) => {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    setBulkLoading(true)
+    const res = await updateProductsBulkAction({ ids, patch: { is_visible_web: publish } })
+    setBulkLoading(false)
+    setBulkConfirm(null)
+    if (!res.success) { toast.error(res.error || 'No se pudo actualizar'); return }
+    toast.success(publish
+      ? `${(res.data as any).updated} productos publicados en la web`
+      : `${(res.data as any).updated} productos retirados de la web`)
+    clearSelection()
+    refresh()
+  }
+
   const SortHeader = ({ field, children }: { field: string; children: React.ReactNode }) => (
     <TableHead className="cursor-pointer select-none" onClick={() => toggleSort(field)}>
       <div className="flex items-center gap-1">{children}<ArrowUpDown className={`h-3 w-3 ${sortBy === field ? 'text-foreground' : 'text-muted-foreground/50'}`} /></div>
@@ -109,7 +212,7 @@ export function ProductsTab() {
   )
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-24">
       {/* Barra de filtros */}
       <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
         <div className="flex items-center gap-2">
@@ -145,6 +248,32 @@ export function ProductsTab() {
               <SelectItem value="tailoring_fabric">Tela</SelectItem>
               <SelectItem value="alteration">Arreglo</SelectItem>
               <SelectItem value="service">Servicio</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* Colección */}
+          <Select value={collectionFilter} onValueChange={applyCollection}>
+            <SelectTrigger className={`h-8 w-[150px] text-sm ${collectionFilter !== 'all' ? 'border-prats-navy text-prats-navy font-medium' : ''}`}>
+              <SelectValue placeholder="Colección" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas las colecciones</SelectItem>
+              {collectionOptions.map((c) => (
+                <SelectItem key={c} value={c}>{c}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Temporada */}
+          <Select value={seasonFilter} onValueChange={applySeason}>
+            <SelectTrigger className={`h-8 w-[140px] text-sm ${seasonFilter !== 'all' ? 'border-prats-navy text-prats-navy font-medium' : ''}`}>
+              <SelectValue placeholder="Temporada" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas las temporadas</SelectItem>
+              {seasonOptions.map((s) => (
+                <SelectItem key={s} value={s}>{s}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
 
@@ -189,6 +318,18 @@ export function ProductsTab() {
                 <button onClick={() => applyType('all')} className="ml-0.5 hover:text-foreground"><X className="h-3 w-3" /></button>
               </Badge>
             )}
+            {collectionFilter !== 'all' && (
+              <Badge variant="secondary" className="text-xs gap-1 pr-1">
+                Colección: {collectionFilter}
+                <button onClick={() => applyCollection('all')} className="ml-0.5 hover:text-foreground"><X className="h-3 w-3" /></button>
+              </Badge>
+            )}
+            {seasonFilter !== 'all' && (
+              <Badge variant="secondary" className="text-xs gap-1 pr-1">
+                Temporada: {seasonFilter}
+                <button onClick={() => applySeason('all')} className="ml-0.5 hover:text-foreground"><X className="h-3 w-3" /></button>
+              </Badge>
+            )}
             {stockFilter !== 'all' && (
               <Badge variant="secondary" className="text-xs gap-1 pr-1">
                 {stockFilter === 'out' ? 'Sin stock' : stockFilter === 'low' ? 'Stock bajo' : 'Con stock'}
@@ -204,6 +345,23 @@ export function ProductsTab() {
           </div>
         )}
       </div>
+
+      {/* Aviso de selección cuando hay más resultados que los visibles */}
+      {pageAllSelected && total > displayedIds.length && selectedIds.size === displayedIds.length && (
+        <div className="rounded-md border border-prats-navy/30 bg-prats-navy/5 px-3 py-2 text-sm flex items-center gap-2">
+          <span>Seleccionados los {displayedIds.length} de esta página.</span>
+          <Button
+            size="sm"
+            variant="link"
+            className="h-auto p-0 text-prats-navy font-medium"
+            disabled={selectAllFilteredLoading}
+            onClick={selectAllFiltered}
+          >
+            {selectAllFilteredLoading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+            Seleccionar los {total} productos que coinciden con los filtros
+          </Button>
+        </div>
+      )}
 
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
@@ -222,6 +380,13 @@ export function ProductsTab() {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-10">
+                <Checkbox
+                  aria-label="Seleccionar página"
+                  checked={pageAllSelected ? true : pageSomeSelected ? 'indeterminate' : false}
+                  onCheckedChange={togglePage}
+                />
+              </TableHead>
               <TableHead className="w-12"></TableHead>
               <SortHeader field="sku">SKU</SortHeader>
               <SortHeader field="name">Producto</SortHeader>
@@ -240,6 +405,7 @@ export function ProductsTab() {
             {isLoading ? (
               Array.from({ length: 8 }).map((_, i) => (
                 <TableRow key={i}>
+                  <TableCell><Skeleton className="h-4 w-4 rounded" /></TableCell>
                   <TableCell><Skeleton className="h-10 w-10 rounded" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-16" /></TableCell>
                   <TableCell><div className="space-y-1"><Skeleton className="h-4 w-36" /><Skeleton className="h-3 w-24" /></div></TableCell>
@@ -255,12 +421,24 @@ export function ProductsTab() {
                 </TableRow>
               ))
             ) : displayedProducts.length === 0 ? (
-              <TableRow><TableCell colSpan={12} className="h-40 text-center text-muted-foreground">{hasActiveFilters ? 'No hay productos con los filtros aplicados.' : 'No hay productos'}</TableCell></TableRow>
+              <TableRow><TableCell colSpan={13} className="h-40 text-center text-muted-foreground">{hasActiveFilters ? 'No hay productos con los filtros aplicados.' : 'No hay productos'}</TableCell></TableRow>
             ) : displayedProducts.map((p: any) => {
               const isFabric = p.product_type === 'tailoring_fabric'
               const { total: stockTotal, warehouses } = getProductStockSummary(p)
+              const isSelected = selectedIds.has(p.id)
               return (
-                <TableRow key={p.id} className="cursor-pointer hover:bg-muted/50" onClick={() => router.push(`/admin/stock/productos/${p.id}`)}>
+                <TableRow
+                  key={p.id}
+                  className={`cursor-pointer hover:bg-muted/50 ${isSelected ? 'bg-prats-navy/5' : ''}`}
+                  onClick={() => router.push(`/admin/stock/productos/${p.id}`)}
+                >
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <Checkbox
+                      aria-label={`Seleccionar ${p.name}`}
+                      checked={isSelected}
+                      onCheckedChange={() => toggleRow(p.id)}
+                    />
+                  </TableCell>
                   <TableCell>
                     {p.main_image_url ? (
                       <img src={p.main_image_url} alt="" className="h-10 w-10 rounded object-cover" />
@@ -280,7 +458,7 @@ export function ProductsTab() {
                   </TableCell>
                   <TableCell className="text-sm">{p.product_categories?.name || '-'}</TableCell>
                   <TableCell className="text-sm">{p.brand || '-'}</TableCell>
-                  <TableCell className="font-medium">{formatCurrency(p.price_with_tax ?? p.base_price)}{isFabric ? <span className="text-xs text-muted-foreground">/m</span> : null}</TableCell>
+                  <TableCell className="font-medium">{formatCurrency(p.price_with_tax)}{isFabric ? <span className="text-xs text-muted-foreground">/m</span> : null}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{p.cost_price ? formatCurrency(p.cost_price) : '-'}</TableCell>
                   <TableCell className="text-sm">{p.suppliers?.name || '-'}</TableCell>
                   <TableCell>
@@ -333,6 +511,77 @@ export function ProductsTab() {
           </div>
         </div>
       )}
+
+      {/* Barra de acciones masivas (sticky bottom) */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[min(900px,calc(100vw-2rem))]">
+          <div className="rounded-lg bg-slate-900 text-white shadow-2xl px-4 py-3 flex flex-wrap items-center gap-3">
+            <span className="font-semibold text-sm">
+              {selectedIds.size} {selectedIds.size === 1 ? 'producto seleccionado' : 'productos seleccionados'}
+            </span>
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              {can('products.edit') && (
+                <>
+                  <Button
+                    size="sm"
+                    className="bg-green-600 hover:bg-green-700 text-white gap-1"
+                    disabled={bulkLoading}
+                    onClick={() => setBulkConfirm('publish')}
+                  >
+                    <Globe className="h-3.5 w-3.5" /> Publicar en web
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="bg-amber-600 hover:bg-amber-700 text-white gap-1"
+                    disabled={bulkLoading}
+                    onClick={() => setBulkConfirm('unpublish')}
+                  >
+                    <EyeOff className="h-3.5 w-3.5" /> Quitar de la web
+                  </Button>
+                </>
+              )}
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-white hover:bg-slate-800 gap-1"
+                disabled={bulkLoading}
+                onClick={clearSelection}
+              >
+                <X className="h-3.5 w-3.5" /> Deseleccionar todo
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmación */}
+      <AlertDialog open={bulkConfirm !== null} onOpenChange={(open) => { if (!open) setBulkConfirm(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {bulkConfirm === 'publish'
+                ? `¿Publicar ${selectedIds.size} ${selectedIds.size === 1 ? 'producto' : 'productos'} en la web?`
+                : `¿Quitar ${selectedIds.size} ${selectedIds.size === 1 ? 'producto' : 'productos'} de la web?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {bulkConfirm === 'publish'
+                ? 'Los productos seleccionados aparecerán en la tienda online.'
+                : 'Los productos seleccionados dejarán de aparecer en la tienda online.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkLoading}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className={bulkConfirm === 'publish' ? 'bg-green-600 hover:bg-green-700' : 'bg-amber-600 hover:bg-amber-700'}
+              disabled={bulkLoading}
+              onClick={(e) => { e.preventDefault(); runBulk(bulkConfirm === 'publish') }}
+            >
+              {bulkLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {bulkConfirm === 'publish' ? 'Publicar' : 'Quitar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

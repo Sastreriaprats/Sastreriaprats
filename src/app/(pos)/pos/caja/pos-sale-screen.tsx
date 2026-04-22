@@ -433,12 +433,11 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
         l.product_variant_id === variant.id ? { ...l, quantity: l.quantity + 1 } : l
       ))
     } else {
-      // price_with_tax ES el PVP (IVA incluido); si no existe, calcular desde base_price
+      // price_with_tax es la fuente de verdad del PVP (IVA incluido); price_override tiene prioridad si se definió
       const taxRate = Number(variant.products.tax_rate) || 21
       const priceOverride = Number(variant.price_override) || 0
       const priceWithTax = Number(variant.products.price_with_tax) || 0
-      const basePrice = Number(variant.products.base_price) || 0
-      const price = priceOverride || priceWithTax || (basePrice ? basePrice * (1 + taxRate / 100) : 0)
+      const price = priceOverride || priceWithTax
       setTicketLines(prev => [...prev, {
         id: crypto.randomUUID(),
         product_variant_id: variant.id,
@@ -1065,11 +1064,9 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
             <div className="bg-white border-b border-slate-200 max-h-64 overflow-y-auto shrink-0 shadow-sm">
               {searchResults.map((v: any) => {
                 const stock = Array.isArray(v.stock_levels) ? (v.stock_levels[0]?.available ?? 0) : (v.stock_levels?.[0]?.available || 0)
-                const taxRate = Number(v.products?.tax_rate) || 21
                 const priceOverride = Number(v.price_override) || 0
                 const priceWithTax = Number(v.products?.price_with_tax) || 0
-                const basePrice = Number(v.products?.base_price) || 0
-                const price = priceOverride || priceWithTax || (basePrice ? basePrice * (1 + taxRate / 100) : 0)
+                const price = priceOverride || priceWithTax
                 const name = v.products?.name ?? ''
                 const sku = v.products?.sku ?? ''
                 const variantSku = v.variant_sku ?? ''

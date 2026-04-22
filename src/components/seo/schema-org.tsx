@@ -6,10 +6,10 @@ function JsonLd({ data }: SchemaProps) {
   return <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }} />
 }
 
-export function ProductSchema({ product }: { product: Record<string, unknown> & { name: string; description?: string; main_image_url?: string; slug: string; brand?: string; base_price: number; material?: string; product_variants?: Record<string, unknown>[] } }) {
+export function ProductSchema({ product }: { product: Record<string, unknown> & { name: string; description?: string; main_image_url?: string; slug: string; brand?: string; price_with_tax: number; material?: string; product_variants?: Record<string, unknown>[] } }) {
   const url = `${process.env.NEXT_PUBLIC_APP_URL || ''}/boutique/${product.slug}`
   const variants = product.product_variants || []
-  const prices = variants.map((v) => (v.price_override as number) || product.base_price)
+  const prices = variants.map((v) => (v.price_override as number) || product.price_with_tax)
 
   const data: Record<string, unknown> = {
     '@context': 'https://schema.org',
@@ -23,8 +23,8 @@ export function ProductSchema({ product }: { product: Record<string, unknown> & 
     offers: {
       '@type': 'AggregateOffer',
       priceCurrency: 'EUR',
-      lowPrice: product.base_price,
-      highPrice: Math.max(product.base_price, ...prices),
+      lowPrice: product.price_with_tax,
+      highPrice: Math.max(product.price_with_tax, ...prices),
       availability: variants.some((v) => ((v.total_stock as number) || 0) > 0)
         ? 'https://schema.org/InStock'
         : 'https://schema.org/OutOfStock',

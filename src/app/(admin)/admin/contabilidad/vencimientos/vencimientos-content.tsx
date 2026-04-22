@@ -14,21 +14,22 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   CalendarClock, Search, Loader2, RefreshCw, AlertCircle, Clock,
-  CreditCard, FileText, ArrowLeft,
+  CreditCard, FileText, Check,
 } from 'lucide-react'
 import { formatCurrency, formatDate, cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import {
   listSupplierVencimientos,
   getSupplierVencimientosKpis,
+  markSupplierInvoiceDueDatePaid,
   type SupplierVencimientoRow,
   type SupplierVencimientosKpis,
 } from '@/actions/supplier-invoice-payments'
-import {
-  SupplierPaymentDialog,
-  type SupplierPaymentDialogInvoice,
-} from '@/components/payments/supplier-payment-dialog'
 
 function KpiCard({ label, value, sub, icon: Icon, color = 'text-foreground' }: {
   label: string; value: string; sub?: string; icon: React.ElementType; color?: string
@@ -52,17 +53,15 @@ function KpiCard({ label, value, sub, icon: Icon, color = 'text-foreground' }: {
 }
 
 const STATUS_OPTIONS = [
-  { value: 'all', label: 'Pendientes y parciales' },
+  { value: 'all', label: 'Pendientes (todas)' },
   { value: 'vencida', label: 'Solo vencidas' },
-  { value: 'pendiente', label: 'Pendientes (sin pagos)' },
-  { value: 'parcial', label: 'Parciales' },
+  { value: 'pendiente', label: 'Pendientes al día' },
   { value: 'pagada', label: 'Pagadas' },
 ]
 
 const STATUS_BADGE: Record<string, { label: string; className: string }> = {
   pendiente: { label: 'Pendiente', className: 'bg-yellow-100 text-yellow-800' },
   vencida: { label: 'Vencida', className: 'bg-red-100 text-red-800' },
-  parcial: { label: 'Parcial', className: 'bg-blue-100 text-blue-800' },
   pagada: { label: 'Pagada', className: 'bg-green-100 text-green-800' },
 }
 
@@ -76,8 +75,8 @@ export function VencimientosContent() {
     searchParams.get('vencidos') === '1' ? 'vencida' : 'all',
   )
   const [onlyOverdue, setOnlyOverdue] = useState(searchParams.get('vencidos') === '1')
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [selected, setSelected] = useState<SupplierPaymentDialogInvoice | null>(null)
+  const [confirmRow, setConfirmRow] = useState<SupplierVencimientoRow | null>(null)
+  const [marking, setMarking] = useState(false)
 
   const loadKpis = useCallback(async () => {
     try {
@@ -119,29 +118,24 @@ export function VencimientosContent() {
   }, [search, statusFilter, onlyOverdue])
 
   useEffect(() => { loadKpis() }, [loadKpis])
-
   useEffect(() => {
     const t = setTimeout(loadList, 300)
     return () => clearTimeout(t)
   }, [loadList])
 
-  function openPaymentDialog(row: SupplierVencimientoRow) {
-    setSelected({
-      id: row.id,
-      supplier_name: row.supplier_name,
-      invoice_number: row.invoice_number,
-      total_amount: row.total_amount,
-      amount_paid: row.amount_paid,
-      amount_pending: row.amount_pending,
-      default_payment_method: row.last_payment_method ?? 'transfer',
-    })
-    setDialogOpen(true)
+  const confirmMarkPaid = async () => {
+    if (!confirmRow) return
+    setMarking(true)
+    const r = await markSupplierInvoiceDueDatePaid({ id: confirmRow.id })
+    setMarking(false)
+    if (!r.success) { toast.error(r.error || 'Error al marcar como pagada'); return }
+    toast.success(r.data.all_paid ? 'Cuota pagada. Factura completada.' : 'Cuota pagada.')
+    setConfirmRow(null)
+    loadList()
+    loadKpis()
   }
 
   function displayStatus(row: SupplierVencimientoRow) {
-    const t = new Date().toISOString().slice(0, 10)
-    const isOverdue = row.due_date < t && (row.status === 'pendiente' || row.status === 'parcial')
-    if (isOverdue) return STATUS_BADGE.vencida
     return STATUS_BADGE[row.status] ?? STATUS_BADGE.pendiente
   }
 
@@ -154,7 +148,7 @@ export function VencimientosContent() {
             Vencimientos proveedores
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Facturas de proveedor con pagos pendientes. Registra pagos parciales o totales.
+            Cuotas de vencimiento de facturas de proveedor. Marca cada cuota como pagada cuando se liquide.
           </p>
         </div>
         <div className="flex gap-2">
@@ -176,28 +170,28 @@ export function VencimientosContent() {
           <KpiCard
             label="Total pendiente"
             value={formatCurrency(kpis.totalPendiente)}
-            sub={`${kpis.countPendientes} factura${kpis.countPendientes === 1 ? '' : 's'}`}
+            sub={`${kpis.countPendientes} cuota${kpis.countPendientes === 1 ? '' : 's'}`}
             icon={CreditCard}
             color="text-amber-600"
           />
           <KpiCard
             label="Vencidas"
             value={formatCurrency(kpis.totalVencidas)}
-            sub={`${kpis.countVencidas} factura${kpis.countVencidas === 1 ? '' : 's'}`}
+            sub={`${kpis.countVencidas} cuota${kpis.countVencidas === 1 ? '' : 's'}`}
             icon={AlertCircle}
             color="text-red-600"
           />
           <KpiCard
             label="Próximas 30 días"
             value={formatCurrency(kpis.totalProximas30)}
-            sub={`${kpis.countProximas30} factura${kpis.countProximas30 === 1 ? '' : 's'}`}
+            sub={`${kpis.countProximas30} cuota${kpis.countProximas30 === 1 ? '' : 's'}`}
             icon={Clock}
             color="text-amber-600"
           />
           <KpiCard
             label="Pagadas este mes"
             value={String(kpis.countPagadasEsteMes)}
-            sub="facturas"
+            sub="cuotas"
             icon={CalendarClock}
             color="text-green-600"
           />
@@ -244,7 +238,7 @@ export function VencimientosContent() {
       ) : rows.length === 0 ? (
         <div className="text-center py-16 border rounded-lg">
           <CalendarClock className="mx-auto h-12 w-12 mb-4 opacity-20" />
-          <p className="text-muted-foreground">No hay vencimientos con los filtros indicados</p>
+          <p className="text-muted-foreground">No hay cuotas con los filtros indicados</p>
         </div>
       ) : (
         <div className="rounded-lg border overflow-hidden">
@@ -253,20 +247,21 @@ export function VencimientosContent() {
               <TableRow className="bg-muted/50">
                 <TableHead className="text-xs">Proveedor</TableHead>
                 <TableHead className="text-xs">Nº factura</TableHead>
-                <TableHead className="text-xs">Fecha</TableHead>
+                <TableHead className="text-xs">Fecha factura</TableHead>
+                <TableHead className="text-xs">Cuota</TableHead>
                 <TableHead className="text-xs">Vencimiento</TableHead>
-                <TableHead className="text-xs text-right">Total</TableHead>
+                <TableHead className="text-xs text-right">Importe cuota</TableHead>
                 <TableHead className="text-xs text-right">Pagado</TableHead>
                 <TableHead className="text-xs text-right">Pendiente</TableHead>
                 <TableHead className="text-xs">Días</TableHead>
                 <TableHead className="text-xs">Estado</TableHead>
-                <TableHead className="w-32" />
+                <TableHead className="w-40" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {rows.map((row) => {
                 const badge = displayStatus(row)
-                const overdue = row.days_overdue > 0 && row.amount_pending > 0
+                const overdue = row.status === 'vencida'
                 return (
                   <TableRow
                     key={row.id}
@@ -281,15 +276,23 @@ export function VencimientosContent() {
                     <TableCell className="font-mono text-xs">{row.invoice_number}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{formatDate(row.invoice_date)}</TableCell>
                     <TableCell className="text-xs">
+                      {row.installment_count > 1
+                        ? <Badge variant="outline" className="text-[10px] h-5">{row.installment_index} de {row.installment_count}</Badge>
+                        : <span className="text-muted-foreground">Única</span>}
+                    </TableCell>
+                    <TableCell className="text-xs">
                       <span className={overdue ? 'text-red-600 font-semibold' : 'text-muted-foreground'}>
                         {formatDate(row.due_date)}
                       </span>
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-sm font-medium">
-                      {formatCurrency(row.total_amount)}
+                      {formatCurrency(row.installment_amount)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-sm text-green-600">
                       {formatCurrency(row.amount_paid)}
+                      {row.paid_at && (
+                        <div className="text-[10px] text-muted-foreground">{formatDate(row.paid_at)}</div>
+                      )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums font-semibold text-sm text-amber-600">
                       {formatCurrency(row.amount_pending)}
@@ -308,16 +311,20 @@ export function VencimientosContent() {
                         {badge.label}
                       </span>
                     </TableCell>
-                    <TableCell className="w-32">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-8 text-xs gap-1.5"
-                        onClick={() => openPaymentDialog(row)}
-                      >
-                        <CreditCard className="h-3.5 w-3.5" />
-                        {row.amount_pending > 0 ? 'Registrar pago' : 'Ver pagos'}
-                      </Button>
+                    <TableCell className="w-40">
+                      {row.is_paid ? (
+                        <span className="text-xs text-muted-foreground">Pagada</span>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 text-xs gap-1.5"
+                          onClick={() => setConfirmRow(row)}
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                          Marcar como pagada
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 )
@@ -327,12 +334,33 @@ export function VencimientosContent() {
         </div>
       )}
 
-      <SupplierPaymentDialog
-        open={dialogOpen}
-        onOpenChange={(open) => { setDialogOpen(open); if (!open) setSelected(null) }}
-        invoice={selected}
-        onChanged={() => { loadList(); loadKpis() }}
-      />
+      <AlertDialog open={Boolean(confirmRow)} onOpenChange={(v) => { if (!v) setConfirmRow(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Marcar cuota como pagada</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmRow && (
+                <>
+                  Se registrará un pago de <strong>{formatCurrency(confirmRow.installment_amount)}</strong> sobre
+                  la factura <strong>{confirmRow.invoice_number}</strong> de{' '}
+                  <strong>{confirmRow.supplier_name}</strong>. Se creará la transacción contable correspondiente.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={marking}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-green-600 hover:bg-green-700"
+              disabled={marking}
+              onClick={(e) => { e.preventDefault(); confirmMarkPaid() }}
+            >
+              {marking ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Check className="h-4 w-4 mr-2" />}
+              Confirmar pago
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

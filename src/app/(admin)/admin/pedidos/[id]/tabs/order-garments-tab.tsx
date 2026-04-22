@@ -1,25 +1,90 @@
 'use client'
 
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
+import { Printer, Pencil, Loader2 } from 'lucide-react'
 import { formatCurrency, getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
+import { generateFichaForLine, generateFichaForLineCamiseria } from '@/lib/pdf/ficha-confeccion'
+import { EditFichaDialog } from '@/components/orders/edit-ficha-dialog'
+import { toast } from 'sonner'
+
+type LineGroup = 'sastreria' | 'camiseria' | 'complemento'
+
+function getLineGroup(line: any): LineGroup {
+  const cfg = line?.configuration ?? {}
+  if (cfg.product_name !== undefined) return 'complemento'
+  if (cfg.tipo === 'camiseria' || cfg.puno !== undefined) return 'camiseria'
+  return 'sastreria'
+}
+
+const LOCKED_STATUSES = new Set(['delivered', 'cancelled'])
 
 export function OrderGarmentsTab({ order }: { order: any }) {
+  const router = useRouter()
   const lines = order.tailoring_order_lines || []
+  const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null)
+  const [editingLine, setEditingLine] = useState<any | null>(null)
+
+  const canEdit = !LOCKED_STATUSES.has(order?.status)
+
+  const handleDownload = async (line: any, group: LineGroup, idx: number) => {
+    if (group === 'complemento') return
+    setPdfLoadingId(line.id)
+    try {
+      if (group === 'camiseria') await generateFichaForLineCamiseria(order, line, idx)
+      else await generateFichaForLine(order, line)
+    } catch (err) {
+      console.error(err)
+      toast.error('No se pudo generar la ficha')
+    } finally {
+      setPdfLoadingId(null)
+    }
+  }
 
   return (
     <div className="space-y-4">
-      {lines.map((line: any, idx: number) => (
+      {lines.map((line: any, idx: number) => {
+        const group = getLineGroup(line)
+        const canPrintFicha = group !== 'complemento'
+        return (
         <Card key={line.id}>
           <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <CardTitle className="text-base flex items-center gap-2">
                 <span className="text-muted-foreground text-sm">#{idx + 1}</span>
                 {line.garment_types?.name}
                 <Badge variant="outline" className="text-xs">{line.line_type === 'artesanal' ? 'Artesanal' : 'Industrial'}</Badge>
               </CardTitle>
-              <Badge className={`text-xs ${getOrderStatusColor(line.status)}`}>{getOrderStatusLabel(line.status)}</Badge>
+              <div className="flex items-center gap-2">
+                <Badge className={`text-xs ${getOrderStatusColor(line.status)}`}>{getOrderStatusLabel(line.status)}</Badge>
+                {canPrintFicha && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1 h-8"
+                    onClick={() => handleDownload(line, group, idx)}
+                    disabled={pdfLoadingId === line.id}
+                  >
+                    {pdfLoadingId === line.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />}
+                    Descargar ficha
+                  </Button>
+                )}
+                {canEdit && canPrintFicha && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1 h-8"
+                    onClick={() => setEditingLine(line)}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    Editar ficha
+                  </Button>
+                )}
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -109,13 +174,44 @@ export function OrderGarmentsTab({ order }: { order: any }) {
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
               <div><span className="text-muted-foreground block text-xs">PVP</span><span className="font-medium">{formatCurrency(line.unit_price)}</span></div>
               {line.discount_percentage > 0 && <div><span className="text-muted-foreground block text-xs">Dto.</span>-{line.discount_percentage}%</div>}
-              <div><span className="text-muted-foreground block text-xs">Coste material</span>{formatCurrency(line.material_cost)}</div>
-              <div><span className="text-muted-foreground block text-xs">Coste M.O.</span>{formatCurrency(line.labor_cost)}</div>
-              <div><span className="text-muted-foreground block text-xs">Coste fábrica</span>{formatCurrency(line.factory_cost)}</div>
+              {(() => {
+                const material = Number(line.material_cost) || 0
+                const labor = Number(line.labor_cost) || 0
+                const factory = Number(line.factory_cost) || 0
+                const anyCost = material > 0 || labor > 0 || factory > 0
+                if (!anyCost) return null
+                const totalCost = Math.round((material + labor + factory) * 100) / 100
+                return (
+                  <>
+                    {material > 0 && (
+                      <div><span className="text-muted-foreground block text-xs">Material</span>{formatCurrency(material)}</div>
+                    )}
+                    {labor > 0 && (
+                      <div><span className="text-muted-foreground block text-xs">Mano de obra</span>{formatCurrency(labor)}</div>
+                    )}
+                    {factory > 0 && (
+                      <div><span className="text-muted-foreground block text-xs">Fabricación</span>{formatCurrency(factory)}</div>
+                    )}
+                    <div>
+                      <span className="text-muted-foreground block text-xs">Total coste</span>
+                      <span className="font-semibold">{formatCurrency(totalCost)}</span>
+                    </div>
+                  </>
+                )
+              })()}
             </div>
           </CardContent>
         </Card>
-      ))}
+        )
+      })}
+
+      <EditFichaDialog
+        open={!!editingLine}
+        onOpenChange={(v) => { if (!v) setEditingLine(null) }}
+        order={order}
+        line={editingLine}
+        onSaved={() => { setEditingLine(null); router.refresh() }}
+      />
     </div>
   )
 }

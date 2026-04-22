@@ -11,6 +11,7 @@ import {
 const PERMISSION = 'supplier_invoices.manage'
 const TABLE = 'ap_supplier_invoice_payments'
 const INVOICES_TABLE = 'ap_supplier_invoices'
+const DUE_DATES_TABLE = 'ap_supplier_invoice_due_dates'
 
 export type SupplierInvoicePayment = {
   id: string
@@ -25,17 +26,34 @@ export type SupplierInvoicePayment = {
 }
 
 export type SupplierVencimientoRow = {
+  /** ID de la cuota si viene de la tabla de cuotas; si no, ID de la factura. */
   id: string
+  /** ID de la factura AP a la que pertenece la cuota. */
+  supplier_invoice_id: string
   supplier_id: string | null
   supplier_name: string
   supplier_cif: string | null
   invoice_number: string
   invoice_date: string
+  /** Fecha de vencimiento de ESTA cuota. */
   due_date: string
+  /** Total de la factura (para contexto). */
   total_amount: number
+  /** Importe de esta cuota. */
+  installment_amount: number
+  /** Nº de cuota (1-based). */
+  installment_index: number
+  /** Total de cuotas de la factura. */
+  installment_count: number
+  /** Importe pagado de esta cuota: igual a installment_amount si is_paid, 0 si no. */
   amount_paid: number
+  /** Importe pendiente de esta cuota. */
   amount_pending: number
+  /** Estado agregado de la cuota: 'pagada' | 'vencida' | 'pendiente' | 'parcial' (no aplica) */
   status: string
+  is_paid: boolean
+  paid_at: string | null
+  payment_method: string | null
   last_payment_date: string | null
   last_payment_method: string | null
   notes: string | null
@@ -233,23 +251,10 @@ export const getSupplierVencimientosKpis = protectedAction<
     in30.setDate(in30.getDate() + 30)
     const in30Str = in30.toISOString().slice(0, 10)
 
-    const { data: invoices, error: invErr } = await ctx.adminClient
-      .from(INVOICES_TABLE)
-      .select('id, total_amount, status, due_date, payment_date')
-    if (invErr) return failure(invErr.message)
-
-    const invoiceIds = (invoices || []).map((r: any) => String(r.id))
-    const paidMap = new Map<string, number>()
-    if (invoiceIds.length > 0) {
-      const { data: pays } = await ctx.adminClient
-        .from(TABLE)
-        .select('supplier_invoice_id, amount')
-        .in('supplier_invoice_id', invoiceIds)
-      for (const p of (pays || []) as any[]) {
-        const key = String(p.supplier_invoice_id)
-        paidMap.set(key, (paidMap.get(key) ?? 0) + Number(p.amount ?? 0))
-      }
-    }
+    const { data: cuotas, error: cuotasErr } = await ctx.adminClient
+      .from(DUE_DATES_TABLE)
+      .select('amount, due_date, is_paid, paid_at')
+    if (cuotasErr) return failure(cuotasErr.message)
 
     let totalPendiente = 0
     let totalVencidas = 0
@@ -259,24 +264,23 @@ export const getSupplierVencimientosKpis = protectedAction<
     let countProximas30 = 0
     let countPagadasEsteMes = 0
 
-    for (const r of (invoices || []) as any[]) {
-      const total = Number(r.total_amount ?? 0)
-      const paid = paidMap.get(String(r.id)) ?? 0
-      const pending = Math.max(0, total - paid)
-      if (r.status === 'pagada') {
-        if (r.payment_date && r.payment_date >= startMonth && r.payment_date <= endMonth) {
+    for (const c of (cuotas || []) as any[]) {
+      const amt = Number(c.amount ?? 0)
+      if (c.is_paid) {
+        if (c.paid_at && c.paid_at >= startMonth && c.paid_at <= endMonth) {
           countPagadasEsteMes++
         }
         continue
       }
-      if (pending <= 0) continue
-      totalPendiente += pending
+      if (amt <= 0) continue
+      totalPendiente += amt
       countPendientes++
-      if (r.due_date < t) {
-        totalVencidas += pending
+      const due = String(c.due_date ?? '')
+      if (due && due < t) {
+        totalVencidas += amt
         countVencidas++
-      } else if (r.due_date <= in30Str) {
-        totalProximas30 += pending
+      } else if (due && due <= in30Str) {
+        totalProximas30 += amt
         countProximas30++
       }
     }
@@ -305,85 +309,212 @@ export const listSupplierVencimientos = protectedAction<
 >(
   { permission: PERMISSION, auditModule: 'accounting' },
   async (ctx, { search, status = 'all', onlyOverdue = false }) => {
-    let q = ctx.adminClient
-      .from(INVOICES_TABLE)
-      .select('id, supplier_id, supplier_name, supplier_cif, invoice_number, invoice_date, due_date, total_amount, status, notes, created_at')
+    // 1. Traemos cuotas con su factura embebida.
+    const { data: cuotas, error: cuotasErr } = await ctx.adminClient
+      .from(DUE_DATES_TABLE)
+      .select(`
+        id, supplier_invoice_id, due_date, amount, sort_order, is_paid, paid_at, payment_method, created_at,
+        invoice:ap_supplier_invoices!supplier_invoice_id (
+          id, supplier_id, supplier_name, supplier_cif, invoice_number, invoice_date, total_amount, status, notes
+        )
+      `)
       .order('due_date', { ascending: true })
-      .limit(500)
+      .limit(1000)
+    if (cuotasErr) return failure(cuotasErr.message)
 
-    if (status === 'pendiente' || status === 'parcial' || status === 'pagada') {
-      q = q.eq('status', status)
-    } else if (status === 'vencida') {
-      q = q.lt('due_date', today()).in('status', ['pendiente', 'parcial'])
-    } else {
-      q = q.in('status', ['pendiente', 'parcial', 'vencida'])
-    }
-
-    const term = (search ?? '').trim()
-    if (term) {
-      q = q.or(`supplier_name.ilike.%${term}%,invoice_number.ilike.%${term}%`)
-    }
-
-    const { data: invoices, error: invErr } = await q
-    if (invErr) return failure(invErr.message)
-
-    const invoiceIds = (invoices || []).map((r: any) => String(r.id))
-    const payMap = new Map<string, { paid: number; last_date: string | null; last_method: string | null }>()
-    if (invoiceIds.length > 0) {
-      const { data: pays } = await ctx.adminClient
-        .from(TABLE)
-        .select('supplier_invoice_id, amount, payment_date, payment_method')
-        .in('supplier_invoice_id', invoiceIds)
-        .order('payment_date', { ascending: false })
-      for (const p of (pays || []) as any[]) {
-        const key = String(p.supplier_invoice_id)
-        const prev = payMap.get(key) ?? { paid: 0, last_date: null, last_method: null }
-        prev.paid += Number(p.amount ?? 0)
-        if (!prev.last_date && p.payment_date) {
-          prev.last_date = String(p.payment_date)
-          prev.last_method = p.payment_method ? String(p.payment_method) : null
-        }
-        payMap.set(key, prev)
-      }
-    }
-
+    const term = (search ?? '').trim().toLowerCase()
     const todayStr = today()
-    const rows: SupplierVencimientoRow[] = []
-    for (const r of (invoices || []) as any[]) {
-      const total = Number(r.total_amount ?? 0)
-      const agg = payMap.get(String(r.id)) ?? { paid: 0, last_date: null, last_method: null }
-      const paid = Math.round(agg.paid * 100) / 100
-      const pending = Math.max(0, Math.round((total - paid) * 100) / 100)
-      if (status !== 'pagada' && pending <= 0) continue
 
-      const due = String(r.due_date ?? '')
-      const daysOverdue = due && due < todayStr
+    // 2. Contar cuotas por factura para mostrar "Cuota 1 de N"
+    const countByInvoice = new Map<string, number>()
+    for (const c of (cuotas || []) as any[]) {
+      const invId = String(c.supplier_invoice_id)
+      countByInvoice.set(invId, (countByInvoice.get(invId) ?? 0) + 1)
+    }
+
+    // 3. Para cada factura, calcular el índice de la cuota (ordenadas por due_date/sort_order)
+    const sortedIndexByCuota = new Map<string, number>()
+    const grouped = new Map<string, any[]>()
+    for (const c of (cuotas || []) as any[]) {
+      const invId = String(c.supplier_invoice_id)
+      if (!grouped.has(invId)) grouped.set(invId, [])
+      grouped.get(invId)!.push(c)
+    }
+    for (const [, list] of grouped.entries()) {
+      list.sort((a: any, b: any) => {
+        const byOrder = Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)
+        if (byOrder !== 0) return byOrder
+        return String(a.due_date).localeCompare(String(b.due_date))
+      })
+      list.forEach((c: any, i: number) => sortedIndexByCuota.set(String(c.id), i + 1))
+    }
+
+    const rows: SupplierVencimientoRow[] = []
+    for (const c of (cuotas || []) as any[]) {
+      const inv = c.invoice
+      if (!inv) continue
+
+      // Filtro de búsqueda (por proveedor o nº factura)
+      if (term) {
+        const name = String(inv.supplier_name ?? '').toLowerCase()
+        const num = String(inv.invoice_number ?? '').toLowerCase()
+        if (!name.includes(term) && !num.includes(term)) continue
+      }
+
+      const due = String(c.due_date ?? '')
+      const amt = Number(c.amount ?? 0)
+      const isOverdue = !c.is_paid && due && due < todayStr
+      const daysOverdue = isOverdue
         ? Math.floor((new Date(todayStr).getTime() - new Date(due).getTime()) / 86400000)
         : 0
 
-      if (onlyOverdue && daysOverdue <= 0) continue
+      // Derivar estado visible de la cuota
+      let rowStatus: 'pagada' | 'vencida' | 'pendiente'
+      if (c.is_paid) rowStatus = 'pagada'
+      else if (isOverdue) rowStatus = 'vencida'
+      else rowStatus = 'pendiente'
 
+      // Filtros
+      if (status === 'pagada' && rowStatus !== 'pagada') continue
+      if (status === 'pendiente' && rowStatus !== 'pendiente') continue
+      if (status === 'vencida' && rowStatus !== 'vencida') continue
+      if (status === 'parcial') continue // ya no aplica al modelo por cuota
+      if (status === 'all' && rowStatus === 'pagada') continue // por defecto oculta pagadas
+      if (onlyOverdue && rowStatus !== 'vencida') continue
+
+      const cuotaId = String(c.id)
       rows.push({
-        id: String(r.id),
-        supplier_id: r.supplier_id ? String(r.supplier_id) : null,
-        supplier_name: String(r.supplier_name ?? ''),
-        supplier_cif: r.supplier_cif ? String(r.supplier_cif) : null,
-        invoice_number: String(r.invoice_number ?? ''),
-        invoice_date: String(r.invoice_date ?? ''),
+        id: cuotaId,
+        supplier_invoice_id: String(c.supplier_invoice_id),
+        supplier_id: inv.supplier_id ? String(inv.supplier_id) : null,
+        supplier_name: String(inv.supplier_name ?? ''),
+        supplier_cif: inv.supplier_cif ? String(inv.supplier_cif) : null,
+        invoice_number: String(inv.invoice_number ?? ''),
+        invoice_date: String(inv.invoice_date ?? ''),
         due_date: due,
-        total_amount: total,
-        amount_paid: paid,
-        amount_pending: pending,
-        status: String(r.status ?? 'pendiente'),
-        last_payment_date: agg.last_date,
-        last_payment_method: agg.last_method,
-        notes: r.notes ? String(r.notes) : null,
+        total_amount: Number(inv.total_amount ?? 0),
+        installment_amount: Math.round(amt * 100) / 100,
+        installment_index: sortedIndexByCuota.get(cuotaId) ?? 1,
+        installment_count: countByInvoice.get(String(c.supplier_invoice_id)) ?? 1,
+        amount_paid: c.is_paid ? Math.round(amt * 100) / 100 : 0,
+        amount_pending: c.is_paid ? 0 : Math.round(amt * 100) / 100,
+        status: rowStatus,
+        is_paid: Boolean(c.is_paid),
+        paid_at: c.paid_at ? String(c.paid_at) : null,
+        payment_method: c.payment_method ? String(c.payment_method) : null,
+        last_payment_date: c.paid_at ? String(c.paid_at) : null,
+        last_payment_method: c.payment_method ? String(c.payment_method) : null,
+        notes: inv.notes ? String(inv.notes) : null,
         days_overdue: daysOverdue,
-        created_at: String(r.created_at ?? ''),
+        created_at: String(c.created_at ?? ''),
       })
     }
 
     return success(rows)
+  },
+)
+
+// ─── Marcar cuota como pagada ────────────────────────────────────────────────
+
+export const markSupplierInvoiceDueDatePaid = protectedAction<
+  { id: string; paid_at?: string; payment_method?: SupplierPaymentMethod | string; create_accounting_entry?: boolean },
+  { id: string; invoice_status: string; all_paid: boolean }
+>(
+  {
+    permission: PERMISSION,
+    auditModule: 'accounting',
+    auditAction: 'payment',
+    auditEntity: 'ap_supplier_invoice_due_date',
+  },
+  async (ctx, input) => {
+    if (!input.id) return failure('Cuota no indicada', 'VALIDATION')
+
+    const { data: cuota, error: cuotaErr } = await ctx.adminClient
+      .from(DUE_DATES_TABLE)
+      .select('id, supplier_invoice_id, amount, is_paid')
+      .eq('id', input.id)
+      .maybeSingle()
+    if (cuotaErr || !cuota) return failure(cuotaErr?.message || 'Cuota no encontrada')
+    if ((cuota as any).is_paid) return failure('La cuota ya estaba pagada', 'VALIDATION')
+
+    const paidAt = input.paid_at || today()
+    const paymentMethod = (input.payment_method || 'transfer') as SupplierPaymentMethod
+
+    // Leer factura para registrar pago asociado + descripción
+    const { data: invoice } = await ctx.adminClient
+      .from(INVOICES_TABLE)
+      .select('id, total_amount, supplier_name, invoice_number')
+      .eq('id', (cuota as any).supplier_invoice_id)
+      .maybeSingle()
+
+    // 1. Registrar pago en ap_supplier_invoice_payments + manual_transaction
+    let manualTransactionId: string | null = null
+    if (input.create_accounting_entry !== false && invoice) {
+      const mtPayload = {
+        type: 'expense',
+        date: paidAt,
+        description: `Pago cuota factura ${(invoice as any).invoice_number} · ${(invoice as any).supplier_name}`,
+        category: 'proveedores',
+        amount: Number((cuota as any).amount),
+        tax_rate: 0,
+        tax_amount: 0,
+        total: Number((cuota as any).amount),
+        notes: `Método: ${SUPPLIER_PAYMENT_METHOD_LABEL[paymentMethod] ?? paymentMethod}`,
+        created_by: ctx.userId,
+      }
+      const { data: mt } = await ctx.adminClient
+        .from('manual_transactions')
+        .insert(mtPayload)
+        .select('id')
+        .single()
+      if (mt) manualTransactionId = String((mt as any).id)
+    }
+
+    if (invoice) {
+      await ctx.adminClient.from(TABLE).insert({
+        supplier_invoice_id: (cuota as any).supplier_invoice_id,
+        payment_date: paidAt,
+        payment_method: paymentMethod,
+        amount: Number((cuota as any).amount),
+        reference: null,
+        notes: `Cuota ${input.id}`,
+        manual_transaction_id: manualTransactionId,
+        created_by: ctx.userId,
+      })
+    }
+
+    // 2. Marcar la cuota como pagada
+    const { error: updErr } = await ctx.adminClient
+      .from(DUE_DATES_TABLE)
+      .update({ is_paid: true, paid_at: paidAt, payment_method: paymentMethod })
+      .eq('id', input.id)
+    if (updErr) return failure(updErr.message || 'Error al marcar cuota')
+
+    // 3. Si todas las cuotas de la factura están pagadas → status='pagada'
+    const { data: remaining } = await ctx.adminClient
+      .from(DUE_DATES_TABLE)
+      .select('id, is_paid')
+      .eq('supplier_invoice_id', (cuota as any).supplier_invoice_id)
+    const allPaid = Array.isArray(remaining) && remaining.length > 0 && remaining.every((r: any) => r.is_paid)
+    let invoiceStatus = 'parcial'
+    if (allPaid) {
+      invoiceStatus = 'pagada'
+      await ctx.adminClient
+        .from(INVOICES_TABLE)
+        .update({ status: 'pagada', payment_date: paidAt, payment_method: paymentMethod, updated_at: new Date().toISOString() })
+        .eq('id', (cuota as any).supplier_invoice_id)
+    } else {
+      await ctx.adminClient
+        .from(INVOICES_TABLE)
+        .update({ status: 'parcial', updated_at: new Date().toISOString() })
+        .eq('id', (cuota as any).supplier_invoice_id)
+    }
+
+    return success({
+      id: input.id,
+      invoice_status: invoiceStatus,
+      all_paid: allPaid,
+    })
   },
 )
 
@@ -430,32 +561,28 @@ export const getSupplierPendingAp = protectedAction<
       return success({ total_pending: 0, count_pending: 0, count_overdue: 0, overdue_pending: 0, invoices: [] })
     }
 
-    const { data: invoices, error: invErr } = await ctx.adminClient
-      .from(INVOICES_TABLE)
-      .select('id, supplier_id, supplier_name, supplier_cif, invoice_number, invoice_date, due_date, total_amount, status, notes, created_at')
-      .eq('supplier_id', supplier_id)
-      .in('status', ['pendiente', 'parcial', 'vencida'])
+    const { data: cuotas, error: cuotasErr } = await ctx.adminClient
+      .from(DUE_DATES_TABLE)
+      .select(`
+        id, supplier_invoice_id, due_date, amount, sort_order, is_paid, paid_at, payment_method, created_at,
+        invoice:ap_supplier_invoices!supplier_invoice_id (
+          id, supplier_id, supplier_name, supplier_cif, invoice_number, invoice_date, total_amount, status, notes
+        )
+      `)
+      .eq('invoice.supplier_id', supplier_id)
+      .eq('is_paid', false)
       .order('due_date', { ascending: true })
-    if (invErr) return failure(invErr.message)
+      .limit(500)
+    if (cuotasErr) return failure(cuotasErr.message)
 
-    const invoiceIds = (invoices || []).map((r: any) => String(r.id))
-    const payMap = new Map<string, { paid: number; last_date: string | null; last_method: string | null }>()
-    if (invoiceIds.length > 0) {
-      const { data: pays } = await ctx.adminClient
-        .from(TABLE)
-        .select('supplier_invoice_id, amount, payment_date, payment_method')
-        .in('supplier_invoice_id', invoiceIds)
-        .order('payment_date', { ascending: false })
-      for (const p of (pays || []) as any[]) {
-        const key = String(p.supplier_invoice_id)
-        const prev = payMap.get(key) ?? { paid: 0, last_date: null, last_method: null }
-        prev.paid += Number(p.amount ?? 0)
-        if (!prev.last_date && p.payment_date) {
-          prev.last_date = String(p.payment_date)
-          prev.last_method = p.payment_method ? String(p.payment_method) : null
-        }
-        payMap.set(key, prev)
-      }
+    // Filtrar por proveedor en TS (el embedded filter puede no cubrirlo todo)
+    const filtered = (cuotas || []).filter((c: any) => c.invoice && String(c.invoice.supplier_id) === String(supplier_id))
+
+    // Contar cuotas por factura para el índice
+    const countByInvoice = new Map<string, number>()
+    for (const c of filtered as any[]) {
+      const invId = String(c.supplier_invoice_id)
+      countByInvoice.set(invId, (countByInvoice.get(invId) ?? 0) + 1)
     }
 
     const todayStr = today()
@@ -464,41 +591,45 @@ export const getSupplierPendingAp = protectedAction<
     let count_overdue = 0
     const rows: SupplierVencimientoRow[] = []
 
-    for (const r of (invoices || []) as any[]) {
-      const total = Number(r.total_amount ?? 0)
-      const agg = payMap.get(String(r.id)) ?? { paid: 0, last_date: null, last_method: null }
-      const paid = Math.round(agg.paid * 100) / 100
-      const pending = Math.max(0, Math.round((total - paid) * 100) / 100)
-      if (pending <= 0) continue
-
-      const due = String(r.due_date ?? '')
+    for (const c of filtered as any[]) {
+      const inv = c.invoice
+      const amt = Math.round(Number(c.amount ?? 0) * 100) / 100
+      if (amt <= 0) continue
+      const due = String(c.due_date ?? '')
       const daysOverdue = due && due < todayStr
         ? Math.floor((new Date(todayStr).getTime() - new Date(due).getTime()) / 86400000)
         : 0
 
-      total_pending += pending
+      total_pending += amt
       if (daysOverdue > 0) {
-        overdue_pending += pending
+        overdue_pending += amt
         count_overdue++
       }
 
       rows.push({
-        id: String(r.id),
-        supplier_id: r.supplier_id ? String(r.supplier_id) : null,
-        supplier_name: String(r.supplier_name ?? ''),
-        supplier_cif: r.supplier_cif ? String(r.supplier_cif) : null,
-        invoice_number: String(r.invoice_number ?? ''),
-        invoice_date: String(r.invoice_date ?? ''),
+        id: String(c.id),
+        supplier_invoice_id: String(c.supplier_invoice_id),
+        supplier_id: inv.supplier_id ? String(inv.supplier_id) : null,
+        supplier_name: String(inv.supplier_name ?? ''),
+        supplier_cif: inv.supplier_cif ? String(inv.supplier_cif) : null,
+        invoice_number: String(inv.invoice_number ?? ''),
+        invoice_date: String(inv.invoice_date ?? ''),
         due_date: due,
-        total_amount: total,
-        amount_paid: paid,
-        amount_pending: pending,
-        status: String(r.status ?? 'pendiente'),
-        last_payment_date: agg.last_date,
-        last_payment_method: agg.last_method,
-        notes: r.notes ? String(r.notes) : null,
+        total_amount: Number(inv.total_amount ?? 0),
+        installment_amount: amt,
+        installment_index: 1,
+        installment_count: countByInvoice.get(String(c.supplier_invoice_id)) ?? 1,
+        amount_paid: 0,
+        amount_pending: amt,
+        status: daysOverdue > 0 ? 'vencida' : 'pendiente',
+        is_paid: false,
+        paid_at: null,
+        payment_method: c.payment_method ? String(c.payment_method) : null,
+        last_payment_date: null,
+        last_payment_method: null,
+        notes: inv.notes ? String(inv.notes) : null,
         days_overdue: daysOverdue,
-        created_at: String(r.created_at ?? ''),
+        created_at: String(c.created_at ?? ''),
       })
     }
 

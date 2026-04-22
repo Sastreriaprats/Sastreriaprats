@@ -178,7 +178,7 @@ export function ProductDetailContent({
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <Card><CardContent className="pt-4 pb-3"><p className="text-xs text-muted-foreground">PVP</p><p className="text-xl font-bold">{formatCurrency(product.price_with_tax ?? product.base_price)}</p></CardContent></Card>
+        <Card><CardContent className="pt-4 pb-3"><p className="text-xs text-muted-foreground">PVP</p><p className="text-xl font-bold">{formatCurrency(product.price_with_tax)}</p></CardContent></Card>
         <Card><CardContent className="pt-4 pb-3"><p className="text-xs text-muted-foreground">Coste</p><p className="text-xl font-bold">{formatCurrency(product.cost_price)}</p></CardContent></Card>
         <Card><CardContent className="pt-4 pb-3"><p className="text-xs text-muted-foreground">IVA</p><p className="text-xl font-bold">{product.tax_rate}%</p></CardContent></Card>
         <Card><CardContent className="pt-4 pb-3">
@@ -275,7 +275,7 @@ export function ProductDetailContent({
                         </div>
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">{v.barcode || '-'}</TableCell>
-                      <TableCell>{v.price_override ? formatCurrency(v.price_override) : <span className="text-muted-foreground text-xs">{formatCurrency(product.price_with_tax ?? product.base_price)}</span>}</TableCell>
+                      <TableCell>{v.price_override ? formatCurrency(v.price_override) : <span className="text-muted-foreground text-xs">{formatCurrency(product.price_with_tax)}</span>}</TableCell>
                       {warehousesToShow.map(w => {
                         const sl = v.stock_levels?.find((s: any) => s.warehouse_id === w.id)
                         const qty = sl?.quantity || 0

@@ -24,7 +24,7 @@ export default async function OrderDetailPage(props: { params: Promise<{ id: str
         suppliers ( id, name ),
         officials ( id, name )
       ),
-      tailoring_order_state_history ( id, from_status, to_status, notes, changed_by_name, changed_at ),
+      tailoring_order_state_history ( id, from_status, to_status, description, notes, changed_by_name, changed_at ),
       tailoring_fittings ( id, fitting_number, scheduled_date, scheduled_time, status, adjustments_needed, notes, duration_minutes )
     `)
     .eq('id', params.id)

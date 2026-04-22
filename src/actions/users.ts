@@ -101,7 +101,31 @@ export interface CreateUserInput {
   firstName: string
   lastName: string
   roleId: string
-  storeId: string
+  /** Tiendas asignadas. Debe tener al menos 1 elemento. */
+  storeIds: string[]
+  /** ID de la tienda principal (is_primary=true). Debe estar incluido en storeIds. */
+  primaryStoreId: string
+}
+
+/**
+ * Valida y normaliza storeIds + primaryStoreId.
+ * Devuelve un error textual si no es válido, o la lista lista para insertar.
+ */
+function buildStoreAssignments(
+  storeIds: string[] | undefined,
+  primaryStoreId: string | undefined,
+): { rows?: Array<{ store_id: string; is_primary: boolean }>; error?: string } {
+  const ids = Array.isArray(storeIds)
+    ? Array.from(new Set(storeIds.map((s) => String(s).trim()).filter(Boolean)))
+    : []
+  if (ids.length === 0) return { error: 'Debes asignar al menos una tienda' }
+  const primary = (primaryStoreId ?? '').trim() || ids[0]
+  if (!ids.includes(primary)) {
+    return { error: 'La tienda principal debe estar incluida entre las asignadas' }
+  }
+  return {
+    rows: ids.map((id) => ({ store_id: id, is_primary: id === primary })),
+  }
 }
 
 export async function createAdminUser(input: CreateUserInput): Promise<{ data?: { userId: string; tempPassword: string }; error?: string }> {
@@ -113,6 +137,9 @@ export async function createAdminUser(input: CreateUserInput): Promise<{ data?: 
     const admin = createAdminClient()
     const hasPerm = await checkUserPermission(currentUser.id, 'config.users')
     if (!hasPerm) return { error: 'Sin permisos' }
+
+    const assignments = buildStoreAssignments(input.storeIds, input.primaryStoreId)
+    if (assignments.error) return { error: assignments.error }
 
   const rand = crypto.randomInt(1000, 10000)
   const tempPassword = `Prats2026!${rand}`
@@ -151,9 +178,10 @@ export async function createAdminUser(input: CreateUserInput): Promise<{ data?: 
     console.error('[createAdminUser] Error asignando rol:', roleErr)
     return { error: 'Usuario creado pero error al asignar rol: ' + roleErr.message }
   }
-  const { error: storeErr } = await admin.from('user_stores').insert({ user_id: userId, store_id: input.storeId, is_primary: true })
+  const storeRows = (assignments.rows ?? []).map((r) => ({ ...r, user_id: userId }))
+  const { error: storeErr } = await admin.from('user_stores').insert(storeRows)
   if (storeErr) {
-    console.error('[createAdminUser] Error asignando tienda:', storeErr)
+    console.error('[createAdminUser] Error asignando tiendas:', storeErr)
   }
 
   const { data: role } = await admin.from('roles').select('name').eq('id', input.roleId).single()
@@ -181,7 +209,10 @@ export interface UpdateUserInput {
   firstName?: string
   lastName?: string
   roleId?: string
-  storeId?: string
+  /** Si se pasa, reemplaza todas las tiendas asignadas. Si es undefined, no se toca user_stores. */
+  storeIds?: string[]
+  /** Tienda principal al reemplazar. Debe estar en storeIds. */
+  primaryStoreId?: string
   isActive?: boolean
   resetPassword?: boolean
 }
@@ -230,9 +261,19 @@ export async function updateAdminUser(input: UpdateUserInput): Promise<{ data?: 
     changes.role = { old: '?', new: role?.name ?? input.roleId }
   }
 
-  if (input.storeId) {
+  if (input.storeIds !== undefined) {
+    const assignments = buildStoreAssignments(input.storeIds, input.primaryStoreId)
+    if (assignments.error) return { error: assignments.error }
     await admin.from('user_stores').delete().eq('user_id', input.userId)
-    await admin.from('user_stores').insert({ user_id: input.userId, store_id: input.storeId, is_primary: true })
+    const storeRows = (assignments.rows ?? []).map((r) => ({ ...r, user_id: input.userId }))
+    if (storeRows.length > 0) {
+      const { error: storeErr } = await admin.from('user_stores').insert(storeRows)
+      if (storeErr) {
+        console.error('[updateAdminUser] Error reasignando tiendas:', storeErr)
+        return { error: 'Error al actualizar las tiendas asignadas: ' + storeErr.message }
+      }
+    }
+    changes.stores = { old: '?', new: input.storeIds.join(', ') + ` (primary: ${input.primaryStoreId})` }
   }
 
   let tempPassword: string | undefined
@@ -304,6 +345,38 @@ export async function deleteAdminUser(userId: string): Promise<{ error?: string 
   } catch (err) {
     console.error('[deleteAdminUser]', err)
     return { error: err instanceof Error ? err.message : 'Error al eliminar usuario' }
+  }
+}
+
+export async function getUserStoreAssignments(
+  userId: string,
+): Promise<{ data?: { storeIds: string[]; primaryStoreId: string | null }; error?: string }> {
+  try {
+    const supabase = await createServerSupabaseClient()
+    const { data: { user: currentUser } } = await supabase.auth.getUser()
+    if (!currentUser) return { error: 'No autenticado' }
+
+    const admin = createAdminClient()
+    const hasPerm = await checkUserPermission(currentUser.id, 'config.users')
+    if (!hasPerm) return { error: 'Sin permisos' }
+
+    const { data, error } = await admin
+      .from('user_stores')
+      .select('store_id, is_primary')
+      .eq('user_id', userId)
+    if (error) return { error: error.message }
+    const rows = (data || []) as Array<{ store_id: string; is_primary: boolean }>
+    const storeIds = rows.map((r) => String(r.store_id))
+    const primary = rows.find((r) => r.is_primary)
+    return {
+      data: {
+        storeIds,
+        primaryStoreId: primary ? String(primary.store_id) : (storeIds[0] ?? null),
+      },
+    }
+  } catch (err) {
+    console.error('[getUserStoreAssignments]', err)
+    return { error: err instanceof Error ? err.message : 'Error al leer tiendas' }
   }
 }
 

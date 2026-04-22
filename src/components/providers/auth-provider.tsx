@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { User, Session } from '@supabase/supabase-js'
 import type { UserWithRoles } from '@/lib/types/auth'
@@ -76,37 +76,22 @@ export function AuthProvider({
   const [stores, setStores] = useState<StoreInfo[]>([])
   // isLoading false by default: we show UI immediately from cache
   const [isLoading, setIsLoading] = useState(false)
-  const [activeStoreId, setActiveStoreIdState] = useState<string | null>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('prats_active_store')
-    }
-    return null
-  })
-  const hasSetInitialStore = useRef(false)
+  // La tienda activa se gestiona por sessionStorage con userId para:
+  // - No heredar tienda entre usuarios del mismo navegador.
+  // - No auto-seleccionar silenciosamente una tienda al entrar (eso lo
+  //   decide ahora el StoreGate, que fuerza confirmación explícita).
+  const [activeStoreId, setActiveStoreIdState] = useState<string | null>(null)
 
   const setActiveStoreId = useCallback((id: string | null) => {
     setActiveStoreIdState(id)
-    if (typeof window !== 'undefined') {
-      if (id) localStorage.setItem('prats_active_store', id)
-      else localStorage.removeItem('prats_active_store')
-    }
   }, [])
 
   const permissions = new Set(profile?.permissions ?? [])
 
+  // Ya no auto-seleccionamos tienda. StoreGate se encarga de forzar
+  // confirmación explícita en cada sesión del navegador.
   const applyStores = useCallback((storeList: StoreInfo[]) => {
     setStores(storeList)
-    if (!hasSetInitialStore.current && storeList.length > 0) {
-      hasSetInitialStore.current = true
-      const primary = storeList.find(s => s.isPrimary)
-      const firstStoreId = primary?.storeId ?? storeList[0]?.storeId
-      if (firstStoreId) {
-        setActiveStoreIdState(firstStoreId)
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('prats_active_store', firstStoreId)
-        }
-      }
-    }
   }, [])
 
   const { data: profileData, refetch: refetchProfileQuery } = useCurrentProfile(user?.id ?? null)
@@ -139,8 +124,6 @@ export function AuthProvider({
               setProfile(cached.profile)
               applyStores(cached.stores)
             }
-          } else {
-            hasSetInitialStore.current = false
           }
         } else {
           setProfile(null)
@@ -159,13 +142,20 @@ export function AuthProvider({
   const isSuperAdmin = hasRole('administrador') || hasRole('super_admin')
 
   const signOut = useCallback(async () => {
-    if (user?.id) clearCachedAuth(user.id)
+    if (user?.id) {
+      clearCachedAuth(user.id)
+      if (typeof window !== 'undefined') {
+        // Limpiar confirmación de tienda (StoreGate) para este usuario
+        window.sessionStorage.removeItem(`prats_store_confirmed_${user.id}`)
+      }
+    }
     await supabase.auth.signOut()
     setUser(null)
     setSession(null)
     setProfile(null)
     setStores([])
-    hasSetInitialStore.current = false
+    setActiveStoreIdState(null)
+    // Legacy: limpia la clave antigua por si quedaba rastro de versiones previas
     if (typeof window !== 'undefined') {
       localStorage.removeItem('prats_active_store')
     }

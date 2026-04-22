@@ -629,7 +629,7 @@ function InvoicesTab() {
                   {productResults.map(p => (
                     <button key={p.id} type="button" className="w-full text-left rounded p-2 hover:bg-muted flex justify-between items-center" onClick={() => addProductAsLine(p)}>
                       <span className="font-medium truncate">{p.name || p.sku}</span>
-                      <span className="text-sm text-muted-foreground shrink-0 ml-2">{formatCurrency(p.price_with_tax ?? p.base_price)}</span>
+                      <span className="text-sm text-muted-foreground shrink-0 ml-2">{formatCurrency(p.price_with_tax)}</span>
                     </button>
                   ))}
                 </div>
@@ -923,7 +923,7 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
                   {productResults.map(p => (
                     <button key={p.id} type="button" className="w-full text-left rounded p-2 hover:bg-muted flex justify-between items-center" onClick={() => addProductAsLineEdit(p)}>
                       <span className="font-medium truncate">{p.name || p.sku}</span>
-                      <span className="text-sm text-muted-foreground shrink-0 ml-2">{formatCurrency(p.price_with_tax ?? p.base_price)}</span>
+                      <span className="text-sm text-muted-foreground shrink-0 ml-2">{formatCurrency(p.price_with_tax)}</span>
                     </button>
                   ))}
                 </div>
@@ -1461,7 +1461,7 @@ function EstimatesTab() {
                   {productResults.map(p => (
                     <button key={p.id} type="button" className="w-full text-left rounded p-2 hover:bg-muted flex justify-between items-center" onClick={() => addProductAsLineEst(p)}>
                       <span className="font-medium truncate">{p.name || p.sku}</span>
-                      <span className="text-sm text-muted-foreground shrink-0 ml-2">{formatCurrency(p.price_with_tax ?? p.base_price)}</span>
+                      <span className="text-sm text-muted-foreground shrink-0 ml-2">{formatCurrency(p.price_with_tax)}</span>
                     </button>
                   ))}
                 </div>

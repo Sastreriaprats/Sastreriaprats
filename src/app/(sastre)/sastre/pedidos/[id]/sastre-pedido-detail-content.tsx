@@ -13,7 +13,9 @@ import { generateFichaForLine, generateFichaForLineCamiseria } from '@/lib/pdf/f
 import { generateTicketComplemento } from '@/lib/pdf/ticket-boutique'
 import { generateTailoringOrderTicketPdf } from '@/lib/pdf/tailoring-order-ticket'
 import { NewAlterationDialog } from '@/app/(sastre)/sastre/arreglos/arreglos-content'
-import { Plus, Scissors, Loader2 } from 'lucide-react'
+import { EditOrderDialog } from '@/components/orders/edit-order-dialog'
+import { EditFichaDialog } from '@/components/orders/edit-ficha-dialog'
+import { Plus, Scissors, Loader2, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { useActiveStore } from '@/hooks/use-store'
 
@@ -92,6 +94,11 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
   const [orderAlterations, setOrderAlterations] = useState<AlterationRow[]>([])
   const [alterationsLoading, setAlterationsLoading] = useState(true)
   const [alterationDialogOpen, setAlterationDialogOpen] = useState(false)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [editingFichaLine, setEditingFichaLine] = useState<any | null>(null)
+
+  const LOCKED = new Set(['delivered', 'cancelled'])
+  const canEditFicha = !LOCKED.has(order?.status)
 
   const loadAlterations = useCallback(async () => {
     setAlterationsLoading(true)
@@ -204,6 +211,16 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
               <span className="text-xs px-3 py-1 rounded-lg bg-white/[0.08] text-white/70 border border-white/10">
                 {getOrderStatusLabel(order.status)}
               </span>
+              {!['delivered', 'cancelled'].includes(order.status) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1 bg-white/[0.04] text-white border-white/15 hover:bg-white/10"
+                  onClick={() => setEditDialogOpen(true)}
+                >
+                  <Pencil className="h-3.5 w-3.5" /> Editar
+                </Button>
+              )}
               <select
                 value={order.status}
                 onChange={(e) => handleStatusChange(e.target.value)}
@@ -309,6 +326,16 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
                     >
                       {pdfLoadingId === line.id ? '...' : 'Descargar ficha'}
                     </button>
+                    {canEditFicha && (
+                      <button
+                        type="button"
+                        onClick={() => setEditingFichaLine(line)}
+                        className="border border-white/15 text-white/60 px-3 py-1.5 rounded-lg text-xs font-medium shrink-0 ml-2 hover:bg-white/[0.07] hover:text-white/80 transition-all inline-flex items-center gap-1"
+                      >
+                        <Pencil className="h-3 w-3" />
+                        Editar ficha
+                      </button>
+                    )}
                   </div>
                 ))}
               </>
@@ -351,6 +378,16 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
                       >
                         {pdfLoadingId === line.id ? '...' : 'Descargar ficha'}
                       </button>
+                      {canEditFicha && (
+                        <button
+                          type="button"
+                          onClick={() => setEditingFichaLine(line)}
+                          className="border border-white/15 text-white/60 px-3 py-1.5 rounded-lg text-xs font-medium shrink-0 ml-2 hover:bg-white/[0.07] hover:text-white/80 transition-all inline-flex items-center gap-1"
+                        >
+                          <Pencil className="h-3 w-3" />
+                          Editar ficha
+                        </button>
+                      )}
                     </div>
                   )
                 })}
@@ -461,6 +498,21 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
         onCreated={loadAlterations}
         preselectedClientId={order.client_id}
         preselectedOrderId={order.id}
+      />
+
+      <EditOrderDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        order={order}
+        onSaved={refreshOrder}
+      />
+
+      <EditFichaDialog
+        open={!!editingFichaLine}
+        onOpenChange={(v) => { if (!v) setEditingFichaLine(null) }}
+        order={order}
+        line={editingFichaLine}
+        onSaved={() => { setEditingFichaLine(null); refreshOrder() }}
       />
 
       <Card className="border-white/10 bg-white/[0.04] shadow-none">

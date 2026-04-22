@@ -123,7 +123,7 @@ export async function GET() {
     const p = productsById.get(v.product_id)
     if (!p) continue
     const w = warehousesById.get(sr.warehouse_id)
-    const pvp = v.price_override != null ? Number(v.price_override) : (p.price_with_tax != null ? Number(p.price_with_tax) : Number(p.base_price ?? 0))
+    const pvp = v.price_override != null ? Number(v.price_override) : Number(p.price_with_tax ?? 0)
     const coste = v.cost_price_override != null ? Number(v.cost_price_override) : (p.cost_price != null ? Number(p.cost_price) : null)
 
     const row = [

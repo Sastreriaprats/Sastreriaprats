@@ -193,7 +193,12 @@ export function SuppliersPageContent() {
       supplier_types: form.supplier_types,
       payment_terms: (form.payment_terms || 'net_30') as 'immediate' | 'net_15' | 'net_30' | 'net_60' | 'net_90' | 'custom',
       payment_method: form.payment_method || null,
-      payment_days: 30,
+      payment_days: (() => {
+        const termsMap: Record<string, number> = {
+          immediate: 0, net_15: 15, net_30: 30, net_60: 60, net_90: 90, custom: 0,
+        }
+        return termsMap[form.payment_terms] ?? 30
+      })(),
       bank_iban: form.bank_iban?.trim() || null,
       internal_notes: form.internal_notes?.trim() || null,
       is_active: form.is_active,

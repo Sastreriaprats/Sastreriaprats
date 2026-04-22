@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
+import { createClient as createSupabaseClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
@@ -53,6 +54,7 @@ import {
   Check,
   ChevronsUpDown,
   Package,
+  X,
 } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -107,9 +109,20 @@ function addDays(dateStr: string, days: number) {
 
 function computeDueFromSupplier(invoiceDate: string, supplier: SupplierOptionForInvoice | null): string {
   if (!supplier) return addDays(invoiceDate, 30)
-  if (supplier.payment_terms === 'immediate') return invoiceDate
-  const days = Number(supplier.payment_days ?? 30)
-  return addDays(invoiceDate, Number.isFinite(days) && days >= 0 ? days : 30)
+  switch (supplier.payment_terms) {
+    case 'immediate': return invoiceDate
+    case 'net_15': return addDays(invoiceDate, 15)
+    case 'net_30': return addDays(invoiceDate, 30)
+    case 'net_60': return addDays(invoiceDate, 60)
+    case 'net_90': return addDays(invoiceDate, 90)
+    case 'custom': {
+      // Primera cuota del plan, si existe. Si no, 30 días.
+      const firstDays = supplier.custom_payment_plan?.[0]?.days
+      const d = firstDays !== null && firstDays !== undefined && Number.isFinite(firstDays) ? Number(firstDays) : 30
+      return addDays(invoiceDate, d)
+    }
+    default: return addDays(invoiceDate, 30)
+  }
 }
 
 const PAYMENT_TERMS_LABEL: Record<string, string> = {
@@ -163,6 +176,10 @@ export function SupplierInvoicesContent() {
   const [deliveryNotesLoading, setDeliveryNotesLoading] = useState(false)
   const [selectedDeliveryNoteIds, setSelectedDeliveryNoteIds] = useState<string[]>([])
   const [totalTouched, setTotalTouched] = useState(false)
+
+  const [attachmentUploading, setAttachmentUploading] = useState(false)
+  const [attachmentName, setAttachmentName] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const selectedSupplier = suppliers.find((s) => s.id === form.supplier_id) || null
 
@@ -227,6 +244,54 @@ export function SupplierInvoicesContent() {
     [],
   )
 
+  const deriveFilenameFromUrl = (url: string | null | undefined): string | null => {
+    if (!url) return null
+    try {
+      const clean = url.split('?')[0]
+      const parts = clean.split('/')
+      const raw = decodeURIComponent(parts[parts.length - 1] || '')
+      // Quitar el prefijo timestamp_ si lo tiene
+      return raw.replace(/^\d{10,}_/, '') || raw
+    } catch {
+      return url
+    }
+  }
+
+  const uploadInvoiceAttachment = async (file: File) => {
+    if (!file.type.includes('pdf') && !file.name.toLowerCase().endsWith('.pdf')) {
+      toast.error('Solo se admiten archivos PDF')
+      return
+    }
+    const supabase = createSupabaseClient()
+    const folder = form.supplier_id || 'sin-proveedor'
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const path = `${folder}/${Date.now()}_${safeName}`
+    setAttachmentUploading(true)
+    try {
+      const { error } = await supabase.storage
+        .from('supplier-invoices')
+        .upload(path, file, { contentType: 'application/pdf', upsert: false })
+      if (error) {
+        toast.error(`No se pudo subir el PDF: ${error.message}`)
+        return
+      }
+      const { data: urlData } = supabase.storage.from('supplier-invoices').getPublicUrl(path)
+      setForm((f) => ({ ...f, attachment_url: urlData.publicUrl }))
+      setAttachmentName(file.name)
+      toast.success('PDF adjuntado')
+    } catch (err: any) {
+      toast.error(`Error inesperado al subir: ${err?.message || 'desconocido'}`)
+    } finally {
+      setAttachmentUploading(false)
+    }
+  }
+
+  const removeAttachment = () => {
+    setForm((f) => ({ ...f, attachment_url: '' }))
+    setAttachmentName(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
   const openCreate = () => {
     setEditingId(null)
     setForm({
@@ -247,6 +312,7 @@ export function SupplierInvoicesContent() {
     setSelectedDeliveryNoteIds([])
     setDeliveryNotes([])
     setTotalTouched(false)
+    setAttachmentName(null)
     setDialogOpen(true)
   }
 
@@ -268,6 +334,7 @@ export function SupplierInvoicesContent() {
       attachment_url: row.attachment_url || '',
     })
     setTotalTouched(true)
+    setAttachmentName(deriveFilenameFromUrl(row.attachment_url))
     setDialogOpen(true)
     if (row.supplier_id) {
       await loadDeliveryNotesForSupplier(row.supplier_id, row.id)
@@ -903,6 +970,25 @@ export function SupplierInvoicesContent() {
                 </span>
               </div>
             )}
+            {selectedSupplier?.payment_terms === 'custom' && (selectedSupplier.custom_payment_plan?.length ?? 0) > 0 && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                <p className="font-semibold">Plan de pagos personalizado</p>
+                <p className="mt-0.5">
+                  Este proveedor tiene {selectedSupplier.custom_payment_plan!.length} cuota
+                  {selectedSupplier.custom_payment_plan!.length === 1 ? '' : 's'} configurada
+                  {selectedSupplier.custom_payment_plan!.length === 1 ? '' : 's'}. Las cuotas se generarán
+                  automáticamente al guardar la factura (la fecha de vencimiento visible es solo la de la
+                  primera cuota).
+                </p>
+                <ul className="mt-1 space-y-0.5 font-mono">
+                  {selectedSupplier.custom_payment_plan!.map((p, i) => (
+                    <li key={i}>
+                      · Cuota {i + 1}: {p.amount.toFixed(2)} € — {p.days !== null ? `${p.days} días` : 'sin fecha'}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <div>
               <Label>Notas</Label>
               <Textarea
@@ -912,19 +998,78 @@ export function SupplierInvoicesContent() {
               />
             </div>
             <div>
-              <Label>URL adjunto (PDF)</Label>
-              <Input
-                value={form.attachment_url}
-                onChange={(e) => setForm((f) => ({ ...f, attachment_url: e.target.value }))}
-                placeholder="https://..."
+              <Label>Adjuntar factura (PDF)</Label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,application/pdf"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0]
+                  if (file) await uploadInvoiceAttachment(file)
+                  if (fileInputRef.current) fileInputRef.current.value = ''
+                }}
               />
+              {form.attachment_url ? (
+                <div className="flex items-center gap-2 rounded-md border px-3 py-2 bg-muted/30">
+                  <FileText className="h-4 w-4 text-red-600 shrink-0" />
+                  <a
+                    href={form.attachment_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 text-sm truncate text-prats-navy hover:underline"
+                    title={attachmentName || form.attachment_url}
+                  >
+                    {attachmentName || 'Ver factura'}
+                  </a>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    disabled={attachmentUploading}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    {attachmentUploading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Reemplazar'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0 text-red-600 hover:text-red-700"
+                    disabled={attachmentUploading}
+                    onClick={removeAttachment}
+                    aria-label="Quitar adjunto"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full justify-start gap-2"
+                  disabled={attachmentUploading}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  {attachmentUploading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" /> Subiendo...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="h-4 w-4" /> Seleccionar PDF
+                    </>
+                  )}
+                </Button>
+              )}
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSave} disabled={saving}>
-              {saving && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
-              {editingId ? 'Guardar' : 'Crear factura'}
+            <Button onClick={handleSave} disabled={saving || attachmentUploading}>
+              {(saving || attachmentUploading) && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+              {attachmentUploading ? 'Subiendo PDF...' : editingId ? 'Guardar' : 'Crear factura'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -147,17 +147,17 @@ export const getProductsWithVariantsForBarcodes = protectedAction<
     }
 
     const rows = raw || []
-    const byProduct = new Map<string, { product_id: string; product_name: string; product_sku: string; base_price: number; tax_rate_pct: number; variants: any[] }>()
+    const byProduct = new Map<string, { product_id: string; product_name: string; product_sku: string; price_with_tax: number; tax_rate_pct: number; variants: any[] }>()
     let withoutBarcodeCount = 0
 
     for (const v of rows) {
       const rawProducts = v.products
-      const p = Array.isArray(rawProducts) ? rawProducts[0] ?? {} : (rawProducts ?? {}) as { id?: string; sku?: string; name?: string; base_price?: number; tax_rate?: number; is_active?: boolean }
+      const p = Array.isArray(rawProducts) ? rawProducts[0] ?? {} : (rawProducts ?? {}) as { id?: string; sku?: string; name?: string; base_price?: number; price_with_tax?: number; tax_rate?: number; is_active?: boolean }
       const productId = v.product_id
       const priceOverride = v.price_override != null ? Number(v.price_override) : null
-      const basePrice = priceOverride ?? Number(p.base_price ?? 0)
+      const productPriceWithTax = Number(p.price_with_tax ?? 0)
+      const priceWithTax = priceOverride ?? productPriceWithTax
       const taxRatePct = Number(p.tax_rate ?? 21)
-      const priceWithTax = Math.round(basePrice * (1 + taxRatePct / 100) * 100) / 100
       const hasBarcode = Boolean(v.barcode && String(v.barcode).trim())
       if (!hasBarcode) withoutBarcodeCount++
 
@@ -176,7 +176,7 @@ export const getProductsWithVariantsForBarcodes = protectedAction<
           product_id: productId,
           product_name: p.name || '',
           product_sku: p.sku || '',
-          base_price: basePrice,
+          price_with_tax: productPriceWithTax,
           tax_rate_pct: taxRatePct,
           variants: [],
         })
@@ -457,6 +457,106 @@ export const createProductAction = protectedAction<any, any>(
 
     if (error) return failure(error.message)
     return success(product)
+  }
+)
+
+/** Valores distintos de `collection` (no nulos). Para poblar el filtro del admin. */
+export const listProductCollections = protectedAction<void, string[]>(
+  { permission: 'products.view', auditModule: 'stock' },
+  async (ctx) => {
+    const { data, error } = await ctx.adminClient
+      .from('products')
+      .select('collection')
+      .not('collection', 'is', null)
+      .neq('collection', '')
+      .limit(2000)
+    if (error) return failure(error.message)
+    const unique = Array.from(new Set((data || []).map((r: any) => String(r.collection).trim()).filter(Boolean)))
+    unique.sort((a, b) => a.localeCompare(b, 'es'))
+    return success(unique)
+  }
+)
+
+/** Valores distintos de `season` (no nulos). Para poblar el filtro del admin. */
+export const listProductSeasons = protectedAction<void, string[]>(
+  { permission: 'products.view', auditModule: 'stock' },
+  async (ctx) => {
+    const { data, error } = await ctx.adminClient
+      .from('products')
+      .select('season')
+      .not('season', 'is', null)
+      .neq('season', '')
+      .limit(2000)
+    if (error) return failure(error.message)
+    const unique = Array.from(new Set((data || []).map((r: any) => String(r.season).trim()).filter(Boolean)))
+    unique.sort((a, b) => a.localeCompare(b, 'es'))
+    return success(unique)
+  }
+)
+
+/** Devuelve sólo los IDs de productos que cumplen los filtros dados. Usado por
+ *  "Seleccionar todos los filtrados" en la tabla del admin. */
+export const listProductIdsByFilters = protectedAction<
+  {
+    search?: string | null
+    product_type?: string | null
+    is_visible_web?: boolean | null
+    collection?: string | null
+    season?: string | null
+  },
+  string[]
+>(
+  { permission: 'products.view', auditModule: 'stock' },
+  async (ctx, input) => {
+    let q = ctx.adminClient.from('products').select('id')
+
+    if (input.product_type) q = q.eq('product_type', input.product_type)
+    else q = q.neq('product_type', 'tailoring_fabric')
+    if (input.is_visible_web !== null && input.is_visible_web !== undefined) q = q.eq('is_visible_web', input.is_visible_web)
+    if (input.collection) q = q.eq('collection', input.collection)
+    if (input.season) q = q.eq('season', input.season)
+    if (input.search && input.search.trim()) {
+      const s = input.search.trim().replace(/[%_\\]/g, '\\$&')
+      const like = `%${s}%`
+      q = q.or(`sku.ilike.${like},name.ilike.${like},brand.ilike.${like},barcode.ilike.${like}`)
+    }
+
+    const { data, error } = await q.limit(10000)
+    if (error) return failure(error.message)
+    return success((data || []).map((r: any) => r.id as string))
+  }
+)
+
+/** Actualiza en lote campos simples de varios productos.
+ *  Por ahora solo soporta `is_visible_web` — ampliable en el futuro. */
+export const updateProductsBulkAction = protectedAction<
+  { ids: string[]; patch: { is_visible_web?: boolean } },
+  { updated: number }
+>(
+  {
+    permission: 'products.edit',
+    auditModule: 'stock',
+    auditAction: 'update',
+    auditEntity: 'product',
+    revalidate: ['/admin/stock', '/boutique'],
+  },
+  async (ctx, { ids, patch }) => {
+    if (!Array.isArray(ids) || ids.length === 0) return failure('No hay productos seleccionados', 'VALIDATION')
+    if (patch.is_visible_web === undefined) return failure('Nada que actualizar', 'VALIDATION')
+
+    const { error, count } = await ctx.adminClient
+      .from('products')
+      .update({ is_visible_web: patch.is_visible_web }, { count: 'exact' })
+      .in('id', ids)
+
+    if (error) return failure(error.message)
+
+    const action = patch.is_visible_web ? 'publicados en web' : 'ocultos de la web'
+    return success({
+      updated: count ?? ids.length,
+      auditDescription: `Actualización masiva: ${count ?? ids.length} productos ${action}`,
+      auditNewData: { ids, patch },
+    } as any)
   }
 )
 

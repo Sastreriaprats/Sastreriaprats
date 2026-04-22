@@ -42,8 +42,12 @@ export function CatalogContent() {
     if (search) params.set('search', search)
     if (categoryParam) params.set('category', categoryParam)
 
-    const res = await fetch(`/api/public/catalog?${params}`)
+    const url = `/api/public/catalog?${params}`
+    // TEMP: quitar estos 2 logs cuando confirmes que el filtro por categoría funciona
+    console.log('[CatalogContent] categoryParam =', JSON.stringify(categoryParam), '| fetch URL =', url)
+    const res = await fetch(url)
     const data = await res.json()
+    console.log('[CatalogContent] response total =', data.total, '| first 2 products =', (data.products ?? []).slice(0, 2).map((p: any) => ({ id: p.id, name: p.name, slug: p.slug ?? p.web_slug })))
     setProducts(data.products || [])
     setTotal(data.total || 0)
     setTotalPages(data.totalPages || 1)
@@ -92,10 +96,10 @@ export function CatalogContent() {
       size: variant.size as string | undefined,
       color: variant.color as string | undefined,
       image_url: product.main_image_url as string | undefined,
-      unit_price: (variant.price_override as number) || (product.price_with_tax as number) || (product.base_price as number),
+      unit_price: (variant.price_override as number) || (product.price_with_tax as number),
       max_stock: variant.total_stock as number,
     })
-    trackAddToCart(product.name as string, (variant.price_override as number) || (product.price_with_tax as number) || (product.base_price as number), 1)
+    trackAddToCart(product.name as string, (variant.price_override as number) || (product.price_with_tax as number), 1)
     toast.success('Añadido al carrito')
   }
 
@@ -167,7 +171,7 @@ export function CatalogContent() {
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {products.map((product) => {
               const variants = product.product_variants as Record<string, unknown>[] | undefined
-              const minPrice = (product.price_with_tax as number) || (product.base_price as number)
+              const minPrice = product.price_with_tax as number
               const hasStock = variants?.some((v) => (v.total_stock as number) > 0)
               const productId = product.id as string
               const isFavorite = favoriteIds.has(productId)

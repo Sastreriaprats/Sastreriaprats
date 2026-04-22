@@ -19,6 +19,7 @@ export const createProductSchema = z.object({
   season: z.string().optional().nullable(),
   cost_price: coerceOptionalNumber.pipe(z.number().min(0).optional().nullable()),
   base_price: coerceNumber.pipe(z.number().min(0, 'Precio debe ser 0 o mayor')).default(0),
+  price_with_tax: coerceNumber.pipe(z.number().min(0, 'PVP debe ser 0 o mayor')).default(0),
   tax_rate: coerceNumber.pipe(z.number().min(0).max(100)).default(21),
   supplier_id: z.string().uuid().optional().nullable(),
   supplier_reference: z.string().optional().nullable(),

@@ -167,7 +167,10 @@ export function ProductForm({
     })
     const taxRate = initialProduct.tax_rate ?? 21
     const basePrice = initialProduct.base_price != null ? Number(initialProduct.base_price) : null
-    const pvpValue = basePrice != null ? Math.round(basePrice * (1 + taxRate / 100) * 100) / 100 : ''
+    const priceWithTax = initialProduct.price_with_tax != null ? Number(initialProduct.price_with_tax) : null
+    const pvpValue = priceWithTax != null
+      ? priceWithTax
+      : basePrice != null ? Math.round(basePrice * (1 + taxRate / 100) * 100) / 100 : ''
     setPrecios({
       cost_price: initialProduct.cost_price != null ? initialProduct.cost_price : '',
       pvp: pvpValue,
@@ -516,6 +519,7 @@ export function ProductForm({
       supplier_reference: basico.supplier_reference || undefined,
       cost_price: precios.cost_price !== '' ? Number(precios.cost_price) : undefined,
       base_price: finalPrice,
+      price_with_tax: typeof precios.pvp === 'number' ? precios.pvp : (Number(precios.pvp) || 0),
       tax_rate: precios.tax_rate,
       min_stock_alert: precios.min_stock_alert !== '' && precios.min_stock_alert != null
         ? (basico.product_type === 'tailoring_fabric' ? parseFloat(String(precios.min_stock_alert)) : Number(precios.min_stock_alert))

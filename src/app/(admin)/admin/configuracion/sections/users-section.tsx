@@ -12,7 +12,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Switch } from '@/components/ui/switch'
 import { Loader2, UserPlus, KeyRound, Pencil, Copy, Check, Trash2 } from 'lucide-react'
-import { listAdminUsers, createAdminUser, updateAdminUser, deleteAdminUser, type UserRow } from '@/actions/users'
+import { Checkbox } from '@/components/ui/checkbox'
+import { listAdminUsers, createAdminUser, updateAdminUser, deleteAdminUser, getUserStoreAssignments, type UserRow } from '@/actions/users'
 import { useStores, useRolesAndPermissions } from '@/hooks/use-cached-queries'
 import { formatDateTime } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -245,6 +246,60 @@ export function UsersSection() {
   )
 }
 
+function StoreAssignmentPicker({
+  stores,
+  selectedIds,
+  primaryId,
+  onToggle,
+  onSetPrimary,
+}: {
+  stores: { id: string; name: string }[]
+  selectedIds: string[]
+  primaryId: string
+  onToggle: (storeId: string, checked: boolean) => void
+  onSetPrimary: (storeId: string) => void
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="rounded-md border divide-y">
+        {stores.length === 0 ? (
+          <div className="p-3 text-sm text-muted-foreground">No hay tiendas disponibles</div>
+        ) : stores.map((s) => {
+          const checked = selectedIds.includes(s.id)
+          const isPrimary = primaryId === s.id && checked
+          return (
+            <label key={s.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/50">
+              <Checkbox
+                checked={checked}
+                onCheckedChange={(v) => onToggle(s.id, Boolean(v))}
+              />
+              <span className="flex-1 text-sm">{s.name}</span>
+              {selectedIds.length > 1 && checked && (
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                  <input
+                    type="radio"
+                    name="primary-store"
+                    checked={isPrimary}
+                    onChange={() => onSetPrimary(s.id)}
+                    className="h-3.5 w-3.5"
+                  />
+                  Principal
+                </label>
+              )}
+              {selectedIds.length === 1 && checked && (
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Principal</span>
+              )}
+            </label>
+          )
+        })}
+      </div>
+      {selectedIds.length === 0 && (
+        <p className="text-xs text-amber-700">Debes seleccionar al menos una tienda.</p>
+      )}
+    </div>
+  )
+}
+
 function CreateUserForm({ roles, stores, onSuccess }: {
   roles: { id: string; name: string; display_name: string | null }[]
   stores: { id: string; name: string }[]
@@ -254,13 +309,37 @@ function CreateUserForm({ roles, stores, onSuccess }: {
   const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
   const [roleId, setRoleId] = useState('')
-  const [storeId, setStoreId] = useState('')
+  const [selectedStoreIds, setSelectedStoreIds] = useState<string[]>([])
+  const [primaryStoreId, setPrimaryStoreId] = useState<string>('')
   const [loading, setLoading] = useState(false)
+
+  const toggleStore = (id: string, checked: boolean) => {
+    setSelectedStoreIds((prev) => {
+      if (checked) {
+        const next = prev.includes(id) ? prev : [...prev, id]
+        // Si era la primera en marcarse, la ponemos como primaria automáticamente
+        if (prev.length === 0) setPrimaryStoreId(id)
+        return next
+      }
+      const next = prev.filter((s) => s !== id)
+      // Si se desmarcó la primaria, elegir otra
+      if (id === primaryStoreId) setPrimaryStoreId(next[0] ?? '')
+      return next
+    })
+  }
 
   const handle = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (selectedStoreIds.length === 0) {
+      toast.error('Selecciona al menos una tienda')
+      return
+    }
     setLoading(true)
-    const res = await createAdminUser({ firstName, lastName, email, roleId, storeId })
+    const res = await createAdminUser({
+      firstName, lastName, email, roleId,
+      storeIds: selectedStoreIds,
+      primaryStoreId: primaryStoreId || selectedStoreIds[0],
+    })
     setLoading(false)
     if (res.error) { toast.error(res.error); return }
     toast.success('Usuario creado')
@@ -284,15 +363,16 @@ function CreateUserForm({ roles, stores, onSuccess }: {
         </Select>
       </div>
       <div className="space-y-1">
-        <Label>Tienda asignada *</Label>
-        <Select value={storeId} onValueChange={setStoreId} required>
-          <SelectTrigger><SelectValue placeholder="Seleccionar tienda..." /></SelectTrigger>
-          <SelectContent>
-            {stores.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <Label>Tiendas asignadas *</Label>
+        <StoreAssignmentPicker
+          stores={stores}
+          selectedIds={selectedStoreIds}
+          primaryId={primaryStoreId}
+          onToggle={toggleStore}
+          onSetPrimary={setPrimaryStoreId}
+        />
       </div>
-      <Button type="submit" className="w-full bg-prats-navy hover:bg-prats-navy/90" disabled={loading || !roleId || !storeId}>
+      <Button type="submit" className="w-full bg-prats-navy hover:bg-prats-navy/90" disabled={loading || !roleId || selectedStoreIds.length === 0}>
         {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creando...</> : 'Crear usuario'}
       </Button>
     </form>
@@ -308,15 +388,65 @@ function EditUserForm({ user, roles, stores, onSuccess }: {
   const [firstName, setFirstName] = useState(user.first_name ?? '')
   const [lastName, setLastName] = useState(user.last_name ?? '')
   const [roleId, setRoleId] = useState(user.roles[0]?.id ?? '')
-  const [storeId, setStoreId] = useState('')
+  const [selectedStoreIds, setSelectedStoreIds] = useState<string[]>([])
+  const [primaryStoreId, setPrimaryStoreId] = useState<string>('')
+  const [storesDirty, setStoresDirty] = useState(false)
+  const [storesLoading, setStoresLoading] = useState(true)
   const [isActive, setIsActive] = useState(user.is_active)
   const [loading, setLoading] = useState(false)
   const [resetting, setResetting] = useState(false)
 
+  // Cargar tiendas actualmente asignadas
+  useEffect(() => {
+    let cancelled = false
+    setStoresLoading(true)
+    getUserStoreAssignments(user.id)
+      .then((res) => {
+        if (cancelled) return
+        if (res.data) {
+          setSelectedStoreIds(res.data.storeIds)
+          setPrimaryStoreId(res.data.primaryStoreId ?? res.data.storeIds[0] ?? '')
+        }
+      })
+      .finally(() => { if (!cancelled) setStoresLoading(false) })
+    return () => { cancelled = true }
+  }, [user.id])
+
+  const toggleStore = (id: string, checked: boolean) => {
+    setStoresDirty(true)
+    setSelectedStoreIds((prev) => {
+      if (checked) {
+        const next = prev.includes(id) ? prev : [...prev, id]
+        if (prev.length === 0) setPrimaryStoreId(id)
+        return next
+      }
+      const next = prev.filter((s) => s !== id)
+      if (id === primaryStoreId) setPrimaryStoreId(next[0] ?? '')
+      return next
+    })
+  }
+
+  const handleSetPrimary = (id: string) => {
+    setStoresDirty(true)
+    setPrimaryStoreId(id)
+  }
+
   const handle = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (storesDirty && selectedStoreIds.length === 0) {
+      toast.error('Selecciona al menos una tienda o cancela los cambios')
+      return
+    }
     setLoading(true)
-    const res = await updateAdminUser({ userId: user.id, firstName, lastName, roleId: roleId || undefined, storeId: storeId || undefined, isActive })
+    const res = await updateAdminUser({
+      userId: user.id,
+      firstName,
+      lastName,
+      roleId: roleId || undefined,
+      storeIds: storesDirty ? selectedStoreIds : undefined,
+      primaryStoreId: storesDirty ? (primaryStoreId || selectedStoreIds[0]) : undefined,
+      isActive,
+    })
     setLoading(false)
     if (res.error) { toast.error(res.error); return }
     toast.success('Usuario actualizado')
@@ -348,20 +478,27 @@ function EditUserForm({ user, roles, stores, onSuccess }: {
         </Select>
       </div>
       <div className="space-y-1">
-        <Label>Cambiar tienda</Label>
-        <Select value={storeId} onValueChange={setStoreId}>
-          <SelectTrigger><SelectValue placeholder="Sin cambios" /></SelectTrigger>
-          <SelectContent>
-            {stores.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <Label>Tiendas asignadas</Label>
+        {storesLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando tiendas actuales…
+          </div>
+        ) : (
+          <StoreAssignmentPicker
+            stores={stores}
+            selectedIds={selectedStoreIds}
+            primaryId={primaryStoreId}
+            onToggle={toggleStore}
+            onSetPrimary={handleSetPrimary}
+          />
+        )}
       </div>
       <div className="flex items-center justify-between border rounded-lg p-3">
         <div><p className="text-sm font-medium">Estado de la cuenta</p><p className="text-xs text-muted-foreground">Desactivar impide el acceso</p></div>
         <Switch checked={isActive} onCheckedChange={setIsActive} />
       </div>
       <div className="flex gap-2">
-        <Button type="submit" className="flex-1 bg-prats-navy hover:bg-prats-navy/90" disabled={loading}>
+        <Button type="submit" className="flex-1 bg-prats-navy hover:bg-prats-navy/90" disabled={loading || storesLoading}>
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Guardar cambios'}
         </Button>
         <Button type="button" variant="outline" className="gap-2" onClick={handleReset} disabled={resetting}>

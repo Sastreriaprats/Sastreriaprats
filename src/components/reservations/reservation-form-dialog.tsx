@@ -105,12 +105,8 @@ const PAYMENT_METHODS: Array<{ value: ReservationPaymentMethod; label: string; i
 function computeDefaultPrice(v: ProductVariantResult): number {
   const override = Number(v.price_override ?? 0)
   const withTax = Number(v.products?.price_with_tax ?? 0)
-  const base = Number(v.products?.base_price ?? 0)
-  const taxRate = Number(v.products?.tax_rate ?? 21)
   if (override > 0) return override
-  if (withTax > 0) return withTax
-  if (base > 0) return Math.round(base * (1 + taxRate / 100) * 100) / 100
-  return 0
+  return withTax
 }
 
 function variantAvailable(v: ProductVariantResult): number {

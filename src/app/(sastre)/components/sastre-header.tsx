@@ -5,7 +5,10 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { ArrowLeft, LogOut, MapPin } from 'lucide-react'
+import { toast } from 'sonner'
 import { useActiveStore } from '@/hooks/use-store'
+import { useRequireStore } from '@/hooks/use-require-store'
+import { checkCashSessionOpen } from '@/actions/pos'
 import {
   Select,
   SelectContent,
@@ -27,10 +30,18 @@ type Props = {
 export function SastreHeader({ sastreName, sectionTitle, title, backHref }: Props) {
   const activeSection = sectionTitle ?? title
   const router = useRouter()
-  const { activeStoreId, switchStore } = useActiveStore()
+  const { activeStoreId } = useActiveStore()
+  const { availableStores, selectStore } = useRequireStore()
+  // Mantenemos un fetch independiente sólo para el caso en que availableStores
+  // aún no esté poblado (primera render del header tras confirmar); así el
+  // Select no queda en blanco un instante. Se usa sólo como fallback visual.
   const [allStores, setAllStores] = useState<{ storeId: string; storeName: string }[]>([])
 
   useEffect(() => {
+    if (availableStores.length > 0) {
+      setAllStores(availableStores.map((s) => ({ storeId: s.storeId, storeName: s.storeName })))
+      return
+    }
     const supabase = createClient()
     supabase
       .from('stores')
@@ -41,13 +52,22 @@ export function SastreHeader({ sastreName, sectionTitle, title, backHref }: Prop
       .then(({ data }) => {
         if (data) setAllStores(data.map((s) => ({ storeId: s.id, storeName: s.name })))
       })
-  }, [])
+  }, [availableStores])
 
-  useEffect(() => {
-    if (activeStoreId == null && allStores.length > 0) {
-      switchStore(allStores[0].storeId)
+  const handleSwitchStore = async (newStoreId: string) => {
+    if (!newStoreId || newStoreId === activeStoreId) return
+    // No permitir cambiar mientras haya caja abierta en la tienda actual
+    if (activeStoreId) {
+      const r = await checkCashSessionOpen({ storeId: activeStoreId })
+      if (r.success && r.data.open) {
+        const currentName = allStores.find((s) => s.storeId === activeStoreId)?.storeName ?? 'la tienda actual'
+        toast.error(`Debes cerrar la caja de ${currentName} antes de cambiar de tienda`)
+        return
+      }
     }
-  }, [activeStoreId, allStores, switchStore])
+    // selectStore actualiza activeStoreId y persiste la confirmación
+    selectStore(newStoreId)
+  }
 
   const handleLogout = async () => {
     const supabase = createClient()
@@ -98,7 +118,7 @@ export function SastreHeader({ sastreName, sectionTitle, title, backHref }: Prop
         {allStores.length > 0 && (
           <>
             <span className="h-5 w-px bg-white/20" aria-hidden />
-            <Select value={activeStoreId ?? ''} onValueChange={switchStore}>
+            <Select value={activeStoreId ?? ''} onValueChange={handleSwitchStore}>
               <SelectTrigger
                 className="h-8 min-w-0 w-auto max-w-[160px] sm:max-w-[200px] border-[rgba(201,169,110,0.3)] bg-transparent text-white text-sm font-normal hover:bg-[#1a2744] focus:ring-[rgba(201,169,110,0.3)] [&>svg:last-child]:hidden"
                 style={{ backgroundColor: 'transparent' }}

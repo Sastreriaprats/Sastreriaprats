@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
   for (const item of items) {
     const { data: variant } = await admin
       .from('product_variants')
-      .select('id, variant_sku, price_override, product_id, products(base_price, name)')
+      .select('id, variant_sku, price_override, product_id, products(price_with_tax, name)')
       .eq('id', item.variant_id)
       .single()
 
@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
     }
 
     const prod = variant.products as unknown as Record<string, unknown> | null
-    const unitPrice = (variant.price_override as number) || (prod?.base_price as number) || 0
+    const unitPrice = (variant.price_override as number) || (prod?.price_with_tax as number) || 0
     const lineTotal = unitPrice * item.quantity
     subtotal += lineTotal
 
@@ -91,7 +91,8 @@ export async function POST(request: NextRequest) {
   }
 
   const afterDiscount = subtotal - validatedDiscount
-  const taxAmount = Math.round(afterDiscount * 0.21 * 100) / 100
+  // afterDiscount ya incluye IVA (unit_price = price_with_tax). Extraemos el IVA contenido.
+  const taxAmount = Math.round((afterDiscount - afterDiscount / 1.21) * 100) / 100
   const total = afterDiscount + (shipping_cost || 0)
 
   let clientId: string | null = null

@@ -256,14 +256,14 @@ export async function getHomeContent(): Promise<HomeContent> {
 
 /** Productos destacados para la sección SELECCIÓN de la home (4 productos). */
 export async function getFeaturedProductsForHome(): Promise<
-  { id: string; name: string; slug: string; base_price: number; main_image_url: string | null }[]
+  { id: string; name: string; slug: string; price_with_tax: number; main_image_url: string | null }[]
 > {
   try {
     const { createAdminClient } = await import('@/lib/supabase/admin')
     const admin = createAdminClient()
     const { data } = await admin
       .from('products')
-      .select('id, name, web_slug, base_price, price_with_tax, main_image_url')
+      .select('id, name, web_slug, price_with_tax, main_image_url')
       .eq('is_active', true)
       .eq('is_visible_web', true)
       .order('created_at', { ascending: false })
@@ -272,7 +272,7 @@ export async function getFeaturedProductsForHome(): Promise<
       id: p.id as string,
       name: p.name as string,
       slug: (p.web_slug as string) || (p.id as string),
-      base_price: Number(p.base_price) || 0,
+      price_with_tax: Number(p.price_with_tax) || 0,
       main_image_url: (p.main_image_url as string) || null,
     }))
   } catch (err) {

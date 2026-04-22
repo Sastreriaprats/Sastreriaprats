@@ -1,64 +1,43 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Loader2, MapPin } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/components/providers/auth-provider'
+import { useRequireStore } from '@/hooks/use-require-store'
 import { checkCashSessionOpen, openCashSession } from '@/actions/pos'
 import { CashCounter } from '@/components/cash/cash-counter'
 
-interface Store {
-  storeId: string
-  storeName: string
-  storeCode?: string
-}
-
 interface SastreSessionGateProps {
   children: React.ReactNode
-  stores: Store[]
 }
 
-type Step = 'loading' | 'choose_store' | 'open_cash' | 'ready'
+type Step = 'loading' | 'open_cash' | 'ready'
 
-export function SastreSessionGate({ children, stores }: SastreSessionGateProps) {
-  const { activeStoreId, setActiveStoreId } = useAuth()
+/**
+ * Una vez que StoreGate ha confirmado la tienda, verificamos si hay caja
+ * abierta para operar. Si no → muestra pantalla de apertura. El usuario
+ * puede continuar sin caja (solo consulta).
+ */
+export function SastreSessionGate({ children }: SastreSessionGateProps) {
+  const { activeStoreId } = useAuth()
+  const { storeName, clearConfirmation } = useRequireStore()
   const [step, setStep] = useState<Step>('loading')
   const [openingAmount, setOpeningAmount] = useState('0')
   const [cashBreakdown, setCashBreakdown] = useState<Record<string, number>>({})
   const [opening, setOpening] = useState(false)
-  const checkedRef = useRef(false)
+  const checkedRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (checkedRef.current) return
-    checkedRef.current = true
+    if (!activeStoreId) return
+    if (checkedRef.current === activeStoreId) return
+    checkedRef.current = activeStoreId
 
-    const sessionSelected = typeof window !== 'undefined'
-      ? sessionStorage.getItem('prats_sastre_store_selected')
-      : null
-
-    if (!sessionSelected || !activeStoreId) {
-      setStep('choose_store')
-      return
-    }
-
+    setStep('loading')
     checkCashSessionOpen({ storeId: activeStoreId })
-      .then(r => setStep(r.success && r.data.open ? 'ready' : 'open_cash'))
+      .then((r) => setStep(r.success && r.data.open ? 'ready' : 'open_cash'))
       .catch(() => setStep('open_cash'))
   }, [activeStoreId])
-
-  async function selectStore(storeId: string) {
-    setStep('loading')
-    setActiveStoreId(storeId)
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem('prats_sastre_store_selected', 'true')
-    }
-    try {
-      const r = await checkCashSessionOpen({ storeId })
-      setStep(r.success && r.data.open ? 'ready' : 'open_cash')
-    } catch {
-      setStep('open_cash')
-    }
-  }
 
   async function handleOpenCash() {
     if (!activeStoreId) return
@@ -82,7 +61,6 @@ export function SastreSessionGate({ children, stores }: SastreSessionGateProps) 
     }
   }
 
-  const currentStore = stores.find(s => s.storeId === activeStoreId)
   const bgStyle = { background: 'radial-gradient(ellipse at top, #1a2744 0%, #0a1020 70%)' }
 
   if (step === 'loading') {
@@ -93,41 +71,16 @@ export function SastreSessionGate({ children, stores }: SastreSessionGateProps) 
     )
   }
 
-  if (step === 'choose_store') {
-    return (
-      <div style={bgStyle} className="min-h-screen flex flex-col items-center justify-center p-6">
-        <div className="max-w-md w-full space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-serif text-white">Sastrería Prats</h1>
-            <p className="text-white/50 mt-2">Selecciona tu tienda para comenzar</p>
-          </div>
-          <div className="space-y-3">
-            {stores.map(store => (
-              <button
-                key={store.storeId}
-                onClick={() => selectStore(store.storeId)}
-                className="w-full p-4 rounded-xl bg-white/[0.05] border border-white/10 text-white hover:bg-white/10 hover:border-[#c9a96e]/40 transition-all text-left"
-              >
-                <p className="font-medium">{store.storeName}</p>
-                {store.storeCode && <p className="text-white/40 text-sm">{store.storeCode}</p>}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   if (step === 'open_cash') {
     return (
       <div style={bgStyle} className="min-h-screen flex flex-col items-center justify-center p-6">
         <div className="max-w-2xl w-full space-y-6">
           <div className="text-center">
             <h1 className="text-2xl font-serif text-white">Caja cerrada</h1>
-            {currentStore && (
+            {storeName && (
               <div className="flex items-center justify-center gap-1.5 mt-1 text-white/40 text-sm">
                 <MapPin className="h-3.5 w-3.5" />
-                {currentStore.storeName}
+                {storeName}
               </div>
             )}
             <p className="text-white/50 mt-3">Abre la caja para poder registrar cobros</p>
@@ -163,7 +116,7 @@ export function SastreSessionGate({ children, stores }: SastreSessionGateProps) 
           </div>
 
           <button
-            onClick={() => { setActiveStoreId(null); setStep('choose_store') }}
+            onClick={() => { clearConfirmation(); checkedRef.current = null }}
             className="text-white/40 text-sm hover:text-white/60 transition-colors mx-auto block"
           >
             ← Cambiar tienda
@@ -173,6 +126,6 @@ export function SastreSessionGate({ children, stores }: SastreSessionGateProps) 
     )
   }
 
-  // step === 'ready'
+  // ready
   return <>{children}</>
 }

@@ -181,7 +181,7 @@ export const getOrder = protectedAction<string, any>(
         ? admin.from('stores').select('id, name, code').eq('id', storeId).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
       admin.from('tailoring_order_lines').select('*').eq('tailoring_order_id', orderId),
-      admin.from('tailoring_order_state_history').select('id, from_status, to_status, notes, changed_by_name, changed_at').eq('tailoring_order_id', orderId).order('changed_at', { ascending: false }),
+      admin.from('tailoring_order_state_history').select('id, from_status, to_status, description, notes, changed_by_name, changed_at').eq('tailoring_order_id', orderId).order('changed_at', { ascending: false }),
       admin.from('tailoring_fittings').select('id, fitting_number, scheduled_date, scheduled_time, status, adjustments_needed').eq('tailoring_order_id', orderId).order('scheduled_date', { ascending: true }),
     ])
 
@@ -600,6 +600,292 @@ export const updateOrderStatus = protectedAction<
   }
 )
 
+// ─── Edición completa de pedido existente ──────────────────────────────────
+
+export interface UpdateOrderInput {
+  orderId: string
+  // Cabecera (todos opcionales — solo se aplican los definidos)
+  client_id?: string | null
+  store_id?: string
+  order_type?: 'artesanal' | 'industrial'
+  estimated_delivery_date?: string | null
+  delivery_method?: 'store' | 'home'
+  delivery_address?: string | null
+  delivery_city?: string | null
+  delivery_postal_code?: string | null
+  discount_percentage?: number
+  internal_notes?: string | null
+  client_notes?: string | null
+  // Líneas — si se pasa, reemplaza el estado completo: update/insert/delete
+  lines?: Array<{
+    id?: string
+    garment_type_id: string
+    line_type: 'artesanal' | 'industrial'
+    unit_price: number
+    discount_percentage?: number
+    tax_rate?: number
+    material_cost?: number
+    labor_cost?: number
+    factory_cost?: number
+    fabric_id?: string | null
+    fabric_description?: string | null
+    fabric_meters?: number | null
+    supplier_id?: string | null
+    model_name?: string | null
+    model_size?: string | null
+    finishing_notes?: string | null
+    configuration?: Record<string, unknown>
+    sort_order?: number
+  }>
+}
+
+const HEADER_EDITABLE_FIELDS = [
+  'client_id', 'store_id', 'order_type', 'estimated_delivery_date',
+  'delivery_method', 'delivery_address', 'delivery_city', 'delivery_postal_code',
+  'discount_percentage', 'internal_notes', 'client_notes',
+] as const
+
+const LINE_EDITABLE_FIELDS = [
+  'garment_type_id', 'line_type', 'unit_price', 'discount_percentage', 'tax_rate',
+  'material_cost', 'labor_cost', 'factory_cost',
+  'fabric_id', 'fabric_description', 'fabric_meters', 'supplier_id',
+  'model_name', 'model_size', 'finishing_notes', 'configuration', 'sort_order',
+] as const
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100
+}
+
+function buildChangeSummary(
+  headerDiff: Record<string, { old: unknown; new: unknown }>,
+  lineChanges: { added: number; removed: number; modified: number },
+): string {
+  const parts: string[] = []
+  const entries = Object.entries(headerDiff)
+  if (entries.length > 0) {
+    const labelMap: Record<string, string> = {
+      client_id: 'cliente',
+      store_id: 'tienda',
+      order_type: 'tipo',
+      estimated_delivery_date: 'fecha entrega',
+      delivery_method: 'método de entrega',
+      delivery_address: 'dirección',
+      delivery_city: 'ciudad',
+      delivery_postal_code: 'CP',
+      discount_percentage: 'descuento',
+      internal_notes: 'notas internas',
+      client_notes: 'notas cliente',
+    }
+    parts.push(entries.map(([k]) => labelMap[k] ?? k).join(', '))
+  }
+  const lineBits: string[] = []
+  if (lineChanges.added > 0) lineBits.push(`${lineChanges.added} línea${lineChanges.added === 1 ? '' : 's'} añadida${lineChanges.added === 1 ? '' : 's'}`)
+  if (lineChanges.removed > 0) lineBits.push(`${lineChanges.removed} eliminada${lineChanges.removed === 1 ? '' : 's'}`)
+  if (lineChanges.modified > 0) lineBits.push(`${lineChanges.modified} modificada${lineChanges.modified === 1 ? '' : 's'}`)
+  if (lineBits.length > 0) parts.push(`Prendas: ${lineBits.join(', ')}`)
+  if (parts.length === 0) return 'Editado (sin cambios detectados)'
+  return 'Editado: ' + parts.join(' · ')
+}
+
+export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
+  {
+    permission: 'orders.edit',
+    auditModule: 'orders',
+    auditAction: 'update',
+    auditEntity: 'tailoring_order',
+    revalidate: ['/admin/pedidos'],
+  },
+  async (ctx, input) => {
+    if (!input.orderId) return failure('orderId requerido', 'VALIDATION')
+
+    const admin = ctx.adminClient
+
+    // 1. Leer pedido actual completo (cabecera + líneas)
+    const { data: orderBefore, error: orderErr } = await admin
+      .from('tailoring_orders')
+      .select('*')
+      .eq('id', input.orderId)
+      .single()
+    if (orderErr || !orderBefore) return failure('Pedido no encontrado', 'NOT_FOUND')
+
+    const currentStatus = String((orderBefore as any).status)
+    if (currentStatus === 'delivered' || currentStatus === 'cancelled') {
+      return failure(`No se puede editar un pedido en estado "${currentStatus}"`, 'CONFLICT')
+    }
+
+    const { data: linesBefore } = await admin
+      .from('tailoring_order_lines')
+      .select('*')
+      .eq('tailoring_order_id', input.orderId)
+      .order('sort_order', { ascending: true })
+
+    const linesBeforeArr = (linesBefore || []) as Array<Record<string, any>>
+
+    // 2. Aplicar cambios en cabecera
+    const headerUpdate: Record<string, any> = {}
+    const headerDiff: Record<string, { old: unknown; new: unknown }> = {}
+    for (const field of HEADER_EDITABLE_FIELDS) {
+      const incoming = (input as any)[field]
+      if (incoming === undefined) continue
+      const current = (orderBefore as any)[field]
+      // Normalización blanda: null/'' equivalentes para textuales
+      const norm = (v: any) => (v === undefined || v === '' ? null : v)
+      if (norm(incoming) !== norm(current)) {
+        headerUpdate[field] = incoming
+        headerDiff[field] = { old: current, new: incoming }
+      }
+    }
+
+    // 3. Procesar líneas si vienen en el input
+    const lineChanges = { added: 0, removed: 0, modified: 0 }
+    const linesAfterDiff: Array<{ id: string; action: 'insert' | 'update' | 'delete'; before?: any; after?: any }> = []
+
+    if (input.lines !== undefined) {
+      const incomingLines = input.lines
+      const incomingIds = new Set(incomingLines.map((l) => l.id).filter(Boolean) as string[])
+
+      // DELETE: líneas que existían antes pero ya no están
+      const toDelete = linesBeforeArr.filter((l) => !incomingIds.has(String(l.id)))
+      if (toDelete.length > 0) {
+        const { error: delErr } = await admin
+          .from('tailoring_order_lines')
+          .delete()
+          .in('id', toDelete.map((l) => l.id))
+        if (delErr) return failure(`Error al eliminar líneas: ${delErr.message}`)
+        lineChanges.removed = toDelete.length
+        for (const l of toDelete) linesAfterDiff.push({ id: String(l.id), action: 'delete', before: l })
+      }
+
+      // UPDATE / INSERT
+      for (let i = 0; i < incomingLines.length; i++) {
+        const line = incomingLines[i]
+        const unitPrice = Number(line.unit_price) || 0
+        const discountPct = Number(line.discount_percentage) || 0
+        const discountAmount = round2(unitPrice * discountPct / 100)
+        const lineTotal = round2(unitPrice - discountAmount)
+        const sortOrder = line.sort_order ?? i
+
+        const row: Record<string, any> = {
+          garment_type_id: line.garment_type_id,
+          line_type: line.line_type,
+          unit_price: unitPrice,
+          discount_percentage: discountPct,
+          discount_amount: discountAmount,
+          line_total: lineTotal,
+          tax_rate: Number(line.tax_rate ?? 21),
+          material_cost: Number(line.material_cost ?? 0),
+          labor_cost: Number(line.labor_cost ?? 0),
+          factory_cost: Number(line.factory_cost ?? 0),
+          fabric_id: line.fabric_id || null,
+          fabric_description: line.fabric_description?.toString().trim() || null,
+          fabric_meters: line.fabric_meters ?? null,
+          supplier_id: line.supplier_id || null,
+          model_name: line.model_name?.toString().trim() || null,
+          model_size: line.model_size?.toString().trim() || null,
+          finishing_notes: line.finishing_notes?.toString().trim() || null,
+          configuration: line.configuration ?? {},
+          sort_order: sortOrder,
+        }
+
+        if (line.id) {
+          const before = linesBeforeArr.find((l) => String(l.id) === line.id)
+          // Detectar si hubo cambio real comparando campos editables
+          let changed = false
+          if (before) {
+            for (const k of LINE_EDITABLE_FIELDS) {
+              const a = (before as any)[k]
+              const b = (row as any)[k]
+              if (JSON.stringify(a ?? null) !== JSON.stringify(b ?? null)) { changed = true; break }
+            }
+          }
+          const { error: updErr } = await admin
+            .from('tailoring_order_lines')
+            .update(row)
+            .eq('id', line.id)
+          if (updErr) return failure(`Error al actualizar línea: ${updErr.message}`)
+          if (changed) {
+            lineChanges.modified++
+            linesAfterDiff.push({ id: line.id, action: 'update', before, after: row })
+          }
+        } else {
+          const { data: inserted, error: insErr } = await admin
+            .from('tailoring_order_lines')
+            .insert({ ...row, tailoring_order_id: input.orderId })
+            .select('id')
+            .single()
+          if (insErr) return failure(`Error al insertar línea: ${insErr.message}`)
+          lineChanges.added++
+          linesAfterDiff.push({ id: String((inserted as any)?.id ?? ''), action: 'insert', after: row })
+        }
+      }
+    }
+
+    // 4. Recalcular totales de cabecera (tras procesar líneas)
+    const { data: finalLines } = await admin
+      .from('tailoring_order_lines')
+      .select('line_total, tax_rate')
+      .eq('tailoring_order_id', input.orderId)
+    const subtotalLines = (finalLines || []).reduce(
+      (s: number, l: any) => s + Number(l.line_total || 0), 0,
+    )
+    const discountPct = headerUpdate.discount_percentage ?? (orderBefore as any).discount_percentage ?? 0
+    const subtotalAfterHeaderDiscount = round2(subtotalLines * (1 - Number(discountPct) / 100))
+    const discountAmount = round2(subtotalLines - subtotalAfterHeaderDiscount)
+    // IVA ponderado por tax_rate de cada línea
+    let taxAmount = 0
+    for (const l of (finalLines || []) as any[]) {
+      const lt = Number(l.line_total || 0)
+      const tr = Number(l.tax_rate ?? 21)
+      const ltAfter = lt * (1 - Number(discountPct) / 100)
+      taxAmount += ltAfter * tr / (100 + tr)
+    }
+    taxAmount = round2(taxAmount)
+    const total = subtotalAfterHeaderDiscount
+    const subtotal = round2(total - taxAmount)
+
+    headerUpdate.subtotal = subtotal
+    headerUpdate.discount_amount = discountAmount
+    headerUpdate.tax_amount = taxAmount
+    headerUpdate.total = total
+    headerUpdate.updated_at = new Date().toISOString()
+
+    const { data: orderAfter, error: updOrderErr } = await admin
+      .from('tailoring_orders')
+      .update(headerUpdate)
+      .eq('id', input.orderId)
+      .select('*')
+      .single()
+    if (updOrderErr) return failure(updOrderErr.message)
+
+    // 5. Registrar entrada de edición en el historial
+    const description = buildChangeSummary(headerDiff, lineChanges)
+    await admin.from('tailoring_order_state_history').insert({
+      tailoring_order_id: input.orderId,
+      from_status: currentStatus,
+      to_status: currentStatus,
+      description,
+      notes: JSON.stringify({ header: headerDiff, lines: linesAfterDiff }),
+      changed_by: ctx.userId,
+      changed_by_name: ctx.userName,
+    })
+
+    // 6. Devolver datos para auditoría (protectedAction registra audit_log)
+    return success({
+      ...(orderAfter as any),
+      auditDescription: `Pedido ${(orderBefore as any).order_number}: ${description}`,
+      auditOldData: {
+        header: Object.fromEntries(Object.entries(headerDiff).map(([k, v]) => [k, v.old])),
+        lines: linesAfterDiff.map((d) => d.before).filter(Boolean),
+      },
+      auditNewData: {
+        header: Object.fromEntries(Object.entries(headerDiff).map(([k, v]) => [k, v.new])),
+        lines: linesAfterDiff.map((d) => d.after).filter(Boolean),
+      },
+      auditMetadata: { line_changes: lineChanges },
+    })
+  },
+)
+
 // ─── Nueva venta (ficha) ────────────────────────────────────────────────────
 
 export interface PrendaLineaInput {
@@ -608,6 +894,8 @@ export interface PrendaLineaInput {
   precio: number
   oficial: string
   configuration: Record<string, unknown>
+  /** Coste estimado opcional (material + mano de obra) — se guarda en material_cost de la línea. */
+  coste?: number
 }
 
 export interface CreateFichaOrderInput {
@@ -627,7 +915,7 @@ export interface CreateFichaOrderInput {
     precio: number
     [key: string]: unknown
   }>
-  complementos: Array<{ product_variant_id: string; nombre: string; cantidad: number; precio: number }>
+  complementos: Array<{ product_variant_id: string; nombre: string; cantidad: number; precio: number; cost_price?: number }>
   entregaACuenta: number
   /** Método de pago cuando entregaACuenta > 0 (efectivo, tarjeta, transferencia, bizum). */
   metodoPago?: 'efectivo' | 'tarjeta' | 'transferencia' | 'bizum'
@@ -721,6 +1009,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
       line_type: 'artesanal' | 'industrial'
       unit_price: number
       line_total: number
+      material_cost: number
       finishing_notes: string | null
       configuration: Record<string, unknown>
       sort_order: number
@@ -759,6 +1048,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
           line_type: orderTypeDb,
           unit_price: Number(prendaInput.precio) || 0,
           line_total: Number(prendaInput.precio) || 0,
+          material_cost: Number(prendaInput.coste) || 0,
           finishing_notes: (input.notas || '').trim() || null,
           configuration: {
             ...(input.fichaCommon ?? {}),
@@ -789,6 +1079,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
         line_type: orderTypeDb,
         unit_price: Number(input.precioPrenda) || 0,
         line_total: Number(input.precioPrenda) || 0,
+        material_cost: 0,
         finishing_notes: (input.notas || '').trim() || null,
         configuration: mainConfig,
         sort_order: sortOrder++,
@@ -799,22 +1090,44 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
     for (const camisa of input.camisas || []) {
       const precio = Number(camisa.precio) || 0
       subtotalLines += precio
-      const { precio: _p, ...config } = camisa
+      const { precio: _p, coste: _c, ...config } = camisa as { precio: number; coste?: number; [k: string]: unknown }
       linesToInsert.push({
         tailoring_order_id: order.id,
         garment_type_id: camiseriaGarmentTypeId,
         line_type: 'industrial',
         unit_price: precio,
         line_total: precio,
+        material_cost: Number((camisa as { coste?: number }).coste) || 0,
         finishing_notes: null,
         configuration: { ...config, tipo: 'camiseria' },
         sort_order: sortOrder++,
       })
     }
 
+    // Si algún complemento no trae cost_price, lo buscamos en la BD (fallback).
+    const complementsMissingCost = (input.complementos || []).filter(
+      (c) => !(typeof c.cost_price === 'number' && c.cost_price > 0) && c.product_variant_id,
+    )
+    const costByVariantId = new Map<string, number>()
+    if (complementsMissingCost.length > 0) {
+      const variantIds = Array.from(new Set(complementsMissingCost.map((c) => c.product_variant_id)))
+      const { data: variantsWithCost } = await ctx.adminClient
+        .from('product_variants')
+        .select('id, products(cost_price)')
+        .in('id', variantIds)
+      for (const v of (variantsWithCost || []) as any[]) {
+        const parent = Array.isArray(v.products) ? v.products[0] : v.products
+        const cost = Number(parent?.cost_price) || 0
+        if (v.id) costByVariantId.set(String(v.id), cost)
+      }
+    }
+
     for (const comp of input.complementos || []) {
       const precio = Number(comp.precio) || 0
       const cantidad = Math.max(1, Math.floor(Number(comp.cantidad) || 1))
+      const unitCost = typeof comp.cost_price === 'number' && comp.cost_price > 0
+        ? Number(comp.cost_price)
+        : (costByVariantId.get(comp.product_variant_id) ?? 0)
       for (let i = 0; i < cantidad; i++) {
         linesToInsert.push({
           tailoring_order_id: order.id,
@@ -822,6 +1135,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
           line_type: 'industrial',
           unit_price: precio,
           line_total: precio,
+          material_cost: unitCost,
           finishing_notes: null,
           configuration: { product_variant_id: comp.product_variant_id, product_name: comp.nombre },
           sort_order: sortOrder++,
@@ -842,6 +1156,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
         line_type: l.line_type,
         unit_price: l.unit_price,
         line_total: l.line_total,
+        material_cost: l.material_cost ?? 0,
         finishing_notes: l.finishing_notes,
         configuration: l.configuration,
         sort_order: l.sort_order,
@@ -943,7 +1258,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
  */
 export const searchComplementProducts = protectedAction<
   { query: string; storeId?: string },
-  Array<{ id: string; name: string; sku: string; price_with_tax: number; tax_rate: number; stock: number }>
+  Array<{ id: string; name: string; sku: string; price_with_tax: number; tax_rate: number; cost_price: number; stock: number }>
 >(
   { permission: 'orders.create' },
   async (ctx, { query, storeId }) => {
@@ -952,7 +1267,7 @@ export const searchComplementProducts = protectedAction<
 
     const { data: productsData, error: productsError } = await ctx.adminClient
       .from('products')
-      .select('id, name, sku, price_with_tax, tax_rate')
+      .select('id, name, sku, price_with_tax, tax_rate, cost_price')
       .eq('product_type', 'boutique')
       .ilike('name', `%${q}%`)
       .limit(20)
@@ -1005,7 +1320,7 @@ export const searchComplementProducts = protectedAction<
 
     const result = products
       .filter((p: { id: string }) => variantByProductId[p.id])
-      .map((p: { id: string; name: string; sku: string | null; price_with_tax: unknown; tax_rate: unknown }) => {
+      .map((p: { id: string; name: string; sku: string | null; price_with_tax: unknown; tax_rate: unknown; cost_price: unknown }) => {
         const v = variantByProductId[p.id]
         return {
           id: v.id,
@@ -1013,6 +1328,7 @@ export const searchComplementProducts = protectedAction<
           sku: v.variant_sku ?? p.sku ?? '—',
           price_with_tax: Number(p.price_with_tax) || 0,
           tax_rate: Number(p.tax_rate) || 0,
+          cost_price: Number(p.cost_price) || 0,
           stock: stockMap[v.id] ?? 0,
         }
       })

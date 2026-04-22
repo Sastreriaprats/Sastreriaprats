@@ -157,7 +157,7 @@ export function ImprimirEtiquetasContent({ variantIdsParam, legacyIdsParam }: { 
             barcode={v.barcode!}
             productName={v.name}
             sku={v.variant_sku || v.sku}
-            price={v.price_with_tax ?? v.base_price}
+            price={v.price_with_tax ?? 0}
             size={v.size}
           />
         ))}

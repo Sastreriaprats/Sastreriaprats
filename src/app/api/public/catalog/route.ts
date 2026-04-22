@@ -24,16 +24,19 @@ export async function GET(request: NextRequest) {
   const currentMonth = new Date().getMonth() + 1 // 1-12
   const currentSeason = currentMonth >= 4 && currentMonth <= 9 ? 'ss' : 'aw'
 
-  // Si hay filtro de categoría, buscar su ID + IDs de todas las descendientes (hijas y nietas)
+  // Si hay filtro de categoría, buscar su ID + IDs del padre (si es subcategoría) + descendientes
   let categoryIds: string[] | null = null
   if (category) {
     const { data: cat } = await admin
       .from('product_categories')
-      .select('id')
+      .select('id, parent_id')
       .eq('slug', category)
       .single()
     if (cat) {
       categoryIds = [cat.id]
+      // Padre (si la categoría seleccionada es una subcategoría): así los productos
+      // asignados al padre también aparecen cuando se filtra por una de sus hijas.
+      if (cat.parent_id) categoryIds.push(cat.parent_id)
       // Hijas directas
       const { data: children } = await admin
         .from('product_categories')
@@ -71,11 +74,11 @@ export async function GET(request: NextRequest) {
     const s = sanitizeSearchPattern(search)
     query = query.or(`name.ilike.%${s}%,brand.ilike.%${s}%,description.ilike.%${s}%`)
   }
-  if (minPrice) query = query.gte('base_price', parseFloat(minPrice))
-  if (maxPrice) query = query.lte('base_price', parseFloat(maxPrice))
+  if (minPrice) query = query.gte('price_with_tax', parseFloat(minPrice))
+  if (maxPrice) query = query.lte('price_with_tax', parseFloat(maxPrice))
 
-  if (sort === 'price_asc') query = query.order('base_price', { ascending: true })
-  else if (sort === 'price_desc') query = query.order('base_price', { ascending: false })
+  if (sort === 'price_asc') query = query.order('price_with_tax', { ascending: true })
+  else if (sort === 'price_desc') query = query.order('price_with_tax', { ascending: false })
   else if (sort === 'name') query = query.order('name', { ascending: true })
   else query = query.order('created_at', { ascending: false })
 

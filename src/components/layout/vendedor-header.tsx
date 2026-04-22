@@ -11,8 +11,11 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { Menu, LogOut, ChevronRight, PanelLeftClose, PanelLeft, MapPin } from 'lucide-react'
+import { toast } from 'sonner'
 import { useAuth } from '@/components/providers/auth-provider'
 import { useActiveStore } from '@/hooks/use-store'
+import { useRequireStore } from '@/hooks/use-require-store'
+import { checkCashSessionOpen } from '@/actions/pos'
 import {
   Select,
   SelectContent,
@@ -74,10 +77,15 @@ export function VendedorHeader({
   const pathname = usePathname()
   const router = useRouter()
   const { profile } = useAuth()
-  const { activeStoreId, switchStore } = useActiveStore()
+  const { activeStoreId } = useActiveStore()
+  const { availableStores, selectStore } = useRequireStore()
   const [allStores, setAllStores] = useState<{ id: string; name: string }[]>([])
 
   useEffect(() => {
+    if (availableStores.length > 0) {
+      setAllStores(availableStores.map((s) => ({ id: s.storeId, name: s.storeName })))
+      return
+    }
     createClient()
       .from('stores')
       .select('id, name')
@@ -87,11 +95,20 @@ export function VendedorHeader({
       .then(({ data }) => {
         if (data) setAllStores(data)
       })
-  }, [])
+  }, [availableStores])
 
-  useEffect(() => {
-    if (!activeStoreId && allStores.length > 0) switchStore(allStores[0].id)
-  }, [activeStoreId, allStores, switchStore])
+  const handleSwitchStore = async (newStoreId: string) => {
+    if (!newStoreId || newStoreId === activeStoreId) return
+    if (activeStoreId) {
+      const r = await checkCashSessionOpen({ storeId: activeStoreId })
+      if (r.success && r.data.open) {
+        const currentName = allStores.find((s) => s.id === activeStoreId)?.name ?? 'la tienda actual'
+        toast.error(`Debes cerrar la caja de ${currentName} antes de cambiar de tienda`)
+        return
+      }
+    }
+    selectStore(newStoreId)
+  }
 
   const pathParts = pathname.split('/').filter(Boolean)
   const breadcrumbs = pathParts.map((part, idx) => {
@@ -137,7 +154,7 @@ export function VendedorHeader({
 
       <div className="flex items-center gap-2">
         {allStores.length > 0 && (
-          <Select value={activeStoreId ?? ''} onValueChange={switchStore}>
+          <Select value={activeStoreId ?? ''} onValueChange={handleSwitchStore}>
             <SelectTrigger className="h-8 w-auto min-w-[120px] max-w-[160px] text-xs border-gray-200 [&>svg:last-child]:hidden">
               <span className="flex items-center gap-1.5 truncate">
                 <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />

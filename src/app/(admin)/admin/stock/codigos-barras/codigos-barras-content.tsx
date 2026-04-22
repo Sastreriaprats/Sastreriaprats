@@ -23,7 +23,7 @@ type ProductGroup = {
   product_id: string
   product_name: string
   product_sku: string
-  base_price: number
+  price_with_tax: number
   tax_rate_pct?: number
   variants: Array<{
     variant_id: string
@@ -274,7 +274,7 @@ export function CodigosBarrasContent() {
           <div className="divide-y">
             {products.map((prod) => {
               const isExpanded = expanded.has(prod.product_id)
-              const firstPrice = prod.variants[0]?.price_with_tax ?? prod.base_price * (1 + (prod.tax_rate_pct ?? 21) / 100)
+              const firstPrice = prod.variants[0]?.price_with_tax ?? prod.price_with_tax ?? 0
               const checkState = getProductCheckState(prod)
               const hasAnyBarcode = prod.variants.some((v) => v.has_barcode)
 

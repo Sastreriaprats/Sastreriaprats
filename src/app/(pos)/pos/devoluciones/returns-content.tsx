@@ -226,8 +226,7 @@ export function ReturnsContent() {
       const taxRate = Number(variant.products?.tax_rate) || 21
       const priceOverride = Number(variant.price_override) || 0
       const priceWithTax = Number(variant.products?.price_with_tax) || 0
-      const basePrice = Number(variant.products?.base_price) || 0
-      const price = priceOverride || priceWithTax || (basePrice ? basePrice * (1 + taxRate / 100) : 0)
+      const price = priceOverride || priceWithTax
       setReplacements(prev => [...prev, {
         variantId: variant.id,
         description: `${variant.products.name}${variant.size ? ` T.${variant.size}` : ''}${variant.color ? ` ${variant.color}` : ''}`,
@@ -508,11 +507,9 @@ export function ReturnsContent() {
                         {productResults.length > 0 && (
                           <div className="border rounded divide-y bg-white max-h-64 overflow-y-auto">
                             {productResults.map((v: any) => {
-                              const taxRate = Number(v.products?.tax_rate) || 21
                               const priceOverride = Number(v.price_override) || 0
                               const priceWithTax = Number(v.products?.price_with_tax) || 0
-                              const basePrice = Number(v.products?.base_price) || 0
-                              const price = priceOverride || priceWithTax || (basePrice ? basePrice * (1 + taxRate / 100) : 0)
+                              const price = priceOverride || priceWithTax
                               const stock = Array.isArray(v.stock_levels) ? (v.stock_levels[0]?.available ?? 0) : 0
                               return (
                                 <button

@@ -73,7 +73,7 @@ export function WishlistContent({ items, clientId }: {
                     {product.name as string}
                   </h3>
                   <p className="text-sm font-bold text-prats-navy mt-1">
-                    {formatCurrency((product.price_with_tax || product.base_price) as number)}
+                    {formatCurrency(product.price_with_tax as number)}
                   </p>
                 </Link>
                 <button

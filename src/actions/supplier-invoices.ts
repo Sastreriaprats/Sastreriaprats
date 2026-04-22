@@ -55,6 +55,7 @@ export type SupplierOptionForInvoice = {
   payment_days: number | null
   payment_method: string | null
   default_tax_rate: number
+  custom_payment_plan: Array<{ amount: number; days: number | null }> | null
 }
 
 const SUPPLIER_PAYMENT_METHOD_LABEL: Record<string, string> = {
@@ -86,15 +87,89 @@ function addDaysISO(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10)
 }
 
-function computeDueDate(
+function computeDueDate(invoiceDate: string, terms: string | null): string {
+  switch (terms) {
+    case 'immediate': return invoiceDate
+    case 'net_15': return addDaysISO(invoiceDate, 15)
+    case 'net_30': return addDaysISO(invoiceDate, 30)
+    case 'net_60': return addDaysISO(invoiceDate, 60)
+    case 'net_90': return addDaysISO(invoiceDate, 90)
+    default: return addDaysISO(invoiceDate, 30)
+  }
+}
+
+type InstallmentSpec = { due_date: string; amount: number; sort_order: number }
+
+/**
+ * Construye la lista de cuotas a generar para una factura.
+ * - custom + plan con importes > 0 → cuotas del plan; el último sumidero absorbe residuos.
+ * - En cualquier otro caso → 1 sola cuota con el total.
+ */
+function buildInstallments(
   invoiceDate: string,
-  supplier: { payment_terms: string | null; payment_days: number | null } | null,
-): string {
-  if (!supplier) return addDaysISO(invoiceDate, 30)
-  const terms = supplier.payment_terms ?? 'net_30'
-  if (terms === 'immediate') return invoiceDate
-  const days = Number(supplier.payment_days ?? 30)
-  return addDaysISO(invoiceDate, Number.isFinite(days) && days >= 0 ? days : 30)
+  fallbackDueDate: string,
+  totalAmount: number,
+  supplier: {
+    payment_terms: string | null
+    custom_payment_plan: Array<{ amount: number; days?: number | null }> | null
+  } | null,
+): InstallmentSpec[] {
+  const total = Math.round(totalAmount * 100) / 100
+  const plan = supplier?.custom_payment_plan ?? null
+  if (supplier?.payment_terms === 'custom' && plan && plan.length > 0) {
+    // Calcular proporción para escalar el plan al total real de la factura
+    const planTotal = plan.reduce((s, p) => s + (Number(p.amount) || 0), 0)
+    const ratio = planTotal > 0 ? total / planTotal : 1
+    const out: InstallmentSpec[] = []
+    let accumulated = 0
+    plan.forEach((p, idx) => {
+      const rawDays = p.days
+      const days = rawDays !== undefined && rawDays !== null && Number.isFinite(Number(rawDays))
+        ? Number(rawDays)
+        : 30
+      let amount = Math.round(Number(p.amount) * ratio * 100) / 100
+      if (idx === plan.length - 1) {
+        // Última cuota absorbe la diferencia por redondeo
+        amount = Math.round((total - accumulated) * 100) / 100
+      } else {
+        accumulated = Math.round((accumulated + amount) * 100) / 100
+      }
+      if (amount < 0) amount = 0
+      out.push({
+        due_date: addDaysISO(invoiceDate, days),
+        amount,
+        sort_order: idx,
+      })
+    })
+    return out
+  }
+  return [{ due_date: fallbackDueDate, amount: total, sort_order: 0 }]
+}
+
+async function replaceInvoiceInstallments(
+  adminClient: any,
+  supplierInvoiceId: string,
+  installments: InstallmentSpec[],
+): Promise<string | null> {
+  const { error: delErr } = await adminClient
+    .from('ap_supplier_invoice_due_dates')
+    .delete()
+    .eq('supplier_invoice_id', supplierInvoiceId)
+  if (delErr) return delErr.message || 'Error al limpiar cuotas'
+
+  if (installments.length === 0) return null
+  const rows = installments.map((it) => ({
+    supplier_invoice_id: supplierInvoiceId,
+    due_date: it.due_date,
+    amount: it.amount,
+    sort_order: it.sort_order,
+    is_paid: false,
+  }))
+  const { error: insErr } = await adminClient
+    .from('ap_supplier_invoice_due_dates')
+    .insert(rows)
+  if (insErr) return insErr.message || 'Error al crear cuotas'
+  return null
 }
 
 export type SupplierInvoicesKpis = {
@@ -236,19 +311,31 @@ export const listSuppliersForInvoice = protectedAction<void, SupplierOptionForIn
   async (ctx) => {
     const { data, error } = await ctx.adminClient
       .from('suppliers')
-      .select('id, name, nif_cif, payment_terms, payment_days, payment_method, default_tax_rate')
+      .select('id, name, nif_cif, payment_terms, payment_days, payment_method, default_tax_rate, custom_payment_plan')
       .eq('is_active', true)
       .order('name', { ascending: true })
     if (error) return failure(error.message)
-    const list = (data || []).map((r: Record<string, unknown>) => ({
-      id: String(r.id),
-      name: String(r.name ?? ''),
-      nif_cif: r.nif_cif != null ? String(r.nif_cif) : null,
-      payment_terms: r.payment_terms != null ? String(r.payment_terms) : null,
-      payment_days: r.payment_days != null ? Number(r.payment_days) : null,
-      payment_method: supplierPaymentMethodLabel(r.payment_method as string | null),
-      default_tax_rate: r.default_tax_rate != null ? Number(r.default_tax_rate) : 21,
-    }))
+    const list = (data || []).map((r: Record<string, unknown>) => {
+      const rawPlan = (r as any).custom_payment_plan
+      const plan = Array.isArray(rawPlan)
+        ? rawPlan
+            .map((p: any) => ({
+              amount: Number(p?.amount ?? 0),
+              days: p?.days !== undefined && p?.days !== null && p?.days !== '' ? Number(p.days) : null,
+            }))
+            .filter((p: { amount: number }) => Number.isFinite(p.amount) && p.amount > 0)
+        : null
+      return {
+        id: String(r.id),
+        name: String(r.name ?? ''),
+        nif_cif: r.nif_cif != null ? String(r.nif_cif) : null,
+        payment_terms: r.payment_terms != null ? String(r.payment_terms) : null,
+        payment_days: r.payment_days != null ? Number(r.payment_days) : null,
+        payment_method: supplierPaymentMethodLabel(r.payment_method as string | null),
+        default_tax_rate: r.default_tax_rate != null ? Number(r.default_tax_rate) : 21,
+        custom_payment_plan: plan && plan.length > 0 ? plan : null,
+      }
+    })
     return success(list)
   }
 )
@@ -353,20 +440,31 @@ async function resolveSupplierDefaults(
   payment_terms: string | null
   payment_days: number | null
   payment_method: string | null
+  custom_payment_plan: Array<{ amount: number; days?: number | null }> | null
 } | null> {
   if (!supplierId?.trim()) return null
   const { data } = await adminClient
     .from('suppliers')
-    .select('id, name, nif_cif, payment_terms, payment_days, payment_method')
+    .select('id, name, nif_cif, payment_terms, payment_days, payment_method, custom_payment_plan')
     .eq('id', supplierId.trim())
     .maybeSingle()
   if (!data) return null
+  const rawPlan = (data as any).custom_payment_plan
+  const plan = Array.isArray(rawPlan)
+    ? rawPlan
+        .map((r: any) => ({
+          amount: Number(r?.amount ?? 0),
+          days: r?.days !== undefined && r?.days !== null && r?.days !== '' ? Number(r.days) : null,
+        }))
+        .filter((r: { amount: number }) => Number.isFinite(r.amount) && r.amount > 0)
+    : null
   return {
     supplier_name: String((data as any).name ?? ''),
     supplier_cif: (data as any).nif_cif != null ? String((data as any).nif_cif) : null,
     payment_terms: (data as any).payment_terms != null ? String((data as any).payment_terms) : null,
     payment_days: (data as any).payment_days != null ? Number((data as any).payment_days) : null,
     payment_method: supplierPaymentMethodLabel((data as any).payment_method as string | null),
+    custom_payment_plan: plan,
   }
 }
 
@@ -418,7 +516,7 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
 
     const dueDate = input.due_date?.trim()
       ? input.due_date
-      : computeDueDate(input.invoice_date, supplierDefaults)
+      : computeDueDate(input.invoice_date, supplierDefaults?.payment_terms ?? null)
 
     if (new Date(dueDate) < new Date(input.invoice_date)) {
       return failure('La fecha de vencimiento no puede ser anterior a la fecha de factura')
@@ -468,6 +566,19 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
       }
     }
 
+    // Generar cuotas de vencimiento
+    const installments = buildInstallments(
+      input.invoice_date,
+      dueDate,
+      Number(input.total_amount),
+      supplierDefaults,
+    )
+    const schedErr = await replaceInvoiceInstallments(ctx.adminClient, String(data.id), installments)
+    if (schedErr) {
+      console.error('[createSupplierInvoiceAction] cuotas:', schedErr)
+      // No abortamos la factura por un fallo de cuotas; se reintenta al editar.
+    }
+
     return success({ id: String(data.id) })
   }
 )
@@ -490,7 +601,7 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
 
     const dueDate = rest.due_date?.trim()
       ? rest.due_date
-      : computeDueDate(rest.invoice_date, supplierDefaults)
+      : computeDueDate(rest.invoice_date, supplierDefaults?.payment_terms ?? null)
 
     if (new Date(dueDate) < new Date(rest.invoice_date)) {
       return failure('La fecha de vencimiento no puede ser anterior a la fecha de factura')
@@ -540,6 +651,26 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
       }))
       const { error: insErr } = await ctx.adminClient.from(LINK_TABLE).insert(rows)
       if (insErr) return failure(insErr.message || 'Error al vincular albaranes', 'INTERNAL')
+    }
+
+    // Regenerar cuotas. Si ya existen cuotas pagadas las conservamos porque el
+    // usuario ya cobró por ellas; solo regeneramos las pendientes.
+    const { data: existing } = await ctx.adminClient
+      .from('ap_supplier_invoice_due_dates')
+      .select('id, amount, is_paid')
+      .eq('supplier_invoice_id', id)
+    const hasPaid = Array.isArray(existing) && existing.some((r: any) => r.is_paid)
+    if (!hasPaid) {
+      const installments = buildInstallments(
+        rest.invoice_date,
+        dueDate,
+        Number(rest.total_amount),
+        supplierDefaults,
+      )
+      const schedErr = await replaceInvoiceInstallments(ctx.adminClient, id, installments)
+      if (schedErr) {
+        console.error('[updateSupplierInvoiceAction] cuotas:', schedErr)
+      }
     }
 
     return success(undefined)
