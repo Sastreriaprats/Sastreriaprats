@@ -23,6 +23,10 @@ export const createSupplierSchema = z.object({
   shipping_included: z.boolean().default(false),
   internal_notes: z.string().optional().nullable(),
   is_active: z.boolean().default(true),
+  custom_payment_plan: z.array(z.object({
+    amount: z.number().min(0),
+    days: z.number().min(0).optional(),
+  })).optional().nullable().default([]),
 })
 
 export const updateSupplierSchema = createSupplierSchema.partial()

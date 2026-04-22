@@ -243,7 +243,17 @@ export function ReservationFormDialog({
       listClients({ search: q, pageSize: 15 })
         .then((res) => {
           if (cancelled) return
-          if (res.success) setClientResults(((res.data as any)?.items ?? []) as ClientResult[])
+          if (res.success) {
+            const payload = res.data as any
+            const rows = Array.isArray(payload?.data)
+              ? payload.data
+              : Array.isArray(payload?.items)
+                ? payload.items
+                : Array.isArray(payload)
+                  ? payload
+                  : []
+            setClientResults(rows as ClientResult[])
+          }
         })
         .finally(() => {
           if (!cancelled) setClientSearching(false)
@@ -327,68 +337,74 @@ export function ReservationFormDialog({
       : { method: paymentMethod, amount: paymentAmount }
 
     setSubmitting(true)
-    const result = await createReservation({
-      client_id: clientId,
-      store_id: storeId ?? null,
-      cash_session_id: cashSessionId ?? null,
-      lines: lines.map((l) => ({
-        product_variant_id: l.variant.id,
-        warehouse_id: warehouseId,
-        quantity: l.quantity,
-        unit_price: l.unit_price,
-      })),
-      notes: notes || null,
-      reason: reason || null,
-      expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
-      initial_payment,
-    })
-    setSubmitting(false)
+    try {
+      const result = await createReservation({
+        client_id: clientId,
+        store_id: storeId ?? null,
+        cash_session_id: cashSessionId ?? null,
+        lines: lines.map((l) => ({
+          product_variant_id: l.variant.id,
+          warehouse_id: warehouseId,
+          quantity: l.quantity,
+          unit_price: l.unit_price,
+        })),
+        notes: notes || null,
+        reason: reason || null,
+        expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
+        initial_payment,
+      })
 
-    if (!result.success) {
-      toast.error(result.error || 'No se pudo crear la reserva')
-      return
-    }
+      if (!result.success) {
+        toast.error(result.error || 'No se pudo crear la reserva')
+        return
+      }
 
-    const data = result.data
-    if (data.status === 'active') {
-      toast.success(`Reserva ${data.reservation_number} creada`)
-    } else {
-      toast.warning(`Reserva ${data.reservation_number} con productos pendientes de stock`)
-    }
+      const data = result.data
+      if (data.status === 'active') {
+        toast.success(`Reserva ${data.reservation_number} creada`)
+      } else {
+        toast.warning(`Reserva ${data.reservation_number} con productos pendientes de stock`)
+      }
 
-    const linesByVariant = new Map(lines.map((l) => [l.variant.id, l.variant]))
-    const successPayload: ReservationSuccessPayload = {
-      id: data.id,
-      reservation_number: data.reservation_number,
-      status: data.status,
-      had_stock: data.had_stock,
-      total: data.total,
-      total_paid: data.total_paid,
-      payment_status: data.payment_status,
-      expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
-      reason: reason || null,
-      notes: notes || null,
-      client: clientId ? { id: clientId, name: clientName, code: null } : null,
-      lines: data.lines.map((ln) => {
-        const variant = linesByVariant.get(ln.product_variant_id)
-        return {
-          id: ln.id,
-          product_variant_id: ln.product_variant_id,
-          product_name: variant?.products?.name || '—',
-          sku: variant?.variant_sku || variant?.products?.sku || null,
-          size: variant?.size || null,
-          color: variant?.color || null,
-          quantity: ln.quantity,
-          unit_price: ln.unit_price,
-          line_total: ln.line_total,
-          status: ln.status,
-        }
-      }),
-      initial_payment,
+      const linesByVariant = new Map(lines.map((l) => [l.variant.id, l.variant]))
+      const successPayload: ReservationSuccessPayload = {
+        id: data.id,
+        reservation_number: data.reservation_number,
+        status: data.status,
+        had_stock: data.had_stock,
+        total: data.total,
+        total_paid: data.total_paid,
+        payment_status: data.payment_status,
+        expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
+        reason: reason || null,
+        notes: notes || null,
+        client: clientId ? { id: clientId, name: clientName, code: null } : null,
+        lines: (data.lines ?? []).map((ln) => {
+          const variant = linesByVariant.get(ln.product_variant_id)
+          return {
+            id: ln.id,
+            product_variant_id: ln.product_variant_id,
+            product_name: variant?.products?.name || '—',
+            sku: variant?.variant_sku || variant?.products?.sku || null,
+            size: variant?.size || null,
+            color: variant?.color || null,
+            quantity: ln.quantity,
+            unit_price: ln.unit_price,
+            line_total: ln.line_total,
+            status: ln.status,
+          }
+        }),
+        initial_payment,
+      }
+      onSuccess?.(successPayload)
+      resetForm()
+      onOpenChange(false)
+    } catch (err) {
+      console.error('[ReservationFormDialog] createReservation threw:', err)
+      toast.error('Error inesperado al crear la reserva')
+    } finally {
+      setSubmitting(false)
     }
-    onSuccess?.(successPayload)
-    resetForm()
-    onOpenChange(false)
   }
 
   return (

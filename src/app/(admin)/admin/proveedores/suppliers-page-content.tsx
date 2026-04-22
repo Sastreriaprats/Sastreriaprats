@@ -29,7 +29,7 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Plus, Search, MoreHorizontal, Eye, Pencil, Trash2, Loader2, ChevronLeft, ChevronRight, ArrowUpDown } from 'lucide-react'
+import { Plus, Search, MoreHorizontal, Eye, Pencil, Trash2, Loader2, ChevronLeft, ChevronRight, ArrowUpDown, X } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from 'sonner'
 import { useList } from '@/hooks/use-list'
@@ -37,6 +37,8 @@ import { usePermissions } from '@/hooks/use-permissions'
 import { useAction } from '@/hooks/use-action'
 import { listSuppliers, createSupplierAction, updateSupplierAction, deleteSupplierAction } from '@/actions/suppliers'
 import { formatCurrency } from '@/lib/utils'
+
+type CustomPaymentPlanItem = { amount: number; days?: number }
 
 const paymentTermsLabels: Record<string, string> = {
   immediate: 'Al contado', net_15: '15 días', net_30: '30 días', net_60: '60 días', net_90: '90 días', custom: 'Personalizado',
@@ -93,6 +95,7 @@ const emptyForm = {
   bank_iban: '',
   internal_notes: '',
   is_active: true,
+  custom_payment_plan: [] as CustomPaymentPlanItem[],
 }
 
 export function SuppliersPageContent() {
@@ -163,6 +166,9 @@ export function SuppliersPageContent() {
       bank_iban: s.bank_iban ?? '',
       internal_notes: s.internal_notes ?? '',
       is_active: s.is_active !== false,
+      custom_payment_plan: Array.isArray(s.custom_payment_plan)
+        ? (s.custom_payment_plan as CustomPaymentPlanItem[])
+        : [],
     })
     setDialogOpen(true)
   }
@@ -191,6 +197,12 @@ export function SuppliersPageContent() {
       bank_iban: form.bank_iban?.trim() || null,
       internal_notes: form.internal_notes?.trim() || null,
       is_active: form.is_active,
+      custom_payment_plan: form.payment_terms === 'custom'
+        ? form.custom_payment_plan.map((it) => ({
+            amount: Number(it.amount) || 0,
+            ...(it.days !== undefined && it.days !== null ? { days: Number(it.days) } : {}),
+          }))
+        : [],
     }
     if (editingId) {
       updateSupplier({ id: editingId, data: payload })
@@ -207,6 +219,20 @@ export function SuppliersPageContent() {
         : [...f.supplier_types, value],
     }))
   }
+
+  const addPaymentPlanRow = () => {
+    setForm((f) => ({ ...f, custom_payment_plan: [...f.custom_payment_plan, { amount: 0 }] }))
+  }
+  const removePaymentPlanRow = (idx: number) => {
+    setForm((f) => ({ ...f, custom_payment_plan: f.custom_payment_plan.filter((_, i) => i !== idx) }))
+  }
+  const updatePaymentPlanRow = (idx: number, patch: Partial<CustomPaymentPlanItem>) => {
+    setForm((f) => ({
+      ...f,
+      custom_payment_plan: f.custom_payment_plan.map((row, i) => i === idx ? { ...row, ...patch } : row),
+    }))
+  }
+  const paymentPlanTotal = form.custom_payment_plan.reduce((acc, r) => acc + (Number(r.amount) || 0), 0)
 
   const SortHeader = ({ field, children }: { field: string; children: React.ReactNode }) => (
     <TableHead className="cursor-pointer select-none" onClick={() => toggleSort(field)}>
@@ -408,6 +434,68 @@ export function SuppliersPageContent() {
                 </SelectContent>
               </Select>
             </div>
+            {form.payment_terms === 'custom' && (
+              <div className="sm:col-span-2 space-y-3 rounded-md border bg-muted/30 p-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-semibold">Plan de pagos personalizado</Label>
+                  <Button type="button" variant="outline" size="sm" className="gap-1" onClick={addPaymentPlanRow}>
+                    <Plus className="h-3 w-3" /> Añadir cuota
+                  </Button>
+                </div>
+                {form.custom_payment_plan.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    No hay cuotas definidas. Pulsa &quot;Añadir cuota&quot; para empezar.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {form.custom_payment_plan.map((row, idx) => (
+                      <div key={idx} className="flex items-end gap-2">
+                        <div className="flex-1 space-y-1">
+                          <Label className="text-xs text-muted-foreground">Importe (€)</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={row.amount ?? 0}
+                            onChange={(e) => updatePaymentPlanRow(idx, { amount: Number(e.target.value) })}
+                          />
+                        </div>
+                        <div className="flex-1 space-y-1">
+                          <Label className="text-xs text-muted-foreground">Días desde factura</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            placeholder="Opcional"
+                            value={row.days ?? ''}
+                            onChange={(e) => {
+                              const v = e.target.value
+                              updatePaymentPlanRow(idx, { days: v === '' ? undefined : Number(v) })
+                            }}
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-9 w-9 text-red-600 hover:text-red-700 hover:bg-red-50"
+                          onClick={() => removePaymentPlanRow(idx)}
+                          aria-label="Eliminar cuota"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {form.custom_payment_plan.length > 0 && (
+                  <div className="flex justify-end pt-2 border-t">
+                    <p className="text-sm">
+                      Total: <span className="font-bold">{formatCurrency(paymentPlanTotal)}</span>
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Método de pago</Label>
               <Select value={form.payment_method || 'transfer'} onValueChange={(v) => setForm((f) => ({ ...f, payment_method: v }))}>
