@@ -29,6 +29,9 @@ import { NuevaVentaSteps } from '../nueva-venta-steps'
 import { generateFichaConfeccionPDF, generateFichaForLine } from '@/lib/pdf/ficha-confeccion'
 import { toast } from 'sonner'
 import { getOrderStatusLabel } from '@/lib/utils'
+import { FichaPantalonConfig } from './components/ficha-pantalon-config'
+import { FichaChalecoConfig } from './components/ficha-chaleco-config'
+import { FichaAmericanaConfig } from './components/ficha-americana-config'
 
 const PRENDA_LABELS: Record<string, string> = {
   traje_2_piezas: 'Traje',
@@ -424,7 +427,10 @@ export function NuevaVentaFichaClient({
         const userIds = [...new Set(roles.map((ur: Record<string, unknown>) => ur.user_id as string))]
         const { data: profiles } = await supabase.from('profiles').select('id, full_name').in('id', userIds).eq('is_active', true).order('full_name')
         if (!cancelled && profiles) setSastres(profiles as { id: string; full_name: string }[])
-      } catch (err) { console.error('[FichaClient] loadSastres error:', err) }
+      } catch (err) {
+        console.error('[FichaClient] loadSastres error:', err)
+        toast.error('Error al cargar la lista de sastres')
+      }
     }
     loadSastres()
     return () => { cancelled = true }
@@ -438,7 +444,10 @@ export function NuevaVentaFichaClient({
         const supabase = createClient()
         const { data } = await supabase.from('officials').select('id, name, specialty').eq('is_active', true).order('name')
         if (!cancelled && data) setOfficials(data as { id: string; name: string; specialty: string | null }[])
-      } catch (err) { console.error('[FichaClient] loadOfficials error:', err) }
+      } catch (err) {
+        console.error('[FichaClient] loadOfficials error:', err)
+        toast.error('Error al cargar la lista de oficiales')
+      }
     }
     loadOfficials()
     return () => { cancelled = true }
@@ -650,7 +659,10 @@ export function NuevaVentaFichaClient({
               await generateFichaConfeccionPDF(orderRes.data)
             }
           }
-        } catch (e) { console.error('[Ficha] PDF:', e) }
+        } catch (e) {
+          console.error('[Ficha] PDF:', e)
+          toast.error('El pedido se creó, pero no se pudo generar la ficha en PDF')
+        }
         if (onCreated) {
           onCreated(res.data.orderId)
         } else {
@@ -868,310 +880,11 @@ export function NuevaVentaFichaClient({
                           </div>
                         </div>
 
-                        {/* PANTALÓN */}
-                        {sp.slug === 'pantalon' && (
-                          <>
-                            <div>
-                              <Label className="text-white/60 text-xs">Vueltas</Label>
-                              <div className="flex flex-wrap gap-3 mt-2">
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                  <input type="radio" name={`vueltas-${key}`} checked={cfg.vueltas === 'sin_vueltas'} onChange={() => setField('vueltas', 'sin_vueltas')} className="text-[#c9a96e]" />
-                                  <span className="text-white/80 text-sm">Sin vueltas</span>
-                                </label>
-                                <span className="text-white/40 text-sm self-center">Con vuelta:</span>
-                                {['3.5', '4', '4.5', '5'].map((v) => (
-                                  <label key={v} className="flex items-center gap-2 cursor-pointer">
-                                    <input type="radio" name={`vueltas-${key}`} checked={cfg.vueltas === v} onChange={() => setField('vueltas', v)} className="text-[#c9a96e]" />
-                                    <span className="text-white/80 text-sm">{v} cm</span>
-                                  </label>
-                                ))}
-                              </div>
-                            </div>
-                            <div>
-                              <Label className="text-white/60 text-xs">Bragueta</Label>
-                              <div className="flex gap-3 mt-2">
-                                {[{ v: 'cremallera', label: 'Br. cremallera' }, { v: 'botones', label: 'Br. botones' }].map(({ v, label }) => (
-                                  <label key={v} className="flex items-center gap-2 cursor-pointer">
-                                    <input type="radio" name={`bragueta-${key}`} checked={cfg.bragueta === v} onChange={() => setField('bragueta', v)} className="text-[#c9a96e]" />
-                                    <span className="text-white/80 text-sm">{label}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            </div>
-                            <div>
-                              <Label className="text-white/60 text-xs">Pliegues</Label>
-                              <div className="flex items-center gap-3 mt-2">
-                                {[{ v: 'sin_pliegues', label: 'Sin pliegues' }, { v: '1_pliegue', label: '1 pliegue' }, { v: '2_pliegues', label: '2 pliegues' }].map(({ v, label }) => (
-                                  <label key={v} className="flex items-center gap-2 cursor-pointer">
-                                    <input type="radio" name={`pliegues-${key}`} checked={cfg.pliegues === v} onChange={() => setField('pliegues', v)} className="text-[#c9a96e]" />
-                                    <span className="text-white/80 text-sm">{label}</span>
-                                  </label>
-                                ))}
-                                <Input className="h-7 w-16 bg-[#0d1629] border-[#c9a96e]/20 text-white text-sm px-2" value={String(cfg.plieguesVal ?? '')} onChange={(e) => setField('plieguesVal', e.target.value)} placeholder="cm" />
-                              </div>
-                            </div>
-                            <div>
-                              <Label className="text-white/60 text-xs">Bolsillos y detalles</Label>
-                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">
-                                {[
-                                  { k: 'p7pasadores', label: '7 pasadores' }, { k: 'p5bolsillos', label: '5 bolsillos' },
-                                  { k: 'pRefForro', label: 'Ref. forro' }, { k: 'pRefExtTela', label: 'Ref. ext. tela' },
-                                  { k: 'pSinBolTrasero', label: 'Sin bol. trasero' }, { k: 'p1BolTrasero', label: '1 bol. trasero' },
-                                  { k: 'p2BolTraseros', label: '2 bol. traseros' }, { k: 'pBolCostura', label: 'Bol. costura' },
-                                  { k: 'pBolFrances', label: 'Bol. francés' }, { k: 'pBolVivo', label: 'Bol. vivo' }, { k: 'pBolOreja', label: 'Bol. oreja' },
-                                  { k: 'pCenidores', label: 'Ceñidores costados' }, { k: 'pBotonesTirantes', label: 'Botones tirantes' },
-                                  { k: 'pVEnTrasero', label: 'V en trasero' },
-                                ].map(({ k, label }) => (
-                                  <label key={k} className="flex items-center gap-2 cursor-pointer">
-                                    <input type="checkbox" checked={!!cfg[k]} onChange={(e) => setField(k, e.target.checked)} className="text-[#c9a96e]" />
-                                    <span className="text-white/80 text-sm">{label}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            </div>
-                            <div>
-                              <Label className="text-white/60 text-xs">Pretina</Label>
-                              <div className="space-y-2 mt-2">
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                  <input type="checkbox" checked={!!cfg.pretinaCorrida} onChange={(e) => setField('pretinaCorrida', e.target.checked)} className="text-[#c9a96e]" />
-                                  <span className="text-white/80 text-sm">Pretina corrida a 13 y un pasador a 7 en pico</span>
-                                </label>
-                                <div className="flex items-center gap-3">
-                                  <label className="flex items-center gap-2 cursor-pointer">
-                                    <input type="checkbox" checked={!!cfg.pretina2Botones} onChange={(e) => setField('pretina2Botones', e.target.checked)} className="text-[#c9a96e]" />
-                                    <span className="text-white/80 text-sm">Pretina de dos botones en punta</span>
-                                  </label>
-                                  {!!cfg.pretina2Botones && (
-                                    <div className="flex gap-2">
-                                      {['4', '4.5', '5'].map((v) => (
-                                        <label key={v} className="flex items-center gap-1 cursor-pointer">
-                                          <input type="radio" name={`pretinaTamano-${key}`} checked={cfg.pretinaTamano === v} onChange={() => setField('pretinaTamano', v)} className="text-[#c9a96e]" />
-                                          <span className="text-white/80 text-sm">{v} cm</span>
-                                        </label>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                  <input type="checkbox" checked={!!cfg.pretinaReforzadaDelante} onChange={(e) => setField('pretinaReforzadaDelante', e.target.checked)} className="text-[#c9a96e]" />
-                                  <span className="text-white/80 text-sm">Pretina reforzada por delante</span>
-                                </label>
-                              </div>
-                            </div>
-                            <div>
-                              <Label className="text-white/60 text-xs">Configuración</Label>
-                              <div className="flex flex-wrap gap-3 mt-2">
-                                {[
-                                  { k: 'confFM', label: 'FM' }, { k: 'confFT', label: 'FT' },
-                                  { k: 'confPT', label: 'PT' }, { k: 'confRodalTrasero', label: 'Rodal trasero' },
-                                  { k: 'confBajadaDelantero', label: 'Bajada delantero' },
-                                  { k: 'confAlturaTrasero', label: 'Altura trasero' },
-                                  { k: 'confFVSalida', label: 'FV con salida' },
-                                ].map(({ k, label }) => (
-                                  <div key={k} className="flex items-center gap-1.5">
-                                    <span className="text-white/80 text-sm font-medium">{label}</span>
-                                    <Input className="h-7 w-16 bg-[#0d1629] border-[#c9a96e]/20 text-white text-sm px-2" value={String(cfg[k] ?? '')} onChange={(e) => setField(k, e.target.value)} placeholder="—" />
-                                  </div>
-                                ))}
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                  <input type="checkbox" checked={!!cfg.confFormaGemelo} onChange={(e) => setField('confFormaGemelo', e.target.checked)} className="text-[#c9a96e]" />
-                                  <span className="text-white/80 text-sm">Forma gemelo</span>
-                                </label>
-                              </div>
-                            </div>
-                          </>
-                        )}
+                        {sp.slug === 'pantalon' && <FichaPantalonConfig keyId={key} cfg={cfg} setField={setField} />}
 
-                        {/* CHALECO */}
-                        {sp.slug === 'chaleco' && (
-                          <>
-                            <div>
-                              <Label className="text-white/60 text-xs">Corte</Label>
-                              <div className="flex gap-3 mt-2">
-                                {[{ v: 'recto', label: 'Recto' }, { v: 'cruzado', label: 'Cruzado' }].map(({ v, label }) => (
-                                  <label key={v} className="flex items-center gap-2 cursor-pointer">
-                                    <input type="radio" name={`chalecoCorte-${key}`} checked={cfg.chalecoCorte === v} onChange={() => setField('chalecoCorte', v)} className="text-[#c9a96e]" />
-                                    <span className="text-white/80 text-sm">{label}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            </div>
-                            <div>
-                              <Label className="text-white/60 text-xs">Bolsillo</Label>
-                              <div className="flex gap-3 mt-2">
-                                {[{ v: 'cartera', label: 'Bols. cartera' }, { v: 'vivo', label: 'Bolsillo vivo' }].map(({ v, label }) => (
-                                  <label key={v} className="flex items-center gap-2 cursor-pointer">
-                                    <input type="radio" name={`chalecoBolsillo-${key}`} checked={cfg.chalecoBolsillo === v} onChange={() => setField('chalecoBolsillo', v)} className="text-[#c9a96e]" />
-                                    <span className="text-white/80 text-sm">{label}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            </div>
-                            <div>
-                              <Label className="text-white/60 text-xs">Configuración</Label>
-                              <div className="flex flex-wrap gap-3 mt-2">
-                                {[
-                                  { k: 'confF', label: 'F' }, { k: 'confD', label: 'D' },
-                                  { k: 'confFP', label: 'FP' }, { k: 'confFV', label: 'FV' },
-                                  { k: 'confHA', label: 'HA' }, { k: 'confHB', label: 'HB' },
-                                  { k: 'confVD', label: 'VD' },
-                                ].map(({ k, label }) => (
-                                  <div key={k} className="flex items-center gap-1.5">
-                                    <span className="text-white/80 text-sm font-medium">{label}</span>
-                                    <Input className="h-7 w-16 bg-[#0d1629] border-[#c9a96e]/20 text-white text-sm px-2" value={String(cfg[k] ?? '')} onChange={(e) => setField(k, e.target.value)} placeholder="—" />
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          </>
-                        )}
+                        {sp.slug === 'chaleco' && <FichaChalecoConfig keyId={key} cfg={cfg} setField={setField} />}
 
-                        {/* AMERICANA / resto */}
-                        {!['pantalon', 'chaleco'].includes(sp.slug) && (
-                          <>
-                            <div>
-                              <Label className="text-white/60 text-xs">Botones</Label>
-                              <div className="flex flex-wrap gap-3 mt-2">
-                                {[
-                                  { v: '1fila_1', label: '1 Fila 1 botón' }, { v: '1fila_2', label: '1 Fila 2 botones' },
-                                  { v: '1fila_3para2', label: '1 Fila 3 para 2' }, { v: '2filas_6', label: '2 Filas 6 btns 2 adorno' },
-                                ].map(({ v, label }) => (
-                                  <label key={v} className="flex items-center gap-2 cursor-pointer">
-                                    <input type="radio" name={`botones-${key}`} checked={cfg.botones === v} onChange={() => setField('botones', v)} className="text-[#c9a96e]" />
-                                    <span className="text-white/80 text-sm">{label}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            </div>
-                            <div>
-                              <Label className="text-white/60 text-xs">Aberturas</Label>
-                              <div className="flex flex-wrap gap-3 mt-2">
-                                {[{ v: '2aberturas', label: '2 Aberturas' }, { v: '1abertura', label: '1 Abertura' }, { v: 'sin_abertura', label: 'Sin abertura' }].map(({ v, label }) => (
-                                  <label key={v} className="flex items-center gap-2 cursor-pointer">
-                                    <input type="radio" name={`aberturas-${key}`} checked={cfg.aberturas === v} onChange={() => setField('aberturas', v)} className="text-[#c9a96e]" />
-                                    <span className="text-white/80 text-sm">{label}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            </div>
-                            <div>
-                              <Label className="text-white/60 text-xs">Bolsillos</Label>
-                              <div className="flex flex-wrap gap-3 mt-2">
-                                {[
-                                  { v: 'recto', label: 'Bolsillo recto' }, { v: 'inclinado', label: 'Bol. inclinado' },
-                                  { v: 'parche', label: 'Bolsillo parche' }, { v: 'bercheta', label: 'Bol. pecho bercheta' },
-                                  { v: 'bercheta_parche', label: 'Bol. pecho parche bercheta' },
-                                ].map(({ v, label }) => (
-                                  <label key={v} className="flex items-center gap-2 cursor-pointer">
-                                    <input type="radio" name={`bolsilloTipo-${key}`} checked={cfg.bolsilloTipo === v} onChange={() => setField('bolsilloTipo', v)} className="text-[#c9a96e]" />
-                                    <span className="text-white/80 text-sm">{label}</span>
-                                  </label>
-                                ))}
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                  <input type="checkbox" checked={!!cfg.cerrilleraExterior} onChange={(e) => setField('cerrilleraExterior', e.target.checked)} className="text-[#c9a96e]" />
-                                  <span className="text-white/80 text-sm">Cerillera exterior</span>
-                                </label>
-                              </div>
-                              <div className="grid grid-cols-2 gap-3 mt-2">
-                                <div>
-                                  <Label className="text-white/60 text-xs">Primer botón</Label>
-                                  <Input className="mt-1 h-10 bg-[#0d1629] border-[#c9a96e]/20 text-white" value={String(cfg.primerBoton ?? '')} onChange={(e) => setField('primerBoton', e.target.value)} placeholder="cm" />
-                                </div>
-                              </div>
-                            </div>
-                            <div>
-                              <Label className="text-white/60 text-xs">Solapa</Label>
-                              <div className="flex flex-wrap gap-3 mt-2">
-                                {[{ v: 'normal', label: 'Solapa normal' }, { v: 'pico', label: 'Solapa pico' }, { v: 'chal', label: 'Solapa chal' }].map(({ v, label }) => (
-                                  <label key={v} className="flex items-center gap-2 cursor-pointer">
-                                    <input type="radio" name={`solapa-${key}`} checked={cfg.solapa === v} onChange={() => setField('solapa', v)} className="text-[#c9a96e]" />
-                                    <span className="text-white/80 text-sm">{label}</span>
-                                  </label>
-                                ))}
-                                <div className="flex items-center gap-2">
-                                  <Label className="text-white/60 text-xs">Ancho solapa</Label>
-                                  <Input className="w-20 h-8 bg-[#0d1629] border-[#c9a96e]/20 text-white text-sm" value={String(cfg.anchoSolapa ?? '')} onChange={(e) => setField('anchoSolapa', e.target.value)} placeholder="cm" />
-                                </div>
-                              </div>
-                            </div>
-                            <div>
-                              <Label className="text-white/60 text-xs">Manga</Label>
-                              <div className="flex flex-wrap gap-3 mt-2">
-                                {[
-                                  { v: 'napolit', label: 'Manga napolitana' }, { v: 'reborde', label: 'Manga reborde' },
-                                  { v: 'sin_reborde', label: 'Manga sin reborde' }, { v: 'con_reborde', label: 'Manga con reborde' },
-                                ].map(({ v, label }) => (
-                                  <label key={v} className="flex items-center gap-2 cursor-pointer">
-                                    <input type="radio" name={`manga-${key}`} checked={cfg.manga === v} onChange={() => setField('manga', v)} className="text-[#c9a96e]" />
-                                    <span className="text-white/80 text-sm">{label}</span>
-                                  </label>
-                                ))}
-                              </div>
-                              <div className="grid grid-cols-2 gap-3 mt-2">
-                                <div>
-                                  <Label className="text-white/60 text-xs">Ojales abiertos</Label>
-                                  <Input className="mt-1 h-10 bg-[#0d1629] border-[#c9a96e]/20 text-white" value={String(cfg.ojalesAbiertos ?? '')} onChange={(e) => setField('ojalesAbiertos', e.target.value)} placeholder="nº" />
-                                </div>
-                                <div>
-                                  <Label className="text-white/60 text-xs">Ojales cerrados</Label>
-                                  <Input className="mt-1 h-10 bg-[#0d1629] border-[#c9a96e]/20 text-white" value={String(cfg.ojalesCerrados ?? '')} onChange={(e) => setField('ojalesCerrados', e.target.value)} placeholder="nº" />
-                                </div>
-                              </div>
-                            </div>
-                            <div>
-                              <Label className="text-white/60 text-xs">Hombros</Label>
-                              <div className="flex flex-wrap gap-3 mt-2">
-                                {[
-                                  { k: 'medidaHombro', label: 'Medida hombro' }, { k: 'sinHombreras', label: 'Sin hombreras' },
-                                  { k: 'picado34', label: 'Picado 3/4 todo' }, { k: 'sinHombrera', label: 'Sin hombrera' },
-                                  { k: 'hombrerasTraseras', label: 'Hombreras traseras' }, { k: 'pocaHombrera', label: 'Poca hombrera' },
-                                ].map(({ k, label }) => (
-                                  <label key={k} className="flex items-center gap-2 cursor-pointer">
-                                    <input type="checkbox" checked={!!cfg[k]} onChange={(e) => setField(k, e.target.checked)} className="text-[#c9a96e]" />
-                                    <span className="text-white/80 text-sm">{label}</span>
-                                  </label>
-                                ))}
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                  <input type="checkbox" checked={!!cfg.hTerminado} onChange={(e) => setField('hTerminado', e.target.checked)} className="text-[#c9a96e]" />
-                                  <span className="text-white/80 text-sm">H. terminado</span>
-                                  <Input className="h-7 w-16 bg-[#0d1629] border-[#c9a96e]/20 text-white text-sm px-2" value={String(cfg.hTerminadoVal ?? '')} onChange={(e) => setField('hTerminadoVal', e.target.value)} placeholder="cm" />
-                                </label>
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                  <input type="checkbox" checked={!!cfg.escote} onChange={(e) => setField('escote', e.target.checked)} className="text-[#c9a96e]" />
-                                  <span className="text-white/80 text-sm">Escote</span>
-                                  <Input className="h-7 w-16 bg-[#0d1629] border-[#c9a96e]/20 text-white text-sm px-2" value={String(cfg.escoteVal ?? '')} onChange={(e) => setField('escoteVal', e.target.value)} placeholder="cm" />
-                                </label>
-                              </div>
-                            </div>
-                            <div>
-                              <Label className="text-white/60 text-xs">Forro</Label>
-                              <div className="flex flex-wrap gap-3 mt-2">
-                                {[{ v: 'sin_forro', label: 'Sin forro' }, { v: 'medio', label: 'Medio forro' }, { v: 'completo', label: 'Forro completo' }].map(({ v, label }) => (
-                                  <label key={v} className="flex items-center gap-2 cursor-pointer">
-                                    <input type="radio" name={`forro-${key}`} checked={cfg.forro === v} onChange={() => setField('forro', v)} className="text-[#c9a96e]" />
-                                    <span className="text-white/80 text-sm">{label}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            </div>
-                            <div>
-                              <Label className="text-white/60 text-xs">Configuración</Label>
-                              <div className="flex flex-wrap gap-3 mt-2">
-                                {[
-                                  { k: 'confF', label: 'F' }, { k: 'confD', label: 'D' },
-                                  { k: 'confFP', label: 'FP' }, { k: 'confFV', label: 'FV' },
-                                  { k: 'confHA', label: 'HA' }, { k: 'confHB', label: 'HB' },
-                                  { k: 'confVD', label: 'VD' },
-                                ].map(({ k, label }) => (
-                                  <div key={k} className="flex items-center gap-1.5">
-                                    <span className="text-white/80 text-sm font-medium">{label}</span>
-                                    <Input className="h-7 w-16 bg-[#0d1629] border-[#c9a96e]/20 text-white text-sm px-2" value={String(cfg[k] ?? '')} onChange={(e) => setField(k, e.target.value)} placeholder="—" />
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          </>
-                        )}
+                        {!['pantalon', 'chaleco'].includes(sp.slug) && <FichaAmericanaConfig keyId={key} cfg={cfg} setField={setField} />}
 
                         {/* Características por prenda */}
                         <div className="mt-4">
