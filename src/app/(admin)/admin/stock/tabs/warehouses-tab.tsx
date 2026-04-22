@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
+import Image from 'next/image'
 import { listPhysicalWarehouses, listStockByWarehouse } from '@/actions/products'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -384,7 +385,7 @@ export function WarehousesTab({ outOfStockFilter = false, onClearOutOfStockFilte
                 >
                   <TableCell>
                     {r.main_image_url ? (
-                      <img src={r.main_image_url} alt="" className="h-9 w-9 rounded object-cover" />
+                      <Image src={r.main_image_url} alt="" width={36} height={36} className="h-9 w-9 rounded object-cover" />
                     ) : (
                       <div className="h-9 w-9 rounded bg-muted flex items-center justify-center">
                         <ImageIcon className="h-3 w-3 text-muted-foreground" />

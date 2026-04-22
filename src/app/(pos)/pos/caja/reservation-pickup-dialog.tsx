@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import Image from 'next/image'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -356,7 +357,7 @@ export function ReservationPickupDialog({
                     className="w-full flex items-start gap-3 px-3 py-3 text-left border-b last:border-b-0 hover:bg-slate-50 transition-colors"
                   >
                     {firstLineImage ? (
-                      <img src={firstLineImage} alt="" className="w-10 h-10 rounded object-cover bg-slate-100 shrink-0" />
+                      <Image src={firstLineImage} alt="" width={40} height={40} className="w-10 h-10 rounded object-cover bg-slate-100 shrink-0" />
                     ) : (
                       <div className="w-10 h-10 rounded bg-slate-100 flex items-center justify-center shrink-0">
                         <ImageOff className="h-4 w-4 text-slate-300" />
@@ -427,7 +428,7 @@ export function ReservationPickupDialog({
                         >
                           <Checkbox checked={checked} onCheckedChange={() => toggleLine(l.id)} />
                           {l.product_variant?.product?.main_image_url ? (
-                            <img src={l.product_variant.product.main_image_url} alt="" className="w-10 h-10 rounded object-cover bg-slate-100 shrink-0" />
+                            <Image src={l.product_variant.product.main_image_url} alt="" width={40} height={40} className="w-10 h-10 rounded object-cover bg-slate-100 shrink-0" />
                           ) : (
                             <div className="w-10 h-10 rounded bg-slate-100 flex items-center justify-center shrink-0">
                               <ImageOff className="h-4 w-4 text-slate-300" />

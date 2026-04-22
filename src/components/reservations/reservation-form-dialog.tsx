@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import Image from 'next/image'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -490,7 +491,7 @@ export function ReservationFormDialog({
                   return (
                     <div key={l.key} className="flex items-start gap-3 px-3 py-2">
                       {l.variant.products?.main_image_url ? (
-                        <img src={l.variant.products.main_image_url} alt="" className="w-12 h-12 rounded object-cover bg-slate-100 shrink-0" />
+                        <Image src={l.variant.products.main_image_url} alt="" width={48} height={48} className="w-12 h-12 rounded object-cover bg-slate-100 shrink-0" />
                       ) : (
                         <div className="w-12 h-12 rounded bg-slate-100 flex items-center justify-center shrink-0">
                           <ImageOff className="h-4 w-4 text-slate-300" />
@@ -571,7 +572,7 @@ export function ReservationFormDialog({
                         onClick={() => addLine(v)}
                       >
                         {v.products?.main_image_url ? (
-                          <img src={v.products.main_image_url} alt="" className="w-10 h-10 rounded object-cover bg-slate-100 shrink-0" />
+                          <Image src={v.products.main_image_url} alt="" width={40} height={40} className="w-10 h-10 rounded object-cover bg-slate-100 shrink-0" />
                         ) : (
                           <div className="w-10 h-10 rounded bg-slate-100 flex items-center justify-center shrink-0">
                             <ImageOff className="h-4 w-4 text-slate-300" />

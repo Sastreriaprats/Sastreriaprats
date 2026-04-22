@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -8,12 +8,12 @@ import { Store, TrendingUp, Package, AlertTriangle, Loader2, RefreshCw, ArrowRig
 import { getStoresWithStats, type StoreStats } from '@/actions/dashboard'
 import { formatCurrency } from '@/lib/utils'
 
-export function TiendasContent() {
+export function TiendasContent({ initialStores = [] }: { initialStores?: StoreStats[] }) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const tab = searchParams.get('tab') || 'resumen'
-  const [stores, setStores] = useState<StoreStats[]>([])
-  const [loading, setLoading] = useState(true)
+  const [stores, setStores] = useState<StoreStats[]>(initialStores)
+  const [loading, setLoading] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -22,9 +22,7 @@ export function TiendasContent() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { load() }, [load])
-
-  if (loading) {
+  if (loading && stores.length === 0) {
     return (
       <div className="flex h-[50vh] items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-prats-navy" />

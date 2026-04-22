@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import Image from 'next/image'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -441,7 +442,7 @@ export function ProductsTab() {
                   </TableCell>
                   <TableCell>
                     {p.main_image_url ? (
-                      <img src={p.main_image_url} alt="" className="h-10 w-10 rounded object-cover" />
+                      <Image src={p.main_image_url} alt="" width={40} height={40} className="h-10 w-10 rounded object-cover" />
                     ) : (
                       <div className="h-10 w-10 rounded bg-muted flex items-center justify-center"><ImageIcon className="h-4 w-4 text-muted-foreground" /></div>
                     )}

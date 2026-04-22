@@ -3,6 +3,7 @@
 import { useRef, useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import Image from 'next/image'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -1164,7 +1165,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                           {line.product_id && line.description ? (
                             <div className="flex items-center gap-3">
                               {line.image_url ? (
-                                <img src={line.image_url} alt="" className="w-16 h-16 rounded-lg object-cover shrink-0 border border-gray-200" />
+                                <Image src={line.image_url} alt="" width={64} height={64} className="w-16 h-16 rounded-lg object-cover shrink-0 border border-gray-200" />
                               ) : (
                                 <div className="w-16 h-16 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 border border-gray-200">
                                   <Package className="w-8 h-8 text-gray-300" />
@@ -1202,7 +1203,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                                               await loadProductVariants(p.id, line.tempId)
                                             }}>
                                             {img ? (
-                                              <img src={img} alt="" className="w-10 h-10 rounded object-cover shrink-0" />
+                                              <Image src={img} alt="" width={40} height={40} className="w-10 h-10 rounded object-cover shrink-0" />
                                             ) : (
                                               <div className="w-10 h-10 rounded bg-gray-100 flex items-center justify-center shrink-0">
                                                 <Package className="w-5 h-5 text-gray-400" />
