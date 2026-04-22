@@ -5,6 +5,10 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
 import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { Label } from '@/components/ui/label'
@@ -70,6 +74,7 @@ export function PaymentHistory({
   const [dialogOpen, setDialogOpen] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [cashSessionOpen, setCashSessionOpen] = useState<boolean | null>(null)
 
   // Form state
@@ -173,8 +178,9 @@ export function PaymentHistory({
     }
   }
 
-  async function handleDelete(paymentId: string) {
-    if (entityType !== 'tailoring_order') return
+  async function confirmDelete() {
+    if (!deleteTargetId || entityType !== 'tailoring_order') return
+    const paymentId = deleteTargetId
     setDeletingId(paymentId)
     try {
       const result = await deleteOrderPayment({ payment_id: paymentId, tailoring_order_id: entityId })
@@ -190,6 +196,7 @@ export function PaymentHistory({
       toast.error('Error inesperado al eliminar')
     } finally {
       setDeletingId(null)
+      setDeleteTargetId(null)
     }
   }
 
@@ -325,7 +332,7 @@ export function PaymentHistory({
                         size="icon"
                         className="h-7 w-7 text-destructive hover:text-destructive"
                         disabled={deletingId === p.id}
-                        onClick={() => handleDelete(p.id)}
+                        onClick={() => setDeleteTargetId(p.id)}
                       >
                         {deletingId === p.id
                           ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -467,6 +474,27 @@ export function PaymentHistory({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deleteTargetId} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar pago?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se eliminará este pago del pedido. Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={!!deletingId}>No, volver</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={!!deletingId}
+              onClick={confirmDelete}
+            >
+              Sí, eliminar pago
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

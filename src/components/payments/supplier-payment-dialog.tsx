@@ -7,6 +7,10 @@ import { Progress } from '@/components/ui/progress'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
 import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { Label } from '@/components/ui/label'
@@ -64,6 +68,7 @@ export function SupplierPaymentDialog({ open, onOpenChange, invoice, onChanged }
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
 
   const [formDate, setFormDate] = useState(today())
   const [formMethod, setFormMethod] = useState<SupplierPaymentMethod>('transfer')
@@ -133,11 +138,13 @@ export function SupplierPaymentDialog({ open, onOpenChange, invoice, onChanged }
     }
   }
 
-  async function handleDelete(id: string) {
-    if (!window.confirm('¿Eliminar este pago? Se recalculará el estado de la factura.')) return
+  async function confirmDelete() {
+    if (!deleteTargetId) return
+    const id = deleteTargetId
     setDeletingId(id)
     const r = await deleteSupplierInvoicePayment({ id })
     setDeletingId(null)
+    setDeleteTargetId(null)
     if (r.success) {
       toast.success('Pago eliminado')
       await loadPayments()
@@ -312,7 +319,7 @@ export function SupplierPaymentDialog({ open, onOpenChange, invoice, onChanged }
                               size="icon"
                               className="h-7 w-7 text-destructive hover:text-destructive"
                               disabled={deletingId === p.id}
-                              onClick={() => handleDelete(p.id)}
+                              onClick={() => setDeleteTargetId(p.id)}
                             >
                               {deletingId === p.id
                                 ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -333,6 +340,27 @@ export function SupplierPaymentDialog({ open, onOpenChange, invoice, onChanged }
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cerrar</Button>
         </DialogFooter>
       </DialogContent>
+
+      <AlertDialog open={!!deleteTargetId} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar pago?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se eliminará este pago registrado. Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={!!deletingId}>No, volver</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={!!deletingId}
+              onClick={confirmDelete}
+            >
+              Sí, eliminar pago
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   )
 }

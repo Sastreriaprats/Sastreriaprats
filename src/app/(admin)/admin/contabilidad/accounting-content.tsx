@@ -11,6 +11,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -1779,6 +1783,8 @@ function MovimientosTab() {
   const [saving, setSaving] = useState(false)
   const [editRow, setEditRow] = useState<{ id: string; total: number; payment_method: string } | null>(null)
   const [editSaving, setEditSaving] = useState(false)
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
+  const [deletingTxn, setDeletingTxn] = useState(false)
   const [form, setForm] = useState({
     type: 'expense' as 'income' | 'expense',
     date: new Date().toISOString().split('T')[0],
@@ -1845,9 +1851,12 @@ function MovimientosTab() {
     setSaving(false)
   }
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('¿Eliminar este movimiento?')) return
-    const r = await deleteManualTransaction({ id })
+  const confirmDelete = async () => {
+    if (!deleteTargetId) return
+    setDeletingTxn(true)
+    const r = await deleteManualTransaction({ id: deleteTargetId })
+    setDeletingTxn(false)
+    setDeleteTargetId(null)
     if (r.success) { toast.success('Movimiento eliminado'); load() }
     else toast.error('Error al eliminar')
   }
@@ -1994,7 +2003,7 @@ function MovimientosTab() {
                             >
                               <Pencil className="h-3.5 w-3.5" />
                             </Button>
-                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleDelete(r.id)}>
+                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setDeleteTargetId(r.id)}>
                               <Trash2 className="h-3.5 w-3.5 text-red-500" />
                             </Button>
                           </>
@@ -2185,6 +2194,27 @@ function MovimientosTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deleteTargetId} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar cobro?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se eliminará este cobro de la contabilidad. Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingTxn}>No, volver</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deletingTxn}
+              onClick={confirmDelete}
+            >
+              Sí, eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

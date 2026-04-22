@@ -25,6 +25,10 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -153,6 +157,7 @@ export function SupplierInvoicesContent() {
   const [paymentInvoice, setPaymentInvoice] = useState<SupplierPaymentDialogInvoice | null>(null)
   const [paidMap, setPaidMap] = useState<Record<string, number>>({})
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<ApSupplierInvoiceRow | null>(null)
 
   const [form, setForm] = useState({
     supplier_id: '',
@@ -500,12 +505,13 @@ export function SupplierInvoicesContent() {
     setPaymentDialogOpen(true)
   }
 
-  const handleDelete = async (row: ApSupplierInvoiceRow) => {
-    const label = `${row.supplier_name} · ${row.invoice_number}`
-    if (!window.confirm(`¿Eliminar la factura ${label}?\n\nEsta acción no se puede deshacer.`)) return
-    setDeletingId(row.id)
-    const r = await deleteSupplierInvoiceAction({ id: row.id })
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
+    const id = deleteTarget.id
+    setDeletingId(id)
+    const r = await deleteSupplierInvoiceAction({ id })
     setDeletingId(null)
+    setDeleteTarget(null)
     if (r.success) {
       toast.success('Factura eliminada')
       loadList()
@@ -735,7 +741,7 @@ export function SupplierInvoicesContent() {
                             size="sm"
                             variant="ghost"
                             className="h-8 text-destructive hover:text-destructive"
-                            onClick={() => handleDelete(row)}
+                            onClick={() => setDeleteTarget(row)}
                             disabled={deletingId === row.id}
                             title="Eliminar factura"
                           >
@@ -1108,6 +1114,29 @@ export function SupplierInvoicesContent() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar factura de proveedor?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget
+                ? `Se eliminará la factura ${deleteTarget.supplier_name} · ${deleteTarget.invoice_number} y sus datos asociados. Esta acción no se puede deshacer.`
+                : 'Se eliminará esta factura y sus datos asociados. Esta acción no se puede deshacer.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={!!deletingId}>No, volver</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={!!deletingId}
+              onClick={confirmDelete}
+            >
+              Sí, eliminar factura
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
