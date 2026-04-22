@@ -17,20 +17,19 @@ const REQUIRED_ACCOUNTS: Record<string, { name: string; level: number; account_t
 type AnyClient = any
 
 async function ensureChartAccounts(db: AnyClient) {
-  for (const [code, { name, level, account_type }] of Object.entries(REQUIRED_ACCOUNTS)) {
-    await db.from('chart_of_accounts').upsert(
-      {
-        account_code: code,
-        name,
-        level,
-        account_type,
-        normal_balance: ['asset', 'expense'].includes(account_type) ? 'debit' : 'credit',
-        is_detail: true,
-        is_active: true,
-      },
-      { onConflict: 'account_code', ignoreDuplicates: true }
-    )
-  }
+  const rows = Object.entries(REQUIRED_ACCOUNTS).map(([code, { name, level, account_type }]) => ({
+    account_code: code,
+    name,
+    level,
+    account_type,
+    normal_balance: ['asset', 'expense'].includes(account_type) ? 'debit' : 'credit',
+    is_detail: true,
+    is_active: true,
+  }))
+  await db.from('chart_of_accounts').upsert(rows, {
+    onConflict: 'account_code',
+    ignoreDuplicates: true,
+  })
 }
 
 async function getNextEntryNumber(db: AnyClient, fiscalYear: number): Promise<number> {

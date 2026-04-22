@@ -1,6 +1,6 @@
 'use server'
 
-import { protectedAction } from '@/lib/server/action-wrapper'
+import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { queryList, queryById, getNextNumber } from '@/lib/server/query-helpers'
 import { createProductSchema, updateProductSchema, createVariantSchema, updateVariantSchema } from '@/lib/validations/products'
 import { sortBySize } from '@/lib/utils/sort-sizes'
@@ -94,7 +94,7 @@ export const getProductVariantsById = protectedAction<
   }
 )
 
-async function generateDeliveryNoteNumberSafe(adminClient: any): Promise<string> {
+async function generateDeliveryNoteNumberSafe(adminClient: AdminClient): Promise<string> {
   try {
     const { data, error } = await adminClient.rpc('generate_delivery_note_number')
     if (!error && typeof data === 'string' && data.trim()) return data

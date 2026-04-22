@@ -1,6 +1,6 @@
 'use server'
 
-import { protectedAction } from '@/lib/server/action-wrapper'
+import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { revalidatePath } from 'next/cache'
 import { notifyReservationStockAvailable } from '@/lib/notifications/create-notification'
@@ -13,7 +13,7 @@ function toNumber(value: unknown): number {
 }
 
 async function pickWarehouseForDeliveryReceipt(
-  adminClient: any,
+  adminClient: AdminClient,
   hints: { destination_warehouse_id?: string | null; destination_store_id?: string | null; store_id?: string | null },
 ): Promise<string | null> {
   if (hints.destination_warehouse_id) {
@@ -46,7 +46,7 @@ async function pickWarehouseForDeliveryReceipt(
   return data?.id ? String(data.id) : null
 }
 
-async function pickVariantForDeliveryProduct(adminClient: any, productId: string): Promise<string | null> {
+async function pickVariantForDeliveryProduct(adminClient: AdminClient, productId: string): Promise<string | null> {
   const def = await adminClient
     .from('product_variants')
     .select('id')
@@ -108,7 +108,7 @@ type SupplierDeliveryNoteInput = {
   lines?: SupplierDeliveryNoteLineInput[]
 }
 
-async function getNextDeliveryNoteNumber(adminClient: any): Promise<string> {
+async function getNextDeliveryNoteNumber(adminClient: AdminClient): Promise<string> {
   const { data, error } = await adminClient.rpc('generate_delivery_note_number')
   if (!error && typeof data === 'string' && data.trim()) return data
   const year = new Date().getFullYear()

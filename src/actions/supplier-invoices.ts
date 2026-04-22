@@ -1,6 +1,6 @@
 'use server'
 
-import { protectedAction } from '@/lib/server/action-wrapper'
+import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 
 const PERMISSION = 'supplier_invoices.manage'
@@ -147,7 +147,7 @@ function buildInstallments(
 }
 
 async function replaceInvoiceInstallments(
-  adminClient: any,
+  adminClient: AdminClient,
   supplierInvoiceId: string,
   installments: InstallmentSpec[],
 ): Promise<string | null> {
@@ -432,7 +432,7 @@ export const getSupplierInvoiceDeliveryNoteIds = protectedAction<string, string[
 )
 
 async function resolveSupplierDefaults(
-  adminClient: any,
+  adminClient: AdminClient,
   supplierId: string | null | undefined,
 ): Promise<{
   supplier_name: string
@@ -469,7 +469,7 @@ async function resolveSupplierDefaults(
 }
 
 async function validateDeliveryNoteLink(
-  adminClient: any,
+  adminClient: AdminClient,
   deliveryNoteIds: string[],
   supplierId: string,
   excludeInvoiceId: string | null,

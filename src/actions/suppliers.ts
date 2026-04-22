@@ -1,6 +1,6 @@
 'use server'
 
-import { protectedAction } from '@/lib/server/action-wrapper'
+import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { queryList, queryById, getNextNumber } from '@/lib/server/query-helpers'
 import { createSupplierSchema, updateSupplierSchema } from '@/lib/validations/suppliers'
 import { success, failure } from '@/lib/errors'
@@ -87,7 +87,7 @@ type SupplierTotals = { total_debt: number; total_paid: number }
 const DEBT_STATUSES = new Set(['pendiente', 'vencida', 'parcial'])
 
 async function computeSupplierTotals(
-  adminClient: any,
+  adminClient: AdminClient,
   suppliers: Array<{ id: string; nif_cif?: string | null }>,
 ): Promise<Map<string, SupplierTotals>> {
   const totals = new Map<string, SupplierTotals>()
@@ -291,7 +291,7 @@ function toNumber(value: unknown): number {
   return Number.isFinite(n) ? n : 0
 }
 
-async function pickWarehouseForReceipt(adminClient: any, order: any) {
+async function pickWarehouseForReceipt(adminClient: AdminClient, order: any) {
   if (order?.destination_warehouse_id) {
     const { data: destinationWarehouse } = await adminClient
       .from('warehouses')
@@ -323,7 +323,7 @@ async function pickWarehouseForReceipt(adminClient: any, order: any) {
   return (fallbackWarehouse?.id as string | undefined) ?? null
 }
 
-async function pickVariantForProduct(adminClient: any, productId: string): Promise<string | null> {
+async function pickVariantForProduct(adminClient: AdminClient, productId: string): Promise<string | null> {
   const withDefault = await adminClient
     .from('product_variants')
     .select('id')

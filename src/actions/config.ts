@@ -412,7 +412,7 @@ export async function updateRolePermissionsAction(
 // SYSTEM CONFIG
 // ==========================================
 
-export async function updateSystemConfigAction(key: string, value: any) {
+export async function updateSystemConfigAction(key: string, value: unknown) {
   try {
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()

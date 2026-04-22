@@ -13,6 +13,8 @@ export interface ActionContext {
   adminClient: ReturnType<typeof createAdminClient>
 }
 
+export type AdminClient = ActionContext['adminClient']
+
 interface ActionOptions {
   /** Un permiso o lista de permisos (cualquiera de ellos basta). */
   permission?: string | string[]
