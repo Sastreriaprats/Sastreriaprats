@@ -1428,12 +1428,12 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
                     <SelectValue placeholder="Selecciona el vendedor" />
                   </SelectTrigger>
                   <SelectContent>
-                    {posEmployees.length === 0 && profile?.id && (
-                      <SelectItem value={profile.id}>{profile.fullName ?? 'Yo'}</SelectItem>
-                    )}
                     {posEmployees.map((emp) => (
                       <SelectItem key={emp.id} value={emp.id}>{emp.full_name}</SelectItem>
                     ))}
+                    {profile?.id && !posEmployees.some((e) => e.id === profile.id) && (
+                      <SelectItem value={profile.id}>{profile.fullName ?? 'Yo'}</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
               )}
