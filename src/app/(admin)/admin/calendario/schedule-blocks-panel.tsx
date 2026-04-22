@@ -13,6 +13,10 @@ import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { listScheduleBlocks, createScheduleBlock, deleteScheduleBlock } from '@/actions/schedule-blocks'
 import type { ScheduleBlock } from '@/actions/schedule-blocks'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 export function ScheduleBlocksPanel() {
   const supabase = useMemo(() => createClient(), [])
@@ -29,6 +33,8 @@ export function ScheduleBlocksPanel() {
   const [endTime, setEndTime] = useState('14:00')
   const [storeId, setStoreId] = useState('all')
   const [submitting, setSubmitting] = useState(false)
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     loadBlocks()
@@ -72,8 +78,12 @@ export function ScheduleBlocksPanel() {
     }
   }
 
-  async function handleDelete(id: string) {
-    const res = await deleteScheduleBlock({ id })
+  async function confirmDelete() {
+    if (!deleteTargetId) return
+    setDeleting(true)
+    const res = await deleteScheduleBlock({ id: deleteTargetId })
+    setDeleting(false)
+    setDeleteTargetId(null)
     if (res.success) {
       toast.success('Bloqueo eliminado')
       loadBlocks()
@@ -220,7 +230,7 @@ export function ScheduleBlocksPanel() {
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50 shrink-0"
-                    onClick={() => handleDelete(b.id)}
+                    onClick={() => setDeleteTargetId(b.id)}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
@@ -230,6 +240,27 @@ export function ScheduleBlocksPanel() {
           </div>
         )}
       </CardContent>
+
+      <AlertDialog open={!!deleteTargetId} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar bloque?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se eliminará este bloque de horario.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>No, volver</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleting}
+              onClick={confirmDelete}
+            >
+              Sí, eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   )
 }

@@ -23,6 +23,10 @@ import {
 } from '@/actions/delivery-notes'
 import { generateDeliveryNotePdf } from '@/lib/delivery-note-pdf'
 import { formatDate } from '@/lib/utils'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 const ownTypeLabels: Record<string, string> = {
   traspaso: 'Traspaso',
@@ -65,6 +69,8 @@ export function AlbaranesContent() {
 
   const [loadingOwn, setLoadingOwn] = useState(false)
   const [loadingSupplier, setLoadingSupplier] = useState(false)
+  const [cancelTargetId, setCancelTargetId] = useState<string | null>(null)
+  const [cancellingId, setCancellingId] = useState<string | null>(null)
 
   const loadOwn = useCallback(async () => {
     setLoadingOwn(true)
@@ -237,7 +243,7 @@ export function AlbaranesContent() {
                           </Button>
                         )}
                         {row.status !== 'anulado' && (
-                          <Button size="sm" variant="outline" className="gap-1" onClick={async () => { const r = await cancelDeliveryNote(row.id); if (r.success) { toast.success('Albarán anulado'); loadOwn() } }}>
+                          <Button size="sm" variant="outline" className="gap-1" onClick={() => setCancelTargetId(row.id)}>
                             <Ban className="h-3 w-3" /> Anular
                           </Button>
                         )}
@@ -354,6 +360,35 @@ export function AlbaranesContent() {
         accept="application/pdf"
         onChange={(e) => onUploadPdf(e.target.files?.[0] || null)}
       />
+
+      <AlertDialog open={!!cancelTargetId} onOpenChange={(open) => !open && setCancelTargetId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Cancelar albarán?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción no se puede deshacer. El albarán quedará cancelado.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={!!cancellingId}>No, volver</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={!!cancellingId}
+              onClick={async () => {
+                if (!cancelTargetId) return
+                setCancellingId(cancelTargetId)
+                const r = await cancelDeliveryNote(cancelTargetId)
+                setCancellingId(null)
+                setCancelTargetId(null)
+                if (r.success) { toast.success('Albarán anulado'); loadOwn() }
+                else toast.error(r.error || 'Error al anular')
+              }}
+            >
+              Sí, cancelar albarán
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

@@ -107,7 +107,7 @@ export function RegisterForm({ redirectTo }: { redirectTo?: string }) {
             política de privacidad
           </Link>{' '}
           y las{' '}
-          <Link href="/condiciones" className="text-prats-navy hover:underline">
+          <Link href="/aviso-legal" className="text-prats-navy hover:underline">
             condiciones de venta
           </Link>
           .
