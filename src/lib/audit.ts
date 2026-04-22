@@ -13,22 +13,49 @@ export interface AuditParams {
 }
 
 /**
- * Registra un evento en audit_log. Operación append-only.
+ * Registra un evento en audit_logs. Operación append-only.
  * Nunca lanza excepción para no interrumpir el flujo principal.
  */
 export async function logAudit(params: AuditParams): Promise<void> {
   try {
     const admin = createAdminClient()
-    await admin.from('audit_log').insert({
-      user_id:     params.userId || null,
-      user_name:   params.userName,
-      action:      params.action,
-      entity_type: params.entityType,
-      entity_id:   params.entityId    || null,
-      entity_label: params.entityLabel || null,
-      changes:     params.changes    || null,
-      metadata:    params.metadata   || null,
-      store_id:    params.storeId    || null,
+
+    // Mapeo al esquema de audit_logs (plural): el diff "changes" se separa en old_data/new_data.
+    const oldData: Record<string, unknown> = {}
+    const newData: Record<string, unknown> = {}
+    for (const [key, change] of Object.entries(params.changes ?? {})) {
+      oldData[key] = change.old
+      newData[key] = change.new
+    }
+
+    // audit_logs guarda user_email y user_full_name; los resolvemos del profile.
+    let userEmail: string | null = null
+    let userFullName: string | null = params.userName ?? null
+    if (params.userId) {
+      const { data: profile } = await admin
+        .from('profiles')
+        .select('email, full_name')
+        .eq('id', params.userId)
+        .maybeSingle()
+      if (profile) {
+        userEmail = (profile.email as string | null) ?? null
+        userFullName = (profile.full_name as string | null) ?? userFullName
+      }
+    }
+
+    await admin.from('audit_logs').insert({
+      user_id:        params.userId || null,
+      user_email:     userEmail,
+      user_full_name: userFullName,
+      action:         params.action,
+      module:         params.entityType,
+      entity_type:    params.entityType,
+      entity_id:      params.entityId ?? null,
+      entity_display: params.entityLabel ?? null,
+      old_data:       Object.keys(oldData).length ? oldData : null,
+      new_data:       Object.keys(newData).length ? newData : null,
+      metadata:       params.metadata ?? null,
+      store_id:       params.storeId ?? null,
     })
   } catch (err) {
     console.error('[audit] Error registrando evento:', err)

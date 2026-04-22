@@ -869,7 +869,7 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
       changed_by_name: ctx.userName,
     })
 
-    // 6. Devolver datos para auditoría (protectedAction registra audit_log)
+    // 6. Devolver datos para auditoría (protectedAction registra audit_logs)
     return success({
       ...(orderAfter as any),
       auditDescription: `Pedido ${(orderBefore as any).order_number}: ${description}`,
