@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Loader2, Search, Bookmark, Clock, Check, ChevronLeft, ShoppingCart,
   Banknote, CreditCard, Smartphone, ArrowRightLeft, Euro, ImageOff,
@@ -21,6 +22,7 @@ import type { ReservationPaymentMethod } from '@/lib/validations/reservations'
 
 export interface ReservationTicketLinePayload {
   reservation_id: string
+  reservation_line_id: string
   reservation_number: string
   product_variant_id: string
   description: string
@@ -29,15 +31,11 @@ export interface ReservationTicketLinePayload {
   color: string | null
   image_url: string | null
   quantity: number
-  /** Unit price = pending / quantity */
   unit_price: number
   tax_rate: number
   cost_price: number
-  /** Precio total de la reserva (informativo). */
   reservation_total: number
-  /** Importe ya pagado en la reserva (no entra en caja hoy). */
   reservation_already_paid: number
-  /** Cliente asociado (para asignarlo al POS si aún no hay cliente). */
   client_id: string | null
   client_name: string | null
 }
@@ -47,21 +45,16 @@ interface ReservationPickupDialogProps {
   onOpenChange: (open: boolean) => void
   storeId?: string | null
   cashSessionId?: string | null
-  /** Llamado cuando el usuario pulsa "Añadir al ticket". El padre debe añadir
-   *  la línea al ticket del POS y cerrar el diálogo. */
-  onAddToTicket?: (payload: ReservationTicketLinePayload) => void
+  onAddToTicket?: (payloads: ReservationTicketLinePayload[]) => void
 }
 
-type ReservationListRow = {
+type ReservationLine = {
   id: string
-  reservation_number: string
-  status: string
+  product_variant_id: string
   quantity: number
-  total: number | string
-  total_paid: number | string
-  payment_status: 'pending' | 'partial' | 'paid'
-  expires_at: string | null
-  client?: { id: string; full_name?: string | null; first_name?: string | null; last_name?: string | null; phone?: string | null; client_code?: string | null } | null
+  unit_price: number | string
+  line_total: number | string
+  status: 'active' | 'pending_stock' | 'fulfilled' | 'cancelled' | 'expired' | string
   product_variant?: {
     id: string
     variant_sku?: string | null
@@ -69,14 +62,22 @@ type ReservationListRow = {
     color?: string | null
     product?: { id?: string; name?: string; sku?: string; main_image_url?: string | null; tax_rate?: number | string | null } | null
   } | null
-  store?: { id: string; name?: string | null; display_name?: string | null } | null
 }
 
-type ReservationDetail = ReservationListRow & {
+type ReservationRow = {
+  id: string
+  reservation_number: string
+  status: string
+  total: number | string
+  total_paid: number | string
+  payment_status: 'pending' | 'partial' | 'paid'
+  expires_at: string | null
   created_at: string
   reason: string | null
   notes: string | null
-  unit_price: number | string
+  client?: { id: string; full_name?: string | null; first_name?: string | null; last_name?: string | null; phone?: string | null; client_code?: string | null } | null
+  store?: { id: string; name?: string | null; display_name?: string | null } | null
+  lines?: ReservationLine[]
   payments?: Array<{ id: string; payment_date: string; payment_method: string; amount: number | string; reference: string | null; created_at: string }>
 }
 
@@ -92,16 +93,22 @@ const STATUS_BADGE: Record<string, { label: string; className: string }> = {
   pending_stock: { label: 'Pendiente stock',  className: 'bg-amber-100 text-amber-800 border-amber-200' },
 }
 
-function clientName(c: ReservationListRow['client']): string {
+function clientName(c: ReservationRow['client']): string {
   if (!c) return '—'
   return c.full_name || [c.first_name, c.last_name].filter(Boolean).join(' ') || c.client_code || '—'
 }
 
-function productName(pv: ReservationListRow['product_variant']): string {
-  if (!pv) return '—'
-  const name = pv.product?.name || '—'
-  const variantBits = [pv.size ? `T.${pv.size}` : null, pv.color].filter(Boolean).join(' · ')
-  return variantBits ? `${name} (${variantBits})` : name
+function lineDescription(ln: ReservationLine): string {
+  const name = ln.product_variant?.product?.name || '—'
+  const bits = [ln.product_variant?.size ? `T.${ln.product_variant.size}` : null, ln.product_variant?.color].filter(Boolean).join(' · ')
+  return bits ? `${name} (${bits})` : name
+}
+
+function summarizeProducts(lines: ReservationLine[] | undefined): string {
+  if (!lines || lines.length === 0) return '—'
+  const active = lines.filter((l) => l.status !== 'cancelled')
+  if (active.length === 1) return lineDescription(active[0])
+  return `${active.length} productos`
 }
 
 export function ReservationPickupDialog({
@@ -113,13 +120,13 @@ export function ReservationPickupDialog({
 }: ReservationPickupDialogProps) {
   const [step, setStep] = useState<'search' | 'detail'>('search')
   const [search, setSearch] = useState('')
-  const [results, setResults] = useState<ReservationListRow[]>([])
+  const [results, setResults] = useState<ReservationRow[]>([])
   const [loading, setLoading] = useState(false)
 
-  const [selected, setSelected] = useState<ReservationDetail | null>(null)
+  const [selected, setSelected] = useState<ReservationRow | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
+  const [selectedLineIds, setSelectedLineIds] = useState<Set<string>>(new Set())
 
-  // Pago parcial a cuenta
   const [partialOpen, setPartialOpen] = useState(false)
   const [partialMethod, setPartialMethod] = useState<ReservationPaymentMethod>('cash')
   const [partialAmount, setPartialAmount] = useState('')
@@ -130,6 +137,7 @@ export function ReservationPickupDialog({
     setSearch('')
     setResults([])
     setSelected(null)
+    setSelectedLineIds(new Set())
     setPartialOpen(false)
     setPartialMethod('cash')
     setPartialAmount('')
@@ -150,7 +158,7 @@ export function ReservationPickupDialog({
         pageSize: 25,
       })
       if (!res.success) { setResults([]); return }
-      const rows = (res.data.data || []) as ReservationListRow[]
+      const rows = (res.data.data || []) as ReservationRow[]
       setResults(rows.filter((r) => r.status === 'active' || r.status === 'pending_stock'))
     } finally {
       setLoading(false)
@@ -163,12 +171,15 @@ export function ReservationPickupDialog({
     return () => clearTimeout(t)
   }, [open, step, search, fetchList])
 
-  const openDetail = async (row: ReservationListRow) => {
+  const openDetail = async (row: ReservationRow) => {
     setLoadingDetail(true)
     const res = await getReservation({ id: row.id })
     setLoadingDetail(false)
     if (!res.success) { toast.error(res.error || 'No se pudo cargar la reserva'); return }
-    setSelected(res.data as ReservationDetail)
+    const detail = res.data as ReservationRow
+    setSelected(detail)
+    const activeLineIds = (detail.lines || []).filter((l) => l.status === 'active').map((l) => l.id)
+    setSelectedLineIds(new Set(activeLineIds))
     setStep('detail')
   }
 
@@ -177,40 +188,82 @@ export function ReservationPickupDialog({
     return Math.max(0, Number(selected.total) - Number(selected.total_paid))
   }, [selected])
 
-  const canAddToTicket = Boolean(selected && selected.status === 'active' && onAddToTicket)
+  const activeLines = useMemo(() => {
+    return (selected?.lines || []).filter((l) => l.status === 'active')
+  }, [selected])
+
+  const pendingLines = useMemo(() => {
+    return (selected?.lines || []).filter((l) => l.status === 'pending_stock')
+  }, [selected])
+
+  const selectedLines = useMemo(() => {
+    return activeLines.filter((l) => selectedLineIds.has(l.id))
+  }, [activeLines, selectedLineIds])
+
+  const canAddToTicket = selected?.status && (selected.status === 'active' || selected.status === 'pending_stock')
+    ? selectedLines.length > 0
+    : false
+
+  const toggleLine = (lineId: string) => {
+    setSelectedLineIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(lineId)) next.delete(lineId)
+      else next.add(lineId)
+      return next
+    })
+  }
+
+  const toggleAll = () => {
+    if (selectedLineIds.size === activeLines.length) {
+      setSelectedLineIds(new Set())
+    } else {
+      setSelectedLineIds(new Set(activeLines.map((l) => l.id)))
+    }
+  }
 
   const handleAddToTicket = () => {
     if (!selected || !onAddToTicket) return
-    if (selected.status !== 'active') {
-      toast.error('Solo se pueden recoger reservas activas (con stock bloqueado)')
+    if (selectedLines.length === 0) {
+      toast.error('Selecciona al menos una línea')
       return
     }
-    const qty = selected.quantity
-    const unitPriceForLine = qty > 0 ? Math.round((pendingAmount / qty) * 100) / 100 : 0
-    const pName = selected.product_variant?.product?.name || '—'
-    const variantBits = [selected.product_variant?.size ? `T.${selected.product_variant.size}` : null, selected.product_variant?.color].filter(Boolean).join(' · ')
-    const description = `${pName}${variantBits ? ' (' + variantBits + ')' : ''} · Reserva ${selected.reservation_number}`
-    const taxRate = Number(selected.product_variant?.product?.tax_rate ?? 21)
 
-    const payload: ReservationTicketLinePayload = {
-      reservation_id: selected.id,
-      reservation_number: selected.reservation_number,
-      product_variant_id: selected.product_variant?.id || '',
-      description,
-      sku: selected.product_variant?.variant_sku || selected.product_variant?.product?.sku || '',
-      size: selected.product_variant?.size ?? null,
-      color: selected.product_variant?.color ?? null,
-      image_url: selected.product_variant?.product?.main_image_url ?? null,
-      quantity: qty,
-      unit_price: unitPriceForLine,
-      tax_rate: Number.isFinite(taxRate) ? taxRate : 21,
-      cost_price: 0,
-      reservation_total: Number(selected.total),
-      reservation_already_paid: Number(selected.total_paid),
-      client_id: selected.client?.id || null,
-      client_name: clientName(selected.client ?? null),
-    }
-    onAddToTicket(payload)
+    const total = Number(selected.total)
+    const paid = Number(selected.total_paid)
+    const selectedLineTotals = selectedLines.reduce((acc, l) => acc + Number(l.line_total), 0)
+    const payloads: ReservationTicketLinePayload[] = selectedLines.map((l) => {
+      const pv = l.product_variant
+      const taxRate = Number(pv?.product?.tax_rate ?? 21)
+      const desc = `${lineDescription(l)} · Reserva ${selected.reservation_number}`
+      const lineTotal = Number(l.line_total)
+      const lineShareOfPending = selectedLineTotals > 0
+        ? (lineTotal / selectedLineTotals) * Math.max(0, total - paid)
+        : 0
+      const unitPriceForLine = l.quantity > 0
+        ? Math.round((lineShareOfPending / l.quantity) * 100) / 100
+        : 0
+      return {
+        reservation_id: selected.id,
+        reservation_line_id: l.id,
+        reservation_number: selected.reservation_number,
+        product_variant_id: l.product_variant_id,
+        description: desc,
+        sku: pv?.variant_sku || pv?.product?.sku || '',
+        size: pv?.size ?? null,
+        color: pv?.color ?? null,
+        image_url: pv?.product?.main_image_url ?? null,
+        quantity: l.quantity,
+        unit_price: unitPriceForLine,
+        tax_rate: Number.isFinite(taxRate) ? taxRate : 21,
+        cost_price: 0,
+        reservation_total: total,
+        reservation_already_paid: paid,
+        client_id: selected.client?.id || null,
+        client_name: clientName(selected.client ?? null),
+      }
+    })
+
+    onAddToTicket(payloads)
     onOpenChange(false)
   }
 
@@ -243,9 +296,8 @@ export function ReservationPickupDialog({
     if (!res.success) { toast.error(res.error || 'No se pudo registrar el pago'); return }
     toast.success(`Pago a cuenta registrado (${formatCurrency(amount)})`)
     setPartialOpen(false)
-    // Refrescar detalle
     const updated = await getReservation({ id: selected.id })
-    if (updated.success) setSelected(updated.data as ReservationDetail)
+    if (updated.success) setSelected(updated.data as ReservationRow)
   }
 
   return (
@@ -274,7 +326,7 @@ export function ReservationPickupDialog({
               <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 className="pl-8"
-                placeholder="Buscar por nº reserva (RSV-...)"
+                placeholder="Buscar por nº reserva, nombre, teléfono o código de cliente..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 autoFocus
@@ -294,6 +346,7 @@ export function ReservationPickupDialog({
                 const paidNum = Number(r.total_paid)
                 const pending = Math.max(0, totalNum - paidNum)
                 const badge = STATUS_BADGE[r.status] || { label: r.status, className: 'bg-slate-100 text-slate-700 border-slate-200' }
+                const firstLineImage = (r.lines || []).find((l) => l.status !== 'cancelled')?.product_variant?.product?.main_image_url
                 return (
                   <button
                     key={r.id}
@@ -302,8 +355,8 @@ export function ReservationPickupDialog({
                     onClick={() => openDetail(r)}
                     className="w-full flex items-start gap-3 px-3 py-3 text-left border-b last:border-b-0 hover:bg-slate-50 transition-colors"
                   >
-                    {r.product_variant?.product?.main_image_url ? (
-                      <img src={r.product_variant.product.main_image_url} alt="" className="w-10 h-10 rounded object-cover bg-slate-100 shrink-0" />
+                    {firstLineImage ? (
+                      <img src={firstLineImage} alt="" className="w-10 h-10 rounded object-cover bg-slate-100 shrink-0" />
                     ) : (
                       <div className="w-10 h-10 rounded bg-slate-100 flex items-center justify-center shrink-0">
                         <ImageOff className="h-4 w-4 text-slate-300" />
@@ -318,7 +371,7 @@ export function ReservationPickupDialog({
                         </Badge>
                       </div>
                       <div className="text-sm truncate">{clientName(r.client)}</div>
-                      <div className="text-xs text-muted-foreground truncate">{productName(r.product_variant)}</div>
+                      <div className="text-xs text-muted-foreground truncate">{summarizeProducts(r.lines)}</div>
                     </div>
                     <div className="text-right shrink-0">
                       <div className="text-sm font-semibold tabular-nums">{formatCurrency(totalNum)}</div>
@@ -348,14 +401,61 @@ export function ReservationPickupDialog({
                   {selected.client?.phone && (
                     <div className="text-xs text-muted-foreground font-mono">{selected.client.phone}</div>
                   )}
-                </div>
-                <div className="rounded-md border px-3 py-3 space-y-1">
-                  <div className="text-xs uppercase tracking-wide text-slate-500">Producto</div>
-                  <div className="text-sm">{productName(selected.product_variant ?? null)}</div>
-                  <div className="text-xs text-muted-foreground">Cantidad: <span className="tabular-nums">{selected.quantity}</span></div>
                   {selected.expires_at && (
                     <div className="text-xs text-muted-foreground">Fecha límite: {formatDate(selected.expires_at)}</div>
                   )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs uppercase tracking-wide text-slate-500">
+                      Productos ({activeLines.length + pendingLines.length})
+                    </Label>
+                    {activeLines.length > 1 && (
+                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={toggleAll}>
+                        {selectedLineIds.size === activeLines.length ? 'Deseleccionar todo' : 'Seleccionar todo'}
+                      </Button>
+                    )}
+                  </div>
+                  <div className="rounded-md border divide-y">
+                    {activeLines.map((l) => {
+                      const checked = selectedLineIds.has(l.id)
+                      return (
+                        <label
+                          key={l.id}
+                          className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-slate-50"
+                        >
+                          <Checkbox checked={checked} onCheckedChange={() => toggleLine(l.id)} />
+                          {l.product_variant?.product?.main_image_url ? (
+                            <img src={l.product_variant.product.main_image_url} alt="" className="w-10 h-10 rounded object-cover bg-slate-100 shrink-0" />
+                          ) : (
+                            <div className="w-10 h-10 rounded bg-slate-100 flex items-center justify-center shrink-0">
+                              <ImageOff className="h-4 w-4 text-slate-300" />
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm truncate">{lineDescription(l)}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {l.quantity} × {formatCurrency(Number(l.unit_price))}
+                            </div>
+                          </div>
+                          <div className="text-sm font-semibold tabular-nums">{formatCurrency(Number(l.line_total))}</div>
+                        </label>
+                      )
+                    })}
+                    {pendingLines.map((l) => (
+                      <div key={l.id} className="flex items-center gap-3 px-3 py-2 bg-amber-50/50">
+                        <Clock className="h-4 w-4 text-amber-700 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm truncate">{lineDescription(l)}</div>
+                          <div className="text-xs text-amber-800">
+                            {l.quantity} × {formatCurrency(Number(l.unit_price))} · Pendiente de stock
+                          </div>
+                        </div>
+                        <div className="text-sm font-semibold tabular-nums">{formatCurrency(Number(l.line_total))}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="rounded-md border bg-slate-50 px-3 py-2 text-sm space-y-1">
@@ -374,13 +474,6 @@ export function ReservationPickupDialog({
                     </span>
                   </div>
                 </div>
-
-                {selected.status === 'pending_stock' && (
-                  <div className="rounded-md border bg-amber-50 border-amber-200 px-3 py-2 text-xs text-amber-800 flex items-center gap-2">
-                    <Clock className="h-4 w-4" />
-                    Reserva pendiente de stock — no se puede entregar aún. Puedes registrar pagos a cuenta.
-                  </div>
-                )}
 
                 {selected.payments && selected.payments.length > 0 && (
                   <div className="rounded-md border px-3 py-2 text-xs space-y-1">
@@ -408,12 +501,10 @@ export function ReservationPickupDialog({
                 onClick={handleAddToTicket}
                 disabled={!canAddToTicket || loadingDetail}
                 className="gap-1 bg-purple-600 hover:bg-purple-700 text-white"
-                title={!canAddToTicket ? 'Sólo reservas activas se pueden añadir al ticket' : undefined}
+                title={!canAddToTicket ? 'Selecciona al menos una línea activa' : undefined}
               >
                 <ShoppingCart className="h-4 w-4" />
-                {pendingAmount > 0
-                  ? `Añadir al ticket (${formatCurrency(pendingAmount)})`
-                  : 'Añadir al ticket (entregar)'}
+                Añadir al ticket ({selectedLines.length})
               </Button>
             </DialogFooter>
           </div>

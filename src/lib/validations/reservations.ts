@@ -15,14 +15,18 @@ export const initialReservationPaymentSchema = z.object({
   notes: z.string().max(300).optional().nullable(),
 })
 
-export const createReservationSchema = z.object({
-  client_id: z.string().uuid('Cliente obligatorio'),
+export const reservationLineInputSchema = z.object({
   product_variant_id: z.string().uuid('Variante obligatoria'),
   warehouse_id: z.string().uuid('Almacén obligatorio'),
-  store_id: z.string().uuid().optional().nullable(),
-  cash_session_id: z.string().uuid().optional().nullable(),
   quantity: z.number().int().positive('La cantidad debe ser mayor que 0'),
   unit_price: z.number().min(0, 'El precio no puede ser negativo').default(0),
+})
+
+export const createReservationSchema = z.object({
+  client_id: z.string().uuid('Cliente obligatorio'),
+  store_id: z.string().uuid().optional().nullable(),
+  cash_session_id: z.string().uuid().optional().nullable(),
+  lines: z.array(reservationLineInputSchema).min(1, 'Añade al menos un producto'),
   notes: z.string().max(500).optional().nullable(),
   reason: z.string().max(200).optional().nullable(),
   expires_at: z.string().datetime().optional().nullable(),
@@ -52,8 +56,13 @@ export const cancelReservationSchema = z.object({
   reason: z.string().max(300).optional().nullable(),
 })
 
-export const fulfillReservationSchema = z.object({
-  id: z.string().uuid(),
+export const cancelReservationLineSchema = z.object({
+  line_id: z.string().uuid(),
+  reason: z.string().max(300).optional().nullable(),
+})
+
+export const fulfillReservationLineSchema = z.object({
+  line_id: z.string().uuid(),
   sale_id: z.string().uuid().optional().nullable(),
 })
 
@@ -70,9 +79,11 @@ export const listReservationsSchema = z.object({
 })
 
 export type CreateReservationInput = z.infer<typeof createReservationSchema>
+export type ReservationLineInput = z.infer<typeof reservationLineInputSchema>
 export type UpdateReservationInput = z.infer<typeof updateReservationSchema>
 export type CancelReservationInput = z.infer<typeof cancelReservationSchema>
-export type FulfillReservationInput = z.infer<typeof fulfillReservationSchema>
+export type CancelReservationLineInput = z.infer<typeof cancelReservationLineSchema>
+export type FulfillReservationLineInput = z.infer<typeof fulfillReservationLineSchema>
 export type ListReservationsInput = z.infer<typeof listReservationsSchema>
 export type ReservationStatus = z.infer<typeof reservationStatusSchema>
 export type ReservationPaymentMethod = z.infer<typeof reservationPaymentMethodSchema>

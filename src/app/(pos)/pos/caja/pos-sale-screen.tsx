@@ -57,6 +57,8 @@ interface TicketLine {
   cobro_ref?: { entity_type: 'tailoring_order' | 'sale'; entity_id: string }
   /** Si la línea corresponde a la recogida de una reserva, su id. */
   reservation_id?: string | null
+  /** Línea específica de la reserva que se recoge. */
+  reservation_line_id?: string | null
   /** Número legible de la reserva (p.ej. RSV-2026-0003) para mostrar badge. */
   reservation_number?: string | null
   /** Total de la reserva (solo informativo, para desglosar en ticket). */
@@ -471,8 +473,9 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
     }])
   }
 
-  const addReservationPickup = (payload: {
+  const addReservationPickup = (payloads: Array<{
     reservation_id: string
+    reservation_line_id: string
     reservation_number: string
     product_variant_id: string
     description: string
@@ -488,34 +491,50 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
     reservation_already_paid: number
     client_id: string | null
     client_name: string | null
-  }) => {
-    // Evitar duplicar: si ya existe una línea con este reservation_id, avisar y no volver a añadir
-    if (ticketLines.some((l) => l.reservation_id === payload.reservation_id)) {
-      toast.warning(`Reserva ${payload.reservation_number} ya está en el ticket`)
+  }>) => {
+    if (!payloads || payloads.length === 0) return
+
+    const first = payloads[0]
+    // Cliente: asignar el de la reserva si no hay cliente en el ticket
+    if (first.client_id && !selectedClientId) {
+      setSelectedClientId(first.client_id)
+      setSelectedClientName(first.client_name || '')
+    }
+
+    const existingLineIds = new Set(ticketLines.map((l) => l.reservation_line_id).filter(Boolean))
+    const fresh = payloads.filter((p) => !existingLineIds.has(p.reservation_line_id))
+    const duplicates = payloads.length - fresh.length
+
+    if (fresh.length === 0) {
+      toast.warning('Las líneas seleccionadas ya están en el ticket')
       return
     }
-    // Si hay cliente asociado y no hay cliente asignado aún, asignarlo automáticamente
-    if (payload.client_id && !selectedClientId) {
-      setSelectedClientId(payload.client_id)
-      setSelectedClientName(payload.client_name || '')
-    }
-    setTicketLines(prev => [...prev, {
-      id: crypto.randomUUID(),
-      product_variant_id: payload.product_variant_id || null,
-      description: payload.description,
-      sku: payload.sku || '',
-      quantity: payload.quantity,
-      unit_price: payload.unit_price,
-      discount_percentage: 0,
-      tax_rate: payload.tax_rate,
-      cost_price: payload.cost_price,
-      image_url: payload.image_url || undefined,
-      reservation_id: payload.reservation_id,
-      reservation_number: payload.reservation_number,
-      reservation_total: payload.reservation_total,
-      reservation_already_paid: payload.reservation_already_paid,
-    }])
-    toast.success(`Reserva ${payload.reservation_number} añadida al ticket`)
+
+    setTicketLines(prev => [
+      ...prev,
+      ...fresh.map((p) => ({
+        id: crypto.randomUUID(),
+        product_variant_id: p.product_variant_id || null,
+        description: p.description,
+        sku: p.sku || '',
+        quantity: p.quantity,
+        unit_price: p.unit_price,
+        discount_percentage: 0,
+        tax_rate: p.tax_rate,
+        cost_price: p.cost_price,
+        image_url: p.image_url || undefined,
+        reservation_id: p.reservation_id,
+        reservation_line_id: p.reservation_line_id,
+        reservation_number: p.reservation_number,
+        reservation_total: p.reservation_total,
+        reservation_already_paid: p.reservation_already_paid,
+      })),
+    ])
+    toast.success(
+      fresh.length === 1
+        ? `Línea de reserva ${first.reservation_number} añadida`
+        : `${fresh.length} líneas de ${first.reservation_number} añadidas${duplicates > 0 ? ` (${duplicates} ya estaban)` : ''}`,
+    )
   }
 
   const updateLine = (id: string, field: string, value: any) => {
@@ -855,6 +874,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
       lines: ticketLines.map(l => ({
         product_variant_id: l.product_variant_id,
         reservation_id: l.reservation_id ?? null,
+        reservation_line_id: l.reservation_line_id ?? null,
         description: l.description,
         sku: l.sku,
         quantity: l.quantity,

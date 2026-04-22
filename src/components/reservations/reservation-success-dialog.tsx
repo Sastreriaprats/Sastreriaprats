@@ -40,24 +40,24 @@ export function ReservationSuccessDialog({
 
   const buildTicketData = (): ReservationTicketData => {
     const storeConfig = getStorePdfData(storeName || undefined)
-    const descriptionBits = [reservation.product.product_name]
-    const variantBits = [reservation.product.size ? `T.${reservation.product.size}` : null, reservation.product.color].filter(Boolean).join(' · ')
-    if (variantBits) descriptionBits.push(`(${variantBits})`)
     return {
       reservation_number: reservation.reservation_number,
       created_at: new Date().toISOString(),
       expires_at: reservation.expires_at,
       status: reservation.status,
       payment_status: reservation.payment_status,
-      line: {
-        description: descriptionBits.join(' '),
-        sku: reservation.product.sku,
-        size: reservation.product.size,
-        color: reservation.product.color,
-        quantity: reservation.quantity,
-        unit_price: reservation.unit_price,
-        line_total: reservation.total,
-      },
+      lines: reservation.lines.map((ln) => {
+        const variantBits = [ln.size ? `T.${ln.size}` : null, ln.color].filter(Boolean).join(' · ')
+        return {
+          description: variantBits ? `${ln.product_name} (${variantBits})` : ln.product_name,
+          sku: ln.sku,
+          size: ln.size,
+          color: ln.color,
+          quantity: ln.quantity,
+          unit_price: ln.unit_price,
+          line_total: ln.line_total,
+        }
+      }),
       total: reservation.total,
       total_paid: reservation.total_paid,
       payments: reservation.initial_payment
@@ -100,7 +100,7 @@ export function ReservationSuccessDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md" onPointerDownOutside={(e) => e.preventDefault()}>
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto" onPointerDownOutside={(e) => e.preventDefault()}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Bookmark className="h-5 w-5 text-purple-600" />
@@ -119,28 +119,43 @@ export function ReservationSuccessDialog({
             </div>
           </div>
 
-          <dl className="grid grid-cols-1 gap-2 text-sm">
-            {reservation.client && (
-              <div className="flex justify-between items-center py-1 border-b border-slate-100">
-                <dt className="text-slate-600">Cliente</dt>
-                <dd className="font-medium truncate ml-2">{reservation.client.name}</dd>
-              </div>
-            )}
-            <div className="flex justify-between items-center py-1 border-b border-slate-100">
-              <dt className="text-slate-600">Producto</dt>
-              <dd className="text-slate-800 text-right truncate ml-2">
-                {reservation.product.product_name}
-                {reservation.product.size || reservation.product.color ? (
-                  <span className="text-xs text-muted-foreground block">
-                    {[reservation.product.size ? `T.${reservation.product.size}` : null, reservation.product.color].filter(Boolean).join(' · ')}
-                  </span>
-                ) : null}
-              </dd>
+          {reservation.client && (
+            <div className="flex justify-between items-center py-1 border-b border-slate-100 text-sm">
+              <span className="text-slate-600">Cliente</span>
+              <span className="font-medium truncate ml-2">{reservation.client.name}</span>
             </div>
-            <div className="flex justify-between items-center py-1 border-b border-slate-100">
-              <dt className="text-slate-600">Cantidad</dt>
-              <dd className="font-medium tabular-nums">{reservation.quantity}</dd>
+          )}
+
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Productos ({reservation.lines.length})</p>
+            <div className="rounded-md border divide-y text-sm">
+              {reservation.lines.map((ln) => {
+                const variantBits = [ln.size ? `T.${ln.size}` : null, ln.color].filter(Boolean).join(' · ')
+                const lineBadge = ln.status === 'active'
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : 'bg-amber-100 text-amber-800'
+                return (
+                  <div key={ln.id} className="flex items-start gap-2 px-3 py-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium truncate">{ln.product_name}</div>
+                      {variantBits && <div className="text-xs text-muted-foreground">{variantBits}</div>}
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {ln.quantity} × {formatCurrency(ln.unit_price)}
+                        <Badge variant="outline" className={`ml-2 text-[10px] ${lineBadge}`}>
+                          {ln.status === 'active' ? 'Stock bloqueado' : 'Pendiente'}
+                        </Badge>
+                      </div>
+                    </div>
+                    <div className="font-semibold tabular-nums text-sm">
+                      {formatCurrency(ln.line_total)}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
+          </div>
+
+          <dl className="grid grid-cols-1 gap-1 text-sm">
             <div className="flex justify-between items-center py-1 border-b border-slate-100">
               <dt className="text-slate-600">Total</dt>
               <dd className="font-bold tabular-nums">{formatCurrency(reservation.total)}</dd>

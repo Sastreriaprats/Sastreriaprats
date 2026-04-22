@@ -16,8 +16,9 @@ import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import {
   listReservations,
   cancelReservation,
+  cancelReservationLine,
   updateReservation,
-  fulfillReservation,
+  fulfillReservationLine,
   addReservationPayment,
 } from '@/actions/reservations'
 import { ReservationFormDialog } from '@/components/reservations/reservation-form-dialog'
@@ -44,12 +45,29 @@ const STATUS_BADGE: Record<string, { label: string; className: string }> = {
   expired:       { label: 'Expirada',          className: 'bg-rose-100 text-rose-800 border-rose-200' },
 }
 
+type ReservationLine = {
+  id: string
+  product_variant_id: string
+  warehouse_id: string
+  quantity: number
+  unit_price: number | string
+  line_total: number | string
+  status: 'active' | 'pending_stock' | 'fulfilled' | 'cancelled' | 'expired' | string
+  product_variant?: {
+    id: string
+    variant_sku?: string | null
+    size?: string | null
+    color?: string | null
+    product?: { id?: string; sku?: string; name?: string; main_image_url?: string | null; tax_rate?: number | string | null } | null
+  } | null
+  warehouse?: { id: string; code?: string | null; name?: string | null } | null
+}
+
 type Reservation = {
   id: string
   reservation_number: string
   status: keyof typeof STATUS_BADGE
-  quantity: number
-  unit_price: number | string
+  quantity: number | null
   total: number | string
   total_paid: number | string
   payment_status: 'pending' | 'partial' | 'paid'
@@ -57,19 +75,10 @@ type Reservation = {
   reason: string | null
   expires_at: string | null
   created_at: string
-  stock_reserved_at: string | null
-  fulfilled_at: string | null
   cancelled_at: string | null
   client?: { id: string; full_name?: string | null; first_name?: string | null; last_name?: string | null; client_code?: string | null; phone?: string | null } | null
-  product_variant?: {
-    id: string
-    variant_sku?: string | null
-    size?: string | null
-    color?: string | null
-    product?: { id?: string; sku?: string; name?: string } | null
-  } | null
-  warehouse?: { id: string; code?: string | null; name?: string | null } | null
   store?: { id: string; code?: string | null; name?: string | null; display_name?: string | null } | null
+  lines?: ReservationLine[]
   payments?: Array<{ id: string; payment_date: string; payment_method: string; amount: number | string; reference: string | null; notes: string | null; created_at: string }>
 }
 
@@ -91,11 +100,17 @@ function getClientName(c: Reservation['client']): string {
   return c.full_name || [c.first_name, c.last_name].filter(Boolean).join(' ') || c.client_code || '—'
 }
 
-function getProductName(pv: Reservation['product_variant']): string {
-  if (!pv) return '—'
-  const name = pv.product?.name || '—'
-  const variantBits = [pv.size ? `T.${pv.size}` : null, pv.color].filter(Boolean).join(' · ')
+function getLineDescription(ln: ReservationLine): string {
+  const name = ln.product_variant?.product?.name || '—'
+  const variantBits = [ln.product_variant?.size ? `T.${ln.product_variant.size}` : null, ln.product_variant?.color].filter(Boolean).join(' · ')
   return variantBits ? `${name} — ${variantBits}` : name
+}
+
+function getTotalQuantity(r: Reservation): number {
+  if (r.quantity !== null && r.quantity !== undefined) return Number(r.quantity)
+  return (r.lines || [])
+    .filter((l) => l.status !== 'cancelled')
+    .reduce((acc, l) => acc + Number(l.quantity || 0), 0)
 }
 
 export function ReservationsTab() {
@@ -119,6 +134,8 @@ export function ReservationsTab() {
   const [cancelReasonInput, setCancelReasonInput] = useState('')
   const [cancelling, setCancelling] = useState(false)
 
+  const [cancelLineTarget, setCancelLineTarget] = useState<{ reservation: Reservation; line: ReservationLine } | null>(null)
+
   const [paymentTarget, setPaymentTarget] = useState<Reservation | null>(null)
   const [paymentMethod, setPaymentMethod] = useState<ReservationPaymentMethod>('cash')
   const [paymentAmount, setPaymentAmount] = useState('')
@@ -127,7 +144,7 @@ export function ReservationsTab() {
 
   const [printingId, setPrintingId] = useState<string | null>(null)
 
-  const [actioningId, setActioningId] = useState<string | null>(null)
+  const [actioningLineId, setActioningLineId] = useState<string | null>(null)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -187,12 +204,23 @@ export function ReservationsTab() {
     fetchData()
   }
 
-  const markFulfilled = async (r: Reservation) => {
-    setActioningId(r.id)
-    const res = await fulfillReservation({ id: r.id, sale_id: null })
-    setActioningId(null)
+  const confirmCancelLine = async () => {
+    if (!cancelLineTarget) return
+    setCancelling(true)
+    const res = await cancelReservationLine({ line_id: cancelLineTarget.line.id, reason: null })
+    setCancelling(false)
+    if (!res.success) { toast.error(res.error || 'No se pudo cancelar la línea'); return }
+    toast.success('Línea cancelada')
+    setCancelLineTarget(null)
+    fetchData()
+  }
+
+  const markLineFulfilled = async (lineId: string) => {
+    setActioningLineId(lineId)
+    const res = await fulfillReservationLine({ line_id: lineId, sale_id: null })
+    setActioningLineId(null)
     if (!res.success) { toast.error(res.error || 'No se pudo marcar como cumplida'); return }
-    toast.success('Reserva marcada como cumplida')
+    toast.success('Línea marcada como cumplida')
     fetchData()
   }
 
@@ -228,8 +256,6 @@ export function ReservationsTab() {
 
   const buildReservationTicketData = (r: Reservation): ReservationTicketData => {
     const storeConfig = getStorePdfData(r.store?.display_name || r.store?.name || undefined)
-    const productName = r.product_variant?.product?.name || '—'
-    const variantBits = [r.product_variant?.size ? `T.${r.product_variant.size}` : null, r.product_variant?.color].filter(Boolean).join(' · ')
     const clientName = r.client
       ? (r.client.full_name || [r.client.first_name, r.client.last_name].filter(Boolean).join(' ') || null)
       : null
@@ -239,15 +265,21 @@ export function ReservationsTab() {
       expires_at: r.expires_at,
       status: r.status,
       payment_status: r.payment_status,
-      line: {
-        description: variantBits ? `${productName} (${variantBits})` : productName,
-        sku: r.product_variant?.variant_sku || r.product_variant?.product?.sku || null,
-        size: r.product_variant?.size || null,
-        color: r.product_variant?.color || null,
-        quantity: r.quantity,
-        unit_price: Number(r.unit_price),
-        line_total: Number(r.total),
-      },
+      lines: (r.lines || [])
+        .filter((ln) => ln.status !== 'cancelled')
+        .map((ln) => {
+          const productName = ln.product_variant?.product?.name || '—'
+          const variantBits = [ln.product_variant?.size ? `T.${ln.product_variant.size}` : null, ln.product_variant?.color].filter(Boolean).join(' · ')
+          return {
+            description: variantBits ? `${productName} (${variantBits})` : productName,
+            sku: ln.product_variant?.variant_sku || ln.product_variant?.product?.sku || null,
+            size: ln.product_variant?.size || null,
+            color: ln.product_variant?.color || null,
+            quantity: Number(ln.quantity),
+            unit_price: Number(ln.unit_price),
+            line_total: Number(ln.line_total),
+          }
+        }),
       total: Number(r.total),
       total_paid: Number(r.total_paid),
       payments: (r.payments || []).map((p) => ({ payment_method: p.payment_method, amount: Number(p.amount) })),
@@ -291,8 +323,8 @@ export function ReservationsTab() {
             <Label htmlFor="only-pending" className="text-sm">Solo pendientes de stock</Label>
           </div>
           <Input
-            placeholder="Buscar por nº reserva..."
-            className="w-56"
+            placeholder="Buscar por nº reserva o cliente..."
+            className="w-64"
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(0) }}
           />
@@ -308,8 +340,8 @@ export function ReservationsTab() {
             <TableRow>
               <TableHead>Nº</TableHead>
               <TableHead>Cliente</TableHead>
-              <TableHead>Producto</TableHead>
-              <TableHead className="text-center">Cant.</TableHead>
+              <TableHead>Productos</TableHead>
+              <TableHead className="text-center">Uds</TableHead>
               <TableHead>Estado</TableHead>
               <TableHead className="text-right">Total / Pagado</TableHead>
               <TableHead>Fecha</TableHead>
@@ -338,21 +370,65 @@ export function ReservationsTab() {
               const pendingNum = Math.max(0, totalNum - paidNum)
               const canEdit = r.status === 'active' || r.status === 'pending_stock'
               const canPay  = canEdit && pendingNum > 0
+              const activeLines = (r.lines || []).filter((l) => l.status !== 'cancelled')
               return (
                 <TableRow key={r.id}>
-                  <TableCell className="font-mono text-sm">{r.reservation_number}</TableCell>
-                  <TableCell>
+                  <TableCell className="font-mono text-sm align-top">{r.reservation_number}</TableCell>
+                  <TableCell className="align-top">
                     <div className="text-sm">{getClientName(r.client)}</div>
                     {r.client?.phone && <div className="text-xs text-muted-foreground font-mono">{r.client.phone}</div>}
                   </TableCell>
-                  <TableCell>
-                    <div className="text-sm">{getProductName(r.product_variant)}</div>
-                    {r.product_variant?.variant_sku && (
-                      <div className="text-xs text-muted-foreground font-mono">{r.product_variant.variant_sku}</div>
-                    )}
+                  <TableCell className="align-top">
+                    <div className="space-y-1">
+                      {activeLines.length === 0 && (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                      {activeLines.map((ln) => {
+                        const lineBadge = STATUS_BADGE[ln.status] || STATUS_BADGE.active
+                        return (
+                          <div key={ln.id} className="flex items-start justify-between gap-2 text-sm">
+                            <div className="min-w-0">
+                              <div className="truncate">{getLineDescription(ln)}</div>
+                              <div className="text-xs text-muted-foreground">
+                                <Badge variant="outline" className={`text-[10px] mr-1 ${lineBadge.className}`}>
+                                  {ln.status === 'pending_stock' && <Clock className="h-2 w-2 mr-0.5" />}
+                                  {lineBadge.label}
+                                </Badge>
+                                {ln.quantity} × {formatCurrency(Number(ln.unit_price))}
+                              </div>
+                            </div>
+                            {canEdit && activeLines.length > 1 && (
+                              <div className="flex gap-0.5 shrink-0">
+                                {ln.status === 'active' && (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-6 w-6 p-0"
+                                    title="Marcar cumplida"
+                                    disabled={actioningLineId !== null}
+                                    onClick={() => markLineFulfilled(ln.id)}
+                                  >
+                                    {actioningLineId === ln.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                                  </Button>
+                                )}
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 w-6 p-0 text-rose-700"
+                                  title="Cancelar línea"
+                                  onClick={() => setCancelLineTarget({ reservation: r, line: ln })}
+                                >
+                                  <X className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
                   </TableCell>
-                  <TableCell className="text-center tabular-nums">{r.quantity}</TableCell>
-                  <TableCell>
+                  <TableCell className="text-center tabular-nums align-top">{getTotalQuantity(r)}</TableCell>
+                  <TableCell className="align-top">
                     <div className="flex flex-col gap-1">
                       <Badge variant="outline" className={`text-xs w-fit ${badge.className}`}>
                         {r.status === 'pending_stock' && <Clock className="h-3 w-3 mr-0.5" />}
@@ -364,18 +440,18 @@ export function ReservationsTab() {
                       </Badge>
                     </div>
                   </TableCell>
-                  <TableCell className="text-right text-xs whitespace-nowrap">
+                  <TableCell className="text-right text-xs whitespace-nowrap align-top">
                     <div className="font-semibold tabular-nums">{formatCurrency(totalNum)}</div>
                     <div className="text-emerald-700 tabular-nums">+{formatCurrency(paidNum)}</div>
                     {pendingNum > 0 && (
                       <div className="text-rose-700 tabular-nums">-{formatCurrency(pendingNum)}</div>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDateTime(r.created_at)}</TableCell>
-                  <TableCell className="text-xs whitespace-nowrap">
+                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap align-top">{formatDateTime(r.created_at)}</TableCell>
+                  <TableCell className="text-xs whitespace-nowrap align-top">
                     {r.expires_at ? formatDate(r.expires_at) : <span className="text-muted-foreground">—</span>}
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right align-top">
                     <div className="flex justify-end gap-1 flex-wrap">
                       <Button
                         size="sm"
@@ -397,18 +473,6 @@ export function ReservationsTab() {
                           <Button size="sm" variant="outline" className="gap-1" onClick={() => openEdit(r)}>
                             <Pencil className="h-3 w-3" /> Editar
                           </Button>
-                          {r.status === 'active' && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="gap-1"
-                              disabled={actioningId !== null}
-                              onClick={() => markFulfilled(r)}
-                            >
-                              {actioningId === r.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-                              Cumplida
-                            </Button>
-                          )}
                           <Button
                             size="sm"
                             variant="outline"
@@ -441,7 +505,6 @@ export function ReservationsTab() {
         </div>
       </div>
 
-      {/* Crear reserva */}
       <ReservationFormDialog
         open={creating}
         onOpenChange={setCreating}
@@ -449,7 +512,6 @@ export function ReservationsTab() {
         onSuccess={() => { fetchData() }}
       />
 
-      {/* Editar notas/motivo/expiración */}
       <Dialog open={Boolean(editing)} onOpenChange={(v) => { if (!v) setEditing(null) }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -469,7 +531,7 @@ export function ReservationsTab() {
               <Textarea rows={3} value={editNotes} onChange={(e) => setEditNotes(e.target.value)} maxLength={500} />
             </div>
             <p className="text-xs text-muted-foreground">
-              Para cambiar la cantidad o el almacén cancela la reserva y crea una nueva.
+              Para cambiar productos o cantidades, cancela la reserva y crea una nueva.
             </p>
           </div>
           <DialogFooter>
@@ -482,7 +544,6 @@ export function ReservationsTab() {
         </DialogContent>
       </Dialog>
 
-      {/* Añadir pago */}
       <Dialog open={Boolean(paymentTarget)} onOpenChange={(v) => { if (!v) setPaymentTarget(null) }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -548,7 +609,6 @@ export function ReservationsTab() {
         </DialogContent>
       </Dialog>
 
-      {/* Cancelar reserva */}
       <Dialog open={Boolean(cancelTarget)} onOpenChange={(v) => { if (!v) setCancelTarget(null) }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -556,7 +616,7 @@ export function ReservationsTab() {
           </DialogHeader>
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Esto liberará {cancelTarget?.quantity ?? ''} unidades bloqueadas (si la reserva estaba activa).
+              Esto cancelará todas las líneas no cumplidas y liberará el stock bloqueado.
             </p>
             <div className="space-y-1">
               <Label>Motivo de cancelación (opcional)</Label>
@@ -568,6 +628,28 @@ export function ReservationsTab() {
             <Button variant="destructive" onClick={confirmCancel} disabled={cancelling} className="gap-1">
               {cancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
               Confirmar cancelación
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(cancelLineTarget)} onOpenChange={(v) => { if (!v) setCancelLineTarget(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Cancelar línea — {cancelLineTarget?.reservation.reservation_number}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {cancelLineTarget && (
+                <>Se cancelará <strong>{getLineDescription(cancelLineTarget.line)}</strong> y se liberará su stock (si estaba activo).</>
+              )}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelLineTarget(null)} disabled={cancelling}>Volver</Button>
+            <Button variant="destructive" onClick={confirmCancelLine} disabled={cancelling} className="gap-1">
+              {cancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+              Cancelar línea
             </Button>
           </DialogFooter>
         </DialogContent>

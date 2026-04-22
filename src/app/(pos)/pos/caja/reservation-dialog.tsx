@@ -17,8 +17,8 @@ interface ReservationDialogProps {
   defaultClientId: string | null
   defaultClientName: string
   onCreated?: () => void
-  /** El POS añade la línea al ticket (recogida de reserva). */
-  onAddReservationToTicket?: (payload: ReservationTicketLinePayload) => void
+  /** El POS añade las líneas al ticket (recogida selectiva de reserva). */
+  onAddReservationToTicket?: (payloads: ReservationTicketLinePayload[]) => void
 }
 
 type Mode = 'menu' | 'new' | 'pickup'
@@ -114,8 +114,8 @@ export function ReservationDialog({
         onOpenChange={(v) => { if (!v) closeAll() }}
         storeId={storeId}
         cashSessionId={cashSessionId}
-        onAddToTicket={(payload) => {
-          onAddReservationToTicket?.(payload)
+        onAddToTicket={(payloads) => {
+          onAddReservationToTicket?.(payloads)
           closeAll()
         }}
       />

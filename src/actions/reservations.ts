@@ -6,13 +6,15 @@ import {
   createReservationSchema,
   updateReservationSchema,
   cancelReservationSchema,
-  fulfillReservationSchema,
+  cancelReservationLineSchema,
+  fulfillReservationLineSchema,
   listReservationsSchema,
   addReservationPaymentSchema,
   type CreateReservationInput,
   type UpdateReservationInput,
   type CancelReservationInput,
-  type FulfillReservationInput,
+  type CancelReservationLineInput,
+  type FulfillReservationLineInput,
   type ListReservationsInput,
   type AddReservationPaymentInput,
 } from '@/lib/validations/reservations'
@@ -20,18 +22,23 @@ import {
 type ListResult<T> = { data: T[]; total: number; page: number; pageSize: number }
 
 const RESERVATION_SELECT = `
-  id, reservation_number, client_id, product_variant_id, warehouse_id, store_id,
+  id, reservation_number, client_id, store_id,
   quantity, unit_price, total, total_paid, payment_status,
   status, notes, reason, expires_at,
-  fulfilled_sale_id, fulfilled_at, cancelled_at, cancelled_reason,
-  stock_reserved_at, created_by, created_at, updated_at,
+  cancelled_at, cancelled_reason,
+  created_by, created_at, updated_at,
   client:clients ( id, client_code, full_name, first_name, last_name, phone ),
-  product_variant:product_variants (
-    id, variant_sku, size, color, barcode, image_url,
-    product:products ( id, sku, name, brand, main_image_url, base_price, price_with_tax, tax_rate )
-  ),
-  warehouse:warehouses ( id, code, name ),
   store:stores ( id, code, name, display_name ),
+  lines:product_reservation_lines (
+    id, product_variant_id, warehouse_id, quantity, unit_price, line_total,
+    status, stock_reserved_at, fulfilled_sale_id, fulfilled_at,
+    cancelled_at, cancelled_reason, sort_order, created_at, updated_at,
+    product_variant:product_variants (
+      id, variant_sku, size, color, barcode, image_url,
+      product:products ( id, sku, name, brand, main_image_url, base_price, price_with_tax, tax_rate )
+    ),
+    warehouse:warehouses ( id, code, name )
+  ),
   payments:product_reservation_payments ( id, payment_date, payment_method, amount, reference, notes, created_at ),
   created_by_profile:profiles!product_reservations_created_by_fkey ( id, full_name )
 `
@@ -40,6 +47,21 @@ export const listReservations = protectedAction<ListReservationsInput, ListResul
   { permission: 'reservations.view', auditModule: 'reservations' },
   async (ctx, rawInput) => {
     const input = listReservationsSchema.parse(rawInput)
+
+    // Búsqueda inteligente: por nº de reserva o por cliente (nombre/código/teléfono).
+    // Resolvemos primero los IDs de clientes que matchean el término, luego
+    // construimos un OR sobre reservation_number y client_id.
+    let clientIdsFromSearch: string[] | null = null
+    const searchTerm = input.search?.trim() || ''
+    if (searchTerm.length > 0) {
+      const like = `%${searchTerm}%`
+      const { data: matches } = await ctx.adminClient
+        .from('clients')
+        .select('id')
+        .or(`full_name.ilike.${like},first_name.ilike.${like},last_name.ilike.${like},client_code.ilike.${like},phone.ilike.${like}`)
+        .limit(200)
+      clientIdsFromSearch = (matches ?? []).map((c: any) => c.id as string)
+    }
 
     let query = ctx.adminClient
       .from('product_reservations')
@@ -52,13 +74,39 @@ export const listReservations = protectedAction<ListReservationsInput, ListResul
       query = query.eq('status', 'pending_stock')
     }
     if (input.clientId) query = query.eq('client_id', input.clientId)
-    if (input.productVariantId) query = query.eq('product_variant_id', input.productVariantId)
-    if (input.warehouseId) query = query.eq('warehouse_id', input.warehouseId)
     if (input.storeId) query = query.eq('store_id', input.storeId)
 
-    if (input.search && input.search.trim().length > 0) {
-      const term = `%${input.search.trim()}%`
-      query = query.or(`reservation_number.ilike.${term}`)
+    if (input.productVariantId) {
+      const { data: linesMatch } = await ctx.adminClient
+        .from('product_reservation_lines')
+        .select('reservation_id')
+        .eq('product_variant_id', input.productVariantId)
+      const ids = [...new Set((linesMatch ?? []).map((l: any) => l.reservation_id as string))]
+      if (ids.length === 0) {
+        return success({ data: [], total: 0, page: input.page, pageSize: input.pageSize })
+      }
+      query = query.in('id', ids)
+    }
+
+    if (input.warehouseId) {
+      const { data: linesMatch } = await ctx.adminClient
+        .from('product_reservation_lines')
+        .select('reservation_id')
+        .eq('warehouse_id', input.warehouseId)
+      const ids = [...new Set((linesMatch ?? []).map((l: any) => l.reservation_id as string))]
+      if (ids.length === 0) {
+        return success({ data: [], total: 0, page: input.page, pageSize: input.pageSize })
+      }
+      query = query.in('id', ids)
+    }
+
+    if (searchTerm.length > 0) {
+      const like = `%${searchTerm}%`
+      const orParts: string[] = [`reservation_number.ilike.${like}`]
+      if (clientIdsFromSearch && clientIdsFromSearch.length > 0) {
+        orParts.push(`client_id.in.(${clientIdsFromSearch.join(',')})`)
+      }
+      query = query.or(orParts.join(','))
     }
 
     const from = input.page * input.pageSize
@@ -98,11 +146,19 @@ type CreateReservationResult = {
   reservation_number: string
   status: string
   had_stock: boolean
-  unit_price: number
   total: number
   total_paid: number
   payment_status: 'pending' | 'partial' | 'paid'
   payment_id: string | null
+  lines: Array<{
+    id: string
+    product_variant_id: string
+    warehouse_id: string
+    quantity: number
+    unit_price: number
+    line_total: number
+    status: string
+  }>
 }
 
 export const createReservation = protectedAction<CreateReservationInput, CreateReservationResult>(
@@ -118,12 +174,14 @@ export const createReservation = protectedAction<CreateReservationInput, CreateR
 
     const payload: Record<string, unknown> = {
       client_id: input.client_id,
-      product_variant_id: input.product_variant_id,
-      warehouse_id: input.warehouse_id,
       store_id: input.store_id ?? null,
       cash_session_id: input.cash_session_id ?? null,
-      quantity: input.quantity,
-      unit_price: input.unit_price,
+      lines: input.lines.map((l) => ({
+        product_variant_id: l.product_variant_id,
+        warehouse_id: l.warehouse_id,
+        quantity: l.quantity,
+        unit_price: l.unit_price,
+      })),
       notes: input.notes ?? null,
       reason: input.reason ?? null,
       expires_at: input.expires_at ?? null,
@@ -151,11 +209,16 @@ export const createReservation = protectedAction<CreateReservationInput, CreateR
       reservation_number: result.reservation_number,
       status: result.status,
       had_stock: result.had_stock,
-      unit_price: Number(result.unit_price ?? 0),
       total: Number(result.total ?? 0),
       total_paid: Number(result.total_paid ?? 0),
       payment_status: result.payment_status ?? 'pending',
       payment_id: result.payment_id ?? null,
+      lines: (result.lines ?? []).map((l) => ({
+        ...l,
+        quantity: Number(l.quantity),
+        unit_price: Number(l.unit_price),
+        line_total: Number(l.line_total),
+      })),
     })
   }
 )
@@ -259,24 +322,48 @@ export const cancelReservation = protectedAction<CancelReservationInput, { id: s
   }
 )
 
-export const fulfillReservation = protectedAction<FulfillReservationInput, { id: string; status: string }>(
+export const cancelReservationLine = protectedAction<CancelReservationLineInput, { id: string; status: string }>(
+  {
+    permission: 'reservations.delete',
+    auditModule: 'reservations',
+    auditAction: 'delete',
+    auditEntity: 'product_reservation_line',
+    revalidate: ['/admin/stock'],
+  },
+  async (ctx, rawInput) => {
+    const input = cancelReservationLineSchema.parse(rawInput)
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_cancel_reservation_line', {
+      p_line_id: input.line_id,
+      p_reason: input.reason ?? null,
+      p_user_id: ctx.userId !== 'system' ? ctx.userId : null,
+    })
+
+    if (error) return failure(error.message || 'Error al cancelar línea', 'INTERNAL')
+    const result = data as { id: string; status: string } | null
+    if (!result?.id) return failure('Respuesta inválida del servidor', 'INTERNAL')
+    return success(result)
+  }
+)
+
+export const fulfillReservationLine = protectedAction<FulfillReservationLineInput, { id: string; status: string }>(
   {
     permission: 'reservations.edit',
     auditModule: 'reservations',
     auditAction: 'state_change',
-    auditEntity: 'product_reservation',
+    auditEntity: 'product_reservation_line',
     revalidate: ['/admin/stock'],
   },
   async (ctx, rawInput) => {
-    const input = fulfillReservationSchema.parse(rawInput)
+    const input = fulfillReservationLineSchema.parse(rawInput)
 
-    const { data, error } = await ctx.adminClient.rpc('rpc_fulfill_reservation', {
-      p_reservation_id: input.id,
+    const { data, error } = await ctx.adminClient.rpc('rpc_fulfill_reservation_line', {
+      p_line_id: input.line_id,
       p_sale_id: input.sale_id ?? null,
       p_user_id: ctx.userId !== 'system' ? ctx.userId : null,
     })
 
-    if (error) return failure(error.message || 'Error al cumplir reserva', 'INTERNAL')
+    if (error) return failure(error.message || 'Error al cumplir línea', 'INTERNAL')
     const result = data as { id: string; status: string } | null
     if (!result?.id) return failure('Respuesta inválida del servidor', 'INTERNAL')
     return success(result)
@@ -285,33 +372,38 @@ export const fulfillReservation = protectedAction<FulfillReservationInput, { id:
 
 /**
  * Helper usado en el POS para saber si el cliente seleccionado
- * tiene reserva activa sobre una variante. Devuelve la cantidad
- * reservada total (puede haber varias reservas activas del mismo
- * cliente sobre la misma variante).
+ * tiene líneas activas sobre una variante. Suma cantidad de todas
+ * las líneas activas (puede haber varias en varias reservas).
  */
 export const getActiveReservationsForVariant = protectedAction<
   { productVariantId: string; warehouseId?: string; clientId?: string },
-  { totalReserved: number; count: number; reservations: Array<{ id: string; reservation_number: string; quantity: number; client_id: string }> }
+  { totalReserved: number; count: number; reservations: Array<{ id: string; line_id: string; reservation_number: string; quantity: number; client_id: string }> }
 >(
   { permission: 'reservations.view', auditModule: 'reservations' },
   async (ctx, { productVariantId, warehouseId, clientId }) => {
     let query = ctx.adminClient
-      .from('product_reservations')
-      .select('id, reservation_number, quantity, client_id')
+      .from('product_reservation_lines')
+      .select('id, reservation_id, quantity, product_reservations!inner(reservation_number, client_id)')
       .eq('product_variant_id', productVariantId)
       .eq('status', 'active')
 
     if (warehouseId) query = query.eq('warehouse_id', warehouseId)
-    if (clientId) query = query.eq('client_id', clientId)
+    if (clientId) query = query.eq('product_reservations.client_id', clientId)
 
     const { data, error } = await query
     if (error) return failure(error.message || 'Error al consultar reservas', 'INTERNAL')
-    const rows = data ?? []
-    const totalReserved = rows.reduce((acc: number, r: any) => acc + (Number(r.quantity) || 0), 0)
+    const rows = (data ?? []) as any[]
+    const totalReserved = rows.reduce((acc, r) => acc + (Number(r.quantity) || 0), 0)
     return success({
       totalReserved,
       count: rows.length,
-      reservations: rows as any[],
+      reservations: rows.map((r) => ({
+        id: r.reservation_id,
+        line_id: r.id,
+        reservation_number: r.product_reservations?.reservation_number ?? '',
+        quantity: Number(r.quantity),
+        client_id: r.product_reservations?.client_id ?? '',
+      })),
     })
   }
 )

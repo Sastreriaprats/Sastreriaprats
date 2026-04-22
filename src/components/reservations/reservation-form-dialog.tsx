@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Loader2, Search, User, X, Bookmark, AlertCircle, ImageOff, Check, Banknote, CreditCard, Smartphone, ArrowRightLeft } from 'lucide-react'
+import { Loader2, Search, User, X, Bookmark, AlertCircle, ImageOff, Check, Banknote, CreditCard, Smartphone, ArrowRightLeft, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { createReservation, getMainWarehouseForStore } from '@/actions/reservations'
 import { listClients } from '@/actions/clients'
@@ -37,27 +37,38 @@ type ProductVariantResult = {
   stock_levels?: Array<{ quantity?: number; available?: number; warehouse_id?: string }>
 }
 
+type DraftLine = {
+  key: string
+  variant: ProductVariantResult
+  quantity: number
+  unit_price: number
+  unit_price_input: string
+}
+
 export type ReservationSuccessPayload = {
   id: string
   reservation_number: string
   status: 'active' | 'pending_stock' | 'fulfilled' | 'cancelled' | 'expired' | string
   had_stock: boolean
-  unit_price: number
   total: number
   total_paid: number
   payment_status: 'pending' | 'partial' | 'paid'
-  quantity: number
   expires_at: string | null
   reason: string | null
   notes: string | null
   client: { id: string; name: string; code: string | null } | null
-  product: {
-    variant_id: string
+  lines: Array<{
+    id: string
+    product_variant_id: string
     product_name: string
     sku: string | null
     size: string | null
     color: string | null
-  }
+    quantity: number
+    unit_price: number
+    line_total: number
+    status: string
+  }>
   initial_payment: { method: ReservationPaymentMethod; amount: number } | null
 }
 
@@ -75,16 +86,11 @@ type WarehouseOption = { id: string; name: string; code: string; storeName?: str
 export interface ReservationFormDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** Cuando viene desde el POS se fija al almacén principal de esta tienda. */
   storeId?: string | null
-  /** Sesión de caja abierta (para registrar pagos). */
   cashSessionId?: string | null
-  /** Precargar cliente (asignado en el POS). */
   defaultClientId?: string | null
   defaultClientName?: string | null
-  /** Si `lockClient=true` no se permite cambiar el cliente desde el formulario. */
   lockClient?: boolean
-  /** Permite al admin elegir almacén explícitamente. */
   allowWarehouseSelection?: boolean
   onSuccess?: (result: ReservationSuccessPayload) => void
 }
@@ -95,6 +101,25 @@ const PAYMENT_METHODS: Array<{ value: ReservationPaymentMethod; label: string; i
   { value: 'bizum',    label: 'Bizum',          icon: Smartphone },
   { value: 'transfer', label: 'Transferencia',  icon: ArrowRightLeft },
 ]
+
+function computeDefaultPrice(v: ProductVariantResult): number {
+  const override = Number(v.price_override ?? 0)
+  const withTax = Number(v.products?.price_with_tax ?? 0)
+  const base = Number(v.products?.base_price ?? 0)
+  const taxRate = Number(v.products?.tax_rate ?? 21)
+  if (override > 0) return override
+  if (withTax > 0) return withTax
+  if (base > 0) return Math.round(base * (1 + taxRate / 100) * 100) / 100
+  return 0
+}
+
+function variantAvailable(v: ProductVariantResult): number {
+  if (!v.stock_levels) return 0
+  const row = Array.isArray(v.stock_levels) ? v.stock_levels[0] : null
+  if (!row) return 0
+  if (typeof row.available === 'number') return row.available
+  return Number(row.quantity ?? 0)
+}
 
 export function ReservationFormDialog({
   open,
@@ -114,7 +139,8 @@ export function ReservationFormDialog({
   const [productQuery, setProductQuery] = useState('')
   const [productResults, setProductResults] = useState<ProductVariantResult[]>([])
   const [productSearching, setProductSearching] = useState(false)
-  const [selectedVariant, setSelectedVariant] = useState<ProductVariantResult | null>(null)
+
+  const [lines, setLines] = useState<DraftLine[]>([])
 
   const [clientId, setClientId] = useState<string | null>(defaultClientId ?? null)
   const [clientName, setClientName] = useState<string>(defaultClientName ?? '')
@@ -122,9 +148,6 @@ export function ReservationFormDialog({
   const [clientResults, setClientResults] = useState<ClientResult[]>([])
   const [clientSearching, setClientSearching] = useState(false)
 
-  const [quantity, setQuantity] = useState<number>(1)
-  const [unitPrice, setUnitPrice] = useState<number>(0)
-  const [unitPriceInput, setUnitPriceInput] = useState<string>('0')
   const [reason, setReason] = useState('')
   const [notes, setNotes] = useState('')
   const [expiresAt, setExpiresAt] = useState('')
@@ -136,16 +159,13 @@ export function ReservationFormDialog({
   const resetForm = useCallback(() => {
     setProductQuery('')
     setProductResults([])
-    setSelectedVariant(null)
+    setLines([])
     setClientQuery('')
     setClientResults([])
     if (!lockClient) {
       setClientId(defaultClientId ?? null)
       setClientName(defaultClientName ?? '')
     }
-    setQuantity(1)
-    setUnitPrice(0)
-    setUnitPriceInput('0')
     setReason('')
     setNotes('')
     setExpiresAt('')
@@ -160,7 +180,6 @@ export function ReservationFormDialog({
     setClientName(defaultClientName ?? '')
   }, [open, defaultClientId, defaultClientName])
 
-  // Resolver warehouseId por storeId (POS) o dejar al admin elegir.
   useEffect(() => {
     if (!open) return
     if (allowWarehouseSelection) {
@@ -192,7 +211,6 @@ export function ReservationFormDialog({
     setWarehouseId(null)
   }, [open, storeId, allowWarehouseSelection])
 
-  // Buscar productos
   useEffect(() => {
     if (!open) return
     const q = productQuery.trim()
@@ -215,7 +233,6 @@ export function ReservationFormDialog({
     return () => { cancelled = true; clearTimeout(timer) }
   }, [productQuery, storeId, open])
 
-  // Buscar clientes (si no está bloqueado)
   useEffect(() => {
     if (!open || lockClient) return
     const q = clientQuery.trim()
@@ -235,37 +252,50 @@ export function ReservationFormDialog({
     return () => { cancelled = true; clearTimeout(timer) }
   }, [clientQuery, open, lockClient])
 
-  const variantAvailable = useMemo(() => {
-    if (!selectedVariant?.stock_levels) return 0
-    const row = Array.isArray(selectedVariant.stock_levels)
-      ? selectedVariant.stock_levels[0]
-      : null
-    if (!row) return 0
-    if (typeof row.available === 'number') return row.available
-    return Number(row.quantity ?? 0)
-  }, [selectedVariant])
+  const addLine = (v: ProductVariantResult) => {
+    setLines((prev) => {
+      const existing = prev.find((l) => l.variant.id === v.id)
+      if (existing) {
+        return prev.map((l) =>
+          l.variant.id === v.id ? { ...l, quantity: l.quantity + 1 } : l,
+        )
+      }
+      const price = computeDefaultPrice(v)
+      return [
+        ...prev,
+        {
+          key: `${v.id}-${Date.now()}`,
+          variant: v,
+          quantity: 1,
+          unit_price: price,
+          unit_price_input: price ? price.toFixed(2) : '0',
+        },
+      ]
+    })
+    setProductQuery('')
+    setProductResults([])
+  }
 
-  // Prellenar precio al seleccionar variante (PVP con IVA)
-  useEffect(() => {
-    if (!selectedVariant) return
-    const override = Number(selectedVariant.price_override ?? 0)
-    const withTax = Number(selectedVariant.products?.price_with_tax ?? 0)
-    const base = Number(selectedVariant.products?.base_price ?? 0)
-    const taxRate = Number(selectedVariant.products?.tax_rate ?? 21)
-    const price = override > 0
-      ? override
-      : withTax > 0
-        ? withTax
-        : base > 0
-          ? Math.round(base * (1 + taxRate / 100) * 100) / 100
-          : 0
-    setUnitPrice(price)
-    setUnitPriceInput(price ? price.toFixed(2) : '0')
-  }, [selectedVariant])
+  const removeLine = (key: string) => {
+    setLines((prev) => prev.filter((l) => l.key !== key))
+  }
+
+  const updateLineQty = (key: string, qty: number) => {
+    setLines((prev) => prev.map((l) => l.key === key ? { ...l, quantity: Math.max(1, Math.trunc(Number.isFinite(qty) ? qty : 1)) } : l))
+  }
+
+  const updateLinePrice = (key: string, raw: string) => {
+    setLines((prev) => prev.map((l) => {
+      if (l.key !== key) return l
+      const n = Number(raw.replace(',', '.'))
+      return { ...l, unit_price_input: raw, unit_price: Number.isFinite(n) && n >= 0 ? n : 0 }
+    }))
+  }
 
   const totalAmount = useMemo(() => {
-    return Math.round(unitPrice * quantity * 100) / 100
-  }, [unitPrice, quantity])
+    const total = lines.reduce((acc, l) => acc + l.unit_price * l.quantity, 0)
+    return Math.round(total * 100) / 100
+  }, [lines])
 
   const paymentAmount = useMemo(() => {
     if (paymentMode === 'none') return 0
@@ -275,15 +305,13 @@ export function ReservationFormDialog({
   }, [paymentMode, partialAmount, totalAmount])
 
   const canSubmit = Boolean(
-    clientId && selectedVariant && warehouseId && quantity > 0 && !submitting,
+    clientId && warehouseId && lines.length > 0 && lines.every((l) => l.quantity > 0) && !submitting,
   )
 
   const handleSubmit = async () => {
     if (!clientId) { toast.error('Selecciona un cliente'); return }
-    if (!selectedVariant) { toast.error('Selecciona un producto'); return }
+    if (lines.length === 0) { toast.error('Añade al menos un producto'); return }
     if (!warehouseId) { toast.error('No se pudo determinar el almacén'); return }
-    if (quantity <= 0) { toast.error('La cantidad debe ser mayor que 0'); return }
-    if (unitPrice < 0) { toast.error('El precio no puede ser negativo'); return }
 
     if (paymentMode !== 'none' && totalAmount <= 0) {
       toast.error('No puedes registrar un pago sobre una reserva sin precio')
@@ -301,12 +329,14 @@ export function ReservationFormDialog({
     setSubmitting(true)
     const result = await createReservation({
       client_id: clientId,
-      product_variant_id: selectedVariant.id,
-      warehouse_id: warehouseId,
       store_id: storeId ?? null,
       cash_session_id: cashSessionId ?? null,
-      quantity,
-      unit_price: unitPrice,
+      lines: lines.map((l) => ({
+        product_variant_id: l.variant.id,
+        warehouse_id: warehouseId,
+        quantity: l.quantity,
+        unit_price: l.unit_price,
+      })),
       notes: notes || null,
       reason: reason || null,
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
@@ -321,34 +351,39 @@ export function ReservationFormDialog({
 
     const data = result.data
     if (data.status === 'active') {
-      toast.success(`Reserva ${data.reservation_number} creada (stock bloqueado)`)
+      toast.success(`Reserva ${data.reservation_number} creada`)
     } else {
-      toast.warning(`Reserva ${data.reservation_number} pendiente de stock — avisaremos al recibir mercancía`)
+      toast.warning(`Reserva ${data.reservation_number} con productos pendientes de stock`)
     }
 
+    const linesByVariant = new Map(lines.map((l) => [l.variant.id, l.variant]))
     const successPayload: ReservationSuccessPayload = {
       id: data.id,
       reservation_number: data.reservation_number,
       status: data.status,
       had_stock: data.had_stock,
-      unit_price: data.unit_price,
       total: data.total,
       total_paid: data.total_paid,
       payment_status: data.payment_status,
-      quantity,
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       reason: reason || null,
       notes: notes || null,
-      client: clientId
-        ? { id: clientId, name: clientName, code: null }
-        : null,
-      product: {
-        variant_id: selectedVariant.id,
-        product_name: selectedVariant.products?.name || '—',
-        sku: selectedVariant.variant_sku || selectedVariant.products?.sku || null,
-        size: selectedVariant.size || null,
-        color: selectedVariant.color || null,
-      },
+      client: clientId ? { id: clientId, name: clientName, code: null } : null,
+      lines: data.lines.map((ln) => {
+        const variant = linesByVariant.get(ln.product_variant_id)
+        return {
+          id: ln.id,
+          product_variant_id: ln.product_variant_id,
+          product_name: variant?.products?.name || '—',
+          sku: variant?.variant_sku || variant?.products?.sku || null,
+          size: variant?.size || null,
+          color: variant?.color || null,
+          quantity: ln.quantity,
+          unit_price: ln.unit_price,
+          line_total: ln.line_total,
+          status: ln.status,
+        }
+      }),
       initial_payment,
     }
     onSuccess?.(successPayload)
@@ -433,131 +468,127 @@ export function ReservationFormDialog({
             </div>
           )}
 
-          {/* Producto */}
-          <div className="space-y-1">
-            <Label>Producto</Label>
-            {selectedVariant ? (
-              <div className="flex items-start justify-between rounded-md border px-3 py-2 text-sm gap-3">
-                {selectedVariant.products?.main_image_url ? (
-                  <img src={selectedVariant.products.main_image_url} alt="" className="w-12 h-12 rounded object-cover bg-slate-100" />
-                ) : (
-                  <div className="w-12 h-12 rounded bg-slate-100 flex items-center justify-center">
-                    <ImageOff className="h-4 w-4 text-slate-300" />
-                  </div>
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium truncate">{selectedVariant.products?.name || '—'}</div>
-                  <div className="text-xs text-muted-foreground font-mono truncate">
-                    {selectedVariant.products?.sku || ''} {selectedVariant.variant_sku ? `· ${selectedVariant.variant_sku}` : ''}
-                  </div>
-                  <div className="text-xs mt-0.5 flex gap-1 flex-wrap">
-                    {selectedVariant.size && <Badge variant="secondary" className="text-[10px]">T.{selectedVariant.size}</Badge>}
-                    {selectedVariant.color && <Badge variant="secondary" className="text-[10px]">{selectedVariant.color}</Badge>}
-                    <span className={`text-xs tabular-nums ${variantAvailable > 0 ? 'text-green-600' : 'text-amber-600'}`}>
-                      {variantAvailable > 0 ? `${variantAvailable} disponibles` : 'Sin stock disponible'}
-                    </span>
-                  </div>
-                </div>
-                <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setSelectedVariant(null)}>
-                  <X className="h-3 w-3" />
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <div className="relative">
-                  <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    className="pl-8"
-                    placeholder="Buscar por nombre, referencia, SKU o EAN..."
-                    value={productQuery}
-                    onChange={(e) => setProductQuery(e.target.value)}
-                    disabled={!storeId}
-                  />
-                  {productSearching && (
-                    <Loader2 className="absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
-                  )}
-                </div>
-                {!storeId && (
-                  <p className="text-xs text-amber-700 flex items-center gap-1">
-                    <AlertCircle className="h-3 w-3" /> Necesitas una tienda activa para buscar productos.
-                  </p>
-                )}
-                {productResults.length > 0 && (
-                  <div className="rounded-md border max-h-56 overflow-y-auto">
-                    {productResults.map((v) => {
-                      const available = Array.isArray(v.stock_levels)
-                        ? (v.stock_levels[0]?.available ?? v.stock_levels[0]?.quantity ?? 0)
-                        : 0
-                      return (
-                        <button
-                          key={v.id}
-                          type="button"
-                          className="w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-slate-50 border-b last:border-b-0 text-left"
-                          onClick={() => { setSelectedVariant(v); setProductQuery(''); setProductResults([]) }}
-                        >
-                          {v.products?.main_image_url ? (
-                            <img src={v.products.main_image_url} alt="" className="w-10 h-10 rounded object-cover bg-slate-100 shrink-0" />
-                          ) : (
-                            <div className="w-10 h-10 rounded bg-slate-100 flex items-center justify-center shrink-0">
-                              <ImageOff className="h-4 w-4 text-slate-300" />
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <div className="truncate font-medium">{v.products?.name || '—'}</div>
-                            <div className="text-xs text-muted-foreground font-mono truncate">
-                              {v.products?.sku || ''} {v.variant_sku ? `· ${v.variant_sku}` : ''}
-                            </div>
+          {/* Productos */}
+          <div className="space-y-2">
+            <Label>Productos</Label>
+            {lines.length > 0 && (
+              <div className="rounded-md border divide-y">
+                {lines.map((l) => {
+                  const avail = variantAvailable(l.variant)
+                  return (
+                    <div key={l.key} className="flex items-start gap-3 px-3 py-2">
+                      {l.variant.products?.main_image_url ? (
+                        <img src={l.variant.products.main_image_url} alt="" className="w-12 h-12 rounded object-cover bg-slate-100 shrink-0" />
+                      ) : (
+                        <div className="w-12 h-12 rounded bg-slate-100 flex items-center justify-center shrink-0">
+                          <ImageOff className="h-4 w-4 text-slate-300" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm truncate">{l.variant.products?.name || '—'}</div>
+                        <div className="text-xs text-muted-foreground font-mono truncate">
+                          {l.variant.products?.sku || ''} {l.variant.variant_sku ? `· ${l.variant.variant_sku}` : ''}
+                        </div>
+                        <div className="text-xs mt-0.5 flex gap-1 flex-wrap items-center">
+                          {l.variant.size && <Badge variant="secondary" className="text-[10px]">T.{l.variant.size}</Badge>}
+                          {l.variant.color && <Badge variant="secondary" className="text-[10px]">{l.variant.color}</Badge>}
+                          <span className={`text-xs tabular-nums ${avail >= l.quantity ? 'text-green-600' : 'text-amber-600'}`}>
+                            {avail >= l.quantity ? `${avail} disponibles` : `Solo ${avail} — pendiente`}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-2">
+                          <Input
+                            type="number"
+                            min={1}
+                            value={l.quantity}
+                            onChange={(e) => updateLineQty(l.key, Number(e.target.value))}
+                            className="h-8 w-20"
+                          />
+                          <span className="text-xs text-muted-foreground">×</span>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min={0}
+                            value={l.unit_price_input}
+                            onChange={(e) => updateLinePrice(l.key, e.target.value)}
+                            className="h-8 w-24"
+                          />
+                          <span className="text-xs text-muted-foreground">€</span>
+                          <div className="ml-auto text-sm font-semibold tabular-nums">
+                            {formatCurrency(l.quantity * l.unit_price)}
                           </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            {v.size && <Badge variant="secondary" className="text-[10px]">T.{v.size}</Badge>}
-                            {v.color && <Badge variant="secondary" className="text-[10px]">{v.color}</Badge>}
-                          </div>
-                          <div className={`text-xs tabular-nums shrink-0 ${available > 0 ? 'text-green-600' : 'text-amber-600'}`}>
-                            {available > 0 ? `${available} uds` : 'Pendiente'}
-                          </div>
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
+                        </div>
+                      </div>
+                      <Button variant="ghost" size="sm" className="shrink-0" onClick={() => removeLine(l.key)}>
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  )
+                })}
               </div>
             )}
-          </div>
 
-          {/* Cantidad + Precio */}
-          <div className="grid grid-cols-3 gap-3">
-            <div className="space-y-1">
-              <Label>Cantidad</Label>
-              <Input
-                type="number"
-                min={1}
-                value={quantity}
-                onChange={(e) => {
-                  const n = Number(e.target.value)
-                  setQuantity(Math.max(1, Number.isFinite(n) ? Math.trunc(n) : 1))
-                }}
-              />
-              {selectedVariant && variantAvailable < quantity && (
+            <div className="space-y-2">
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  className="pl-8"
+                  placeholder={lines.length === 0 ? 'Buscar primer producto...' : 'Añadir otro producto...'}
+                  value={productQuery}
+                  onChange={(e) => setProductQuery(e.target.value)}
+                  disabled={!storeId}
+                />
+                {productSearching && (
+                  <Loader2 className="absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+                )}
+              </div>
+              {!storeId && (
                 <p className="text-xs text-amber-700 flex items-center gap-1">
-                  <AlertCircle className="h-3 w-3" />
-                  Solo {variantAvailable} disponibles — reserva pendiente.
+                  <AlertCircle className="h-3 w-3" /> Necesitas una tienda activa para buscar productos.
                 </p>
               )}
+              {productResults.length > 0 && (
+                <div className="rounded-md border max-h-56 overflow-y-auto">
+                  {productResults.map((v) => {
+                    const available = variantAvailable(v)
+                    return (
+                      <button
+                        key={v.id}
+                        type="button"
+                        className="w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-slate-50 border-b last:border-b-0 text-left"
+                        onClick={() => addLine(v)}
+                      >
+                        {v.products?.main_image_url ? (
+                          <img src={v.products.main_image_url} alt="" className="w-10 h-10 rounded object-cover bg-slate-100 shrink-0" />
+                        ) : (
+                          <div className="w-10 h-10 rounded bg-slate-100 flex items-center justify-center shrink-0">
+                            <ImageOff className="h-4 w-4 text-slate-300" />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="truncate font-medium">{v.products?.name || '—'}</div>
+                          <div className="text-xs text-muted-foreground font-mono truncate">
+                            {v.products?.sku || ''} {v.variant_sku ? `· ${v.variant_sku}` : ''}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {v.size && <Badge variant="secondary" className="text-[10px]">T.{v.size}</Badge>}
+                          {v.color && <Badge variant="secondary" className="text-[10px]">{v.color}</Badge>}
+                        </div>
+                        <div className={`text-xs tabular-nums shrink-0 ${available > 0 ? 'text-green-600' : 'text-amber-600'}`}>
+                          {available > 0 ? `${available} uds` : 'Pendiente'}
+                        </div>
+                        <Plus className="h-4 w-4 text-purple-600 shrink-0" />
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
             </div>
-            <div className="space-y-1">
-              <Label>PVP unitario (IVA incl.)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                min={0}
-                value={unitPriceInput}
-                onChange={(e) => {
-                  setUnitPriceInput(e.target.value)
-                  const n = Number(e.target.value.replace(',', '.'))
-                  setUnitPrice(Number.isFinite(n) && n >= 0 ? n : 0)
-                }}
-              />
-            </div>
+          </div>
+
+          {/* Fecha + Total */}
+          <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label>Fecha límite</Label>
               <Input
@@ -566,12 +597,12 @@ export function ReservationFormDialog({
                 onChange={(e) => setExpiresAt(e.target.value)}
               />
             </div>
-          </div>
-
-          {/* Total */}
-          <div className="flex items-center justify-between rounded-md border bg-slate-50 px-3 py-2">
-            <span className="text-sm font-medium">Total reserva</span>
-            <span className="text-base font-bold tabular-nums">{formatCurrency(totalAmount)}</span>
+            <div className="space-y-1">
+              <Label>Total reserva</Label>
+              <div className="flex items-center rounded-md border bg-slate-50 px-3 h-9 font-bold tabular-nums">
+                {formatCurrency(totalAmount)}
+              </div>
+            </div>
           </div>
 
           {/* Pago */}
