@@ -1371,6 +1371,144 @@ export const updateEstimateAction = protectedAction<
   }
 )
 
+// ── Detalle para edición (datos + líneas) ──────────────────────────────────────
+
+export type EstimateDetail = {
+  id: string
+  estimate_number: string
+  client_id: string | null
+  client_name: string
+  client_nif: string | null
+  client_email: string | null
+  estimate_date: string
+  valid_until: string | null
+  notes: string | null
+  subtotal: number
+  tax_rate: number
+  tax_amount: number
+  irpf_rate: number
+  irpf_amount: number
+  total: number
+  status: string
+  lines: { description: string; quantity: number; unit_price: number; tax_rate: number }[]
+}
+
+export const getEstimateDetail = protectedAction<{ estimateId: string }, EstimateDetail>(
+  { permission: 'accounting.view', auditModule: 'accounting' },
+  async (ctx, { estimateId }) => {
+    const { data: est, error } = await ctx.adminClient
+      .from('estimates')
+      .select(`id, estimate_number, client_id, client_name, client_nif, client_email,
+        estimate_date, valid_until, notes, subtotal, tax_rate, tax_amount,
+        irpf_rate, irpf_amount, total, status`)
+      .eq('id', estimateId)
+      .single()
+    if (error || !est) return failure('Presupuesto no encontrado')
+
+    const { data: rawLines = [] } = await ctx.adminClient
+      .from('estimate_lines')
+      .select('description, quantity, unit_price, tax_rate')
+      .eq('estimate_id', estimateId)
+      .order('line_order', { ascending: true })
+
+    const e = est as Record<string, unknown>
+    return success({
+      id: String(e.id),
+      estimate_number: String(e.estimate_number ?? ''),
+      client_id: (e.client_id as string) ?? null,
+      client_name: String(e.client_name ?? ''),
+      client_nif: (e.client_nif as string) ?? null,
+      client_email: (e.client_email as string) ?? null,
+      estimate_date: String(e.estimate_date ?? ''),
+      valid_until: (e.valid_until as string) ?? null,
+      notes: (e.notes as string) ?? null,
+      subtotal: Number(e.subtotal ?? 0),
+      tax_rate: Number(e.tax_rate ?? 21),
+      tax_amount: Number(e.tax_amount ?? 0),
+      irpf_rate: Number(e.irpf_rate ?? 0),
+      irpf_amount: Number(e.irpf_amount ?? 0),
+      total: Number(e.total ?? 0),
+      status: String(e.status ?? 'draft'),
+      lines: (rawLines || []).map((l: Record<string, unknown>) => ({
+        description: String(l.description ?? ''),
+        quantity: Number(l.quantity ?? 1),
+        unit_price: Number(l.unit_price ?? 0),
+        tax_rate: Number(l.tax_rate ?? 21),
+      })),
+    })
+  }
+)
+
+// ── Edición completa de presupuesto (cabecera + líneas) ────────────────────────
+
+export type UpdateEstimateFullInput = CreateEstimateInput & { estimateId: string }
+
+export const updateEstimateFullAction = protectedAction<UpdateEstimateFullInput, { id: string }>(
+  {
+    permission: 'accounting.edit',
+    auditModule: 'accounting',
+    auditAction: 'update',
+    auditEntity: 'estimate',
+    revalidate: ['/admin/contabilidad'],
+  },
+  async (ctx, input) => {
+    const { data: est } = await ctx.adminClient
+      .from('estimates')
+      .select('id, status')
+      .eq('id', input.estimateId)
+      .single()
+    if (!est) return failure('Presupuesto no encontrado')
+    if (!['draft', 'sent'].includes((est as { status?: string }).status ?? '')) {
+      return failure('Solo se pueden editar presupuestos en borrador o enviados')
+    }
+
+    const { error: upErr } = await ctx.adminClient
+      .from('estimates')
+      .update({
+        client_id: input.client_id || null,
+        client_name: input.client_name?.trim() || '',
+        client_nif: input.client_nif || null,
+        client_email: input.client_email?.trim() || null,
+        estimate_date: input.estimate_date,
+        valid_until: input.valid_until || null,
+        subtotal: input.subtotal,
+        tax_rate: input.tax_rate,
+        tax_amount: input.tax_amount,
+        irpf_rate: input.irpf_rate || null,
+        irpf_amount: input.irpf_amount || null,
+        total: input.total,
+        notes: input.notes || null,
+        pdf_url: null,
+      })
+      .eq('id', input.estimateId)
+    if (upErr) return failure(upErr.message)
+
+    const { error: delErr } = await ctx.adminClient
+      .from('estimate_lines')
+      .delete()
+      .eq('estimate_id', input.estimateId)
+    if (delErr) return failure(delErr.message)
+
+    const { error: insErr } = await ctx.adminClient.from('estimate_lines').insert(
+      input.lines.map((l, i) => ({
+        estimate_id: input.estimateId,
+        line_order: i + 1,
+        description: l.description,
+        quantity: l.quantity,
+        unit_price: l.unit_price,
+        discount_pct: 0,
+        subtotal: l.quantity * l.unit_price,
+        tax_rate: l.tax_rate,
+        tax_amount: l.quantity * l.unit_price * (l.tax_rate / 100),
+        total: l.quantity * l.unit_price * (1 + l.tax_rate / 100),
+      }))
+    )
+    if (insErr) return failure(insErr.message)
+
+    return success({ id: input.estimateId })
+  }
+)
+
 // ── Presupuesto: enviar, aceptar, rechazar, convertir a factura ─────────────────
 
 export const sendEstimateAction = protectedAction<{ estimateId: string }, undefined>(

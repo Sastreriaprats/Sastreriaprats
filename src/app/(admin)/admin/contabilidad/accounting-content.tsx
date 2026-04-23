@@ -42,7 +42,7 @@ import {
   getAccountingMovements,
   getProductsForInvoice, listTailoringOrdersForInvoice, getTailoringOrderLinesForInvoice,
   createInvoiceAction, updateInvoiceAction, issueInvoiceAction,
-  createEstimateAction, updateEstimateAction, sendEstimateAction, acceptEstimateAction, rejectEstimateAction, convertEstimateToInvoiceAction,
+  createEstimateAction, updateEstimateAction, updateEstimateFullAction, getEstimateDetail, sendEstimateAction, acceptEstimateAction, rejectEstimateAction, convertEstimateToInvoiceAction,
   getInvoiceLinesAction, updateJournalEntryDescriptionAction,
   generateInvoicePdfAction, generateEstimatePdfAction,
   type InvoiceRow, type EstimateRow, type JournalEntryRow, type VatQuarterRow,
@@ -1049,7 +1049,7 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
 
 type EstimateLine = { description: string; quantity: number; unit_price: number; tax_rate: number }
 
-function EstimateTableRow ({ est, onRefresh }: { est: EstimateRow; onRefresh: () => void }) {
+function EstimateTableRow ({ est, onRefresh, onEdit }: { est: EstimateRow; onRefresh: () => void; onEdit: (id: string) => void }) {
   const [loadingPdf, setLoadingPdf] = useState(false)
   const [loadingInvoicePdf, setLoadingInvoicePdf] = useState(false)
   const [loadingAction, setLoadingAction] = useState(false)
@@ -1159,6 +1159,11 @@ function EstimateTableRow ({ est, onRefresh }: { est: EstimateRow; onRefresh: ()
             <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" onClick={openPdf} disabled={loadingPdf} title="Ver PDF">
               {loadingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
             </Button>
+            {(est.status === 'draft' || est.status === 'sent') && (
+              <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" onClick={() => onEdit(est.id)} title="Editar presupuesto">
+                <Pencil className="h-4 w-4" />
+              </Button>
+            )}
             {est.status === 'draft' && (
               <Button size="sm" variant="outline" className="h-9 min-h-[48px] text-xs border-green-500 text-green-700 hover:bg-green-50" onClick={() => setSendDialogOpen(true)} disabled={loadingAction}>
                 {loadingAction ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Send className="h-3.5 w-3.5 mr-1" />}
@@ -1279,6 +1284,9 @@ function EstimatesTab() {
   const [clients, setClients] = useState<ClientForInvoice[]>([])
   const [billTo, setBillTo] = useState<'client' | string>('client')
   const [saving, setSaving] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingNumber, setEditingNumber] = useState<string>('')
+  const [loadingEdit, setLoadingEdit] = useState(false)
 
   const [productDialogOpen, setProductDialogOpen] = useState(false)
   const [productSearch, setProductSearch] = useState('')
@@ -1307,10 +1315,57 @@ function EstimatesTab() {
 
   useEffect(() => { load() }, [load])
 
+  const resetForm = () => {
+    setEditingId(null)
+    setEditingNumber('')
+    setBillTo('client')
+    setForm({ client_id: '', client_name: '', client_nif: '', client_email: '', estimate_date: new Date().toISOString().split('T')[0], valid_until: '', notes: '', irpf_rate: 0, tax_rate: 21 })
+    setLines([{ description: '', quantity: 1, unit_price: 0, tax_rate: 21 }])
+  }
+
   const openDialog = async () => {
+    resetForm()
     const r = await getClientsForInvoice()
     if (r.success) setClients(r.data)
     setDialogOpen(true)
+  }
+
+  const openEditDialog = async (estimateId: string) => {
+    setLoadingEdit(true)
+    try {
+      const [clientsRes, detailRes] = await Promise.all([
+        getClientsForInvoice(),
+        getEstimateDetail({ estimateId }),
+      ])
+      if (clientsRes.success) setClients(clientsRes.data)
+      if (!detailRes.success) {
+        toast.error('error' in detailRes ? detailRes.error : 'No se pudo cargar el presupuesto')
+        return
+      }
+      const d = detailRes.data
+      setEditingId(d.id)
+      setEditingNumber(d.estimate_number)
+      setBillTo('client')
+      setForm({
+        client_id: d.client_id ?? '',
+        client_name: d.client_name ?? '',
+        client_nif: d.client_nif ?? '',
+        client_email: d.client_email ?? '',
+        estimate_date: d.estimate_date || new Date().toISOString().split('T')[0],
+        valid_until: d.valid_until ?? '',
+        notes: d.notes ?? '',
+        irpf_rate: d.irpf_rate ?? 0,
+        tax_rate: d.tax_rate ?? 21,
+      })
+      setLines(
+        d.lines.length > 0
+          ? d.lines.map(l => ({ description: l.description, quantity: l.quantity, unit_price: l.unit_price, tax_rate: l.tax_rate }))
+          : [{ description: '', quantity: 1, unit_price: 0, tax_rate: 21 }],
+      )
+      setDialogOpen(true)
+    } finally {
+      setLoadingEdit(false)
+    }
   }
 
   const addLine = () => setLines(l => [...l, { description: '', quantity: 1, unit_price: 0, tax_rate: 21 }])
@@ -1364,7 +1419,7 @@ function EstimatesTab() {
     if (!hasValidLine) { toast.error('Añade al menos una línea con descripción y precio'); return }
     setSaving(true)
     try {
-      const result = await createEstimateAction({
+      const payload = {
         client_id: form.client_id || null,
         client_name: form.client_name,
         client_nif: form.client_nif || null,
@@ -1384,22 +1439,30 @@ function EstimatesTab() {
           unit_price: l.unit_price,
           tax_rate: l.tax_rate,
         })),
-      })
-
-      if (!result.success) {
-        toast.error(result.error ?? 'Error al crear el presupuesto')
-        return
       }
 
-      toast.success(`Presupuesto ${result.data.estimate_number} creado`)
+      if (editingId) {
+        const result = await updateEstimateFullAction({ estimateId: editingId, ...payload })
+        if (!result.success) {
+          toast.error('error' in result ? result.error : 'Error al actualizar el presupuesto')
+          return
+        }
+        toast.success(`Presupuesto ${editingNumber} actualizado`)
+      } else {
+        const result = await createEstimateAction(payload)
+        if (!result.success) {
+          toast.error(result.error ?? 'Error al crear el presupuesto')
+          return
+        }
+        toast.success(`Presupuesto ${result.data.estimate_number} creado`)
+      }
+
       setDialogOpen(false)
-      setLines([{ description: '', quantity: 1, unit_price: 0, tax_rate: 21 }])
-      setForm({ client_id: '', client_name: '', client_nif: '', client_email: '', estimate_date: new Date().toISOString().split('T')[0], valid_until: '', notes: '', irpf_rate: 0, tax_rate: 21 })
-      setBillTo('client')
+      resetForm()
       load()
     } catch (error) {
-      console.error('Error creating estimate:', error)
-      toast.error(error instanceof Error ? error.message : 'Error desconocido al crear el presupuesto')
+      console.error('Error saving estimate:', error)
+      toast.error(error instanceof Error ? error.message : 'Error desconocido al guardar el presupuesto')
     } finally {
       setSaving(false)
     }
@@ -1423,7 +1486,7 @@ function EstimatesTab() {
             <SelectItem value="invoiced">Facturado</SelectItem>
           </SelectContent>
         </Select>
-        <Button onClick={openDialog}><Plus className="h-4 w-4 mr-1" /> Nuevo presupuesto</Button>
+        <Button onClick={openDialog} disabled={loadingEdit}><Plus className="h-4 w-4 mr-1" /> Nuevo presupuesto</Button>
       </div>
 
       {loading ? <Spinner /> : (
@@ -1444,17 +1507,17 @@ function EstimatesTab() {
               {rows.length === 0 ? (
                 <TableRow><TableCell colSpan={7} className="text-center py-12 text-muted-foreground">Sin presupuestos</TableCell></TableRow>
               ) : rows.map(est => (
-                <EstimateTableRow key={est.id} est={est} onRefresh={load} />
+                <EstimateTableRow key={est.id} est={est} onRefresh={load} onEdit={openEditDialog} />
               ))}
             </TableBody>
           </Table>
         </div>
       )}
 
-      {/* New Estimate Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      {/* New / Edit Estimate Dialog */}
+      <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm() }}>
         <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
-          <DialogHeader><DialogTitle>Nuevo presupuesto</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingId ? `Editar presupuesto ${editingNumber}` : 'Nuevo presupuesto'}</DialogTitle></DialogHeader>
           <ScrollArea className="flex-1 pr-1">
             <div className="space-y-4 p-1">
               {(() => {
@@ -1592,7 +1655,7 @@ function EstimatesTab() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
             <Button onClick={handleSave} disabled={saving}>
-              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null} Crear presupuesto
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null} {editingId ? 'Guardar cambios' : 'Crear presupuesto'}
             </Button>
           </DialogFooter>
         </DialogContent>
