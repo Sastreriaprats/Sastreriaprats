@@ -4,7 +4,7 @@ import { useState, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Store, TrendingUp, Package, AlertTriangle, Loader2, RefreshCw, ArrowRight } from 'lucide-react'
+import { Store, TrendingUp, Package, AlertTriangle, Loader2, RefreshCw, ArrowRight, Plus } from 'lucide-react'
 import { getStoresWithStats, type StoreStats } from '@/actions/dashboard'
 import { formatCurrency } from '@/lib/utils'
 
@@ -37,9 +37,18 @@ export function TiendasContent({ initialStores = [] }: { initialStores?: StoreSt
           <h1 className="text-2xl font-bold tracking-tight">Tiendas</h1>
           <p className="text-muted-foreground">Stocks y ventas por tienda</p>
         </div>
-        <Button variant="outline" size="sm" className="gap-2" onClick={load}>
-          <RefreshCw className="h-4 w-4" /> Actualizar
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="gap-2" onClick={load}>
+            <RefreshCw className="h-4 w-4" /> Actualizar
+          </Button>
+          <Button
+            size="sm"
+            className="gap-2 bg-prats-navy hover:bg-prats-navy-light"
+            onClick={() => router.push('/admin/configuracion?tab=stores')}
+          >
+            <Plus className="h-4 w-4" /> Nueva tienda
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
