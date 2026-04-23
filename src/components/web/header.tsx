@@ -125,13 +125,24 @@ function MenuSubItem({ child, onClose }: { child: NavChild; onClose: () => void 
 
   return (
     <div>
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center justify-between w-full py-2 text-[15px] text-gray-600 hover:text-black transition-colors"
-      >
-        <span>{child.label}</span>
-        <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
-      </button>
+      <div className="flex items-center justify-between w-full text-[15px] text-gray-600 hover:text-black transition-colors">
+        <Link
+          href={child.href}
+          onClick={onClose}
+          className="flex-1 py-2 focus-visible:ring-2 focus-visible:ring-prats-gold focus-visible:outline-none rounded"
+        >
+          {child.label}
+        </Link>
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          aria-label={open ? `Cerrar submenú ${child.label}` : `Abrir submenú ${child.label}`}
+          aria-expanded={open}
+          className="py-2 pl-3 focus-visible:ring-2 focus-visible:ring-prats-gold focus-visible:outline-none rounded"
+        >
+          <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+        </button>
+      </div>
       <div className={`overflow-hidden transition-all duration-300 ${open ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'}`}>
         <div className="pl-4 pb-1 space-y-1">
           {child.children.map(sub => (
