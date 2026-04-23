@@ -28,13 +28,14 @@ import {
 import { toast } from 'sonner'
 import { useAuth } from '@/components/providers/auth-provider'
 import { useAction } from '@/hooks/use-action'
-import { searchProductsForPos, createSale, cashWithdrawal, listPosEmployees, validateDiscountCode, getPhysicalStoresForCaja } from '@/actions/pos'
+import { searchProductsForPos, createSale, cashWithdrawal, listPosEmployees, validateDiscountCode, getPhysicalStoresForCaja, createGiftCard, validateVoucher } from '@/actions/pos'
 import { addOrderPayment, addSalePayment, getClientPendingDebt } from '@/actions/payments'
 import { getProductByBarcode } from '@/actions/products'
 import { listClients } from '@/actions/clients'
 import { CreateClientDialog } from '@/app/(admin)/admin/clientes/create-client-dialog'
 import { formatCurrency } from '@/lib/utils'
 import { generateTicketPdf, printTicketPdf, printGiftTicketPdf } from '@/components/pos/ticket-pdf'
+import { printGiftCardPdf } from '@/components/pos/gift-card-pdf'
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
 import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
 import { getActiveReservationsForVariant } from '@/actions/reservations'
@@ -143,6 +144,20 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const [showReservationDialog, setShowReservationDialog] = useState(false)
   const [reservedVariantsForClient, setReservedVariantsForClient] = useState<Record<string, number>>({})
 
+  // Tarjetas regalo (vales)
+  const [showGiftCardSell, setShowGiftCardSell] = useState(false)
+  const [giftCardAmount, setGiftCardAmount] = useState('')
+  const [giftCardPaymentMethod, setGiftCardPaymentMethod] = useState<'cash' | 'card' | 'bizum' | 'transfer'>('cash')
+  const [giftCardExpiryDays, setGiftCardExpiryDays] = useState('365')
+  const [giftCardReference, setGiftCardReference] = useState('')
+  const [giftCardSubmitting, setGiftCardSubmitting] = useState(false)
+  const [issuedGiftCard, setIssuedGiftCard] = useState<{ code: string; original_amount: number; issued_date: string; expiry_date: string } | null>(null)
+  // Canje de vale en el modal de pago
+  const [voucherCodeInput, setVoucherCodeInput] = useState('')
+  const [voucherValidating, setVoucherValidating] = useState(false)
+  const [voucherInfo, setVoucherInfo] = useState<{ id: string; code: string; remaining_amount: number; expiry_date: string } | null>(null)
+  const [residualVouchers, setResidualVouchers] = useState<Array<{ id: string; code: string; amount: number; expiry_date: string }>>([])
+
   // Totales de sesión para la cabecera
   const [sessionTotals, setSessionTotals] = useState({
     total_sales: 0,
@@ -150,6 +165,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
     total_card_sales: 0,
     total_bizum_sales: 0,
     total_transfer_sales: 0,
+    total_voucher_sales: 0,
   })
   const lastPaymentsRef = useRef<Payment[]>([])
 
@@ -161,6 +177,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
       total_card_sales: Number(session.total_card_sales) || 0,
       total_bizum_sales: Number(session.total_bizum_sales) || 0,
       total_transfer_sales: Number(session.total_transfer_sales) || 0,
+      total_voucher_sales: Number(session.total_voucher_sales) || 0,
     })
   }, [session?.id])
 
@@ -659,11 +676,13 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
             else if (p.payment_method === 'card') next.total_card_sales += p.amount
             else if (p.payment_method === 'bizum') next.total_bizum_sales += p.amount
             else if (p.payment_method === 'transfer') next.total_transfer_sales += p.amount
+            else if (p.payment_method === 'voucher') next.total_voucher_sales += p.amount
           })
           return next
         })
         lastPaymentsRef.current = []
       }
+      setResidualVouchers(Array.isArray((data as any)?.residualVouchers) ? (data as any).residualVouchers : [])
       setShowPayment(false)
       setCompletedSale(data)
       setShowTicketModal(true)
@@ -715,7 +734,138 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
     setShowPayment(false)
     setSaleType('boutique')
     setSaleWithoutClient(false)
+    setVoucherCodeInput('')
+    setVoucherInfo(null)
+    setResidualVouchers([])
     searchRef.current?.focus()
+  }
+
+  const handlePrintResidualVoucher = async (v: { code: string; expiry_date: string }) => {
+    const storeConfig = getStorePdfData(activeStoreName)
+    await printGiftCardPdf({
+      voucherCode: v.code,
+      issuedDate: new Date().toISOString().split('T')[0],
+      expiryDate: v.expiry_date,
+      kind: 'residual',
+      storeAddress: storeConfig.address,
+      storeSubtitle: storeConfig.subtitle ?? null,
+      storePhones: storeConfig.phones,
+    })
+  }
+
+  const handlePrintIssuedGiftCard = async () => {
+    if (!issuedGiftCard) return
+    const storeConfig = getStorePdfData(activeStoreName)
+    await printGiftCardPdf({
+      voucherCode: issuedGiftCard.code,
+      issuedDate: issuedGiftCard.issued_date,
+      expiryDate: issuedGiftCard.expiry_date,
+      kind: 'gift_card',
+      storeAddress: storeConfig.address,
+      storeSubtitle: storeConfig.subtitle ?? null,
+      storePhones: storeConfig.phones,
+    })
+  }
+
+  const handleSubmitGiftCard = async () => {
+    const amountValue = parseFloat(String(giftCardAmount).replace(',', '.')) || 0
+    if (amountValue < 1) { toast.error('Indica un importe válido (mínimo 1 €)'); return }
+    if (!session?.id || !activeStoreId) { toast.error('No hay caja abierta'); return }
+    const expDays = parseInt(giftCardExpiryDays, 10) || 365
+    setGiftCardSubmitting(true)
+    try {
+      const res: any = await createGiftCard({
+        cash_session_id: session.id,
+        store_id: activeStoreId,
+        amount: amountValue,
+        expiry_days: expDays,
+        payment_method: giftCardPaymentMethod,
+        reference: giftCardReference || null,
+        client_id: selectedClientId,
+        salesperson_id: profile?.id ?? null,
+        notes: null,
+      })
+      if (!res?.success) {
+        toast.error(res?.error ?? 'Error al emitir la tarjeta regalo')
+        return
+      }
+      const v = res.data?.voucher
+      if (v) {
+        setIssuedGiftCard({
+          code: v.code,
+          original_amount: Number(v.original_amount),
+          issued_date: v.issued_date,
+          expiry_date: v.expiry_date,
+        })
+        // Reflejar el cobro en los totales de sesión (igual que una venta normal)
+        setSessionTotals((prev) => {
+          const next = { ...prev }
+          next.total_sales += amountValue
+          if (giftCardPaymentMethod === 'cash') next.total_cash_sales += amountValue
+          else if (giftCardPaymentMethod === 'card') next.total_card_sales += amountValue
+          else if (giftCardPaymentMethod === 'bizum') next.total_bizum_sales += amountValue
+          else if (giftCardPaymentMethod === 'transfer') next.total_transfer_sales += amountValue
+          return next
+        })
+        toast.success(`Tarjeta regalo ${v.code} emitida`)
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al emitir la tarjeta regalo')
+    } finally {
+      setGiftCardSubmitting(false)
+    }
+  }
+
+  const resetGiftCardSell = () => {
+    setShowGiftCardSell(false)
+    setGiftCardAmount('')
+    setGiftCardPaymentMethod('cash')
+    setGiftCardExpiryDays('365')
+    setGiftCardReference('')
+    setIssuedGiftCard(null)
+  }
+
+  const handleApplyVoucher = async () => {
+    const code = voucherCodeInput.trim().toUpperCase()
+    if (!code) { toast.error('Introduce un código'); return }
+    setVoucherValidating(true)
+    try {
+      const res: any = await validateVoucher(code)
+      if (!res?.success) {
+        toast.error(res?.error ?? 'Vale no válido')
+        setVoucherInfo(null)
+        return
+      }
+      const v = res.data
+      setVoucherInfo({
+        id: v.id,
+        code: v.code,
+        remaining_amount: Number(v.remaining_amount),
+        expiry_date: v.expiry_date,
+      })
+      // Importe a aplicar: el menor entre saldo del vale y el restante por pagar.
+      const apply = Math.min(Number(v.remaining_amount), Math.max(0, remaining))
+      if (apply <= 0) {
+        toast.error('No queda importe pendiente al que aplicar el vale')
+        return
+      }
+      setPayments(prev => [...prev, { payment_method: 'voucher', amount: Number(apply.toFixed(2)), voucher_id: v.id }])
+      const willResidual = Number(v.remaining_amount) > apply + 0.005
+      const willCoverAll = apply >= remaining - 0.005
+      if (willResidual && willCoverAll) {
+        toast.success(`Vale aplicado. Se generará un vale residual de ${(Number(v.remaining_amount) - apply).toFixed(2)}€`)
+      } else if (!willCoverAll) {
+        toast.success(`Vale aplicado por ${apply.toFixed(2)}€. Cobra el resto con otro método.`)
+      } else {
+        toast.success('Vale aplicado')
+      }
+      setVoucherCodeInput('')
+      setVoucherInfo(null)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al validar el vale')
+    } finally {
+      setVoucherValidating(false)
+    }
   }
 
   const handleDownloadTicketPdf = async () => {
@@ -1290,6 +1440,14 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
             <Bookmark className="h-5 w-5" />
             <span className="text-[10px] font-medium uppercase tracking-wide">Reservar</span>
           </Button>
+          <Button
+            variant="ghost"
+            className="flex flex-col items-center justify-center gap-0.5 min-w-[4rem] py-2 h-auto text-amber-300 hover:text-amber-200 hover:bg-white/5 rounded"
+            onClick={() => { setIssuedGiftCard(null); setShowGiftCardSell(true) }}
+          >
+            <Gift className="h-5 w-5" />
+            <span className="text-[10px] font-medium uppercase tracking-wide">T. Regalo</span>
+          </Button>
           <Button variant="ghost" className="flex flex-col items-center justify-center gap-0.5 min-w-[4rem] py-2 h-auto text-slate-300 hover:text-white hover:bg-white/5 rounded" onClick={() => router.back()}>
             <LogOut className="h-5 w-5" />
             <span className="text-[10px] font-medium uppercase tracking-wide">Salir</span>
@@ -1538,6 +1696,15 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
                         </Button>
                       )
                     })}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-16 rounded-xl flex-col gap-1.5 border-2 border-rose-200 bg-white hover:bg-slate-50 text-slate-800 font-medium col-span-2"
+                      onClick={() => { setPayments([]); setPaymentTab('mixto'); setPaymentAmountInput(remaining.toFixed(2)); setVoucherCodeInput('') }}
+                    >
+                      <Gift className="h-7 w-7 text-rose-600" />
+                      <span className="text-sm">Pagar con tarjeta regalo / vale</span>
+                    </Button>
                   </div>
                   <Button
                     className="w-full h-12 rounded-xl bg-[#1B2A4A] hover:bg-[#243860] text-white font-bold disabled:opacity-50 gap-2"
@@ -1573,12 +1740,39 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
                       )
                     })}
                   </div>
+
+                  {/* Aplicar tarjeta regalo / vale */}
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 space-y-2">
+                    <Label className="text-xs font-semibold text-rose-700 uppercase tracking-wide flex items-center gap-1.5">
+                      <Gift className="h-3.5 w-3.5" /> Tarjeta regalo / vale
+                    </Label>
+                    <div className="flex gap-2">
+                      <Input
+                        type="text"
+                        placeholder="Código del vale"
+                        value={voucherCodeInput}
+                        onChange={(e) => setVoucherCodeInput(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleApplyVoucher() } }}
+                        className="h-9 font-mono uppercase"
+                      />
+                      <Button size="sm" variant="outline" className="gap-1.5 border-rose-300" disabled={voucherValidating || !voucherCodeInput.trim()} onClick={handleApplyVoucher}>
+                        {voucherValidating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                        Aplicar
+                      </Button>
+                    </div>
+                    <p className="text-[11px] text-rose-700/80">
+                      Se aplicará el menor entre el saldo del vale y el importe pendiente. Si sobra saldo se generará un nuevo vale automáticamente.
+                    </p>
+                  </div>
                   {payments.length > 0 && (
                     <div className="space-y-2">
                       <p className="text-sm font-semibold text-slate-700">Pagos aplicados</p>
                       {payments.map((p, i) => (
-                        <div key={i} className="flex items-center justify-between p-3 bg-slate-100 rounded-lg border border-slate-200">
-                          <span className="text-sm capitalize text-slate-700">{p.payment_method}</span>
+                        <div key={i} className={`flex items-center justify-between p-3 rounded-lg border ${p.payment_method === 'voucher' ? 'bg-rose-50 border-rose-200' : 'bg-slate-100 border-slate-200'}`}>
+                          <span className="text-sm capitalize text-slate-700 flex items-center gap-1.5">
+                            {p.payment_method === 'voucher' && <Gift className="h-3.5 w-3.5 text-rose-600" />}
+                            {p.payment_method === 'voucher' ? 'Vale' : p.payment_method}
+                          </span>
                           <div className="flex items-center gap-2">
                             <span className="font-semibold text-[#1B2A4A]">{formatCurrency(p.amount)}</span>
                             <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-500 hover:text-red-600" onClick={() => setPayments(prev => prev.filter((_, idx) => idx !== i))}><X className="h-3.5 w-3.5" /></Button>
@@ -1700,6 +1894,24 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
               {selectedClientName && (
                 <p className="text-xs text-slate-500">Ticket guardado en el perfil del cliente</p>
               )}
+              {residualVouchers.length > 0 && (
+                <div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-3 space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-800 flex items-center gap-1.5">
+                    <Gift className="h-3.5 w-3.5" /> Vale residual generado
+                  </p>
+                  {residualVouchers.map((v) => (
+                    <div key={v.id} className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-mono font-bold text-slate-900 text-sm truncate">{v.code}</p>
+                        <p className="text-[11px] text-slate-600">Saldo: <span className="font-semibold">{formatCurrency(v.amount)}</span> · Caduca: {new Date(v.expiry_date).toLocaleDateString('es-ES')}</p>
+                      </div>
+                      <Button size="sm" variant="outline" className="gap-1.5 shrink-0 border-amber-300" onClick={() => handlePrintResidualVoucher(v)}>
+                        <Printer className="h-3.5 w-3.5" /> Imprimir vale
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           <DialogFooter className="flex flex-wrap gap-2 sm:flex-row border-t pt-4">
@@ -1765,6 +1977,132 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
         defaultClientName={selectedClientName}
         onAddReservationToTicket={addReservationPickup}
       />
+
+      {/* Diálogo: Vender tarjeta regalo */}
+      <Dialog
+        open={showGiftCardSell}
+        onOpenChange={(open) => { if (!open) resetGiftCardSell(); else setShowGiftCardSell(true) }}
+      >
+        <DialogContent className="max-w-md rounded-2xl border-0 shadow-2xl overflow-hidden p-0 gap-0">
+          <div className="bg-gradient-to-br from-amber-500 to-amber-600 px-6 py-5 text-white">
+            <p className="text-xs font-medium text-white/80 uppercase tracking-wider flex items-center gap-1.5">
+              <Gift className="h-4 w-4" /> Tarjeta regalo
+            </p>
+            <p className="text-lg font-bold mt-0.5">
+              {issuedGiftCard ? 'Tarjeta emitida correctamente' : 'Emitir nueva tarjeta regalo'}
+            </p>
+          </div>
+
+          {!issuedGiftCard ? (
+            <div className="p-6 space-y-4">
+              <div className="space-y-2">
+                <Label className="text-sm font-medium text-slate-700">Importe (€)</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="1"
+                  placeholder="50.00"
+                  value={giftCardAmount}
+                  onChange={(e) => setGiftCardAmount(e.target.value)}
+                  className="h-12 text-2xl font-mono text-center border-slate-300"
+                  autoFocus
+                />
+                <p className="text-[11px] text-slate-500">El cliente paga este importe ahora y recibe un código que podrá canjear hasta su caducidad.</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-sm font-medium text-slate-700">Caducidad (días)</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={giftCardExpiryDays}
+                  onChange={(e) => setGiftCardExpiryDays(e.target.value)}
+                  className="h-10 w-32 font-mono text-center border-slate-300"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-sm font-medium text-slate-700">Cobrar con</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { method: 'cash' as const, label: 'Efectivo', icon: Banknote },
+                    { method: 'card' as const, label: 'Tarjeta', icon: CreditCard },
+                    { method: 'bizum' as const, label: 'Bizum', icon: Smartphone },
+                    { method: 'transfer' as const, label: 'Transfer.', icon: ArrowRightLeft },
+                  ] as const).map(({ method, label, icon: Icon }) => {
+                    const selected = giftCardPaymentMethod === method
+                    return (
+                      <Button
+                        key={method}
+                        type="button"
+                        variant="outline"
+                        className={`h-12 rounded-xl gap-2 border-2 ${selected ? 'border-amber-500 bg-amber-50 ring-2 ring-amber-200' : 'border-slate-200 bg-white'}`}
+                        onClick={() => setGiftCardPaymentMethod(method)}
+                      >
+                        <Icon className="h-4 w-4" />
+                        <span className="text-sm">{label}</span>
+                      </Button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {(giftCardPaymentMethod === 'transfer' || giftCardPaymentMethod === 'bizum') && (
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium text-slate-700">Referencia (opcional)</Label>
+                  <Input value={giftCardReference} onChange={(e) => setGiftCardReference(e.target.value)} className="h-9 border-slate-300" />
+                </div>
+              )}
+
+              {selectedClientName && (
+                <p className="text-xs text-slate-600 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">
+                  Asociada al cliente: <span className="font-medium text-slate-800">{selectedClientName}</span>
+                </p>
+              )}
+
+              <Button
+                className="w-full h-12 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold gap-2"
+                disabled={giftCardSubmitting || !giftCardAmount}
+                onClick={handleSubmitGiftCard}
+              >
+                {giftCardSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Gift className="h-4 w-4" />}
+                Cobrar y emitir
+              </Button>
+            </div>
+          ) : (
+            <div className="p-6 space-y-4">
+              <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-4 text-center">
+                <p className="text-xs font-semibold uppercase tracking-wider text-amber-800 mb-1">Código del vale</p>
+                <p className="text-2xl font-mono font-black tabular-nums text-slate-900">{issuedGiftCard.code}</p>
+                <Separator className="my-3 bg-amber-200" />
+                <div className="grid grid-cols-2 gap-2 text-left text-xs">
+                  <div>
+                    <p className="text-amber-800/80">Importe</p>
+                    <p className="font-bold text-slate-900">{formatCurrency(issuedGiftCard.original_amount)}</p>
+                  </div>
+                  <div>
+                    <p className="text-amber-800/80">Caducidad</p>
+                    <p className="font-bold text-slate-900">{new Date(issuedGiftCard.expiry_date).toLocaleDateString('es-ES')}</p>
+                  </div>
+                </div>
+              </div>
+              <p className="text-xs text-center text-slate-500">
+                Imprime la tarjeta para entregar al cliente. El importe ya se ha cobrado y está en caja.
+              </p>
+              <div className="flex flex-col gap-2">
+                <Button className="h-12 gap-2 bg-prats-gold hover:bg-prats-gold/90 text-prats-navy font-semibold" onClick={handlePrintIssuedGiftCard}>
+                  <Printer className="h-4 w-4" />
+                  Imprimir tarjeta regalo
+                </Button>
+                <Button variant="outline" className="h-10" onClick={resetGiftCardSell}>
+                  Cerrar
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

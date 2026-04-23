@@ -17,7 +17,7 @@ export const createSaleSchema = z.object({
   cash_session_id: z.string().uuid(),
   store_id: z.string().uuid(),
   client_id: z.string().uuid().optional().nullable(),
-  sale_type: z.enum(['boutique', 'tailoring_deposit', 'tailoring_final', 'alteration', 'online']).default('boutique'),
+  sale_type: z.enum(['boutique', 'tailoring_deposit', 'tailoring_final', 'alteration', 'online', 'gift_card']).default('boutique'),
   discount_percentage: z.number().min(0).max(100).default(0),
   discount_code: z.string().optional().nullable(),
   is_tax_free: z.boolean().default(false),
@@ -25,6 +25,18 @@ export const createSaleSchema = z.object({
   notes: z.string().optional().nullable(),
   /** Quién realiza la venta (empleado). Si no se envía, se usa el usuario actual. */
   salesperson_id: z.string().uuid().optional().nullable(),
+})
+
+export const createGiftCardSchema = z.object({
+  cash_session_id: z.string().uuid(),
+  store_id: z.string().uuid(),
+  amount: z.number().positive(),
+  expiry_days: z.number().int().min(1).default(365),
+  payment_method: z.enum(['cash', 'card', 'bizum', 'transfer']),
+  reference: z.string().optional().nullable(),
+  client_id: z.string().uuid().optional().nullable(),
+  salesperson_id: z.string().uuid().optional().nullable(),
+  notes: z.string().optional().nullable(),
 })
 
 export const saleLineSchema = z.object({
@@ -52,3 +64,4 @@ export type CloseCashSessionInput = z.infer<typeof closeCashSessionSchema>
 export type CreateSaleInput = z.infer<typeof createSaleSchema>
 export type SaleLineInput = z.infer<typeof saleLineSchema>
 export type SalePaymentInput = z.infer<typeof salePaymentSchema>
+export type CreateGiftCardInput = z.infer<typeof createGiftCardSchema>

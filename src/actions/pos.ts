@@ -3,7 +3,7 @@
 import { protectedAction } from '@/lib/server/action-wrapper'
 import {
   openCashSessionSchema, closeCashSessionSchema,
-  createSaleSchema,
+  createSaleSchema, createGiftCardSchema,
 } from '@/lib/validations/pos'
 import { success, failure } from '@/lib/errors'
 import { createSaleJournalEntry } from '@/actions/accounting-triggers'
@@ -218,6 +218,28 @@ export const createSale = protectedAction<{
       .single()
     if (!openSession) return failure('La sesión de caja está cerrada. Abre la caja antes de registrar una venta.')
 
+    // Capturar el saldo previo de cada voucher utilizado, para poder emitir vale residual
+    // si tras la venta sobra saldo. El RPC consume el voucher por el importe del pago,
+    // así que el sobrante = saldo_previo - importe_aplicado.
+    const voucherPayments: Array<{ voucher_id: string; amount: number; prev_remaining: number; client_id: string | null; expiry_date: string }> = []
+    for (const p of (paymentsInput ?? [])) {
+      if (p.payment_method === 'voucher' && p.voucher_id) {
+        const { data: v } = await ctx.adminClient
+          .from('vouchers')
+          .select('id, remaining_amount, client_id, expiry_date, status')
+          .eq('id', p.voucher_id)
+          .single()
+        if (!v) return failure('Vale no encontrado')
+        voucherPayments.push({
+          voucher_id: p.voucher_id,
+          amount: Number(p.amount),
+          prev_remaining: Number(v.remaining_amount),
+          client_id: v.client_id,
+          expiry_date: v.expiry_date,
+        })
+      }
+    }
+
     const { data: result, error: rpcError } = await ctx.adminClient.rpc('rpc_create_sale', {
       p_sale: parsedSale.data,
       p_lines: linesInput,
@@ -227,6 +249,46 @@ export const createSale = protectedAction<{
 
     if (rpcError) return failure(rpcError.message)
 
+    // Generar vouchers residuales para los vales que se aplicaron por menos de su saldo
+    const residualVouchers: Array<{ id: string; code: string; amount: number; expiry_date: string }> = []
+    for (const vp of voucherPayments) {
+      const residualAmount = vp.prev_remaining - vp.amount
+      if (residualAmount > 0.005) {
+        const code = await generateUniqueVoucherCode(ctx.adminClient)
+        const expiryDate = new Date()
+        expiryDate.setDate(expiryDate.getDate() + 365)
+        const expiryStr = expiryDate.toISOString().split('T')[0]
+        const { data: residual, error: residualError } = await ctx.adminClient
+          .from('vouchers')
+          .insert({
+            code,
+            voucher_type: 'fixed',
+            voucher_kind: 'residual',
+            parent_voucher_id: vp.voucher_id,
+            original_amount: residualAmount,
+            remaining_amount: residualAmount,
+            origin_sale_id: result.id,
+            client_id: vp.client_id,
+            issued_date: new Date().toISOString().split('T')[0],
+            expiry_date: expiryStr,
+            status: 'active',
+            issued_by_store_id: parsedSale.data.store_id,
+            issued_by: ctx.userId,
+            notes: `Saldo residual del vale ${vp.voucher_id}`,
+          })
+          .select('id, code, remaining_amount, expiry_date')
+          .single()
+        if (!residualError && residual) {
+          residualVouchers.push({
+            id: residual.id,
+            code: residual.code,
+            amount: Number(residual.remaining_amount),
+            expiry_date: residual.expiry_date,
+          })
+        }
+      }
+    }
+
     // Fire-and-forget: asiento contable
     createSaleJournalEntry(result.id).catch(() => {})
 
@@ -234,6 +296,133 @@ export const createSale = protectedAction<{
 
     return success({
       ...result,
+      residualVouchers,
+      auditDescription,
+    })
+  }
+)
+
+/** Genera un código alfanumérico único para vouchers (8 chars, sin caracteres ambiguos). */
+async function generateUniqueVoucherCode(adminClient: any): Promise<string> {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  for (let attempt = 0; attempt < 6; attempt++) {
+    let code = 'GC-'
+    for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)]
+    const { data: existing } = await adminClient
+      .from('vouchers')
+      .select('id')
+      .eq('code', code)
+      .maybeSingle()
+    if (!existing) return code
+  }
+  // Fallback con timestamp (improbable llegar aquí)
+  return 'GC-' + Date.now().toString(36).toUpperCase()
+}
+
+/**
+ * Vende una tarjeta regalo. Crea una venta de tipo `gift_card` (1 línea virtual)
+ * y un voucher asociado con un código único. El cliente puede después canjearlo
+ * en cualquier compra introduciendo el código en el modal de pago.
+ */
+export const createGiftCard = protectedAction<any, any>(
+  {
+    permission: 'pos.sell',
+    auditModule: 'pos',
+    auditAction: 'create',
+    auditEntity: 'gift_card',
+    revalidate: ['/pos'],
+  },
+  async (ctx, input) => {
+    const parsed = createGiftCardSchema.safeParse(input)
+    if (!parsed.success) return failure(parsed.error.issues[0].message)
+    const data = parsed.data
+
+    // Verificar caja abierta
+    const { data: openSession } = await ctx.adminClient
+      .from('cash_sessions')
+      .select('id')
+      .eq('id', data.cash_session_id)
+      .eq('status', 'open')
+      .single()
+    if (!openSession) return failure('La sesión de caja está cerrada. Abre la caja antes de emitir una tarjeta regalo.')
+
+    // 1. Crear la venta de la tarjeta regalo (sale_type='gift_card', con IVA 21%).
+    const saleInput = {
+      cash_session_id: data.cash_session_id,
+      store_id: data.store_id,
+      client_id: data.client_id ?? null,
+      sale_type: 'gift_card' as const,
+      discount_percentage: 0,
+      discount_code: null,
+      is_tax_free: false,
+      tailoring_order_id: null,
+      notes: data.notes ?? null,
+      salesperson_id: data.salesperson_id ?? null,
+    }
+    const lines = [{
+      product_variant_id: null,
+      reservation_id: null,
+      description: `Tarjeta regalo`,
+      sku: null,
+      quantity: 1,
+      unit_price: data.amount,
+      discount_percentage: 0,
+      tax_rate: 21,
+      cost_price: null,
+    }]
+    const payments = [{
+      payment_method: data.payment_method,
+      amount: data.amount,
+      reference: data.reference ?? null,
+      voucher_id: null,
+      next_payment_date: null,
+    }]
+
+    const { data: saleResult, error: rpcError } = await ctx.adminClient.rpc('rpc_create_sale', {
+      p_sale: saleInput,
+      p_lines: lines,
+      p_payments: payments,
+      p_user_id: ctx.userId,
+    })
+    if (rpcError) return failure(rpcError.message)
+
+    // 2. Generar voucher de tipo gift_card asociado a la venta.
+    const code = await generateUniqueVoucherCode(ctx.adminClient)
+    const today = new Date()
+    const expiry = new Date()
+    expiry.setDate(today.getDate() + (data.expiry_days ?? 365))
+    const expiryStr = expiry.toISOString().split('T')[0]
+    const issuedStr = today.toISOString().split('T')[0]
+
+    const { data: voucher, error: voucherError } = await ctx.adminClient
+      .from('vouchers')
+      .insert({
+        code,
+        voucher_type: 'fixed',
+        voucher_kind: 'gift_card',
+        original_amount: data.amount,
+        remaining_amount: data.amount,
+        origin_sale_id: saleResult.id,
+        client_id: data.client_id ?? null,
+        issued_date: issuedStr,
+        expiry_date: expiryStr,
+        status: 'active',
+        issued_by_store_id: data.store_id,
+        issued_by: ctx.userId,
+        notes: data.notes ?? null,
+      })
+      .select('id, code, original_amount, remaining_amount, issued_date, expiry_date')
+      .single()
+    if (voucherError) return failure(voucherError.message)
+
+    // Fire-and-forget: asiento contable
+    createSaleJournalEntry(saleResult.id).catch(() => {})
+
+    const auditDescription = `Tarjeta regalo ${voucher.code} · ${Number(data.amount).toFixed(2)}€`
+
+    return success({
+      sale: saleResult,
+      voucher,
       auditDescription,
     })
   }
@@ -782,15 +971,23 @@ export const checkCashSessionOpen = protectedAction<
 export const validateVoucher = protectedAction<string, any>(
   { permission: 'pos.access', auditModule: 'pos' },
   async (ctx, code) => {
+    const normalized = (code ?? '').trim().toUpperCase()
+    if (!normalized) return failure('Introduce un código de vale')
+
     const { data: voucher } = await ctx.adminClient
       .from('vouchers')
-      .select('*')
-      .eq('code', code.toUpperCase())
-      .eq('status', 'active')
+      .select('id, code, voucher_type, voucher_kind, parent_voucher_id, original_amount, remaining_amount, expiry_date, status, client_id, origin_sale_id, issued_date')
+      .eq('code', normalized)
       .single()
 
-    if (!voucher) return failure('Vale no encontrado o no activo')
-    if (new Date(voucher.expiry_date) < new Date()) return failure('Vale expirado')
+    if (!voucher) return failure('Vale no encontrado')
+    if (!['active', 'partially_used'].includes(voucher.status)) {
+      return failure(`Vale no disponible (estado: ${voucher.status})`)
+    }
+    if (new Date(voucher.expiry_date) < new Date(new Date().toISOString().split('T')[0])) {
+      return failure('Vale caducado')
+    }
+    if (Number(voucher.remaining_amount) <= 0) return failure('Vale sin saldo')
     return success(voucher)
   }
 )

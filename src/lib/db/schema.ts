@@ -1201,10 +1201,12 @@ export const salePayments = pgTable('sale_payments', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
-export const vouchers = pgTable('vouchers', {
+export const vouchers: any = pgTable('vouchers', {
   id: uuid('id').primaryKey().defaultRandom(),
   code: varchar('code', { length: 20 }).notNull().unique(),
   voucherType: text('voucher_type').default('fixed'),
+  voucherKind: text('voucher_kind').default('return'),
+  parentVoucherId: uuid('parent_voucher_id'),
   originalAmount: decimal('original_amount', { precision: 10, scale: 2 }).notNull(),
   remainingAmount: decimal('remaining_amount', { precision: 10, scale: 2 }).notNull(),
   percentage: decimal('percentage', { precision: 5, scale: 2 }),
