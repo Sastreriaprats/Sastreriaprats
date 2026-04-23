@@ -130,25 +130,41 @@ export const getProductsWithVariantsForBarcodes = protectedAction<
     const page = params.page || 1
     const pageSize = Math.min(params.pageSize || 50, 100)
 
-    let query = admin
+    // Conteo exacto de variantes sin barcode (producto y variante activos)
+    const { count: withoutBarcodeCountRaw } = await admin
       .from('product_variants')
-      .select(`
-        id, variant_sku, size, color, barcode, price_override, product_id,
-        products!inner(id, sku, name, base_price, price_with_tax, tax_rate, is_active)
-      `)
-      .eq('products.is_active', true)
+      .select('id, products!inner(is_active)', { count: 'exact', head: true })
       .eq('is_active', true)
+      .eq('products.is_active', true)
+      .or('barcode.is.null,barcode.eq.')
+    const withoutBarcodeCount = withoutBarcodeCountRaw ?? 0
 
-    const { data: raw, error } = await query.order('product_id', { ascending: true }).order('size', { ascending: true }).limit(5000)
+    // Traer TODAS las variantes activas — Supabase limita a 1000 por query, paginamos internamente
+    const CHUNK = 1000
+    const rows: any[] = []
+    for (let offset = 0; ; offset += CHUNK) {
+      const { data: chunk, error } = await admin
+        .from('product_variants')
+        .select(`
+          id, variant_sku, size, color, barcode, price_override, product_id,
+          products!inner(id, sku, name, base_price, price_with_tax, tax_rate, is_active)
+        `)
+        .eq('products.is_active', true)
+        .eq('is_active', true)
+        .order('product_id', { ascending: true })
+        .order('size', { ascending: true })
+        .range(offset, offset + CHUNK - 1)
 
-    if (error) {
-      console.error('[getProductsWithVariantsForBarcodes]', error)
-      return success({ data: [], total: 0, page, pageSize, totalPages: 0, withoutBarcodeCount: 0 })
+      if (error) {
+        console.error('[getProductsWithVariantsForBarcodes]', error)
+        return success({ data: [], total: 0, page, pageSize, totalPages: 0, withoutBarcodeCount: 0 })
+      }
+      if (!chunk || chunk.length === 0) break
+      rows.push(...chunk)
+      if (chunk.length < CHUNK) break
     }
 
-    const rows = raw || []
     const byProduct = new Map<string, { product_id: string; product_name: string; product_sku: string; price_with_tax: number; tax_rate_pct: number; variants: any[] }>()
-    let withoutBarcodeCount = 0
 
     for (const v of rows) {
       const rawProducts = v.products
@@ -159,7 +175,6 @@ export const getProductsWithVariantsForBarcodes = protectedAction<
       const priceWithTax = priceOverride ?? productPriceWithTax
       const taxRatePct = Number(p.tax_rate ?? 21)
       const hasBarcode = Boolean(v.barcode && String(v.barcode).trim())
-      if (!hasBarcode) withoutBarcodeCount++
 
       const variant = {
         variant_id: v.id,
@@ -201,10 +216,11 @@ export const getProductsWithVariantsForBarcodes = protectedAction<
 
     const filtered = searched.filter((prod) => {
       const allWith = prod.variants.every((v: any) => v.has_barcode)
+      const anyWithout = prod.variants.some((v: any) => !v.has_barcode)
       const allWithout = prod.variants.every((v: any) => !v.has_barcode)
       const partial = !allWith && !allWithout
       if (filter === 'with') return allWith
-      if (filter === 'without') return allWithout
+      if (filter === 'without') return anyWithout
       if (filter === 'partial') return partial
       return true
     })
@@ -1977,14 +1993,30 @@ export const generateBarcodesForAllVariants = protectedAction<void, { generated:
     const ids = (activeProductIds ?? []).map((p: { id: string }) => p.id)
     if (!ids.length) return success({ generated: 0, errors: [] })
 
-    const { data: variants } = await ctx.adminClient
-      .from('product_variants')
-      .select('id, variant_sku, product_id, products!inner(sku, name)')
-      .in('product_id', ids)
-      .or('barcode.is.null,barcode.eq.')
-      .eq('is_active', true)
+    // Paginar — Supabase limita a 1000 filas por query. Obtener TODAS las variantes sin barcode en chunks por lotes de product_ids.
+    const variants: any[] = []
+    const ID_CHUNK = 500
+    for (let i = 0; i < ids.length; i += ID_CHUNK) {
+      const slice = ids.slice(i, i + ID_CHUNK)
+      let offset = 0
+      const ROW_CHUNK = 1000
+      while (true) {
+        const { data: chunk } = await ctx.adminClient
+          .from('product_variants')
+          .select('id, variant_sku, product_id, products!inner(sku, name)')
+          .in('product_id', slice)
+          .or('barcode.is.null,barcode.eq.')
+          .eq('is_active', true)
+          .order('id', { ascending: true })
+          .range(offset, offset + ROW_CHUNK - 1)
+        if (!chunk || chunk.length === 0) break
+        variants.push(...chunk)
+        if (chunk.length < ROW_CHUNK) break
+        offset += ROW_CHUNK
+      }
+    }
 
-    if (!variants?.length) return success({ generated: 0, errors: [] })
+    if (!variants.length) return success({ generated: 0, errors: [] })
 
     const used = new Set<string>()
     const errors: string[] = []
