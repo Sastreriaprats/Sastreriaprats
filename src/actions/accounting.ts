@@ -306,13 +306,48 @@ export const getVatQuarterly = protectedAction<
   }
 )
 
-export const getClientsForInvoice = protectedAction<void, { id: string; full_name: string; email: string | null }[]>(
+export type ClientForInvoiceCompany = {
+  id: string
+  company_name: string
+  nif: string | null
+  contact_email: string | null
+  is_default: boolean
+}
+export type ClientForInvoice = {
+  id: string
+  full_name: string
+  email: string | null
+  nif: string | null
+  companies: ClientForInvoiceCompany[]
+}
+
+export const getClientsForInvoice = protectedAction<void, ClientForInvoice[]>(
   { permission: 'accounting.edit', auditModule: 'accounting' },
   async (ctx) => {
-    const { data } = await ctx.adminClient.from('clients').select('id, first_name, last_name, full_name, email').order('last_name').limit(500)
+    const { data } = await ctx.adminClient
+      .from('clients')
+      .select('id, first_name, last_name, full_name, email, document_number, client_companies(id, company_name, nif, contact_email, is_default)')
+      .order('last_name')
+      .limit(500)
     return success((data || []).map((c: Record<string, unknown>) => {
       const fn = (c as any).full_name ?? `${(c as any).first_name ?? ''} ${(c as any).last_name ?? ''}`.trim()
-      return { id: String(c.id), full_name: String(fn || 'Sin nombre'), email: (c.email as string) ?? null }
+      const rawCompanies = ((c as any).client_companies ?? []) as Record<string, unknown>[]
+      const companies: ClientForInvoiceCompany[] = rawCompanies
+        .map(cc => ({
+          id: String(cc.id),
+          company_name: String((cc as any).company_name ?? ''),
+          nif: ((cc as any).nif as string) ?? null,
+          contact_email: ((cc as any).contact_email as string) ?? null,
+          is_default: Boolean((cc as any).is_default),
+        }))
+        .sort((a, b) => Number(b.is_default) - Number(a.is_default))
+      return {
+        id: String(c.id),
+        full_name: String(fn || 'Sin nombre'),
+        email: (c.email as string) ?? null,
+        nif: ((c as any).document_number as string) ?? null,
+        companies,
+      }
     }))
   }
 )

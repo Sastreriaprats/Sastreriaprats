@@ -10,6 +10,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -26,11 +28,12 @@ import {
   Loader2, Plus, Search, ChevronDown, ChevronRight, Eye,
   Send, CheckCircle, FileOutput, Trash2, RefreshCw, ArrowUpCircle, Download,
   Receipt, ExternalLink, Package, ClipboardList, Pencil, Calendar, XCircle, Store,
+  Check, ChevronsUpDown, Building2, User,
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import {
   getAccountingSummary, getInvoices, getEstimates,
@@ -44,6 +47,7 @@ import {
   generateInvoicePdfAction, generateEstimatePdfAction,
   type InvoiceRow, type EstimateRow, type JournalEntryRow, type VatQuarterRow,
   type ManualTransaction, type AccountingMovementRow, type AccountingSummary,
+  type ClientForInvoice,
 } from '@/actions/accounting'
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -126,6 +130,88 @@ const MONTHS = [
   'Enero','Febrero','Marzo','Abril','Mayo','Junio',
   'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre',
 ]
+
+// ─── Shared UI ──────────────────────────────────────────────────────────────
+
+function ClientSearchCombobox({
+  clients,
+  value,
+  onSelect,
+  placeholder = 'Buscar cliente por nombre, email o NIF…',
+  disabled = false,
+}: {
+  clients: ClientForInvoice[]
+  value: string
+  onSelect: (client: ClientForInvoice | null) => void
+  placeholder?: string
+  disabled?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const selected = clients.find(c => c.id === value) || null
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          disabled={disabled}
+          className="w-full justify-between font-normal"
+        >
+          <span className={cn('truncate', !selected && 'text-muted-foreground')}>
+            {selected ? selected.full_name : placeholder}
+          </span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+        <Command
+          filter={(value, search) => {
+            const normalizedSearch = search.toLowerCase().trim()
+            if (!normalizedSearch) return 1
+            return value.toLowerCase().includes(normalizedSearch) ? 1 : 0
+          }}
+        >
+          <CommandInput placeholder="Buscar…" />
+          <CommandList>
+            <CommandEmpty>Sin resultados.</CommandEmpty>
+            <CommandGroup>
+              {clients.map(c => {
+                const searchValue = [
+                  c.full_name,
+                  c.email ?? '',
+                  c.nif ?? '',
+                  ...c.companies.flatMap(cc => [cc.company_name, cc.nif ?? '']),
+                ].join(' ')
+                return (
+                  <CommandItem
+                    key={c.id}
+                    value={`${searchValue} ${c.id}`}
+                    onSelect={() => {
+                      onSelect(c.id === value ? null : c)
+                      setOpen(false)
+                    }}
+                  >
+                    <Check className={cn('mr-2 h-4 w-4', value === c.id ? 'opacity-100' : 'opacity-0')} />
+                    <div className="flex flex-col min-w-0">
+                      <span className="truncate">{c.full_name}</span>
+                      <span className="text-xs text-muted-foreground truncate">
+                        {[c.email, c.nif].filter(Boolean).join(' · ') || 'Sin email ni NIF'}
+                        {c.companies.length > 0 && ` · ${c.companies.length} empresa${c.companies.length === 1 ? '' : 's'}`}
+                      </span>
+                    </div>
+                  </CommandItem>
+                )
+              })}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  )
+}
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 
@@ -1190,7 +1276,8 @@ function EstimatesTab() {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [clients, setClients] = useState<{ id: string; full_name: string; email: string | null }[]>([])
+  const [clients, setClients] = useState<ClientForInvoice[]>([])
+  const [billTo, setBillTo] = useState<'client' | string>('client')
   const [saving, setSaving] = useState(false)
 
   const [productDialogOpen, setProductDialogOpen] = useState(false)
@@ -1308,6 +1395,7 @@ function EstimatesTab() {
       setDialogOpen(false)
       setLines([{ description: '', quantity: 1, unit_price: 0, tax_rate: 21 }])
       setForm({ client_id: '', client_name: '', client_nif: '', client_email: '', estimate_date: new Date().toISOString().split('T')[0], valid_until: '', notes: '', irpf_rate: 0, tax_rate: 21 })
+      setBillTo('client')
       load()
     } catch (error) {
       console.error('Error creating estimate:', error)
@@ -1369,34 +1457,93 @@ function EstimatesTab() {
           <DialogHeader><DialogTitle>Nuevo presupuesto</DialogTitle></DialogHeader>
           <ScrollArea className="flex-1 pr-1">
             <div className="space-y-4 p-1">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label>Cliente</Label>
-                  <Select value={form.client_id} onValueChange={id => {
-                    const c = clients.find(x => x.id === id)
-                    setForm(f => ({ ...f, client_id: id, client_name: c?.full_name ?? '', client_email: c?.email ?? '' }))
-                  }}>
-                    <SelectTrigger><SelectValue placeholder="Seleccionar cliente" /></SelectTrigger>
-                    <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.full_name}</SelectItem>)}</SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <Label>Email del cliente</Label>
-                  <Input type="email" value={form.client_email} onChange={e => setForm(f => ({ ...f, client_email: e.target.value }))} placeholder="email@ejemplo.com (opcional)" />
-                </div>
-                <div className="space-y-1">
-                  <Label>Nombre presupuesto</Label>
-                  <Input value={form.client_name} onChange={e => setForm(f => ({ ...f, client_name: e.target.value }))} />
-                </div>
-                <div className="space-y-1">
-                  <Label>NIF / CIF</Label>
-                  <Input value={form.client_nif} onChange={e => setForm(f => ({ ...f, client_nif: e.target.value }))} />
-                </div>
-                <div className="space-y-1">
-                  <Label>Fecha</Label>
-                  <DatePickerPopover value={form.estimate_date} onChange={date => setForm(f => ({ ...f, estimate_date: date }))} />
-                </div>
-              </div>
+              {(() => {
+                const selected = clients.find(c => c.id === form.client_id)
+                const hasCompanies = !!selected && selected.companies.length > 0
+                return (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1 col-span-2">
+                      <Label>Cliente</Label>
+                      <ClientSearchCombobox
+                        clients={clients}
+                        value={form.client_id}
+                        onSelect={c => {
+                          if (!c) {
+                            setBillTo('client')
+                            setForm(f => ({ ...f, client_id: '', client_name: '', client_email: '', client_nif: '' }))
+                            return
+                          }
+                          setBillTo('client')
+                          setForm(f => ({
+                            ...f,
+                            client_id: c.id,
+                            client_name: c.full_name,
+                            client_email: c.email ?? '',
+                            client_nif: c.nif ?? '',
+                          }))
+                        }}
+                      />
+                    </div>
+                    {hasCompanies && selected && (
+                      <div className="space-y-1 col-span-2">
+                        <Label>Facturar a</Label>
+                        <Select
+                          value={billTo}
+                          onValueChange={v => {
+                            setBillTo(v)
+                            if (v === 'client') {
+                              setForm(f => ({
+                                ...f,
+                                client_name: selected.full_name,
+                                client_email: selected.email ?? '',
+                                client_nif: selected.nif ?? '',
+                              }))
+                            } else {
+                              const company = selected.companies.find(cc => cc.id === v)
+                              if (company) {
+                                setForm(f => ({
+                                  ...f,
+                                  client_name: company.company_name,
+                                  client_email: company.contact_email ?? selected.email ?? '',
+                                  client_nif: company.nif ?? '',
+                                }))
+                              }
+                            }
+                          }}
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="client">
+                              <span className="flex items-center gap-2"><User className="h-3.5 w-3.5" /> Particular · {selected.full_name}</span>
+                            </SelectItem>
+                            {selected.companies.map(cc => (
+                              <SelectItem key={cc.id} value={cc.id}>
+                                <span className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5" /> {cc.company_name}{cc.is_default ? ' (por defecto)' : ''}</span>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    <div className="space-y-1">
+                      <Label>Nombre presupuesto</Label>
+                      <Input value={form.client_name} onChange={e => setForm(f => ({ ...f, client_name: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label>NIF / CIF</Label>
+                      <Input value={form.client_nif} onChange={e => setForm(f => ({ ...f, client_nif: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Email del cliente</Label>
+                      <Input type="email" value={form.client_email} onChange={e => setForm(f => ({ ...f, client_email: e.target.value }))} placeholder="email@ejemplo.com (opcional)" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Fecha</Label>
+                      <DatePickerPopover value={form.estimate_date} onChange={date => setForm(f => ({ ...f, estimate_date: date }))} />
+                    </div>
+                  </div>
+                )
+              })()}
 
               <div>
                 <div className="mb-2">
