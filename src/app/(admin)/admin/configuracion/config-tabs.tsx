@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/components/providers/auth-provider'
-import { Users, Shield, Store, Settings, Shirt, UserCog, Target } from 'lucide-react'
+import { Users, Shield, Store, Settings, Shirt, UserCog, Target, Layers, CalendarDays } from 'lucide-react'
 import { UsersSection } from './sections/users-section'
 import { RolesSection } from './sections/roles-section'
 import { StoresSection } from './sections/stores-section'
@@ -11,6 +11,8 @@ import { StoreEmployeesSection } from './sections/store-employees-section'
 import { GarmentTypesSection } from './sections/garment-types-section'
 import { SettingsSection } from './sections/settings-section'
 import { GoalsSection } from './sections/goals-section'
+import { CollectionsSection } from './sections/collections-section'
+import { SeasonsSection } from './sections/seasons-section'
 
 // Cada pestaña acepta cualquiera de los posibles códigos de permiso que puedan existir
 // según la migración activa (001 usa nombres distintos a 010).
@@ -50,6 +52,18 @@ const ALL_TABS = [
     label: 'Prendas y Medidas',
     icon: Shirt,
     perms: ['config.edit', 'config.manage_garment_types', 'config.view', 'config.access'],
+  },
+  {
+    value: 'collections',
+    label: 'Colecciones',
+    icon: Layers,
+    perms: ['products.view', 'products.edit', 'config.edit', 'config.view', 'config.access'],
+  },
+  {
+    value: 'seasons',
+    label: 'Temporadas',
+    icon: CalendarDays,
+    perms: ['products.view', 'products.edit', 'config.edit', 'config.view', 'config.access'],
   },
   {
     value: 'settings',
@@ -117,6 +131,8 @@ export function ConfigTabs({ activeTab }: { activeTab: string }) {
         <TabsContent value="store-employees"><StoreEmployeesSection /></TabsContent>
         <TabsContent value="goals"><GoalsSection /></TabsContent>
         <TabsContent value="garments"><GarmentTypesSection /></TabsContent>
+        <TabsContent value="collections"><CollectionsSection /></TabsContent>
+        <TabsContent value="seasons"><SeasonsSection /></TabsContent>
         <TabsContent value="settings"><SettingsSection /></TabsContent>
       </div>
     </Tabs>

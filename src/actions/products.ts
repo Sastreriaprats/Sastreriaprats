@@ -460,37 +460,31 @@ export const createProductAction = protectedAction<any, any>(
   }
 )
 
-/** Valores distintos de `collection` (no nulos). Para poblar el filtro del admin. */
+/** Colecciones activas definidas por el admin (tabla `product_collections`). */
 export const listProductCollections = protectedAction<void, string[]>(
   { permission: 'products.view', auditModule: 'stock' },
   async (ctx) => {
     const { data, error } = await ctx.adminClient
-      .from('products')
-      .select('collection')
-      .not('collection', 'is', null)
-      .neq('collection', '')
-      .limit(2000)
+      .from('product_collections')
+      .select('name')
+      .eq('is_active', true)
+      .order('name', { ascending: true })
     if (error) return failure(error.message)
-    const unique = Array.from(new Set((data || []).map((r: any) => String(r.collection).trim()).filter(Boolean)))
-    unique.sort((a, b) => a.localeCompare(b, 'es'))
-    return success(unique)
+    return success((data ?? []).map((r: any) => r.name as string))
   }
 )
 
-/** Valores distintos de `season` (no nulos). Para poblar el filtro del admin. */
+/** Temporadas activas definidas por el admin (tabla `product_seasons`). */
 export const listProductSeasons = protectedAction<void, string[]>(
   { permission: 'products.view', auditModule: 'stock' },
   async (ctx) => {
     const { data, error } = await ctx.adminClient
-      .from('products')
-      .select('season')
-      .not('season', 'is', null)
-      .neq('season', '')
-      .limit(2000)
+      .from('product_seasons')
+      .select('name')
+      .eq('is_active', true)
+      .order('name', { ascending: true })
     if (error) return failure(error.message)
-    const unique = Array.from(new Set((data || []).map((r: any) => String(r.season).trim()).filter(Boolean)))
-    unique.sort((a, b) => a.localeCompare(b, 'es'))
-    return success(unique)
+    return success((data ?? []).map((r: any) => r.name as string))
   }
 )
 
