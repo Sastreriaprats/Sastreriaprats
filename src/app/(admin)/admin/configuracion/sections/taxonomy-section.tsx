@@ -343,8 +343,8 @@ function AssignProductsDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
+      <DialogContent className="max-w-2xl flex flex-col max-h-[85vh] p-0 gap-0">
+        <DialogHeader className="px-6 pt-6 pb-4 border-b">
           <DialogTitle>Asignar productos a {label.toLowerCase()}: {item.name}</DialogTitle>
           <DialogDescription>
             Marca los productos que pertenecen a esta {label.toLowerCase()}. Los desmarcados se
@@ -352,7 +352,7 @@ function AssignProductsDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
+        <div className="flex-1 min-h-0 flex flex-col gap-3 px-6 py-4">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -377,7 +377,7 @@ function AssignProductsDialog({
             <Badge variant="secondary">{selectedIds.size} seleccionados</Badge>
           </div>
 
-          <ScrollArea className="h-[360px] rounded-md border">
+          <ScrollArea className="flex-1 min-h-0 rounded-md border">
             {loading ? (
               <div className="p-8 text-center text-sm text-muted-foreground">
                 <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
@@ -410,7 +410,7 @@ function AssignProductsDialog({
           </ScrollArea>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="px-6 py-4 border-t">
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancelar</Button>
           <Button onClick={handleSave} disabled={saving || loading}>
             {saving && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
