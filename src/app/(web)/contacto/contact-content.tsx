@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { CheckCircle } from 'lucide-react'
+import { CheckCircle, MapPin, Mail, Phone, Clock } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -225,83 +225,99 @@ export function ContactContent() {
           </form>
         </div>
 
-        <aside className="space-y-10 text-prats-navy lg:pt-4">
-          <section>
-            <p className="text-base font-medium">Nuestras boutiques:</p>
-            <p className="mt-2 text-base">
+        <aside className="space-y-8 text-prats-navy lg:pt-4">
+          <section className="rounded-lg border border-prats-gold/20 bg-prats-cream/30 p-6 transition-colors hover:border-prats-gold/40">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-prats-gold/10">
+                <MapPin className="h-5 w-5 text-prats-gold" strokeWidth={1.5} />
+              </span>
+              <h3 className="font-display text-lg font-light tracking-wide">Nuestras boutiques</h3>
+            </div>
+            <div className="mt-4 space-y-2 pl-[52px]">
               <a
                 href={STORE_LOCATIONS.pinzon.mapsUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="hover:underline"
+                className="block text-base transition-colors hover:text-prats-gold"
               >
                 {STORE_LOCATIONS.pinzon.address}
               </a>
-            </p>
-            <p className="text-base">
               <a
                 href={STORE_LOCATIONS.wellington.mapsUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="hover:underline"
+                className="block text-base transition-colors hover:text-prats-gold"
               >
                 {STORE_LOCATIONS.wellington.address} - {STORE_LOCATIONS.wellington.subtitle}
               </a>
-            </p>
+            </div>
           </section>
 
-          <section>
-            <p className="text-base font-medium">Para consultas generales</p>
-            <a
-              href={`mailto:${BRAND.email}`}
-              className="mt-2 inline-block text-base underline underline-offset-4 hover:text-prats-gold"
-            >
-              {BRAND.email}
-            </a>
+          <section className="rounded-lg border border-prats-gold/20 bg-prats-cream/30 p-6 transition-colors hover:border-prats-gold/40">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-prats-gold/10">
+                <Mail className="h-5 w-5 text-prats-gold" strokeWidth={1.5} />
+              </span>
+              <h3 className="font-display text-lg font-light tracking-wide">Consultas generales</h3>
+            </div>
+            <div className="mt-4 pl-[52px]">
+              <a
+                href={`mailto:${BRAND.email}`}
+                className="inline-block text-base transition-colors hover:text-prats-gold"
+              >
+                {BRAND.email}
+              </a>
+            </div>
           </section>
 
-          <section>
-            <p className="text-base font-medium">Teléfonos</p>
-            <p className="mt-2">
+          <section className="rounded-lg border border-prats-gold/20 bg-prats-cream/30 p-6 transition-colors hover:border-prats-gold/40">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-prats-gold/10">
+                <Phone className="h-5 w-5 text-prats-gold" strokeWidth={1.5} />
+              </span>
+              <h3 className="font-display text-lg font-light tracking-wide">Teléfonos</h3>
+            </div>
+            <div className="mt-4 space-y-1.5 pl-[52px]">
               <a
                 href={brandPhoneHref}
-                className="text-base underline underline-offset-4 hover:text-prats-gold"
+                className="block text-base transition-colors hover:text-prats-gold"
               >
                 {BRAND.phone}
               </a>
-            </p>
-            <p>
               <a
                 href={pinzonPhoneHref}
-                className="text-base underline underline-offset-4 hover:text-prats-gold"
+                className="block text-base transition-colors hover:text-prats-gold"
               >
                 {STORE_LOCATIONS.pinzon.phones[0]}
               </a>
-            </p>
-            <p>
               <a
                 href={wellingtonPhoneHref}
-                className="text-base underline underline-offset-4 hover:text-prats-gold"
+                className="block text-base transition-colors hover:text-prats-gold"
               >
                 {STORE_LOCATIONS.wellington.phones[0]}
               </a>
-            </p>
+            </div>
           </section>
 
-          <section>
-            <p className="text-base font-medium">Nuestros horarios</p>
-            <div className="mt-2 space-y-3 text-base">
+          <section className="rounded-lg border border-prats-gold/20 bg-prats-cream/30 p-6 transition-colors hover:border-prats-gold/40">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-prats-gold/10">
+                <Clock className="h-5 w-5 text-prats-gold" strokeWidth={1.5} />
+              </span>
+              <h3 className="font-display text-lg font-light tracking-wide">Nuestros horarios</h3>
+            </div>
+            <div className="mt-4 space-y-4 pl-[52px] text-base">
               <div>
-                <p className="font-medium">{STORE_LOCATIONS.pinzon.name}</p>
-                <p>Lunes – Viernes: {STORE_LOCATIONS.pinzon.hours.weekdays}</p>
-                <p>Sábado: {STORE_LOCATIONS.pinzon.hours.saturday}</p>
+                <p className="font-medium text-prats-navy">{STORE_LOCATIONS.pinzon.name}</p>
+                <p className="text-prats-navy/80">Lunes – Viernes: {STORE_LOCATIONS.pinzon.hours.weekdays}</p>
+                <p className="text-prats-navy/80">Sábado: {STORE_LOCATIONS.pinzon.hours.saturday}</p>
               </div>
               <div>
-                <p className="font-medium">{STORE_LOCATIONS.wellington.name}</p>
-                <p>Lunes – Viernes: {STORE_LOCATIONS.wellington.hours.weekdays}</p>
-                <p>Sábado: {STORE_LOCATIONS.wellington.hours.saturday}</p>
+                <p className="font-medium text-prats-navy">{STORE_LOCATIONS.wellington.name}</p>
+                <p className="text-prats-navy/80">Lunes – Viernes: {STORE_LOCATIONS.wellington.hours.weekdays}</p>
+                <p className="text-prats-navy/80">Sábado: {STORE_LOCATIONS.wellington.hours.saturday}</p>
               </div>
-              <p>Domingos: Cerrado</p>
+              <p className="text-prats-navy/80">Domingos: Cerrado</p>
             </div>
           </section>
         </aside>
