@@ -1,14 +1,7 @@
 import { Metadata } from 'next'
 import Image from 'next/image'
-import { Caveat } from 'next/font/google'
 
 export const revalidate = 3600
-
-const caveat = Caveat({
-  subsets: ['latin'],
-  weight: ['400', '500'],
-  display: 'swap',
-})
 
 export const metadata: Metadata = {
   title: 'Sobre nosotros — Sastrería Prats',
@@ -67,12 +60,16 @@ export default function SobreNosotrosPage() {
   return (
     <main className="bg-white">
       {/* TÍTULO MANUSCRITO */}
-      <section className="py-20 md:py-28 px-6 text-center">
-        <h1
-          className={`${caveat.className} text-5xl md:text-7xl lg:text-8xl text-black font-normal leading-none`}
-        >
-          Auténtico e Imperfecto
-        </h1>
+      <section className="py-20 md:py-28 px-6 flex justify-center">
+        <h1 className="sr-only">Auténtico e Imperfecto</h1>
+        <Image
+          src="https://www.sastreriaprats.com/cdn/shop/files/Captura_de_pantalla_2024-11-08_a_las_15.45.28.png?v=1731077134"
+          alt="Auténtico e Imperfecto"
+          width={900}
+          height={220}
+          priority
+          className="w-full max-w-3xl h-auto"
+        />
       </section>
 
       {/* TIMELINE */}
