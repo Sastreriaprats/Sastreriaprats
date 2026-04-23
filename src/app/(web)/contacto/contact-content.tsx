@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { MapPin, Phone, Mail, Clock, CheckCircle } from 'lucide-react'
+import { CheckCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+
 const SERVICES = [
   'Traje a medida',
   'Camisa a medida',
@@ -89,47 +90,59 @@ export function ContactContent() {
     )
   }
 
-  return (
-    <div className="container mx-auto px-4 py-16 sm:py-20">
-      <h1 className="mb-12 font-display text-4xl font-light text-prats-navy">
-        Contacto
-      </h1>
+  const pinzonPhoneHref = `tel:${STORE_LOCATIONS.pinzon.phones[0].replace(/\s/g, '')}`
+  const wellingtonPhoneHref = `tel:${STORE_LOCATIONS.wellington.phones[0].replace(/\s/g, '')}`
+  const brandPhoneHref = `tel:${BRAND.phone.replace(/\s/g, '')}`
 
-      <div className="grid gap-12 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="grid gap-6 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="name">Nombre *</Label>
-                <Input
-                  id="name"
-                  name="name"
-                  value={formData.name}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, name: e.target.value }))
-                  }
-                  placeholder="Tu nombre"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="email">Email *</Label>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, email: e.target.value }))
-                  }
-                  placeholder="tu@email.com"
-                  required
-                />
-              </div>
+  return (
+    <div className="container mx-auto px-4 py-16 sm:py-24 lg:py-28">
+      <div className="grid gap-16 lg:grid-cols-2 lg:gap-20">
+        <div>
+          <h1 className="font-display text-5xl font-light leading-tight text-prats-navy sm:text-6xl">
+            ¿Necesitas ayuda?
+          </h1>
+          <div className="mt-6 h-px w-16 bg-prats-navy" />
+
+          <form onSubmit={handleSubmit} className="mt-16 space-y-6">
+            <div className="space-y-2">
+              <Label htmlFor="name" className="sr-only">
+                Nombre
+              </Label>
+              <Input
+                id="name"
+                name="name"
+                value={formData.name}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, name: e.target.value }))
+                }
+                placeholder="Nombre"
+                required
+                className="h-12 rounded-none border-x-0 border-t-0 border-b border-prats-navy/20 bg-transparent px-0 text-base placeholder:text-prats-navy/50 focus-visible:border-prats-navy focus-visible:ring-0"
+              />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="phone">Teléfono</Label>
+              <Label htmlFor="email" className="sr-only">
+                Email
+              </Label>
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                value={formData.email}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, email: e.target.value }))
+                }
+                placeholder="Email"
+                required
+                className="h-12 rounded-none border-x-0 border-t-0 border-b border-prats-navy/20 bg-transparent px-0 text-base placeholder:text-prats-navy/50 focus-visible:border-prats-navy focus-visible:ring-0"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="phone" className="sr-only">
+                Teléfono
+              </Label>
               <Input
                 id="phone"
                 name="phone"
@@ -138,20 +151,26 @@ export function ContactContent() {
                 onChange={(e) =>
                   setFormData((prev) => ({ ...prev, phone: e.target.value }))
                 }
-                placeholder="+34 600 000 000"
+                placeholder="Teléfono"
+                className="h-12 rounded-none border-x-0 border-t-0 border-b border-prats-navy/20 bg-transparent px-0 text-base placeholder:text-prats-navy/50 focus-visible:border-prats-navy focus-visible:ring-0"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="service">Servicio de interés</Label>
+              <Label htmlFor="service" className="sr-only">
+                Servicio de interés
+              </Label>
               <Select
                 value={formData.service}
                 onValueChange={(value) =>
                   setFormData((prev) => ({ ...prev, service: value }))
                 }
               >
-                <SelectTrigger id="service">
-                  <SelectValue placeholder="Selecciona un servicio" />
+                <SelectTrigger
+                  id="service"
+                  className="h-12 rounded-none border-x-0 border-t-0 border-b border-prats-navy/20 bg-transparent px-0 text-base text-prats-navy data-[placeholder]:text-prats-navy/50 focus:ring-0 focus-visible:border-prats-navy focus-visible:ring-0"
+                >
+                  <SelectValue placeholder="Servicio de interés" />
                 </SelectTrigger>
                 <SelectContent>
                   {SERVICES.map((s) => (
@@ -164,7 +183,9 @@ export function ContactContent() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="preferredDate">Fecha preferida</Label>
+              <Label htmlFor="preferredDate" className="sr-only">
+                Fecha preferida
+              </Label>
               <DatePickerPopover
                 id="preferredDate"
                 value={formData.preferredDate}
@@ -172,12 +193,15 @@ export function ContactContent() {
                   setFormData((prev) => ({ ...prev, preferredDate: date }))
                 }
                 min={new Date().toISOString().split('T')[0]}
-                placeholder="Seleccionar fecha"
+                placeholder="Fecha preferida"
+                containerClassName="h-12 rounded-none border-x-0 border-t-0 border-b border-prats-navy/20 bg-transparent px-0 text-base shadow-none hover:bg-transparent data-[placeholder]:text-prats-navy/50 focus-visible:border-prats-navy focus-visible:ring-0"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="message">Mensaje</Label>
+              <Label htmlFor="message" className="sr-only">
+                Mensaje
+              </Label>
               <Textarea
                 id="message"
                 name="message"
@@ -185,90 +209,101 @@ export function ContactContent() {
                 onChange={(e) =>
                   setFormData((prev) => ({ ...prev, message: e.target.value }))
                 }
-                placeholder="Cuéntanos en qué podemos ayudarte..."
-                rows={5}
+                placeholder="Mensaje"
+                rows={4}
+                className="resize-none rounded-none border-x-0 border-t-0 border-b border-prats-navy/20 bg-transparent px-0 text-base placeholder:text-prats-navy/50 focus-visible:border-prats-navy focus-visible:ring-0"
               />
             </div>
 
             <Button
               type="submit"
               disabled={isSubmitting}
-              className="bg-prats-navy hover:bg-prats-navy/90"
+              className="h-12 rounded-none bg-prats-navy px-10 text-sm font-medium uppercase tracking-wider hover:bg-prats-navy/90"
             >
-              {isSubmitting ? 'Enviando...' : 'Enviar mensaje'}
+              {isSubmitting ? 'Enviando...' : 'Enviar'}
             </Button>
           </form>
         </div>
 
-        <aside className="space-y-8 rounded-lg border border-border bg-prats-cream/30 p-6">
-          <div>
-            <h3 className="font-display text-lg font-medium text-prats-navy">
-              Información de contacto
-            </h3>
-          </div>
-          <div className="space-y-4">
-            <div className="flex gap-3">
-              <MapPin className="h-5 w-5 shrink-0 text-prats-gold" />
+        <aside className="space-y-10 text-prats-navy lg:pt-4">
+          <section>
+            <p className="text-base font-medium">Nuestras boutiques:</p>
+            <p className="mt-2 text-base">
+              <a
+                href={STORE_LOCATIONS.pinzon.mapsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:underline"
+              >
+                {STORE_LOCATIONS.pinzon.address}
+              </a>
+            </p>
+            <p className="text-base">
+              <a
+                href={STORE_LOCATIONS.wellington.mapsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:underline"
+              >
+                {STORE_LOCATIONS.wellington.address} - {STORE_LOCATIONS.wellington.subtitle}
+              </a>
+            </p>
+          </section>
+
+          <section>
+            <p className="text-base font-medium">Para consultas generales</p>
+            <a
+              href={`mailto:${BRAND.email}`}
+              className="mt-2 inline-block text-base underline underline-offset-4 hover:text-prats-gold"
+            >
+              {BRAND.email}
+            </a>
+          </section>
+
+          <section>
+            <p className="text-base font-medium">Teléfonos</p>
+            <p className="mt-2">
+              <a
+                href={brandPhoneHref}
+                className="text-base underline underline-offset-4 hover:text-prats-gold"
+              >
+                {BRAND.phone}
+              </a>
+            </p>
+            <p>
+              <a
+                href={pinzonPhoneHref}
+                className="text-base underline underline-offset-4 hover:text-prats-gold"
+              >
+                {STORE_LOCATIONS.pinzon.phones[0]}
+              </a>
+            </p>
+            <p>
+              <a
+                href={wellingtonPhoneHref}
+                className="text-base underline underline-offset-4 hover:text-prats-gold"
+              >
+                {STORE_LOCATIONS.wellington.phones[0]}
+              </a>
+            </p>
+          </section>
+
+          <section>
+            <p className="text-base font-medium">Nuestros horarios</p>
+            <div className="mt-2 space-y-3 text-base">
               <div>
-                <p className="font-medium text-prats-navy">Hermanos Pinzón</p>
-                <p className="text-sm text-muted-foreground">
-                  {STORE_LOCATIONS.pinzon.fullAddress}
-                </p>
-                <a href={`tel:${STORE_LOCATIONS.pinzon.phones[0].replace(/\s/g, '')}`} className="text-sm text-muted-foreground underline hover:text-prats-navy transition-colors">
-                  {STORE_LOCATIONS.pinzon.phones[0]}
-                </a>
+                <p className="font-medium">{STORE_LOCATIONS.pinzon.name}</p>
+                <p>Lunes – Viernes: {STORE_LOCATIONS.pinzon.hours.weekdays}</p>
+                <p>Sábado: {STORE_LOCATIONS.pinzon.hours.saturday}</p>
               </div>
-            </div>
-            <div className="flex gap-3">
-              <MapPin className="h-5 w-5 shrink-0 text-prats-gold" />
               <div>
-                <p className="font-medium text-prats-navy">Wellington</p>
-                <p className="text-sm text-muted-foreground">
-                  {STORE_LOCATIONS.wellington.fullAddress} ({STORE_LOCATIONS.wellington.subtitle})
-                </p>
-                <a href={`tel:${STORE_LOCATIONS.wellington.phones[0].replace(/\s/g, '')}`} className="text-sm text-muted-foreground underline hover:text-prats-navy transition-colors">
-                  {STORE_LOCATIONS.wellington.phones[0]}
-                </a>
+                <p className="font-medium">{STORE_LOCATIONS.wellington.name}</p>
+                <p>Lunes – Viernes: {STORE_LOCATIONS.wellington.hours.weekdays}</p>
+                <p>Sábado: {STORE_LOCATIONS.wellington.hours.saturday}</p>
               </div>
+              <p>Domingos: Cerrado</p>
             </div>
-            <div className="flex gap-3">
-              <Phone className="h-5 w-5 shrink-0 text-prats-gold" />
-              <div>
-                <p className="font-medium text-prats-navy">Teléfono general</p>
-                <a href={`tel:${BRAND.phone.replace(/\s/g, '')}`} className="text-sm text-muted-foreground underline hover:text-prats-navy transition-colors">
-                  {BRAND.phone}
-                </a>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <Mail className="h-5 w-5 shrink-0 text-prats-gold" />
-              <div>
-                <p className="font-medium text-prats-navy">Email</p>
-                <a href={`mailto:${BRAND.email}`} className="text-sm text-muted-foreground underline hover:text-prats-navy transition-colors">
-                  {BRAND.email}
-                </a>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <Clock className="h-5 w-5 shrink-0 text-prats-gold" />
-              <div>
-                <p className="font-medium text-prats-navy">Horarios</p>
-                <p className="text-sm text-muted-foreground font-medium mt-1">Hermanos Pinzón:</p>
-                <p className="text-sm text-muted-foreground">
-                  Lunes a Viernes: {STORE_LOCATIONS.pinzon.hours.weekdays}
-                  <br />
-                  Sábados: {STORE_LOCATIONS.pinzon.hours.saturday}
-                </p>
-                <p className="text-sm text-muted-foreground font-medium mt-2">Wellington:</p>
-                <p className="text-sm text-muted-foreground">
-                  Lunes a Viernes: {STORE_LOCATIONS.wellington.hours.weekdays}
-                  <br />
-                  Sábados: {STORE_LOCATIONS.wellington.hours.saturday}
-                </p>
-                <p className="text-sm text-muted-foreground font-medium mt-2">Domingos: Cerrado</p>
-              </div>
-            </div>
-          </div>
+          </section>
         </aside>
       </div>
     </div>
