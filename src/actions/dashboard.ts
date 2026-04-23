@@ -253,7 +253,14 @@ export interface StoreStats {
   salesThisMonth: number
   totalStockUnits: number
   lowStockCount: number
+  boutiqueSalesThisMonth: number
+  sastreriaSalesThisMonth: number
+  boutiqueTarget: number
+  sastreriaTarget: number
 }
+
+const BOUTIQUE_SALE_TYPES = ['boutique', 'online']
+const SASTRERIA_SALE_TYPES = ['tailoring_deposit', 'tailoring_final', 'alteration']
 
 export const getStoresWithStats = protectedAction<void, StoreStats[]>(
   { auditModule: 'dashboard' },
@@ -261,6 +268,9 @@ export const getStoresWithStats = protectedAction<void, StoreStats[]>(
     const admin = ctx.adminClient
     const today = new Date().toISOString().split('T')[0]
     const monthStart = `${today.slice(0, 7)}-01`
+    const [yearStr, monthStr] = today.split('-')
+    const year = Number(yearStr)
+    const month = Number(monthStr)
 
     const { data: stores } = await admin.from('stores').select('id, code, name').eq('is_active', true).order('name')
     if (!stores?.length) return success([])
@@ -271,10 +281,12 @@ export const getStoresWithStats = protectedAction<void, StoreStats[]>(
       salesTodayRes,
       salesMonthRes,
       warehousesRes,
+      goalsRes,
     ] = await Promise.all([
       admin.from('sales').select('store_id, total').in('store_id', storeIds).gte('created_at', `${today}T00:00:00`).eq('status', 'completed'),
-      admin.from('sales').select('store_id, total').in('store_id', storeIds).gte('created_at', `${monthStart}T00:00:00`).eq('status', 'completed'),
+      admin.from('sales').select('store_id, total, sale_type').in('store_id', storeIds).gte('created_at', `${monthStart}T00:00:00`).eq('status', 'completed'),
       admin.from('warehouses').select('id, store_id').in('store_id', storeIds),
+      admin.from('store_monthly_goals').select('store_id, goal_type, target_amount').in('store_id', storeIds).eq('year', year).eq('month', month),
     ])
 
     const warehouses = (warehousesRes.data || []) as { id: string; store_id: string }[]
@@ -289,15 +301,35 @@ export const getStoresWithStats = protectedAction<void, StoreStats[]>(
 
     const salesTodayByStore: Record<string, number> = {}
     const salesMonthByStore: Record<string, number> = {}
+    const boutiqueByStore: Record<string, number> = {}
+    const sastreriaByStore: Record<string, number> = {}
     for (const s of stores as { id: string }[]) {
       salesTodayByStore[s.id] = 0
       salesMonthByStore[s.id] = 0
+      boutiqueByStore[s.id] = 0
+      sastreriaByStore[s.id] = 0
     }
     for (const r of (salesTodayRes.data || []) as { store_id: string; total?: number }[]) {
       if (r.store_id) salesTodayByStore[r.store_id] = (salesTodayByStore[r.store_id] ?? 0) + (r.total ?? 0)
     }
-    for (const r of (salesMonthRes.data || []) as { store_id: string; total?: number }[]) {
-      if (r.store_id) salesMonthByStore[r.store_id] = (salesMonthByStore[r.store_id] ?? 0) + (r.total ?? 0)
+    for (const r of (salesMonthRes.data || []) as { store_id: string; total?: number; sale_type?: string }[]) {
+      if (!r.store_id) continue
+      const t = r.total ?? 0
+      salesMonthByStore[r.store_id] = (salesMonthByStore[r.store_id] ?? 0) + t
+      const st = r.sale_type ?? ''
+      if (BOUTIQUE_SALE_TYPES.includes(st)) {
+        boutiqueByStore[r.store_id] = (boutiqueByStore[r.store_id] ?? 0) + t
+      } else if (SASTRERIA_SALE_TYPES.includes(st)) {
+        sastreriaByStore[r.store_id] = (sastreriaByStore[r.store_id] ?? 0) + t
+      }
+    }
+
+    const boutiqueTargetByStore: Record<string, number> = {}
+    const sastreriaTargetByStore: Record<string, number> = {}
+    for (const g of (goalsRes.data || []) as { store_id: string; goal_type: string; target_amount: string | number }[]) {
+      const amount = Number(g.target_amount) || 0
+      if (g.goal_type === 'boutique') boutiqueTargetByStore[g.store_id] = amount
+      else if (g.goal_type === 'sastreria') sastreriaTargetByStore[g.store_id] = amount
     }
 
     const stockByStore: Record<string, { total: number; low: number }> = {}
@@ -322,6 +354,10 @@ export const getStoresWithStats = protectedAction<void, StoreStats[]>(
       salesThisMonth: salesMonthByStore[store.id] ?? 0,
       totalStockUnits: stockByStore[store.id]?.total ?? 0,
       lowStockCount: stockByStore[store.id]?.low ?? 0,
+      boutiqueSalesThisMonth: boutiqueByStore[store.id] ?? 0,
+      sastreriaSalesThisMonth: sastreriaByStore[store.id] ?? 0,
+      boutiqueTarget: boutiqueTargetByStore[store.id] ?? 0,
+      sastreriaTarget: sastreriaTargetByStore[store.id] ?? 0,
     }))
 
     return success(JSON.parse(JSON.stringify(result)))

@@ -11,9 +11,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Switch } from '@/components/ui/switch'
-import { Loader2, UserPlus, KeyRound, Pencil, Copy, Check, Trash2 } from 'lucide-react'
+import { Loader2, UserPlus, KeyRound, Pencil, Copy, Check, Trash2, TrendingUp } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { listAdminUsers, createAdminUser, updateAdminUser, deleteAdminUser, getUserStoreAssignments, type UserRow } from '@/actions/users'
+import { UserSalesDialog } from '@/components/admin/user-sales-dialog'
 import { useStores, useRolesAndPermissions } from '@/hooks/use-cached-queries'
 import { formatDateTime } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -40,6 +41,7 @@ export function UsersSection() {
   const [deleting, setDeleting] = useState(false)
   const [tempPassword, setTempPassword] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [salesUser, setSalesUser] = useState<UserRow | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -173,6 +175,15 @@ export function UsersSection() {
                         {u.last_login_at ? formatDateTime(u.last_login_at) : 'Nunca'}
                       </TableCell>
                       <TableCell className="text-right space-x-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          title="Ver ventas y comisiones"
+                          onClick={() => setSalesUser(u)}
+                        >
+                          <TrendingUp className="h-3.5 w-3.5" />
+                        </Button>
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditUser(u)}>
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
@@ -220,6 +231,16 @@ export function UsersSection() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Sales dialog */}
+      {salesUser && (
+        <UserSalesDialog
+          userId={salesUser.id}
+          userLabel={salesUser.full_name ?? salesUser.email ?? ''}
+          open={!!salesUser}
+          onOpenChange={(open) => { if (!open) setSalesUser(null) }}
+        />
+      )}
 
       {/* Edit dialog */}
       {editUser && (

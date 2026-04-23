@@ -198,6 +198,19 @@ export const stores = pgTable('stores', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
+export const storeMonthlyGoals = pgTable('store_monthly_goals', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  storeId: uuid('store_id').notNull().references(() => stores.id, { onDelete: 'cascade' }),
+  year: integer('year').notNull(),
+  month: integer('month').notNull(),
+  goalType: text('goal_type').notNull(), // 'boutique' | 'sastreria'
+  targetAmount: decimal('target_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+  updatedBy: uuid('updated_by').references(() => profiles.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
 export const warehouses = pgTable('warehouses', {
   id: uuid('id').primaryKey().defaultRandom(),
   code: varchar('code', { length: 10 }).notNull().unique(),

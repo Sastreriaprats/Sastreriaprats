@@ -593,3 +593,168 @@ export const getClientsAnalytics = protectedAction<
     })
   }
 )
+
+/**
+ * Resumen de ventas de UN vendedor concreto: totales del mes actual, del año
+ * y acumulados, más listado de ventas recientes. Se usa para mostrar el
+ * histórico en la ficha del usuario.
+ *
+ * Fuente: `sale_lines.salesperson_id` (permite comisiones por línea incluso
+ * si la venta la cerró otra persona; ver migración 122).
+ */
+export const getUserSalesSummary = protectedAction<
+  { user_id: string; recent_limit?: number },
+  {
+    user: { id: string; full_name: string | null; email: string | null } | null
+    mtd: { total: number; sales_count: number }
+    ytd: { total: number; sales_count: number }
+    all_time: { total: number; sales_count: number }
+    current_month: { year: number; month: number; label: string }
+    recent_sales: Array<{
+      sale_id: string
+      ticket_number: string
+      created_at: string
+      sale_total: number
+      lines_total_for_user: number
+      client_name: string | null
+      store_name: string | null
+    }>
+    by_month: Array<{ year: number; month: number; label: string; total: number; sales_count: number }>
+  }
+>(
+  { permission: 'reports.view', auditModule: 'reports' },
+  async (ctx, { user_id, recent_limit = 20 }) => {
+    if (!user_id) return failure('user_id requerido', 'VALIDATION')
+
+    // Perfil
+    const { data: profile } = await ctx.adminClient
+      .from('profiles')
+      .select('id, full_name, email')
+      .eq('id', user_id)
+      .maybeSingle()
+
+    // Traer TODAS las líneas asignadas a este vendedor (completed).
+    // Para una sastrería con miles de ventas al año, esto es manejable.
+    const { data: lines, error: linesErr } = await ctx.adminClient
+      .from('sale_lines')
+      .select(`
+        sale_id,
+        line_total,
+        sales!inner(id, ticket_number, total, status, created_at, store_id, client_id)
+      `)
+      .eq('salesperson_id', user_id)
+      .eq('sales.status', 'completed')
+    if (linesErr) return failure(linesErr.message || 'Error al consultar ventas', 'INTERNAL')
+
+    // Agregar por venta
+    type SaleAgg = {
+      sale_id: string
+      ticket_number: string
+      sale_total: number
+      created_at: string
+      store_id: string | null
+      client_id: string | null
+      lines_total_for_user: number
+    }
+    const bySale = new Map<string, SaleAgg>()
+    for (const l of (lines ?? []) as any[]) {
+      const s = l.sales
+      if (!s?.id) continue
+      const existing = bySale.get(s.id)
+      const lineAmount = Number(l.line_total) || 0
+      if (existing) {
+        existing.lines_total_for_user += lineAmount
+      } else {
+        bySale.set(s.id, {
+          sale_id: s.id,
+          ticket_number: s.ticket_number,
+          sale_total: Number(s.total) || 0,
+          created_at: s.created_at,
+          store_id: s.store_id ?? null,
+          client_id: s.client_id ?? null,
+          lines_total_for_user: lineAmount,
+        })
+      }
+    }
+
+    const sales = [...bySale.values()].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    )
+
+    // Periodos
+    const now = new Date()
+    const year = now.getFullYear()
+    const month = now.getMonth() // 0-based
+    const monthStart = new Date(year, month, 1).getTime()
+    const yearStart = new Date(year, 0, 1).getTime()
+
+    let mtdTotal = 0, mtdCount = 0
+    let ytdTotal = 0, ytdCount = 0
+    let allTotal = 0
+    const byMonth = new Map<string, { year: number; month: number; total: number; sales_count: number }>()
+
+    for (const s of sales) {
+      const amount = s.lines_total_for_user
+      allTotal += amount
+      const t = new Date(s.created_at).getTime()
+      if (t >= yearStart) { ytdTotal += amount; ytdCount += 1 }
+      if (t >= monthStart) { mtdTotal += amount; mtdCount += 1 }
+
+      const d = new Date(s.created_at)
+      const key = `${d.getFullYear()}-${d.getMonth()}`
+      const bm = byMonth.get(key)
+      if (bm) { bm.total += amount; bm.sales_count += 1 }
+      else byMonth.set(key, { year: d.getFullYear(), month: d.getMonth(), total: amount, sales_count: 1 })
+    }
+
+    // Nombres de tienda y cliente para las ventas recientes
+    const recent = sales.slice(0, recent_limit)
+    const storeIds = [...new Set(recent.map((s) => s.store_id).filter(Boolean) as string[])]
+    const clientIds = [...new Set(recent.map((s) => s.client_id).filter(Boolean) as string[])]
+
+    const [storesRes, clientsRes] = await Promise.all([
+      storeIds.length > 0
+        ? ctx.adminClient.from('stores').select('id, name').in('id', storeIds)
+        : Promise.resolve({ data: [] as any[] }),
+      clientIds.length > 0
+        ? ctx.adminClient.from('clients').select('id, first_name, last_name, company_name').in('id', clientIds)
+        : Promise.resolve({ data: [] as any[] }),
+    ])
+    const storeNameById = new Map<string, string>()
+    for (const s of (storesRes.data as any[]) ?? []) storeNameById.set(s.id, s.name)
+    const clientNameById = new Map<string, string>()
+    for (const c of (clientsRes.data as any[]) ?? []) {
+      const name = c.company_name || [c.first_name, c.last_name].filter(Boolean).join(' ') || null
+      clientNameById.set(c.id, name ?? '—')
+    }
+
+    const monthLabels = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+
+    return success({
+      user: profile
+        ? { id: (profile as any).id, full_name: (profile as any).full_name, email: (profile as any).email }
+        : null,
+      mtd: { total: Math.round(mtdTotal * 100) / 100, sales_count: mtdCount },
+      ytd: { total: Math.round(ytdTotal * 100) / 100, sales_count: ytdCount },
+      all_time: { total: Math.round(allTotal * 100) / 100, sales_count: sales.length },
+      current_month: { year, month, label: `${monthLabels[month]} ${year}` },
+      recent_sales: recent.map((s) => ({
+        sale_id: s.sale_id,
+        ticket_number: s.ticket_number,
+        created_at: s.created_at,
+        sale_total: s.sale_total,
+        lines_total_for_user: Math.round(s.lines_total_for_user * 100) / 100,
+        client_name: s.client_id ? (clientNameById.get(s.client_id) ?? null) : null,
+        store_name: s.store_id ? (storeNameById.get(s.store_id) ?? null) : null,
+      })),
+      by_month: [...byMonth.values()]
+        .sort((a, b) => (b.year - a.year) || (b.month - a.month))
+        .slice(0, 12)
+        .map((b) => ({
+          ...b,
+          label: `${monthLabels[b.month]} ${b.year}`,
+          total: Math.round(b.total * 100) / 100,
+        })),
+    })
+  }
+)

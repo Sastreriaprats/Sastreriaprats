@@ -8,13 +8,16 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   TrendingUp, TrendingDown, DollarSign, Scissors, Users,
-  AlertTriangle, Calendar, Truck, RefreshCw, ArrowRight, ServerCrash, Clock, User,
+  AlertTriangle, Calendar, Truck, RefreshCw, ArrowRight, ServerCrash, Clock, User, BadgeEuro,
 } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
 import { usePermissions } from '@/hooks/use-permissions'
 import { getDashboardStats, getSalesChartData, getRecentActivity, getDashboardAppointments } from '@/actions/dashboard'
 import type { DashboardAppointment } from '@/actions/dashboard'
+import { getCommissionsByEmployee } from '@/actions/reports'
 import { getOverdueSupplierInvoicesCount } from '@/actions/supplier-invoices'
+import { UserSalesDialog } from '@/components/admin/user-sales-dialog'
+import { StoreGoalsWidget } from '@/components/admin/store-goals-widget'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 
 const actionLabelsEsPast: Record<string, string> = {
@@ -149,6 +152,15 @@ export function DashboardContent() {
   const [appointmentsWeekCount, setAppointmentsWeekCount] = useState(0)
   const [appointmentsLoading, setAppointmentsLoading] = useState(true)
 
+  const [vendorSales, setVendorSales] = useState<Array<{
+    salesperson_id: string
+    salesperson_name: string
+    lines_total: number
+    sales_count: number
+  }>>([])
+  const [vendorSalesLoading, setVendorSalesLoading] = useState(true)
+  const [vendorDialogUser, setVendorDialogUser] = useState<{ id: string; label: string } | null>(null)
+
   const [statsLoading, setStatsLoading] = useState(true)
   const [chartLoading, setChartLoading] = useState(true)
   const [activityLoading, setActivityLoading] = useState(true)
@@ -196,17 +208,40 @@ export function DashboardContent() {
       .finally(() => setAppointmentsLoading(false))
   }, [])
 
+  const loadVendorSales = useCallback(() => {
+    setVendorSalesLoading(true)
+    const now = new Date()
+    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10)
+    getCommissionsByEmployee({ start_date: start, end_date: end })
+      .then(res => {
+        if (res.success && res.data) {
+          setVendorSales(res.data
+            .filter((e) => e.salesperson_id !== 'unknown' && e.lines_total > 0)
+            .map((e) => ({
+              salesperson_id: e.salesperson_id,
+              salesperson_name: e.salesperson_name,
+              lines_total: e.lines_total,
+              sales_count: e.sales_count,
+            })))
+        }
+      })
+      .catch(() => {})
+      .finally(() => setVendorSalesLoading(false))
+  }, [])
+
   const loadData = useCallback(() => {
     loadStats()
     loadChart()
     loadActivity()
     loadAppointments()
+    if (can('reports.view')) loadVendorSales()
     if (can('supplier_invoices.manage')) {
       getOverdueSupplierInvoicesCount()
         .then((r) => r?.success && typeof r.data === 'number' && setOverdueSupplierInvoicesCount(r.data))
         .catch(() => {})
     }
-  }, [loadStats, loadChart, loadActivity, loadAppointments, can])
+  }, [loadStats, loadChart, loadActivity, loadAppointments, loadVendorSales, can])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -403,6 +438,9 @@ export function DashboardContent() {
         </Card>
       )}
 
+      {/* Objetivos del mes por tienda */}
+      <StoreGoalsWidget />
+
       {/* Calendario de citas de la semana */}
       {appointmentsLoading ? (
         <Card>
@@ -518,6 +556,77 @@ export function DashboardContent() {
             )}
           </CardContent>
         </Card>
+      )}
+
+      {/* Ventas por vendedor del mes (solo si tiene permisos de reports) */}
+      {can('reports.view') && (
+        <Card>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <BadgeEuro className="h-4 w-4 text-prats-navy" /> Ventas por vendedor · {new Date().toLocaleDateString('es-ES', { month: 'long' })}
+                </CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">Base de cálculo para comisiones. Haz clic en un vendedor para ver su desglose.</p>
+              </div>
+              <Button variant="ghost" size="sm" className="gap-1 text-xs shrink-0" onClick={() => router.push('/admin/reporting?tab=employees')}>
+                Ver informe completo <ArrowRight className="h-3 w-3" />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {vendorSalesLoading ? (
+              <div className="space-y-2">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <Skeleton className="h-4 flex-1" />
+                    <Skeleton className="h-4 w-16" />
+                    <Skeleton className="h-4 w-20" />
+                  </div>
+                ))}
+              </div>
+            ) : vendorSales.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">Sin ventas atribuidas a vendedores este mes</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs text-muted-foreground border-b">
+                      <th className="text-left font-medium py-2">Vendedor</th>
+                      <th className="text-right font-medium py-2 w-20">Ventas</th>
+                      <th className="text-right font-medium py-2 w-32">Importe</th>
+                      <th className="w-8" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vendorSales.map((v) => (
+                      <tr
+                        key={v.salesperson_id}
+                        className="border-b last:border-b-0 cursor-pointer hover:bg-muted/50"
+                        onClick={() => setVendorDialogUser({ id: v.salesperson_id, label: v.salesperson_name })}
+                      >
+                        <td className="py-2 font-medium">{v.salesperson_name}</td>
+                        <td className="py-2 text-right tabular-nums">{v.sales_count}</td>
+                        <td className="py-2 text-right tabular-nums font-semibold">{formatCurrency(v.lines_total)}</td>
+                        <td className="py-2 text-right"><ArrowRight className="h-3.5 w-3.5 text-muted-foreground inline" /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Diálogo de desglose por vendedor */}
+      {vendorDialogUser && (
+        <UserSalesDialog
+          userId={vendorDialogUser.id}
+          userLabel={vendorDialogUser.label}
+          open={!!vendorDialogUser}
+          onOpenChange={(open) => { if (!open) setVendorDialogUser(null) }}
+        />
       )}
 
       {/* Gráfico + mini stats — skeleton propio */}

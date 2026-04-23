@@ -3,7 +3,7 @@ import { z } from 'zod'
 export const createClientSchema = z.object({
   first_name: z.string().min(1, 'Nombre requerido'),
   last_name: z.string().min(1, 'Apellido requerido'),
-  email: z.string().min(1, 'Email requerido').email('Email inválido'),
+  email: z.string().email('Email inválido').optional().nullable().or(z.literal('')),
   phone: z.string().min(1, 'Teléfono requerido'),
   phone_secondary: z.string().optional().nullable(),
   date_of_birth: z.string().optional().nullable(),
