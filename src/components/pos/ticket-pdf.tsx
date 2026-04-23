@@ -372,50 +372,52 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
     await new Promise<void>((resolve) => {
       (pdf as any).getBlob((blob: Blob) => {
         const url = URL.createObjectURL(blob)
-        const iframe = document.createElement('iframe')
-        iframe.style.position = 'fixed'
-        iframe.style.right = '0'
-        iframe.style.bottom = '0'
-        iframe.style.width = '0'
-        iframe.style.height = '0'
-        iframe.style.border = '0'
-        iframe.setAttribute('aria-hidden', 'true')
-        iframe.src = url
+        const fileName = `${giftMode ? 'ticket-regalo' : 'ticket'}-${data.sale.ticket_number}.pdf`
+
+        // Abrir en nueva ventana/pestaña y disparar el diálogo de impresión del navegador.
+        // Este approach es más fiable que un iframe oculto: el visor PDF del navegador
+        // carga completamente antes de invocar print(), lo que permite elegir impresora.
+        const printWindow = window.open(url, '_blank')
+
+        if (!printWindow) {
+          // Popups bloqueados: fallback a descarga
+          const a = document.createElement('a')
+          a.href = url
+          a.download = fileName
+          a.click()
+          setTimeout(() => URL.revokeObjectURL(url), 2000)
+          resolve()
+          return
+        }
 
         let printed = false
         const triggerPrint = () => {
           if (printed) return
           printed = true
           try {
-            iframe.contentWindow?.focus()
-            iframe.contentWindow?.print()
+            printWindow.focus()
+            printWindow.print()
           } catch {
-            // Fallback: descargar si el navegador bloquea la impresión
-            const a = document.createElement('a')
-            a.href = url
-            a.download = `${giftMode ? 'ticket-regalo' : 'ticket'}-${data.sale.ticket_number}.pdf`
-            a.click()
+            // Si falla el print, el usuario ya tiene el PDF abierto y puede imprimir manualmente
           }
         }
 
-        iframe.addEventListener('load', () => {
-          // Pequeño delay para que el visor PDF del iframe termine de montar
-          setTimeout(triggerPrint, 250)
-        })
-        // Fallback por si el evento load no dispara
+        // Intentar disparar print cuando la ventana haya cargado el PDF.
+        // El visor PDF puede tardar un poco más tras el evento load.
+        const onLoad = () => setTimeout(triggerPrint, 500)
+        try {
+          printWindow.addEventListener('load', onLoad)
+        } catch {
+          // Algunos navegadores restringen acceso cross-origin al blob window
+        }
+        // Fallback temporal por si load no llega a dispararse
         setTimeout(triggerPrint, 1500)
 
-        // Limpieza: retirar iframe y revocar blob cuando la ventana recupere el foco
-        const cleanup = () => {
-          setTimeout(() => {
-            try { document.body.removeChild(iframe) } catch {}
-            try { URL.revokeObjectURL(url) } catch {}
-            window.removeEventListener('focus', cleanup)
-          }, 1000)
-        }
-        window.addEventListener('focus', cleanup)
+        // Limpieza del blob URL tras un tiempo prudencial
+        setTimeout(() => {
+          try { URL.revokeObjectURL(url) } catch {}
+        }, 60000)
 
-        document.body.appendChild(iframe)
         resolve()
       })
     })
