@@ -721,44 +721,44 @@ export async function generateReservationPdf(
     await new Promise<void>((resolve) => {
       (pdf as any).getBlob((blob: Blob) => {
         const url = URL.createObjectURL(blob)
-        const iframe = document.createElement('iframe')
-        iframe.style.position = 'fixed'
-        iframe.style.right = '0'
-        iframe.style.bottom = '0'
-        iframe.style.width = '0'
-        iframe.style.height = '0'
-        iframe.style.border = '0'
-        iframe.setAttribute('aria-hidden', 'true')
-        iframe.src = url
+        const fileName = `reserva-${data.reservation_number}.pdf`
+
+        const printWindow = window.open(url, '_blank')
+
+        if (!printWindow) {
+          const a = document.createElement('a')
+          a.href = url
+          a.download = fileName
+          a.click()
+          setTimeout(() => URL.revokeObjectURL(url), 2000)
+          resolve()
+          return
+        }
 
         let printed = false
         const triggerPrint = () => {
           if (printed) return
           printed = true
           try {
-            iframe.contentWindow?.focus()
-            iframe.contentWindow?.print()
+            printWindow.focus()
+            printWindow.print()
           } catch {
-            const a = document.createElement('a')
-            a.href = url
-            a.download = `reserva-${data.reservation_number}.pdf`
-            a.click()
+            // El usuario puede imprimir manualmente desde el visor PDF
           }
         }
 
-        iframe.addEventListener('load', () => { setTimeout(triggerPrint, 250) })
+        const onLoad = () => setTimeout(triggerPrint, 500)
+        try {
+          printWindow.addEventListener('load', onLoad)
+        } catch {
+          // Algunos navegadores restringen acceso cross-origin al blob window
+        }
         setTimeout(triggerPrint, 1500)
 
-        const cleanup = () => {
-          setTimeout(() => {
-            try { document.body.removeChild(iframe) } catch {}
-            try { URL.revokeObjectURL(url) } catch {}
-            window.removeEventListener('focus', cleanup)
-          }, 1000)
-        }
-        window.addEventListener('focus', cleanup)
+        setTimeout(() => {
+          try { URL.revokeObjectURL(url) } catch {}
+        }, 60000)
 
-        document.body.appendChild(iframe)
         resolve()
       })
     })

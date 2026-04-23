@@ -100,7 +100,7 @@ export function ReservationSuccessDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto" onPointerDownOutside={(e) => e.preventDefault()}>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto overflow-x-hidden" onPointerDownOutside={(e) => e.preventDefault()}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Bookmark className="h-5 w-5 text-purple-600" />
