@@ -77,7 +77,7 @@ export function ContactContent() {
     return (
       <div className="container mx-auto px-4 py-20 sm:py-24">
         <div className="mx-auto flex max-w-lg flex-col items-center justify-center rounded-lg border border-border bg-prats-cream/30 p-12 text-center">
-          <CheckCircle className="h-16 w-16 text-prats-gold" />
+          <CheckCircle className="h-16 w-16 text-prats-navy" />
           <h2 className="mt-6 font-display text-2xl font-light text-prats-navy">
             Mensaje enviado
           </h2>
@@ -225,88 +225,97 @@ export function ContactContent() {
           </form>
         </div>
 
-        <aside className="space-y-8 text-prats-navy lg:pt-4">
-          <section className="rounded-lg border border-prats-gold/20 bg-prats-cream/30 p-6 transition-colors hover:border-prats-gold/40">
+        <aside className="space-y-6 text-prats-navy lg:pt-4">
+          <section className="rounded-lg border border-prats-navy/15 bg-white p-7 shadow-sm transition-colors hover:border-prats-navy/40">
             <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-prats-gold/10">
-                <MapPin className="h-5 w-5 text-prats-gold" strokeWidth={1.5} />
+              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-prats-navy">
+                <MapPin className="h-5 w-5 text-white" strokeWidth={1.75} />
               </span>
-              <h3 className="font-display text-lg font-light tracking-wide">Nuestras boutiques</h3>
+              <h3 className="font-display text-xl font-light tracking-wide">Nuestras boutiques</h3>
             </div>
-            <div className="mt-4 space-y-2 pl-[52px]">
-              <a
-                href={STORE_LOCATIONS.pinzon.mapsUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block text-base transition-colors hover:text-prats-gold"
-              >
-                {STORE_LOCATIONS.pinzon.address}
-              </a>
-              <a
-                href={STORE_LOCATIONS.wellington.mapsUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block text-base transition-colors hover:text-prats-gold"
-              >
-                {STORE_LOCATIONS.wellington.address} - {STORE_LOCATIONS.wellington.subtitle}
-              </a>
+            <div className="mt-5 space-y-5">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-prats-navy/60">
+                  {STORE_LOCATIONS.pinzon.name}
+                </p>
+                <a
+                  href={STORE_LOCATIONS.pinzon.mapsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-1 block text-lg font-medium leading-snug text-prats-navy underline-offset-4 transition-colors hover:underline"
+                >
+                  {STORE_LOCATIONS.pinzon.address}
+                </a>
+                <a
+                  href={pinzonPhoneHref}
+                  className="mt-1 inline-flex items-center gap-2 text-base text-prats-navy/80 transition-colors hover:text-prats-navy"
+                >
+                  <Phone className="h-4 w-4" strokeWidth={1.75} />
+                  {STORE_LOCATIONS.pinzon.phones[0]}
+                </a>
+              </div>
+              <div className="border-t border-prats-navy/10 pt-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-prats-navy/60">
+                  {STORE_LOCATIONS.wellington.name}
+                </p>
+                <a
+                  href={STORE_LOCATIONS.wellington.mapsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-1 block text-lg font-medium leading-snug text-prats-navy underline-offset-4 transition-colors hover:underline"
+                >
+                  {STORE_LOCATIONS.wellington.address}
+                </a>
+                <p className="text-sm text-prats-navy/70">{STORE_LOCATIONS.wellington.subtitle}</p>
+                <a
+                  href={wellingtonPhoneHref}
+                  className="mt-1 inline-flex items-center gap-2 text-base text-prats-navy/80 transition-colors hover:text-prats-navy"
+                >
+                  <Phone className="h-4 w-4" strokeWidth={1.75} />
+                  {STORE_LOCATIONS.wellington.phones[0]}
+                </a>
+              </div>
             </div>
           </section>
 
-          <section className="rounded-lg border border-prats-gold/20 bg-prats-cream/30 p-6 transition-colors hover:border-prats-gold/40">
+          <section className="rounded-lg border border-prats-navy/15 bg-white p-7 shadow-sm transition-colors hover:border-prats-navy/40">
             <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-prats-gold/10">
-                <Mail className="h-5 w-5 text-prats-gold" strokeWidth={1.5} />
+              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-prats-navy">
+                <Phone className="h-5 w-5 text-white" strokeWidth={1.75} />
               </span>
-              <h3 className="font-display text-lg font-light tracking-wide">Consultas generales</h3>
+              <h3 className="font-display text-xl font-light tracking-wide">Atención al cliente</h3>
             </div>
-            <div className="mt-4 pl-[52px]">
-              <a
-                href={`mailto:${BRAND.email}`}
-                className="inline-block text-base transition-colors hover:text-prats-gold"
-              >
-                {BRAND.email}
-              </a>
-            </div>
+            <a
+              href={brandPhoneHref}
+              className="mt-5 block text-2xl font-medium tracking-wide text-prats-navy underline-offset-4 transition-colors hover:underline"
+            >
+              {BRAND.phone}
+            </a>
           </section>
 
-          <section className="rounded-lg border border-prats-gold/20 bg-prats-cream/30 p-6 transition-colors hover:border-prats-gold/40">
+          <section className="rounded-lg border border-prats-navy/10 bg-prats-cream/40 p-6">
             <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-prats-gold/10">
-                <Phone className="h-5 w-5 text-prats-gold" strokeWidth={1.5} />
+              <span className="flex h-9 w-9 items-center justify-center rounded-full border border-prats-navy/20">
+                <Mail className="h-4 w-4 text-prats-navy" strokeWidth={1.5} />
               </span>
-              <h3 className="font-display text-lg font-light tracking-wide">Teléfonos</h3>
+              <h3 className="font-display text-base font-light tracking-wide">Consultas generales</h3>
             </div>
-            <div className="mt-4 space-y-1.5 pl-[52px]">
-              <a
-                href={brandPhoneHref}
-                className="block text-base transition-colors hover:text-prats-gold"
-              >
-                {BRAND.phone}
-              </a>
-              <a
-                href={pinzonPhoneHref}
-                className="block text-base transition-colors hover:text-prats-gold"
-              >
-                {STORE_LOCATIONS.pinzon.phones[0]}
-              </a>
-              <a
-                href={wellingtonPhoneHref}
-                className="block text-base transition-colors hover:text-prats-gold"
-              >
-                {STORE_LOCATIONS.wellington.phones[0]}
-              </a>
-            </div>
+            <a
+              href={`mailto:${BRAND.email}`}
+              className="mt-3 inline-block text-base text-prats-navy/90 underline-offset-4 transition-colors hover:underline"
+            >
+              {BRAND.email}
+            </a>
           </section>
 
-          <section className="rounded-lg border border-prats-gold/20 bg-prats-cream/30 p-6 transition-colors hover:border-prats-gold/40">
+          <section className="rounded-lg border border-prats-navy/10 bg-prats-cream/40 p-6">
             <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-prats-gold/10">
-                <Clock className="h-5 w-5 text-prats-gold" strokeWidth={1.5} />
+              <span className="flex h-9 w-9 items-center justify-center rounded-full border border-prats-navy/20">
+                <Clock className="h-4 w-4 text-prats-navy" strokeWidth={1.5} />
               </span>
-              <h3 className="font-display text-lg font-light tracking-wide">Nuestros horarios</h3>
+              <h3 className="font-display text-base font-light tracking-wide">Nuestros horarios</h3>
             </div>
-            <div className="mt-4 space-y-4 pl-[52px] text-base">
+            <div className="mt-4 space-y-4 text-sm">
               <div>
                 <p className="font-medium text-prats-navy">{STORE_LOCATIONS.pinzon.name}</p>
                 <p className="text-prats-navy/80">Lunes – Viernes: {STORE_LOCATIONS.pinzon.hours.weekdays}</p>
@@ -317,7 +326,7 @@ export function ContactContent() {
                 <p className="text-prats-navy/80">Lunes – Viernes: {STORE_LOCATIONS.wellington.hours.weekdays}</p>
                 <p className="text-prats-navy/80">Sábado: {STORE_LOCATIONS.wellington.hours.saturday}</p>
               </div>
-              <p className="text-prats-navy/80">Domingos: Cerrado</p>
+              <p className="text-prats-navy/70">Domingos: Cerrado</p>
             </div>
           </section>
         </aside>
