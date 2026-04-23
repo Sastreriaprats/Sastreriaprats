@@ -158,23 +158,27 @@ export function ReservationPickupDialog({
       const res = await listReservations({
         status: 'all',
         search: trimmed || undefined,
-        storeId: storeId || undefined,
+        // No filtramos por storeId: una reserva se puede recoger desde cualquier
+        // tienda, así que mostramos reservas de toda la cadena.
         page: 0,
         pageSize: 50,
       })
-      if (!res.success) { setResults([]); return }
-      const rows = (res.data.data || []) as ReservationRow[]
-      // Sin búsqueda: sólo activas / pendientes (flujo normal de caja).
-      // Con búsqueda: todas las reservas que coincidan, independientemente del estado.
-      if (trimmed) {
-        setResults(rows)
-      } else {
-        setResults(rows.filter((r) => r.status === 'active' || r.status === 'pending_stock'))
+      if (!res.success) {
+        setResults([])
+        toast.error(res.error || 'No se pudieron cargar las reservas')
+        return
       }
+      const rows = (res.data.data || []) as ReservationRow[]
+      // Orden estable: primero activas y pendientes de stock (son las que
+      // típicamente se van a recoger), después el resto por fecha desc
+      // (que ya viene así del servidor).
+      const priority = (s: string) => (s === 'active' || s === 'pending_stock' ? 0 : 1)
+      const sorted = [...rows].sort((a, b) => priority(a.status) - priority(b.status))
+      setResults(sorted)
     } finally {
       setLoading(false)
     }
-  }, [storeId])
+  }, [])
 
   useEffect(() => {
     if (!open || step !== 'search') return
@@ -350,9 +354,7 @@ export function ReservationPickupDialog({
                 </div>
               ) : results.length === 0 ? (
                 <div className="py-10 text-center text-sm text-muted-foreground">
-                  {search.trim()
-                    ? 'Sin resultados'
-                    : 'No hay reservas activas o pendientes. Escribe para buscar en todo el histórico.'}
+                  {search.trim() ? 'Sin resultados' : 'No hay reservas'}
                 </div>
               ) : results.map((r) => {
                 const totalNum = Number(r.total)
