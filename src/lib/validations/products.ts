@@ -38,6 +38,7 @@ export const createProductSchema = z.object({
   main_image_url: z.string().optional().nullable(),
   fabric_meters_used: coerceOptionalNumber.pipe(z.number().min(0).optional().nullable()),
   metros_iniciales: coerceOptionalNumber.pipe(z.number().min(0).optional().nullable()),
+  size_guide_id: z.string().uuid().optional().nullable(),
 })
 
 export const updateProductSchema = createProductSchema.partial()

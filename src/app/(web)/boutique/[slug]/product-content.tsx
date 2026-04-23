@@ -400,42 +400,91 @@ export function ProductContent({ slug }: { slug: string }) {
         </div>
       </div>
 
-      <Dialog open={sizeGuideOpen} onOpenChange={setSizeGuideOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Guía de tallas</DialogTitle></DialogHeader>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-center">
-              <thead>
-                <tr className="border-b">
-                  <th className="py-2 px-3 text-left font-medium">Talla ES</th>
-                  <th className="py-2 px-3">Pecho (cm)</th>
-                  <th className="py-2 px-3">Cintura (cm)</th>
-                  <th className="py-2 px-3">Cadera (cm)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[
-                  ['44', '88–92', '76–80', '94–98'],
-                  ['46', '92–96', '80–84', '98–102'],
-                  ['48', '96–100', '84–88', '102–106'],
-                  ['50', '100–104', '88–92', '106–110'],
-                  ['52', '104–108', '92–96', '110–114'],
-                  ['54', '108–112', '96–100', '114–118'],
-                  ['56', '112–116', '100–104', '118–122'],
-                ].map(([size, chest, waist, hip]) => (
-                  <tr key={size} className="border-b border-gray-100">
-                    <td className="py-2 px-3 text-left font-medium text-[#1a2744]">{size}</td>
-                    <td className="py-2 px-3 text-gray-600">{chest}</td>
-                    <td className="py-2 px-3 text-gray-600">{waist}</td>
-                    <td className="py-2 px-3 text-gray-600">{hip}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="text-xs text-gray-400 mt-4">Las medidas son orientativas. Si tienes dudas, visítanos en cualquiera de nuestras boutiques.</p>
-        </DialogContent>
-      </Dialog>
+      <SizeGuideDialog
+        open={sizeGuideOpen}
+        onOpenChange={setSizeGuideOpen}
+        guide={product?.size_guide as SizeGuideData | null | undefined}
+      />
     </div>
+  )
+}
+
+type SizeGuideColumn = { key: string; label: string }
+type SizeGuideRow = Record<string, string>
+type SizeGuideData = {
+  id: string
+  name: string
+  columns: SizeGuideColumn[]
+  rows: SizeGuideRow[]
+  footer_note: string | null
+}
+
+function SizeGuideDialog({
+  open, onOpenChange, guide,
+}: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  guide: SizeGuideData | null | undefined
+}) {
+  const hasGuide = guide && Array.isArray(guide.columns) && guide.columns.length > 0
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{hasGuide ? `Guía de tallas · ${guide!.name}` : 'Guía de tallas'}</DialogTitle>
+        </DialogHeader>
+        {hasGuide ? (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-center">
+                <thead>
+                  <tr className="border-b">
+                    {guide!.columns.map((c, i) => (
+                      <th
+                        key={c.key}
+                        className={cn('py-2 px-3', i === 0 ? 'text-left font-medium' : '')}
+                      >
+                        {c.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {guide!.rows.length === 0 ? (
+                    <tr>
+                      <td colSpan={guide!.columns.length} className="py-6 text-gray-400 text-sm">
+                        Sin medidas disponibles.
+                      </td>
+                    </tr>
+                  ) : guide!.rows.map((row, rIdx) => (
+                    <tr key={rIdx} className="border-b border-gray-100">
+                      {guide!.columns.map((c, cIdx) => (
+                        <td
+                          key={c.key}
+                          className={cn(
+                            'py-2 px-3',
+                            cIdx === 0 ? 'text-left font-medium text-[#1a2744]' : 'text-gray-600',
+                          )}
+                        >
+                          {row[c.key] || '—'}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {guide!.footer_note && (
+              <p className="text-xs text-gray-400 mt-4">{guide!.footer_note}</p>
+            )}
+          </>
+        ) : (
+          <p className="text-sm text-gray-500 py-4">
+            Este producto no tiene una guía de tallas asociada. Si tienes dudas, visítanos en
+            cualquiera de nuestras boutiques.
+          </p>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }

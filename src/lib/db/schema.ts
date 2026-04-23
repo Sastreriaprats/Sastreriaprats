@@ -731,6 +731,19 @@ export const reservationStatusEnum = pgEnum('reservation_status', [
 
 // ========== TABLAS 003a: PRODUCTOS Y STOCK ==========
 
+export const sizeGuides = pgTable('size_guides', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull(),
+  slug: text('slug').notNull().unique(),
+  description: text('description'),
+  columns: jsonb('columns').default([]).notNull(),
+  rows: jsonb('rows').default([]).notNull(),
+  footerNote: text('footer_note'),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
 export const productCategories = pgTable('product_categories', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
@@ -745,6 +758,7 @@ export const productCategories = pgTable('product_categories', {
   seoDescription: text('seo_description'),
   sortOrder: integer('sort_order').default(0),
   icon: text('icon'),
+  sizeGuideId: uuid('size_guide_id').references(() => sizeGuides.id, { onDelete: 'set null' }),
   isActive: boolean('is_active').default(true).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -802,6 +816,7 @@ export const products = pgTable('products', {
   minStockAlert: integer('min_stock_alert'),
   staleDaysThreshold: integer('stale_days_threshold').default(90),
   isSample: boolean('is_sample').default(false),
+  sizeGuideId: uuid('size_guide_id').references(() => sizeGuides.id, { onDelete: 'set null' }),
   isActive: boolean('is_active').default(true).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
