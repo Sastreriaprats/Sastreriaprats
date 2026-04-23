@@ -1176,7 +1176,7 @@ export const createStockTransfer = protectedAction<
   { id: string; transfer_number: string; lines: number }
 >(
   {
-    permission: 'products.edit',
+    permission: 'stock.transfer',
     auditModule: 'stock',
     auditAction: 'create',
     auditEntity: 'stock_transfer',
@@ -1317,7 +1317,7 @@ export const approveStockTransfer = protectedAction<
   { id: string; as?: 'admin' | 'destination' },
   { status: 'admin_approved' | 'destination_approved' | 'approved' }
 >(
-  { permission: 'products.edit', auditModule: 'stock' },
+  { permission: 'stock.approve_transfer', auditModule: 'stock' },
   async (ctx, { id, as }) => {
     const profileId = ctx.userId
     if (!profileId) return failure('No hay sesión', 'UNAUTHORIZED')
@@ -1564,7 +1564,7 @@ export const approveStockTransfer = protectedAction<
 
 /** Rechazar/cancelar un traspaso (status → cancelled). */
 export const rejectStockTransfer = protectedAction<{ id: string }, void>(
-  { permission: 'products.edit', auditModule: 'stock' },
+  { permission: 'stock.approve_transfer', auditModule: 'stock' },
   async (ctx, { id }) => {
     const { error } = await ctx.adminClient
       .from('stock_transfers')
