@@ -23,7 +23,7 @@ import {
   Search, X, Plus, Minus, Trash2, User, ShoppingBag, CreditCard,
   Banknote, Smartphone, ArrowRightLeft, Receipt, FileText,
   LogOut, Clock, BarChart3, Loader2, Percent, UserPlus, CalendarClock, AlertCircle, Lock, Check, ImageOff, ChevronLeft, Printer,
-  Bookmark, Gift,
+  Bookmark, Gift, Download,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/components/providers/auth-provider'
@@ -35,7 +35,7 @@ import { listClients } from '@/actions/clients'
 import { CreateClientDialog } from '@/app/(admin)/admin/clientes/create-client-dialog'
 import { formatCurrency } from '@/lib/utils'
 import { generateTicketPdf, printTicketPdf, printGiftTicketPdf } from '@/components/pos/ticket-pdf'
-import { printGiftCardPdf } from '@/components/pos/gift-card-pdf'
+import { printGiftCardPdf, downloadGiftCardPdf } from '@/components/pos/gift-card-pdf'
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
 import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
 import { getActiveReservationsForVariant } from '@/actions/reservations'
@@ -756,15 +756,37 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const handlePrintIssuedGiftCard = async () => {
     if (!issuedGiftCard) return
     const storeConfig = getStorePdfData(activeStoreName)
-    await printGiftCardPdf({
-      voucherCode: issuedGiftCard.code,
-      issuedDate: issuedGiftCard.issued_date,
-      expiryDate: issuedGiftCard.expiry_date,
-      kind: 'gift_card',
-      storeAddress: storeConfig.address,
-      storeSubtitle: storeConfig.subtitle ?? null,
-      storePhones: storeConfig.phones,
-    })
+    try {
+      await printGiftCardPdf({
+        voucherCode: issuedGiftCard.code,
+        issuedDate: issuedGiftCard.issued_date,
+        expiryDate: issuedGiftCard.expiry_date,
+        kind: 'gift_card',
+        storeAddress: storeConfig.address,
+        storeSubtitle: storeConfig.subtitle ?? null,
+        storePhones: storeConfig.phones,
+      })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al imprimir la tarjeta regalo')
+    }
+  }
+
+  const handleDownloadIssuedGiftCard = async () => {
+    if (!issuedGiftCard) return
+    const storeConfig = getStorePdfData(activeStoreName)
+    try {
+      await downloadGiftCardPdf({
+        voucherCode: issuedGiftCard.code,
+        issuedDate: issuedGiftCard.issued_date,
+        expiryDate: issuedGiftCard.expiry_date,
+        kind: 'gift_card',
+        storeAddress: storeConfig.address,
+        storeSubtitle: storeConfig.subtitle ?? null,
+        storePhones: storeConfig.phones,
+      })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al descargar la tarjeta regalo')
+    }
   }
 
   const handleSubmitGiftCard = async () => {
@@ -2095,7 +2117,11 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
                   <Printer className="h-4 w-4" />
                   Imprimir tarjeta regalo
                 </Button>
-                <Button variant="outline" className="h-10" onClick={resetGiftCardSell}>
+                <Button variant="outline" className="h-11 gap-2" onClick={handleDownloadIssuedGiftCard}>
+                  <Download className="h-4 w-4" />
+                  Descargar PDF
+                </Button>
+                <Button variant="ghost" className="h-10" onClick={resetGiftCardSell}>
                   Cerrar
                 </Button>
               </div>

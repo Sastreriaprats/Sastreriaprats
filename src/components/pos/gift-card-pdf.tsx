@@ -199,35 +199,44 @@ export async function generateGiftCardPdf(data: GiftCardPdfData, mode: 'download
     await new Promise<void>((resolve) => {
       (pdf as any).getBlob((blob: Blob) => {
         const url = URL.createObjectURL(blob)
-        const printWindow = window.open(url, '_blank')
-
-        if (!printWindow) {
-          const a = document.createElement('a')
-          a.href = url
-          a.download = fileName
-          a.click()
-          setTimeout(() => URL.revokeObjectURL(url), 2000)
-          resolve()
-          return
-        }
+        const iframe = document.createElement('iframe')
+        iframe.style.position = 'fixed'
+        iframe.style.right = '0'
+        iframe.style.bottom = '0'
+        iframe.style.width = '0'
+        iframe.style.height = '0'
+        iframe.style.border = '0'
+        iframe.setAttribute('aria-hidden', 'true')
+        iframe.src = url
 
         let printed = false
         const triggerPrint = () => {
           if (printed) return
           printed = true
           try {
-            printWindow.focus()
-            printWindow.print()
-          } catch {}
+            iframe.contentWindow?.focus()
+            iframe.contentWindow?.print()
+          } catch {
+            const a = document.createElement('a')
+            a.href = url
+            a.download = fileName
+            a.click()
+          }
         }
 
-        const onLoad = () => setTimeout(triggerPrint, 500)
-        try {
-          printWindow.addEventListener('load', onLoad)
-        } catch {}
+        iframe.addEventListener('load', () => { setTimeout(triggerPrint, 250) })
         setTimeout(triggerPrint, 1500)
-        setTimeout(() => { try { URL.revokeObjectURL(url) } catch {} }, 60000)
 
+        const cleanup = () => {
+          setTimeout(() => {
+            try { document.body.removeChild(iframe) } catch {}
+            try { URL.revokeObjectURL(url) } catch {}
+            window.removeEventListener('focus', cleanup)
+          }, 1000)
+        }
+        window.addEventListener('focus', cleanup)
+
+        document.body.appendChild(iframe)
         resolve()
       })
     })
@@ -238,4 +247,8 @@ export async function generateGiftCardPdf(data: GiftCardPdfData, mode: 'download
 
 export async function printGiftCardPdf(data: GiftCardPdfData): Promise<void> {
   return generateGiftCardPdf(data, 'print')
+}
+
+export async function downloadGiftCardPdf(data: GiftCardPdfData): Promise<void> {
+  return generateGiftCardPdf(data, 'download')
 }
