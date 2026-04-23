@@ -1,19 +1,22 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Store, TrendingUp, Package, AlertTriangle, Loader2, RefreshCw, ArrowRight, Plus } from 'lucide-react'
+import { Store, Package, AlertTriangle, Loader2, RefreshCw, ArrowRight, Plus, Pencil } from 'lucide-react'
 import { getStoresWithStats, type StoreStats } from '@/actions/dashboard'
 import { formatCurrency } from '@/lib/utils'
+import { useStores } from '@/hooks/use-cached-queries'
+import { StoreEditDialog, type StoreEditRow } from '@/components/admin/store-edit-dialog'
 
 export function TiendasContent({ initialStores = [] }: { initialStores?: StoreStats[] }) {
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const tab = searchParams.get('tab') || 'resumen'
   const [stores, setStores] = useState<StoreStats[]>(initialStores)
   const [loading, setLoading] = useState(false)
+  const { data: storesFull, refetch: refetchStoresFull } = useStores()
+  const [editOpen, setEditOpen] = useState(false)
+  const [editingStore, setEditingStore] = useState<StoreEditRow | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -21,6 +24,18 @@ export function TiendasContent({ initialStores = [] }: { initialStores?: StoreSt
     if (res.success && res.data) setStores(res.data)
     setLoading(false)
   }, [])
+
+  const openEdit = (storeId: string) => {
+    const full = storesFull?.find(s => s.id === storeId)
+    if (!full) return
+    setEditingStore(full as StoreEditRow)
+    setEditOpen(true)
+  }
+
+  const openNew = () => {
+    setEditingStore(null)
+    setEditOpen(true)
+  }
 
   if (loading && stores.length === 0) {
     return (
@@ -44,7 +59,7 @@ export function TiendasContent({ initialStores = [] }: { initialStores?: StoreSt
           <Button
             size="sm"
             className="gap-2 bg-prats-navy hover:bg-prats-navy-light"
-            onClick={() => router.push('/admin/configuracion?tab=stores')}
+            onClick={openNew}
           >
             <Plus className="h-4 w-4" /> Nueva tienda
           </Button>
@@ -64,7 +79,18 @@ export function TiendasContent({ initialStores = [] }: { initialStores?: StoreSt
                   <Store className="h-4 w-4 text-prats-navy" />
                   {s.name}
                 </CardTitle>
-                <span className="text-xs text-muted-foreground">{s.code}</span>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-muted-foreground">{s.code}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={(e) => { e.stopPropagation(); openEdit(s.id) }}
+                    title="Editar tienda"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -99,10 +125,17 @@ export function TiendasContent({ initialStores = [] }: { initialStores?: StoreSt
       {stores.length === 0 && (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
-            No hay tiendas activas. Configura tiendas en <Button variant="link" className="p-0 h-auto" onClick={() => router.push('/admin/configuracion?tab=stores')}>Configuración → Tiendas</Button>.
+            No hay tiendas activas. <Button variant="link" className="p-0 h-auto" onClick={openNew}>Crear nueva tienda</Button>.
           </CardContent>
         </Card>
       )}
+
+      <StoreEditDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        store={editingStore}
+        onSaved={() => { refetchStoresFull(); load() }}
+      />
     </div>
   )
 }

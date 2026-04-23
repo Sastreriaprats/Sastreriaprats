@@ -117,6 +117,7 @@ export async function createStoreAction(data: {
     })
 
     revalidatePath('/admin/configuracion')
+    revalidatePath('/admin/tiendas')
     return { success: true, store: store ? serializeForServerAction(store) : undefined }
   } catch (err) {
     console.error('[createStoreAction]', err)
@@ -150,6 +151,7 @@ export async function updateStoreAction(
     })
 
     revalidatePath('/admin/configuracion')
+    revalidatePath('/admin/tiendas')
     return { success: true }
   } catch (err) {
     console.error('[updateStoreAction]', err)

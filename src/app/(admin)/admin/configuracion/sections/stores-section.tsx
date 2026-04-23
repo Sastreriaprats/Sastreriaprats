@@ -19,39 +19,24 @@ import {
 } from '@/components/ui/select'
 import { Plus, Store, Warehouse, Pencil, Loader2, MapPin } from 'lucide-react'
 import { toast } from 'sonner'
-import { createStoreAction, updateStoreAction, createWarehouseAction } from '@/actions/config'
+import { createWarehouseAction } from '@/actions/config'
+import { StoreEditDialog, type StoreEditRow } from '@/components/admin/store-edit-dialog'
 
 export function StoresSection() {
   const supabase = useMemo(() => createClient(), [])
   const { data: storesData, refetch: refetchStores } = useStores()
   const stores = storesData ?? []
   interface WarehouseRow { id: string; code: string; name: string; is_main: boolean; accepts_online_stock: boolean; stores?: { name: string } | null }
-  interface StoreRow { id: string; code: string; name: string; display_name?: string | null; store_type: string; address?: string | null; city?: string | null; postal_code?: string | null; province?: string | null; country?: string | null; phone?: string | null; email?: string | null; default_cash_fund?: number | null; order_prefix?: string | null; slug?: string | null; opening_hours?: Record<string, unknown> | null; fiscal_name?: string | null; fiscal_nif?: string | null; fiscal_address?: string | null; latitude?: number | null; longitude?: number | null; google_maps_url?: string | null }
   const [warehouses, setWarehouses] = useState<WarehouseRow[]>([])
   const [warehousesLoading, setWarehousesLoading] = useState(true)
   const [showStoreDialog, setShowStoreDialog] = useState(false)
   const [showWarehouseDialog, setShowWarehouseDialog] = useState(false)
-  const [editingStore, setEditingStore] = useState<StoreRow | null>(null)
+  const [editingStore, setEditingStore] = useState<StoreEditRow | null>(null)
   const [isSaving, setIsSaving] = useState(false)
-
-  const [storeForm, setStoreForm] = useState({
-    code: '', name: '', display_name: '', store_type: 'physical',
-    address: '', city: 'Madrid', postal_code: '', province: 'Madrid', country: 'España',
-    phone: '', email: '', default_cash_fund: '300', order_prefix: '', slug: '',
-    opening_hours: {} as Record<string, { open: string; close: string }>,
-    fiscal_name: '', fiscal_nif: '', fiscal_address: '',
-    latitude: '', longitude: '', google_maps_url: '',
-  })
 
   const [warehouseForm, setWarehouseForm] = useState({
     code: '', name: '', store_id: '', is_main: false, accepts_online_stock: false,
   })
-
-  const days = [
-    { key: 'mon', label: 'Lunes' }, { key: 'tue', label: 'Martes' }, { key: 'wed', label: 'Miércoles' },
-    { key: 'thu', label: 'Jueves' }, { key: 'fri', label: 'Viernes' }, { key: 'sat', label: 'Sábado' },
-    { key: 'sun', label: 'Domingo' },
-  ]
 
   const fetchWarehouses = useCallback(async () => {
     setWarehousesLoading(true)
@@ -70,66 +55,14 @@ export function StoresSection() {
 
   const isLoading = warehousesLoading
 
-  const handleSaveStore = async () => {
-    setIsSaving(true)
-    const payload = {
-      code: storeForm.code.toUpperCase(), name: storeForm.name,
-      display_name: storeForm.display_name || storeForm.name,
-      store_type: storeForm.store_type, address: storeForm.address || undefined,
-      city: storeForm.city, postal_code: storeForm.postal_code || undefined,
-      province: storeForm.province, country: storeForm.country,
-      phone: storeForm.phone || undefined, email: storeForm.email || undefined,
-      opening_hours: storeForm.opening_hours,
-      default_cash_fund: parseFloat(storeForm.default_cash_fund) || 300,
-      order_prefix: storeForm.order_prefix || storeForm.code.toUpperCase(),
-      slug: storeForm.slug || storeForm.name.toLowerCase().replace(/\s+/g, '-'),
-      fiscal_name: storeForm.fiscal_name || undefined,
-      fiscal_nif: storeForm.fiscal_nif || undefined,
-      fiscal_address: storeForm.fiscal_address || undefined,
-      latitude: storeForm.latitude ? parseFloat(storeForm.latitude) : undefined,
-      longitude: storeForm.longitude ? parseFloat(storeForm.longitude) : undefined,
-      google_maps_url: storeForm.google_maps_url || undefined,
-    }
-
-    const result = editingStore
-      ? await updateStoreAction(editingStore.id, payload)
-      : await createStoreAction(payload)
-
-    if (result.error) toast.error(result.error)
-    else { toast.success(editingStore ? 'Tienda actualizada' : 'Tienda creada con almacén'); setShowStoreDialog(false); refetchStores(); fetchWarehouses() }
-    setIsSaving(false)
-  }
-
-  const editStore = (store: StoreRow) => {
+  const editStore = (store: StoreEditRow) => {
     setEditingStore(store)
-    setStoreForm({
-      code: store.code, name: store.name, display_name: store.display_name || '',
-      store_type: store.store_type, address: store.address || '', city: store.city || 'Madrid',
-      postal_code: store.postal_code || '', province: store.province || 'Madrid', country: store.country || 'España',
-      phone: store.phone || '', email: store.email || '',
-      default_cash_fund: store.default_cash_fund?.toString() || '300',
-      order_prefix: store.order_prefix || '', slug: store.slug || '',
-      opening_hours: (store.opening_hours || {}) as Record<string, { open: string; close: string }>,
-      fiscal_name: store.fiscal_name || '', fiscal_nif: store.fiscal_nif || '', fiscal_address: store.fiscal_address || '',
-      latitude: store.latitude?.toString() || '', longitude: store.longitude?.toString() || '',
-      google_maps_url: store.google_maps_url || '',
-    })
     setShowStoreDialog(true)
   }
 
   const newStore = () => {
     setEditingStore(null)
-    setStoreForm({ code: '', name: '', display_name: '', store_type: 'physical', address: '', city: 'Madrid',
-      postal_code: '', province: 'Madrid', country: 'España', phone: '', email: '', default_cash_fund: '300',
-      order_prefix: '', slug: '', opening_hours: {}, fiscal_name: '', fiscal_nif: '', fiscal_address: '',
-      latitude: '', longitude: '', google_maps_url: '' })
     setShowStoreDialog(true)
-  }
-
-  const setHours = (day: string, field: 'open' | 'close', value: string) => {
-    setStoreForm(prev => ({
-      ...prev, opening_hours: { ...prev.opening_hours, [day]: { ...(prev.opening_hours[day] || { open: '', close: '' }), [field]: value } }
-    }))
   }
 
   return (
@@ -200,69 +133,12 @@ export function StoresSection() {
         </div>
       </div>
 
-      <Dialog open={showStoreDialog} onOpenChange={setShowStoreDialog}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editingStore ? 'Editar tienda' : 'Nueva tienda'}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-2"><Label>Código *</Label><Input value={storeForm.code} onChange={(e) => setStoreForm(p => ({ ...p, code: e.target.value }))} placeholder="WEL" maxLength={10} /></div>
-              <div className="space-y-2 col-span-2"><Label>Nombre *</Label><Input value={storeForm.name} onChange={(e) => setStoreForm(p => ({ ...p, name: e.target.value }))} /></div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2"><Label>Tipo</Label>
-                <Select value={storeForm.store_type} onValueChange={(v) => setStoreForm(p => ({ ...p, store_type: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="physical">Física</SelectItem>
-                    <SelectItem value="online">Online</SelectItem>
-                    <SelectItem value="warehouse">Almacén</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2"><Label>Fondo de caja (€)</Label><Input type="number" value={storeForm.default_cash_fund} onChange={(e) => setStoreForm(p => ({ ...p, default_cash_fund: e.target.value }))} /></div>
-            </div>
-            <div className="space-y-2"><Label>Dirección</Label><Input value={storeForm.address} onChange={(e) => setStoreForm(p => ({ ...p, address: e.target.value }))} /></div>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-2"><Label>Ciudad</Label><Input value={storeForm.city} onChange={(e) => setStoreForm(p => ({ ...p, city: e.target.value }))} /></div>
-              <div className="space-y-2"><Label>CP</Label><Input value={storeForm.postal_code} onChange={(e) => setStoreForm(p => ({ ...p, postal_code: e.target.value }))} /></div>
-              <div className="space-y-2"><Label>Provincia</Label><Input value={storeForm.province} onChange={(e) => setStoreForm(p => ({ ...p, province: e.target.value }))} /></div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2"><Label>Teléfono</Label><Input value={storeForm.phone} onChange={(e) => setStoreForm(p => ({ ...p, phone: e.target.value }))} /></div>
-              <div className="space-y-2"><Label>Email</Label><Input value={storeForm.email} onChange={(e) => setStoreForm(p => ({ ...p, email: e.target.value }))} /></div>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Horario de apertura</Label>
-              <div className="rounded-lg border p-3 space-y-2">
-                {days.map(d => (
-                  <div key={d.key} className="grid grid-cols-5 items-center gap-2">
-                    <span className="text-sm">{d.label}</span>
-                    <Input type="time" className="col-span-2" value={storeForm.opening_hours[d.key]?.open || ''} onChange={(e) => setHours(d.key, 'open', e.target.value)} />
-                    <Input type="time" className="col-span-2" value={storeForm.opening_hours[d.key]?.close || ''} onChange={(e) => setHours(d.key, 'close', e.target.value)} />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label className="font-semibold">Datos fiscales</Label>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><Label>Razón social</Label><Input value={storeForm.fiscal_name} onChange={(e) => setStoreForm(p => ({ ...p, fiscal_name: e.target.value }))} /></div>
-                <div className="space-y-2"><Label>NIF/CIF</Label><Input value={storeForm.fiscal_nif} onChange={(e) => setStoreForm(p => ({ ...p, fiscal_nif: e.target.value }))} /></div>
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowStoreDialog(false)}>Cancelar</Button>
-            <Button onClick={handleSaveStore} disabled={isSaving || !storeForm.code || !storeForm.name} className="bg-prats-navy hover:bg-prats-navy-light">
-              {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} {editingStore ? 'Guardar cambios' : 'Crear tienda'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <StoreEditDialog
+        open={showStoreDialog}
+        onOpenChange={setShowStoreDialog}
+        store={editingStore}
+        onSaved={() => { refetchStores(); fetchWarehouses() }}
+      />
 
       <Dialog open={showWarehouseDialog} onOpenChange={setShowWarehouseDialog}>
         <DialogContent>
