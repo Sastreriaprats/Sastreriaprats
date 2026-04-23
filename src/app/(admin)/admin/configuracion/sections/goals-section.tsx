@@ -146,7 +146,8 @@ export function GoalsSection() {
                     label="Boutique"
                     helper="Venta directa + online"
                     value={draft.boutique}
-                    current={row.boutique_target}
+                    target={row.boutique_target}
+                    actual={row.boutique_actual}
                     onChange={v => setField('boutique', v)}
                     onSave={() => saveOne(row.store_id, 'boutique')}
                     saving={savingKey === `${row.store_id}:boutique`}
@@ -155,7 +156,8 @@ export function GoalsSection() {
                     label="Sastrería"
                     helper="Depósitos, entregas y arreglos"
                     value={draft.sastreria}
-                    current={row.sastreria_target}
+                    target={row.sastreria_target}
+                    actual={row.sastreria_actual}
                     onChange={v => setField('sastreria', v)}
                     onSave={() => saveOne(row.store_id, 'sastreria')}
                     saving={savingKey === `${row.store_id}:sastreria`}
@@ -171,18 +173,20 @@ export function GoalsSection() {
 }
 
 function GoalInput({
-  label, helper, value, current, onChange, onSave, saving,
+  label, helper, value, target, actual, onChange, onSave, saving,
 }: {
   label: string
   helper: string
   value: string
-  current: number
+  target: number
+  actual: number
   onChange: (v: string) => void
   onSave: () => void
   saving: boolean
 }) {
   const parsed = value.trim() === '' ? 0 : Number(value)
-  const dirty = Number.isFinite(parsed) && parsed !== current
+  const dirty = Number.isFinite(parsed) && parsed !== target
+  const pct = target > 0 ? Math.round((actual / target) * 100) : null
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
@@ -191,7 +195,7 @@ function GoalInput({
           <p className="text-[11px] text-muted-foreground">{helper}</p>
         </div>
         <span className="text-xs text-muted-foreground tabular-nums">
-          Actual: {formatCurrency(current)}
+          Actual: {formatCurrency(actual)}{pct !== null ? ` (${pct}%)` : ''}
         </span>
       </div>
       <div className="flex items-center gap-2">

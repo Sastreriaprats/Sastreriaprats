@@ -22,7 +22,12 @@ export interface StoreGoalsRow {
   store_name: string
   boutique_target: number
   sastreria_target: number
+  boutique_actual: number
+  sastreria_actual: number
 }
+
+const BOUTIQUE_SALE_TYPES = ['boutique', 'online']
+const SASTRERIA_SALE_TYPES = ['tailoring_deposit', 'tailoring_final', 'alteration']
 
 /** Devuelve una fila por tienda con sus 2 objetivos para el mes indicado. */
 export async function getStoreGoalsForMonth(
@@ -35,13 +40,20 @@ export async function getStoreGoalsForMonth(
     if (!user) return { error: 'No autenticado' }
 
     const admin = createAdminClient()
-    const [storesRes, goalsRes] = await Promise.all([
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const monthStart = `${year}-${pad(month)}-01T00:00:00`
+    const nextMonth = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 }
+    const nextMonthStart = `${nextMonth.y}-${pad(nextMonth.m)}-01T00:00:00`
+
+    const [storesRes, goalsRes, salesRes] = await Promise.all([
       admin.from('stores').select('id, code, name').eq('is_active', true).order('name'),
       admin.from('store_monthly_goals').select('store_id, goal_type, target_amount').eq('year', year).eq('month', month),
+      admin.from('sales').select('store_id, total, sale_type').eq('status', 'completed').gte('created_at', monthStart).lt('created_at', nextMonthStart),
     ])
 
     if (storesRes.error) return { error: storesRes.error.message }
     if (goalsRes.error) return { error: goalsRes.error.message }
+    if (salesRes.error) return { error: salesRes.error.message }
 
     const goalsByStore = new Map<string, { boutique: number; sastreria: number }>()
     for (const g of (goalsRes.data || []) as { store_id: string; goal_type: GoalType; target_amount: string | number }[]) {
@@ -50,14 +62,28 @@ export async function getStoreGoalsForMonth(
       goalsByStore.set(g.store_id, entry)
     }
 
+    const actualByStore = new Map<string, { boutique: number; sastreria: number }>()
+    for (const r of (salesRes.data || []) as { store_id: string | null; total: number | string | null; sale_type: string | null }[]) {
+      if (!r.store_id) continue
+      const entry = actualByStore.get(r.store_id) ?? { boutique: 0, sastreria: 0 }
+      const total = Number(r.total) || 0
+      const st = r.sale_type ?? ''
+      if (BOUTIQUE_SALE_TYPES.includes(st)) entry.boutique += total
+      else if (SASTRERIA_SALE_TYPES.includes(st)) entry.sastreria += total
+      actualByStore.set(r.store_id, entry)
+    }
+
     const rows: StoreGoalsRow[] = (storesRes.data || []).map((s: { id: string; code: string; name: string }) => {
       const g = goalsByStore.get(s.id) ?? { boutique: 0, sastreria: 0 }
+      const a = actualByStore.get(s.id) ?? { boutique: 0, sastreria: 0 }
       return {
         store_id: s.id,
         store_code: s.code,
         store_name: s.name,
         boutique_target: g.boutique,
         sastreria_target: g.sastreria,
+        boutique_actual: a.boutique,
+        sastreria_actual: a.sastreria,
       }
     })
 
