@@ -92,6 +92,9 @@ const PAYMENT_METHODS: Array<{ value: ReservationPaymentMethod; label: string; i
 const STATUS_BADGE: Record<string, { label: string; className: string }> = {
   active:        { label: 'Activa',           className: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
   pending_stock: { label: 'Pendiente stock',  className: 'bg-amber-100 text-amber-800 border-amber-200' },
+  fulfilled:     { label: 'Entregada',        className: 'bg-sky-100 text-sky-800 border-sky-200' },
+  cancelled:     { label: 'Cancelada',        className: 'bg-rose-100 text-rose-800 border-rose-200' },
+  expired:       { label: 'Expirada',         className: 'bg-slate-200 text-slate-700 border-slate-300' },
 }
 
 function clientName(c: ReservationRow['client']): string {
@@ -151,16 +154,23 @@ export function ReservationPickupDialog({
   const fetchList = useCallback(async (term: string) => {
     setLoading(true)
     try {
+      const trimmed = term.trim()
       const res = await listReservations({
         status: 'all',
-        search: term.trim() || undefined,
+        search: trimmed || undefined,
         storeId: storeId || undefined,
         page: 0,
-        pageSize: 25,
+        pageSize: 50,
       })
       if (!res.success) { setResults([]); return }
       const rows = (res.data.data || []) as ReservationRow[]
-      setResults(rows.filter((r) => r.status === 'active' || r.status === 'pending_stock'))
+      // Sin búsqueda: sólo activas / pendientes (flujo normal de caja).
+      // Con búsqueda: todas las reservas que coincidan, independientemente del estado.
+      if (trimmed) {
+        setResults(rows)
+      } else {
+        setResults(rows.filter((r) => r.status === 'active' || r.status === 'pending_stock'))
+      }
     } finally {
       setLoading(false)
     }
@@ -340,7 +350,9 @@ export function ReservationPickupDialog({
                 </div>
               ) : results.length === 0 ? (
                 <div className="py-10 text-center text-sm text-muted-foreground">
-                  {search.trim() ? 'Sin resultados' : 'No hay reservas activas o pendientes'}
+                  {search.trim()
+                    ? 'Sin resultados'
+                    : 'No hay reservas activas o pendientes. Escribe para buscar en todo el histórico.'}
                 </div>
               ) : results.map((r) => {
                 const totalNum = Number(r.total)
