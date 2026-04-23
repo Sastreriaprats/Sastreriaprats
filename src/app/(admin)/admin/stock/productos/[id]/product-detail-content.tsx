@@ -14,11 +14,11 @@ import { variantSkuFromSize } from '@/lib/constants-sizes'
 import { sortBySize } from '@/lib/utils/sort-sizes'
 import { Textarea } from '@/components/ui/textarea'
 import {
-  ArrowLeft, Plus, ArrowUp, Loader2, Image as ImageIcon, Pencil, ArrowLeftRight, Trash2,
+  ArrowLeft, Plus, ArrowUp, Loader2, Image as ImageIcon, Pencil, ArrowLeftRight, Trash2, Barcode,
 } from 'lucide-react'
 import { useAction } from '@/hooks/use-action'
 import { usePermissions } from '@/hooks/use-permissions'
-import { adjustStock, createVariantAction, deleteVariantAction, moveStockBetweenWarehouses, updateProductAction } from '@/actions/products'
+import { adjustStock, createVariantAction, deleteVariantAction, generateBarcodeForProduct, moveStockBetweenWarehouses, updateProductAction } from '@/actions/products'
 import { formatCurrency } from '@/lib/utils'
 import { toast } from 'sonner'
 import { ProductForm } from '../product-form'
@@ -67,6 +67,17 @@ export function ProductDetailContent({
   })
 
   const { execute: doUpdateProduct, isLoading: isUpdatingProduct } = useAction(updateProductAction, { successMessage: 'Producto actualizado', onSuccess: () => router.refresh() })
+
+  const { execute: doGenerateBarcode, isLoading: isGeneratingBarcode } = useAction(generateBarcodeForProduct, {
+    successMessage: 'EAN generado y asignado a todas las variantes',
+    onSuccess: () => router.refresh(),
+  })
+
+  const handleGenerateBarcode = async () => {
+    const hasExistingBarcode = variants.some((v: any) => v.barcode) || !!product.barcode
+    if (hasExistingBarcode && !confirm('Ya existe un código de barras. ¿Generar uno nuevo y reemplazarlo en todas las variantes?')) return
+    await doGenerateBarcode({ productId: product.id })
+  }
 
   const totalStock = variants.reduce((sum: number, v: any) =>
     sum + (v.stock_levels?.reduce((s: number, sl: any) => s + (sl.quantity || 0), 0) || 0), 0
@@ -244,6 +255,11 @@ export function ProductDetailContent({
                   )}
                   <Button size="sm" variant="outline" className="gap-1" onClick={() => setShowTransfer(true)}><ArrowLeftRight className="h-3 w-3" /> Traspaso</Button>
                 </>
+              )}
+              {can('products.edit') && (
+                <Button size="sm" variant="outline" className="gap-1" onClick={handleGenerateBarcode} disabled={isGeneratingBarcode} title="Genera un código EAN-13 y lo asigna a todas las variantes de este producto">
+                  {isGeneratingBarcode ? <Loader2 className="h-3 w-3 animate-spin" /> : <Barcode className="h-3 w-3" />} Generar EAN
+                </Button>
               )}
               {can('products.create') && <Button size="sm" className="gap-1 bg-prats-navy hover:bg-prats-navy-light" onClick={() => setShowNewVariant(true)}><Plus className="h-3 w-3" /> Nueva variante</Button>}
             </div>

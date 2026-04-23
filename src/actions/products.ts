@@ -2171,6 +2171,60 @@ export const getProductByBarcode = protectedAction<
   }
 )
 
+/** Genera un único EAN-13 y lo asigna a TODAS las variantes del producto (mismo código para todas las tallas). */
+export const generateBarcodeForProduct = protectedAction<
+  { productId: string },
+  { barcode: string; variantsUpdated: number }
+>(
+  {
+    permission: 'products.edit',
+    auditModule: 'stock',
+    auditAction: 'update',
+    auditEntity: 'product',
+    revalidate: ['/admin/stock', '/admin/stock/codigos-barras'],
+  },
+  async (ctx, { productId }) => {
+    if (!productId) return failure('productId requerido', 'VALIDATION')
+
+    const { data: variants, error: vErr } = await ctx.adminClient
+      .from('product_variants')
+      .select('id')
+      .eq('product_id', productId)
+      .eq('is_active', true)
+    if (vErr) return failure(vErr.message)
+
+    let code = ''
+    for (let i = 0; i < 50; i++) {
+      const candidate = generateEAN13()
+      const { data: existing } = await ctx.adminClient
+        .from('product_variants')
+        .select('id')
+        .eq('barcode', candidate)
+        .limit(1)
+        .maybeSingle()
+      if (!existing) { code = candidate; break }
+    }
+    if (!code) return failure('No se pudo generar un EAN único', 'INTERNAL')
+
+    if (variants && variants.length > 0) {
+      const { error: uErr } = await ctx.adminClient
+        .from('product_variants')
+        .update({ barcode: code })
+        .eq('product_id', productId)
+        .eq('is_active', true)
+      if (uErr) return failure(uErr.message)
+    }
+
+    const { error: pErr } = await ctx.adminClient
+      .from('products')
+      .update({ barcode: code, barcode_generated_at: new Date().toISOString() })
+      .eq('id', productId)
+    if (pErr) return failure(pErr.message)
+
+    return success({ barcode: code, variantsUpdated: variants?.length ?? 0 })
+  }
+)
+
 /** Actualiza el barcode de una variante (producto + talla). */
 export const updateVariantBarcode = protectedAction<{ variantId: string; barcode: string }, any>(
   {
