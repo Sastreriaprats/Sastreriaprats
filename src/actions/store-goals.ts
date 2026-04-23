@@ -31,7 +31,7 @@ export interface StoreGoalsRow {
 
 // Código de la tienda que hospeda el canal online (única tienda que tiene
 // objetivo 'online' y agrega las ventas de la tabla online_orders).
-export const ONLINE_HOST_STORE_CODE = 'PIN'
+const ONLINE_HOST_STORE_CODE = 'PIN'
 
 const BOUTIQUE_SALE_TYPES = ['boutique']
 const SASTRERIA_SALE_TYPES = ['tailoring_deposit', 'tailoring_final', 'alteration']
