@@ -5,7 +5,7 @@ import Image from 'next/image'
 import { useState, useEffect, useMemo } from 'react'
 import { ShoppingBag, Menu, Search, ChevronLeft, ChevronRight, ChevronDown, Facebook, Instagram, Linkedin, Mail } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { SOCIAL_LINKS } from '@/lib/constants'
 import type { WebCategory } from '@/actions/cms'
 
@@ -272,7 +272,7 @@ export function WebHeader({ announcementText, categories = [] }: { announcementT
                 <SheetContent side="right" className="w-[85vw] sm:w-[420px] sm:max-w-[420px] p-0 flex flex-col">
                   {/* Título MENÚ */}
                   <div className="px-7 pt-7 pb-5 border-b border-gray-200">
-                    <span className="text-base font-bold tracking-[0.25em] uppercase">MENÚ</span>
+                    <SheetTitle className="text-base font-bold tracking-[0.25em] uppercase">MENÚ</SheetTitle>
                   </div>
 
                   {/* Navegación — key={String(isOpen)} resetea acordeones al reabrir */}
