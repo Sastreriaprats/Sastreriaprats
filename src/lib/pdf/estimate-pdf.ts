@@ -52,9 +52,9 @@ export async function generateEstimatePdf(estimateId: string): Promise<string> {
 
   const { data: rawLines = [] } = await admin
     .from('estimate_lines')
-    .select('description, quantity, unit_price, tax_rate, line_total')
+    .select('description, quantity, unit_price, tax_rate, line_total:total')
     .eq('estimate_id', estimateId)
-    .order('sort_order', { ascending: true })
+    .order('line_order', { ascending: true })
 
   const estimate = est as unknown as EstimateRecord
   const lines = (rawLines || []) as unknown as PdfLine[]
