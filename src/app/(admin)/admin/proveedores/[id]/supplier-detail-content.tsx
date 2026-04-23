@@ -25,7 +25,7 @@ import { createClient } from '@/lib/supabase/client'
 import { getProductVariantsById } from '@/actions/products'
 import { searchSupplierFabrics, searchSupplierProducts } from '@/actions/suppliers'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { createSupplierDeliveryNote, uploadSupplierDeliveryNoteAttachment, upsertSupplierDeliveryNoteForOrder } from '@/actions/delivery-notes'
+import { createSupplierDeliveryNote, uploadSupplierDeliveryNoteAttachment, upsertSupplierDeliveryNoteForOrder, getSupplierDeliveryNote } from '@/actions/delivery-notes'
 import { SIZE_TEMPLATES, variantSkuFromSize } from '@/lib/constants-sizes'
 import { sortBySize } from '@/lib/utils/sort-sizes'
 import { Badge } from '@/components/ui/badge'
@@ -128,6 +128,9 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
   const [selectedDeliveryNoteId, setSelectedDeliveryNoteId] = useState<string | null>(null)
   const selectedDeliveryNoteIdRef = useRef<string | null>(null)
   const [uploadedNoteUrls, setUploadedNoteUrls] = useState<Record<string, string>>({})
+  const [deliveryNoteDetailOpen, setDeliveryNoteDetailOpen] = useState(false)
+  const [deliveryNoteDetailLoading, setDeliveryNoteDetailLoading] = useState(false)
+  const [deliveryNoteDetail, setDeliveryNoteDetail] = useState<any | null>(null)
   const uploadPdfInputRef = useRef<HTMLInputElement | null>(null)
   const orderUploadInputRef = useRef<HTMLInputElement | null>(null)
   const selectedOrderIdForUploadRef = useRef<string | null>(null)
@@ -329,6 +332,20 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
     selectedDeliveryNoteIdRef.current = deliveryNoteId
     setSelectedDeliveryNoteId(deliveryNoteId)
     uploadPdfInputRef.current?.click()
+  }
+
+  const openDeliveryNoteDetail = async (deliveryNoteId: string) => {
+    setDeliveryNoteDetailOpen(true)
+    setDeliveryNoteDetailLoading(true)
+    setDeliveryNoteDetail(null)
+    const res = await getSupplierDeliveryNote(deliveryNoteId)
+    setDeliveryNoteDetailLoading(false)
+    if (res.success && res.data) {
+      setDeliveryNoteDetail(res.data)
+    } else {
+      toast.error((res as any)?.error || 'No se pudo cargar el albarán')
+      setDeliveryNoteDetailOpen(false)
+    }
   }
 
   const handleUploadDeliveryNotePdf = async (file: File) => {
@@ -845,7 +862,25 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                     const fileUrl = uploadedNoteUrls[n.id] || n.attachment_url || ''
                     return (
                     <TableRow key={n.id}>
-                      <TableCell className="font-mono text-xs">{n.supplier_reference || '-'}</TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {n.supplier_reference ? (
+                          <button
+                            type="button"
+                            className="text-primary hover:underline focus:outline-none focus:underline"
+                            onClick={() => openDeliveryNoteDetail(n.id)}
+                          >
+                            {n.supplier_reference}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="text-primary hover:underline focus:outline-none focus:underline"
+                            onClick={() => openDeliveryNoteDetail(n.id)}
+                          >
+                            Ver detalle
+                          </button>
+                        )}
+                      </TableCell>
                       <TableCell className="font-mono text-xs">{n.order_number || '-'}</TableCell>
                       <TableCell className="text-sm">{n.delivery_date ? formatDate(n.delivery_date) : '-'}</TableCell>
                       <TableCell>
@@ -2069,6 +2104,150 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
         invoice={apPaymentInvoice}
         onChanged={() => { loadApPending(); router.refresh() }}
       />
+
+      <Dialog
+        open={deliveryNoteDetailOpen}
+        onOpenChange={(open) => {
+          setDeliveryNoteDetailOpen(open)
+          if (!open) setDeliveryNoteDetail(null)
+        }}
+      >
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Albarán de proveedor
+              {deliveryNoteDetail?.supplier_reference && (
+                <span className="font-mono text-muted-foreground font-normal">
+                  {deliveryNoteDetail.supplier_reference}
+                </span>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+
+          {deliveryNoteDetailLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : !deliveryNoteDetail ? (
+            <p className="text-sm text-muted-foreground py-6">Albarán no encontrado</p>
+          ) : (
+            <div className="grid gap-4 py-2">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                <div>
+                  <p className="text-xs text-muted-foreground">Estado</p>
+                  <Badge
+                    variant={
+                      deliveryNoteDetail.status === 'recibido' ? 'default'
+                      : deliveryNoteDetail.status === 'incidencia' ? 'destructive'
+                      : 'secondary'
+                    }
+                    className="mt-1"
+                  >
+                    {deliveryNoteDetail.status === 'recibido' ? 'Recibido'
+                      : deliveryNoteDetail.status === 'incidencia' ? 'Incidencia'
+                      : 'Pendiente'}
+                  </Badge>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Referencia</p>
+                  <p className="font-mono font-medium mt-1">
+                    {deliveryNoteDetail.supplier_reference || '-'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Pedido vinculado</p>
+                  <p className="font-mono font-medium mt-1">
+                    {deliveryNoteDetail.supplier_orders?.order_number || '-'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Fecha entrega</p>
+                  <p className="font-medium mt-1">
+                    {deliveryNoteDetail.delivery_date ? formatDate(deliveryNoteDetail.delivery_date) : '-'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Fecha registro</p>
+                  <p className="font-medium mt-1">
+                    {deliveryNoteDetail.created_at ? formatDate(deliveryNoteDetail.created_at) : '-'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Creado por</p>
+                  <p className="font-medium mt-1">
+                    {deliveryNoteDetail.created_by_name || 'Sistema'}
+                  </p>
+                </div>
+              </div>
+
+              {deliveryNoteDetail.notes && (
+                <div className="rounded-md border bg-muted/30 px-3 py-2">
+                  <p className="text-xs text-muted-foreground mb-1">Notas</p>
+                  <p className="text-sm whitespace-pre-wrap">{deliveryNoteDetail.notes}</p>
+                </div>
+              )}
+
+              <div className="rounded-md border">
+                <div className="flex items-center justify-between border-b px-3 py-2">
+                  <h4 className="text-sm font-semibold">Líneas del albarán</h4>
+                  <Badge variant="secondary">{deliveryNoteDetail.lines?.length || 0}</Badge>
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Producto</TableHead>
+                      <TableHead>Referencia</TableHead>
+                      <TableHead className="text-right">Pedida</TableHead>
+                      <TableHead className="text-right">Recibida</TableHead>
+                      <TableHead className="text-right">Precio</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {!deliveryNoteDetail.lines?.length ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-muted-foreground py-6">
+                          Sin líneas registradas
+                        </TableCell>
+                      </TableRow>
+                    ) : deliveryNoteDetail.lines.map((line: any) => (
+                      <TableRow key={line.id}>
+                        <TableCell className="text-sm">{line.product_name || '-'}</TableCell>
+                        <TableCell className="font-mono text-xs">{line.reference || '-'}</TableCell>
+                        <TableCell className="text-right tabular-nums">{line.quantity_ordered ?? '-'}</TableCell>
+                        <TableCell className="text-right tabular-nums">{line.quantity_received ?? '-'}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {line.unit_price != null ? formatCurrency(Number(line.unit_price)) : '-'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {(uploadedNoteUrls[deliveryNoteDetail.id] || deliveryNoteDetail.attachment_url) && (
+                <div className="flex justify-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => {
+                      const url = uploadedNoteUrls[deliveryNoteDetail.id] || deliveryNoteDetail.attachment_url
+                      if (url) window.open(url, '_blank')
+                    }}
+                  >
+                    <FileText className="h-4 w-4" /> Ver PDF
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeliveryNoteDetailOpen(false)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
