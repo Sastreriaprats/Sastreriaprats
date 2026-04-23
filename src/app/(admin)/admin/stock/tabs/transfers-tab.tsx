@@ -32,6 +32,7 @@ const PAGE_SIZE = 20
 const statusLabels: Record<string, string> = {
   requested: 'Pendiente de aprobar',
   approved: 'Aprobado',
+  partial: 'Recibido parcialmente',
   in_transit: 'En tránsito',
   received: 'Recibido',
   cancelled: 'Cancelado',
@@ -76,18 +77,69 @@ export function TransfersTab() {
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailData, setDetailData] = useState<{ transfer: any; lines: any[] } | null>(null)
+  const [detailTransferRow, setDetailTransferRow] = useState<any | null>(null)
+  const [receivedQty, setReceivedQty] = useState<Record<string, number>>({})
+  const [confirmingReception, setConfirmingReception] = useState(false)
 
-  const openDetail = async (id: string) => {
+  const openDetail = async (id: string, transferRow?: any) => {
     setDetailOpen(true)
     setDetailLoading(true)
     setDetailData(null)
+    setDetailTransferRow(transferRow ?? null)
+    setReceivedQty({})
     const res = await getStockTransferDetail({ id })
     setDetailLoading(false)
     if (res.success && res.data) {
       setDetailData(res.data)
+      // Inicializar cantidades recibidas con lo solicitado (para recepción completa por defecto)
+      const initial: Record<string, number> = {}
+      for (const l of res.data.lines) initial[l.id] = Number(l.quantity_requested || 0)
+      setReceivedQty(initial)
     } else {
       toast.error((!res.success && res.error) || 'No se pudo cargar el detalle del traspaso')
       setDetailOpen(false)
+    }
+  }
+
+  // Permisos de recepción del traspaso actual del diálogo (para mostrar inputs editables)
+  const detailCanReceive = (() => {
+    const row = detailTransferRow
+    if (!row) return false
+    if (row.status !== 'requested') return false
+    const isOwnRequest = row.requested_by === profile?.id
+    const destStoreId = row.to_warehouse?.store_id ?? null
+    const userIsDestStoreMember = destStoreId ? userStoreIds.has(destStoreId) : false
+    const destDone = !!row.destination_approved_at
+    const adminDone = !!row.admin_approved_at
+    return !isOwnRequest && userIsDestStoreMember && !destDone
+      && (!adminDone || row.admin_approved_by !== profile?.id)
+  })()
+
+  const handleConfirmReception = async () => {
+    if (!detailData || !detailTransferRow) return
+    setConfirmingReception(true)
+    try {
+      const result = await approveStockTransfer({
+        id: detailTransferRow.id,
+        as: 'destination',
+        receivedQuantities: receivedQty,
+      })
+      if (result.success) {
+        if (result.data?.status === 'approved') {
+          toast.success('Recepción confirmada: traspaso aprobado completamente')
+        } else if (result.data?.status === 'partial') {
+          toast.success('Recepción parcial confirmada: el traspaso queda como parcial')
+        } else if (result.data?.status === 'destination_approved') {
+          toast.success('Recepción registrada. Falta la aprobación de admin')
+        }
+        setDetailOpen(false)
+        fetchTransfers()
+        if (typeof window !== 'undefined') window.dispatchEvent(new Event('stock-transfers-updated'))
+      } else {
+        toast.error(result.error || 'No se pudo confirmar la recepción')
+      }
+    } finally {
+      setConfirmingReception(false)
     }
   }
 
@@ -375,7 +427,7 @@ export function TransfersTab() {
                         size="sm"
                         variant="outline"
                         className="gap-1"
-                        onClick={() => openDetail(t.id)}
+                        onClick={() => openDetail(t.id, t)}
                         title="Ver contenido del traspaso"
                       >
                         <Eye className="h-3 w-3" /> Ver
@@ -428,11 +480,10 @@ export function TransfersTab() {
                               variant="default"
                               className="gap-1"
                               disabled={actioningId !== null}
-                              onClick={() => handleApprove(t.id, 'destination')}
-                              title="Aprobar como tienda destino"
+                              onClick={() => openDetail(t.id, t)}
+                              title="Indicar cantidades recibidas y confirmar recepción"
                             >
-                              {actioningId === t.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-                              Aprobar (destino)
+                              <Check className="h-3 w-3" /> Recepcionar
                             </Button>
                           )}
                           {(canApproveAsAdmin || canApproveAsDest) && (
@@ -747,6 +798,14 @@ export function TransfersTab() {
                   ) : null}
                 </div>
 
+                {detailCanReceive ? (
+                  <div className="rounded-md border border-primary/40 bg-primary/5 p-3 text-sm">
+                    <strong>Recepción de traspaso:</strong> indica cuántas unidades has recibido físicamente de cada línea.
+                    Si falta alguna, ajusta la cantidad (0 si no ha llegado). El traspaso quedará marcado como
+                    &quot;Recibido parcialmente&quot; si alguna cantidad no coincide con la solicitada.
+                  </div>
+                ) : null}
+
                 <div className="rounded-md border">
                   <Table>
                     <TableHeader>
@@ -755,36 +814,101 @@ export function TransfersTab() {
                         <TableHead>SKU / Variante</TableHead>
                         <TableHead>Talla / Color</TableHead>
                         <TableHead className="text-right">Cant. solicitada</TableHead>
+                        {detailCanReceive ? (
+                          <TableHead className="text-right w-40">Cant. recibida</TableHead>
+                        ) : (
+                          <>
+                            <TableHead className="text-right">Cant. recibida</TableHead>
+                            <TableHead className="text-right">Faltan</TableHead>
+                          </>
+                        )}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {detailData.lines.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={4} className="text-center text-muted-foreground py-6">
+                          <TableCell colSpan={detailCanReceive ? 5 : 6} className="text-center text-muted-foreground py-6">
                             Sin líneas
                           </TableCell>
                         </TableRow>
-                      ) : detailData.lines.map((l) => (
-                        <TableRow key={l.id}>
-                          <TableCell className="font-medium">{l.product_name || '-'}</TableCell>
-                          <TableCell className="font-mono text-xs">
-                            <div>{l.variant_sku || l.product_sku || '-'}</div>
-                            {l.barcode ? <div className="text-muted-foreground">{l.barcode}</div> : null}
-                          </TableCell>
-                          <TableCell className="text-xs">
-                            {[l.size, l.color].filter(Boolean).join(' · ') || '—'}
-                          </TableCell>
-                          <TableCell className="text-right font-semibold">{l.quantity_requested}</TableCell>
-                        </TableRow>
-                      ))}
+                      ) : detailData.lines.map((l) => {
+                        const received = Number(receivedQty[l.id] ?? l.quantity_received ?? 0)
+                        const missing = Math.max(0, Number(l.quantity_requested || 0) - received)
+                        return (
+                          <TableRow key={l.id}>
+                            <TableCell className="font-medium">{l.product_name || '-'}</TableCell>
+                            <TableCell className="font-mono text-xs">
+                              <div>{l.variant_sku || l.product_sku || '-'}</div>
+                              {l.barcode ? <div className="text-muted-foreground">{l.barcode}</div> : null}
+                            </TableCell>
+                            <TableCell className="text-xs">
+                              {[l.size, l.color].filter(Boolean).join(' · ') || '—'}
+                            </TableCell>
+                            <TableCell className="text-right font-semibold">{l.quantity_requested}</TableCell>
+                            {detailCanReceive ? (
+                              <TableCell className="text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  <Input
+                                    type="number"
+                                    min={0}
+                                    max={l.quantity_requested}
+                                    value={received}
+                                    onChange={(e) => {
+                                      const n = Number(e.target.value)
+                                      const clamped = Math.max(0, Math.min(Number(l.quantity_requested || 0), Number.isFinite(n) ? Math.trunc(n) : 0))
+                                      setReceivedQty((prev) => ({ ...prev, [l.id]: clamped }))
+                                    }}
+                                    className="h-8 w-20 text-right"
+                                  />
+                                  {missing > 0 && (
+                                    <Badge variant="outline" className="text-[10px] text-amber-700 border-amber-400">
+                                      faltan {missing}
+                                    </Badge>
+                                  )}
+                                </div>
+                              </TableCell>
+                            ) : (
+                              <>
+                                <TableCell className="text-right">
+                                  {l.quantity_received != null ? Number(l.quantity_received) : '—'}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {l.quantity_received != null && missing > 0 ? (
+                                    <span className="text-amber-700 font-medium">{missing}</span>
+                                  ) : (
+                                    <span className="text-muted-foreground">—</span>
+                                  )}
+                                </TableCell>
+                              </>
+                            )}
+                          </TableRow>
+                        )
+                      })}
                     </TableBody>
                   </Table>
                 </div>
 
                 <div className="text-sm text-muted-foreground">
-                  Total de unidades: <span className="font-semibold text-foreground">
+                  Solicitado: <span className="font-semibold text-foreground">
                     {detailData.lines.reduce((acc, l) => acc + (l.quantity_requested || 0), 0)}
-                  </span> · {detailData.lines.length} línea{detailData.lines.length !== 1 ? 's' : ''}
+                  </span>
+                  {detailCanReceive ? (
+                    <>
+                      {' · '}
+                      A recepcionar: <span className="font-semibold text-foreground">
+                        {Object.values(receivedQty).reduce((acc, n) => acc + (Number(n) || 0), 0)}
+                      </span>
+                    </>
+                  ) : detailData.lines.some((l) => l.quantity_received != null && Number(l.quantity_received) > 0) ? (
+                    <>
+                      {' · '}
+                      Recibido: <span className="font-semibold text-foreground">
+                        {detailData.lines.reduce((acc, l) => acc + Number(l.quantity_received || 0), 0)}
+                      </span>
+                    </>
+                  ) : null}
+                  {' · '}
+                  {detailData.lines.length} línea{detailData.lines.length !== 1 ? 's' : ''}
                 </div>
               </>
             ) : null}
@@ -792,6 +916,16 @@ export function TransfersTab() {
 
           <DialogFooter className="flex-shrink-0 border-t pt-4 mt-2">
             <Button variant="outline" onClick={() => setDetailOpen(false)}>Cerrar</Button>
+            {detailCanReceive && (
+              <Button
+                onClick={handleConfirmReception}
+                disabled={confirmingReception || !detailData}
+                className="gap-1"
+              >
+                {confirmingReception ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                Confirmar recepción
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

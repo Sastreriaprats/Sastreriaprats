@@ -689,7 +689,7 @@ export const stockMovementTypeEnum = pgEnum('stock_movement_type', [
   'adjustment_positive', 'adjustment_negative', 'inventory',
   'reservation', 'reservation_release', 'initial', 'purchase_receipt',
 ])
-export const transferStatusEnum = pgEnum('transfer_status', ['requested', 'approved', 'in_transit', 'received', 'cancelled'])
+export const transferStatusEnum = pgEnum('transfer_status', ['requested', 'approved', 'in_transit', 'received', 'cancelled', 'partial'])
 export const deliveryNoteTypeEnum = pgEnum('delivery_note_type', ['traspaso', 'entrada_stock', 'salida_stock', 'ajuste'])
 export const deliveryNoteStatusEnum = pgEnum('delivery_note_status', ['borrador', 'confirmado', 'anulado'])
 export const supplierDeliveryNoteStatusEnum = pgEnum('supplier_delivery_note_status', ['pendiente', 'recibido', 'incidencia'])

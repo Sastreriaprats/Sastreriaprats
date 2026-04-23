@@ -1385,11 +1385,11 @@ export const getStockTransferDetail = protectedAction<
  * cuando ambas aprobaciones están registradas. El creador nunca puede aprobar.
  */
 export const approveStockTransfer = protectedAction<
-  { id: string; as?: 'admin' | 'destination' },
-  { status: 'admin_approved' | 'destination_approved' | 'approved' }
+  { id: string; as?: 'admin' | 'destination'; receivedQuantities?: Record<string, number> },
+  { status: 'admin_approved' | 'destination_approved' | 'approved' | 'partial' }
 >(
   { permission: 'stock.approve_transfer', auditModule: 'stock' },
-  async (ctx, { id, as }) => {
+  async (ctx, { id, as, receivedQuantities }) => {
     const profileId = ctx.userId
     if (!profileId) return failure('No hay sesión', 'UNAUTHORIZED')
     const { data: transfer, error: transferError } = await ctx.adminClient
@@ -1473,6 +1473,26 @@ export const approveStockTransfer = protectedAction<
       update.destination_approved_at = nowIso
     }
 
+    // Si el destino declara cantidades recibidas (recepción parcial), las guardamos
+    // ANTES de evaluar si se completa el par, para que queden registradas aunque la
+    // aprobación aún sea parcial.
+    if (role === 'destination' && receivedQuantities && typeof receivedQuantities === 'object') {
+      const { data: existingLines } = await ctx.adminClient
+        .from('stock_transfer_lines')
+        .select('id, quantity_requested')
+        .eq('transfer_id', id)
+      for (const el of (existingLines as any[]) ?? []) {
+        const raw = receivedQuantities[el.id]
+        if (raw === undefined) continue
+        const clamped = Math.max(0, Math.min(Number(el.quantity_requested || 0), Math.trunc(Number(raw) || 0)))
+        const { error: upErr } = await ctx.adminClient
+          .from('stock_transfer_lines')
+          .update({ quantity_received: clamped })
+          .eq('id', el.id)
+        if (upErr) return failure(upErr.message || 'Error al guardar cantidad recibida', 'INTERNAL')
+      }
+    }
+
     // Si con esta aprobación se completan las dos, se mueve el stock.
     const willBeFullyApproved = role === 'admin' ? !!destApprovedAt : !!adminApprovedAt
 
@@ -1492,9 +1512,19 @@ export const approveStockTransfer = protectedAction<
 
     const { data: lines, error: linesError } = await ctx.adminClient
       .from('stock_transfer_lines')
-      .select('product_variant_id, quantity_requested, quantity_sent')
+      .select('id, product_variant_id, quantity_requested, quantity_sent, quantity_received')
       .eq('transfer_id', id)
     if (linesError || !lines?.length) return failure('No hay líneas en el traspaso', 'VALIDATION')
+
+    // Modo parcial: alguna línea tiene quantity_received > 0 (destino ya declaró recepción).
+    // En modo parcial, lo que se mueve al stock es quantity_received (puede ser 0 para líneas no recibidas).
+    // En modo legacy (nadie declaró cantidades), se mueve quantity_sent o quantity_requested como siempre.
+    const partialMode = (lines as any[]).some((l: any) => Number(l.quantity_received || 0) > 0)
+    const qtyToMove = (line: any) => {
+      if (partialMode) return Number(line.quantity_received || 0)
+      if (Number(line.quantity_sent) > 0) return Number(line.quantity_sent)
+      return Number(line.quantity_requested || 0)
+    }
 
     const variantIds = [...new Set((lines as any[]).map((l: any) => l.product_variant_id))]
     const { data: fromLevels } = await ctx.adminClient
@@ -1505,7 +1535,7 @@ export const approveStockTransfer = protectedAction<
     const fromMap = new Map((fromLevels || []).map((r: any) => [r.product_variant_id, { id: r.id, quantity: Number(r.quantity || 0) }]))
 
     for (const line of lines as any[]) {
-      const qty = Number(line.quantity_sent) > 0 ? Number(line.quantity_sent) : Number(line.quantity_requested || 0)
+      const qty = qtyToMove(line)
       if (qty <= 0) continue
       const fromLevel = fromMap.get(line.product_variant_id)
       if (!fromLevel) return failure(`Sin stock en origen para variante ${line.product_variant_id}`, 'CONFLICT')
@@ -1514,7 +1544,7 @@ export const approveStockTransfer = protectedAction<
 
     for (const line of lines as any[]) {
       const variantId = (line as any).product_variant_id
-      const quantity = Number((line as any).quantity_sent) > 0 ? Number((line as any).quantity_sent) : Number((line as any).quantity_requested || 0)
+      const quantity = qtyToMove(line)
       if (quantity <= 0) continue
 
       const fromLevel = fromMap.get(variantId)!
@@ -1555,11 +1585,17 @@ export const approveStockTransfer = protectedAction<
       fromMap.set(variantId, { id: fromLevel.id, quantity: fromAfter })
     }
 
+    // Estado final: 'partial' si en modo parcial alguna línea recibió menos de lo solicitado.
+    const finalStatus: 'approved' | 'partial' = partialMode
+      && (lines as any[]).some((l: any) => Number(l.quantity_received || 0) < Number(l.quantity_requested || 0))
+      ? 'partial'
+      : 'approved'
+
     const { error } = await ctx.adminClient
       .from('stock_transfers')
       .update({
         ...update,
-        status: 'approved',
+        status: finalStatus,
         approved_by: profileId,
         approved_at: nowIso,
       })
@@ -1602,18 +1638,21 @@ export const approveStockTransfer = protectedAction<
             .single()
 
           if (!noteErr && note?.id) {
-            const { data: lines } = await ctx.adminClient
+            const { data: noteLines } = await ctx.adminClient
               .from('stock_transfer_lines')
-              .select('product_variant_id, quantity_requested, quantity_sent, product_variants(variant_sku, products(name, sku, base_price, price_with_tax), price_override)')
+              .select('product_variant_id, quantity_requested, quantity_sent, quantity_received, product_variants(variant_sku, products(name, sku, base_price, price_with_tax), price_override)')
               .eq('transfer_id', id)
-            if (lines?.length) {
-              const payload = lines
+            if (noteLines?.length) {
+              const nlPartialMode = (noteLines as any[]).some((l: any) => Number(l.quantity_received || 0) > 0)
+              const payload = noteLines
                 .map((l: any, idx: number) => ({
                   delivery_note_id: note.id,
                   product_variant_id: l.product_variant_id,
                   product_name: l.product_variants?.products?.name ?? null,
                   sku: l.product_variants?.variant_sku ?? l.product_variants?.products?.sku ?? null,
-                  quantity: Number(l.quantity_sent) > 0 ? Number(l.quantity_sent) : Number(l.quantity_requested || 0),
+                  quantity: nlPartialMode
+                    ? Number(l.quantity_received || 0)
+                    : (Number(l.quantity_sent) > 0 ? Number(l.quantity_sent) : Number(l.quantity_requested || 0)),
                   unit_price: l.product_variants?.price_override != null
                     ? Number(l.product_variants.price_override)
                     : Number(l.product_variants?.products?.base_price || 0),
@@ -1629,7 +1668,7 @@ export const approveStockTransfer = protectedAction<
       console.error('[approveStockTransfer] auto delivery note:', e)
     }
 
-    return success({ status: 'approved' as const })
+    return success({ status: finalStatus as 'approved' | 'partial' })
   }
 )
 
