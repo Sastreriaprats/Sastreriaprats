@@ -74,6 +74,7 @@ const ENTITY_LABELS: Record<string, string> = {
   tailoring_order: 'Pedido',
   fitting: 'Prueba',
   invoice: 'Factura',
+  stock_transfer: 'Traspaso',
 }
 // Fallback si el API no envía entity_type_display
 const getEntityTypeLabel = (log: LogRow) => log.entity_type_display ?? ENTITY_LABELS[log.entity_type] ?? log.entity_type
@@ -193,6 +194,21 @@ export function AuditoriaContent() {
     opening_amount: 'Fondo inicial',
     counted_cash: 'Efectivo contado',
     closing_notes: 'Notas de cierre',
+    // Traspasos
+    numero_traspaso: 'Nº de traspaso',
+    almacen_origen: 'Almacén origen',
+    almacen_destino: 'Almacén destino',
+    total_unidades: 'Total unidades',
+    total_lineas: 'Total líneas',
+    total_unidades_movidas: 'Unidades movidas',
+    productos: 'Productos',
+    producto: 'Producto',
+    solicitado: 'Solicitado',
+    recibido: 'Recibido',
+    movido: 'Movido',
+    rol_aprobacion: 'Rol de aprobación',
+    rol_ultima_aprobacion: 'Rol última aprobación',
+    estado_final: 'Estado final',
   }
 
   // IDs/UUIDs técnicos que no aportan valor visual al admin

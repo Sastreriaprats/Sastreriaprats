@@ -451,6 +451,7 @@ export async function getAuditLogs(filters: {
     fitting: 'Prueba',
     cash_withdrawal: 'Arqueo',
     return: 'Devolución',
+    stock_transfer: 'Traspaso',
   }
   const PAYMENT_METHOD_ES: Record<string, string> = {
     cash: 'efectivo',
@@ -661,6 +662,11 @@ export async function getAuditLogs(filters: {
             const n = (inv as any).invoice_series && (inv as any).invoice_number ? `${(inv as any).invoice_series}-${(inv as any).invoice_number}` : (inv as any).invoice_number
             const total = (inv as any).total != null ? Number((inv as any).total).toFixed(2) : ''
             labels.set((inv as any).id, total ? `Factura F-${n} · ${total}€` : `Factura: ${n}`)
+          }
+        } else if (entityType === 'stock_transfer') {
+          const { data: transfers } = await admin.from('stock_transfers').select('id, transfer_number').in('id', uniqueIds)
+          for (const t of transfers ?? []) {
+            labels.set((t as any).id, `Traspaso: ${(t as any).transfer_number}`)
           }
         } else if (entityType === 'appointment') {
           const { data: apps } = await admin.from('appointments').select('id, client_id').in('id', uniqueIds)

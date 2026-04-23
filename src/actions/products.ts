@@ -1257,7 +1257,49 @@ export const createStockTransfer = protectedAction<
       return failure(linesError.message || 'Error al crear líneas de traspaso', 'INTERNAL')
     }
 
-    return success({ id: transfer.id, transfer_number: transfer.transfer_number, lines: linesPayload.length })
+    // Datos para auditoría: nombres de almacenes y detalle de productos
+    const [{ data: whNames }, { data: variantDetails }] = await Promise.all([
+      ctx.adminClient.from('warehouses').select('id, name, code').in('id', [fromWarehouseId, toWarehouseId]),
+      ctx.adminClient
+        .from('product_variants')
+        .select('id, variant_sku, size, color, products(name, sku)')
+        .in('id', variantIds),
+    ])
+    const whMap = new Map<string, string>()
+    for (const w of (whNames as any[]) || []) whMap.set((w as any).id, `${(w as any).name}${(w as any).code ? ` (${(w as any).code})` : ''}`)
+    const variantMap = new Map<string, any>()
+    for (const v of (variantDetails as any[]) || []) variantMap.set((v as any).id, v)
+    const productDetails = Array.from(grouped.entries()).map(([variantId, qty]) => {
+      const v = variantMap.get(variantId)
+      const productName = v?.products?.name || 'Producto'
+      const parts = [v?.size, v?.color].filter(Boolean).join(' / ')
+      const sku = v?.variant_sku || v?.products?.sku || ''
+      return {
+        producto: productName + (parts ? ` · ${parts}` : ''),
+        sku,
+        cantidad: qty,
+      }
+    })
+    const fromName = whMap.get(fromWarehouseId) || 'Origen'
+    const toName = whMap.get(toWarehouseId) || 'Destino'
+    const totalUnits = Array.from(grouped.values()).reduce((s, n) => s + n, 0)
+
+    return success({
+      id: transfer.id,
+      transfer_number: transfer.transfer_number,
+      lines: linesPayload.length,
+      auditEntityDisplay: `Traspaso: ${transfer.transfer_number}`,
+      auditDescription: `Traspaso ${transfer.transfer_number} · ${fromName} → ${toName} · ${totalUnits} uds · ${linesPayload.length} líneas`,
+      auditMetadata: {
+        numero_traspaso: transfer.transfer_number,
+        almacen_origen: fromName,
+        almacen_destino: toName,
+        total_unidades: totalUnits,
+        total_lineas: linesPayload.length,
+        notas: (input.notes || '').trim() || null,
+        productos: productDetails,
+      },
+    })
   }
 )
 
@@ -1388,7 +1430,13 @@ export const approveStockTransfer = protectedAction<
   { id: string; as?: 'admin' | 'destination'; receivedQuantities?: Record<string, number> },
   { status: 'admin_approved' | 'destination_approved' | 'approved' | 'partial' }
 >(
-  { permission: 'stock.approve_transfer', auditModule: 'stock' },
+  {
+    permission: 'stock.approve_transfer',
+    auditModule: 'stock',
+    auditAction: 'state_change',
+    auditEntity: 'stock_transfer',
+    revalidate: ['/admin/stock'],
+  },
   async (ctx, { id, as, receivedQuantities }) => {
     const profileId = ctx.userId
     if (!profileId) return failure('No hay sesión', 'UNAUTHORIZED')
@@ -1503,7 +1551,18 @@ export const approveStockTransfer = protectedAction<
         .eq('id', id)
         .eq('status', 'requested')
       if (partialErr) return failure(partialErr.message || 'Error al registrar aprobación', 'INTERNAL')
-      return success({ status: role === 'admin' ? 'admin_approved' as const : 'destination_approved' as const })
+      const partialStatus = role === 'admin' ? 'admin_approved' as const : 'destination_approved' as const
+      const transferNumberText = (transfer as any).transfer_number || id
+      return success({
+        status: partialStatus,
+        auditEntityDisplay: `Traspaso: ${transferNumberText}`,
+        auditDescription: `Traspaso ${transferNumberText} · ${role === 'admin' ? 'Aprobación admin' : 'Aprobación tienda destino'} registrada (pendiente segunda firma)`,
+        auditMetadata: {
+          numero_traspaso: transferNumberText,
+          rol_aprobacion: role === 'admin' ? 'Administrador' : 'Tienda destino',
+          estado: partialStatus === 'admin_approved' ? 'Aprobado por admin' : 'Aprobado por tienda destino',
+        },
+      })
     }
 
     // Llegados aquí, esta aprobación completa el par → mover stock
@@ -1668,14 +1727,69 @@ export const approveStockTransfer = protectedAction<
       console.error('[approveStockTransfer] auto delivery note:', e)
     }
 
-    return success({ status: finalStatus as 'approved' | 'partial' })
+    // Detalle para auditoría: nombres de almacenes y productos movidos
+    const variantIdsForAudit = Array.from(new Set((lines as any[]).map((l: any) => l.product_variant_id)))
+    const [{ data: whNames }, { data: variantDetails }] = await Promise.all([
+      ctx.adminClient.from('warehouses').select('id, name, code').in('id', [fromWarehouseId, toWarehouseId]),
+      ctx.adminClient
+        .from('product_variants')
+        .select('id, variant_sku, size, color, products(name, sku)')
+        .in('id', variantIdsForAudit),
+    ])
+    const whMap = new Map<string, string>()
+    for (const w of (whNames as any[]) || []) whMap.set((w as any).id, `${(w as any).name}${(w as any).code ? ` (${(w as any).code})` : ''}`)
+    const variantMap = new Map<string, any>()
+    for (const v of (variantDetails as any[]) || []) variantMap.set((v as any).id, v)
+    const productDetails = (lines as any[]).map((line: any) => {
+      const v = variantMap.get(line.product_variant_id)
+      const productName = v?.products?.name || 'Producto'
+      const parts = [v?.size, v?.color].filter(Boolean).join(' / ')
+      const sku = v?.variant_sku || v?.products?.sku || ''
+      return {
+        producto: productName + (parts ? ` · ${parts}` : ''),
+        sku,
+        solicitado: Number(line.quantity_requested || 0),
+        recibido: Number(line.quantity_received || 0),
+        movido: qtyToMove(line),
+      }
+    })
+    const fromName = whMap.get(fromWarehouseId) || 'Origen'
+    const toName = whMap.get(toWarehouseId) || 'Destino'
+    const totalMoved = productDetails.reduce((s, p) => s + Number(p.movido || 0), 0)
+    const transferNumberText = (transfer as any).transfer_number || id
+
+    return success({
+      status: finalStatus as 'approved' | 'partial',
+      auditEntityDisplay: `Traspaso: ${transferNumberText}`,
+      auditDescription: `Traspaso ${transferNumberText} · ${finalStatus === 'partial' ? 'Recibido parcial' : 'Aprobado y completado'} · ${fromName} → ${toName} · ${totalMoved} uds movidas`,
+      auditMetadata: {
+        numero_traspaso: transferNumberText,
+        almacen_origen: fromName,
+        almacen_destino: toName,
+        estado_final: finalStatus === 'partial' ? 'Parcial' : 'Aprobado',
+        total_unidades_movidas: totalMoved,
+        rol_ultima_aprobacion: role === 'admin' ? 'Administrador' : 'Tienda destino',
+        productos: productDetails,
+      },
+    })
   }
 )
 
 /** Rechazar/cancelar un traspaso (status → cancelled). */
-export const rejectStockTransfer = protectedAction<{ id: string }, void>(
-  { permission: 'stock.approve_transfer', auditModule: 'stock' },
+export const rejectStockTransfer = protectedAction<{ id: string }, { id: string }>(
+  {
+    permission: 'stock.approve_transfer',
+    auditModule: 'stock',
+    auditAction: 'state_change',
+    auditEntity: 'stock_transfer',
+    revalidate: ['/admin/stock'],
+  },
   async (ctx, { id }) => {
+    const { data: prev } = await ctx.adminClient
+      .from('stock_transfers')
+      .select('transfer_number, from_warehouse_id, to_warehouse_id')
+      .eq('id', id)
+      .single()
     const { error } = await ctx.adminClient
       .from('stock_transfers')
       .update({
@@ -1685,7 +1799,33 @@ export const rejectStockTransfer = protectedAction<{ id: string }, void>(
       .eq('id', id)
       .eq('status', 'requested')
     if (error) return failure(error.message || 'Error al rechazar traspaso', 'INTERNAL')
-    return success(undefined)
+
+    const transferNumberText = (prev as any)?.transfer_number || id
+    let fromName = 'Origen'
+    let toName = 'Destino'
+    if (prev) {
+      const { data: whs } = await ctx.adminClient
+        .from('warehouses')
+        .select('id, name, code')
+        .in('id', [(prev as any).from_warehouse_id, (prev as any).to_warehouse_id])
+      for (const w of (whs as any[]) || []) {
+        const label = `${(w as any).name}${(w as any).code ? ` (${(w as any).code})` : ''}`
+        if ((w as any).id === (prev as any).from_warehouse_id) fromName = label
+        if ((w as any).id === (prev as any).to_warehouse_id) toName = label
+      }
+    }
+
+    return success({
+      id,
+      auditEntityDisplay: `Traspaso: ${transferNumberText}`,
+      auditDescription: `Traspaso ${transferNumberText} · Rechazado/cancelado · ${fromName} → ${toName}`,
+      auditMetadata: {
+        numero_traspaso: transferNumberText,
+        almacen_origen: fromName,
+        almacen_destino: toName,
+        estado: 'Cancelado',
+      },
+    })
   }
 )
 
