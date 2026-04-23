@@ -2203,10 +2203,10 @@ export const getProductByBarcode = protectedAction<
   }
 )
 
-/** Genera un único EAN-13 y lo asigna a TODAS las variantes del producto (mismo código para todas las tallas). */
+/** Genera un EAN-13 único para cada variante activa del producto (un código distinto por talla). */
 export const generateBarcodeForProduct = protectedAction<
   { productId: string },
-  { barcode: string; variantsUpdated: number }
+  { variantsUpdated: number; firstBarcode: string | null }
 >(
   {
     permission: 'products.edit',
@@ -2224,36 +2224,45 @@ export const generateBarcodeForProduct = protectedAction<
       .eq('product_id', productId)
       .eq('is_active', true)
     if (vErr) return failure(vErr.message)
+    if (!variants || variants.length === 0) return failure('El producto no tiene variantes activas', 'VALIDATION')
 
-    let code = ''
-    for (let i = 0; i < 50; i++) {
-      const candidate = generateEAN13()
-      const { data: existing } = await ctx.adminClient
-        .from('product_variants')
-        .select('id')
-        .eq('barcode', candidate)
-        .limit(1)
-        .maybeSingle()
-      if (!existing) { code = candidate; break }
+    const generated = new Set<string>()
+    const assignments: { id: string; code: string }[] = []
+
+    for (const variant of variants) {
+      let code = ''
+      for (let i = 0; i < 50; i++) {
+        const candidate = generateEAN13()
+        if (generated.has(candidate)) continue
+        const { data: existing } = await ctx.adminClient
+          .from('product_variants')
+          .select('id')
+          .eq('barcode', candidate)
+          .limit(1)
+          .maybeSingle()
+        if (!existing) { code = candidate; break }
+      }
+      if (!code) return failure('No se pudo generar un EAN único', 'INTERNAL')
+      generated.add(code)
+      assignments.push({ id: variant.id, code })
     }
-    if (!code) return failure('No se pudo generar un EAN único', 'INTERNAL')
 
-    if (variants && variants.length > 0) {
+    for (const { id, code } of assignments) {
       const { error: uErr } = await ctx.adminClient
         .from('product_variants')
         .update({ barcode: code })
-        .eq('product_id', productId)
-        .eq('is_active', true)
+        .eq('id', id)
       if (uErr) return failure(uErr.message)
     }
 
+    const firstBarcode = assignments[0]?.code ?? null
     const { error: pErr } = await ctx.adminClient
       .from('products')
-      .update({ barcode: code, barcode_generated_at: new Date().toISOString() })
+      .update({ barcode: firstBarcode, barcode_generated_at: new Date().toISOString() })
       .eq('id', productId)
     if (pErr) return failure(pErr.message)
 
-    return success({ barcode: code, variantsUpdated: variants?.length ?? 0 })
+    return success({ variantsUpdated: assignments.length, firstBarcode })
   }
 )
 

@@ -69,13 +69,13 @@ export function ProductDetailContent({
   const { execute: doUpdateProduct, isLoading: isUpdatingProduct } = useAction(updateProductAction, { successMessage: 'Producto actualizado', onSuccess: () => router.refresh() })
 
   const { execute: doGenerateBarcode, isLoading: isGeneratingBarcode } = useAction(generateBarcodeForProduct, {
-    successMessage: 'EAN generado y asignado a todas las variantes',
+    successMessage: 'EAN generado para cada variante',
     onSuccess: () => router.refresh(),
   })
 
   const handleGenerateBarcode = async () => {
     const hasExistingBarcode = variants.some((v: any) => v.barcode) || !!product.barcode
-    if (hasExistingBarcode && !confirm('Ya existe un código de barras. ¿Generar uno nuevo y reemplazarlo en todas las variantes?')) return
+    if (hasExistingBarcode && !confirm('Ya existen códigos de barras. ¿Regenerar un EAN nuevo por cada variante?')) return
     await doGenerateBarcode({ productId: product.id })
   }
 
@@ -257,7 +257,7 @@ export function ProductDetailContent({
                 </>
               )}
               {can('products.edit') && (
-                <Button size="sm" variant="outline" className="gap-1" onClick={handleGenerateBarcode} disabled={isGeneratingBarcode} title="Genera un código EAN-13 y lo asigna a todas las variantes de este producto">
+                <Button size="sm" variant="outline" className="gap-1" onClick={handleGenerateBarcode} disabled={isGeneratingBarcode} title="Genera un código EAN-13 único para cada variante (una talla, un código)">
                   {isGeneratingBarcode ? <Loader2 className="h-3 w-3 animate-spin" /> : <Barcode className="h-3 w-3" />} Generar EAN
                 </Button>
               )}
