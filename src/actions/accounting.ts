@@ -1699,9 +1699,7 @@ export const generateInvoicePdfAction = protectedAction<string, { url: string }>
 
 export const generateEstimatePdfAction = protectedAction<string, { url: string }>(
   { permission: 'accounting.edit', auditModule: 'accounting' },
-  async (ctx, estimateId) => {
-    const { data: est } = await ctx.adminClient.from('estimates').select('pdf_url').eq('id', estimateId).single()
-    if (est?.pdf_url) return success({ url: est.pdf_url as string })
+  async (_ctx, estimateId) => {
     try {
       const url = await generateEstimatePdf(estimateId)
       return success({ url })
