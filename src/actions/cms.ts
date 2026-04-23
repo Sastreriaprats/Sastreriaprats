@@ -397,9 +397,19 @@ export const uploadWebContentImage = protectedAction<FormData, { url: string }>(
     const ext = file.name.split('.').pop() || 'jpg'
     const path = `home/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
     const buf = Buffer.from(await file.arrayBuffer())
-    const { error } = await ctx.adminClient.storage
-      .from(WEB_CONTENT_BUCKET)
-      .upload(path, buf, { contentType: file.type, upsert: true })
+    const doUpload = () =>
+      ctx.adminClient.storage
+        .from(WEB_CONTENT_BUCKET)
+        .upload(path, buf, { contentType: file.type, upsert: true })
+
+    let { error } = await doUpload()
+    if (error?.message?.toLowerCase().includes('bucket') && error?.message?.toLowerCase().includes('not found')) {
+      const { error: bucketError } = await ctx.adminClient.storage.createBucket(WEB_CONTENT_BUCKET, { public: true })
+      if (!bucketError || bucketError.message?.toLowerCase().includes('already exists')) {
+        const retry = await doUpload()
+        error = retry.error
+      }
+    }
     if (error) return failure(error.message)
     const { data } = ctx.adminClient.storage.from(WEB_CONTENT_BUCKET).getPublicUrl(path)
     return success({ url: data.publicUrl })
