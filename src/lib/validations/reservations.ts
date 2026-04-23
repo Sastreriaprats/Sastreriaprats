@@ -24,6 +24,7 @@ export const reservationLineInputSchema = z.object({
 
 export const createReservationSchema = z.object({
   client_id: z.string().uuid('Cliente obligatorio'),
+  employee_id: z.string().uuid('Vendedor obligatorio'),
   store_id: z.string().uuid().optional().nullable(),
   cash_session_id: z.string().uuid().optional().nullable(),
   lines: z.array(reservationLineInputSchema).min(1, 'Añade al menos un producto'),

@@ -13,8 +13,9 @@ import { Loader2, Search, User, X, Bookmark, AlertCircle, ImageOff, Check, Bankn
 import { toast } from 'sonner'
 import { createReservation, getMainWarehouseForStore } from '@/actions/reservations'
 import { listClients } from '@/actions/clients'
-import { searchProductsForPos } from '@/actions/pos'
+import { searchProductsForPos, listPosEmployees } from '@/actions/pos'
 import { listPhysicalWarehouses } from '@/actions/products'
+import { useAuth } from '@/components/providers/auth-provider'
 import type { ReservationPaymentMethod } from '@/lib/validations/reservations'
 import { formatCurrency } from '@/lib/utils'
 
@@ -84,6 +85,8 @@ type ClientResult = {
 
 type WarehouseOption = { id: string; name: string; code: string; storeName?: string }
 
+type EmployeeOption = { id: string; full_name: string }
+
 export interface ReservationFormDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -129,9 +132,15 @@ export function ReservationFormDialog({
   allowWarehouseSelection,
   onSuccess,
 }: ReservationFormDialogProps) {
+  const { profile } = useAuth()
+
   const [warehouseId, setWarehouseId] = useState<string | null>(null)
   const [warehouseOptions, setWarehouseOptions] = useState<WarehouseOption[]>([])
   const [warehouseLoading, setWarehouseLoading] = useState(false)
+
+  const [employeeId, setEmployeeId] = useState<string | null>(null)
+  const [employees, setEmployees] = useState<EmployeeOption[]>([])
+  const [employeesLoading, setEmployeesLoading] = useState(false)
 
   const [productQuery, setProductQuery] = useState('')
   const [productResults, setProductResults] = useState<ProductVariantResult[]>([])
@@ -176,6 +185,28 @@ export function ReservationFormDialog({
     setClientId(defaultClientId ?? null)
     setClientName(defaultClientName ?? '')
   }, [open, defaultClientId, defaultClientName])
+
+  useEffect(() => {
+    if (!open || !storeId) { setEmployees([]); return }
+    let cancelled = false
+    setEmployeesLoading(true)
+    listPosEmployees({ store_id: storeId })
+      .then((res) => {
+        if (cancelled) return
+        if (res.success && res.data) {
+          setEmployees(res.data)
+          setEmployeeId((current) => {
+            if (current && res.data.some((e) => e.id === current)) return current
+            if (profile?.id && res.data.some((e) => e.id === profile.id)) return profile.id
+            return res.data[0]?.id ?? null
+          })
+        } else {
+          setEmployees([])
+        }
+      })
+      .finally(() => { if (!cancelled) setEmployeesLoading(false) })
+    return () => { cancelled = true }
+  }, [open, storeId, profile?.id])
 
   useEffect(() => {
     if (!open) return
@@ -312,11 +343,12 @@ export function ReservationFormDialog({
   }, [paymentMode, partialAmount, totalAmount])
 
   const canSubmit = Boolean(
-    clientId && warehouseId && lines.length > 0 && lines.every((l) => l.quantity > 0) && !submitting,
+    clientId && warehouseId && employeeId && lines.length > 0 && lines.every((l) => l.quantity > 0) && !submitting,
   )
 
   const handleSubmit = async () => {
     if (!clientId) { toast.error('Selecciona un cliente'); return }
+    if (!employeeId) { toast.error('Selecciona un vendedor'); return }
     if (lines.length === 0) { toast.error('Añade al menos un producto'); return }
     if (!warehouseId) { toast.error('No se pudo determinar el almacén'); return }
 
@@ -337,6 +369,7 @@ export function ReservationFormDialog({
     try {
       const result = await createReservation({
         client_id: clientId,
+        employee_id: employeeId,
         store_id: storeId ?? null,
         cash_session_id: cashSessionId ?? null,
         lines: lines.map((l) => ({
@@ -460,6 +493,30 @@ export function ReservationFormDialog({
                 )}
               </div>
             )}
+          </div>
+
+          {/* Vendedor */}
+          <div className="space-y-1">
+            <Label>Vendedor</Label>
+            <Select
+              value={employeeId ?? ''}
+              onValueChange={(v) => setEmployeeId(v || null)}
+              disabled={!storeId || employeesLoading || employees.length === 0}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={
+                  !storeId ? 'Selecciona una tienda primero' :
+                  employeesLoading ? 'Cargando vendedores...' :
+                  employees.length === 0 ? 'Sin vendedores disponibles' :
+                  'Selecciona vendedor'
+                } />
+              </SelectTrigger>
+              <SelectContent>
+                {employees.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>{e.full_name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Almacén (solo admin) */}

@@ -26,7 +26,7 @@ const RESERVATION_SELECT = `
   quantity, unit_price, total, total_paid, payment_status,
   status, notes, reason, expires_at,
   cancelled_at, cancelled_reason,
-  created_by, created_at, updated_at,
+  created_by, employee_id, created_at, updated_at,
   client:clients ( id, client_code, full_name, first_name, last_name, phone ),
   store:stores ( id, code, name, display_name ),
   lines:product_reservation_lines (
@@ -40,7 +40,8 @@ const RESERVATION_SELECT = `
     warehouse:warehouses ( id, code, name )
   ),
   payments:product_reservation_payments ( id, payment_date, payment_method, amount, reference, notes, created_at ),
-  created_by_profile:profiles!product_reservations_created_by_fkey ( id, full_name )
+  created_by_profile:profiles!product_reservations_created_by_fkey ( id, full_name ),
+  employee:profiles!product_reservations_employee_id_fkey ( id, full_name )
 `
 
 export const listReservations = protectedAction<ListReservationsInput, ListResult<any>>(
@@ -174,6 +175,7 @@ export const createReservation = protectedAction<CreateReservationInput, CreateR
 
     const payload: Record<string, unknown> = {
       client_id: input.client_id,
+      employee_id: input.employee_id,
       store_id: input.store_id ?? null,
       cash_session_id: input.cash_session_id ?? null,
       lines: input.lines.map((l) => ({

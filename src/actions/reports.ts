@@ -1,7 +1,7 @@
 'use server'
 
 import { protectedAction } from '@/lib/server/action-wrapper'
-import { success } from '@/lib/errors'
+import { success, failure } from '@/lib/errors'
 
 export const getSalesReport = protectedAction<
   { start_date: string; end_date: string; store_id?: string; group_by?: 'day' | 'week' | 'month' },
@@ -357,6 +357,90 @@ export const getSalesByEmployee = protectedAction<
         total: d.pos_total + d.tailoring_total,
       }))
       .sort((a, b) => b.total - a.total)
+
+    return success(result)
+  }
+)
+
+/**
+ * Comisiones por vendedor: agrupa `sale_lines` por `sale_lines.salesperson_id`
+ * (propagado desde la reserva cuando la línea la cumple, o desde la cabecera
+ * cuando es venta directa) y suma `line_total` en el rango y tienda indicados.
+ */
+export const getCommissionsByEmployee = protectedAction<
+  { start_date: string; end_date: string; store_id?: string | null },
+  {
+    salesperson_id: string
+    salesperson_name: string
+    lines_total: number
+    from_reservation_total: number
+    direct_total: number
+    lines_count: number
+    sales_count: number
+  }[]
+>(
+  { permission: 'reports.view', auditModule: 'reports' },
+  async (ctx, { start_date, end_date, store_id }) => {
+    let query = ctx.adminClient
+      .from('sale_lines')
+      .select('sale_id, line_total, salesperson_id, reservation_line_id, sales!inner(status, store_id, created_at)')
+      .gte('sales.created_at', start_date)
+      .lte('sales.created_at', end_date + 'T23:59:59')
+      .eq('sales.status', 'completed')
+
+    if (store_id) query = query.eq('sales.store_id', store_id)
+
+    const { data, error } = await query
+    if (error) return failure(error.message || 'Error al consultar comisiones', 'INTERNAL')
+
+    const byEmployee: Record<string, {
+      lines_total: number
+      from_reservation_total: number
+      direct_total: number
+      lines_count: number
+      saleIds: Set<string>
+    }> = {}
+
+    for (const line of data || []) {
+      const empId = (line.salesperson_id as string | null) || 'unknown'
+      if (!byEmployee[empId]) {
+        byEmployee[empId] = {
+          lines_total: 0,
+          from_reservation_total: 0,
+          direct_total: 0,
+          lines_count: 0,
+          saleIds: new Set(),
+        }
+      }
+      const amount = Number(line.line_total) || 0
+      byEmployee[empId].lines_total += amount
+      byEmployee[empId].lines_count += 1
+      if (line.sale_id) byEmployee[empId].saleIds.add(String(line.sale_id))
+      if (line.reservation_line_id) byEmployee[empId].from_reservation_total += amount
+      else byEmployee[empId].direct_total += amount
+    }
+
+    const empIds = Object.keys(byEmployee).filter((id) => id !== 'unknown')
+    const names: Record<string, string> = {}
+    if (empIds.length > 0) {
+      const { data: profiles } = await ctx.adminClient
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', empIds)
+      for (const p of profiles || []) names[p.id as string] = (p.full_name as string) || (p.id as string)
+    }
+
+    const result = Object.entries(byEmployee)
+      .map(([salesperson_id, d]) => ({
+        salesperson_id,
+        salesperson_name: names[salesperson_id] || (salesperson_id === 'unknown' ? 'Sin asignar' : salesperson_id),
+        lines_total: Math.round(d.lines_total * 100) / 100,
+        from_reservation_total: Math.round(d.from_reservation_total * 100) / 100,
+        direct_total: Math.round(d.direct_total * 100) / 100,
+        lines_count: d.lines_count,
+        sales_count: d.saleIds.size,
+      }))
+      .sort((a, b) => b.lines_total - a.lines_total)
 
     return success(result)
   }
