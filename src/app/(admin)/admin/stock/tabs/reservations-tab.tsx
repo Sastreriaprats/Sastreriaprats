@@ -10,7 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Loader2, Plus, ChevronLeft, ChevronRight, X, Check, Pencil, Bookmark, Clock, Printer, Euro, Banknote, CreditCard, Smartphone, ArrowRightLeft } from 'lucide-react'
+import { Loader2, Plus, ChevronLeft, ChevronRight, X, Check, Pencil, Bookmark, Clock, Printer, Euro, Banknote, CreditCard, Smartphone, ArrowRightLeft, Eye } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import {
@@ -124,6 +124,7 @@ export function ReservationsTab() {
   const [search, setSearch] = useState('')
 
   const [creating, setCreating] = useState(false)
+  const [viewing, setViewing] = useState<Reservation | null>(null)
   const [editing, setEditing] = useState<Reservation | null>(null)
   const [editNotes, setEditNotes] = useState('')
   const [editReason, setEditReason] = useState('')
@@ -372,7 +373,11 @@ export function ReservationsTab() {
               const canPay  = canEdit && pendingNum > 0
               const activeLines = (r.lines || []).filter((l) => l.status !== 'cancelled')
               return (
-                <TableRow key={r.id}>
+                <TableRow
+                  key={r.id}
+                  className="cursor-pointer hover:bg-slate-50"
+                  onClick={() => setViewing(r)}
+                >
                   <TableCell className="font-mono text-sm align-top">{r.reservation_number}</TableCell>
                   <TableCell className="align-top">
                     <div className="text-sm">{getClientName(r.client)}</div>
@@ -398,7 +403,7 @@ export function ReservationsTab() {
                               </div>
                             </div>
                             {canEdit && activeLines.length > 1 && (
-                              <div className="flex gap-0.5 shrink-0">
+                              <div className="flex gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
                                 {ln.status === 'active' && (
                                   <Button
                                     size="sm"
@@ -451,8 +456,17 @@ export function ReservationsTab() {
                   <TableCell className="text-xs whitespace-nowrap align-top">
                     {r.expires_at ? formatDate(r.expires_at) : <span className="text-muted-foreground">—</span>}
                   </TableCell>
-                  <TableCell className="text-right align-top">
+                  <TableCell className="text-right align-top" onClick={(e) => e.stopPropagation()}>
                     <div className="flex justify-end gap-1 flex-wrap">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1"
+                        title="Ver detalle"
+                        onClick={() => setViewing(r)}
+                      >
+                        <Eye className="h-3 w-3" />
+                      </Button>
                       <Button
                         size="sm"
                         variant="outline"
@@ -511,6 +525,173 @@ export function ReservationsTab() {
         allowWarehouseSelection
         onSuccess={() => { fetchData() }}
       />
+
+      <Dialog open={Boolean(viewing)} onOpenChange={(v) => { if (!v) setViewing(null) }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          {viewing && (() => {
+            const badge = STATUS_BADGE[viewing.status] || { label: viewing.status, className: 'bg-slate-100 text-slate-700 border-slate-200' }
+            const payBadge = PAYMENT_STATUS_BADGE[viewing.payment_status] || PAYMENT_STATUS_BADGE.pending
+            const totalNum = Number(viewing.total)
+            const paidNum = Number(viewing.total_paid)
+            const pendingNum = Math.max(0, totalNum - paidNum)
+            const allLines = viewing.lines || []
+            const payments = viewing.payments || []
+            const canEdit = viewing.status === 'active' || viewing.status === 'pending_stock'
+            const canPay  = canEdit && pendingNum > 0
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <Bookmark className="h-5 w-5 text-purple-600" />
+                    Reserva <span className="font-mono">{viewing.reservation_number}</span>
+                  </DialogTitle>
+                </DialogHeader>
+
+                <div className="space-y-4 py-2">
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="outline" className={`text-xs ${badge.className}`}>
+                      {viewing.status === 'pending_stock' && <Clock className="h-3 w-3 mr-0.5" />}
+                      {viewing.status === 'active' && <Bookmark className="h-3 w-3 mr-0.5" />}
+                      {badge.label}
+                    </Badge>
+                    <Badge variant="outline" className={`text-xs ${payBadge.className}`}>
+                      {payBadge.label}
+                    </Badge>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                    <div className="rounded-md border bg-slate-50 px-3 py-2">
+                      <div className="text-xs text-slate-500 uppercase tracking-wide">Cliente</div>
+                      <div className="font-medium">{getClientName(viewing.client)}</div>
+                      {viewing.client?.phone && <div className="text-xs text-muted-foreground font-mono">{viewing.client.phone}</div>}
+                      {viewing.client?.client_code && <div className="text-xs text-muted-foreground">{viewing.client.client_code}</div>}
+                    </div>
+                    <div className="rounded-md border bg-slate-50 px-3 py-2">
+                      <div className="text-xs text-slate-500 uppercase tracking-wide">Tienda</div>
+                      <div className="font-medium">{viewing.store?.display_name || viewing.store?.name || '—'}</div>
+                      <div className="text-xs text-muted-foreground mt-1">Creada: {formatDateTime(viewing.created_at)}</div>
+                      {viewing.expires_at && <div className="text-xs text-muted-foreground">Expira: {formatDate(viewing.expires_at)}</div>}
+                      {viewing.cancelled_at && <div className="text-xs text-rose-700">Cancelada: {formatDateTime(viewing.cancelled_at)}</div>}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium text-slate-500 uppercase tracking-wide">
+                      Productos ({allLines.length})
+                    </div>
+                    <div className="rounded-md border divide-y">
+                      {allLines.length === 0 && (
+                        <div className="px-3 py-4 text-center text-sm text-muted-foreground">Sin líneas</div>
+                      )}
+                      {allLines.map((ln) => {
+                        const lineBadge = STATUS_BADGE[ln.status] || STATUS_BADGE.active
+                        return (
+                          <div key={ln.id} className="flex items-start gap-2 px-3 py-2 text-sm">
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium">{getLineDescription(ln)}</div>
+                              <div className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap mt-0.5">
+                                <Badge variant="outline" className={`text-[10px] ${lineBadge.className}`}>
+                                  {lineBadge.label}
+                                </Badge>
+                                <span>{ln.quantity} × {formatCurrency(Number(ln.unit_price))}</span>
+                                {ln.product_variant?.variant_sku && (
+                                  <span className="font-mono">{ln.product_variant.variant_sku}</span>
+                                )}
+                                {ln.warehouse?.name && <span>· {ln.warehouse.name}</span>}
+                              </div>
+                            </div>
+                            <div className="font-semibold tabular-nums">
+                              {formatCurrency(Number(ln.line_total))}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border bg-slate-50 px-3 py-2 text-sm">
+                    <div className="flex justify-between"><span className="text-slate-600">Total</span><span className="font-semibold tabular-nums">{formatCurrency(totalNum)}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-600">Pagado</span><span className="text-emerald-700 tabular-nums">{formatCurrency(paidNum)}</span></div>
+                    <div className="flex justify-between border-t border-slate-200 mt-1 pt-1">
+                      <span className="font-medium">Pendiente</span>
+                      <span className={`font-bold tabular-nums ${pendingNum > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+                        {formatCurrency(pendingNum)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {payments.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="text-xs font-medium text-slate-500 uppercase tracking-wide">
+                        Pagos ({payments.length})
+                      </div>
+                      <div className="rounded-md border divide-y text-sm">
+                        {payments.map((p) => (
+                          <div key={p.id} className="flex items-center justify-between px-3 py-2">
+                            <div>
+                              <div className="font-medium capitalize">{p.payment_method}</div>
+                              <div className="text-xs text-muted-foreground">{formatDateTime(p.payment_date)}</div>
+                              {p.reference && <div className="text-xs text-muted-foreground">Ref: {p.reference}</div>}
+                            </div>
+                            <div className="font-semibold tabular-nums text-emerald-700">
+                              {formatCurrency(Number(p.amount))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {viewing.reason && (
+                    <div className="text-sm">
+                      <div className="text-xs font-medium text-slate-500 uppercase tracking-wide">Motivo</div>
+                      <div>{viewing.reason}</div>
+                    </div>
+                  )}
+                  {viewing.notes && (
+                    <div className="text-sm">
+                      <div className="text-xs font-medium text-slate-500 uppercase tracking-wide">Notas</div>
+                      <div className="whitespace-pre-wrap">{viewing.notes}</div>
+                    </div>
+                  )}
+                </div>
+
+                <DialogFooter className="flex flex-wrap gap-2 border-t pt-4">
+                  <Button
+                    variant="outline"
+                    className="gap-1"
+                    disabled={printingId === viewing.id}
+                    onClick={() => handlePrintTicket(viewing, 'print')}
+                  >
+                    {printingId === viewing.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                    Imprimir
+                  </Button>
+                  {canPay && (
+                    <Button variant="outline" className="gap-1" onClick={() => { openAddPayment(viewing); setViewing(null) }}>
+                      <Euro className="h-4 w-4" /> Añadir pago
+                    </Button>
+                  )}
+                  {canEdit && (
+                    <>
+                      <Button variant="outline" className="gap-1" onClick={() => { openEdit(viewing); setViewing(null) }}>
+                        <Pencil className="h-4 w-4" /> Editar
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="gap-1 text-rose-700 hover:text-rose-800"
+                        onClick={() => { setCancelTarget(viewing); setCancelReasonInput(''); setViewing(null) }}
+                      >
+                        <X className="h-4 w-4" /> Cancelar
+                      </Button>
+                    </>
+                  )}
+                  <Button onClick={() => setViewing(null)}>Cerrar</Button>
+                </DialogFooter>
+              </>
+            )
+          })()}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(editing)} onOpenChange={(v) => { if (!v) setEditing(null) }}>
         <DialogContent className="max-w-md">
