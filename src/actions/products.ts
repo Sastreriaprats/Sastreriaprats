@@ -1305,6 +1305,77 @@ export const listStockTransfers = protectedAction<
   }
 )
 
+/** Detalle de un traspaso (cabecera + líneas con producto/variante). */
+export const getStockTransferDetail = protectedAction<
+  { id: string },
+  {
+    transfer: any
+    lines: Array<{
+      id: string
+      product_variant_id: string
+      quantity_requested: number
+      quantity_sent: number | null
+      quantity_received: number | null
+      product_name: string | null
+      product_sku: string | null
+      variant_sku: string | null
+      size: string | null
+      color: string | null
+      barcode: string | null
+    }>
+  }
+>(
+  { permission: 'products.view', auditModule: 'stock' },
+  async (ctx, { id }) => {
+    const { data: transfer, error: tErr } = await ctx.adminClient
+      .from('stock_transfers')
+      .select(`
+        id, transfer_number, status, notes, created_at,
+        from_warehouse:warehouses!from_warehouse_id ( id, name, code ),
+        to_warehouse:warehouses!to_warehouse_id ( id, name, code ),
+        profiles!requested_by ( full_name )
+      `)
+      .eq('id', id)
+      .single()
+    if (tErr || !transfer) return failure('Traspaso no encontrado', 'NOT_FOUND')
+
+    const { data: linesRaw, error: lErr } = await ctx.adminClient
+      .from('stock_transfer_lines')
+      .select(`
+        id, product_variant_id, quantity_requested, quantity_sent, quantity_received,
+        product_variants (
+          variant_sku, size, color, barcode,
+          products ( name, sku )
+        )
+      `)
+      .eq('transfer_id', id)
+      .order('created_at', { ascending: true })
+    if (lErr) return failure(lErr.message || 'Error al cargar líneas', 'INTERNAL')
+
+    const lines = (linesRaw ?? []).map((l: any) => ({
+      id: l.id,
+      product_variant_id: l.product_variant_id,
+      quantity_requested: Number(l.quantity_requested ?? 0),
+      quantity_sent: l.quantity_sent == null ? null : Number(l.quantity_sent),
+      quantity_received: l.quantity_received == null ? null : Number(l.quantity_received),
+      product_name: l.product_variants?.products?.name ?? null,
+      product_sku: l.product_variants?.products?.sku ?? null,
+      variant_sku: l.product_variants?.variant_sku ?? null,
+      size: l.product_variants?.size ?? null,
+      color: l.product_variants?.color ?? null,
+      barcode: l.product_variants?.barcode ?? null,
+    }))
+
+    return success({
+      transfer: {
+        ...transfer,
+        requested_by_name: (transfer as any).profiles?.full_name ?? null,
+      },
+      lines,
+    })
+  }
+)
+
 /**
  * Aprobar un traspaso. Requiere DOBLE aprobación:
  *   - admin: un usuario con rol administrador / admin / super_admin

@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Loader2, ChevronLeft, ChevronRight, Check, X, FileText, Plus } from 'lucide-react'
+import { Loader2, ChevronLeft, ChevronRight, Check, X, FileText, Plus, Eye } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
 import {
   listStockTransfers,
@@ -21,6 +21,7 @@ import {
   listPhysicalWarehouses,
   listTransferCandidates,
   searchTransferProducts,
+  getStockTransferDetail,
 } from '@/actions/products'
 import { createDeliveryNoteFromTransfer } from '@/actions/delivery-notes'
 import { useAuth } from '@/components/providers/auth-provider'
@@ -71,6 +72,24 @@ export function TransfersTab() {
   const [searchTerm, setSearchTerm] = useState('')
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [lines, setLines] = useState<TransferLine[]>([])
+
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailData, setDetailData] = useState<{ transfer: any; lines: any[] } | null>(null)
+
+  const openDetail = async (id: string) => {
+    setDetailOpen(true)
+    setDetailLoading(true)
+    setDetailData(null)
+    const res = await getStockTransferDetail({ id })
+    setDetailLoading(false)
+    if (res.success && res.data) {
+      setDetailData(res.data)
+    } else {
+      toast.error((!res.success && res.error) || 'No se pudo cargar el detalle del traspaso')
+      setDetailOpen(false)
+    }
+  }
 
   const fetchTransfers = useCallback(async () => {
     setIsLoading(true)
@@ -352,6 +371,15 @@ export function TransfersTab() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1"
+                        onClick={() => openDetail(t.id)}
+                        title="Ver contenido del traspaso"
+                      >
+                        <Eye className="h-3 w-3" /> Ver
+                      </Button>
                       {t.delivery_note_id ? (
                         <Link href={`/admin/almacen/albaranes/${t.delivery_note_id}`}>
                           <Button size="sm" variant="outline" className="gap-1">
@@ -675,6 +703,95 @@ export function TransfersTab() {
               {savingTransfer ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
               Confirmar traspaso
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-6">
+          <DialogHeader className="flex-shrink-0">
+            <DialogTitle>
+              Detalle del traspaso {detailData?.transfer?.transfer_number ? `· ${detailData.transfer.transfer_number}` : ''}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
+            {detailLoading ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : detailData ? (
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                  <div>
+                    <div className="text-xs text-muted-foreground">Origen</div>
+                    <div className="font-medium">{detailData.transfer.from_warehouse?.name || detailData.transfer.from_warehouse?.code || '-'}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Destino</div>
+                    <div className="font-medium">{detailData.transfer.to_warehouse?.name || detailData.transfer.to_warehouse?.code || '-'}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Solicitado por</div>
+                    <div className="font-medium">{detailData.transfer.requested_by_name || '-'}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Estado</div>
+                    <Badge variant="secondary" className="text-xs">{statusLabels[detailData.transfer.status] || detailData.transfer.status}</Badge>
+                  </div>
+                  {detailData.transfer.notes ? (
+                    <div className="col-span-2 md:col-span-4">
+                      <div className="text-xs text-muted-foreground">Notas</div>
+                      <div className="whitespace-pre-wrap">{detailData.transfer.notes}</div>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Producto</TableHead>
+                        <TableHead>SKU / Variante</TableHead>
+                        <TableHead>Talla / Color</TableHead>
+                        <TableHead className="text-right">Cant. solicitada</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {detailData.lines.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={4} className="text-center text-muted-foreground py-6">
+                            Sin líneas
+                          </TableCell>
+                        </TableRow>
+                      ) : detailData.lines.map((l) => (
+                        <TableRow key={l.id}>
+                          <TableCell className="font-medium">{l.product_name || '-'}</TableCell>
+                          <TableCell className="font-mono text-xs">
+                            <div>{l.variant_sku || l.product_sku || '-'}</div>
+                            {l.barcode ? <div className="text-muted-foreground">{l.barcode}</div> : null}
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            {[l.size, l.color].filter(Boolean).join(' · ') || '—'}
+                          </TableCell>
+                          <TableCell className="text-right font-semibold">{l.quantity_requested}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="text-sm text-muted-foreground">
+                  Total de unidades: <span className="font-semibold text-foreground">
+                    {detailData.lines.reduce((acc, l) => acc + (l.quantity_requested || 0), 0)}
+                  </span> · {detailData.lines.length} línea{detailData.lines.length !== 1 ? 's' : ''}
+                </div>
+              </>
+            ) : null}
+          </div>
+
+          <DialogFooter className="flex-shrink-0 border-t pt-4 mt-2">
+            <Button variant="outline" onClick={() => setDetailOpen(false)}>Cerrar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
