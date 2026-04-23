@@ -2190,7 +2190,16 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
 
               <div className="rounded-md border">
                 <div className="flex items-center justify-between border-b px-3 py-2">
-                  <h4 className="text-sm font-semibold">Líneas del albarán</h4>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-sm font-semibold">
+                      {deliveryNoteDetail.lines_from_order ? 'Líneas del pedido vinculado' : 'Líneas del albarán'}
+                    </h4>
+                    {deliveryNoteDetail.lines_from_order && (
+                      <span className="text-xs text-muted-foreground">
+                        (el albarán no tiene líneas propias registradas)
+                      </span>
+                    )}
+                  </div>
                   <Badge variant="secondary">{deliveryNoteDetail.lines?.length || 0}</Badge>
                 </div>
                 <Table>

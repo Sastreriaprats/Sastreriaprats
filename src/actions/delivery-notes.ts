@@ -601,8 +601,43 @@ export const getSupplierDeliveryNote = protectedAction<string, any>(
       .eq('id', id)
       .single()
     if (error || !data) return failure('Albarán de proveedor no encontrado', 'NOT_FOUND')
+
+    let lines: any[] = Array.isArray((data as any).lines) ? (data as any).lines : []
+    let linesFromOrder = false
+
+    if (lines.length === 0 && (data as any).supplier_order_id) {
+      const { data: orderLines } = await ctx.adminClient
+        .from('supplier_order_lines')
+        .select(`
+          id, product_id, product_variant_id, fabric_id, description, reference,
+          quantity, quantity_received, unit_price, total_price, unit, sort_order
+        `)
+        .eq('supplier_order_id', (data as any).supplier_order_id)
+        .order('sort_order', { ascending: true })
+
+      if (Array.isArray(orderLines) && orderLines.length > 0) {
+        linesFromOrder = true
+        lines = orderLines.map((l: any) => ({
+          id: l.id,
+          product_id: l.product_id,
+          product_variant_id: l.product_variant_id,
+          fabric_id: l.fabric_id,
+          product_name: l.description,
+          reference: l.reference,
+          quantity_ordered: l.quantity != null ? Number(l.quantity) : null,
+          quantity_received: l.quantity_received != null ? Number(l.quantity_received) : null,
+          unit_price: l.unit_price != null ? Number(l.unit_price) : null,
+          total_price: l.total_price != null ? Number(l.total_price) : null,
+          unit: l.unit,
+          notes: null,
+        }))
+      }
+    }
+
     return success({
       ...data,
+      lines,
+      lines_from_order: linesFromOrder,
       created_by_name: (data as any)?.profiles?.full_name || null,
     })
   }
