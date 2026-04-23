@@ -1,8 +1,9 @@
 'use client'
 
-import { Loader2, MapPin, AlertTriangle } from 'lucide-react'
+import { Loader2, MapPin, AlertTriangle, LogOut } from 'lucide-react'
 import { useRequireStore } from '@/hooks/use-require-store'
 import { useAuth } from '@/components/providers/auth-provider'
+import { useRouter } from 'next/navigation'
 
 interface StoreGateProps {
   children: React.ReactNode
@@ -15,8 +16,14 @@ interface StoreGateProps {
 }
 
 export function StoreGate({ children, theme = 'dark' }: StoreGateProps) {
-  const { user } = useAuth()
+  const { user, signOut } = useAuth()
+  const router = useRouter()
   const { isConfirmed, availableStores, selectStore, isLoading } = useRequireStore()
+
+  const handleSignOut = async () => {
+    await signOut()
+    router.replace('/auth/login')
+  }
 
   // Esperando sesión de usuario
   if (!user) {
@@ -53,6 +60,17 @@ export function StoreGate({ children, theme = 'dark' }: StoreGateProps) {
           <p className={theme === 'dark' ? 'text-white/60' : 'text-muted-foreground'}>
             Contacta con administración para que te asignen la tienda donde trabajas.
           </p>
+          <button
+            type="button"
+            onClick={handleSignOut}
+            className={
+              theme === 'dark'
+                ? 'inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-white/20 text-white/80 hover:bg-white/10 transition-colors'
+                : 'inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition-colors'
+            }
+          >
+            <LogOut className="h-4 w-4" /> Cerrar sesión
+          </button>
         </div>
       </GateShell>
     )
