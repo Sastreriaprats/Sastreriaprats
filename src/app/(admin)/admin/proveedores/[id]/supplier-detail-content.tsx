@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState, useEffect } from 'react'
+import { Fragment, useRef, useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
@@ -15,6 +15,7 @@ import {
   updateSupplierOrderFinanceAction,
   deleteSupplierOrderAction,
   getSupplierOrderLines,
+  getSupplierOrderDetail,
   receiveSupplierOrderLines,
   type SupplierOrderLineForReceipt,
   type ReceiveSupplierOrderLineInput,
@@ -41,6 +42,7 @@ import {
 import {
   ArrowLeft, User, Phone, Mail, MapPin, CreditCard, Truck,
   AlertTriangle, ShoppingBag, Plus, Loader2, FileText, Package, Trash2,
+  ChevronDown, ChevronRight,
 } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -82,6 +84,27 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
   const [creatingDelivery, setCreatingDelivery] = useState(false)
   const [uploadingOrderPdfId, setUploadingOrderPdfId] = useState<string | null>(null)
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null)
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null)
+  const [orderBreakdownById, setOrderBreakdownById] = useState<Record<string, any>>({})
+  const [loadingBreakdownOrderId, setLoadingBreakdownOrderId] = useState<string | null>(null)
+
+  const toggleOrderBreakdown = async (orderId: string) => {
+    if (expandedOrderId === orderId) {
+      setExpandedOrderId(null)
+      return
+    }
+    setExpandedOrderId(orderId)
+    if (orderBreakdownById[orderId]) return
+    setLoadingBreakdownOrderId(orderId)
+    const res = await getSupplierOrderDetail({ orderId })
+    setLoadingBreakdownOrderId(null)
+    if (res?.success && res.data) {
+      setOrderBreakdownById((prev) => ({ ...prev, [orderId]: res.data }))
+    } else {
+      toast.error((res as any)?.error || 'No se pudo cargar el desglose del pedido')
+      setExpandedOrderId(null)
+    }
+  }
 
   const handleDeleteOrder = async (orderId: string) => {
     setDeletingOrderId(orderId)
@@ -511,18 +534,31 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
             <div className="rounded-lg border">
               <Table>
                 <TableHeader><TableRow>
+                  <TableHead className="w-8" />
                   <TableHead>N&ordm; Pedido</TableHead><TableHead>Estado</TableHead><TableHead>Total</TableHead>
                   <TableHead>Pago</TableHead><TableHead>Fecha</TableHead><TableHead>Fecha pago</TableHead><TableHead>Entrega est.</TableHead><TableHead className="w-28">Acciones</TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
                   {orders.length === 0 ? (
-                    <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">Sin pedidos</TableCell></TableRow>
-                  ) : [...orders].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((o: any) => (
-                    <TableRow key={o.id}>
+                    <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-8">Sin pedidos</TableCell></TableRow>
+                  ) : [...orders].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((o: any) => {
+                    const isExpanded = expandedOrderId === o.id
+                    const breakdown = orderBreakdownById[o.id]
+                    const isLoadingBreakdown = loadingBreakdownOrderId === o.id
+                    return (
+                    <Fragment key={o.id}>
+                    <TableRow
+                      className="cursor-pointer hover:bg-muted/40"
+                      onClick={() => toggleOrderBreakdown(o.id)}
+                    >
+                      <TableCell className="w-8 align-middle">
+                        {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                      </TableCell>
                       <TableCell className="font-mono">
                         <Link
                           href={`/admin/proveedores/${supplier.id}/pedidos/${o.id}`}
                           className="hover:underline text-primary"
+                          onClick={(e) => e.stopPropagation()}
                         >
                           {o.order_number}
                         </Link>
@@ -537,7 +573,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                       <TableCell className="text-sm">{formatDate(o.created_at)}</TableCell>
                       <TableCell className="text-sm">{o.payment_due_date ? formatDate(o.payment_due_date) : '-'}</TableCell>
                       <TableCell className="text-sm">{formatDate(o.estimated_delivery_date)}</TableCell>
-                      <TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <div className="flex flex-col gap-1">
                           <Button
                             variant="outline"
@@ -671,7 +707,109 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    {isExpanded && (
+                      <TableRow className="bg-muted/20 hover:bg-muted/20">
+                        <TableCell colSpan={9} className="p-0">
+                          <div className="px-6 py-4">
+                            {isLoadingBreakdown ? (
+                              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                <Loader2 className="h-4 w-4 animate-spin" /> Cargando desglose…
+                              </div>
+                            ) : !breakdown ? (
+                              <div className="text-sm text-muted-foreground">No se pudo cargar el desglose.</div>
+                            ) : (
+                              <div className="space-y-3">
+                                <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-muted-foreground">
+                                  <span><span className="font-medium text-foreground">Subtotal:</span> {formatCurrency(breakdown.subtotal ?? 0)}</span>
+                                  {Number(breakdown.tax_amount ?? 0) > 0 && (
+                                    <span><span className="font-medium text-foreground">IVA:</span> {formatCurrency(breakdown.tax_amount ?? 0)}</span>
+                                  )}
+                                  {Number(breakdown.shipping_cost ?? 0) > 0 && (
+                                    <span><span className="font-medium text-foreground">Envío:</span> {formatCurrency(breakdown.shipping_cost ?? 0)}</span>
+                                  )}
+                                  <span><span className="font-medium text-foreground">Total:</span> {formatCurrency(breakdown.total ?? 0)}</span>
+                                  {breakdown.tailoring_order?.order_number && (
+                                    <span><span className="font-medium text-foreground">Pedido sastrería:</span> {breakdown.tailoring_order.order_number}</span>
+                                  )}
+                                </div>
+                                <div className="rounded-md border bg-background">
+                                  <Table>
+                                    <TableHeader>
+                                      <TableRow>
+                                        <TableHead>Descripción</TableHead>
+                                        <TableHead>Talla / Color</TableHead>
+                                        <TableHead>Ref.</TableHead>
+                                        <TableHead className="text-right">Pedido</TableHead>
+                                        <TableHead className="text-right">Recibido</TableHead>
+                                        <TableHead>Unidad</TableHead>
+                                        <TableHead className="text-right">Precio</TableHead>
+                                        <TableHead className="text-right">Subtotal</TableHead>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {(breakdown.lines ?? []).length === 0 ? (
+                                        <TableRow>
+                                          <TableCell colSpan={8} className="text-center text-muted-foreground py-6">
+                                            Sin líneas
+                                          </TableCell>
+                                        </TableRow>
+                                      ) : (
+                                        breakdown.lines.map((line: any) => {
+                                          const variantSize = line.product_variants?.size?.trim() || null
+                                          const variantColor = line.product_variants?.color?.trim() || null
+                                          let talla: string | null = null
+                                          let descClean = line.description || ''
+                                          if (variantSize || variantColor) {
+                                            talla = [variantSize, variantColor].filter(Boolean).join(' / ')
+                                            descClean = (line.description || '').replace(/\s*(?:—|–|-)\s*.+$/, '').trim() || line.description
+                                          } else {
+                                            const tallaMatch = (line.description || '').match(/\s*(?:—|–|-)\s*(?:Talla\s+)?(\S+)\s*$/)
+                                            talla = tallaMatch ? tallaMatch[1] : null
+                                            descClean = talla ? (line.description || '').replace(/\s*(?:—|–|-)\s*(?:Talla\s+)?\S+\s*$/, '').trim() : (line.description || '')
+                                          }
+                                          const qty = Number(line.quantity ?? 0)
+                                          const qtyRecv = Number(line.quantity_received ?? 0)
+                                          const isComplete = qtyRecv >= qty && qty > 0
+                                          const isPartial = qtyRecv > 0 && !isComplete
+                                          return (
+                                            <TableRow key={line.id}>
+                                              <TableCell className="max-w-[260px]"><span className="truncate block">{descClean || '-'}</span></TableCell>
+                                              <TableCell className="text-sm">{talla || '-'}</TableCell>
+                                              <TableCell className="font-mono text-xs">{line.reference || '-'}</TableCell>
+                                              <TableCell className="text-right">{qty}</TableCell>
+                                              <TableCell className={`text-right font-medium ${isComplete ? 'text-green-600' : isPartial ? 'text-amber-600' : ''}`}>{qtyRecv}</TableCell>
+                                              <TableCell className="text-sm">{line.unit || '-'}</TableCell>
+                                              <TableCell className="text-right">{line.unit_price != null ? formatCurrency(line.unit_price) : '-'}</TableCell>
+                                              <TableCell className="text-right font-medium">{line.total_price != null ? formatCurrency(line.total_price) : '-'}</TableCell>
+                                            </TableRow>
+                                          )
+                                        })
+                                      )}
+                                    </TableBody>
+                                  </Table>
+                                </div>
+                                {breakdown.internal_notes && (
+                                  <div className="text-xs text-muted-foreground">
+                                    <span className="font-medium text-foreground">Notas internas:</span> {breakdown.internal_notes}
+                                  </div>
+                                )}
+                                <div className="flex justify-end">
+                                  <Link
+                                    href={`/admin/proveedores/${supplier.id}/pedidos/${o.id}`}
+                                    className="text-xs text-primary hover:underline"
+                                  >
+                                    Ver detalle completo →
+                                  </Link>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    </Fragment>
+                    )
+                  })}
                 </TableBody>
               </Table>
             </div>
