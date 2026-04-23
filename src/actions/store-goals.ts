@@ -24,17 +24,6 @@ export interface StoreGoalsRow {
   sastreria_target: number
 }
 
-/** Agrupa sale_types en los 2 grupos que usa la UI de objetivos. */
-export const BOUTIQUE_SALE_TYPES = ['boutique', 'online']
-export const SASTRERIA_SALE_TYPES = ['tailoring_deposit', 'tailoring_final', 'alteration']
-
-export function groupSaleType(saleType: string | null | undefined): GoalType | null {
-  if (!saleType) return null
-  if (BOUTIQUE_SALE_TYPES.includes(saleType)) return 'boutique'
-  if (SASTRERIA_SALE_TYPES.includes(saleType)) return 'sastreria'
-  return null
-}
-
 /** Devuelve una fila por tienda con sus 2 objetivos para el mes indicado. */
 export async function getStoreGoalsForMonth(
   year: number,
