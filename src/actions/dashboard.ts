@@ -253,14 +253,19 @@ export interface StoreStats {
   salesThisMonth: number
   totalStockUnits: number
   lowStockCount: number
+  hostsOnline: boolean
   boutiqueSalesThisMonth: number
   sastreriaSalesThisMonth: number
+  onlineSalesThisMonth: number
   boutiqueTarget: number
   sastreriaTarget: number
+  onlineTarget: number
 }
 
-const BOUTIQUE_SALE_TYPES = ['boutique', 'online']
+const BOUTIQUE_SALE_TYPES = ['boutique']
 const SASTRERIA_SALE_TYPES = ['tailoring_deposit', 'tailoring_final', 'alteration']
+const ONLINE_COUNTED_STATUSES = ['paid', 'processing', 'shipped', 'delivered']
+const ONLINE_HOST_STORE_CODE = 'PIN'
 
 export const getStoresWithStats = protectedAction<void, StoreStats[]>(
   { auditModule: 'dashboard' },
@@ -282,11 +287,13 @@ export const getStoresWithStats = protectedAction<void, StoreStats[]>(
       salesMonthRes,
       warehousesRes,
       goalsRes,
+      onlineMonthRes,
     ] = await Promise.all([
       admin.from('sales').select('store_id, total').in('store_id', storeIds).gte('created_at', `${today}T00:00:00`).eq('status', 'completed'),
-      admin.from('sales').select('store_id, total, sale_type').in('store_id', storeIds).gte('created_at', `${monthStart}T00:00:00`).eq('status', 'completed'),
+      admin.from('sales').select('store_id, total, tax_amount, sale_type').in('store_id', storeIds).gte('created_at', `${monthStart}T00:00:00`).eq('status', 'completed'),
       admin.from('warehouses').select('id, store_id').in('store_id', storeIds),
       admin.from('store_monthly_goals').select('store_id, goal_type, target_amount').in('store_id', storeIds).eq('year', year).eq('month', month),
+      admin.from('online_orders').select('total, tax_amount').in('status', ONLINE_COUNTED_STATUSES).gte('created_at', `${monthStart}T00:00:00`),
     ])
 
     const warehouses = (warehousesRes.data || []) as { id: string; store_id: string }[]
@@ -312,24 +319,35 @@ export const getStoresWithStats = protectedAction<void, StoreStats[]>(
     for (const r of (salesTodayRes.data || []) as { store_id: string; total?: number }[]) {
       if (r.store_id) salesTodayByStore[r.store_id] = (salesTodayByStore[r.store_id] ?? 0) + (r.total ?? 0)
     }
-    for (const r of (salesMonthRes.data || []) as { store_id: string; total?: number; sale_type?: string }[]) {
+    // salesMonthByStore mantiene el importe bruto (para widgets históricos).
+    // boutique/sastreria usan base imponible (sin IVA) para comparar con objetivos.
+    for (const r of (salesMonthRes.data || []) as { store_id: string; total?: number; tax_amount?: number | string | null; sale_type?: string }[]) {
       if (!r.store_id) continue
-      const t = r.total ?? 0
+      const t = Number(r.total) || 0
+      const net = t - (Number(r.tax_amount) || 0)
       salesMonthByStore[r.store_id] = (salesMonthByStore[r.store_id] ?? 0) + t
       const st = r.sale_type ?? ''
       if (BOUTIQUE_SALE_TYPES.includes(st)) {
-        boutiqueByStore[r.store_id] = (boutiqueByStore[r.store_id] ?? 0) + t
+        boutiqueByStore[r.store_id] = (boutiqueByStore[r.store_id] ?? 0) + net
       } else if (SASTRERIA_SALE_TYPES.includes(st)) {
-        sastreriaByStore[r.store_id] = (sastreriaByStore[r.store_id] ?? 0) + t
+        sastreriaByStore[r.store_id] = (sastreriaByStore[r.store_id] ?? 0) + net
       }
     }
 
+    const onlineMonthTotal = (onlineMonthRes.data || []).reduce(
+      (s: number, o: { total: number | string | null; tax_amount: number | string | null }) =>
+        s + ((Number(o.total) || 0) - (Number(o.tax_amount) || 0)),
+      0,
+    )
+
     const boutiqueTargetByStore: Record<string, number> = {}
     const sastreriaTargetByStore: Record<string, number> = {}
+    const onlineTargetByStore: Record<string, number> = {}
     for (const g of (goalsRes.data || []) as { store_id: string; goal_type: string; target_amount: string | number }[]) {
       const amount = Number(g.target_amount) || 0
       if (g.goal_type === 'boutique') boutiqueTargetByStore[g.store_id] = amount
       else if (g.goal_type === 'sastreria') sastreriaTargetByStore[g.store_id] = amount
+      else if (g.goal_type === 'online') onlineTargetByStore[g.store_id] = amount
     }
 
     const stockByStore: Record<string, { total: number; low: number }> = {}
@@ -346,19 +364,25 @@ export const getStoresWithStats = protectedAction<void, StoreStats[]>(
       if (min != null && available <= min) stockByStore[storeId].low += 1
     }
 
-    const result: StoreStats[] = (stores as { id: string; code: string; name: string }[]).map((store) => ({
-      id: store.id,
-      code: store.code ?? '',
-      name: store.name ?? '',
-      salesToday: salesTodayByStore[store.id] ?? 0,
-      salesThisMonth: salesMonthByStore[store.id] ?? 0,
-      totalStockUnits: stockByStore[store.id]?.total ?? 0,
-      lowStockCount: stockByStore[store.id]?.low ?? 0,
-      boutiqueSalesThisMonth: boutiqueByStore[store.id] ?? 0,
-      sastreriaSalesThisMonth: sastreriaByStore[store.id] ?? 0,
-      boutiqueTarget: boutiqueTargetByStore[store.id] ?? 0,
-      sastreriaTarget: sastreriaTargetByStore[store.id] ?? 0,
-    }))
+    const result: StoreStats[] = (stores as { id: string; code: string; name: string }[]).map((store) => {
+      const hostsOnline = (store.code ?? '') === ONLINE_HOST_STORE_CODE
+      return {
+        id: store.id,
+        code: store.code ?? '',
+        name: store.name ?? '',
+        salesToday: salesTodayByStore[store.id] ?? 0,
+        salesThisMonth: salesMonthByStore[store.id] ?? 0,
+        totalStockUnits: stockByStore[store.id]?.total ?? 0,
+        lowStockCount: stockByStore[store.id]?.low ?? 0,
+        hostsOnline,
+        boutiqueSalesThisMonth: boutiqueByStore[store.id] ?? 0,
+        sastreriaSalesThisMonth: sastreriaByStore[store.id] ?? 0,
+        onlineSalesThisMonth: hostsOnline ? onlineMonthTotal : 0,
+        boutiqueTarget: boutiqueTargetByStore[store.id] ?? 0,
+        sastreriaTarget: sastreriaTargetByStore[store.id] ?? 0,
+        onlineTarget: hostsOnline ? (onlineTargetByStore[store.id] ?? 0) : 0,
+      }
+    })
 
     return success(JSON.parse(JSON.stringify(result)))
   }

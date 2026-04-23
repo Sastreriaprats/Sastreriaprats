@@ -58,9 +58,11 @@ export function StoreGoalsWidget() {
 
   const totalBoutiqueTarget = stores.reduce((s, r) => s + r.boutiqueTarget, 0)
   const totalSastreriaTarget = stores.reduce((s, r) => s + r.sastreriaTarget, 0)
+  const totalOnlineTarget = stores.reduce((s, r) => s + r.onlineTarget, 0)
   const totalBoutiqueSales = stores.reduce((s, r) => s + r.boutiqueSalesThisMonth, 0)
   const totalSastreriaSales = stores.reduce((s, r) => s + r.sastreriaSalesThisMonth, 0)
-  const hasAnyTarget = totalBoutiqueTarget > 0 || totalSastreriaTarget > 0
+  const totalOnlineSales = stores.reduce((s, r) => s + r.onlineSalesThisMonth, 0)
+  const hasAnyTarget = totalBoutiqueTarget > 0 || totalSastreriaTarget > 0 || totalOnlineTarget > 0
 
   return (
     <Card>
@@ -106,7 +108,7 @@ export function StoreGoalsWidget() {
                 <div className="flex items-center gap-2 mb-3">
                   <span className="text-sm font-semibold">Total todas las tiendas</span>
                 </div>
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-3 md:grid-cols-3">
                   <ProgressRow
                     label="Boutique"
                     actual={totalBoutiqueSales}
@@ -119,6 +121,12 @@ export function StoreGoalsWidget() {
                     target={totalSastreriaTarget}
                     color="bg-amber-600"
                   />
+                  <ProgressRow
+                    label="Tienda Online"
+                    actual={totalOnlineSales}
+                    target={totalOnlineTarget}
+                    color="bg-emerald-600"
+                  />
                 </div>
               </div>
             )}
@@ -126,7 +134,7 @@ export function StoreGoalsWidget() {
             {/* Por tienda */}
             <div className="grid gap-4 md:grid-cols-2">
               {stores.map(store => {
-                const noTarget = store.boutiqueTarget === 0 && store.sastreriaTarget === 0
+                const noTarget = store.boutiqueTarget === 0 && store.sastreriaTarget === 0 && store.onlineTarget === 0
                 if (noTarget) return null
                 return (
                   <div key={store.id} className="space-y-2.5">
@@ -146,6 +154,14 @@ export function StoreGoalsWidget() {
                       target={store.sastreriaTarget}
                       color="bg-amber-600"
                     />
+                    {store.hostsOnline && (
+                      <ProgressRow
+                        label="Tienda Online"
+                        actual={store.onlineSalesThisMonth}
+                        target={store.onlineTarget}
+                        color="bg-emerald-600"
+                      />
+                    )}
                   </div>
                 )
               })}

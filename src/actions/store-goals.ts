@@ -5,7 +5,7 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { checkUserPermission } from '@/actions/auth'
 
-export type GoalType = 'boutique' | 'sastreria'
+export type GoalType = 'boutique' | 'sastreria' | 'online'
 
 export interface StoreMonthlyGoal {
   id: string
@@ -20,16 +20,25 @@ export interface StoreGoalsRow {
   store_id: string
   store_code: string
   store_name: string
+  hosts_online: boolean
   boutique_target: number
   sastreria_target: number
+  online_target: number
   boutique_actual: number
   sastreria_actual: number
+  online_actual: number
 }
 
-const BOUTIQUE_SALE_TYPES = ['boutique', 'online']
-const SASTRERIA_SALE_TYPES = ['tailoring_deposit', 'tailoring_final', 'alteration']
+// Código de la tienda que hospeda el canal online (única tienda que tiene
+// objetivo 'online' y agrega las ventas de la tabla online_orders).
+export const ONLINE_HOST_STORE_CODE = 'PIN'
 
-/** Devuelve una fila por tienda con sus 2 objetivos para el mes indicado. */
+const BOUTIQUE_SALE_TYPES = ['boutique']
+const SASTRERIA_SALE_TYPES = ['tailoring_deposit', 'tailoring_final', 'alteration']
+// Estados de online_orders que se consideran facturación realizada.
+const ONLINE_COUNTED_STATUSES = ['paid', 'processing', 'shipped', 'delivered']
+
+/** Devuelve una fila por tienda con sus objetivos para el mes indicado. */
 export async function getStoreGoalsForMonth(
   year: number,
   month: number,
@@ -45,45 +54,60 @@ export async function getStoreGoalsForMonth(
     const nextMonth = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 }
     const nextMonthStart = `${nextMonth.y}-${pad(nextMonth.m)}-01T00:00:00`
 
-    const [storesRes, goalsRes, salesRes] = await Promise.all([
-      admin.from('stores').select('id, code, name').eq('is_active', true).order('name'),
+    const [storesRes, goalsRes, salesRes, onlineRes] = await Promise.all([
+      admin.from('stores').select('id, code, name, store_type').eq('is_active', true).order('name'),
       admin.from('store_monthly_goals').select('store_id, goal_type, target_amount').eq('year', year).eq('month', month),
-      admin.from('sales').select('store_id, total, sale_type').eq('status', 'completed').gte('created_at', monthStart).lt('created_at', nextMonthStart),
+      admin.from('sales').select('store_id, total, tax_amount, sale_type').eq('status', 'completed').gte('created_at', monthStart).lt('created_at', nextMonthStart),
+      admin.from('online_orders').select('total, tax_amount').in('status', ONLINE_COUNTED_STATUSES).gte('created_at', monthStart).lt('created_at', nextMonthStart),
     ])
 
     if (storesRes.error) return { error: storesRes.error.message }
     if (goalsRes.error) return { error: goalsRes.error.message }
     if (salesRes.error) return { error: salesRes.error.message }
+    if (onlineRes.error) return { error: onlineRes.error.message }
 
-    const goalsByStore = new Map<string, { boutique: number; sastreria: number }>()
+    const goalsByStore = new Map<string, { boutique: number; sastreria: number; online: number }>()
     for (const g of (goalsRes.data || []) as { store_id: string; goal_type: GoalType; target_amount: string | number }[]) {
-      const entry = goalsByStore.get(g.store_id) ?? { boutique: 0, sastreria: 0 }
+      const entry = goalsByStore.get(g.store_id) ?? { boutique: 0, sastreria: 0, online: 0 }
       entry[g.goal_type] = Number(g.target_amount) || 0
       goalsByStore.set(g.store_id, entry)
     }
 
+    // Los objetivos se miden en base imponible (sin IVA): total - tax_amount.
     const actualByStore = new Map<string, { boutique: number; sastreria: number }>()
-    for (const r of (salesRes.data || []) as { store_id: string | null; total: number | string | null; sale_type: string | null }[]) {
+    for (const r of (salesRes.data || []) as { store_id: string | null; total: number | string | null; tax_amount: number | string | null; sale_type: string | null }[]) {
       if (!r.store_id) continue
       const entry = actualByStore.get(r.store_id) ?? { boutique: 0, sastreria: 0 }
-      const total = Number(r.total) || 0
+      const net = (Number(r.total) || 0) - (Number(r.tax_amount) || 0)
       const st = r.sale_type ?? ''
-      if (BOUTIQUE_SALE_TYPES.includes(st)) entry.boutique += total
-      else if (SASTRERIA_SALE_TYPES.includes(st)) entry.sastreria += total
+      if (BOUTIQUE_SALE_TYPES.includes(st)) entry.boutique += net
+      else if (SASTRERIA_SALE_TYPES.includes(st)) entry.sastreria += net
       actualByStore.set(r.store_id, entry)
     }
 
-    const rows: StoreGoalsRow[] = (storesRes.data || []).map((s: { id: string; code: string; name: string }) => {
-      const g = goalsByStore.get(s.id) ?? { boutique: 0, sastreria: 0 }
+    const onlineActualTotal = (onlineRes.data || []).reduce(
+      (sum: number, o: { total: number | string | null; tax_amount: number | string | null }) =>
+        sum + ((Number(o.total) || 0) - (Number(o.tax_amount) || 0)),
+      0,
+    )
+
+    const rows: StoreGoalsRow[] = (storesRes.data || [])
+      .filter((s: { store_type?: string | null }) => (s.store_type ?? 'physical') !== 'online')
+      .map((s: { id: string; code: string; name: string }) => {
+      const g = goalsByStore.get(s.id) ?? { boutique: 0, sastreria: 0, online: 0 }
       const a = actualByStore.get(s.id) ?? { boutique: 0, sastreria: 0 }
+      const hostsOnline = s.code === ONLINE_HOST_STORE_CODE
       return {
         store_id: s.id,
         store_code: s.code,
         store_name: s.name,
+        hosts_online: hostsOnline,
         boutique_target: g.boutique,
         sastreria_target: g.sastreria,
+        online_target: hostsOnline ? g.online : 0,
         boutique_actual: a.boutique,
         sastreria_actual: a.sastreria,
+        online_actual: hostsOnline ? onlineActualTotal : 0,
       }
     })
 
@@ -110,10 +134,24 @@ export async function upsertStoreGoalAction(input: {
     if (!hasPerm) return { error: 'Sin permisos para gestionar objetivos' }
 
     if (input.month < 1 || input.month > 12) return { error: 'Mes inválido' }
-    if (!['boutique', 'sastreria'].includes(input.goal_type)) return { error: 'Tipo inválido' }
+    if (!['boutique', 'sastreria', 'online'].includes(input.goal_type)) return { error: 'Tipo inválido' }
     if (!(input.target_amount >= 0)) return { error: 'Importe inválido' }
 
     const admin = createAdminClient()
+
+    // Si es objetivo online, comprobar que la tienda hospeda el canal online.
+    if (input.goal_type === 'online') {
+      const { data: store, error: storeErr } = await admin
+        .from('stores')
+        .select('code')
+        .eq('id', input.store_id)
+        .maybeSingle()
+      if (storeErr) return { error: storeErr.message }
+      if (!store || store.code !== ONLINE_HOST_STORE_CODE) {
+        return { error: 'Esta tienda no gestiona ventas online' }
+      }
+    }
+
     const { error } = await admin
       .from('store_monthly_goals')
       .upsert(
