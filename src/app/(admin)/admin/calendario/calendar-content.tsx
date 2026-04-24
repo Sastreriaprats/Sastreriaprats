@@ -2,11 +2,13 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ChevronLeft, ChevronRight, Loader2, Plus, ShieldBan, Trash2, CalendarOff } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2, Plus, ShieldBan, Trash2, CalendarOff, Search } from 'lucide-react'
+import { toast } from 'sonner'
 import { useAuth } from '@/components/providers/auth-provider'
 import { usePermissions } from '@/hooks/use-permissions'
-import { listAppointments } from '@/actions/calendar'
+import { listAppointments, findNextAppointmentByClient } from '@/actions/calendar'
 import { formatDate } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import { MonthView } from './views/month-view'
@@ -70,6 +72,8 @@ export function CalendarContent() {
   const [selectedSlot, setSelectedSlot] = useState<{ date: string; time: string } | null>(null)
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
   const [showBlocks, setShowBlocks] = useState(false)
+  const [clientSearch, setClientSearch] = useState('')
+  const [searchingClient, setSearchingClient] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -164,6 +168,32 @@ export function CalendarContent() {
 
   const goToday = () => setCurrentDate(new Date())
 
+  const handleClientSearch = async () => {
+    const term = clientSearch.trim()
+    if (!term) return
+    setSearchingClient(true)
+    try {
+      const res = await findNextAppointmentByClient({ query: term })
+      if (!res.success) {
+        toast.error(res.error || 'Error al buscar')
+        return
+      }
+      const { appointment, hasPastOnly } = res.data
+      if (appointment) {
+        const [y, m, d] = appointment.date.split('-').map(Number)
+        setCurrentDate(new Date(y, m - 1, d))
+        setView('day')
+        toast.success(`${appointment.client_name} · ${formatDate(appointment.date)} a las ${appointment.start_time}`)
+      } else if (hasPastOnly) {
+        toast.info(`${term}: solo tiene citas pasadas`)
+      } else {
+        toast.info(`No hay citas para "${term}"`)
+      }
+    } finally {
+      setSearchingClient(false)
+    }
+  }
+
   const handleSlotClick = (date: string, time: string) => {
     setSelectedSlot({ date, time })
     setSelectedEvent(null)
@@ -226,6 +256,21 @@ export function CalendarContent() {
         </div>
 
         <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+            <Input
+              value={clientSearch}
+              onChange={(e) => setClientSearch(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleClientSearch() } }}
+              placeholder="Buscar cliente..."
+              className="w-48 h-8 pl-7 pr-8 text-xs"
+              disabled={searchingClient}
+            />
+            {searchingClient && (
+              <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />
+            )}
+          </div>
+
           <Select value={tailorFilter} onValueChange={setTailorFilter}>
             <SelectTrigger className="w-40 h-8 text-xs">
               <SelectValue placeholder="Todos los sastres" />

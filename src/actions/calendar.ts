@@ -35,6 +35,53 @@ export const listAppointments = protectedAction<{
   }
 )
 
+export const findNextAppointmentByClient = protectedAction<{ query: string }, {
+  appointment: { id: string; date: string; start_time: string; type: string; title: string; client_name: string } | null
+  hasPastOnly: boolean
+}>(
+  { permission: 'calendar.view', auditModule: 'calendar' },
+  async (ctx, { query }) => {
+    const term = (query || '').trim()
+    if (!term) return success({ appointment: null, hasPastOnly: false })
+
+    const { data, error } = await ctx.adminClient
+      .from('appointments')
+      .select('id, type, title, date, start_time, status, clients!inner(id, full_name)')
+      .ilike('clients.full_name', `%${term}%`)
+      .neq('status', 'cancelled')
+      .order('date', { ascending: true })
+      .order('start_time', { ascending: true })
+
+    if (error) return failure(error.message)
+    if (!data || data.length === 0) return success({ appointment: null, hasPastOnly: false })
+
+    const today = new Date().toISOString().slice(0, 10)
+    const nowTime = new Date().toTimeString().slice(0, 5)
+    const rows = data as Array<Record<string, unknown>>
+    const upcoming = rows.find((a) => {
+      const d = String(a.date)
+      const t = String(a.start_time || '').slice(0, 5)
+      return d > today || (d === today && t >= nowTime)
+    })
+
+    if (upcoming) {
+      const client = upcoming.clients as Record<string, unknown> | null
+      return success({
+        appointment: {
+          id: String(upcoming.id),
+          date: String(upcoming.date),
+          start_time: String(upcoming.start_time || '').slice(0, 5),
+          type: String(upcoming.type),
+          title: String(upcoming.title),
+          client_name: String(client?.full_name ?? ''),
+        },
+        hasPastOnly: false,
+      })
+    }
+    return success({ appointment: null, hasPastOnly: true })
+  }
+)
+
 const CALENDAR_EDIT_PERMISSIONS = ['calendar.edit', 'calendar.update'] as string[]
 const CALENDAR_CANCEL_PERMISSIONS = ['calendar.edit', 'calendar.update', 'calendar.delete'] as string[]
 
