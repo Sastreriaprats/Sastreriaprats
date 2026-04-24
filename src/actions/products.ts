@@ -2370,7 +2370,7 @@ export const importProductBarcodes = protectedAction<
 /** Obtiene variantes por IDs para impresión de etiquetas (por talla; cada variante con su barcode). */
 export const getVariantsByIdsForLabels = protectedAction<
   string[],
-  { id: string; variant_sku: string; size: string | null; color: string | null; sku: string; name: string; barcode: string | null; base_price: number }[]
+  { id: string; variant_sku: string; size: string | null; color: string | null; sku: string; name: string; barcode: string | null; base_price: number; price_with_tax: number }[]
 >(
   { permission: 'products.view', auditModule: 'stock' },
   async (ctx, variantIds) => {
@@ -2382,7 +2382,8 @@ export const getVariantsByIdsForLabels = protectedAction<
       .eq('is_active', true)
     const list = (data || []).map((v: any) => {
       const p = v.products || {}
-      const price = v.price_override != null ? Number(v.price_override) : Number(p.base_price ?? 0)
+      const basePrice = Number(p.base_price ?? 0)
+      const pvp = v.price_override != null ? Number(v.price_override) : Number(p.price_with_tax ?? 0)
       return {
         id: v.id,
         variant_sku: v.variant_sku,
@@ -2391,7 +2392,8 @@ export const getVariantsByIdsForLabels = protectedAction<
         sku: p.sku,
         name: p.name,
         barcode: v.barcode,
-        base_price: price,
+        base_price: basePrice,
+        price_with_tax: pvp,
       }
     }).filter((x: any) => x.barcode)
     return success(list)
