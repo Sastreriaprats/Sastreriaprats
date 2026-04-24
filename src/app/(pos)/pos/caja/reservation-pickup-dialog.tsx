@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Image from 'next/image'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -18,6 +22,7 @@ import {
   listReservations,
   getReservation,
   addReservationPayment,
+  cancelReservationLine,
 } from '@/actions/reservations'
 import type { ReservationPaymentMethod } from '@/lib/validations/reservations'
 
@@ -136,6 +141,9 @@ export function ReservationPickupDialog({
   const [partialAmount, setPartialAmount] = useState('')
   const [partialSubmitting, setPartialSubmitting] = useState(false)
 
+  const [unselectedConfirmOpen, setUnselectedConfirmOpen] = useState(false)
+  const [cancellingUnselected, setCancellingUnselected] = useState(false)
+
   const resetAll = useCallback(() => {
     setStep('search')
     setSearch('')
@@ -145,6 +153,8 @@ export function ReservationPickupDialog({
     setPartialOpen(false)
     setPartialMethod('cash')
     setPartialAmount('')
+    setUnselectedConfirmOpen(false)
+    setCancellingUnselected(false)
   }, [])
 
   useEffect(() => {
@@ -215,6 +225,25 @@ export function ReservationPickupDialog({
     return activeLines.filter((l) => selectedLineIds.has(l.id))
   }, [activeLines, selectedLineIds])
 
+  // Subtotal bruto de las líneas seleccionadas (sin descontar pagos previos)
+  const selectedSubtotal = useMemo(() => {
+    return selectedLines.reduce((acc, l) => acc + Number(l.line_total), 0)
+  }, [selectedLines])
+
+  // Parte del pago previo que corresponde proporcionalmente a las líneas seleccionadas
+  const selectedPaidShare = useMemo(() => {
+    if (!selected) return 0
+    const total = Number(selected.total)
+    const paid = Number(selected.total_paid)
+    if (total <= 0 || paid <= 0) return 0
+    return Math.min(paid, Math.round((selectedSubtotal / total) * paid * 100) / 100)
+  }, [selected, selectedSubtotal])
+
+  // Lo que realmente hay que cobrar ahora por lo que se lleva el cliente
+  const selectedPending = useMemo(() => {
+    return Math.max(0, Math.round((selectedSubtotal - selectedPaidShare) * 100) / 100)
+  }, [selectedSubtotal, selectedPaidShare])
+
   const canAddToTicket = selected?.status && (selected.status === 'active' || selected.status === 'pending_stock')
     ? selectedLines.length > 0
     : false
@@ -236,26 +265,62 @@ export function ReservationPickupDialog({
     }
   }
 
+  // Líneas activas que el usuario NO ha marcado — requieren decisión:
+  // mantener reservadas o cancelar para liberar stock.
+  const unselectedLines = useMemo(() => {
+    return activeLines.filter((l) => !selectedLineIds.has(l.id))
+  }, [activeLines, selectedLineIds])
+
   const handleAddToTicket = () => {
     if (!selected || !onAddToTicket) return
     if (selectedLines.length === 0) {
       toast.error('Selecciona al menos una línea')
       return
     }
+    if (unselectedLines.length > 0) {
+      setUnselectedConfirmOpen(true)
+      return
+    }
+    executeAddToTicket(false)
+  }
+
+  const executeAddToTicket = async (cancelUnselected: boolean) => {
+    if (!selected || !onAddToTicket) return
+
+    if (cancelUnselected && unselectedLines.length > 0) {
+      setCancellingUnselected(true)
+      try {
+        for (const line of unselectedLines) {
+          const res = await cancelReservationLine({
+            line_id: line.id,
+            reason: 'Línea no recogida en la entrega',
+          })
+          if (!res.success) {
+            toast.error(res.error || `No se pudo cancelar "${lineDescription(line)}"`)
+            setCancellingUnselected(false)
+            return
+          }
+        }
+      } finally {
+        setCancellingUnselected(false)
+      }
+    }
 
     const total = Number(selected.total)
     const paid = Number(selected.total_paid)
-    const selectedLineTotals = selectedLines.reduce((acc, l) => acc + Number(l.line_total), 0)
     const payloads: ReservationTicketLinePayload[] = selectedLines.map((l) => {
       const pv = l.product_variant
       const taxRate = Number(pv?.product?.tax_rate ?? 21)
       const desc = `${lineDescription(l)} · Reserva ${selected.reservation_number}`
       const lineTotal = Number(l.line_total)
-      const lineShareOfPending = selectedLineTotals > 0
-        ? (lineTotal / selectedLineTotals) * Math.max(0, total - paid)
-        : 0
+      // Prorratear el pago previo sobre cada línea según su peso en la reserva
+      // completa. Así el cliente paga solo el neto que le corresponde por lo
+      // que se lleva; el resto del pago previo queda aplicado a las líneas
+      // que queden activas en la reserva.
+      const lineShareOfPaid = total > 0 ? (lineTotal / total) * paid : 0
+      const lineNet = Math.max(0, lineTotal - lineShareOfPaid)
       const unitPriceForLine = l.quantity > 0
-        ? Math.round((lineShareOfPending / l.quantity) * 100) / 100
+        ? Math.round((lineNet / l.quantity) * 100) / 100
         : 0
       return {
         reservation_id: selected.id,
@@ -279,6 +344,7 @@ export function ReservationPickupDialog({
     })
 
     onAddToTicket(payloads)
+    setUnselectedConfirmOpen(false)
     onOpenChange(false)
   }
 
@@ -476,16 +542,26 @@ export function ReservationPickupDialog({
                 <div className="rounded-md border bg-slate-50 px-3 py-2 text-sm space-y-1">
                   <div className="flex justify-between">
                     <span className="text-slate-600">Total reserva</span>
-                    <span className="font-semibold tabular-nums">{formatCurrency(Number(selected.total))}</span>
+                    <span className="tabular-nums">{formatCurrency(Number(selected.total))}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Ya pagado</span>
                     <span className="text-emerald-700 tabular-nums">{formatCurrency(Number(selected.total_paid))}</span>
                   </div>
                   <div className="flex justify-between border-t pt-1">
-                    <span className="font-medium">Pendiente</span>
-                    <span className={`font-bold tabular-nums ${pendingAmount > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
-                      {formatCurrency(pendingAmount)}
+                    <span className="text-slate-600">Seleccionado ({selectedLines.length})</span>
+                    <span className="tabular-nums">{formatCurrency(selectedSubtotal)}</span>
+                  </div>
+                  {selectedPaidShare > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-600">Parte ya pagada</span>
+                      <span className="text-emerald-700 tabular-nums">-{formatCurrency(selectedPaidShare)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between border-t pt-1">
+                    <span className="font-medium">A cobrar ahora</span>
+                    <span className={`font-bold tabular-nums ${selectedPending > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+                      {formatCurrency(selectedPending)}
                     </span>
                   </div>
                 </div>
@@ -579,6 +655,50 @@ export function ReservationPickupDialog({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Confirmación cuando se entrega solo parte de la reserva */}
+      <AlertDialog open={unselectedConfirmOpen} onOpenChange={(v) => { if (!cancellingUnselected) setUnselectedConfirmOpen(v) }}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Qué hacemos con los productos restantes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Has seleccionado {selectedLines.length} de {activeLines.length} productos.
+              Los productos no seleccionados son:
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="rounded-md border divide-y max-h-52 overflow-y-auto">
+            {unselectedLines.map((l) => (
+              <div key={l.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                <span className="truncate">{lineDescription(l)}</span>
+                <span className="font-semibold tabular-nums shrink-0">{formatCurrency(Number(l.line_total))}</span>
+              </div>
+            ))}
+          </div>
+          <AlertDialogFooter className="flex-col gap-2 sm:flex-col sm:space-x-0">
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); executeAddToTicket(false) }}
+              disabled={cancellingUnselected}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              Mantener reservados
+            </AlertDialogAction>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); executeAddToTicket(true) }}
+              disabled={cancellingUnselected}
+              className="w-full bg-rose-600 hover:bg-rose-700 text-white"
+            >
+              {cancellingUnselected ? (
+                <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Cancelando…</>
+              ) : (
+                'Cancelar y liberar stock'
+              )}
+            </AlertDialogAction>
+            <AlertDialogCancel disabled={cancellingUnselected} className="w-full mt-0">
+              Volver
+            </AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   )
 }
