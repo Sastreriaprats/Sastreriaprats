@@ -406,12 +406,12 @@ export function NuevaVentaFichaClient({
   }, [clientId])
 
   useEffect(() => {
-    if (orderType !== 'camiseria' || camiseriaMeasurementsLoading) return
+    if (!isCamiseria || camiseriaMeasurementsLoading) return
     setCamisas((prev) => {
       if (prev.length !== 0) return prev
       return [{ ...defaultCamisa(), ...getMeasuresFromRecord(camiseriaMeasurements ?? undefined) }]
     })
-  }, [orderType, camiseriaMeasurementsLoading, camiseriaMeasurements])
+  }, [isCamiseria, camiseriaMeasurementsLoading, camiseriaMeasurements])
 
   const setFichaField = useCallback((field: keyof typeof ficha, value: string | boolean) => {
     setFicha((prev) => ({ ...prev, [field]: value }))

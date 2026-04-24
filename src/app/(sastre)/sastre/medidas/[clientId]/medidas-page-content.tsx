@@ -11,9 +11,12 @@ import { formatDateTime } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { generateCamiseriaFichaPdf } from '@/lib/camiseria-ficha-pdf'
 
-const GARMENT_NAMES = ['Americana', 'Pantalón', 'Chaleco', 'Frac', 'Abrigo', 'Camisería', 'Camisería Industrial']
-/** Índice tab → zona silueta: 0=americana, 1=pantalon, 2=chaleco, 3=frac, 4=abrigo, 5=camiseria, 6=camiseria_industrial */
-const TAB_TO_ZONE = ['americana', 'pantalon', 'chaleco', 'frac', 'abrigo', 'camiseria', 'camiseria_industrial'] as const
+// Camisería y camisería industrial comparten el mismo registro de medidas:
+// el sastre toma UNA vez las medidas de camisa del cliente y se usan en ambos
+// tipos de pedido. Por eso aquí solo exponemos un único tab "Camisería".
+const GARMENT_NAMES = ['Americana', 'Pantalón', 'Chaleco', 'Frac', 'Abrigo', 'Camisería']
+/** Índice tab → zona silueta: 0=americana, 1=pantalon, 2=chaleco, 3=frac, 4=abrigo, 5=camiseria */
+const TAB_TO_ZONE = ['americana', 'pantalon', 'chaleco', 'frac', 'abrigo', 'camiseria'] as const
 
 function getGarmentPrefix(name: string): string {
   return name
