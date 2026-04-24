@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Loader2, FileDown, Receipt, ChevronLeft, ChevronRight, FileText } from 'lucide-react'
+import { Loader2, FileDown, Receipt, ChevronLeft, ChevronRight, FileText, Gift } from 'lucide-react'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { listTickets, getSaleForTicket } from '@/actions/pos'
 import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
@@ -137,12 +138,20 @@ export function TicketsContent() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Receipt className="h-7 w-7" />
-          Tickets
-        </h1>
-        <p className="text-muted-foreground text-sm mt-1">Listado de tickets de venta. Descarga el PDF desde aquí o desde la ficha del cliente.</p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <Receipt className="h-7 w-7" />
+            Tickets
+          </h1>
+          <p className="text-muted-foreground text-sm mt-1">Listado de tickets de venta. Descarga el PDF desde aquí o desde la ficha del cliente.</p>
+        </div>
+        <Link href="/admin/tickets/vales">
+          <Button variant="outline" size="sm" className="gap-1">
+            <Gift className="h-4 w-4" />
+            Vales
+          </Button>
+        </Link>
       </div>
 
       <Card>

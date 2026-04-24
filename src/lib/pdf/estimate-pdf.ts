@@ -96,7 +96,7 @@ export async function generateEstimatePdf(estimateId: string): Promise<string> {
     bodyContent.push({
       text: [
         { text: 'Notas: ', bold: true },
-        { text: String(estimate.notes).slice(0, 300) },
+        { text: String(estimate.notes) },
       ],
       margin: [0, 12, 0, 0] as [number, number, number, number],
       fontSize: 9,

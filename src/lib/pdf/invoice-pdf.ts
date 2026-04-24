@@ -115,7 +115,7 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
     bodyContent.push({
       text: [
         { text: 'Notas: ', bold: true },
-        { text: String(invoice.notes).slice(0, 300) },
+        { text: String(invoice.notes) },
       ],
       margin: [0, 12, 0, 0] as [number, number, number, number],
       fontSize: 9,

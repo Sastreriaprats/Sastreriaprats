@@ -1032,3 +1032,219 @@ export const validateDiscountCode = protectedAction<
     })
   }
 )
+
+export const listVouchers = protectedAction<{
+  page?: number
+  pageSize?: number
+  clientSearch?: string
+  codeSearch?: string
+  status?: string
+  voucherKind?: string
+  storeId?: string
+  dateFrom?: string
+  dateTo?: string
+}, { data: any[]; total: number; page: number; pageSize: number; totalPages: number; totals: { originalAmount: number; remainingAmount: number } }>(
+  { permission: 'pos.access', auditModule: 'pos' },
+  async (ctx, { page = 1, pageSize = 20, clientSearch, codeSearch, status, voucherKind, storeId, dateFrom, dateTo }) => {
+    let query = ctx.adminClient
+      .from('vouchers')
+      .select('id, code, voucher_type, voucher_kind, original_amount, remaining_amount, status, client_id, origin_sale_id, issued_date, expiry_date, issued_by_store_id, issued_by, notes, created_at, stores(name), profiles!vouchers_issued_by_fkey(full_name)', { count: 'exact' })
+      .order('created_at', { ascending: false })
+
+    if (status && status !== 'all') query = query.eq('status', status)
+    if (voucherKind && voucherKind !== 'all') query = query.eq('voucher_kind', voucherKind)
+    if (storeId && storeId !== 'all') query = query.eq('issued_by_store_id', storeId)
+    if (dateFrom) query = query.gte('issued_date', dateFrom)
+    if (dateTo) query = query.lte('issued_date', dateTo)
+    if (codeSearch && codeSearch.trim()) query = query.ilike('code', `%${codeSearch.trim().toUpperCase()}%`)
+
+    if (clientSearch && clientSearch.trim()) {
+      const q = clientSearch.trim()
+      const { data: clients } = await ctx.adminClient
+        .from('clients')
+        .select('id')
+        .or(`full_name.ilike.%${q}%,client_code.ilike.%${q}%`)
+        .limit(500)
+      const ids = (clients ?? []).map((c: any) => c.id)
+      if (ids.length === 0) return success({ data: [], total: 0, page, pageSize, totalPages: 0, totals: { originalAmount: 0, remainingAmount: 0 } })
+      query = query.in('client_id', ids)
+    }
+
+    const from = (page - 1) * pageSize
+    const to = from + pageSize - 1
+    const { data: vouchers, count, error } = await query.range(from, to)
+
+    if (error) return failure(error.message)
+
+    const total = count ?? 0
+    const list = (vouchers ?? []) as any[]
+
+    // Totales agregados sobre TODOS los vales que cumplen los filtros (no solo la página actual)
+    let totals = { originalAmount: 0, remainingAmount: 0 }
+    if (total > 0) {
+      let aggQuery = ctx.adminClient
+        .from('vouchers')
+        .select('original_amount, remaining_amount')
+      if (status && status !== 'all') aggQuery = aggQuery.eq('status', status)
+      if (voucherKind && voucherKind !== 'all') aggQuery = aggQuery.eq('voucher_kind', voucherKind)
+      if (storeId && storeId !== 'all') aggQuery = aggQuery.eq('issued_by_store_id', storeId)
+      if (dateFrom) aggQuery = aggQuery.gte('issued_date', dateFrom)
+      if (dateTo) aggQuery = aggQuery.lte('issued_date', dateTo)
+      if (codeSearch && codeSearch.trim()) aggQuery = aggQuery.ilike('code', `%${codeSearch.trim().toUpperCase()}%`)
+      if (clientSearch && clientSearch.trim()) {
+        const q = clientSearch.trim()
+        const { data: clients } = await ctx.adminClient
+          .from('clients')
+          .select('id')
+          .or(`full_name.ilike.%${q}%,client_code.ilike.%${q}%`)
+          .limit(500)
+        const ids = (clients ?? []).map((c: any) => c.id)
+        if (ids.length > 0) aggQuery = aggQuery.in('client_id', ids)
+      }
+      const { data: aggRows } = await aggQuery
+      for (const r of aggRows ?? []) {
+        totals.originalAmount += Number(r.original_amount ?? 0)
+        totals.remainingAmount += Number(r.remaining_amount ?? 0)
+      }
+    }
+
+    if (list.length === 0) {
+      return success({ data: [], total, page, pageSize, totalPages: Math.ceil(total / pageSize), totals })
+    }
+
+    const clientIds = [...new Set(list.map((v: any) => v.client_id).filter(Boolean))]
+    const saleIds = [...new Set(list.map((v: any) => v.origin_sale_id).filter(Boolean))]
+
+    const [clientsResult, salesResult] = await Promise.all([
+      clientIds.length > 0
+        ? ctx.adminClient.from('clients').select('id, full_name, client_code').in('id', clientIds)
+        : Promise.resolve({ data: [] as any[] }),
+      saleIds.length > 0
+        ? ctx.adminClient.from('sales').select('id, ticket_number').in('id', saleIds)
+        : Promise.resolve({ data: [] as any[] }),
+    ])
+
+    const clientsMap: Record<string, { full_name: string; client_code: string }> = {}
+    for (const c of clientsResult.data ?? []) {
+      clientsMap[c.id] = { full_name: c.full_name ?? '', client_code: c.client_code ?? '' }
+    }
+    const salesMap: Record<string, string> = {}
+    for (const s of salesResult.data ?? []) {
+      salesMap[s.id] = s.ticket_number ?? ''
+    }
+
+    const data = list.map((v: any) => ({
+      id: v.id,
+      code: v.code,
+      voucher_type: v.voucher_type,
+      voucher_kind: v.voucher_kind,
+      original_amount: Number(v.original_amount ?? 0),
+      remaining_amount: Number(v.remaining_amount ?? 0),
+      status: v.status,
+      client_id: v.client_id,
+      client_name: v.client_id ? (clientsMap[v.client_id]?.full_name ?? '') : null,
+      client_code: v.client_id ? (clientsMap[v.client_id]?.client_code ?? '') : null,
+      origin_sale_id: v.origin_sale_id,
+      origin_ticket_number: v.origin_sale_id ? (salesMap[v.origin_sale_id] ?? null) : null,
+      issued_date: v.issued_date,
+      expiry_date: v.expiry_date,
+      store_name: (v.stores as any)?.name ?? null,
+      issued_by_name: (v.profiles as any)?.full_name ?? null,
+      notes: v.notes,
+      created_at: v.created_at,
+    }))
+
+    return success({
+      data,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+      totals,
+    })
+  }
+)
+
+export const getVouchersSummaryByClient = protectedAction<{
+  dateFrom?: string
+  dateTo?: string
+  storeId?: string
+  limit?: number
+}, { data: any[] }>(
+  { permission: 'pos.access', auditModule: 'pos' },
+  async (ctx, { dateFrom, dateTo, storeId, limit = 100 }) => {
+    let query = ctx.adminClient
+      .from('vouchers')
+      .select('client_id, voucher_kind, original_amount, remaining_amount, status, issued_date')
+      .not('client_id', 'is', null)
+
+    if (dateFrom) query = query.gte('issued_date', dateFrom)
+    if (dateTo) query = query.lte('issued_date', dateTo)
+    if (storeId && storeId !== 'all') query = query.eq('issued_by_store_id', storeId)
+
+    const { data: rows, error } = await query.limit(5000)
+    if (error) return failure(error.message)
+
+    type Agg = {
+      client_id: string
+      total_count: number
+      active_count: number
+      used_count: number
+      expired_count: number
+      original_amount: number
+      remaining_amount: number
+      last_issued_date: string | null
+    }
+
+    const map: Record<string, Agg> = {}
+    for (const r of rows ?? []) {
+      const cid = r.client_id as string
+      if (!map[cid]) {
+        map[cid] = {
+          client_id: cid,
+          total_count: 0,
+          active_count: 0,
+          used_count: 0,
+          expired_count: 0,
+          original_amount: 0,
+          remaining_amount: 0,
+          last_issued_date: null,
+        }
+      }
+      const a = map[cid]
+      a.total_count += 1
+      if (r.status === 'active' || r.status === 'partially_used') a.active_count += 1
+      if (r.status === 'used') a.used_count += 1
+      if (r.status === 'expired') a.expired_count += 1
+      a.original_amount += Number(r.original_amount ?? 0)
+      a.remaining_amount += Number(r.remaining_amount ?? 0)
+      if (!a.last_issued_date || (r.issued_date && r.issued_date > a.last_issued_date)) {
+        a.last_issued_date = r.issued_date ?? null
+      }
+    }
+
+    const aggregates = Object.values(map)
+    aggregates.sort((x, y) => y.original_amount - x.original_amount)
+    const top = aggregates.slice(0, limit)
+
+    const clientIds = top.map(a => a.client_id)
+    const clientsMap: Record<string, { full_name: string; client_code: string }> = {}
+    if (clientIds.length > 0) {
+      const { data: clients } = await ctx.adminClient
+        .from('clients')
+        .select('id, full_name, client_code')
+        .in('id', clientIds)
+      for (const c of clients ?? []) {
+        clientsMap[c.id] = { full_name: c.full_name ?? '', client_code: c.client_code ?? '' }
+      }
+    }
+
+    const data = top.map(a => ({
+      ...a,
+      client_name: clientsMap[a.client_id]?.full_name ?? 'Sin nombre',
+      client_code: clientsMap[a.client_id]?.client_code ?? '',
+    }))
+
+    return success({ data })
+  }
+)

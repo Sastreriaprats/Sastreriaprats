@@ -41,7 +41,13 @@ const navItems: NavItem[] = [
     ],
   },
   { label: 'TPV / Caja',   href: '/pos/caja',           icon: CreditCard,   permission: 'pos.access' },
-  { label: 'Tickets',      href: '/admin/tickets',      icon: Receipt,       permission: 'pos.access' },
+  {
+    label: 'Tickets',      href: '/admin/tickets',      icon: Receipt,       permission: 'pos.access',
+    children: [
+      { label: 'Todos los tickets', href: '/admin/tickets' },
+      { label: 'Vales',             href: '/admin/tickets/vales' },
+    ],
+  },
   {
     label: 'Productos y Stock', href: '/admin/stock',    icon: Shirt,        permission: 'products.view',
     children: [
