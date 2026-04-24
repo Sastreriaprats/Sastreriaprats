@@ -91,6 +91,7 @@ const emptyForm = {
   country: 'España',
   supplier_types: [] as string[],
   payment_terms: '',
+  payment_days: 30,
   payment_method: '',
   bank_iban: '',
   internal_notes: '',
@@ -168,6 +169,7 @@ export function SuppliersPageContent() {
         country: full.country ?? 'España',
         supplier_types: Array.isArray(full.supplier_types) ? full.supplier_types : [],
         payment_terms: full.payment_terms ?? '',
+        payment_days: typeof full.payment_days === 'number' ? full.payment_days : 30,
         payment_method: full.payment_method ?? '',
         bank_iban: full.bank_iban ?? '',
         internal_notes: full.internal_notes ?? '',
@@ -202,12 +204,9 @@ export function SuppliersPageContent() {
       supplier_types: form.supplier_types,
       payment_terms: (form.payment_terms || 'net_30') as 'immediate' | 'net_15' | 'net_30' | 'net_60' | 'net_90' | 'custom',
       payment_method: form.payment_method || null,
-      payment_days: (() => {
-        const termsMap: Record<string, number> = {
-          immediate: 0, net_15: 15, net_30: 30, net_60: 60, net_90: 90, custom: 0,
-        }
-        return termsMap[form.payment_terms] ?? 30
-      })(),
+      payment_days: form.payment_terms === 'custom'
+        ? 0
+        : Math.max(0, Number.isFinite(Number(form.payment_days)) ? Number(form.payment_days) : 30),
       bank_iban: form.bank_iban?.trim() || null,
       internal_notes: form.internal_notes?.trim() || null,
       is_active: form.is_active,
@@ -324,7 +323,13 @@ export function SuppliersPageContent() {
                   {s.contact_name && <p>{s.contact_name}</p>}
                   {s.contact_email && <p className="text-xs text-muted-foreground">{s.contact_email}</p>}
                 </TableCell>
-                <TableCell className="text-sm">{paymentTermsLabels[s.payment_terms] || s.payment_terms}</TableCell>
+                <TableCell className="text-sm">
+                  {s.payment_terms === 'custom'
+                    ? 'Personalizado'
+                    : typeof s.payment_days === 'number'
+                      ? (s.payment_days === 0 ? 'Al contado' : `${s.payment_days} días`)
+                      : (paymentTermsLabels[s.payment_terms] || s.payment_terms)}
+                </TableCell>
                 <TableCell className="text-sm">{paymentMethodLabels[s.payment_method] || s.payment_method || '—'}</TableCell>
                 <TableCell>
                   <span className={`font-medium ${(s.total_debt || 0) > 0 ? 'text-red-600' : ''}`}>
@@ -439,7 +444,14 @@ export function SuppliersPageContent() {
             </div>
             <div className="space-y-2">
               <Label>Condiciones de pago</Label>
-              <Select value={form.payment_terms || 'net_30'} onValueChange={(v) => setForm((f) => ({ ...f, payment_terms: v }))}>
+              <Select
+                value={form.payment_terms || 'net_30'}
+                onValueChange={(v) => setForm((f) => {
+                  const presetDays: Record<string, number> = { immediate: 0, net_15: 15, net_30: 30, net_60: 60, net_90: 90 }
+                  const nextDays = v in presetDays ? presetDays[v] : f.payment_days
+                  return { ...f, payment_terms: v, payment_days: nextDays }
+                })}
+              >
                 <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
                 <SelectContent>
                   {PAYMENT_TERMS_OPTIONS.map((opt) => (
@@ -448,6 +460,18 @@ export function SuppliersPageContent() {
                 </SelectContent>
               </Select>
             </div>
+            {form.payment_terms !== 'custom' && (
+              <div className="space-y-2">
+                <Label>Días de pago</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={form.payment_days ?? 30}
+                  onChange={(e) => setForm((f) => ({ ...f, payment_days: Number(e.target.value) }))}
+                />
+                <p className="text-xs text-muted-foreground">Días desde la fecha de factura hasta el vencimiento.</p>
+              </div>
+            )}
             {form.payment_terms === 'custom' && (
               <div className="sm:col-span-2 space-y-3 rounded-md border bg-muted/30 p-3">
                 <div className="flex items-center justify-between">
