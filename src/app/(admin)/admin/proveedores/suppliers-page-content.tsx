@@ -35,7 +35,7 @@ import { toast } from 'sonner'
 import { useList } from '@/hooks/use-list'
 import { usePermissions } from '@/hooks/use-permissions'
 import { useAction } from '@/hooks/use-action'
-import { listSuppliers, createSupplierAction, updateSupplierAction, deleteSupplierAction } from '@/actions/suppliers'
+import { listSuppliers, getSupplier, createSupplierAction, updateSupplierAction, deleteSupplierAction } from '@/actions/suppliers'
 import { formatCurrency } from '@/lib/utils'
 
 type CustomPaymentPlanItem = { amount: number; days?: number }
@@ -146,31 +146,40 @@ export function SuppliersPageContent() {
     setDialogOpen(true)
   }
 
-  const openEdit = (s: any) => {
-    setEditingId(String(s.id))
-    setForm({
-      name: s.name ?? '',
-      legal_name: s.legal_name ?? '',
-      nif_cif: s.nif_cif ?? '',
-      phone: s.contact_phone ?? '',
-      email: s.contact_email ?? '',
-      contact_person: s.contact_name ?? '',
-      address: s.address ?? '',
-      city: s.city ?? '',
-      postal_code: s.postal_code ?? '',
-      province: s.province ?? '',
-      country: s.country ?? 'España',
-      supplier_types: Array.isArray(s.supplier_types) ? s.supplier_types : [],
-      payment_terms: s.payment_terms ?? '',
-      payment_method: s.payment_method ?? '',
-      bank_iban: s.bank_iban ?? '',
-      internal_notes: s.internal_notes ?? '',
-      is_active: s.is_active !== false,
-      custom_payment_plan: Array.isArray(s.custom_payment_plan)
-        ? (s.custom_payment_plan as CustomPaymentPlanItem[])
-        : [],
-    })
-    setDialogOpen(true)
+  const [loadingEdit, setLoadingEdit] = useState(false)
+
+  const openEdit = async (s: any) => {
+    setLoadingEdit(true)
+    try {
+      const res = await getSupplier(String(s.id))
+      const full = res?.success ? res.data : s
+      setEditingId(String(full.id))
+      setForm({
+        name: full.name ?? '',
+        legal_name: full.legal_name ?? '',
+        nif_cif: full.nif_cif ?? '',
+        phone: full.contact_phone ?? '',
+        email: full.contact_email ?? '',
+        contact_person: full.contact_name ?? '',
+        address: full.address ?? '',
+        city: full.city ?? '',
+        postal_code: full.postal_code ?? '',
+        province: full.province ?? '',
+        country: full.country ?? 'España',
+        supplier_types: Array.isArray(full.supplier_types) ? full.supplier_types : [],
+        payment_terms: full.payment_terms ?? '',
+        payment_method: full.payment_method ?? '',
+        bank_iban: full.bank_iban ?? '',
+        internal_notes: full.internal_notes ?? '',
+        is_active: full.is_active !== false,
+        custom_payment_plan: Array.isArray(full.custom_payment_plan)
+          ? (full.custom_payment_plan as CustomPaymentPlanItem[])
+          : [],
+      })
+      setDialogOpen(true)
+    } finally {
+      setLoadingEdit(false)
+    }
   }
 
   const handleSave = () => {
@@ -330,7 +339,7 @@ export function SuppliersPageContent() {
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem onClick={() => router.push(`/admin/proveedores/${s.id}`)}><Eye className="mr-2 h-4 w-4" /> Ver ficha</DropdownMenuItem>
                       {can('suppliers.edit') && (
-                        <DropdownMenuItem onClick={() => openEdit(s)}><Pencil className="mr-2 h-4 w-4" /> Editar</DropdownMenuItem>
+                        <DropdownMenuItem disabled={loadingEdit} onClick={() => openEdit(s)}><Pencil className="mr-2 h-4 w-4" /> Editar</DropdownMenuItem>
                       )}
                       {can('suppliers.edit') && (
                         <>
