@@ -5,7 +5,9 @@ import { success, failure } from '@/lib/errors'
 import { revalidatePath } from 'next/cache'
 import { notifyReservationStockAvailable } from '@/lib/notifications/create-notification'
 
-const ALBARANES_BUCKET = 'albaranes'
+// Bucket compartido con facturas y presupuestos. Es público y ya está creado,
+// por lo que los PDFs se pueden ver directamente con getPublicUrl().
+const ALBARANES_BUCKET = 'documents'
 
 function toNumber(value: unknown): number {
   const n = Number(value)
@@ -1008,7 +1010,7 @@ export const uploadSupplierDeliveryNoteAttachment = protectedAction<FormData, { 
 
     let { data: uploadData, error: uploadError } = await doUpload()
     if (uploadError?.message?.toLowerCase().includes('bucket') && uploadError?.message?.toLowerCase().includes('not found')) {
-      const { data: bucketData, error: bucketError } = await ctx.adminClient.storage.createBucket(ALBARANES_BUCKET, { public: false })
+      const { error: bucketError } = await ctx.adminClient.storage.createBucket(ALBARANES_BUCKET, { public: true })
       if (!bucketError || bucketError.message?.toLowerCase().includes('already exists')) {
         const retry = await doUpload()
         uploadData = retry.data

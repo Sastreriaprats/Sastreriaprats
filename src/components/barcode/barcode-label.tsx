@@ -26,6 +26,16 @@ export function BarcodeLabel({
     ? `${productName} ${size}`.toUpperCase()
     : productName.toUpperCase()
 
+  // Tamaño de fuente adaptativo: cuanto más largo el nombre, más pequeño.
+  // Evita que textos largos se corten por la derecha.
+  const nameLen = fullName.length
+  const nameFontSize =
+    nameLen <= 20 ? 15 :
+    nameLen <= 28 ? 13 :
+    nameLen <= 36 ? 11 :
+    nameLen <= 44 ? 10 : 9
+  const nameLineHeight = 1.15
+
   // Código numérico: extraer números del SKU y padear a 6 dígitos
   const numericCode = (sku.replace(/\D/g, '') || '0').padStart(6, '0')
 
@@ -82,18 +92,19 @@ export function BarcodeLabel({
         fontFamily: 'Arial, Helvetica, sans-serif',
       }}
     >
-      {/* NOMBRE — centrado, uppercase, bold, máx 2 líneas */}
+      {/* NOMBRE — centrado, uppercase, bold, tamaño adaptativo, wrap a 2 líneas */}
       <div
         style={{
-          fontSize: '15px',
+          fontSize: `${nameFontSize}px`,
           fontWeight: 700,
-          lineHeight: 1.2,
+          lineHeight: nameLineHeight,
           textAlign: 'center',
           textTransform: 'uppercase',
+          overflowWrap: 'break-word',
+          wordBreak: 'break-word',
+          maxHeight: `${nameFontSize * nameLineHeight * 2}px`,
           overflow: 'hidden',
-          display: '-webkit-box',
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: 'vertical',
+          width: '100%',
         }}
       >
         {fullName}

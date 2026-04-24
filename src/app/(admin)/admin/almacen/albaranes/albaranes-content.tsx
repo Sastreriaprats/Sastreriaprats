@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -49,10 +49,14 @@ const supplierStatusLabels: Record<string, string> = {
 
 export function AlbaranesContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const initialTab = searchParams.get('tab') === 'proveedor' ? 'proveedor' : 'propios'
+  const initialSupplierSearch = searchParams.get('ref') ?? ''
+  const highlightId = searchParams.get('id')
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const uploadTargetIdRef = useRef<string | null>(null)
   const [uploadingId, setUploadingId] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState('propios')
+  const [activeTab, setActiveTab] = useState(initialTab)
 
   const [ownRows, setOwnRows] = useState<any[]>([])
   const [ownStatus, setOwnStatus] = useState('all')
@@ -63,7 +67,7 @@ export function AlbaranesContent() {
 
   const [supplierRows, setSupplierRows] = useState<any[]>([])
   const [supplierStatus, setSupplierStatus] = useState('all')
-  const [supplierSearch, setSupplierSearch] = useState('')
+  const [supplierSearch, setSupplierSearch] = useState(initialSupplierSearch)
   const [supplierDateFrom, setSupplierDateFrom] = useState('')
   const [supplierDateTo, setSupplierDateTo] = useState('')
 
@@ -294,7 +298,7 @@ export function AlbaranesContent() {
                 ) : supplierRows.length === 0 ? (
                   <TableRow><TableCell colSpan={7} className="h-24 text-center text-muted-foreground">Sin albaranes</TableCell></TableRow>
                 ) : supplierRows.map((row) => (
-                  <TableRow key={row.id}>
+                  <TableRow key={row.id} className={highlightId && row.id === highlightId ? 'bg-amber-50 ring-2 ring-amber-300' : ''}>
                     <TableCell className="font-mono">{row.supplier_reference || '-'}</TableCell>
                     <TableCell>{row.suppliers?.name || '-'}</TableCell>
                     <TableCell>{row.supplier_orders?.order_number || '-'}</TableCell>

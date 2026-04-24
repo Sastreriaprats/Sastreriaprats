@@ -13,6 +13,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
@@ -94,6 +95,26 @@ const STATUS_OPTIONS = [
   { value: 'pagada', label: 'Pagada' },
 ]
 
+const PAYMENT_METHOD_LABEL: Record<string, string> = {
+  transfer: 'Transferencia',
+  direct_debit: 'Domiciliación',
+  check: 'Cheque',
+  cash: 'Efectivo',
+  card: 'Tarjeta',
+  bank_draft: 'Pagaré',
+}
+
+const PAYMENT_METHOD_OPTIONS = [
+  { value: 'all', label: 'Todos los pagos' },
+  { value: 'transfer', label: 'Transferencia' },
+  { value: 'direct_debit', label: 'Domiciliación' },
+  { value: 'check', label: 'Cheque' },
+  { value: 'cash', label: 'Efectivo' },
+  { value: 'card', label: 'Tarjeta' },
+  { value: 'bank_draft', label: 'Pagaré' },
+  { value: 'none', label: 'Sin método' },
+]
+
 const STATUS_BADGE: Record<string, { label: string; className: string }> = {
   pendiente: { label: 'Pendiente', className: 'bg-yellow-100 text-yellow-800' },
   vencida: { label: 'Vencida', className: 'bg-red-100 text-red-800' },
@@ -144,6 +165,7 @@ export function SupplierInvoicesContent() {
   const [rows, setRows] = useState<ApSupplierInvoiceRow[]>([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('all')
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState('all')
   const [supplierSearch, setSupplierSearch] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -200,6 +222,7 @@ export function SupplierInvoicesContent() {
       supplierSearch: supplierSearch.trim() || undefined,
       dateFrom: dateFrom || undefined,
       dateTo: dateTo || undefined,
+      paymentMethod: paymentMethodFilter === 'all' ? undefined : paymentMethodFilter,
     })
     if (r.success) {
       setRows(r.data)
@@ -212,7 +235,7 @@ export function SupplierInvoicesContent() {
       }
     }
     setLoading(false)
-  }, [statusFilter, supplierSearch, dateFrom, dateTo])
+  }, [statusFilter, supplierSearch, dateFrom, dateTo, paymentMethodFilter])
 
   const loadSuppliers = useCallback(async () => {
     const r = await listSuppliersForInvoice()
@@ -649,6 +672,16 @@ export function SupplierInvoicesContent() {
             ))}
           </SelectContent>
         </Select>
+        <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
+          <SelectTrigger className="w-44">
+            <SelectValue placeholder="Tipo de pago" />
+          </SelectTrigger>
+          <SelectContent>
+            {PAYMENT_METHOD_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Input
           placeholder="Buscar por proveedor..."
           className="w-48"
@@ -665,7 +698,17 @@ export function SupplierInvoicesContent() {
           value={dateTo}
           onChange={(date) => setDateTo(date)}
         />
-        <Button variant="secondary" size="sm" onClick={() => { setDateFrom(''); setDateTo(''); setSupplierSearch(''); setStatusFilter('all') }}>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            setDateFrom('')
+            setDateTo('')
+            setSupplierSearch('')
+            setStatusFilter('all')
+            setPaymentMethodFilter('all')
+          }}
+        >
           Limpiar
         </Button>
       </div>
@@ -692,6 +735,7 @@ export function SupplierInvoicesContent() {
                 <TableHead className="text-right">Total</TableHead>
                 <TableHead className="text-right">Pagado</TableHead>
                 <TableHead className="text-right">Pendiente</TableHead>
+                <TableHead>Tipo de pago</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead className="w-32">Acciones</TableHead>
               </TableRow>
@@ -701,6 +745,9 @@ export function SupplierInvoicesContent() {
                 const badge = displayStatus(row)
                 const paid = paidMap[row.id] ?? 0
                 const pending = Math.max(0, Math.round((row.total_amount - paid) * 100) / 100)
+                const paymentLabel = row.payment_method
+                  ? (PAYMENT_METHOD_LABEL[row.payment_method] ?? row.payment_method)
+                  : null
                 return (
                   <TableRow key={row.id}>
                     <TableCell>
@@ -716,6 +763,13 @@ export function SupplierInvoicesContent() {
                     <TableCell className="text-right tabular-nums text-green-600">{formatCurrency(paid)}</TableCell>
                     <TableCell className={`text-right tabular-nums font-semibold ${pending > 0 ? 'text-amber-600' : 'text-muted-foreground'}`}>
                       {formatCurrency(pending)}
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {paymentLabel ? (
+                        <span>{paymentLabel}</span>
+                      ) : (
+                        <span className="text-muted-foreground italic">—</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${badge.className}`}>
@@ -754,6 +808,27 @@ export function SupplierInvoicesContent() {
                 )
               })}
             </TableBody>
+            {(() => {
+              const totalFacturado = rows.reduce((s, r) => s + r.total_amount, 0)
+              const totalPagado = rows.reduce((s, r) => s + (paidMap[r.id] ?? 0), 0)
+              const totalPendiente = rows.reduce(
+                (s, r) => s + Math.max(0, Math.round((r.total_amount - (paidMap[r.id] ?? 0)) * 100) / 100),
+                0,
+              )
+              return (
+                <TableFooter className="bg-muted/60 font-semibold">
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-right">
+                      Totales ({rows.length} factura{rows.length === 1 ? '' : 's'})
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{formatCurrency(totalFacturado)}</TableCell>
+                    <TableCell className="text-right tabular-nums text-green-700">{formatCurrency(totalPagado)}</TableCell>
+                    <TableCell className="text-right tabular-nums text-amber-700">{formatCurrency(totalPendiente)}</TableCell>
+                    <TableCell colSpan={3}></TableCell>
+                  </TableRow>
+                </TableFooter>
+              )
+            })()}
           </Table>
         )}
       </div>

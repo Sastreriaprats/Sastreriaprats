@@ -87,7 +87,14 @@ function addDaysISO(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10)
 }
 
-function computeDueDate(invoiceDate: string, terms: string | null): string {
+function computeDueDate(
+  invoiceDate: string,
+  paymentDays: number | null,
+  terms: string | null,
+): string {
+  if (paymentDays !== null && Number.isFinite(paymentDays) && paymentDays >= 0) {
+    return addDaysISO(invoiceDate, paymentDays)
+  }
   switch (terms) {
     case 'immediate': return invoiceDate
     case 'net_15': return addDaysISO(invoiceDate, 15)
@@ -261,11 +268,11 @@ export const getOverdueSupplierInvoicesCount = protectedAction<void, number>(
 )
 
 export const listSupplierInvoices = protectedAction<
-  { status?: string; supplierSearch?: string; dateFrom?: string; dateTo?: string },
+  { status?: string; supplierSearch?: string; dateFrom?: string; dateTo?: string; paymentMethod?: string },
   ApSupplierInvoiceRow[]
 >(
   { permission: PERMISSION, auditModule: 'accounting' },
-  async (ctx, { status, supplierSearch, dateFrom, dateTo }) => {
+  async (ctx, { status, supplierSearch, dateFrom, dateTo, paymentMethod }) => {
     let q = ctx.adminClient
       .from(TABLE)
       .select('*')
@@ -277,6 +284,13 @@ export const listSupplierInvoices = protectedAction<
     }
     if (dateFrom) q = q.gte('due_date', dateFrom)
     if (dateTo) q = q.lte('due_date', dateTo)
+    if (paymentMethod && paymentMethod !== 'all') {
+      if (paymentMethod === 'none') {
+        q = q.is('payment_method', null)
+      } else {
+        q = q.eq('payment_method', paymentMethod)
+      }
+    }
 
     const { data, error } = await q
     if (error) return failure(error.message)
@@ -516,7 +530,11 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
 
     const dueDate = input.due_date?.trim()
       ? input.due_date
-      : computeDueDate(input.invoice_date, supplierDefaults?.payment_terms ?? null)
+      : computeDueDate(
+          input.invoice_date,
+          supplierDefaults?.payment_days ?? null,
+          supplierDefaults?.payment_terms ?? null,
+        )
 
     if (new Date(dueDate) < new Date(input.invoice_date)) {
       return failure('La fecha de vencimiento no puede ser anterior a la fecha de factura')
@@ -601,7 +619,11 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
 
     const dueDate = rest.due_date?.trim()
       ? rest.due_date
-      : computeDueDate(rest.invoice_date, supplierDefaults?.payment_terms ?? null)
+      : computeDueDate(
+          rest.invoice_date,
+          supplierDefaults?.payment_days ?? null,
+          supplierDefaults?.payment_terms ?? null,
+        )
 
     if (new Date(dueDate) < new Date(rest.invoice_date)) {
       return failure('La fecha de vencimiento no puede ser anterior a la fecha de factura')

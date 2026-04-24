@@ -40,9 +40,19 @@ import {
   receiveSupplierOrderLines,
   markSupplierInvoicePaid,
   deleteSupplierOrderAction,
+  listActiveWarehouses,
   type SupplierOrderLineForReceipt,
   type ReceiveSupplierOrderLineInput,
 } from '@/actions/suppliers'
+
+type WarehouseOption = {
+  id: string
+  name: string
+  code: string | null
+  store_id: string | null
+  store_name: string | null
+  is_main: boolean
+}
 
 const STATUS_LABELS: Record<string, string> = {
   draft: 'Borrador',
@@ -115,6 +125,8 @@ export function PedidoDetailContent({
   const [receptionLineState, setReceptionLineState] = useState<
     Record<string, { selected: boolean; quantityReceived: string }>
   >({})
+  const [warehouses, setWarehouses] = useState<WarehouseOption[]>([])
+  const [warehouseId, setWarehouseId] = useState<string>('')
 
   // Delete
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
@@ -141,16 +153,26 @@ export function PedidoDetailContent({
     setReceptionLineState({})
     setReceptionOpen(true)
     setReceptionLinesLoading(true)
-    const res = await getSupplierOrderLines(order.id)
+    const [linesRes, whRes] = await Promise.all([
+      getSupplierOrderLines(order.id),
+      listActiveWarehouses(),
+    ])
     setReceptionLinesLoading(false)
-    if (res.success && res.data) {
-      setReceptionLines(res.data)
+    if (linesRes.success && linesRes.data) {
+      setReceptionLines(linesRes.data)
       const init: Record<string, { selected: boolean; quantityReceived: string }> = {}
-      for (const l of res.data) {
+      for (const l of linesRes.data) {
         const remaining = Math.max(0, l.quantity - l.quantity_received)
         init[l.id] = { selected: remaining > 0, quantityReceived: remaining > 0 ? String(remaining) : '0' }
       }
       setReceptionLineState(init)
+    }
+    if (whRes.success && whRes.data) {
+      const list = whRes.data as WarehouseOption[]
+      setWarehouses(list)
+      // Preselección: primero main, si no el primero
+      const preferred = list.find(w => w.is_main) ?? list[0]
+      setWarehouseId(prev => prev || preferred?.id || '')
     }
   }
 
@@ -175,7 +197,13 @@ export function PedidoDetailContent({
       return
     }
 
-    const res = await receiveSupplierOrderLines({ orderId: order.id, lines })
+    if (!warehouseId) {
+      toast.error('Selecciona el almacén donde entra la mercancía')
+      setReceptionSubmitting(false)
+      return
+    }
+
+    const res = await receiveSupplierOrderLines({ orderId: order.id, lines, warehouseId })
     setReceptionSubmitting(false)
     if (res.success && res.data) {
       const newStatus = res.data.status
@@ -574,7 +602,30 @@ export function PedidoDetailContent({
           ) : receptionLines.length === 0 ? (
             <p className="text-sm text-muted-foreground py-6">No hay líneas en este pedido.</p>
           ) : (
-            <div className="rounded-md border">
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="reception-warehouse" className="text-sm font-medium">
+                  Almacén de destino <span className="text-red-600">*</span>
+                </Label>
+                <Select value={warehouseId} onValueChange={setWarehouseId}>
+                  <SelectTrigger id="reception-warehouse">
+                    <SelectValue placeholder="Selecciona el almacén donde entra la mercancía" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {warehouses.map((w) => (
+                      <SelectItem key={w.id} value={w.id}>
+                        {w.name}
+                        {w.store_name ? <span className="text-muted-foreground"> — {w.store_name}</span> : null}
+                        {w.is_main ? <span className="text-muted-foreground"> (principal)</span> : null}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  El stock recibido se sumará en este almacén. Cámbialo si la mercancía entra en otra tienda.
+                </p>
+              </div>
+              <div className="rounded-md border">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -638,6 +689,7 @@ export function PedidoDetailContent({
                   })}
                 </TableBody>
               </Table>
+              </div>
             </div>
           )}
 

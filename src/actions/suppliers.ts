@@ -291,7 +291,17 @@ function toNumber(value: unknown): number {
   return Number.isFinite(n) ? n : 0
 }
 
-async function pickWarehouseForReceipt(adminClient: AdminClient, order: any) {
+async function pickWarehouseForReceipt(adminClient: AdminClient, order: any, overrideWarehouseId?: string | null) {
+  if (overrideWarehouseId) {
+    const { data: override } = await adminClient
+      .from('warehouses')
+      .select('id')
+      .eq('id', overrideWarehouseId)
+      .eq('is_active', true)
+      .maybeSingle()
+    if (override?.id) return override.id as string
+  }
+
   if (order?.destination_warehouse_id) {
     const { data: destinationWarehouse } = await adminClient
       .from('warehouses')
@@ -322,6 +332,33 @@ async function pickWarehouseForReceipt(adminClient: AdminClient, order: any) {
     .maybeSingle()
   return (fallbackWarehouse?.id as string | undefined) ?? null
 }
+
+/** Lista de almacenes activos con la tienda a la que pertenecen. Se usa en
+ *  el diálogo de recepción de pedidos de proveedor para permitir que el
+ *  usuario elija el almacén destino. */
+export const listActiveWarehouses = protectedAction<
+  void,
+  { id: string; name: string; code: string | null; store_id: string | null; store_name: string | null; is_main: boolean }[]
+>(
+  { permission: 'suppliers.view' },
+  async (ctx) => {
+    const { data, error } = await ctx.adminClient
+      .from('warehouses')
+      .select('id, name, code, is_main, store_id, stores(name)')
+      .eq('is_active', true)
+      .order('name', { ascending: true })
+    if (error) return failure(error.message)
+    const mapped = (data ?? []).map((w: any) => ({
+      id: String(w.id),
+      name: String(w.name ?? ''),
+      code: w.code ?? null,
+      store_id: w.store_id ?? null,
+      store_name: (w.stores as any)?.name ?? null,
+      is_main: Boolean(w.is_main),
+    }))
+    return success(mapped)
+  }
+)
 
 async function pickVariantForProduct(adminClient: AdminClient, productId: string): Promise<string | null> {
   const withDefault = await adminClient
@@ -610,7 +647,7 @@ export type ReceiveSupplierOrderLineInput = {
 }
 
 export const receiveSupplierOrderLines = protectedAction<
-  { orderId: string; lines: ReceiveSupplierOrderLineInput[] },
+  { orderId: string; lines: ReceiveSupplierOrderLineInput[]; warehouseId?: string | null },
   { status: string; stock_warnings?: number }
 >(
   {
@@ -620,7 +657,7 @@ export const receiveSupplierOrderLines = protectedAction<
     auditEntity: 'supplier_order',
     revalidate: ['/admin/proveedores'],
   },
-  async (ctx, { orderId, lines: inputLines }) => {
+  async (ctx, { orderId, lines: inputLines, warehouseId: warehouseOverride }) => {
     if (!orderId?.trim()) return failure('Pedido obligatorio', 'VALIDATION')
     const linesToProcess = (inputLines || []).filter(
       (l) => l.lineId?.trim() && l.referenceId?.trim() && Number(l.quantityReceived) > 0
@@ -639,7 +676,7 @@ export const receiveSupplierOrderLines = protectedAction<
       return failure('Solo se puede registrar recepción en pedidos enviados o confirmados', 'VALIDATION')
     }
 
-    const warehouseId = await pickWarehouseForReceipt(ctx.adminClient, order)
+    const warehouseId = await pickWarehouseForReceipt(ctx.adminClient, order, warehouseOverride ?? null)
     if (!warehouseId) return failure('No hay almacén activo para registrar la recepción de stock', 'CONFLICT')
 
     const { data: dbLines, error: linesErr } = await ctx.adminClient

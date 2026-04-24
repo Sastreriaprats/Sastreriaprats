@@ -656,7 +656,13 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                                 variant="outline"
                                 size="sm"
                                 className="text-xs"
-                                onClick={() => router.push('/admin/almacen/albaranes?tab=proveedor')}
+                                onClick={() => {
+                                  const note = o.supplier_delivery_notes[0]
+                                  const params = new URLSearchParams({ tab: 'proveedor' })
+                                  if (note.id) params.set('id', note.id)
+                                  if (note.supplier_reference) params.set('ref', note.supplier_reference)
+                                  router.push(`/admin/almacen/albaranes?${params.toString()}`)
+                                }}
                               >
                                 <FileText className="h-3 w-3 mr-1" /> Ver albarán
                               </Button>
