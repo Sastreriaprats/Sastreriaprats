@@ -12,6 +12,10 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
@@ -135,6 +139,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const [clientPendingDebt, setClientPendingDebt] = useState<Array<{ entity_type: 'tailoring_order' | 'sale'; entity_id: string; reference: string; total_pending: number }>>([])
   const [clientDebtLoading, setClientDebtLoading] = useState(false)
   const [showCloseReminderDialog, setShowCloseReminderDialog] = useState(false)
+  const [lineToRemove, setLineToRemove] = useState<{ id: string; description: string } | null>(null)
   const [paymentTab, setPaymentTab] = useState<'integro' | 'mixto' | 'parcial'>('integro')
   const [paymentStep, setPaymentStep] = useState<'salesperson' | 'choose_type' | 'details'>('salesperson')
   const [posEmployees, setPosEmployees] = useState<Array<{ id: string; full_name: string }>>([])
@@ -1342,7 +1347,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
                   </div>
                   <Input type="number" min={0} max={100} value={line.discount_percentage || ''} onChange={(e) => updateLine(line.id, 'discount_percentage', parseFloat(e.target.value) || 0)} className="h-6 w-16 text-xs text-center rounded border-slate-200" />
                   <span className="text-slate-800 font-medium tabular-nums text-xs">{formatCurrency(lineTotal)}</span>
-                  <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 text-red-600 hover:text-red-700" onClick={() => removeLine(line.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 text-red-600 hover:text-red-700" onClick={() => setLineToRemove({ id: line.id, description: line.description })}><Trash2 className="h-3.5 w-3.5" /></Button>
                 </div>
               )})}
             </div>
@@ -2129,6 +2134,30 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
           )}
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!lineToRemove} onOpenChange={(v) => { if (!v) setLineToRemove(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Quitar esta línea del ticket?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {lineToRemove?.description}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 text-white"
+              onClick={(e) => {
+                e.preventDefault()
+                if (lineToRemove) removeLine(lineToRemove.id)
+                setLineToRemove(null)
+              }}
+            >
+              Quitar línea
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

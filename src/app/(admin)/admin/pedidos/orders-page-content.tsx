@@ -13,8 +13,12 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   Plus, Search, MoreHorizontal, Eye, Trash2, ChevronLeft, ChevronRight,
-  LayoutList, Kanban, ArrowUpDown, AlertTriangle, SlidersHorizontal, X,
+  LayoutList, Kanban, ArrowUpDown, AlertTriangle, SlidersHorizontal, X, Loader2,
 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useList } from '@/hooks/use-list'
@@ -60,6 +64,8 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
 
   const [supplierOrders, setSupplierOrders] = useState<any[]>([])
   const [loadingSupplier, setLoadingSupplier] = useState(false)
+  const [orderToDelete, setOrderToDelete] = useState<{ id: string; order_number: string } | null>(null)
+  const [deletingOrder, setDeletingOrder] = useState(false)
 
   // Contadores para badges de los tabs
   const [supplierActiveCount, setSupplierActiveCount] = useState<number | null>(null)
@@ -425,16 +431,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
                                   className="text-red-600 focus:text-red-600"
-                                  onClick={async () => {
-                                    if (!confirm(`¿Eliminar pedido ${order.order_number}? Esta acción no se puede deshacer.`)) return
-                                    const res = await deleteOrder(order.id)
-                                    if (res.success) {
-                                      toast.success('Pedido eliminado')
-                                      refresh()
-                                    } else {
-                                      toast.error(res.error ?? 'Error al eliminar')
-                                    }
-                                  }}
+                                  onClick={() => setOrderToDelete({ id: order.id, order_number: order.order_number })}
                                 >
                                   <Trash2 className="mr-2 h-4 w-4" /> Eliminar
                                 </DropdownMenuItem>
@@ -558,6 +555,41 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
           <ReservationsTab />
         </TabsContent>
       </Tabs>
+
+      <AlertDialog open={!!orderToDelete} onOpenChange={(v) => { if (!v && !deletingOrder) setOrderToDelete(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar pedido {orderToDelete?.order_number}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Borra el talón completo, sus líneas, pagos asociados y vínculos a reservas.
+              Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingOrder}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 text-white"
+              disabled={deletingOrder}
+              onClick={async (e) => {
+                e.preventDefault()
+                if (!orderToDelete) return
+                setDeletingOrder(true)
+                const res = await deleteOrder(orderToDelete.id)
+                setDeletingOrder(false)
+                if (res.success) {
+                  toast.success('Pedido eliminado')
+                  setOrderToDelete(null)
+                  refresh()
+                } else {
+                  toast.error(res.error ?? 'Error al eliminar')
+                }
+              }}
+            >
+              {deletingOrder ? <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Eliminando…</> : 'Eliminar pedido'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

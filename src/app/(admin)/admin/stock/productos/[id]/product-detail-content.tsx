@@ -9,6 +9,10 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { variantSkuFromSize } from '@/lib/constants-sizes'
 import { sortBySize } from '@/lib/utils/sort-sizes'
@@ -50,6 +54,8 @@ export function ProductDetailContent({
   const [showSubtractMeters, setShowSubtractMeters] = useState(false)
   const [subtractMetersForm, setSubtractMetersForm] = useState({ variantId: '', warehouseId: '', quantity: 0, reason: '' })
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string | null>(null)
+  const [variantToDelete, setVariantToDelete] = useState<{ id: string; variant_sku: string } | null>(null)
+  const [deletingVariant, setDeletingVariant] = useState(false)
 
   const { execute: doAdjust, isLoading: isAdjusting } = useAction(adjustStock, {
     successMessage: 'Stock ajustado',
@@ -310,16 +316,7 @@ export function ProductDetailContent({
                             size="icon"
                             className="h-7 w-7 text-muted-foreground hover:text-red-600"
                             title="Eliminar variante"
-                            onClick={async () => {
-                              if (!confirm(`¿Eliminar variante ${v.variant_sku}? Esta acción no se puede deshacer.`)) return
-                              const res = await deleteVariantAction(v.id)
-                              if (res.success) {
-                                toast.success('Variante eliminada')
-                                router.refresh()
-                              } else {
-                                toast.error(res.error ?? 'Error al eliminar')
-                              }
-                            }}
+                            onClick={() => setVariantToDelete({ id: v.id, variant_sku: v.variant_sku })}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -598,6 +595,41 @@ export function ProductDetailContent({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!variantToDelete} onOpenChange={(v) => { if (!v && !deletingVariant) setVariantToDelete(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar variante {variantToDelete?.variant_sku}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción borra el SKU, su stock asociado y los movimientos históricos.
+              No se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingVariant}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 text-white"
+              disabled={deletingVariant}
+              onClick={async (e) => {
+                e.preventDefault()
+                if (!variantToDelete) return
+                setDeletingVariant(true)
+                const res = await deleteVariantAction(variantToDelete.id)
+                setDeletingVariant(false)
+                if (res.success) {
+                  toast.success('Variante eliminada')
+                  setVariantToDelete(null)
+                  router.refresh()
+                } else {
+                  toast.error(res.error ?? 'Error al eliminar')
+                }
+              }}
+            >
+              {deletingVariant ? <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Eliminando…</> : 'Eliminar variante'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
