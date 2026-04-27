@@ -196,47 +196,44 @@ export async function generateGiftCardPdf(data: GiftCardPdfData, mode: 'download
   const fileName = `tarjeta-regalo-${data.voucherCode}.pdf`
 
   if (mode === 'print') {
+    // Mismo flujo que el ticket de venta: abrir blob en pestaña nueva y
+    // disparar print desde ahí. El método de iframe oculto que se usaba antes
+    // funciona en algunos navegadores pero Chrome/Edge bloquean el diálogo
+    // de impresión cuando el iframe es invisible y el contenido es PDF.
     await new Promise<void>((resolve) => {
       (pdf as any).getBlob((blob: Blob) => {
         const url = URL.createObjectURL(blob)
-        const iframe = document.createElement('iframe')
-        iframe.style.position = 'fixed'
-        iframe.style.right = '0'
-        iframe.style.bottom = '0'
-        iframe.style.width = '0'
-        iframe.style.height = '0'
-        iframe.style.border = '0'
-        iframe.setAttribute('aria-hidden', 'true')
-        iframe.src = url
+        const printWindow = window.open(url, '_blank')
+
+        if (!printWindow) {
+          // Pop-ups bloqueados: caer a descarga
+          const a = document.createElement('a')
+          a.href = url
+          a.download = fileName
+          a.click()
+          setTimeout(() => URL.revokeObjectURL(url), 2000)
+          resolve()
+          return
+        }
 
         let printed = false
         const triggerPrint = () => {
           if (printed) return
           printed = true
           try {
-            iframe.contentWindow?.focus()
-            iframe.contentWindow?.print()
+            printWindow.focus()
+            printWindow.print()
           } catch {
-            const a = document.createElement('a')
-            a.href = url
-            a.download = fileName
-            a.click()
+            // Si falla el print el usuario ya tiene el PDF abierto y puede
+            // imprimir manualmente.
           }
         }
 
-        iframe.addEventListener('load', () => { setTimeout(triggerPrint, 250) })
+        const onLoad = () => setTimeout(triggerPrint, 500)
+        try { printWindow.addEventListener('load', onLoad) } catch { /* cross-origin */ }
         setTimeout(triggerPrint, 1500)
 
-        const cleanup = () => {
-          setTimeout(() => {
-            try { document.body.removeChild(iframe) } catch {}
-            try { URL.revokeObjectURL(url) } catch {}
-            window.removeEventListener('focus', cleanup)
-          }, 1000)
-        }
-        window.addEventListener('focus', cleanup)
-
-        document.body.appendChild(iframe)
+        setTimeout(() => { try { URL.revokeObjectURL(url) } catch {} }, 60000)
         resolve()
       })
     })
