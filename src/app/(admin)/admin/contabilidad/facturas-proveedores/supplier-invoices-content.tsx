@@ -778,7 +778,14 @@ export function SupplierInvoicesContent() {
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1">
-                        <Button size="sm" variant="ghost" className="h-8" onClick={() => openEdit(row)}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8"
+                          onClick={() => openEdit(row)}
+                          disabled={row.status === 'pagada'}
+                          title={row.status === 'pagada' ? 'Factura pagada (bloqueada)' : 'Editar factura'}
+                        >
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
                         <Button
@@ -796,8 +803,8 @@ export function SupplierInvoicesContent() {
                             variant="ghost"
                             className="h-8 text-destructive hover:text-destructive"
                             onClick={() => setDeleteTarget(row)}
-                            disabled={deletingId === row.id}
-                            title="Eliminar factura"
+                            disabled={deletingId === row.id || row.status === 'pagada'}
+                            title={row.status === 'pagada' ? 'Factura pagada (bloqueada)' : 'Eliminar factura'}
                           >
                             {deletingId === row.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                           </Button>
@@ -809,6 +816,8 @@ export function SupplierInvoicesContent() {
               })}
             </TableBody>
             {(() => {
+              const totalBruto = rows.reduce((s, r) => s + Number(r.amount ?? 0), 0)
+              const totalIva = rows.reduce((s, r) => s + Number(r.tax_amount ?? 0), 0)
               const totalFacturado = rows.reduce((s, r) => s + r.total_amount, 0)
               const totalPagado = rows.reduce((s, r) => s + (paidMap[r.id] ?? 0), 0)
               const totalPendiente = rows.reduce(
@@ -816,8 +825,22 @@ export function SupplierInvoicesContent() {
                 0,
               )
               return (
-                <TableFooter className="bg-muted/60 font-semibold">
-                  <TableRow>
+                <TableFooter className="bg-muted/60">
+                  <TableRow className="font-normal">
+                    <TableCell colSpan={4} className="text-right text-muted-foreground">
+                      Base imponible
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{formatCurrency(totalBruto)}</TableCell>
+                    <TableCell colSpan={5}></TableCell>
+                  </TableRow>
+                  <TableRow className="font-normal">
+                    <TableCell colSpan={4} className="text-right text-muted-foreground">
+                      IVA
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{formatCurrency(totalIva)}</TableCell>
+                    <TableCell colSpan={5}></TableCell>
+                  </TableRow>
+                  <TableRow className="font-semibold border-t-2">
                     <TableCell colSpan={4} className="text-right">
                       Totales ({rows.length} factura{rows.length === 1 ? '' : 's'})
                     </TableCell>
@@ -835,7 +858,11 @@ export function SupplierInvoicesContent() {
 
       {/* Modal Nueva / Editar */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent
+          className="max-w-lg max-h-[90vh] overflow-y-auto"
+          onInteractOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle>{editingId ? 'Editar factura proveedor' : 'Nueva factura proveedor'}</DialogTitle>
           </DialogHeader>

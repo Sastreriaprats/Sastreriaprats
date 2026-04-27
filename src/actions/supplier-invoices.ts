@@ -610,6 +610,17 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
   },
   async (ctx, input) => {
     const { id, ...rest } = input
+
+    // Bloqueo: una factura ya pagada no puede modificarse desde aquí.
+    const { data: current } = await ctx.adminClient
+      .from(TABLE)
+      .select('status')
+      .eq('id', id)
+      .maybeSingle()
+    if ((current as { status?: string } | null)?.status === 'pagada') {
+      return failure('La factura está pagada y no puede editarse', 'VALIDATION')
+    }
+
     const supplierDefaults = await resolveSupplierDefaults(ctx.adminClient, rest.supplier_id)
 
     const supplierName = (supplierDefaults?.supplier_name || rest.supplier_name || '').trim()
@@ -721,6 +732,18 @@ export const markSupplierInvoicePaidAction = protectedAction<
       .eq('id', id)
 
     if (error) return failure(error.message)
+
+    // Marcar TODAS las cuotas pendientes como pagadas, si no la pantalla de
+    // Vencimientos sigue mostrando la factura como pendiente.
+    const { error: cuotasErr } = await ctx.adminClient
+      .from('ap_supplier_invoice_due_dates')
+      .update({ is_paid: true, paid_at: payment_date, payment_method: payment_method || null })
+      .eq('supplier_invoice_id', id)
+      .eq('is_paid', false)
+    if (cuotasErr) {
+      console.error('[markSupplierInvoicePaidAction] cuotas:', cuotasErr.message)
+    }
+
     return success(undefined)
   }
 )
@@ -910,6 +933,15 @@ export const deleteSupplierInvoiceAction = protectedAction<{ id: string }, void>
   },
   async (ctx, { id }) => {
     if (!id) return failure('Falta el identificador de la factura', 'VALIDATION')
+
+    const { data: current } = await ctx.adminClient
+      .from(TABLE)
+      .select('status')
+      .eq('id', id)
+      .maybeSingle()
+    if ((current as { status?: string } | null)?.status === 'pagada') {
+      return failure('La factura está pagada y no puede eliminarse', 'VALIDATION')
+    }
 
     const { error } = await ctx.adminClient
       .from(TABLE)

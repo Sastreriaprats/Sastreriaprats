@@ -176,6 +176,48 @@ export const registerSupplierInvoicePayment = protectedAction<
     const newPending = Math.max(0, total - newPaid)
     const newStatus = newPaid >= total - 0.005 ? 'pagada' : newPaid > 0 ? 'parcial' : 'pendiente'
 
+    // Propagar a las cuotas: asignar el total pagado en orden (FIFO) y marcar
+    // como pagadas las que queden cubiertas. Sin esto, la pantalla de
+    // Vencimientos seguiría mostrando la factura como pendiente.
+    const { data: dueRows } = await ctx.adminClient
+      .from(DUE_DATES_TABLE)
+      .select('id, amount, sort_order, due_date, is_paid')
+      .eq('supplier_invoice_id', input.supplier_invoice_id)
+      .order('sort_order', { ascending: true })
+      .order('due_date', { ascending: true })
+
+    const idsToMarkPaid: string[] = []
+    let remaining = newPaid
+    for (const r of (dueRows || []) as any[]) {
+      const amt = Number(r.amount ?? 0)
+      if (remaining + 0.005 >= amt) {
+        if (!r.is_paid) idsToMarkPaid.push(String(r.id))
+        remaining = Math.round((remaining - amt) * 100) / 100
+      } else {
+        break
+      }
+    }
+    if (idsToMarkPaid.length > 0) {
+      await ctx.adminClient
+        .from(DUE_DATES_TABLE)
+        .update({ is_paid: true, paid_at: paymentDate, payment_method: paymentMethod })
+        .in('id', idsToMarkPaid)
+    }
+
+    // Sincronizar status de la factura
+    const invoiceUpdate: Record<string, unknown> = {
+      status: newStatus,
+      updated_at: new Date().toISOString(),
+    }
+    if (newStatus === 'pagada') {
+      invoiceUpdate.payment_date = paymentDate
+      invoiceUpdate.payment_method = paymentMethod
+    }
+    await ctx.adminClient
+      .from(INVOICES_TABLE)
+      .update(invoiceUpdate)
+      .eq('id', input.supplier_invoice_id)
+
     return success({
       id: String((pay as any).id),
       amount_paid: Math.round(newPaid * 100) / 100,

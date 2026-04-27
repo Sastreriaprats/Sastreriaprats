@@ -156,7 +156,11 @@ export function SupplierPaymentDialog({ open, onOpenChange, invoice, onChanged }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent
+        className="max-w-2xl"
+        onInteractOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => e.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <CreditCard className="h-5 w-5 text-amber-500" />
