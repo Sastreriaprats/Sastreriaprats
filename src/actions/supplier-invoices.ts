@@ -49,6 +49,9 @@ export type ApSupplierInvoiceInput = {
   notes?: string | null
   attachment_url?: string | null
   delivery_note_ids?: string[]
+  /** Cuotas explícitas para esta factura. Si viene con datos sustituye al
+   * cálculo automático (buildInstallments). */
+  installments?: Array<{ amount: number; due_date: string }>
 }
 
 export type SupplierOptionForInvoice = {
@@ -592,13 +595,22 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
       }
     }
 
-    // Generar cuotas de vencimiento
-    const installments = buildInstallments(
-      input.invoice_date,
-      dueDate,
-      Number(input.total_amount),
-      supplierDefaults,
-    )
+    // Generar cuotas de vencimiento. Si el formulario manda cuotas explícitas
+    // (editor de plazos), las usamos directamente; si no, buildInstallments.
+    const explicitInstallments = (input.installments ?? [])
+      .filter((it) => Number(it.amount) > 0 && it.due_date)
+    const installments = explicitInstallments.length > 0
+      ? explicitInstallments.map((it, idx) => ({
+          due_date: String(it.due_date),
+          amount: Math.round(Number(it.amount) * 100) / 100,
+          sort_order: idx,
+        }))
+      : buildInstallments(
+          input.invoice_date,
+          dueDate,
+          Number(input.total_amount),
+          supplierDefaults,
+        )
     const schedErr = await replaceInvoiceInstallments(ctx.adminClient, String(data.id), installments)
     if (schedErr) {
       console.error('[createSupplierInvoiceAction] cuotas:', schedErr)
@@ -704,12 +716,20 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
       .eq('supplier_invoice_id', id)
     const hasPaid = Array.isArray(existing) && existing.some((r: any) => r.is_paid)
     if (!hasPaid) {
-      const installments = buildInstallments(
-        rest.invoice_date,
-        dueDate,
-        Number(rest.total_amount),
-        supplierDefaults,
-      )
+      const explicitInstallments = (rest.installments ?? [])
+        .filter((it) => Number(it.amount) > 0 && it.due_date)
+      const installments = explicitInstallments.length > 0
+        ? explicitInstallments.map((it, idx) => ({
+            due_date: String(it.due_date),
+            amount: Math.round(Number(it.amount) * 100) / 100,
+            sort_order: idx,
+          }))
+        : buildInstallments(
+            rest.invoice_date,
+            dueDate,
+            Number(rest.total_amount),
+            supplierDefaults,
+          )
       const schedErr = await replaceInvoiceInstallments(ctx.adminClient, id, installments)
       if (schedErr) {
         console.error('[updateSupplierInvoiceAction] cuotas:', schedErr)
@@ -717,6 +737,30 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
     }
 
     return success(undefined)
+  }
+)
+
+export const listSupplierInvoiceInstallments = protectedAction<
+  { invoice_id: string },
+  Array<{ id: string; amount: number; due_date: string; is_paid: boolean; sort_order: number }>
+>(
+  { permission: PERMISSION, auditModule: 'accounting' },
+  async (ctx, { invoice_id }) => {
+    if (!invoice_id) return success([])
+    const { data, error } = await ctx.adminClient
+      .from('ap_supplier_invoice_due_dates')
+      .select('id, amount, due_date, is_paid, sort_order')
+      .eq('supplier_invoice_id', invoice_id)
+      .order('sort_order', { ascending: true })
+      .order('due_date', { ascending: true })
+    if (error) return failure(error.message)
+    return success(((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+      id: String(r.id),
+      amount: Number(r.amount ?? 0),
+      due_date: String(r.due_date ?? ''),
+      is_paid: Boolean(r.is_paid),
+      sort_order: Number(r.sort_order ?? 0),
+    })))
   }
 )
 

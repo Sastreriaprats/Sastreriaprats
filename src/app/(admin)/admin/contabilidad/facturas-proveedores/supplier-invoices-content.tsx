@@ -46,6 +46,7 @@ import {
   CommandList,
 } from '@/components/ui/command'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Switch } from '@/components/ui/switch'
 import {
   Loader2,
   Plus,
@@ -75,6 +76,7 @@ import {
   listSuppliersForInvoice,
   listUnlinkedDeliveryNotesForSupplier,
   getSupplierInvoiceDeliveryNoteIds,
+  listSupplierInvoiceInstallments,
   type ApSupplierInvoiceRow,
   type ApSupplierInvoiceInput,
   type SupplierInvoicesKpis,
@@ -208,6 +210,12 @@ export function SupplierInvoicesContent() {
   const [attachmentUploading, setAttachmentUploading] = useState(false)
   const [attachmentName, setAttachmentName] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  // Editor de plazos de pago para esta factura.
+  // Cuando está activo, las cuotas introducidas aquí sustituyen al cálculo
+  // automático de buildInstallments en el server action.
+  const [splitPayment, setSplitPayment] = useState(false)
+  const [installments, setInstallments] = useState<Array<{ amount: string; due_date: string }>>([])
 
   const selectedSupplier = suppliers.find((s) => s.id === form.supplier_id) || null
 
@@ -343,6 +351,8 @@ export function SupplierInvoicesContent() {
     setDeliveryNotes([])
     setTotalTouched(false)
     setAttachmentName(null)
+    setSplitPayment(false)
+    setInstallments([])
     setDialogOpen(true)
   }
 
@@ -372,6 +382,18 @@ export function SupplierInvoicesContent() {
     setTotalTouched(true)
     setAttachmentName(deriveFilenameFromUrl(row.attachment_url))
     setDialogOpen(true)
+    // Cargar cuotas existentes; si hay más de 1 activamos el editor
+    const inst = await listSupplierInvoiceInstallments({ invoice_id: row.id })
+    if (inst.success && inst.data.length > 0) {
+      setInstallments(inst.data.map((c) => ({
+        amount: String(c.amount),
+        due_date: c.due_date,
+      })))
+      setSplitPayment(inst.data.length > 1)
+    } else {
+      setInstallments([])
+      setSplitPayment(false)
+    }
     if (row.supplier_id) {
       await loadDeliveryNotesForSupplier(row.supplier_id, row.id)
       const linked = await getSupplierInvoiceDeliveryNoteIds(row.id)
@@ -481,6 +503,28 @@ export function SupplierInvoicesContent() {
       return
     }
 
+    // Si la usuaria activó plazos múltiples, validar que las cuotas cuadren.
+    let installmentsPayload: Array<{ amount: number; due_date: string }> | undefined
+    if (splitPayment) {
+      const cleaned = installments
+        .map((it) => ({
+          amount: parseFloat(String(it.amount).replace(',', '.')) || 0,
+          due_date: it.due_date,
+        }))
+        .filter((it) => it.amount > 0 && it.due_date)
+      if (cleaned.length === 0) {
+        toast.error('Añade al menos una cuota o desactiva los plazos')
+        return
+      }
+      const sum = Math.round(cleaned.reduce((s, c) => s + c.amount, 0) * 100) / 100
+      const diff = Math.abs(sum - Math.round(totalNum * 100) / 100)
+      if (diff > 0.05) {
+        toast.error(`La suma de cuotas (${formatCurrency(sum)}) no coincide con el total (${formatCurrency(totalNum)})`)
+        return
+      }
+      installmentsPayload = cleaned
+    }
+
     setSaving(true)
     const tax_amount = Math.round(amountNum * taxRateNum) / 100
     const payload: ApSupplierInvoiceInput = {
@@ -500,6 +544,7 @@ export function SupplierInvoicesContent() {
       notes: form.notes.trim() || null,
       attachment_url: form.attachment_url.trim() || null,
       delivery_note_ids: selectedDeliveryNoteIds,
+      installments: installmentsPayload,
     }
 
     if (editingId) {
@@ -1093,6 +1138,123 @@ export function SupplierInvoicesContent() {
                   onChange={(e) => { setTotalTouched(true); setForm((f) => ({ ...f, total_amount: e.target.value })) }}
                 />
               </div>
+            </div>
+
+            {/* Editor de plazos de pago */}
+            <div className="rounded-md border bg-muted/20 p-3 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <Label className="text-sm font-medium">Plazos de pago</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Activa esto si la factura se paga en varias cuotas (1 plazo por defecto).
+                  </p>
+                </div>
+                <Switch
+                  checked={splitPayment}
+                  onCheckedChange={(checked) => {
+                    setSplitPayment(checked)
+                    if (checked && installments.length === 0) {
+                      // Pre-rellenar con 2 cuotas iguales a 30 y 60 días desde la factura
+                      const half = Math.round(totalNum * 50) / 100
+                      const rest = Math.round((totalNum - half) * 100) / 100
+                      const d30 = addDays(form.invoice_date, 30)
+                      const d60 = addDays(form.invoice_date, 60)
+                      setInstallments([
+                        { amount: String(half), due_date: d30 },
+                        { amount: String(rest), due_date: d60 },
+                      ])
+                    }
+                  }}
+                />
+              </div>
+              {splitPayment && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {[2, 3, 4].map((n) => (
+                      <Button
+                        key={n}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => {
+                          const each = Math.floor((totalNum / n) * 100) / 100
+                          const last = Math.round((totalNum - each * (n - 1)) * 100) / 100
+                          const next = Array.from({ length: n }).map((_, i) => ({
+                            amount: String(i === n - 1 ? last : each),
+                            due_date: addDays(form.invoice_date, 30 * (i + 1)),
+                          }))
+                          setInstallments(next)
+                        }}
+                      >
+                        Repartir en {n} cuotas
+                      </Button>
+                    ))}
+                  </div>
+                  <div className="space-y-2">
+                    {installments.map((it, idx) => (
+                      <div key={idx} className="flex items-end gap-2">
+                        <div className="flex-1">
+                          <Label className="text-xs text-muted-foreground">Cuota {idx + 1} - Importe (€)</Label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={it.amount}
+                            onChange={(e) => {
+                              const v = e.target.value
+                              setInstallments((prev) => prev.map((x, i) => i === idx ? { ...x, amount: v } : x))
+                            }}
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <Label className="text-xs text-muted-foreground">Vencimiento</Label>
+                          <DatePickerPopover
+                            value={it.due_date}
+                            onChange={(date) => {
+                              setInstallments((prev) => prev.map((x, i) => i === idx ? { ...x, due_date: date } : x))
+                            }}
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-9 w-9 text-red-600 hover:text-red-700"
+                          onClick={() => setInstallments((prev) => prev.filter((_, i) => i !== idx))}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-1"
+                      onClick={() => {
+                        const lastDate = installments.length > 0
+                          ? addDays(installments[installments.length - 1].due_date, 30)
+                          : addDays(form.invoice_date, 30)
+                        setInstallments((prev) => [...prev, { amount: '0', due_date: lastDate }])
+                      }}
+                    >
+                      <Plus className="h-3 w-3" /> Añadir cuota
+                    </Button>
+                  </div>
+                  {(() => {
+                    const sum = installments.reduce((s, it) => s + (parseFloat(String(it.amount).replace(',', '.')) || 0), 0)
+                    const diff = Math.round((totalNum - sum) * 100) / 100
+                    if (Math.abs(diff) < 0.01) {
+                      return <p className="text-xs text-emerald-700">Suma de cuotas: {formatCurrency(sum)} (cuadra con el total)</p>
+                    }
+                    return (
+                      <p className="text-xs text-rose-700">
+                        Suma de cuotas: {formatCurrency(sum)} · Diferencia con el total: {formatCurrency(diff)}
+                      </p>
+                    )
+                  })()}
+                </div>
+              )}
             </div>
 
             {selectedSupplier && (
