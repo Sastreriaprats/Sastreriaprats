@@ -23,7 +23,7 @@ import {
 import { useAction } from '@/hooks/use-action'
 import { usePermissions } from '@/hooks/use-permissions'
 import { adjustStock, createVariantAction, deleteVariantAction, generateBarcodeForProduct, moveStockBetweenWarehouses, updateProductAction } from '@/actions/products'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, sortWarehousesByPriority } from '@/lib/utils'
 import { toast } from 'sonner'
 import { ProductForm } from '../product-form'
 
@@ -106,10 +106,11 @@ export function ProductDetailContent({
       }
     }
   }
-  const allWarehouses =
+  const allWarehouses = sortWarehousesByPriority(
     physicalWarehouses.length > 0
       ? physicalWarehouses.map((w) => ({ id: w.id, name: w.name || w.code, storeName: undefined }))
       : warehousesFromVariants
+  )
 
   const warehousesToShow =
     selectedWarehouseId && allWarehouses.some((w) => w.id === selectedWarehouseId)

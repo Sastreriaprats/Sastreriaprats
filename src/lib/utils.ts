@@ -124,6 +124,32 @@ export function getOrderStatusLabel(status: string): string {
   return labels[status] || status
 }
 
+/**
+ * Orden fijo de almacenes para los listados de stock:
+ * Hermanos Pinzón primero, Wellington segundo, el resto detrás
+ * (alfabético dentro del bloque "otros"). Petición de tienda 2026-04.
+ */
+function warehousePriority(name: string | null | undefined): number {
+  const n = (name ?? '').toLowerCase()
+  if (n.includes('pinzon') || n.includes('pinzón')) return 1
+  if (n.includes('wellington')) return 2
+  return 99
+}
+
+export function compareWarehouses(
+  a: { name?: string | null },
+  b: { name?: string | null },
+): number {
+  const pa = warehousePriority(a.name)
+  const pb = warehousePriority(b.name)
+  if (pa !== pb) return pa - pb
+  return (a.name ?? '').localeCompare(b.name ?? '', 'es')
+}
+
+export function sortWarehousesByPriority<T extends { name?: string | null }>(items: T[]): T[] {
+  return [...items].sort(compareWarehouses)
+}
+
 /** Resume las prendas de un pedido para listados (ej. "Americana, Pantalón"). */
 export function summarizeOrderGarments(
   lines: Array<{

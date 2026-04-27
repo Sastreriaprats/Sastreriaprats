@@ -2,6 +2,7 @@ import { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { requirePermission } from '@/actions/auth'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { sortWarehousesByPriority } from '@/lib/utils'
 import { ProductDetailContent } from './product-detail-content'
 
 export const metadata: Metadata = { title: 'Ficha de producto' }
@@ -34,7 +35,7 @@ export default async function ProductDetailPage(props: { params: Promise<{ id: s
       const storeIds = (physicalStores ?? []).map((s: { id: string }) => s.id)
       if (!storeIds.length) return { data: [] }
       const { data } = await admin.from('warehouses').select('id, name, code').eq('is_active', true).in('store_id', storeIds).order('name')
-      return { data: data ?? [] }
+      return { data: sortWarehousesByPriority(data ?? []) }
     })(),
   ])
 
