@@ -323,6 +323,24 @@ async function pickWarehouseForReceipt(adminClient: AdminClient, order: any, ove
     if (storeMainWarehouse?.id) return storeMainWarehouse.id as string
   }
 
+  // Fallback: almacén principal de Hermanos Pinzón (tienda por defecto para recepciones)
+  const { data: pinzonStore } = await adminClient
+    .from('stores')
+    .select('id')
+    .eq('code', 'PIN')
+    .eq('is_active', true)
+    .maybeSingle()
+  if (pinzonStore?.id) {
+    const { data: pinzonWarehouse } = await adminClient
+      .from('warehouses')
+      .select('id')
+      .eq('store_id', pinzonStore.id)
+      .eq('is_main', true)
+      .eq('is_active', true)
+      .maybeSingle()
+    if (pinzonWarehouse?.id) return pinzonWarehouse.id as string
+  }
+
   const { data: fallbackWarehouse } = await adminClient
     .from('warehouses')
     .select('id')
