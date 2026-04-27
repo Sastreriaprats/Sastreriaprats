@@ -191,6 +191,7 @@ export function SupplierInvoicesContent() {
     amount: '',
     tax_rate: '21',
     shipping_amount: '',
+    retention_rate: '0',
     total_amount: '',
     payment_method: '',
     notes: '',
@@ -332,6 +333,7 @@ export function SupplierInvoicesContent() {
       amount: '',
       tax_rate: '21',
       shipping_amount: '',
+      retention_rate: '0',
       total_amount: '',
       payment_method: '',
       notes: '',
@@ -346,6 +348,11 @@ export function SupplierInvoicesContent() {
 
   const openEdit = async (row: ApSupplierInvoiceRow) => {
     setEditingId(row.id)
+    // Reconstruir el IVA % real a partir de los importes guardados (los datos
+    // de la factura solo guardan los importes, no el porcentaje).
+    const reconstructedTaxRate = row.amount > 0
+      ? Math.round((row.tax_amount / row.amount) * 10000) / 100
+      : 21
     setForm({
       supplier_id: row.supplier_id || '',
       supplier_name: row.supplier_name,
@@ -354,8 +361,9 @@ export function SupplierInvoicesContent() {
       invoice_date: row.invoice_date,
       due_date: row.due_date,
       amount: String(row.amount),
-      tax_rate: '21',
+      tax_rate: String(reconstructedTaxRate),
       shipping_amount: row.shipping_amount ? String(row.shipping_amount) : '',
+      retention_rate: String(row.retention_rate ?? 0),
       total_amount: String(row.total_amount),
       payment_method: row.payment_method || '',
       notes: row.notes || '',
@@ -432,21 +440,24 @@ export function SupplierInvoicesContent() {
   const amountNum = parseFloat(String(form.amount).replace(',', '.')) || 0
   const taxRateNum = parseFloat(String(form.tax_rate).replace(',', '.')) || 21
   const shippingNum = parseFloat(String(form.shipping_amount).replace(',', '.')) || 0
-  const computedTotal = amountNum * (1 + taxRateNum / 100) + shippingNum
+  const retentionRateNum = parseFloat(String(form.retention_rate).replace(',', '.')) || 0
+  const retentionAmountNum = Math.round((amountNum * retentionRateNum / 100) * 100) / 100
+  const computedTotal = amountNum * (1 + taxRateNum / 100) + shippingNum - retentionAmountNum
   const totalNum = parseFloat(String(form.total_amount).replace(',', '.')) || computedTotal
 
-  // Si hay albaranes seleccionados y el usuario cambia el IVA o el envío,
+  // Si hay albaranes seleccionados y el usuario cambia el IVA, IRPF o envío,
   // recalcular el total automáticamente sobre la base derivada de los albaranes.
   useEffect(() => {
     if (selectedDeliveryNoteIds.length === 0) return
     const base = Math.round(selectedDeliveryNotesTotal * 100) / 100
-    const total = Math.round((base * (1 + taxRateNum / 100) + shippingNum) * 100) / 100
+    const ret = Math.round((base * retentionRateNum / 100) * 100) / 100
+    const total = Math.round((base * (1 + taxRateNum / 100) + shippingNum - ret) * 100) / 100
     setForm((f) => ({
       ...f,
       amount: base > 0 ? String(base) : f.amount,
       total_amount: total > 0 ? String(total) : f.total_amount,
     }))
-  }, [taxRateNum, shippingNum, selectedDeliveryNoteIds.length, selectedDeliveryNotesTotal])
+  }, [taxRateNum, shippingNum, retentionRateNum, selectedDeliveryNoteIds.length, selectedDeliveryNotesTotal])
 
   const handleSave = async () => {
     if (!form.supplier_id && !form.supplier_name.trim()) {
@@ -471,7 +482,7 @@ export function SupplierInvoicesContent() {
     }
 
     setSaving(true)
-    const tax_amount = totalNum - amountNum - shippingNum
+    const tax_amount = Math.round(amountNum * taxRateNum) / 100
     const payload: ApSupplierInvoiceInput = {
       supplier_id: form.supplier_id || null,
       supplier_name: form.supplier_name.trim(),
@@ -482,6 +493,8 @@ export function SupplierInvoicesContent() {
       amount: amountNum,
       tax_amount,
       shipping_amount: shippingNum,
+      retention_rate: retentionRateNum,
+      retention_amount: retentionAmountNum,
       total_amount: totalNum,
       payment_method: form.payment_method.trim() || null,
       notes: form.notes.trim() || null,
@@ -818,6 +831,7 @@ export function SupplierInvoicesContent() {
             {(() => {
               const totalBruto = rows.reduce((s, r) => s + Number(r.amount ?? 0), 0)
               const totalIva = rows.reduce((s, r) => s + Number(r.tax_amount ?? 0), 0)
+              const totalIrpf = rows.reduce((s, r) => s + Number(r.retention_amount ?? 0), 0)
               const totalFacturado = rows.reduce((s, r) => s + r.total_amount, 0)
               const totalPagado = rows.reduce((s, r) => s + (paidMap[r.id] ?? 0), 0)
               const totalPendiente = rows.reduce(
@@ -840,6 +854,15 @@ export function SupplierInvoicesContent() {
                     <TableCell className="text-right tabular-nums">{formatCurrency(totalIva)}</TableCell>
                     <TableCell colSpan={5}></TableCell>
                   </TableRow>
+                  {totalIrpf > 0 && (
+                    <TableRow className="font-normal">
+                      <TableCell colSpan={4} className="text-right text-muted-foreground">
+                        IRPF retenido
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">−{formatCurrency(totalIrpf)}</TableCell>
+                      <TableCell colSpan={5}></TableCell>
+                    </TableRow>
+                  )}
                   <TableRow className="font-semibold border-t-2">
                     <TableCell colSpan={4} className="text-right">
                       Totales ({rows.length} factura{rows.length === 1 ? '' : 's'})
@@ -1011,9 +1034,12 @@ export function SupplierInvoicesContent() {
                     const amt = parseFloat(v.replace(',', '.')) || 0
                     const rate = parseFloat(String(form.tax_rate).replace(',', '.')) || 21
                     const ship = parseFloat(String(form.shipping_amount).replace(',', '.')) || 0
-                    setForm((f) => ({ ...f, amount: v, total_amount: String(amt * (1 + rate / 100) + ship) }))
+                    const retRate = parseFloat(String(form.retention_rate).replace(',', '.')) || 0
+                    const ret = Math.round((amt * retRate / 100) * 100) / 100
+                    setForm((f) => ({ ...f, amount: v, total_amount: String(amt * (1 + rate / 100) + ship - ret) }))
                   }}
                 />
+                <p className="text-xs text-muted-foreground mt-1">Si hay transporte, súmalo aquí.</p>
               </div>
               <div>
                 <Label>IVA %</Label>
@@ -1022,7 +1048,9 @@ export function SupplierInvoicesContent() {
                   onValueChange={(v) => {
                     const amt = parseFloat(String(form.amount).replace(',', '.')) || 0
                     const ship = parseFloat(String(form.shipping_amount).replace(',', '.')) || 0
-                    setForm((f) => ({ ...f, tax_rate: v, total_amount: String(amt * (1 + parseFloat(v) / 100) + ship) }))
+                    const retRate = parseFloat(String(form.retention_rate).replace(',', '.')) || 0
+                    const ret = Math.round((amt * retRate / 100) * 100) / 100
+                    setForm((f) => ({ ...f, tax_rate: v, total_amount: String(amt * (1 + parseFloat(v) / 100) + ship - ret) }))
                   }}
                 >
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -1034,20 +1062,27 @@ export function SupplierInvoicesContent() {
                 </Select>
               </div>
               <div>
-                <Label>Transporte (€)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={form.shipping_amount}
-                  placeholder="0.00"
-                  onChange={(e) => {
-                    const v = e.target.value
-                    const ship = parseFloat(v.replace(',', '.')) || 0
+                <Label>IRPF %</Label>
+                <Select
+                  value={form.retention_rate}
+                  onValueChange={(v) => {
                     const amt = parseFloat(String(form.amount).replace(',', '.')) || 0
                     const rate = parseFloat(String(form.tax_rate).replace(',', '.')) || 21
-                    setForm((f) => ({ ...f, shipping_amount: v, total_amount: String(amt * (1 + rate / 100) + ship) }))
+                    const ship = parseFloat(String(form.shipping_amount).replace(',', '.')) || 0
+                    const ret = Math.round((amt * parseFloat(v) / 100) * 100) / 100
+                    setForm((f) => ({ ...f, retention_rate: v, total_amount: String(amt * (1 + rate / 100) + ship - ret) }))
                   }}
-                />
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {[0, 7, 15, 19].map((n) => (
+                      <SelectItem key={n} value={String(n)}>{n}%</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {retentionAmountNum > 0 && (
+                  <p className="text-xs text-muted-foreground mt-1">−{formatCurrency(retentionAmountNum)}</p>
+                )}
               </div>
               <div>
                 <Label>Total (€) *</Label>

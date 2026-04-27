@@ -19,6 +19,8 @@ export type ApSupplierInvoiceRow = {
   amount: number
   tax_amount: number
   shipping_amount: number
+  retention_rate: number
+  retention_amount: number
   total_amount: number
   currency: string
   status: string
@@ -40,6 +42,8 @@ export type ApSupplierInvoiceInput = {
   amount: number
   tax_amount?: number
   shipping_amount?: number
+  retention_rate?: number
+  retention_amount?: number
   total_amount: number
   payment_method?: string | null
   notes?: string | null
@@ -307,6 +311,8 @@ export const listSupplierInvoices = protectedAction<
       amount: Number(r.amount ?? 0),
       tax_amount: Number(r.tax_amount ?? 0),
       shipping_amount: Number(r.shipping_amount ?? 0),
+      retention_rate: Number(r.retention_rate ?? 0),
+      retention_amount: Number(r.retention_amount ?? 0),
       total_amount: Number(r.total_amount ?? 0),
       currency: String(r.currency ?? 'EUR'),
       status: String(r.status ?? 'pendiente'),
@@ -561,6 +567,8 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
         amount: Number(input.amount),
         tax_amount: Number(input.tax_amount ?? 0),
         shipping_amount: Number(input.shipping_amount ?? 0),
+        retention_rate: Number(input.retention_rate ?? 0),
+        retention_amount: Number(input.retention_amount ?? 0),
         total_amount: Number(input.total_amount),
         payment_method: input.payment_method?.trim() || supplierDefaults?.payment_method || null,
         notes: input.notes?.trim() || null,
@@ -661,6 +669,8 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
         amount: Number(rest.amount),
         tax_amount: Number(rest.tax_amount ?? 0),
         shipping_amount: Number(rest.shipping_amount ?? 0),
+        retention_rate: Number(rest.retention_rate ?? 0),
+        retention_amount: Number(rest.retention_amount ?? 0),
         total_amount: Number(rest.total_amount),
         payment_method: rest.payment_method?.trim() || supplierDefaults?.payment_method || null,
         notes: rest.notes?.trim() || null,
