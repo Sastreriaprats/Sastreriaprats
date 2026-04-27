@@ -48,8 +48,8 @@ export function ClientsPageContent({ basePath = '/admin' }: { basePath?: string 
     filters, setFilters, isLoading, refresh, pageSize,
   } = useList(listClients, {
     pageSize: 25,
-    defaultSort: 'created_at',
-    defaultOrder: 'desc',
+    defaultSort: 'full_name',
+    defaultOrder: 'asc',
   })
 
   const applyCategory = (value: string) => {

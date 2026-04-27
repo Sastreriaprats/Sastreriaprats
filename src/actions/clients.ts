@@ -1,6 +1,6 @@
 'use server'
 
-import { protectedAction } from '@/lib/server/action-wrapper'
+import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { queryList, queryById, getNextNumber } from '@/lib/server/query-helpers'
 import { createClientSchema, updateClientSchema, clientNoteSchema, clientMeasurementsSchema } from '@/lib/validations/clients'
 import { success, failure } from '@/lib/errors'
@@ -8,10 +8,72 @@ import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { sendWelcomeEmail } from '@/lib/email/transactional'
 import { buildAuditDiff } from '@/lib/audit'
 
+type ClientAggregates = { spent: number; pending: number; count: number }
+
+/**
+ * Calcula en vivo los totales por cliente sumando pedidos de confección
+ * (`tailoring_orders`) y ventas POS completadas (`sales`). Las columnas
+ * homónimas en `clients` están sin trigger y permanecen a 0.
+ */
+async function computeClientAggregates(
+  admin: AdminClient,
+  clientIds: string[],
+): Promise<Map<string, ClientAggregates>> {
+  const map = new Map<string, ClientAggregates>()
+  if (clientIds.length === 0) return map
+
+  const [ordersRes, salesRes] = await Promise.all([
+    admin
+      .from('tailoring_orders')
+      .select('client_id, total_paid, total_pending')
+      .in('client_id', clientIds)
+      .neq('status', 'cancelled'),
+    admin
+      .from('sales')
+      .select('client_id, total')
+      .in('client_id', clientIds)
+      .eq('status', 'completed'),
+  ])
+
+  for (const o of (ordersRes.data ?? []) as Array<Record<string, unknown>>) {
+    const id = String(o.client_id || '')
+    if (!id) continue
+    const cur = map.get(id) ?? { spent: 0, pending: 0, count: 0 }
+    cur.spent += Number(o.total_paid) || 0
+    cur.pending += Number(o.total_pending) || 0
+    cur.count += 1
+    map.set(id, cur)
+  }
+  for (const s of (salesRes.data ?? []) as Array<Record<string, unknown>>) {
+    const id = String(s.client_id || '')
+    if (!id) continue
+    const cur = map.get(id) ?? { spent: 0, pending: 0, count: 0 }
+    cur.spent += Number(s.total) || 0
+    cur.count += 1
+    map.set(id, cur)
+  }
+
+  return map
+}
+
+function applyAggregates<T extends Record<string, unknown>>(
+  client: T,
+  agg: ClientAggregates | undefined,
+): T {
+  const a = agg ?? { spent: 0, pending: 0, count: 0 }
+  return {
+    ...client,
+    total_spent: a.spent,
+    total_pending: a.pending,
+    purchase_count: a.count,
+    average_ticket: a.count > 0 ? a.spent / a.count : 0,
+  }
+}
+
 export const listClients = protectedAction<ListParams, ListResult<any>>(
   { permission: 'clients.view', auditModule: 'clients' },
   async (ctx, params) => {
-    const result = await queryList('clients', {
+    const result = await queryList<Record<string, unknown>>('clients', {
       ...params,
       searchFields: ['full_name', 'email', 'phone', 'document_number', 'client_code'],
     }, `
@@ -20,6 +82,11 @@ export const listClients = protectedAction<ListParams, ListResult<any>>(
       purchase_count, average_ticket, tags, created_at,
       home_store_id, assigned_salesperson_id
     `)
+
+    const ids = result.data.map((c) => String(c.id))
+    const aggregates = await computeClientAggregates(ctx.adminClient, ids)
+    result.data = result.data.map((c) => applyAggregates(c, aggregates.get(String(c.id))))
+
     return success(result)
   }
 )
@@ -33,7 +100,9 @@ export const getClient = protectedAction<string, any>(
       boutique_alterations ( id, description, cost, status, created_at )
     `)
     if (!client) return failure('Cliente no encontrado', 'NOT_FOUND')
-    return success(client)
+
+    const aggregates = await computeClientAggregates(ctx.adminClient, [clientId])
+    return success(applyAggregates(client as Record<string, unknown>, aggregates.get(clientId)))
   }
 )
 
