@@ -14,7 +14,8 @@ const SELECT_ORDERS = `
   estimated_delivery_date, total, total_paid, total_pending,
   created_at,
   clients ( id, full_name, phone, email, category ),
-  stores ( name, code )
+  stores ( name, code ),
+  tailoring_order_lines ( id, sort_order, configuration, garment_types ( name ) )
 `
 
 /** Devuelve el siguiente número de talón (solo el número, ej. 46). */

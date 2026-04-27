@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import { Loader2, AlertTriangle } from 'lucide-react'
-import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
+import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel, summarizeOrderGarments } from '@/lib/utils'
 
 const pipelineStatuses = [
   'created', 'fabric_ordered', 'fabric_received', 'factory_ordered',
@@ -49,6 +49,9 @@ export function OrdersPipeline({ orders, isLoading, onRefresh }: {
                         {isOverdue && <AlertTriangle className="h-3 w-3 text-red-500" />}
                       </div>
                       <p className="text-sm font-medium truncate">{order.clients?.full_name}</p>
+                      <p className="text-xs text-muted-foreground truncate" title={summarizeOrderGarments(order.tailoring_order_lines)}>
+                        {summarizeOrderGarments(order.tailoring_order_lines)}
+                      </p>
                       <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
                         <span>{formatDate(order.estimated_delivery_date)}</span>
                         <span className="font-medium text-foreground">{formatCurrency(order.total)}</span>

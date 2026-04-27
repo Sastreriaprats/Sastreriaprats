@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Loader2, Scissors, Plus } from 'lucide-react'
-import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
+import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel, summarizeOrderGarments } from '@/lib/utils'
 
 export function ClientOrdersTab({ clientId }: { clientId: string }) {
   const router = useRouter()
@@ -21,7 +21,7 @@ export function ClientOrdersTab({ clientId }: { clientId: string }) {
       try {
         const { data } = await supabase
           .from('tailoring_orders')
-          .select('id, order_number, order_type, status, order_date, estimated_delivery_date, total, total_paid, total_pending, stores(name)')
+          .select('id, order_number, order_type, status, order_date, estimated_delivery_date, total, total_paid, total_pending, stores(name), tailoring_order_lines(id, sort_order, configuration, garment_types(name))')
           .eq('client_id', clientId)
           .order('order_date', { ascending: false })
           .limit(100)
@@ -66,7 +66,7 @@ export function ClientOrdersTab({ clientId }: { clientId: string }) {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Nº Pedido</TableHead><TableHead>Tipo</TableHead><TableHead>Estado</TableHead>
+            <TableHead>Nº Pedido</TableHead><TableHead>Encargo</TableHead><TableHead>Tipo</TableHead><TableHead>Estado</TableHead>
             <TableHead>Fecha</TableHead><TableHead>Entrega est.</TableHead><TableHead>Total</TableHead>
             <TableHead>Pagado</TableHead><TableHead>Pendiente</TableHead><TableHead>Tienda</TableHead>
           </TableRow>
@@ -75,6 +75,9 @@ export function ClientOrdersTab({ clientId }: { clientId: string }) {
           {orders.map((o: any) => (
             <TableRow key={o.id} className="cursor-pointer hover:bg-muted/50" onClick={() => router.push(`/admin/pedidos/${o.id}`)}>
               <TableCell className="font-mono font-medium">{o.order_number}</TableCell>
+              <TableCell className="text-sm max-w-[200px] truncate" title={summarizeOrderGarments(o.tailoring_order_lines)}>
+                {summarizeOrderGarments(o.tailoring_order_lines)}
+              </TableCell>
               <TableCell><Badge variant="outline" className="text-xs">{o.order_type === 'artesanal' ? 'Artesanal' : 'Industrial'}</Badge></TableCell>
               <TableCell><Badge className={`text-xs ${getOrderStatusColor(o.status)}`}>{getOrderStatusLabel(o.status)}</Badge></TableCell>
               <TableCell className="text-sm">{formatDate(o.order_date)}</TableCell>

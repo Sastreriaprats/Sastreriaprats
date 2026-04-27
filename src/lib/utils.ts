@@ -123,3 +123,25 @@ export function getOrderStatusLabel(status: string): string {
   }
   return labels[status] || status
 }
+
+/** Resume las prendas de un pedido para listados (ej. "Americana, Pantalón"). */
+export function summarizeOrderGarments(
+  lines: Array<{
+    sort_order?: number | null
+    configuration?: { prendaLabel?: string | null; prenda?: string | null } | null
+    garment_types?: { name?: string | null } | null
+  }> | null | undefined,
+): string {
+  if (!lines || lines.length === 0) return '—'
+  const sorted = [...lines].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+  const names: string[] = []
+  for (const l of sorted) {
+    const cfg = l.configuration ?? {}
+    const rawLabel = String(cfg.prendaLabel ?? '').trim()
+    // "Americana — Traje 1" → "Americana"
+    const label = rawLabel ? rawLabel.split('—')[0]!.trim() : ''
+    const name = label || l.garment_types?.name || ''
+    if (name && !names.includes(name)) names.push(name)
+  }
+  return names.join(', ') || '—'
+}

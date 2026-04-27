@@ -25,7 +25,7 @@ import { useList } from '@/hooks/use-list'
 import { usePermissions } from '@/hooks/use-permissions'
 import { listOrders, deleteOrder } from '@/actions/orders'
 import { listReservations } from '@/actions/reservations'
-import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
+import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel, summarizeOrderGarments } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { OrdersPipeline } from './orders-pipeline'
@@ -356,6 +356,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                     <TableRow>
                       <SortHeader field="order_number">Nº Pedido</SortHeader>
                       <TableHead>Cliente</TableHead>
+                      <TableHead>Encargo</TableHead>
                       <TableHead>Tipo</TableHead>
                       <TableHead>Estado</TableHead>
                       <SortHeader field="created_at">Fecha</SortHeader>
@@ -373,6 +374,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                         <TableRow key={i}>
                           <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                           <TableCell><div className="space-y-1"><Skeleton className="h-4 w-28" /><Skeleton className="h-3 w-20" /></div></TableCell>
+                          <TableCell><Skeleton className="h-4 w-32" /></TableCell>
                           <TableCell><Skeleton className="h-5 w-18 rounded-full" /></TableCell>
                           <TableCell><Skeleton className="h-5 w-22 rounded-full" /></TableCell>
                           <TableCell><Skeleton className="h-4 w-20" /></TableCell>
@@ -386,7 +388,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                       ))
                     ) : orders.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={11} className="h-40 text-center text-muted-foreground">
+                        <TableCell colSpan={12} className="h-40 text-center text-muted-foreground">
                           {hasActiveFilters ? 'No hay pedidos con los filtros aplicados.' : 'No hay pedidos'}
                         </TableCell>
                       </TableRow>
@@ -406,6 +408,9 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                               <p className="font-medium text-sm">{order.clients?.full_name}</p>
                               <p className="text-xs text-muted-foreground">{order.clients?.phone}</p>
                             </div>
+                          </TableCell>
+                          <TableCell className="text-sm max-w-[180px] truncate" title={summarizeOrderGarments(order.tailoring_order_lines)}>
+                            {summarizeOrderGarments(order.tailoring_order_lines)}
                           </TableCell>
                           <TableCell><Badge variant="outline" className="text-xs">{order.order_type === 'artesanal' ? 'Artesanal' : 'Industrial'}</Badge></TableCell>
                           <TableCell><Badge className={`text-xs ${getOrderStatusColor(order.status)}`}>{getOrderStatusLabel(order.status)}</Badge></TableCell>
