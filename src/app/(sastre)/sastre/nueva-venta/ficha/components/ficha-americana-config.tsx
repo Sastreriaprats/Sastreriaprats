@@ -92,11 +92,11 @@ export function FichaAmericanaConfig({ keyId, cfg, setField }: Props) {
         </div>
         <div className="grid grid-cols-2 gap-3 mt-2">
           <div>
-            <Label className="text-white/60 text-xs">Ojales abiertos</Label>
+            <Label className="text-white/60 text-xs uppercase tracking-wide">Ojales abiertos</Label>
             <Input className="mt-1 h-10 bg-[#0d1629] border-[#c9a96e]/20 text-white" value={String(cfg.ojalesAbiertos ?? '')} onChange={(e) => setField('ojalesAbiertos', e.target.value)} placeholder="nº" />
           </div>
           <div>
-            <Label className="text-white/60 text-xs">Ojales cerrados</Label>
+            <Label className="text-white/60 text-xs uppercase tracking-wide">Ojales cerrados</Label>
             <Input className="mt-1 h-10 bg-[#0d1629] border-[#c9a96e]/20 text-white" value={String(cfg.ojalesCerrados ?? '')} onChange={(e) => setField('ojalesCerrados', e.target.value)} placeholder="nº" />
           </div>
         </div>
@@ -105,7 +105,7 @@ export function FichaAmericanaConfig({ keyId, cfg, setField }: Props) {
         <Label className="text-white/60 text-xs">Hombros</Label>
         <div className="flex flex-wrap gap-3 mt-2">
           {[
-            { k: 'medidaHombro', label: 'Medida hombro' }, { k: 'sinHombreras', label: 'Sin hombreras' },
+            { k: 'sinHombreras', label: 'Sin hombreras' },
             { k: 'picado34', label: 'Picado 3/4 todo' }, { k: 'sinHombrera', label: 'Sin hombrera' },
             { k: 'hombrerasTraseras', label: 'Hombreras traseras' }, { k: 'pocaHombrera', label: 'Poca hombrera' },
           ].map(({ k, label }) => (
@@ -116,7 +116,7 @@ export function FichaAmericanaConfig({ keyId, cfg, setField }: Props) {
           ))}
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" checked={!!cfg.hTerminado} onChange={(e) => setField('hTerminado', e.target.checked)} className="text-[#c9a96e]" />
-            <span className="text-white/80 text-sm">H. terminado</span>
+            <span className="text-white/80 text-sm">Hombro terminado</span>
             <Input className="h-7 w-16 bg-[#0d1629] border-[#c9a96e]/20 text-white text-sm px-2" value={String(cfg.hTerminadoVal ?? '')} onChange={(e) => setField('hTerminadoVal', e.target.value)} placeholder="cm" />
           </label>
           <label className="flex items-center gap-2 cursor-pointer">

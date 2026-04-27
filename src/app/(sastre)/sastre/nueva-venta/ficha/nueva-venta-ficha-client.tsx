@@ -81,27 +81,29 @@ const PRENDAS_DISPONIBLES = [
 ]
 
 function defaultPrendaConfig(slug: string): Record<string, unknown> {
+  // Sin valores por defecto en los radios: el sastre los marca al rellenar
+  // para que no queden opciones tildadas que se le pasen sin querer.
   if (slug === 'pantalon') return {
-    vueltas: 'sin_vueltas', bragueta: 'cremallera', pliegues: 'sin_pliegues', plieguesVal: '',
+    vueltas: '', bragueta: '', pliegues: '', plieguesVal: '',
     p7pasadores: false, p5bolsillos: false, pRefForro: false, pRefExtTela: false,
     pSinBolTrasero: false, p1BolTrasero: false, p2BolTraseros: false,
     pBolCostura: false, pBolFrances: false, pBolVivo: false, pBolOreja: false,
     pCenidores: false, pBotonesTirantes: false, pVEnTrasero: false,
-    pretinaCorrida: false, pretina2Botones: false, pretinaTamano: '4', pretinaReforzadaDelante: false,
-    confFM: '', confFT: '', confPT: '', confRodalTrasero: '', confBajadaDelantero: '',
+    pretinaCorrida: false, pretina2Botones: false, pretinaTamano: '', pretinaReforzadaDelante: false,
+    confFM: '', confFT: '', confPT: '', confMuslo: '', confRodalTrasero: '', confBajadaDelantero: '',
     confAlturaTrasero: '', confFormaGemelo: false, confFVSalida: '',
   }
   if (slug === 'chaleco') return {
-    chalecoCorte: 'recto', chalecoBolsillo: '',
+    chalecoCorte: '', chalecoBolsillo: '',
     confF: '', confD: '', confFP: '', confFV: '', confHA: '', confHB: '', confVD: '',
   }
   // americana, teba, abrigo, gabardina, frac, chaque, smoking
   return {
-    botones: '1fila_2', aberturas: '2aberturas', bolsilloTipo: '', cerrilleraExterior: false,
-    primerBoton: '', solapa: 'normal', anchoSolapa: '', manga: 'napolit',
-    ojalesAbiertos: '', ojalesCerrados: '', medidaHombro: false, hTerminado: false, hTerminadoVal: '',
+    botones: '', aberturas: '', bolsilloTipo: '', cerrilleraExterior: false,
+    primerBoton: '', solapa: '', anchoSolapa: '', manga: '',
+    ojalesAbiertos: '', ojalesCerrados: '', hTerminado: false, hTerminadoVal: '',
     escote: false, escoteVal: '', sinHombreras: false, picado34: false, sinHombrera: false,
-    hombrerasTraseras: false, pocaHombrera: false, forro: 'completo',
+    hombrerasTraseras: false, pocaHombrera: false, forro: '',
     confF: '', confD: '', confFP: '', confFV: '', confHA: '', confHB: '', confVD: '',
   }
 }

@@ -104,7 +104,8 @@ export function FichaPantalonConfig({ keyId, cfg, setField }: Props) {
         <div className="flex flex-wrap gap-3 mt-2">
           {[
             { k: 'confFM', label: 'FM' }, { k: 'confFT', label: 'FT' },
-            { k: 'confPT', label: 'PT' }, { k: 'confRodalTrasero', label: 'Rodal trasero' },
+            { k: 'confPT', label: 'PT' }, { k: 'confMuslo', label: 'Muslo' },
+            { k: 'confRodalTrasero', label: 'Rodal trasero' },
             { k: 'confBajadaDelantero', label: 'Bajada delantero' },
             { k: 'confAlturaTrasero', label: 'Altura trasero' },
             { k: 'confFVSalida', label: 'FV con salida' },

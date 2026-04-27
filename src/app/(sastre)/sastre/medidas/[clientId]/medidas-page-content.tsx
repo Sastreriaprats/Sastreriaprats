@@ -489,8 +489,8 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
                                   <label className="block text-sm font-medium text-white/90">{f.name}</label>
                                   <div className="flex items-center gap-2">
                                     <input
-                                      type={f.field_type === 'number' ? 'number' : 'text'}
-                                      step={f.field_type === 'number' ? '0.5' : undefined}
+                                      type="text"
+                                      inputMode={f.field_type === 'number' ? 'decimal' : 'text'}
                                       value={String(values[vKey] ?? '')}
                                       onChange={(e) => setValue(vKey, e.target.value)}
                                       className="flex-1 h-12 px-4 rounded-xl border border-white/20 bg-white/[0.07] text-white text-lg font-medium placeholder:text-white/30 focus:outline-none focus:border-[#c9a96e] focus:ring-1 focus:ring-[#c9a96e]/30 transition-all touch-manipulation"
