@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
@@ -8,9 +8,14 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Loader2, Check } from 'lucide-react'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+  Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
+} from '@/components/ui/command'
+import { Loader2, Check, ChevronsUpDown } from 'lucide-react'
 import { toast } from 'sonner'
 import { updateOrderAction } from '@/actions/orders'
+import { listActiveFabricsForFicha } from '@/actions/fabrics'
 
 type Cfg = Record<string, unknown>
 
@@ -27,18 +32,20 @@ function detectType(line: any, cfg: Cfg): 'pantalon' | 'chaleco' | 'camiseria' |
 }
 
 function defaultsFor(type: 'pantalon' | 'chaleco' | 'camiseria' | 'americana'): Cfg {
+  // Sin valores marcados por defecto en radios: el sastre los pone al rellenar
+  // (consistente con defaultPrendaConfig del flujo de nueva venta).
   if (type === 'pantalon') return {
-    vueltas: 'sin_vueltas', bragueta: 'cremallera', pliegues: 'sin_pliegues', plieguesVal: '',
+    vueltas: '', bragueta: '', pliegues: '', plieguesVal: '',
     p7pasadores: false, p5bolsillos: false, pRefForro: false, pRefExtTela: false,
     pSinBolTrasero: false, p1BolTrasero: false, p2BolTraseros: false,
     pBolCostura: false, pBolFrances: false, pBolVivo: false, pBolOreja: false,
     pCenidores: false, pBotonesTirantes: false, pVEnTrasero: false,
-    pretinaCorrida: false, pretina2Botones: false, pretinaTamano: '4', pretinaReforzadaDelante: false,
-    confFM: '', confFT: '', confPT: '', confRodalTrasero: '', confBajadaDelantero: '',
+    pretinaCorrida: false, pretina2Botones: false, pretinaTamano: '', pretinaReforzadaDelante: false,
+    confFM: '', confFT: '', confPT: '', confMuslo: '', confRodalTrasero: '', confBajadaDelantero: '',
     confAlturaTrasero: '', confFormaGemelo: false, confFVSalida: '',
   }
   if (type === 'chaleco') return {
-    chalecoCorte: 'recto', chalecoBolsillo: '',
+    chalecoCorte: '', chalecoBolsillo: '',
     confF: '', confD: '', confFP: '', confFV: '', confHA: '', confHB: '', confVD: '',
   }
   if (type === 'camiseria') return {
@@ -47,15 +54,15 @@ function defaultsFor(type: 'pantalon' | 'chaleco' | 'camiseria' | 'americana'): 
     jareton: false, bolsillo: false, hombroCaido: false, derecho: false, izquierdo: false,
     hombrosAltos: false, hombrosBajos: false, erguido: false, cargado: false,
     espaldaLisa: false, espPliegues: false, espTablonCentr: false, espPinzas: false,
-    iniciales: false, inicialesTexto: '', modCuello: '', puno: 'sencillo', tejido: '', obs: '',
+    iniciales: false, inicialesTexto: '', modCuello: '', puno: '', tejido: '', obs: '',
   }
   // americana y similares
   return {
-    botones: '1fila_2', aberturas: '2aberturas', bolsilloTipo: '', cerrilleraExterior: false,
-    primerBoton: '', solapa: 'normal', anchoSolapa: '', manga: 'napolit',
-    ojalesAbiertos: '', ojalesCerrados: '', medidaHombro: false, hTerminado: false, hTerminadoVal: '',
+    botones: '', aberturas: '', bolsilloTipo: '', cerrilleraExterior: false,
+    primerBoton: '', solapa: '', anchoSolapa: '', manga: '',
+    ojalesAbiertos: '', ojalesCerrados: '', hTerminado: false, hTerminadoVal: '',
     escote: false, escoteVal: '', sinHombreras: false, picado34: false, sinHombrera: false,
-    hombrerasTraseras: false, pocaHombrera: false, forro: 'completo',
+    hombrerasTraseras: false, pocaHombrera: false, forro: '',
     confF: '', confD: '', confFP: '', confFV: '', confHA: '', confHB: '', confVD: '',
   }
 }
@@ -69,10 +76,39 @@ interface EditFichaDialogProps {
 }
 
 export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: EditFichaDialogProps) {
-  const initialCfg = useMemo<Cfg>(() => (line?.configuration as Cfg) ?? {}, [line?.configuration])
+  const initialCfg = useMemo<Cfg>(() => {
+    const base = (line?.configuration as Cfg) ?? {}
+    // Si el pedido se creó desde el wizard de admin, el tejido vive en
+    // columnas dedicadas (line.fabric_id / fabric_description) y no en
+    // configuration. Lo traemos aquí para que se vea y se pueda editar.
+    const hasConfigTejido = base.tejidoStockId || base.tejidoStockNombre || base.tejidoCatalogo || base.tejido
+    if (!hasConfigTejido && line?.fabric_id) {
+      return {
+        ...base,
+        tejidoStockId: String(line.fabric_id),
+        tejidoStockNombre: String(line.fabric_description ?? ''),
+      }
+    }
+    if (!hasConfigTejido && line?.fabric_description) {
+      return { ...base, tejidoCatalogo: String(line.fabric_description) }
+    }
+    return base
+  }, [line?.configuration, line?.fabric_id, line?.fabric_description])
   const type = useMemo(() => detectType(line, initialCfg), [line, initialCfg])
   const [cfg, setCfg] = useState<Cfg>(() => ({ ...defaultsFor(type), ...initialCfg }))
   const [saving, setSaving] = useState(false)
+  const [fabricsStock, setFabricsStock] = useState<Array<{ id: string; fabric_code: string | null; name: string }>>([])
+  const [tejidoPopoverOpen, setTejidoPopoverOpen] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    listActiveFabricsForFicha().then((res) => {
+      if (cancelled) return
+      if (res?.success && Array.isArray(res.data)) setFabricsStock(res.data)
+    }).catch((err) => console.error('[EditFichaDialog] fabrics:', err))
+    return () => { cancelled = true }
+  }, [open])
 
   const set = <T,>(field: string, value: T) => setCfg((prev) => ({ ...prev, [field]: value }))
   const str = (v: unknown) => (v === null || v === undefined ? '' : String(v))
@@ -83,26 +119,37 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
   const handleSubmit = async () => {
     // Reenviamos TODAS las líneas (preservando campos intactos) cambiando solo la configuration de la editada.
     const allLines = (order?.tailoring_order_lines ?? []) as any[]
-    const payloadLines = allLines.map((l: any, i: number) => ({
-      id: l.id,
-      garment_type_id: l.garment_type_id,
-      line_type: l.line_type,
-      unit_price: Number(l.unit_price ?? 0),
-      discount_percentage: Number(l.discount_percentage ?? 0),
-      tax_rate: Number(l.tax_rate ?? 21),
-      material_cost: Number(l.material_cost ?? 0),
-      labor_cost: Number(l.labor_cost ?? 0),
-      factory_cost: Number(l.factory_cost ?? 0),
-      fabric_id: l.fabric_id ?? null,
-      fabric_description: l.fabric_description ?? null,
-      fabric_meters: l.fabric_meters ?? null,
-      supplier_id: l.supplier_id ?? null,
-      model_name: l.model_name ?? null,
-      model_size: l.model_size ?? null,
-      finishing_notes: l.finishing_notes ?? null,
-      configuration: l.id === line.id ? { ...(l.configuration as Cfg), ...cfg } : (l.configuration ?? {}),
-      sort_order: l.sort_order ?? i,
-    }))
+    const payloadLines = allLines.map((l: any, i: number) => {
+      const isEdited = l.id === line.id
+      // Para la línea editada, sincronizamos también las columnas
+      // fabric_id / fabric_description con lo elegido en el buscador.
+      const editedFabricId = isEdited
+        ? (cfg.tejidoStockId ? String(cfg.tejidoStockId) : null)
+        : (l.fabric_id ?? null)
+      const editedFabricDescription = isEdited
+        ? String(cfg.tejidoStockNombre ?? cfg.tejidoCatalogo ?? cfg.tejido ?? '') || null
+        : (l.fabric_description ?? null)
+      return {
+        id: l.id,
+        garment_type_id: l.garment_type_id,
+        line_type: l.line_type,
+        unit_price: Number(l.unit_price ?? 0),
+        discount_percentage: Number(l.discount_percentage ?? 0),
+        tax_rate: Number(l.tax_rate ?? 21),
+        material_cost: Number(l.material_cost ?? 0),
+        labor_cost: Number(l.labor_cost ?? 0),
+        factory_cost: Number(l.factory_cost ?? 0),
+        fabric_id: editedFabricId,
+        fabric_description: editedFabricDescription,
+        fabric_meters: l.fabric_meters ?? null,
+        supplier_id: l.supplier_id ?? null,
+        model_name: l.model_name ?? null,
+        model_size: l.model_size ?? null,
+        finishing_notes: l.finishing_notes ?? null,
+        configuration: isEdited ? { ...(l.configuration as Cfg), ...cfg } : (l.configuration ?? {}),
+        sort_order: l.sort_order ?? i,
+      }
+    })
 
     setSaving(true)
     const res = await updateOrderAction({
@@ -462,11 +509,68 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
               </div>
               <div className="space-y-1">
                 <Label>Tejido</Label>
-                <Input
-                  value={str(cfg.tejidoStockNombre ?? cfg.tejidoCatalogo ?? cfg.tejido)}
-                  onChange={(e) => set('tejidoCatalogo', e.target.value)}
-                  placeholder="Nombre o referencia"
-                />
+                <Popover open={tejidoPopoverOpen} onOpenChange={setTejidoPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={tejidoPopoverOpen}
+                      className="w-full justify-between font-normal"
+                    >
+                      <span className="truncate">
+                        {str(cfg.tejidoStockNombre ?? cfg.tejidoCatalogo ?? cfg.tejido) || 'Buscar o escribir tejido...'}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="p-0" align="start" style={{ width: 'var(--radix-popover-trigger-width)' }}>
+                    <Command>
+                      <CommandInput
+                        placeholder="Buscar por código o nombre..."
+                        onValueChange={(v) => {
+                          // El texto escrito se queda en tejidoCatalogo por si no
+                          // coincide con ningún tejido del stock (texto libre).
+                          setCfg((prev) => ({
+                            ...prev,
+                            tejidoStockId: '',
+                            tejidoStockNombre: '',
+                            tejidoCatalogo: v,
+                          }))
+                        }}
+                      />
+                      <CommandList>
+                        <CommandEmpty className="py-3 px-3 text-xs text-muted-foreground">
+                          Sin tejidos en stock con ese texto. Lo que escribas se guardará como referencia.
+                        </CommandEmpty>
+                        <CommandGroup>
+                          {fabricsStock.map((f) => {
+                            const label = f.fabric_code ? `${f.fabric_code} — ${f.name}` : f.name
+                            const selected = cfg.tejidoStockId === f.id
+                            return (
+                              <CommandItem
+                                key={f.id}
+                                value={`${f.fabric_code ?? ''} ${f.name}`}
+                                onSelect={() => {
+                                  setCfg((prev) => ({
+                                    ...prev,
+                                    tejidoStockId: f.id,
+                                    tejidoStockNombre: `${f.fabric_code ?? ''} — ${f.name}`.trim(),
+                                    tejidoCatalogo: '',
+                                  }))
+                                  setTejidoPopoverOpen(false)
+                                }}
+                              >
+                                <Check className={`mr-2 h-4 w-4 ${selected ? 'opacity-100' : 'opacity-0'}`} />
+                                {label}
+                              </CommandItem>
+                            )
+                          })}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
             <div className="space-y-1">
