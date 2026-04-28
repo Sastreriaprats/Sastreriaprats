@@ -14,6 +14,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+  Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
+} from '@/components/ui/command'
+import { Check, ChevronsUpDown } from 'lucide-react'
 import { createFichaOrder, searchComplementProducts, getOrder, getNextTalonNumber } from '@/actions/orders'
 import { getClient, getClientMeasurements } from '@/actions/clients'
 import { listActiveFabricsForFicha } from '@/actions/fabrics'
@@ -238,6 +243,7 @@ export function NuevaVentaFichaClient({
   const [sastres, setSastres] = useState<{ id: string; full_name: string }[]>([])
   const [officials, setOfficials] = useState<{ id: string; name: string; specialty: string | null }[]>([])
   const [fabricsStock, setFabricsStock] = useState<{ id: string; fabric_code: string | null; name: string }[]>([])
+  const [tejidoPopoverOpen, setTejidoPopoverOpen] = useState(false)
   const [client, setClient] = useState<Record<string, unknown> | null>(null)
   const [clientLoading, setClientLoading] = useState(false)
   const [camiseriaMeasurements, setCamiseriaMeasurements] = useState<Record<string, unknown> | null>(null)
@@ -755,16 +761,64 @@ export function NuevaVentaFichaClient({
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <Label className="text-white/60 text-xs">Tejido en stock</Label>
-                        <Select value={ficha.tejidoStockId || '__none__'} onValueChange={(v) => {
-                          const fabric = v === '__none__' ? null : fabricsStock.find((f) => f.id === v)
-                          setFicha((prev) => ({ ...prev, tejidoStockId: v === '__none__' ? '' : v, tejidoStockNombre: fabric ? `${fabric.fabric_code ?? ''} — ${fabric.name}`.trim() : '' }))
-                        }}>
-                          <SelectTrigger className="mt-1 min-h-[44px] bg-[#0d1629] border-[#c9a96e]/20 text-white"><SelectValue placeholder="Selecciona tejido en stock" /></SelectTrigger>
-                          <SelectContent className="bg-[#0d1629] border border-white/20 text-white">
-                            <SelectItem value="__none__" className="text-white focus:bg-white/10 focus:text-white">—</SelectItem>
-                            {fabricsStock.map((f) => <SelectItem key={f.id} value={f.id} className="text-white focus:bg-white/10 focus:text-white">{f.fabric_code ? `${f.fabric_code} — ${f.name}` : f.name}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
+                        <Popover open={tejidoPopoverOpen} onOpenChange={setTejidoPopoverOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={tejidoPopoverOpen}
+                              className="mt-1 w-full min-h-[44px] justify-between bg-[#0d1629] border-[#c9a96e]/20 text-white hover:bg-[#0d1629] hover:text-white font-normal"
+                            >
+                              <span className="truncate">
+                                {ficha.tejidoStockNombre || 'Buscar o seleccionar tejido...'}
+                              </span>
+                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="p-0 bg-[#0d1629] border border-white/20 text-white" align="start" style={{ width: 'var(--radix-popover-trigger-width)' }}>
+                            <Command className="bg-transparent text-white">
+                              <CommandInput placeholder="Buscar por código o nombre..." className="text-white placeholder:text-white/40" />
+                              <CommandList>
+                                <CommandEmpty className="py-4 text-center text-sm text-white/50">Sin resultados</CommandEmpty>
+                                <CommandGroup>
+                                  <CommandItem
+                                    value="__none__"
+                                    onSelect={() => {
+                                      setFicha((prev) => ({ ...prev, tejidoStockId: '', tejidoStockNombre: '' }))
+                                      setTejidoPopoverOpen(false)
+                                    }}
+                                    className="text-white aria-selected:bg-white/10 aria-selected:text-white"
+                                  >
+                                    <Check className={`mr-2 h-4 w-4 ${ficha.tejidoStockId ? 'opacity-0' : 'opacity-100'}`} />
+                                    —
+                                  </CommandItem>
+                                  {fabricsStock.map((f) => {
+                                    const label = f.fabric_code ? `${f.fabric_code} — ${f.name}` : f.name
+                                    return (
+                                      <CommandItem
+                                        key={f.id}
+                                        value={`${f.fabric_code ?? ''} ${f.name}`}
+                                        onSelect={() => {
+                                          setFicha((prev) => ({
+                                            ...prev,
+                                            tejidoStockId: f.id,
+                                            tejidoStockNombre: `${f.fabric_code ?? ''} — ${f.name}`.trim(),
+                                          }))
+                                          setTejidoPopoverOpen(false)
+                                        }}
+                                        className="text-white aria-selected:bg-white/10 aria-selected:text-white"
+                                      >
+                                        <Check className={`mr-2 h-4 w-4 ${ficha.tejidoStockId === f.id ? 'opacity-100' : 'opacity-0'}`} />
+                                        {label}
+                                      </CommandItem>
+                                    )
+                                  })}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
                       </div>
                       <div>
                         <Label className="text-white/60 text-xs">Tejido de catálogo</Label>
