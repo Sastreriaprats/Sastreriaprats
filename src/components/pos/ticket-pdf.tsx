@@ -495,6 +495,12 @@ export async function generateReservationPdf(
   data: ReservationTicketData,
   mode: 'download' | 'print' = 'download',
 ): Promise<void> {
+  // IMPORTANTE: si vamos a imprimir, abrimos la pestaña ANTES del primer
+  // await (sin la URL todavía), porque luego de un async el navegador no
+  // considera la llamada user-gesture y el pop-up blocker la rechaza.
+  // Sin esto, la 2.ª impresión seguida fallaba en silencio.
+  const printWindow = mode === 'print' ? window.open('', '_blank') : null
+
   const pdfMake = (await import('pdfmake/build/pdfmake')).default
   const vfsModule = await import('pdfmake/build/vfs_fonts')
   const vfs = (vfsModule as { default?: Record<string, string> }).default
@@ -723,9 +729,8 @@ export async function generateReservationPdf(
         const url = URL.createObjectURL(blob)
         const fileName = `reserva-${data.reservation_number}.pdf`
 
-        const printWindow = window.open(url, '_blank')
-
         if (!printWindow) {
+          // Pop-up bloqueado a pesar de abrir antes del await: fallback a descarga
           const a = document.createElement('a')
           a.href = url
           a.download = fileName
@@ -734,6 +739,9 @@ export async function generateReservationPdf(
           resolve()
           return
         }
+
+        // Cargar el blob en la ventana ya abierta
+        printWindow.location.href = url
 
         let printed = false
         const triggerPrint = () => {
