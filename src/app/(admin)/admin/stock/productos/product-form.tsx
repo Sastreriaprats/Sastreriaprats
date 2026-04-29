@@ -725,19 +725,14 @@ export function ProductForm({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">Sin temporada</SelectItem>
-                    {seasonOptions.map((s) => (
-                      <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>
-                    ))}
-                    {basico.season && !seasonOptions.some(s => s.name === basico.season) && (
+                    <SelectItem value="all">Todo el año</SelectItem>
+                    <SelectItem value="ss">Primavera / Verano</SelectItem>
+                    <SelectItem value="aw">Otoño / Invierno</SelectItem>
+                    {basico.season && !['all', 'ss', 'aw'].includes(basico.season) && (
                       <SelectItem value={basico.season}>{basico.season} (obsoleta)</SelectItem>
                     )}
                   </SelectContent>
                 </Select>
-                {seasonOptions.length === 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    No hay temporadas. Créalas en Configuración → Temporadas.
-                  </p>
-                )}
               </div>
               <div className="space-y-2">
                 <Label>Descripción</Label>
