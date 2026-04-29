@@ -31,10 +31,10 @@ import { usePermissions } from '@/hooks/use-permissions'
 import {
   listProducts,
   listProductCollections,
-  listProductSeasons,
   listProductIdsByFilters,
   updateProductsBulkAction,
 } from '@/actions/products'
+import { listSeasons, type SeasonRow } from '@/actions/seasons'
 import { formatCurrency } from '@/lib/utils'
 
 const productTypeLabels: Record<string, string> = {
@@ -81,7 +81,12 @@ export function ProductsTab() {
 
   // Opciones dinámicas de los selects
   const [collectionOptions, setCollectionOptions] = useState<string[]>([])
-  const [seasonOptions, setSeasonOptions] = useState<string[]>([])
+  const [seasonOptions, setSeasonOptions] = useState<SeasonRow[]>([])
+  const seasonNameBySlug = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const s of seasonOptions) map[s.slug] = s.name
+    return map
+  }, [seasonOptions])
 
   // Selección múltiple (se conserva entre páginas)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -98,7 +103,7 @@ export function ProductsTab() {
   // Cargar opciones de colección y temporada al montar
   useEffect(() => {
     listProductCollections().then((r) => { if (r.success) setCollectionOptions(r.data as string[]) })
-    listProductSeasons().then((r) => { if (r.success) setSeasonOptions(r.data as string[]) })
+    listSeasons().then((r) => { if (r.success) setSeasonOptions(r.data) })
   }, [])
 
   const applyType = (v: string) => {
@@ -273,7 +278,9 @@ export function ProductsTab() {
             <SelectContent>
               <SelectItem value="all">Todas las temporadas</SelectItem>
               {seasonOptions.map((s) => (
-                <SelectItem key={s} value={s}>{s}</SelectItem>
+                <SelectItem key={s.id} value={s.slug}>
+                  {s.name}{s.is_active ? '' : ' (inactiva)'}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -327,7 +334,7 @@ export function ProductsTab() {
             )}
             {seasonFilter !== 'all' && (
               <Badge variant="secondary" className="text-xs gap-1 pr-1">
-                Temporada: {seasonFilter}
+                Temporada: {seasonNameBySlug[seasonFilter] ?? seasonFilter}
                 <button onClick={() => applySeason('all')} className="ml-0.5 hover:text-foreground"><X className="h-3 w-3" /></button>
               </Badge>
             )}
@@ -450,7 +457,7 @@ export function ProductsTab() {
                   <TableCell className="font-mono text-sm">{p.sku}</TableCell>
                   <TableCell>
                     <p className="font-medium">{p.name}</p>
-                    {p.collection && <p className="text-xs text-muted-foreground">{p.collection}{p.season ? ` · ${p.season}` : ''}</p>}
+                    {p.collection && <p className="text-xs text-muted-foreground">{p.collection}{p.season ? ` · ${seasonNameBySlug[p.season] ?? p.season}` : ''}</p>}
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline" className={`text-xs ${productTypeBadgeColors[p.product_type] || ''}`}>

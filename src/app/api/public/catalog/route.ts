@@ -20,9 +20,16 @@ export async function GET(request: NextRequest) {
 
   const admin = createAdminClient()
 
-  // Filtrar por temporada: oct-mar → incluir 'aw', abr-sep → incluir 'ss', siempre incluir 'all'/null
-  const currentMonth = new Date().getMonth() + 1 // 1-12
-  const currentSeason = currentMonth >= 4 && currentMonth <= 9 ? 'ss' : 'aw'
+  // Filtrar por temporada: leemos los slugs de seasons activas y dentro de fechas.
+  // Los productos sin temporada (NULL o '') se muestran siempre.
+  const today = new Date().toISOString().slice(0, 10)
+  const { data: activeSeasonsRaw } = await admin
+    .from('seasons')
+    .select('slug, start_date, end_date')
+    .eq('is_active', true)
+  const activeSeasonSlugs = ((activeSeasonsRaw ?? []) as Array<{ slug: string; start_date: string | null; end_date: string | null }>)
+    .filter((r) => (!r.start_date || r.start_date <= today) && (!r.end_date || r.end_date >= today))
+    .map((r) => r.slug)
 
   // Si hay filtro de categoría, buscar su ID + IDs del padre (si es subcategoría) + descendientes
   let categoryIds: string[] | null = null
@@ -67,7 +74,15 @@ export async function GET(request: NextRequest) {
     `, { count: 'exact' })
     .eq('is_active', true)
     .eq('is_visible_web', true)
-    .or(`season.is.null,season.eq.all,season.eq.,season.eq.${currentSeason}`)
+
+  // Productos sin temporada (NULL/'') siempre, más los que tengan slug en activos.
+  const seasonOrParts = ['season.is.null', 'season.eq.']
+  for (const slug of activeSeasonSlugs) {
+    // Escapar caracteres especiales del slug en el filtro PostgREST
+    const safe = slug.replace(/[(),]/g, '')
+    seasonOrParts.push(`season.eq.${safe}`)
+  }
+  query = query.or(seasonOrParts.join(','))
 
   if (categoryIds && categoryIds.length > 0) query = query.in('category_id', categoryIds)
   if (search) {

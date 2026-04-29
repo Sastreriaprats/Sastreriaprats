@@ -30,7 +30,8 @@ import { ArrowLeft, Plus, Loader2, X, ImagePlus, Sparkles, Star } from 'lucide-r
 import { toast } from 'sonner'
 import { useAction } from '@/hooks/use-action'
 import { createProductAction, updateProductAction, createVariantAction, updateVariantAction, deleteVariantAction, adjustStock, listPhysicalWarehouses, generateProductSkuAction } from '@/actions/products'
-import { listCollectionNames, listSeasonNames } from '@/actions/product-taxonomies'
+import { listCollectionNames } from '@/actions/product-taxonomies'
+import { listSeasons, type SeasonRow } from '@/actions/seasons'
 import { listSizeGuideOptions, type SizeGuideListItem } from '@/actions/size-guides'
 import { formatCurrency } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
@@ -125,7 +126,7 @@ export function ProductForm({
   const [initialStockWarehouseId, setInitialStockWarehouseId] = useState<string>('')
   const [warehouses, setWarehouses] = useState<{ id: string; name: string; code: string; stores?: { name: string; store_type?: string } }[]>([])
   const [collectionOptions, setCollectionOptions] = useState<{ id: string; name: string }[]>([])
-  const [seasonOptions, setSeasonOptions] = useState<{ id: string; name: string }[]>([])
+  const [seasonOptions, setSeasonOptions] = useState<SeasonRow[]>([])
   const [images, setImages] = useState<string[]>([])
   const [mainImageUrl, setMainImageUrl] = useState<string | null>(null)
   const [uploadingImages, setUploadingImages] = useState<Array<{ tempId: string; previewUrl: string }>>([])
@@ -156,7 +157,7 @@ export function ProductForm({
         }
       })
     listCollectionNames().then(r => { if (!cancelled && r.success) setCollectionOptions(r.data) })
-    listSeasonNames().then(r => { if (!cancelled && r.success) setSeasonOptions(r.data) })
+    listSeasons().then(r => { if (!cancelled && r.success) setSeasonOptions(r.data) })
     listSizeGuideOptions().then(r => { if (!cancelled && r.success) setSizeGuideOptions(r.data) })
     return () => { cancelled = true }
   }, [])
@@ -810,14 +811,19 @@ export function ProductForm({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">Sin temporada</SelectItem>
-                    <SelectItem value="all">Todo el año</SelectItem>
-                    <SelectItem value="ss">Primavera / Verano</SelectItem>
-                    <SelectItem value="aw">Otoño / Invierno</SelectItem>
-                    {basico.season && !['all', 'ss', 'aw'].includes(basico.season) && (
+                    {seasonOptions.map((s) => (
+                      <SelectItem key={s.id} value={s.slug}>
+                        {s.name}{s.is_active ? '' : ' (inactiva)'}
+                      </SelectItem>
+                    ))}
+                    {basico.season && !seasonOptions.some(s => s.slug === basico.season) && (
                       <SelectItem value={basico.season}>{basico.season} (obsoleta)</SelectItem>
                     )}
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  Gestiona las temporadas en Configuración → Temporadas.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label>Descripción</Label>

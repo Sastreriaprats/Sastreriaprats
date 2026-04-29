@@ -9,7 +9,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   LayoutDashboard, Users, Scissors, Truck, UserCheck,
   CreditCard, BookOpen, Calendar, Settings, Shirt, Database,
-  Store, ShoppingBag, BarChart3, Mail, ScrollText, CircleDollarSign, Receipt, ClipboardList, Tag, FolderTree,
+  Store, ShoppingBag, BarChart3, Mail, ScrollText, CircleDollarSign, Receipt, ClipboardList, Tag, FolderTree, CalendarRange,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState, useEffect, useRef } from 'react'
@@ -95,6 +95,7 @@ const navItems: NavItem[] = [
       { label: 'Usuarios',          href: '/admin/configuracion?tab=users',   permission: 'config.users' },
       { label: 'Tiendas',           href: '/admin/configuracion?tab=stores',  permission: 'config.edit' },
       { label: 'Categorías',        href: '/admin/configuracion/categorias',  permission: 'products.view', icon: FolderTree },
+      { label: 'Temporadas',        href: '/admin/configuracion/temporadas',  permission: 'products.view', icon: CalendarRange },
       { label: 'Impresora',         href: '/admin/configuracion/impresora' },
     ],
   },
