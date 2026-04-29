@@ -416,6 +416,50 @@ export const uploadWebContentImage = protectedAction<FormData, { url: string }>(
   }
 )
 
+/**
+ * Genera una URL firmada para que el navegador suba un archivo grande (vídeo)
+ * directamente al bucket, sin pasar por una Server Action. Evita los límites
+ * de body size de Next.js / la plataforma de hosting y no carga el archivo
+ * en memoria del servidor.
+ */
+export const getSignedUploadUrl = protectedAction<
+  { filename: string; contentType: string },
+  { signedUrl: string; token: string; path: string; publicUrl: string }
+>(
+  {
+    permission: 'cms.edit_pages',
+    auditModule: 'cms',
+  },
+  async (ctx, { filename, contentType }) => {
+    const safeName = (filename || 'video').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80)
+    const path = `hero/${Date.now()}_${safeName}`
+
+    const tryCreate = () =>
+      ctx.adminClient.storage.from(WEB_CONTENT_BUCKET).createSignedUploadUrl(path)
+
+    let { data, error } = await tryCreate()
+    if (error?.message?.toLowerCase().includes('bucket') && error?.message?.toLowerCase().includes('not found')) {
+      const { error: bucketError } = await ctx.adminClient.storage.createBucket(WEB_CONTENT_BUCKET, { public: true })
+      if (!bucketError || bucketError.message?.toLowerCase().includes('already exists')) {
+        const retry = await tryCreate()
+        data = retry.data
+        error = retry.error
+      }
+    }
+    if (error || !data) return failure(error?.message || 'No se pudo generar la URL de subida')
+
+    const { data: publicData } = ctx.adminClient.storage.from(WEB_CONTENT_BUCKET).getPublicUrl(path)
+    // El contentType lo aplica el navegador en la subida; aquí lo aceptamos pero no se usa por createSignedUploadUrl.
+    void contentType
+    return success({
+      signedUrl: data.signedUrl,
+      token: data.token,
+      path,
+      publicUrl: publicData.publicUrl,
+    })
+  }
+)
+
 export const listCmsPages = protectedAction<void, unknown[]>(
   { permission: 'cms.view', auditModule: 'cms' },
   async (ctx) => {

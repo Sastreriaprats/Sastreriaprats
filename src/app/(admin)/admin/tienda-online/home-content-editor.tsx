@@ -12,6 +12,7 @@ import {
   getHomeSectionsForAdmin,
   updateHomeSection,
   uploadWebContentImage,
+  getSignedUploadUrl,
   type HomeSectionForAdmin,
 } from '@/actions/cms'
 import { toast } from 'sonner'
@@ -261,12 +262,50 @@ function HeroForm({
 
   const handleVideoFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (!file) return
-    setUploadingVideo(true)
-    const url = await onUpload(file)
-    setUploadingVideo(false)
-    if (url) setVideoUrl(url)
     e.target.value = ''
+    if (!file) return
+
+    if (!file.type.startsWith('video/')) {
+      toast.error('El archivo no es un vídeo válido.')
+      return
+    }
+    const MAX_BYTES = 50 * 1024 * 1024
+    if (file.size > MAX_BYTES) {
+      toast.error('El vídeo supera 50MB. Súbelo a YouTube o Vimeo y pega la URL en el campo de abajo.')
+      return
+    }
+
+    setUploadingVideo(true)
+    try {
+      const signed = await getSignedUploadUrl({ filename: file.name, contentType: file.type })
+      if (!signed?.success || !signed.data) {
+        throw new Error('error' in signed ? signed.error : 'No se pudo iniciar la subida')
+      }
+      const res = await fetch(signed.data.signedUrl, {
+        method: 'PUT',
+        body: file,
+        headers: { 'Content-Type': file.type || 'video/mp4' },
+      })
+      if (!res.ok) throw new Error(`Subida rechazada (${res.status})`)
+      setVideoUrl(signed.data.publicUrl)
+      toast.success('Vídeo subido')
+    } catch (err: any) {
+      console.error('[hero video upload]', err)
+      toast.error('Error al subir el vídeo. Prueba con una URL externa.')
+    } finally {
+      setUploadingVideo(false)
+    }
+  }
+
+  const isExternalVideo = (url: string) =>
+    /youtube\.com|youtu\.be|vimeo\.com/i.test(url)
+  const youtubeEmbed = (url: string): string | null => {
+    const m = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]{11})/i)
+    return m ? `https://www.youtube.com/embed/${m[1]}` : null
+  }
+  const vimeoEmbed = (url: string): string | null => {
+    const m = url.match(/vimeo\.com\/(\d+)/i)
+    return m ? `https://player.vimeo.com/video/${m[1]}` : null
   }
 
   const handleSave = () => {
@@ -286,7 +325,7 @@ function HeroForm({
           <Input
             value={video_url}
             onChange={(e) => setVideoUrl(e.target.value)}
-            placeholder="URL del vídeo (.mp4, .webm)"
+            placeholder="URL del vídeo (.mp4, .webm, YouTube, Vimeo)"
             className="flex-1"
           />
           <input
@@ -303,10 +342,45 @@ function HeroForm({
             disabled={saving || uploadingVideo}
             onClick={() => videoInputRef.current?.click()}
           >
-            {uploadingVideo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+            {uploadingVideo ? (
+              <span className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Subiendo vídeo...</span>
+            ) : (
+              <Upload className="h-4 w-4" />
+            )}
           </Button>
         </div>
-        <p className="text-xs text-muted-foreground">Si hay vídeo, se mostrará en bucle sin sonido. La imagen se usa como fallback y poster.</p>
+        <p className="text-xs text-muted-foreground">
+          Máximo 50MB. Para vídeos más grandes, súbelo a YouTube, Vimeo o similar y pega la URL.
+          Si hay vídeo, se mostrará en bucle sin sonido. La imagen se usa como fallback y poster.
+        </p>
+        {video_url && !uploadingVideo && (() => {
+          if (isExternalVideo(video_url)) {
+            const yt = youtubeEmbed(video_url)
+            const vm = vimeoEmbed(video_url)
+            const embed = yt || vm
+            if (embed) {
+              return (
+                <iframe
+                  src={embed}
+                  className="w-full max-h-64 aspect-video rounded-lg mt-2 border"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                />
+              )
+            }
+            return (
+              <a
+                href={video_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-sm text-prats-navy hover:underline mt-2"
+              >
+                <ExternalLink className="h-3.5 w-3.5" /> Ver vídeo
+              </a>
+            )
+          }
+          return <video controls src={video_url} className="w-full max-h-64 rounded-lg mt-2 border" />
+        })()}
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1">
