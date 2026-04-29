@@ -249,6 +249,7 @@ export interface StoreStats {
   id: string
   code: string
   name: string
+  isActive: boolean
   salesToday: number
   salesThisMonth: number
   totalStockUnits: number
@@ -267,17 +268,20 @@ const SASTRERIA_SALE_TYPES = ['tailoring_deposit', 'tailoring_final', 'alteratio
 const ONLINE_COUNTED_STATUSES = ['paid', 'processing', 'shipped', 'delivered']
 const ONLINE_HOST_STORE_CODE = 'PIN'
 
-export const getStoresWithStats = protectedAction<void, StoreStats[]>(
+export const getStoresWithStats = protectedAction<{ includeInactive?: boolean } | undefined, StoreStats[]>(
   { auditModule: 'dashboard' },
-  async (ctx) => {
+  async (ctx, input) => {
     const admin = ctx.adminClient
+    const includeInactive = input?.includeInactive === true
     const today = new Date().toISOString().split('T')[0]
     const monthStart = `${today.slice(0, 7)}-01`
     const [yearStr, monthStr] = today.split('-')
     const year = Number(yearStr)
     const month = Number(monthStr)
 
-    const { data: stores } = await admin.from('stores').select('id, code, name').eq('is_active', true).order('name')
+    let storesQuery = admin.from('stores').select('id, code, name, is_active').order('name')
+    if (!includeInactive) storesQuery = storesQuery.eq('is_active', true)
+    const { data: stores } = await storesQuery
     if (!stores?.length) return success([])
 
     const storeIds = stores.map((s: { id: string }) => s.id)
@@ -364,12 +368,13 @@ export const getStoresWithStats = protectedAction<void, StoreStats[]>(
       if (min != null && available <= min) stockByStore[storeId].low += 1
     }
 
-    const result: StoreStats[] = (stores as { id: string; code: string; name: string }[]).map((store) => {
+    const result: StoreStats[] = (stores as { id: string; code: string; name: string; is_active?: boolean }[]).map((store) => {
       const hostsOnline = (store.code ?? '') === ONLINE_HOST_STORE_CODE
       return {
         id: store.id,
         code: store.code ?? '',
         name: store.name ?? '',
+        isActive: store.is_active !== false,
         salesToday: salesTodayByStore[store.id] ?? 0,
         salesThisMonth: salesMonthByStore[store.id] ?? 0,
         totalStockUnits: stockByStore[store.id]?.total ?? 0,

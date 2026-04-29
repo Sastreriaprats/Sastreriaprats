@@ -159,6 +159,112 @@ export async function updateStoreAction(
   }
 }
 
+/** Soft delete: desactiva la tienda si no tiene cajas abiertas ni pedidos pendientes. */
+export async function deleteStoreAction(storeId: string) {
+  try {
+    const supabase = await createServerSupabaseClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { error: 'No autenticado' }
+    const hasPerm = await checkUserPermission(user.id, 'config.manage_stores')
+    if (!hasPerm) return { error: 'Sin permisos para gestionar tiendas' }
+
+    const admin = createAdminClient()
+
+    const { data: store, error: fetchErr } = await admin
+      .from('stores')
+      .select('id, name, code, is_active')
+      .eq('id', storeId)
+      .single()
+    if (fetchErr || !store) return { error: 'Tienda no encontrada' }
+    if (store.is_active === false) return { error: 'La tienda ya está inactiva' }
+
+    const { count: openCashCount } = await admin
+      .from('cash_sessions')
+      .select('id', { count: 'exact', head: true })
+      .eq('store_id', storeId)
+      .eq('status', 'open')
+    if ((openCashCount ?? 0) > 0) {
+      return { error: `No se puede desactivar la tienda porque tiene ${openCashCount} caja(s) abierta(s). Ciérralas primero.` }
+    }
+
+    const { count: pendingOrdersCount } = await admin
+      .from('tailoring_orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('store_id', storeId)
+      .not('status', 'in', '("delivered","cancelled")')
+    if ((pendingOrdersCount ?? 0) > 0) {
+      return { error: `No se puede desactivar la tienda porque tiene ${pendingOrdersCount} pedido(s) de sastrería pendiente(s). Entrégalos o cancélalos primero.` }
+    }
+
+    const { error: updateErr } = await admin
+      .from('stores')
+      .update({ is_active: false })
+      .eq('id', storeId)
+    if (updateErr) return { error: updateErr.message }
+
+    await admin.rpc('log_audit', {
+      p_user_id: user.id,
+      p_action: 'delete',
+      p_module: 'config',
+      p_entity_type: 'store',
+      p_entity_id: storeId,
+      p_entity_display: `Tienda: ${store.name}`,
+      p_description: `Tienda desactivada (soft delete): ${store.name} (${store.code})`,
+    })
+
+    revalidatePath('/admin/configuracion')
+    revalidatePath('/admin/tiendas')
+    return { success: true }
+  } catch (err) {
+    console.error('[deleteStoreAction]', err)
+    return { error: err instanceof Error ? err.message : 'Error al desactivar tienda' }
+  }
+}
+
+/** Reactiva una tienda previamente desactivada. */
+export async function reactivateStoreAction(storeId: string) {
+  try {
+    const supabase = await createServerSupabaseClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { error: 'No autenticado' }
+    const hasPerm = await checkUserPermission(user.id, 'config.manage_stores')
+    if (!hasPerm) return { error: 'Sin permisos para gestionar tiendas' }
+
+    const admin = createAdminClient()
+
+    const { data: store, error: fetchErr } = await admin
+      .from('stores')
+      .select('id, name, code, is_active')
+      .eq('id', storeId)
+      .single()
+    if (fetchErr || !store) return { error: 'Tienda no encontrada' }
+    if (store.is_active !== false) return { error: 'La tienda ya está activa' }
+
+    const { error: updateErr } = await admin
+      .from('stores')
+      .update({ is_active: true })
+      .eq('id', storeId)
+    if (updateErr) return { error: updateErr.message }
+
+    await admin.rpc('log_audit', {
+      p_user_id: user.id,
+      p_action: 'update',
+      p_module: 'config',
+      p_entity_type: 'store',
+      p_entity_id: storeId,
+      p_entity_display: `Tienda: ${store.name}`,
+      p_description: `Tienda reactivada: ${store.name} (${store.code})`,
+    })
+
+    revalidatePath('/admin/configuracion')
+    revalidatePath('/admin/tiendas')
+    return { success: true }
+  } catch (err) {
+    console.error('[reactivateStoreAction]', err)
+    return { error: err instanceof Error ? err.message : 'Error al reactivar tienda' }
+  }
+}
+
 // ==========================================
 // WAREHOUSES
 // ==========================================

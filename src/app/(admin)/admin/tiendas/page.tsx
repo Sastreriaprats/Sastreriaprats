@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: 'Tiendas — Stocks y ventas' }
 
 export default async function TiendasPage() {
   await requirePermission('config.view')
-  const res = await getStoresWithStats(undefined)
+  const res = await getStoresWithStats({ includeInactive: true })
   const initialStores = res.success && res.data ? res.data : []
   return <TiendasContent initialStores={initialStores} />
 }

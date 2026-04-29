@@ -21,7 +21,7 @@ export function StoreGoalsWidget() {
 
   const load = useCallback(() => {
     setLoading(true)
-    getStoresWithStats()
+    getStoresWithStats(undefined)
       .then(res => { if (res.success) setStores(res.data) })
       .catch(() => {})
       .finally(() => setLoading(false))
