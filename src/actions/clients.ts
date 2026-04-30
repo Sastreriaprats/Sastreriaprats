@@ -174,6 +174,14 @@ export const createClientAction = protectedAction<any, any>(
         created_by: ctx.userId,
       }
       delete (insertPayload as Record<string, unknown>).full_name
+      // Columnas NOT NULL en la tabla clients: si vienen null/undefined,
+      // las quitamos para que apliquen los DEFAULTs SQL
+      // ('individual', 'standard', FALSE, FALSE).
+      for (const k of ['client_type', 'category', 'accepts_marketing', 'accepts_data_storage']) {
+        if (insertPayload[k] === null || insertPayload[k] === undefined) {
+          delete insertPayload[k]
+        }
+      }
       if (profileId) insertPayload.profile_id = profileId
 
       const { data: client, error } = await ctx.adminClient
