@@ -11,6 +11,9 @@ import { Plus, Trash2 } from 'lucide-react'
 
 export type CamisaItem = {
   id: string
+  /** 'a_medida' usa medidas + opciones detalladas; 'industrial' es una camisa
+   *  estándar facturada solo por precio + cantidad (sin medidas detalladas). */
+  mode: 'a_medida' | 'industrial'
   cuello: string; canesu: string; manga: string; frenPecho: string; contPecho: string
   cintura: string; cadera: string; largo: string; pIzq: string; pDch: string
   hombro: string; biceps: string
@@ -111,11 +114,33 @@ export function FichaCamisaSection({
           <Button type="button" className="min-h-[48px] gap-2 bg-[#c9a96e]/15 border border-[#c9a96e]/30 text-[#c9a96e] font-medium hover:bg-[#c9a96e]/25 transition-all" onClick={addCamisa}>
             <Plus className="h-5 w-5" /> Añadir camisa
           </Button>
-          {camisas.map((camisa, index) => (
+          {camisas.map((camisa, index) => {
+            const isIndustrial = camisa.mode === 'industrial'
+            return (
             <div key={camisa.id} className="rounded-lg border border-[#c9a96e]/15 bg-[#0d1629] p-4 space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-[#c9a96e] font-medium">CAMISA #{index + 1}</h3>
                 <div className="flex items-center gap-3">
+                  <div className="inline-flex rounded-md border border-[#c9a96e]/30 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => updateCamisa(camisa.id, 'mode', 'a_medida')}
+                      className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                        !isIndustrial ? 'bg-[#c9a96e]/25 text-[#c9a96e]' : 'bg-transparent text-white/60 hover:text-white'
+                      }`}
+                    >
+                      A medida
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updateCamisa(camisa.id, 'mode', 'industrial')}
+                      className={`px-3 py-1.5 text-xs font-medium transition-colors border-l border-[#c9a96e]/30 ${
+                        isIndustrial ? 'bg-[#c9a96e]/25 text-[#c9a96e]' : 'bg-transparent text-white/60 hover:text-white'
+                      }`}
+                    >
+                      Industrial
+                    </button>
+                  </div>
                   <div className="flex items-center gap-2">
                     <Label className="text-white/60 text-xs whitespace-nowrap">Cortador</Label>
                     <Select value={camisa.cortador || '__none__'} onValueChange={(v) => updateCamisa(camisa.id, 'cortador', v === '__none__' ? '' : v)}>
@@ -141,17 +166,71 @@ export function FichaCamisaSection({
                   </Button>
                 </div>
               </div>
-              <div>
-                <Label className="text-white/60 text-xs mb-2 block">Medidas</Label>
-                <div className="grid grid-cols-6 gap-3 rounded-lg bg-[#0a1020] p-3">
-                  {MEDIDAS_FIELDS.map(({ label, field }) => (
-                    <div key={field}>
-                      <Label className="text-xs text-gray-400 block mb-1">{label}</Label>
-                      <Input type="text" inputMode="decimal" className="w-full py-2 text-center bg-[#1a2744] border-[#c9a96e]/20 text-white text-sm" value={camisa[field] ?? ''} onChange={(e) => updateCamisa(camisa.id, field, e.target.value)} placeholder="—" />
-                    </div>
-                  ))}
+
+              {/* Precio y cantidad arriba para que sean siempre visibles */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-lg bg-[#0a1020] p-3">
+                <div>
+                  <Label className="text-white/70 text-xs">Precio (€) *</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    className="mt-1 h-10 bg-[#1a2744] border-[#c9a96e]/20 text-white"
+                    value={camisa.precio || ''}
+                    onChange={(e) => updateCamisa(camisa.id, 'precio', parseFloat(e.target.value) || 0)}
+                    placeholder="0,00"
+                  />
+                </div>
+                <div>
+                  <Label className="text-white/70 text-xs">Cantidad</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    className="mt-1 h-10 bg-[#1a2744] border-[#c9a96e]/20 text-white"
+                    value={camisa.cantidad}
+                    onChange={(e) => updateCamisa(camisa.id, 'cantidad', Math.max(1, parseInt(e.target.value, 10) || 1))}
+                  />
+                </div>
+                <div>
+                  <Label className="text-white/70 text-xs">Coste est. (€)</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    className="mt-1 h-10 bg-[#1a2744] border-[#c9a96e]/20 text-white"
+                    value={camisa.coste ?? ''}
+                    onChange={(e) => {
+                      const raw = e.target.value
+                      const value = raw === '' ? undefined : (parseFloat(raw) || 0)
+                      updateCamisa(camisa.id, 'coste', value)
+                    }}
+                    placeholder="—"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <p className="text-white/70 text-xs">
+                    Subtotal:{' '}
+                    <span className="text-[#c9a96e] font-semibold">
+                      {((Number(camisa.precio) || 0) * (camisa.cantidad || 1)).toFixed(2)} €
+                    </span>
+                  </p>
                 </div>
               </div>
+
+              {!isIndustrial && (
+                <div>
+                  <Label className="text-white/60 text-xs mb-2 block">Medidas</Label>
+                  <div className="grid grid-cols-6 gap-3 rounded-lg bg-[#0a1020] p-3">
+                    {MEDIDAS_FIELDS.map(({ label, field }) => (
+                      <div key={field}>
+                        <Label className="text-xs text-gray-400 block mb-1">{label}</Label>
+                        <Input type="text" inputMode="decimal" className="w-full py-2 text-center bg-[#1a2744] border-[#c9a96e]/20 text-white text-sm" value={camisa[field] ?? ''} onChange={(e) => updateCamisa(camisa.id, field, e.target.value)} placeholder="—" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {!isIndustrial && (
               <div>
                 <Label className="text-white/60 text-xs mb-2 block">Opciones</Label>
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
@@ -208,6 +287,8 @@ export function FichaCamisaSection({
                   </div>
                 </div>
               </div>
+              )}
+              {!isIndustrial && (
               <div>
                 <Label className="text-white/70 text-xs mb-2 block">Puño</Label>
                 <div className="flex flex-wrap gap-3">
@@ -219,42 +300,17 @@ export function FichaCamisaSection({
                   ))}
                 </div>
               </div>
+              )}
               <div>
                 <Label className="text-white/70 text-xs">Tejido</Label>
                 <div className="mt-1"><TejidoInput value={camisa.tejido} onChange={(v) => updateCamisa(camisa.id, 'tejido', v)} placeholder="Escribe o elige tejido" /></div>
-              </div>
-              <div>
-                <Label className="text-white/60 text-xs mb-2 block">Precio y cantidad</Label>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-white/50 text-xs">Precio (€)</Label>
-                    <Input type="number" min={0} step={0.01} className="mt-1 h-10 bg-[#1a2744] border-[#c9a96e]/20 text-white" value={camisa.precio || ''} onChange={(e) => updateCamisa(camisa.id, 'precio', parseFloat(e.target.value) || 0)} />
-                  </div>
-                  <div>
-                    <Label className="text-white/50 text-xs">Cantidad</Label>
-                    <Input type="number" min={1} className="mt-1 h-10 bg-[#1a2744] border-[#c9a96e]/20 text-white" value={camisa.cantidad} onChange={(e) => updateCamisa(camisa.id, 'cantidad', Math.max(1, parseInt(e.target.value, 10) || 1))} />
-                  </div>
-                </div>
-                <div className="mt-2">
-                  <Label className="text-white/50 text-xs">Coste est. (€)</Label>
-                  <Input
-                    type="number" min={0} step={0.01} placeholder="Opcional"
-                    className="mt-1 h-8 bg-transparent border-white/10 text-white/70 text-xs"
-                    value={camisa.coste ?? ''}
-                    onChange={(e) => {
-                      const raw = e.target.value
-                      const value = raw === '' ? undefined : (parseFloat(raw) || 0)
-                      updateCamisa(camisa.id, 'coste', value)
-                    }}
-                  />
-                </div>
               </div>
               <div>
                 <Label className="text-white/70 text-xs">Observaciones</Label>
                 <Textarea className="mt-1 min-h-[60px] bg-[#1a2744] border-[#c9a96e]/20 text-white" value={camisa.obs} onChange={(e) => updateCamisa(camisa.id, 'obs', e.target.value)} placeholder="Opcional" />
               </div>
             </div>
-          ))}
+          )})}
         </>
       )}
     </section>
