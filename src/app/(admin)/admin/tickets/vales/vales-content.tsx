@@ -30,7 +30,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import {
   Loader2, Gift, ChevronLeft, ChevronRight, Receipt, Users, TicketCheck,
-  ArrowLeftRight, CircleDollarSign, CalendarX, MoreHorizontal, UserCog, Ban, CalendarClock, X,
+  ArrowLeftRight, CircleDollarSign, CalendarX, MoreHorizontal, UserCog, Ban, CalendarClock, X, Printer,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCurrency, formatDate, cn } from '@/lib/utils'
@@ -40,6 +40,7 @@ import { listClients } from '@/actions/clients'
 import {
   cancelVoucherAction, reassignVoucherClientAction, updateVoucherExpiryAction,
 } from '@/actions/vouchers'
+import { downloadVoucherPdf } from '@/lib/pdf/voucher-pdf'
 
 const STATUS_LABELS: Record<string, { label: string; className: string }> = {
   active: { label: 'Activo', className: 'bg-green-100 text-green-700 border-green-200' },
@@ -241,6 +242,23 @@ export function VouchersContent() {
     toast.success(`Vale ${actionTarget.code} anulado`)
     closeAction()
     load()
+  }
+
+  const handlePrintVoucher = async (voucher: any) => {
+    try {
+      await downloadVoucherPdf({
+        code: voucher.code,
+        kind: voucher.voucher_kind,
+        amount: Number(voucher.remaining_amount ?? voucher.original_amount ?? 0),
+        clientName: voucher.client_name ?? null,
+        issuedDate: voucher.issued_date,
+        expiryDate: voucher.expiry_date ?? null,
+        storeName: voucher.store_name ?? null,
+        notes: voucher.notes ?? null,
+      })
+    } catch (err: any) {
+      toast.error(err?.message || 'Error al generar el PDF del vale')
+    }
   }
 
   const handleUpdateExpiry = async () => {
@@ -510,38 +528,40 @@ export function VouchersContent() {
                             <TableCell className="text-sm">{v.store_name ?? '—'}</TableCell>
                             <TableCell className="text-sm text-slate-600">{v.issued_by_name ?? '—'}</TableCell>
                             <TableCell className="text-right">
-                              {canReassign || canCancel || canChangeExpiry ? (
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-7 w-7">
-                                      <MoreHorizontal className="h-4 w-4" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
-                                    {canReassign && (
-                                      <DropdownMenuItem onClick={() => openReassign(v)}>
-                                        <UserCog className="mr-2 h-4 w-4" /> Reasignar cliente
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="h-7 w-7">
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => handlePrintVoucher(v)}>
+                                    <Printer className="mr-2 h-4 w-4" /> Imprimir vale
+                                  </DropdownMenuItem>
+                                  {(canReassign || canChangeExpiry || canCancel) && <DropdownMenuSeparator />}
+                                  {canReassign && (
+                                    <DropdownMenuItem onClick={() => openReassign(v)}>
+                                      <UserCog className="mr-2 h-4 w-4" /> Reasignar cliente
+                                    </DropdownMenuItem>
+                                  )}
+                                  {canChangeExpiry && (
+                                    <DropdownMenuItem onClick={() => openExpiry(v)}>
+                                      <CalendarClock className="mr-2 h-4 w-4" /> Cambiar caducidad
+                                    </DropdownMenuItem>
+                                  )}
+                                  {canCancel && (
+                                    <>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem
+                                        onClick={() => openCancel(v)}
+                                        className="text-red-600 focus:text-red-700 focus:bg-red-50"
+                                      >
+                                        <Ban className="mr-2 h-4 w-4" /> Anular vale
                                       </DropdownMenuItem>
-                                    )}
-                                    {canChangeExpiry && (
-                                      <DropdownMenuItem onClick={() => openExpiry(v)}>
-                                        <CalendarClock className="mr-2 h-4 w-4" /> Cambiar caducidad
-                                      </DropdownMenuItem>
-                                    )}
-                                    {canCancel && (
-                                      <>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem
-                                          onClick={() => openCancel(v)}
-                                          className="text-red-600 focus:text-red-700 focus:bg-red-50"
-                                        >
-                                          <Ban className="mr-2 h-4 w-4" /> Anular vale
-                                        </DropdownMenuItem>
-                                      </>
-                                    )}
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              ) : null}
+                                    </>
+                                  )}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                             </TableCell>
                           </TableRow>
                         )
