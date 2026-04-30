@@ -4,8 +4,18 @@ import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { ArrowLeft, MapPin, Loader2, Truck } from 'lucide-react'
-import { getOnlineOrderDetail, type OnlineOrderDetail } from '@/actions/online-orders'
+import { toast } from 'sonner'
+import { getOnlineOrderDetail, updateOnlineOrderStatusAction, type OnlineOrderDetail, type OnlineOrderStatus } from '@/actions/online-orders'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 
 const STATUS_LABELS: Record<string, string> = {
@@ -28,12 +38,47 @@ const STATUS_COLORS: Record<string, string> = {
   refunded: 'bg-gray-100 text-gray-700',
 }
 
+const STATUS_OPTIONS: OnlineOrderStatus[] = [
+  'pending_payment', 'paid', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded',
+]
+
 export function AdminOrderDetailContent() {
   const params = useParams()
   const router = useRouter()
   const id = params?.id as string
   const [order, setOrder] = useState<OnlineOrderDetail | null>(null)
   const [loading, setLoading] = useState(true)
+  const [pendingStatus, setPendingStatus] = useState<OnlineOrderStatus | null>(null)
+  const [trackingInput, setTrackingInput] = useState('')
+  const [carrierInput, setCarrierInput] = useState('')
+  const [updating, setUpdating] = useState(false)
+
+  const reload = async () => {
+    if (!id) return
+    const res = await getOnlineOrderDetail(id)
+    if (res.success && res.data) setOrder(res.data)
+  }
+
+  const confirmStatusChange = async () => {
+    if (!order || !pendingStatus) return
+    setUpdating(true)
+    const res = await updateOnlineOrderStatusAction({
+      orderId: order.id,
+      status: pendingStatus,
+      trackingNumber: pendingStatus === 'shipped' ? trackingInput.trim() || null : null,
+      carrier: pendingStatus === 'shipped' ? carrierInput.trim() || null : null,
+    })
+    setUpdating(false)
+    if (!res.success) {
+      toast.error('error' in res ? res.error : 'No se pudo cambiar el estado')
+      return
+    }
+    toast.success(`Estado cambiado a "${STATUS_LABELS[pendingStatus] ?? pendingStatus}"`)
+    setPendingStatus(null)
+    setTrackingInput('')
+    setCarrierInput('')
+    await reload()
+  }
 
   useEffect(() => {
     if (!id) {
@@ -99,11 +144,26 @@ export function AdminOrderDetailContent() {
 
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold font-mono">{order.order_number}</h1>
             <Badge className={STATUS_COLORS[order.status] ?? 'bg-gray-100 text-gray-700'}>
               {STATUS_LABELS[order.status] ?? order.status}
             </Badge>
+            <Select
+              value={order.status}
+              onValueChange={(v) => setPendingStatus(v as OnlineOrderStatus)}
+            >
+              <SelectTrigger className="w-44 h-8 text-xs">
+                <SelectValue placeholder="Cambiar estado…" />
+              </SelectTrigger>
+              <SelectContent>
+                {STATUS_OPTIONS.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {STATUS_LABELS[s]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
             {formatDateTime(order.created_at)}
@@ -225,6 +285,62 @@ export function AdminOrderDetailContent() {
           </Card>
         </div>
       </div>
+
+      <AlertDialog
+        open={pendingStatus !== null}
+        onOpenChange={(open) => { if (!open) { setPendingStatus(null); setTrackingInput(''); setCarrierInput('') } }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              ¿Cambiar estado del pedido {order.order_number} a{' '}
+              <span className="font-semibold">
+                &quot;{pendingStatus ? STATUS_LABELS[pendingStatus] ?? pendingStatus : ''}&quot;
+              </span>?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>El cambio queda registrado en el historial del pedido.</p>
+                {pendingStatus === 'shipped' && (
+                  <div className="space-y-2 rounded border bg-purple-50/40 p-3">
+                    <p className="text-xs text-purple-900">
+                      Al marcar como enviado se enviará un email al cliente con el número de seguimiento (si lo indicas).
+                    </p>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Número de seguimiento (opcional)</Label>
+                      <Input
+                        value={trackingInput}
+                        onChange={(e) => setTrackingInput(e.target.value)}
+                        placeholder="Ej: 1Z999AA10123456784"
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Transportista (opcional)</Label>
+                      <Input
+                        value={carrierInput}
+                        onChange={(e) => setCarrierInput(e.target.value)}
+                        placeholder="Ej: SEUR, UPS, Correos…"
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={updating}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); confirmStatusChange() }}
+              disabled={updating}
+            >
+              {updating && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Confirmar cambio
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
