@@ -26,7 +26,7 @@ import {
 import {
   Search, X, Plus, Minus, Trash2, User, ShoppingBag, CreditCard,
   Banknote, Smartphone, ArrowRightLeft, Receipt, FileText,
-  LogOut, Clock, BarChart3, Loader2, Percent, UserPlus, CalendarClock, AlertCircle, Lock, Check, ImageOff, ChevronLeft, Printer,
+  LogOut, Clock, BarChart3, Loader2, Percent, UserPlus, CalendarClock, AlertCircle, AlertTriangle, Lock, Check, ImageOff, ChevronLeft, Printer,
   Bookmark, Gift, Download,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -140,6 +140,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const [clientDebtLoading, setClientDebtLoading] = useState(false)
   const [showCloseReminderDialog, setShowCloseReminderDialog] = useState(false)
   const [lineToRemove, setLineToRemove] = useState<{ id: string; description: string } | null>(null)
+  const [showStockWarning, setShowStockWarning] = useState(false)
   const [paymentTab, setPaymentTab] = useState<'integro' | 'mixto' | 'parcial'>('integro')
   const [paymentStep, setPaymentStep] = useState<'salesperson' | 'choose_type' | 'details'>('salesperson')
   const [posEmployees, setPosEmployees] = useState<Array<{ id: string; full_name: string }>>([])
@@ -449,13 +450,25 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
 
   const addToTicket = (variant: any) => {
     const stock = Array.isArray(variant.stock_levels) ? (variant.stock_levels[0]?.available ?? 0) : 0
+    const productName = variant.products?.name ?? 'Producto'
+    const variantLabel = `${productName}${variant.size ? ` T.${variant.size}` : ''}${variant.color ? ` ${variant.color}` : ''}`
     const existing = ticketLines.find(l => l.product_variant_id === variant.id)
     if (existing) {
-      if (existing.available_stock != null && existing.quantity >= existing.available_stock) return
+      const nextQty = existing.quantity + 1
+      if (existing.available_stock != null && nextQty > existing.available_stock) {
+        toast.warning(`⚠️ ${variantLabel} — Sin stock suficiente en esta tienda (disponible: ${existing.available_stock})`, {
+          style: { background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d' },
+        })
+      }
       setTicketLines(prev => prev.map(l =>
-        l.product_variant_id === variant.id ? { ...l, quantity: l.quantity + 1 } : l
+        l.product_variant_id === variant.id ? { ...l, quantity: nextQty } : l
       ))
     } else {
+      if (stock <= 0) {
+        toast.warning(`⚠️ ${variantLabel} — Sin stock en esta tienda (disponible: 0)`, {
+          style: { background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d' },
+        })
+      }
       // price_with_tax es la fuente de verdad del PVP (IVA incluido); price_override tiene prioridad si se definió
       const taxRate = Number(variant.products.tax_rate) || 21
       const priceOverride = Number(variant.price_override) || 0
@@ -1066,7 +1079,14 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'F2' && canCobrar && ticketLines.length > 0) { e.preventDefault(); setShowPayment(true) }
+      if (e.key === 'F2' && canCobrar && ticketLines.length > 0) {
+        e.preventDefault()
+        const linesWithoutStock = ticketLines.filter(l =>
+          l.product_variant_id && l.available_stock != null && l.quantity > l.available_stock,
+        )
+        if (linesWithoutStock.length > 0) { setShowStockWarning(true); return }
+        setShowPayment(true)
+      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
@@ -1308,13 +1328,18 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
                   <div className="flex items-center gap-0">
                     <Button variant="ghost" size="icon" className="rounded-full w-6 h-6 bg-slate-100 hover:bg-slate-200 text-slate-600" onClick={() => updateLine(line.id, 'quantity', Math.max(1, line.quantity - 1))}><Minus className="h-2.5 w-2.5" /></Button>
                     <span className="w-5 text-center text-xs tabular-nums text-slate-700">{line.quantity}</span>
-                    <Button variant="ghost" size="icon" className={`rounded-full w-6 h-6 bg-slate-100 hover:bg-slate-200 text-slate-600 ${line.available_stock != null && line.quantity >= line.available_stock ? 'opacity-30 cursor-not-allowed' : ''}`} onClick={() => { if (line.available_stock != null && line.quantity >= line.available_stock) return; updateLine(line.id, 'quantity', line.quantity + 1) }}><Plus className="h-2.5 w-2.5" /></Button>
+                    <Button variant="ghost" size="icon" className="rounded-full w-6 h-6 bg-slate-100 hover:bg-slate-200 text-slate-600" onClick={() => updateLine(line.id, 'quantity', line.quantity + 1)}><Plus className="h-2.5 w-2.5" /></Button>
                   </div>
                   <span className="text-slate-500 text-xs truncate">{line.sku || '—'}</span>
                   <div className="min-w-0">
                     {line.product_variant_id ? (
                       <div className="flex items-center gap-1 min-w-0">
                         <p className="font-medium truncate text-slate-800">{line.description}</p>
+                        {line.available_stock != null && line.quantity > line.available_stock && (
+                          <Badge variant="secondary" className="bg-amber-100 text-amber-800 border-amber-300 text-[10px] px-1.5 py-0 shrink-0" title={`Stock disponible en esta tienda: ${line.available_stock}`}>
+                            <AlertTriangle className="h-2.5 w-2.5 mr-0.5" /> Sin stock
+                          </Badge>
+                        )}
                         {line.reservation_id ? (
                           <Badge variant="secondary" className="bg-purple-100 text-purple-800 border-purple-200 text-[10px] px-1.5 py-0 shrink-0">
                             <Bookmark className="h-2.5 w-2.5 mr-0.5" /> {line.reservation_number || 'Reserva'}
@@ -1481,7 +1506,15 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
           </Button>
         </div>
         <Button
-          onClick={() => { if (ticketLines.length === 0) { toast.error('Ticket vacío'); return } if (!canCobrar) { toast.error('Selecciona un cliente o activa "Venta sin cliente"'); return } setShowPayment(true) }}
+          onClick={() => {
+            if (ticketLines.length === 0) { toast.error('Ticket vacío'); return }
+            if (!canCobrar) { toast.error('Selecciona un cliente o activa "Venta sin cliente"'); return }
+            const linesWithoutStock = ticketLines.filter(l =>
+              l.product_variant_id && l.available_stock != null && l.quantity > l.available_stock,
+            )
+            if (linesWithoutStock.length > 0) { setShowStockWarning(true); return }
+            setShowPayment(true)
+          }}
           disabled={!canCobrar || ticketLines.length === 0}
           className="flex flex-col items-center justify-center gap-0.5 h-14 px-8 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded disabled:opacity-50 shrink-0"
         >
@@ -2154,6 +2187,47 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
               }}
             >
               Quitar línea
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showStockWarning} onOpenChange={setShowStockWarning}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-amber-700">
+              <AlertTriangle className="h-5 w-5" /> Productos sin stock en esta tienda
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  Hay {ticketLines.filter(l => l.product_variant_id && l.available_stock != null && l.quantity > l.available_stock).length} producto(s) sin stock suficiente en esta tienda.
+                  ¿Continuar con la venta?
+                </p>
+                <ul className="text-sm bg-amber-50 border border-amber-200 rounded p-2 space-y-1">
+                  {ticketLines
+                    .filter(l => l.product_variant_id && l.available_stock != null && l.quantity > l.available_stock)
+                    .map(l => (
+                      <li key={l.id} className="flex justify-between gap-2">
+                        <span className="truncate">{l.description}</span>
+                        <span className="text-amber-700 shrink-0">{l.quantity} ud · stock: {l.available_stock ?? 0}</span>
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Revisar carrito</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={(e) => {
+                e.preventDefault()
+                setShowStockWarning(false)
+                setShowPayment(true)
+              }}
+            >
+              Continuar igualmente
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
