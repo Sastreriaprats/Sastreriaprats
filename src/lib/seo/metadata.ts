@@ -1,6 +1,6 @@
 import { Metadata } from 'next'
 
-const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://prats.fastia.es'
+const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://sastreriaprats.com'
 
 interface PageMetaParams {
   title: string

@@ -36,7 +36,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     locale: 'es_ES',
-    url: process.env.NEXT_PUBLIC_APP_URL || 'https://prats.fastia.es',
+    url: process.env.NEXT_PUBLIC_APP_URL || 'https://sastreriaprats.com',
     siteName: 'Sastrería Prats',
     title: 'Sastrería Prats — Panel de Gestión',
     description: 'Sistema de gestión integral para sastrería de lujo.',
