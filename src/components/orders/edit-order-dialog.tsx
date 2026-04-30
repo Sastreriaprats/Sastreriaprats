@@ -20,10 +20,11 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { Loader2, Plus, Trash2, Search, Check, X } from 'lucide-react'
+import { Loader2, Plus, Trash2, Search, Check, X, Scissors } from 'lucide-react'
 import { toast } from 'sonner'
 import { listClients } from '@/actions/clients'
 import { updateOrderAction } from '@/actions/orders'
+import { listFabrics } from '@/actions/fabrics'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/utils'
 
@@ -40,6 +41,8 @@ type EditableLine = {
   fabric_id?: string | null
   fabric_description?: string | null
   fabric_meters?: number | null
+  /** Local-only: cacheamos el €/m del tejido para autocalcular material_cost */
+  fabric_price_per_meter?: number | null
   supplier_id?: string | null
   model_name?: string | null
   model_size?: string | null
@@ -48,6 +51,16 @@ type EditableLine = {
   sort_order: number
   // Local-only
   _key: string
+}
+
+type FabricOpt = {
+  id: string
+  fabric_code: string | null
+  name: string
+  composition: string | null
+  color_name: string | null
+  price_per_meter: string | number | null
+  stock_meters: string | number | null
 }
 
 type GarmentType = { id: string; name: string; code: string | null }
@@ -115,6 +128,10 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
   const [stores, setStores] = useState<StoreOpt[]>([])
   const [saving, setSaving] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [fabrics, setFabrics] = useState<FabricOpt[]>([])
+  const [fabricsLoading, setFabricsLoading] = useState(false)
+  const [fabricSelectorFor, setFabricSelectorFor] = useState<string | null>(null)
+  const [fabricSearch, setFabricSearch] = useState('')
 
   // Cargar tipos de prenda y tiendas
   useEffect(() => {
@@ -124,6 +141,26 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
       .then(({ data }) => { if (data) setGarmentTypes(data as GarmentType[]) })
     sb.from('stores').select('id, name').eq('is_active', true).neq('store_type', 'online').order('name')
       .then(({ data }) => { if (data) setStores(data as StoreOpt[]) })
+  }, [open])
+
+  // Cargar catálogo de tejidos para el selector
+  useEffect(() => {
+    if (!open) return
+    setFabricsLoading(true)
+    listFabrics({ isActive: true, limit: 500 })
+      .then((res) => {
+        if (res.success && res.data?.data) {
+          const list = res.data.data as FabricOpt[]
+          setFabrics(list)
+          // Precargar fabric_price_per_meter en las líneas existentes que tengan fabric_id
+          setLines((prev) => prev.map((l) => {
+            if (!l.fabric_id || l.fabric_price_per_meter != null) return l
+            const fab = list.find((f) => f.id === l.fabric_id)
+            return fab ? { ...l, fabric_price_per_meter: Number(fab.price_per_meter ?? 0) || null } : l
+          }))
+        }
+      })
+      .finally(() => setFabricsLoading(false))
   }, [open])
 
   // Buscar cliente
@@ -171,11 +208,20 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
     )
     const margin = total - totalCost
     const marginPct = total > 0 ? (margin / total) * 100 : 0
+    const fabricBreakdown = lines
+      .filter((l) => (l.fabric_description?.trim() || l.fabric_id) && Number(l.fabric_meters ?? 0) > 0)
+      .map((l) => ({
+        name: l.fabric_description?.trim() || 'Tejido',
+        meters: Number(l.fabric_meters ?? 0),
+        pricePerMeter: l.fabric_price_per_meter != null ? Number(l.fabric_price_per_meter) : null,
+        materialCost: Number(l.material_cost ?? 0),
+      }))
     return {
       subtotal, discountAmount, taxAmount, total,
       totalCost: Math.round(totalCost * 100) / 100,
       margin: Math.round(margin * 100) / 100,
       marginPct,
+      fabricBreakdown,
     }
   }, [lines, discountPct])
 
@@ -212,8 +258,56 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
   const removeLine = (key: string) => setLines((prev) => prev.filter((l) => l._key !== key))
 
   const updateLine = useCallback(<K extends keyof EditableLine>(key: string, field: K, value: EditableLine[K]) => {
-    setLines((prev) => prev.map((l) => (l._key === key ? { ...l, [field]: value } : l)))
+    setLines((prev) => prev.map((l) => {
+      if (l._key !== key) return l
+      const next = { ...l, [field]: value }
+      // Si cambian los metros y hay precio por metro definido, recalculamos material_cost.
+      // No tocamos si el usuario edita material_cost directamente — eso es override manual.
+      if (field === 'fabric_meters' && next.fabric_price_per_meter != null) {
+        const meters = Number(next.fabric_meters ?? 0)
+        const price = Number(next.fabric_price_per_meter ?? 0)
+        next.material_cost = Math.round(price * meters * 100) / 100
+      }
+      return next
+    }))
   }, [])
+
+  /** Aplica un tejido del catálogo a una línea: setea fabric_id, descripción,
+   *  cachea price_per_meter y recalcula material_cost si hay metros. */
+  const applyFabric = useCallback((key: string, fabric: FabricOpt | null) => {
+    setLines((prev) => prev.map((l) => {
+      if (l._key !== key) return l
+      if (!fabric) {
+        // Quitar tejido: mantener fabric_description manual si lo había, limpiar fabric_id/price.
+        return { ...l, fabric_id: null, fabric_price_per_meter: null }
+      }
+      const price = Number(fabric.price_per_meter ?? 0) || 0
+      const meters = Number(l.fabric_meters ?? 0)
+      const next: EditableLine = {
+        ...l,
+        fabric_id: fabric.id,
+        fabric_description: fabric.name,
+        fabric_price_per_meter: price || null,
+      }
+      if (price > 0 && meters > 0) {
+        next.material_cost = Math.round(price * meters * 100) / 100
+      }
+      return next
+    }))
+  }, [])
+
+  const filteredFabrics = useMemo(() => {
+    const term = fabricSearch.trim().toLowerCase()
+    if (!term) return fabrics.slice(0, 50)
+    return fabrics
+      .filter((f) =>
+        (f.name || '').toLowerCase().includes(term) ||
+        (f.fabric_code || '').toLowerCase().includes(term) ||
+        (f.composition || '').toLowerCase().includes(term) ||
+        (f.color_name || '').toLowerCase().includes(term),
+      )
+      .slice(0, 50)
+  }, [fabrics, fabricSearch])
 
   const canSave = clientId && storeId && !saving && lines.length > 0
 
@@ -476,12 +570,38 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                             value={l.factory_cost} onChange={(e) => updateLine(l._key, 'factory_cost', parseFloat(e.target.value) || 0)} />
                         </TableCell>
                         <TableCell>
-                          <Input className="h-8 text-xs" placeholder="Descripción"
-                            value={l.fabric_description ?? ''} onChange={(e) => updateLine(l._key, 'fabric_description', e.target.value)} />
+                          <div className="flex items-center gap-1">
+                            <Input
+                              className="h-8 text-xs flex-1"
+                              placeholder="Descripción"
+                              value={l.fabric_description ?? ''}
+                              onChange={(e) => updateLine(l._key, 'fabric_description', e.target.value)}
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8 shrink-0"
+                              onClick={() => { setFabricSelectorFor(l._key); setFabricSearch('') }}
+                              title="Elegir tejido del catálogo"
+                            >
+                              <Scissors className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                          {l.fabric_price_per_meter != null && l.fabric_price_per_meter > 0 && (
+                            <p className="text-[10px] text-muted-foreground mt-0.5 tabular-nums">
+                              {formatCurrency(Number(l.fabric_price_per_meter))} / m
+                            </p>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Input className="h-8 text-xs" type="number" min={0} step={0.1}
                             value={l.fabric_meters ?? ''} onChange={(e) => updateLine(l._key, 'fabric_meters', e.target.value === '' ? null : (parseFloat(e.target.value) || 0))} />
+                          {l.fabric_price_per_meter != null && l.fabric_price_per_meter > 0 && l.fabric_meters && l.fabric_meters > 0 && (
+                            <p className="text-[10px] text-amber-700 mt-0.5 tabular-nums">
+                              = {formatCurrency(Number(l.fabric_price_per_meter) * Number(l.fabric_meters))}
+                            </p>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Input className="h-8 text-xs"
@@ -539,6 +659,25 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                 </Badge>
               </div>
             </div>
+            {summary.fabricBreakdown.length > 0 && (
+              <div className="mt-3 pt-3 border-t">
+                <p className="text-xs text-muted-foreground mb-1">Tejidos utilizados</p>
+                <ul className="text-xs space-y-0.5">
+                  {summary.fabricBreakdown.map((f, i) => (
+                    <li key={i} className="flex justify-between gap-3 tabular-nums">
+                      <span className="truncate">
+                        <span className="font-medium">{f.name}</span>
+                        <span className="text-muted-foreground"> · {f.meters.toFixed(2)} m</span>
+                        {f.pricePerMeter != null && f.pricePerMeter > 0 && (
+                          <span className="text-muted-foreground"> × {formatCurrency(f.pricePerMeter)}/m</span>
+                        )}
+                      </span>
+                      <span className="font-semibold shrink-0">= {formatCurrency(f.materialCost)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </section>
 
           <DialogFooter>
@@ -546,6 +685,82 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
             <Button onClick={() => setConfirmOpen(true)} disabled={!canSave} className="bg-prats-navy hover:bg-prats-navy-light">
               Guardar cambios
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Selector de tejido del catálogo */}
+      <Dialog open={fabricSelectorFor !== null} onOpenChange={(o) => { if (!o) setFabricSelectorFor(null) }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Scissors className="h-5 w-5" /> Elegir tejido del catálogo
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por nombre, código, composición o color…"
+                value={fabricSearch}
+                onChange={(e) => setFabricSearch(e.target.value)}
+                className="pl-9"
+                autoFocus
+              />
+            </div>
+            <div className="border rounded max-h-80 overflow-y-auto">
+              {fabricsLoading ? (
+                <div className="p-6 text-center text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin inline mr-2" /> Cargando tejidos…
+                </div>
+              ) : filteredFabrics.length === 0 ? (
+                <p className="p-6 text-center text-sm text-muted-foreground">Sin resultados</p>
+              ) : (
+                filteredFabrics.map((f) => {
+                  const price = Number(f.price_per_meter ?? 0)
+                  const stock = Number(f.stock_meters ?? 0)
+                  return (
+                    <button
+                      key={f.id}
+                      type="button"
+                      className="w-full text-left px-3 py-2 hover:bg-muted text-sm border-b last:border-0 flex items-center gap-3"
+                      onClick={() => {
+                        if (fabricSelectorFor) applyFabric(fabricSelectorFor, f)
+                        setFabricSelectorFor(null)
+                      }}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate">{f.name}</p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {f.fabric_code ? <span className="font-mono mr-2">{f.fabric_code}</span> : null}
+                          {[f.composition, f.color_name].filter(Boolean).join(' · ')}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="font-semibold tabular-nums">{price > 0 ? `${formatCurrency(price)}/m` : '—'}</p>
+                        <p className="text-xs text-muted-foreground tabular-nums">{stock.toFixed(1)} m</p>
+                      </div>
+                    </button>
+                  )
+                })
+              )}
+            </div>
+          </div>
+          <DialogFooter className="flex-row justify-between sm:justify-between">
+            {fabricSelectorFor && lines.find((l) => l._key === fabricSelectorFor)?.fabric_id && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-red-600 hover:text-red-700 border-red-200 hover:bg-red-50"
+                onClick={() => {
+                  if (fabricSelectorFor) applyFabric(fabricSelectorFor, null)
+                  setFabricSelectorFor(null)
+                }}
+              >
+                <X className="h-4 w-4 mr-1" /> Quitar tejido
+              </Button>
+            )}
+            <Button variant="ghost" onClick={() => setFabricSelectorFor(null)}>Cancelar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
