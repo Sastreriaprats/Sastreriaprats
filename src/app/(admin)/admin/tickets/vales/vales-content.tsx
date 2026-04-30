@@ -1,9 +1,11 @@
 'use client'
 
 import Link from 'next/link'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { DatePickerPopover } from '@/components/ui/date-picker-popover'
@@ -17,12 +19,27 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import {
+  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu'
+import {
   Loader2, Gift, ChevronLeft, ChevronRight, Receipt, Users, TicketCheck,
-  ArrowLeftRight, CircleDollarSign, CalendarX,
+  ArrowLeftRight, CircleDollarSign, CalendarX, MoreHorizontal, UserCog, Ban, CalendarClock, X,
 } from 'lucide-react'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { toast } from 'sonner'
+import { formatCurrency, formatDate, cn } from '@/lib/utils'
 import { listVouchers, getVouchersSummaryByClient } from '@/actions/pos'
 import { getStoresList } from '@/actions/config'
+import { listClients } from '@/actions/clients'
+import {
+  cancelVoucherAction, reassignVoucherClientAction, updateVoucherExpiryAction,
+} from '@/actions/vouchers'
 
 const STATUS_LABELS: Record<string, { label: string; className: string }> = {
   active: { label: 'Activo', className: 'bg-green-100 text-green-700 border-green-200' },
@@ -65,6 +82,23 @@ export function VouchersContent() {
   // ---- Resumen por cliente ----
   const [clientsSummary, setClientsSummary] = useState<any[]>([])
   const [loadingClients, setLoadingClients] = useState(false)
+
+  // ---- Acciones por fila ----
+  const [actionTarget, setActionTarget] = useState<any | null>(null)
+  const [actionMode, setActionMode] = useState<'reassign' | 'cancel' | 'expiry' | null>(null)
+  const [actionLoading, setActionLoading] = useState(false)
+
+  // Reasignar cliente
+  const [clientSearchInput, setClientSearchInput] = useState('')
+  const [clientSearchResults, setClientSearchResults] = useState<any[]>([])
+  const [clientSearchLoading, setClientSearchLoading] = useState(false)
+  const clientSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Anular vale
+  const [cancelReason, setCancelReason] = useState('')
+
+  // Cambiar caducidad
+  const [newExpiryDate, setNewExpiryDate] = useState('')
 
   useEffect(() => {
     getStoresList().then(res => {
@@ -138,6 +172,94 @@ export function VouchersContent() {
   // Agregados rápidos sobre la página cargada (para las tarjetas superiores
   // en modo listado, pero usando los totales reales del back)
   const activeCount = data.filter(v => v.status === 'active' || v.status === 'partially_used').length
+
+  // ── Acciones por fila ────────────────────────────────────────────────────
+  const openReassign = (voucher: any) => {
+    setActionTarget(voucher)
+    setActionMode('reassign')
+    setClientSearchInput(voucher.client_name ?? '')
+    setClientSearchResults([])
+  }
+  const openCancel = (voucher: any) => {
+    setActionTarget(voucher)
+    setActionMode('cancel')
+    setCancelReason('')
+  }
+  const openExpiry = (voucher: any) => {
+    setActionTarget(voucher)
+    setActionMode('expiry')
+    setNewExpiryDate(voucher.expiry_date ?? '')
+  }
+  const closeAction = () => {
+    if (actionLoading) return
+    setActionTarget(null)
+    setActionMode(null)
+    setClientSearchInput('')
+    setClientSearchResults([])
+    setCancelReason('')
+    setNewExpiryDate('')
+  }
+
+  // Buscador de clientes con debounce
+  useEffect(() => {
+    if (actionMode !== 'reassign') return
+    if (clientSearchTimer.current) clearTimeout(clientSearchTimer.current)
+    const term = clientSearchInput.trim()
+    if (term.length < 2) { setClientSearchResults([]); return }
+    clientSearchTimer.current = setTimeout(async () => {
+      setClientSearchLoading(true)
+      const res = await listClients({ page: 1, pageSize: 10, search: term, sortBy: 'full_name', sortOrder: 'asc' })
+      setClientSearchLoading(false)
+      if (res.success && res.data) setClientSearchResults(res.data.data ?? [])
+    }, 250)
+    return () => { if (clientSearchTimer.current) clearTimeout(clientSearchTimer.current) }
+  }, [clientSearchInput, actionMode])
+
+  const handleReassignTo = async (clientId: string | null) => {
+    if (!actionTarget) return
+    setActionLoading(true)
+    const res = await reassignVoucherClientAction({ voucherId: actionTarget.id, clientId })
+    setActionLoading(false)
+    if (!res.success) {
+      toast.error('error' in res ? res.error : 'Error al reasignar cliente')
+      return
+    }
+    toast.success(clientId ? 'Cliente reasignado' : 'Cliente desasignado')
+    closeAction()
+    load()
+  }
+
+  const handleCancel = async () => {
+    if (!actionTarget) return
+    setActionLoading(true)
+    const res = await cancelVoucherAction({ voucherId: actionTarget.id, reason: cancelReason.trim() || null })
+    setActionLoading(false)
+    if (!res.success) {
+      toast.error('error' in res ? res.error : 'Error al anular el vale')
+      return
+    }
+    toast.success(`Vale ${actionTarget.code} anulado`)
+    closeAction()
+    load()
+  }
+
+  const handleUpdateExpiry = async () => {
+    if (!actionTarget) return
+    if (!newExpiryDate || !/^\d{4}-\d{2}-\d{2}$/.test(newExpiryDate)) {
+      toast.error('Selecciona una fecha válida')
+      return
+    }
+    setActionLoading(true)
+    const res = await updateVoucherExpiryAction({ voucherId: actionTarget.id, expiryDate: newExpiryDate })
+    setActionLoading(false)
+    if (!res.success) {
+      toast.error('error' in res ? res.error : 'Error al actualizar caducidad')
+      return
+    }
+    toast.success('Caducidad actualizada')
+    closeAction()
+    load()
+  }
 
   return (
     <div className="space-y-6">
@@ -332,6 +454,7 @@ export function VouchersContent() {
                         <TableHead>Origen</TableHead>
                         <TableHead>Tienda</TableHead>
                         <TableHead>Emitido por</TableHead>
+                        <TableHead className="text-right w-12">Acciones</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -340,8 +463,13 @@ export function VouchersContent() {
                         const isExpiredSoon = v.expiry_date &&
                           (v.status === 'active' || v.status === 'partially_used') &&
                           new Date(v.expiry_date).getTime() - Date.now() < 30 * 24 * 60 * 60 * 1000
+                        const isCancelled = v.status === 'cancelled'
+                        const isUsed = v.status === 'used'
+                        const canCancel = v.status === 'active' || v.status === 'partially_used'
+                        const canChangeExpiry = !isCancelled && !isUsed
+                        const canReassign = !isCancelled
                         return (
-                          <TableRow key={v.id}>
+                          <TableRow key={v.id} className={cn(isCancelled && 'opacity-60')}>
                             <TableCell className="font-mono text-sm">{v.code}</TableCell>
                             <TableCell className="text-sm text-muted-foreground">{formatDate(v.issued_date)}</TableCell>
                             <TableCell>
@@ -381,6 +509,40 @@ export function VouchersContent() {
                             </TableCell>
                             <TableCell className="text-sm">{v.store_name ?? '—'}</TableCell>
                             <TableCell className="text-sm text-slate-600">{v.issued_by_name ?? '—'}</TableCell>
+                            <TableCell className="text-right">
+                              {canReassign || canCancel || canChangeExpiry ? (
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-7 w-7">
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    {canReassign && (
+                                      <DropdownMenuItem onClick={() => openReassign(v)}>
+                                        <UserCog className="mr-2 h-4 w-4" /> Reasignar cliente
+                                      </DropdownMenuItem>
+                                    )}
+                                    {canChangeExpiry && (
+                                      <DropdownMenuItem onClick={() => openExpiry(v)}>
+                                        <CalendarClock className="mr-2 h-4 w-4" /> Cambiar caducidad
+                                      </DropdownMenuItem>
+                                    )}
+                                    {canCancel && (
+                                      <>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem
+                                          onClick={() => openCancel(v)}
+                                          className="text-red-600 focus:text-red-700 focus:bg-red-50"
+                                        >
+                                          <Ban className="mr-2 h-4 w-4" /> Anular vale
+                                        </DropdownMenuItem>
+                                      </>
+                                    )}
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              ) : null}
+                            </TableCell>
                           </TableRow>
                         )
                       })}
@@ -535,6 +697,142 @@ export function VouchersContent() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* ── Dialog: reasignar cliente ── */}
+      <Dialog open={actionMode === 'reassign'} onOpenChange={(open) => { if (!open) closeAction() }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reasignar cliente</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Vale <span className="font-mono font-medium">{actionTarget?.code}</span>.
+              {actionTarget?.client_name ? (
+                <> Cliente actual: <strong>{actionTarget.client_name}</strong>.</>
+              ) : (
+                <> Sin cliente asignado.</>
+              )}
+            </p>
+            <div className="space-y-1">
+              <Label>Buscar cliente</Label>
+              <div className="relative">
+                <Input
+                  value={clientSearchInput}
+                  onChange={(e) => setClientSearchInput(e.target.value)}
+                  placeholder="Nombre, email o NIF…"
+                  autoFocus
+                />
+                {clientSearchLoading && (
+                  <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+                )}
+              </div>
+              {clientSearchInput.trim().length >= 2 && (
+                <div className="border rounded max-h-56 overflow-y-auto">
+                  {clientSearchResults.length === 0 ? (
+                    <p className="text-xs text-muted-foreground p-3 text-center">
+                      {clientSearchLoading ? 'Buscando…' : 'Sin resultados'}
+                    </p>
+                  ) : (
+                    clientSearchResults.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => handleReassignTo(c.id)}
+                        disabled={actionLoading}
+                        className="w-full text-left px-3 py-2 hover:bg-muted text-sm border-b last:border-0 disabled:opacity-50"
+                      >
+                        <span className="font-medium">{c.full_name ?? `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() ?? 'Sin nombre'}</span>
+                        {c.email && <span className="text-muted-foreground ml-2">{c.email}</span>}
+                        {c.document_number && <span className="text-muted-foreground ml-2 font-mono text-xs">{c.document_number}</span>}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+          <DialogFooter className="flex-row justify-between sm:justify-between">
+            {actionTarget?.client_id ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleReassignTo(null)}
+                disabled={actionLoading}
+                className="text-red-600 hover:text-red-700 border-red-200 hover:bg-red-50"
+              >
+                <X className="h-4 w-4 mr-1" /> Quitar cliente
+              </Button>
+            ) : <span />}
+            <Button variant="ghost" onClick={closeAction} disabled={actionLoading}>Cancelar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── AlertDialog: anular vale ── */}
+      <AlertDialog open={actionMode === 'cancel'} onOpenChange={(open) => { if (!open) closeAction() }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-700">
+              <Ban className="h-5 w-5" /> ¿Anular el vale {actionTarget?.code}?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  El vale quedará marcado como <strong>cancelado</strong> y no podrá canjearse.
+                  El saldo restante <strong>{formatCurrency(actionTarget?.remaining_amount ?? 0)}</strong> se perderá.
+                </p>
+                <div className="space-y-1">
+                  <Label htmlFor="cancel-reason">Motivo de anulación (opcional)</Label>
+                  <Textarea
+                    id="cancel-reason"
+                    value={cancelReason}
+                    onChange={(e) => setCancelReason(e.target.value)}
+                    rows={3}
+                    placeholder="Ej: vale duplicado, error al emitir…"
+                  />
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={actionLoading}>No, volver</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              onClick={(e) => { e.preventDefault(); handleCancel() }}
+              disabled={actionLoading}
+            >
+              {actionLoading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Sí, anular vale
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── Dialog: cambiar caducidad ── */}
+      <Dialog open={actionMode === 'expiry'} onOpenChange={(open) => { if (!open) closeAction() }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Cambiar caducidad</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Vale <span className="font-mono font-medium">{actionTarget?.code}</span>.
+              Caducidad actual: <strong>{actionTarget?.expiry_date ? formatDate(actionTarget.expiry_date) : '—'}</strong>.
+            </p>
+            <div className="space-y-1">
+              <Label>Nueva fecha de caducidad</Label>
+              <DatePickerPopover value={newExpiryDate} onChange={setNewExpiryDate} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeAction} disabled={actionLoading}>Cancelar</Button>
+            <Button onClick={handleUpdateExpiry} disabled={actionLoading || !newExpiryDate}>
+              {actionLoading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Guardar caducidad
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
