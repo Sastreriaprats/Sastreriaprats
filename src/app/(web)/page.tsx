@@ -35,7 +35,7 @@ export default async function HomePage() {
             muted
             playsInline
             poster={hero.image_url}
-            className="absolute inset-0 w-full h-full object-cover object-[center_25%] grayscale"
+            className="absolute inset-0 w-full h-full object-cover object-[center_25%]"
           >
             <source src={hero.video_url} type={hero.video_url.endsWith('.webm') ? 'video/webm' : 'video/mp4'} />
           </video>
