@@ -147,7 +147,7 @@ export function FichaCamisaSection({
                   {MEDIDAS_FIELDS.map(({ label, field }) => (
                     <div key={field}>
                       <Label className="text-xs text-gray-400 block mb-1">{label}</Label>
-                      <Input type="number" inputMode="decimal" className="w-full py-2 text-center bg-[#1a2744] border-[#c9a96e]/20 text-white text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" value={camisa[field] ?? ''} onChange={(e) => updateCamisa(camisa.id, field, e.target.value)} placeholder="—" />
+                      <Input type="text" inputMode="decimal" className="w-full py-2 text-center bg-[#1a2744] border-[#c9a96e]/20 text-white text-sm" value={camisa[field] ?? ''} onChange={(e) => updateCamisa(camisa.id, field, e.target.value)} placeholder="—" />
                     </div>
                   ))}
                 </div>

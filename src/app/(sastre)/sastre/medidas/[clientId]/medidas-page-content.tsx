@@ -270,6 +270,11 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
         for (const f of currentGroup.fields) {
           camiseriaValues[f.code] = String(values[valueKey('camiseria', f.code)] ?? '')
         }
+        // Talla no está en measurement_fields; la guardamos manualmente.
+        const tallaVal = values[valueKey('camiseria', 'talla')]
+        if (tallaVal !== undefined && tallaVal !== '') {
+          camiseriaValues.talla = String(tallaVal)
+        }
         const result = await saveBodyMeasurements({
           client_id: clientId,
           garment_type_id: currentGroup.id,
@@ -406,6 +411,19 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
               {currentGroup &&
                 (currentGroup.name === 'Camisería' ? (
                   <>
+                    {/* Talla del cliente para camisería */}
+                    <div className="flex items-end gap-3 mb-4">
+                      <div className="space-y-1 w-40">
+                        <label className="block text-sm font-medium text-white/90">Talla</label>
+                        <input
+                          type="text"
+                          value={String(values[valueKey('camiseria', 'talla')] ?? '')}
+                          onChange={(e) => setValue(valueKey('camiseria', 'talla'), e.target.value)}
+                          className="w-full h-12 px-4 rounded-xl border border-white/20 bg-white/[0.07] text-white text-lg font-medium placeholder:text-white/30 focus:outline-none focus:border-[#c9a96e] focus:ring-1 focus:ring-[#c9a96e]/30 transition-all"
+                          placeholder="40, 42, M…"
+                        />
+                      </div>
+                    </div>
                     {/* Solo medidas físicas (field_group === 'medidas', number/decimal) */}
                     <div>
                       <h3 className="text-xs font-semibold text-[#c9a96e] uppercase tracking-[0.2em] mb-4 pb-2 border-b border-[#c9a96e]/15">Medidas</h3>
@@ -421,8 +439,8 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
                               <label className="block text-sm font-medium text-white/90">{f.name}</label>
                               <div className="flex items-center gap-2">
                                 <input
-                                  type="number"
-                                  step="0.5"
+                                  type="text"
+                                  inputMode="decimal"
                                   value={String(values[vKey] ?? '')}
                                   onChange={(e) => setValue(vKey, e.target.value)}
                                   className="flex-1 h-12 px-4 rounded-xl border border-white/20 bg-white/[0.07] text-white text-lg font-medium placeholder:text-white/30 focus:outline-none focus:border-[#c9a96e] focus:ring-1 focus:ring-[#c9a96e]/30 transition-all"
@@ -449,6 +467,24 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
                   </>
                 ) : (
                   <>
+                    {(() => {
+                      const groupPrefix = getGarmentPrefix(currentGroup.name)
+                      const tallaKey = valueKey(groupPrefix, 'talla')
+                      return (
+                        <div className="flex items-end gap-3">
+                          <div className="space-y-1 w-40">
+                            <label className="block text-sm font-medium text-white/90">Talla</label>
+                            <input
+                              type="text"
+                              value={String(values[tallaKey] ?? '')}
+                              onChange={(e) => setValue(tallaKey, e.target.value)}
+                              className="w-full h-12 px-4 rounded-xl border border-white/20 bg-white/[0.07] text-white text-lg font-medium placeholder:text-white/30 focus:outline-none focus:border-[#c9a96e] focus:ring-1 focus:ring-[#c9a96e]/30 transition-all"
+                              placeholder="50, 52C, M…"
+                            />
+                          </div>
+                        </div>
+                      )
+                    })()}
                     {(() => {
                       const groupPrefix = getGarmentPrefix(currentGroup.name)
                       // Solo campos de medidas físicas (no configuración ni características)

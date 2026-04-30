@@ -10,19 +10,22 @@ const LINE = 6
 const A4_W_MM = 210
 const A4_H_MM = 297
 
+// keys[0] es el código nuevo (post-migración 072); el resto son fallbacks
+// para datos antiguos.
 const MEDIDAS_KEYS = [
-  { key: 'cuello', label: 'Cuello' },
-  { key: 'canesu', label: 'Canesú' },
-  { key: 'manga', label: 'Manga' },
-  { key: 'fren_pecho', label: 'Fren. Pecho' },
-  { key: 'cont_pecho', label: 'Cont. Pecho' },
-  { key: 'cintura', label: 'Cintura' },
-  { key: 'cadera', label: 'Cadera' },
-  { key: 'largo_cuerpo', label: 'Largo Cuerpo' },
-  { key: 'p_izq', label: 'P. Izq.' },
-  { key: 'p_dch', label: 'P. Dch.' },
-  { key: 'hombro', label: 'Hombro' },
-  { key: 'biceps', label: 'Bíceps' },
+  { keys: ['cuello'], label: 'Cuello' },
+  { keys: ['canesu'], label: 'Canesú' },
+  { keys: ['largo_manga', 'manga'], label: 'Manga' },
+  { keys: ['frente_pecho', 'fren_pecho'], label: 'Fren. Pecho' },
+  { keys: ['pecho', 'cont_pecho'], label: 'Cont. Pecho' },
+  { keys: ['cintura'], label: 'Cintura' },
+  { keys: ['cadera'], label: 'Cadera' },
+  { keys: ['largo_cuerpo'], label: 'Largo Cuerpo' },
+  { keys: ['p_izq'], label: 'P. Izq.' },
+  { keys: ['p_dch'], label: 'P. Dch.' },
+  { keys: ['hombro'], label: 'Hombro' },
+  { keys: ['biceps'], label: 'Bíceps' },
+  { keys: ['puno'], label: 'Puño' },
 ] as const
 
 const CARACT_LABELS: Record<string, string> = {
@@ -61,6 +64,15 @@ function getVal(values: Record<string, string>, prefix: string, key: string): st
   return v?.trim() ?? '—'
 }
 
+function getValMulti(values: Record<string, string>, prefix: string, keys: readonly string[] | string[]): string {
+  for (const k of keys) {
+    const v = values[`${prefix}_${k}`] ?? values[k]
+    const trimmed = v?.trim()
+    if (trimmed) return trimmed
+  }
+  return '—'
+}
+
 function getChecked(values: Record<string, string>, prefix: string, key: string): boolean {
   const v = getVal(values, prefix, key)
   return v === 'true' || v === '1'
@@ -81,6 +93,10 @@ export async function generateCamiseriaFichaPdf(params: CamiseriaFichaPdfParams)
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(FONT)
   doc.text('Cliente: ' + (params.clientName || '—'), MARGIN, y)
+  const tallaCabecera = getVal(params.values, prefix, 'talla')
+  if (tallaCabecera && tallaCabecera !== '—') {
+    doc.text('Talla: ' + tallaCabecera, pageW - MARGIN, y, { align: 'right' })
+  }
   y += LINE + 4
 
   doc.setDrawColor(0, 0, 0)
@@ -97,9 +113,9 @@ export async function generateCamiseriaFichaPdf(params: CamiseriaFichaPdfParams)
   const cols = 4
   let col = 0
   doc.setFont('helvetica', 'normal')
-  for (const { key, label } of MEDIDAS_KEYS) {
+  for (const { keys, label } of MEDIDAS_KEYS) {
     const x = MARGIN + col * colW
-    const val = getVal(params.values, prefix, key)
+    const val = getValMulti(params.values, prefix, keys)
     doc.text(`${label}: ${val}`, x, y)
     col++
     if (col >= cols) {

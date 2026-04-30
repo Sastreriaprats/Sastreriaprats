@@ -125,8 +125,8 @@ function FieldInput({
     <div className="space-y-1">
       <Label className="text-xs text-muted-foreground">{field.name}</Label>
       <Input
-        type={field.field_type === 'number' ? 'number' : 'text'}
-        step={field.field_type === 'number' ? '0.5' : undefined}
+        type="text"
+        inputMode={field.field_type === 'number' ? 'decimal' : 'text'}
         value={value}
         onChange={(e) => onChange(field.code, e.target.value)}
         disabled={disabled}
@@ -362,6 +362,19 @@ export function ClientMeasurementsTab({ clientId }: { clientId: string }) {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
+                    <div className="flex items-end gap-3">
+                      <div className="space-y-1 w-32">
+                        <Label className="text-xs text-muted-foreground">Talla</Label>
+                        <Input
+                          type="text"
+                          value={values[valueKey(prefix, 'talla')] ?? ''}
+                          onChange={(e) => set(valueKey(prefix, 'talla'), e.target.value)}
+                          disabled={!canEdit}
+                          className="h-8 text-sm"
+                          placeholder="50, 52C, M…"
+                        />
+                      </div>
+                    </div>
                     {groups.map(([groupName, fields]) => (
                       <div key={groupName}>
                         {groupName !== '__default__' && (
