@@ -223,6 +223,12 @@ export const updateClientAction = protectedAction<{ id: string; data: any }, any
 
     const updateData: any = { ...parsed.data }
     delete updateData.full_name
+    // No permitir null/undefined explícito en columnas NOT NULL: dejaríamos
+    // el UPDATE roto con violation de NOT NULL constraint. Si el front no
+    // envía valor, mantenemos el actual.
+    for (const k of ['client_type', 'category', 'accepts_marketing', 'accepts_data_storage'] as const) {
+      if (updateData[k] === null || updateData[k] === undefined) delete updateData[k]
+    }
 
     const { data: before } = await ctx.adminClient
       .from('clients')
