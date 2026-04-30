@@ -143,25 +143,58 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
       .then(({ data }) => { if (data) setStores(data as StoreOpt[]) })
   }, [open])
 
-  // Cargar catálogo de tejidos para el selector
+  // Cargar catálogo de tejidos para el selector + precargar el price_per_meter
+  // de los tejidos referenciados por las líneas existentes (incluso si están
+  // inactivos o fuera del límite del listado).
   useEffect(() => {
     if (!open) return
     setFabricsLoading(true)
-    listFabrics({ isActive: true, limit: 500 })
-      .then((res) => {
-        if (res.success && res.data?.data) {
-          const list = res.data.data as FabricOpt[]
-          setFabrics(list)
-          // Precargar fabric_price_per_meter en las líneas existentes que tengan fabric_id
-          setLines((prev) => prev.map((l) => {
-            if (!l.fabric_id || l.fabric_price_per_meter != null) return l
-            const fab = list.find((f) => f.id === l.fabric_id)
-            return fab ? { ...l, fabric_price_per_meter: Number(fab.price_per_meter ?? 0) || null } : l
-          }))
+    const sb = createClient()
+
+    const referencedIds = Array.from(
+      new Set(
+        lines
+          .map((l) => l.fabric_id)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    )
+
+    Promise.all([
+      listFabrics({ isActive: true, limit: 500 }),
+      referencedIds.length > 0
+        ? sb.from('fabrics')
+            .select('id, fabric_code, name, composition, color_name, price_per_meter, stock_meters')
+            .in('id', referencedIds)
+        : Promise.resolve({ data: [] as FabricOpt[] }),
+    ])
+      .then(([catalogRes, refRes]) => {
+        const catalog: FabricOpt[] = catalogRes.success && catalogRes.data?.data
+          ? (catalogRes.data.data as FabricOpt[])
+          : []
+        const referenced: FabricOpt[] = ((refRes as { data?: FabricOpt[] }).data ?? []) as FabricOpt[]
+
+        // Combinar para que el selector también sepa de los tejidos referenciados
+        // por líneas existentes (aunque estén inactivos).
+        const byId = new Map<string, FabricOpt>()
+        for (const f of catalog) byId.set(f.id, f)
+        for (const f of referenced) byId.set(f.id, f)
+        setFabrics(Array.from(byId.values()))
+
+        // Precarga del €/m. Damos prioridad a la query específica por IDs.
+        const priceById = new Map<string, number | null>()
+        for (const f of referenced) priceById.set(f.id, Number(f.price_per_meter ?? 0) || null)
+        for (const f of catalog) {
+          if (!priceById.has(f.id)) priceById.set(f.id, Number(f.price_per_meter ?? 0) || null)
         }
+
+        setLines((prev) => prev.map((l) => {
+          if (!l.fabric_id || l.fabric_price_per_meter != null) return l
+          const price = priceById.get(l.fabric_id)
+          return price != null ? { ...l, fabric_price_per_meter: price } : l
+        }))
       })
       .finally(() => setFabricsLoading(false))
-  }, [open])
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Buscar cliente
   useEffect(() => {
