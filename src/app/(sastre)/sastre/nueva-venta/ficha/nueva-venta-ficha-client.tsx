@@ -153,15 +153,35 @@ function getMeasuresFromRecord(
 ): Pick<CamisaItem, 'cuello' | 'canesu' | 'manga' | 'frenPecho' | 'contPecho' | 'cintura' | 'cadera' | 'largo' | 'pIzq' | 'pDch' | 'hombro' | 'biceps'> {
   const empty = { cuello: '', canesu: '', manga: '', frenPecho: '', contPecho: '', cintura: '', cadera: '', largo: '', pIzq: '', pDch: '', hombro: '', biceps: '' }
   if (!v || typeof v !== 'object') return empty
-  const MEDIDAS_MAP: Array<[string, keyof CamisaItem]> = [
-    ['cuello', 'cuello'], ['canesu', 'canesu'], ['manga', 'manga'],
-    ['fren_pecho', 'frenPecho'], ['cont_pecho', 'contPecho'],
-    ['cintura', 'cintura'], ['cadera', 'cadera'], ['largo_cuerpo', 'largo'],
-    ['p_izq', 'pIzq'], ['p_dch', 'pDch'], ['hombro', 'hombro'], ['biceps', 'biceps'],
+  // Cada outKey acepta varias keys posibles porque la migración 072 renombró
+  // los códigos en camisería: manga→largo_manga, fren_pecho→frente_pecho,
+  // cont_pecho→pecho, largo→largo_cuerpo. Y los registros se guardan a veces
+  // con prefijo "camiseria_" (datos antiguos) y a veces sin él (datos nuevos
+  // de saveBodyMeasurements). Probamos todas las combinaciones.
+  const MEDIDAS_MAP: Array<{ keys: string[]; outKey: keyof CamisaItem }> = [
+    { keys: ['cuello'], outKey: 'cuello' },
+    { keys: ['canesu'], outKey: 'canesu' },
+    { keys: ['largo_manga', 'manga'], outKey: 'manga' },
+    { keys: ['frente_pecho', 'fren_pecho'], outKey: 'frenPecho' },
+    { keys: ['pecho', 'cont_pecho'], outKey: 'contPecho' },
+    { keys: ['cintura'], outKey: 'cintura' },
+    { keys: ['cadera'], outKey: 'cadera' },
+    { keys: ['largo_cuerpo', 'largo'], outKey: 'largo' },
+    { keys: ['p_izq'], outKey: 'pIzq' },
+    { keys: ['p_dch'], outKey: 'pDch' },
+    { keys: ['hombro'], outKey: 'hombro' },
+    { keys: ['biceps'], outKey: 'biceps' },
   ]
   const out = { ...empty }
-  for (const [recordKey, outKey] of MEDIDAS_MAP) {
-    const val = v['camiseria_' + recordKey] ?? v[recordKey]
+  for (const { keys, outKey } of MEDIDAS_MAP) {
+    let val: unknown
+    for (const k of keys) {
+      const candidate = v['camiseria_' + k] ?? v[k]
+      if (candidate !== null && candidate !== undefined && candidate !== '') {
+        val = candidate
+        break
+      }
+    }
     if (val !== null && val !== undefined && val !== '' && !Number.isNaN(Number(val))) {
       ;(out as Record<string, string>)[outKey] = String(val)
     }
