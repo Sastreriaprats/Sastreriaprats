@@ -136,6 +136,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const [nextPaymentDate, setNextPaymentDate] = useState('')
   const [wantPartialPayment, setWantPartialPayment] = useState(false)
   const [downloadingInvoice, setDownloadingInvoice] = useState(false)
+  const [invoiceConfirmOpen, setInvoiceConfirmOpen] = useState(false)
   const [clientPendingDebt, setClientPendingDebt] = useState<Array<{ entity_type: 'tailoring_order' | 'sale'; entity_id: string; reference: string; total_pending: number }>>([])
   const [clientDebtLoading, setClientDebtLoading] = useState(false)
   const [showCloseReminderDialog, setShowCloseReminderDialog] = useState(false)
@@ -1987,9 +1988,9 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
               <Receipt className="h-4 w-4" />
               Descargar ticket PDF
             </Button>
-            <Button variant="outline" className="flex-1 min-w-[140px] gap-2" onClick={handleDownloadFactura} disabled={downloadingInvoice}>
+            <Button variant="outline" className="flex-1 min-w-[140px] gap-2" onClick={() => setInvoiceConfirmOpen(true)} disabled={downloadingInvoice}>
               {downloadingInvoice ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-              Descargar factura
+              Emitir factura
             </Button>
             <Button className="flex-1 min-w-[140px] bg-prats-navy hover:bg-prats-navy-light" onClick={handleNewSale}>
               Nueva venta
@@ -2228,6 +2229,45 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
               }}
             >
               Continuar igualmente
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={invoiceConfirmOpen} onOpenChange={setInvoiceConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-prats-navy" />
+              ¿Emitir factura para esta venta?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  Esta acción generará una factura oficial vinculada al ticket{' '}
+                  <span className="font-mono font-medium">{completedSale?.ticket_number ?? ''}</span>{' '}
+                  y no se puede deshacer.
+                </p>
+                {!completedSale?.client_id && (
+                  <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 text-xs">
+                    <strong>Aviso:</strong> esta venta no tiene cliente asignado. La factura
+                    se emitirá a nombre de <strong>&quot;Consumidor final&quot;</strong> sin
+                    NIF ni dirección. Si necesitas una factura nominativa con datos fiscales,
+                    cancela ahora, asigna un cliente y vuelve a emitir.
+                  </div>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={downloadingInvoice}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); setInvoiceConfirmOpen(false); handleDownloadFactura() }}
+              disabled={downloadingInvoice}
+              className="bg-prats-navy hover:bg-prats-navy/90"
+            >
+              {downloadingInvoice && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Emitir factura
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

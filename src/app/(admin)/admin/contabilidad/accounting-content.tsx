@@ -28,8 +28,11 @@ import {
   Loader2, Plus, Search, ChevronDown, ChevronRight, Eye,
   Send, CheckCircle, FileOutput, Trash2, RefreshCw, ArrowUpCircle, Download,
   Receipt, ExternalLink, Package, ClipboardList, Pencil, Calendar, XCircle, Store,
-  Check, ChevronsUpDown, Building2, User,
+  Check, ChevronsUpDown, Building2, User, MoreHorizontal, Ban,
 } from 'lucide-react'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
@@ -41,7 +44,7 @@ import {
   getManualTransactions, createManualTransaction, deleteManualTransaction, updateManualTransaction,
   getAccountingMovements,
   getProductsForInvoice, listTailoringOrdersForInvoice, getTailoringOrderLinesForInvoice,
-  createInvoiceAction, updateInvoiceAction, issueInvoiceAction,
+  createInvoiceAction, updateInvoiceAction, issueInvoiceAction, deleteInvoiceAction, cancelInvoiceAction,
   createEstimateAction, updateEstimateAction, updateEstimateFullAction, getEstimateDetail, sendEstimateAction, acceptEstimateAction, rejectEstimateAction, convertEstimateToInvoiceAction,
   getInvoiceLinesAction, updateJournalEntryDescriptionAction,
   generateInvoicePdfAction, generateEstimatePdfAction,
@@ -763,7 +766,13 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
   const [loadingPdf, setLoadingPdf] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [cancelOpen, setCancelOpen] = useState(false)
+  const [cancelReason, setCancelReason] = useState('')
+  const [actionLoading, setActionLoading] = useState(false)
   const s = INVOICE_STATUS[inv.status] ?? INVOICE_STATUS.draft
+  const canDelete = inv.status === 'draft'
+  const canCancel = ['issued', 'paid', 'partially_paid', 'overdue'].includes(inv.status)
 
   // ── Estado del formulario de edición ──
   const [form, setForm] = useState({ client_id: inv.client_id ?? '', client_name: inv.client_name, client_nif: '', invoice_date: inv.invoice_date, due_date: '', notes: '', irpf_rate: 0, tax_rate: 21 })
@@ -880,6 +889,37 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
     toast.success('Factura marcada como pagada'); onRefresh()
   }
 
+  const handleDelete = async () => {
+    setActionLoading(true)
+    const res = await deleteInvoiceAction(inv.id)
+    setActionLoading(false)
+    if (!res.success) {
+      toast.error('error' in res ? res.error : 'Error al eliminar')
+      return
+    }
+    toast.success('Factura eliminada')
+    setDeleteOpen(false)
+    onRefresh()
+  }
+
+  const handleCancel = async () => {
+    if (!cancelReason.trim()) {
+      toast.error('El motivo de anulación es obligatorio')
+      return
+    }
+    setActionLoading(true)
+    const res = await cancelInvoiceAction({ invoiceId: inv.id, reason: cancelReason.trim() })
+    setActionLoading(false)
+    if (!res.success) {
+      toast.error('error' in res ? res.error : 'Error al anular')
+      return
+    }
+    toast.success(`Factura ${inv.invoice_number} anulada`)
+    setCancelOpen(false)
+    setCancelReason('')
+    onRefresh()
+  }
+
   return (
     <>
       <TableRow>
@@ -914,6 +954,36 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
               <Button size="icon" variant="ghost" className="h-8 w-8" onClick={markPaid} title="Marcar como pagada">
                 <CheckCircle className="h-3.5 w-3.5 text-green-600" />
               </Button>
+            )}
+            {(canDelete || canCancel) && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="icon" variant="ghost" className="h-8 w-8" title="Más acciones">
+                    <MoreHorizontal className="h-3.5 w-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {canDelete && (
+                    <DropdownMenuItem
+                      onClick={() => setDeleteOpen(true)}
+                      className="text-red-600 focus:text-red-700 focus:bg-red-50"
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" /> Eliminar borrador
+                    </DropdownMenuItem>
+                  )}
+                  {canCancel && (
+                    <>
+                      {canDelete && <DropdownMenuSeparator />}
+                      <DropdownMenuItem
+                        onClick={() => { setCancelOpen(true); setCancelReason('') }}
+                        className="text-amber-700 focus:text-amber-800 focus:bg-amber-50"
+                      >
+                        <Ban className="mr-2 h-4 w-4" /> Anular factura
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
           </div>
         </TableCell>
@@ -1041,6 +1111,84 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
           </ScrollArea>
         </DialogContent>
       </Dialog>
+
+      {/* AlertDialog: eliminar factura borrador */}
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-700">
+              <Trash2 className="h-5 w-5" /> Eliminar factura borrador
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>
+                  ¿Eliminar la factura{' '}
+                  <span className="font-mono font-semibold">{inv.invoice_number}</span>?
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Solo se elimina porque está en borrador. Sus líneas también se borrarán.
+                  Esta acción no se puede deshacer.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={actionLoading}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); handleDelete() }}
+              disabled={actionLoading}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {actionLoading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* AlertDialog: anular factura emitida */}
+      <AlertDialog open={cancelOpen} onOpenChange={(open) => { setCancelOpen(open); if (!open) setCancelReason('') }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-amber-700">
+              <Ban className="h-5 w-5" /> Anular factura {inv.invoice_number}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  La factura quedará marcada como <strong>anulada</strong>. El registro
+                  fiscal se mantiene intacto. No se elimina nada — el cambio queda
+                  reflejado en el historial.
+                </p>
+                <div className="space-y-1">
+                  <Label htmlFor={`cancel-reason-${inv.id}`}>Motivo de anulación *</Label>
+                  <Textarea
+                    id={`cancel-reason-${inv.id}`}
+                    value={cancelReason}
+                    onChange={(e) => setCancelReason(e.target.value)}
+                    rows={3}
+                    placeholder="Ej: error en los datos del cliente, factura duplicada, devolución total…"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Se guarda en las notas de la factura junto con la fecha.
+                  </p>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={actionLoading}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); handleCancel() }}
+              disabled={actionLoading || !cancelReason.trim()}
+              className="bg-amber-600 hover:bg-amber-700"
+            >
+              {actionLoading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Anular factura
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

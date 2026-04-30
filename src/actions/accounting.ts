@@ -1222,6 +1222,105 @@ export const issueInvoiceAction = protectedAction<string, { id: string }>(
   }
 )
 
+/** Elimina una factura. SOLO permitido si está en borrador. Las facturas
+ *  emitidas no se borran — se anulan con cancelInvoiceAction. */
+export const deleteInvoiceAction = protectedAction<string, { deleted: true }>(
+  {
+    permission: 'accounting.manage_invoices',
+    auditModule: 'accounting',
+    auditAction: 'delete',
+    auditEntity: 'invoice',
+    revalidate: ['/admin/contabilidad'],
+  },
+  async (ctx, invoiceId) => {
+    if (!invoiceId?.trim()) return failure('ID de factura requerido', 'VALIDATION')
+
+    const { data: inv } = await ctx.adminClient
+      .from('invoices')
+      .select('id, invoice_number, status')
+      .eq('id', invoiceId)
+      .single()
+    if (!inv) return failure('Factura no encontrada', 'NOT_FOUND')
+
+    const status = (inv as { status: string }).status
+    if (status !== 'draft') {
+      return failure(
+        'Solo se pueden eliminar facturas en borrador. Para una factura emitida, anúlala (cambio de estado a "cancelada").',
+        'CONFLICT',
+      )
+    }
+
+    // Borrar líneas y luego la factura.
+    await ctx.adminClient.from('invoice_lines').delete().eq('invoice_id', invoiceId)
+    const { error } = await ctx.adminClient.from('invoices').delete().eq('id', invoiceId)
+    if (error) return failure(error.message)
+
+    return success({
+      deleted: true,
+      auditDescription: `Factura eliminada (borrador): ${(inv as { invoice_number: string }).invoice_number}`,
+    } as any)
+  }
+)
+
+/** Anula una factura ya emitida (status 'cancelled'). Para borradores hay
+ *  que usar deleteInvoiceAction. Se requiere motivo y se preserva el
+ *  registro fiscal. */
+export const cancelInvoiceAction = protectedAction<
+  { invoiceId: string; reason: string },
+  { id: string; status: 'cancelled' }
+>(
+  {
+    permission: 'accounting.manage_invoices',
+    auditModule: 'accounting',
+    auditAction: 'state_change',
+    auditEntity: 'invoice',
+    revalidate: ['/admin/contabilidad'],
+  },
+  async (ctx, { invoiceId, reason }) => {
+    if (!invoiceId?.trim()) return failure('ID de factura requerido', 'VALIDATION')
+    const trimmedReason = reason?.trim()
+    if (!trimmedReason) return failure('El motivo de anulación es obligatorio', 'VALIDATION')
+
+    const { data: inv } = await ctx.adminClient
+      .from('invoices')
+      .select('id, invoice_number, status, notes')
+      .eq('id', invoiceId)
+      .single()
+    if (!inv) return failure('Factura no encontrada', 'NOT_FOUND')
+
+    const status = (inv as { status: string }).status
+    if (status === 'cancelled') return failure('La factura ya está anulada', 'CONFLICT')
+    if (status === 'draft') {
+      return failure(
+        'Esta factura está en borrador: usa "Eliminar" en lugar de "Anular".',
+        'CONFLICT',
+      )
+    }
+    if (status === 'rectified') {
+      return failure('La factura ya fue rectificada', 'CONFLICT')
+    }
+
+    const stamp = new Date().toISOString().slice(0, 10)
+    const prevNotes = ((inv as { notes: string | null }).notes ?? '').trimEnd()
+    const newLine = `[${stamp}] Anulada: ${trimmedReason}`
+    const newNotes = prevNotes ? `${prevNotes}\n${newLine}` : newLine
+
+    const { error } = await ctx.adminClient
+      .from('invoices')
+      .update({ status: 'cancelled', notes: newNotes })
+      .eq('id', invoiceId)
+    if (error) return failure(error.message)
+
+    return success({
+      id: invoiceId,
+      status: 'cancelled' as const,
+      auditDescription: `Factura ${(inv as { invoice_number: string }).invoice_number} anulada: ${trimmedReason}`,
+      auditOldData: { status, notes: (inv as { notes: string | null }).notes },
+      auditNewData: { status: 'cancelled', notes: newNotes },
+    } as any)
+  }
+)
+
 // ── Cargar líneas de una factura para editar ──────────────────────────────────
 export const getInvoiceLinesAction = protectedAction<string, { lines: { description: string; quantity: number; unit_price: number; tax_rate: number; line_total: number }[] }>(
   { permission: 'accounting.manage_invoices', auditModule: 'accounting' },
