@@ -945,6 +945,12 @@ export type CreateSupplierOrderInput = {
   alert_on_payment?: boolean
   alert_on_delivery?: boolean
   tailoring_order_id?: string
+  /** Tienda destino donde se recepcionará la mercancía. Si se omite o es
+   *  null, la recepción cae en el fallback (almacén principal de Pinzón). */
+  destination_store_id?: string | null
+  /** Almacén destino concreto. Si se omite, se usa el principal de la
+   *  tienda destino. */
+  destination_warehouse_id?: string | null
   lines?: Array<{
     fabric_id?: string | null
     product_id?: string | null
@@ -970,7 +976,7 @@ export const createSupplierOrderAction = protectedAction<
     auditEntity: 'supplier_order',
     revalidate: ['/admin/proveedores', '/admin/contabilidad/facturas-proveedores'],
   },
-  async (ctx, { supplier_id, total, payment_due_date, estimated_delivery_date, notes, alert_on_payment, alert_on_delivery, tailoring_order_id, lines, payment_schedule }) => {
+  async (ctx, { supplier_id, total, payment_due_date, estimated_delivery_date, notes, alert_on_payment, alert_on_delivery, tailoring_order_id, destination_store_id, destination_warehouse_id, lines, payment_schedule }) => {
     if (!supplier_id?.trim()) return failure('Proveedor obligatorio', 'VALIDATION')
     if (!estimated_delivery_date?.trim()) return failure('Fecha de entrega estimada obligatoria', 'VALIDATION')
 
@@ -1002,6 +1008,21 @@ export const createSupplierOrderAction = protectedAction<
     const totalNum = totalFromLines >= 0 ? totalFromLines : 0
     const today = new Date().toISOString().slice(0, 10)
 
+    // Tienda/almacén destino: si solo viene la tienda, resolvemos el almacén
+    // principal de esa tienda. Así la recepción nunca cae en el fallback.
+    const destStoreId = destination_store_id?.trim() || null
+    let destWarehouseId = destination_warehouse_id?.trim() || null
+    if (destStoreId && !destWarehouseId) {
+      const { data: mainWh } = await ctx.adminClient
+        .from('warehouses')
+        .select('id')
+        .eq('store_id', destStoreId)
+        .eq('is_main', true)
+        .eq('is_active', true)
+        .maybeSingle()
+      if (mainWh?.id) destWarehouseId = String(mainWh.id)
+    }
+
     const baseOrderPayload: Record<string, unknown> = {
       order_number: orderNumber,
       supplier_id: supplier_id.trim(),
@@ -1016,6 +1037,8 @@ export const createSupplierOrderAction = protectedAction<
       created_by: ctx.userId !== 'system' ? ctx.userId : null,
       alert_on_delivery: alert_on_delivery !== false,
       tailoring_order_id: tailoring_order_id?.trim() || null,
+      destination_store_id: destStoreId,
+      destination_warehouse_id: destWarehouseId,
     }
 
     let order: { id: string; order_number: string } | null = null

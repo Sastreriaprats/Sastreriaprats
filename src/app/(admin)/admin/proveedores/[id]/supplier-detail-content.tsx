@@ -26,6 +26,7 @@ import { getProductVariantsById } from '@/actions/products'
 import { searchSupplierFabrics, searchSupplierProducts } from '@/actions/suppliers'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { createSupplierDeliveryNote, uploadSupplierDeliveryNoteAttachment, upsertSupplierDeliveryNoteForOrder, getSupplierDeliveryNote } from '@/actions/delivery-notes'
+import { useActiveStore } from '@/hooks/use-store'
 import { SIZE_TEMPLATES, variantSkuFromSize } from '@/lib/constants-sizes'
 import { sortBySize } from '@/lib/utils/sort-sizes'
 import { Badge } from '@/components/ui/badge'
@@ -144,7 +145,10 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
     estimated_delivery_date: '',
     notes: '',
     tailoring_order_id: '',
+    destination_store_id: '',
   })
+  const [physicalStores, setPhysicalStores] = useState<Array<{ id: string; name: string; code: string }>>([])
+  const { activeStoreId } = useActiveStore()
   /** Hasta 3 plazos de pago (fecha + importe). El primero se mantiene sincronizado con payment_due_date. */
   const [paymentSchedule, setPaymentSchedule] = useState<Array<{ due_date: string; amount: string }>>([
     { due_date: '', amount: '' },
@@ -184,6 +188,29 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
   const [newFabricForm, setNewFabricForm] = useState({ name: '', fabric_code: '', reference: '', unit: 'meters' })
   const fabricSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const productSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Cargar tiendas físicas activas para el selector de destino del nuevo pedido
+  useEffect(() => {
+    const sb = createClient()
+    sb.from('stores')
+      .select('id, name, code')
+      .eq('is_active', true)
+      .eq('store_type', 'physical')
+      .order('name')
+      .then(({ data }) => {
+        if (!data) return
+        const list = data as Array<{ id: string; name: string; code: string }>
+        setPhysicalStores(list)
+        // Default: tienda activa del usuario, o Pinzón si está, o la primera
+        setNewOrderForm((f) => {
+          if (f.destination_store_id) return f
+          const fromActive = activeStoreId && list.find((s) => s.id === activeStoreId)?.id
+          const pinzon = list.find((s) => s.code === 'PIN')?.id
+          const first = list[0]?.id
+          return { ...f, destination_store_id: fromActive || pinzon || first || '' }
+        })
+      })
+  }, [activeStoreId])
+
   useEffect(() => {
     if (!receptionDialogOpen || !receptionOrderId) return
     setReceptionLinesLoading(true)
@@ -538,7 +565,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                   <Button
                     onClick={() => {
                       const today = new Date().toISOString().slice(0, 10)
-                      setNewOrderForm({ payment_due_date: '', estimated_delivery_date: today, notes: '', tailoring_order_id: '' })
+                      setNewOrderForm((prev) => ({ payment_due_date: '', estimated_delivery_date: today, notes: '', tailoring_order_id: '', destination_store_id: prev.destination_store_id }))
                       setOrderLines([])
                       setNewOrderOpen(true)
                     }}
@@ -1048,13 +1075,32 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
 
           <div className="grid gap-6 py-2">
             {/* ── SECCIÓN 1: CABECERA ───────────────────────────────── */}
-            <div className="space-y-2">
-              <Label htmlFor="new-order-delivery">Fecha de entrega estimada *</Label>
-              <DatePickerPopover
-                id="new-order-delivery"
-                value={newOrderForm.estimated_delivery_date}
-                onChange={(date) => setNewOrderForm((f) => ({ ...f, estimated_delivery_date: date }))}
-              />
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="new-order-delivery">Fecha de entrega estimada *</Label>
+                <DatePickerPopover
+                  id="new-order-delivery"
+                  value={newOrderForm.estimated_delivery_date}
+                  onChange={(date) => setNewOrderForm((f) => ({ ...f, estimated_delivery_date: date }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Tienda destino *</Label>
+                <Select
+                  value={newOrderForm.destination_store_id || undefined}
+                  onValueChange={(v) => setNewOrderForm((f) => ({ ...f, destination_store_id: v }))}
+                >
+                  <SelectTrigger><SelectValue placeholder="Seleccionar tienda…" /></SelectTrigger>
+                  <SelectContent>
+                    {physicalStores.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Almacén donde se recepcionará la mercancía al recibirla.
+                </p>
+              </div>
             </div>
 
             {/* ── PLAZOS DE PAGO (1-3) ─────────────────────────────── */}
@@ -1558,7 +1604,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
           <DialogFooter>
             <Button variant="outline" onClick={() => setNewOrderOpen(false)}>Cancelar</Button>
             <Button
-              disabled={creating || !newOrderForm.estimated_delivery_date || orderLines.length === 0}
+              disabled={creating || !newOrderForm.estimated_delivery_date || !newOrderForm.destination_store_id || orderLines.length === 0}
               onClick={async () => {
                 setCreating(true)
                 const supabase = createClient()
@@ -1650,6 +1696,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                   alert_on_payment: true,
                   alert_on_delivery: true,
                   tailoring_order_id: newOrderForm.tailoring_order_id?.trim() || undefined,
+                  destination_store_id: newOrderForm.destination_store_id?.trim() || null,
                   lines: finalLines,
                   payment_schedule: cleanedSchedule.length > 0 ? cleanedSchedule : undefined,
                 })
