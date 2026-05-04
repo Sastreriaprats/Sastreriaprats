@@ -7,6 +7,7 @@ import { success, failure } from '@/lib/errors'
 import { createPurchaseJournalEntry } from '@/actions/accounting-triggers'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { buildAuditDiff } from '@/lib/audit'
+import { recalculatePendingInvoicesForSupplier } from '@/lib/server/supplier-payments'
 
 export const listSupplierOrders = protectedAction<void, any[]>(
   { permission: 'orders.view' },
@@ -274,6 +275,24 @@ export const updateSupplierAction = protectedAction<{ id: string; data: any }, a
       .from('suppliers').update(parsed.data).eq('id', id).select().single()
 
     if (error) return failure(error.message)
+
+    const paymentChanged = paymentConfigChanged(
+      before as Record<string, unknown> | null,
+      supplier as Record<string, unknown> | null,
+    )
+    if (paymentChanged) {
+      const s = supplier as any
+      try {
+        await recalculatePendingInvoicesForSupplier(ctx.adminClient, id, {
+          payment_terms: s.payment_terms ?? null,
+          payment_days: s.payment_days != null ? Number(s.payment_days) : null,
+          custom_payment_plan: normalizeCustomPlan(s.custom_payment_plan),
+        })
+      } catch (e) {
+        console.error('[updateSupplierAction] recálculo de vencimientos:', e)
+      }
+    }
+
     const diff = buildAuditDiff(before as Record<string, unknown> | null, supplier as Record<string, unknown> | null)
     return success({
       ...(supplier as Record<string, unknown>),
@@ -283,6 +302,30 @@ export const updateSupplierAction = protectedAction<{ id: string; data: any }, a
     })
   }
 )
+
+function paymentConfigChanged(
+  before: Record<string, unknown> | null,
+  after: Record<string, unknown> | null,
+): boolean {
+  if (!before || !after) return false
+  const a = (before as any).payment_days
+  const b = (after as any).payment_days
+  if ((a ?? null) !== (b ?? null)) return true
+  if (((before as any).payment_terms ?? null) !== ((after as any).payment_terms ?? null)) return true
+  if (JSON.stringify((before as any).custom_payment_plan ?? null) !== JSON.stringify((after as any).custom_payment_plan ?? null)) return true
+  return false
+}
+
+function normalizeCustomPlan(raw: unknown): Array<{ amount: number; days: number | null }> | null {
+  if (!Array.isArray(raw)) return null
+  const plan = raw
+    .map((p: any) => ({
+      amount: Number(p?.amount ?? 0),
+      days: p?.days !== undefined && p?.days !== null && p?.days !== '' ? Number(p.days) : null,
+    }))
+    .filter((p) => Number.isFinite(p.amount) && p.amount > 0)
+  return plan.length > 0 ? plan : null
+}
 
 const SUPPLIER_ORDER_STATUSES = ['draft', 'sent', 'confirmed', 'partially_received', 'received', 'incident', 'cancelled'] as const
 
