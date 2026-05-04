@@ -15,6 +15,8 @@ export function useList<T>(
     defaultFilters?: Record<string, any>
     autoFetch?: boolean
     syncUrl?: boolean
+    /** Filter keys to mirror in the URL (only used if syncUrl is true). */
+    urlFilterKeys?: readonly string[]
   } = {},
 ) {
   const pageSize = options.pageSize || 20
@@ -22,6 +24,15 @@ export function useList<T>(
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
+
+  const filterKeysRef = useRef<readonly string[] | undefined>(options.urlFilterKeys)
+  filterKeysRef.current = options.urlFilterKeys
+
+  const parseUrlFilterValue = (raw: string): unknown => {
+    if (raw === 'true') return true
+    if (raw === 'false') return false
+    return raw
+  }
 
   const [data, setData] = useState<T[]>([])
   const [total, setTotal] = useState(0)
@@ -39,7 +50,17 @@ export function useList<T>(
   })
   const [sortBy, setSortBy] = useState(options.defaultSort || 'created_at')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>(options.defaultOrder || 'desc')
-  const [filters, setFilters] = useState<Record<string, any>>(options.defaultFilters || {})
+  const [filters, setFiltersState] = useState<Record<string, any>>(() => {
+    const base = options.defaultFilters || {}
+    if (!sync || !options.urlFilterKeys) return base
+    const fromUrl: Record<string, any> = {}
+    for (const key of options.urlFilterKeys) {
+      const raw = searchParams.get(key)
+      if (raw === null || raw === '') continue
+      fromUrl[key] = parseUrlFilterValue(raw)
+    }
+    return { ...base, ...fromUrl }
+  })
   const [isLoading, setIsLoading] = useState(true)
   const [statusCounts, setStatusCounts] = useState<Record<string, number> | undefined>(undefined)
   const [totalAll, setTotalAll] = useState<number | undefined>(undefined)
@@ -67,6 +88,25 @@ export function useList<T>(
     setSearchState(s)
     updateUrl({ search: s || null, page: null })
   }, [updateUrl])
+
+  const setFilters = useCallback<typeof setFiltersState>((updater) => {
+    setFiltersState(prev => {
+      const next = typeof updater === 'function'
+        ? (updater as (p: Record<string, any>) => Record<string, any>)(prev)
+        : updater
+      const keys = filterKeysRef.current
+      if (sync && keys && keys.length > 0) {
+        const params: Record<string, string | null> = { page: null }
+        for (const key of keys) {
+          const v = next[key]
+          if (v === undefined || v === null || v === '') params[key] = null
+          else params[key] = String(v)
+        }
+        updateUrl(params)
+      }
+      return next
+    })
+  }, [sync, updateUrl])
 
   const fetchData = useCallback(async () => {
     setIsLoading(true)
@@ -112,6 +152,21 @@ export function useList<T>(
     const urlSearch = searchParams.get('search') || ''
     if (!isNaN(urlPage) && urlPage !== page) setPageState(urlPage)
     if (urlSearch !== search) setSearchState(urlSearch)
+
+    const keys = filterKeysRef.current
+    if (keys && keys.length > 0) {
+      let changed = false
+      const merged = { ...filters }
+      for (const key of keys) {
+        const raw = searchParams.get(key)
+        const parsed = raw === null || raw === '' ? undefined : parseUrlFilterValue(raw)
+        if (filters[key] !== parsed) {
+          merged[key] = parsed
+          changed = true
+        }
+      }
+      if (changed) setFiltersState(merged)
+    }
   }, [searchParams])
 
   const refresh = useCallback(() => fetchData(), [fetchData])

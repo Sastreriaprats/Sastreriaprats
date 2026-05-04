@@ -2652,6 +2652,7 @@ function CajaSessionsTab() {
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailTotalCobrosSastreria, setDetailTotalCobrosSastreria] = useState<number>(0)
+  const [detailSastreriaByMethod, setDetailSastreriaByMethod] = useState<{ cash: number; card: number; bizum: number; transfer: number }>({ cash: 0, card: 0, bizum: 0, transfer: 0 })
 
   const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
 
@@ -2803,6 +2804,22 @@ function CajaSessionsTab() {
       setDetailTotalCobrosSastreria(0)
     }
 
+    // Desglose de cobros sastrería por método de pago (para el arqueo PDF y vista)
+    const byMethod = { cash: 0, card: 0, bizum: 0, transfer: 0 }
+    const { data: sastPays } = await supabase
+      .from('tailoring_order_payments')
+      .select('amount, payment_method')
+      .eq('cash_session_id', session.id)
+    for (const p of sastPays ?? []) {
+      const m = String(p.payment_method ?? '').toLowerCase()
+      const amt = Number(p.amount ?? 0)
+      if (m === 'cash' || m === 'efectivo') byMethod.cash += amt
+      else if (m === 'card' || m === 'tarjeta') byMethod.card += amt
+      else if (m === 'bizum') byMethod.bizum += amt
+      else if (m === 'transfer' || m === 'transferencia') byMethod.transfer += amt
+    }
+    setDetailSastreriaByMethod(byMethod)
+
     setDetailLoading(false)
   }, [supabase])
 
@@ -2861,7 +2878,7 @@ function CajaSessionsTab() {
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-3">
-          <Button variant="outline" size="sm" onClick={() => { setVista('list'); setSelectedSession(null); setTimelineEvents([]); setDetailTotalCobrosSastreria(0) }}>
+          <Button variant="outline" size="sm" onClick={() => { setVista('list'); setSelectedSession(null); setTimelineEvents([]); setDetailTotalCobrosSastreria(0); setDetailSastreriaByMethod({ cash: 0, card: 0, bizum: 0, transfer: 0 }) }}>
             ← Volver al listado
           </Button>
           {s.status === 'closed' && (
@@ -2891,6 +2908,10 @@ function CajaSessionsTab() {
                     countedCash: Number(s.counted_cash ?? 0),
                     cashDifference: Number(s.cash_difference ?? 0),
                     closingNotes: s.closing_notes ?? undefined,
+                    sastreriaCashPayments: detailSastreriaByMethod.cash,
+                    sastreriaCardPayments: detailSastreriaByMethod.card,
+                    sastreriaBizumPayments: detailSastreriaByMethod.bizum,
+                    sastreriaTransferPayments: detailSastreriaByMethod.transfer,
                   })
                 } catch {
                   console.error('Error generando PDF de arqueo')
@@ -3078,6 +3099,7 @@ function CajaSessionsTab() {
                           <TableHeader>
                             <TableRow>
                               <TableHead>Fecha</TableHead>
+                              <TableHead>Tienda</TableHead>
                               <TableHead>Hora apertura</TableHead>
                               <TableHead>Abrió</TableHead>
                               <TableHead>Hora cierre</TableHead>
@@ -3102,6 +3124,7 @@ function CajaSessionsTab() {
                                   onClick={() => loadDetail(s)}
                                 >
                                   <TableCell className="text-sm text-muted-foreground">{s.opened_at ? formatDate(s.opened_at.split('T')[0]) : '—'}</TableCell>
+                                  <TableCell className="text-sm">{s.stores?.name ?? '—'}</TableCell>
                                   <TableCell className="text-sm tabular-nums">{horaApertura}</TableCell>
                                   <TableCell className="text-sm">{openedBy}</TableCell>
                                   <TableCell className="text-sm tabular-nums">{horaCierre}</TableCell>

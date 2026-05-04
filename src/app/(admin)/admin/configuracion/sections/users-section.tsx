@@ -406,8 +406,16 @@ function EditUserForm({ user, roles, stores, onSuccess }: {
   stores: { id: string; name: string }[]
   onSuccess: (tempPassword?: string) => void
 }) {
-  const [firstName, setFirstName] = useState(user.first_name ?? '')
-  const [lastName, setLastName] = useState(user.last_name ?? '')
+  // Fallback: si el perfil no tiene first_name/last_name pero sí full_name, partimos por el primer espacio.
+  const splitFullName = (full: string | null | undefined): [string, string] => {
+    const t = (full ?? '').trim()
+    if (!t) return ['', '']
+    const idx = t.indexOf(' ')
+    return idx === -1 ? [t, ''] : [t.slice(0, idx), t.slice(idx + 1).trim()]
+  }
+  const [fallbackFirst, fallbackLast] = splitFullName(user.full_name)
+  const [firstName, setFirstName] = useState(user.first_name ?? fallbackFirst)
+  const [lastName, setLastName] = useState(user.last_name ?? fallbackLast)
   const [roleId, setRoleId] = useState(user.roles[0]?.id ?? '')
   const [selectedStoreIds, setSelectedStoreIds] = useState<string[]>([])
   const [primaryStoreId, setPrimaryStoreId] = useState<string>('')

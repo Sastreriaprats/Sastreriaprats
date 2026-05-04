@@ -1120,7 +1120,7 @@ export function SupplierInvoicesContent() {
                 >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {[0, 7, 15, 19].map((n) => (
+                    {[0, 7, 10, 15, 19].map((n) => (
                       <SelectItem key={n} value={String(n)}>{n}%</SelectItem>
                     ))}
                   </SelectContent>

@@ -172,13 +172,21 @@ export const listProductsForTaxonomy = protectedAction<
   { permission: 'products.view', auditModule: 'stock' },
   async (ctx, { taxonomy, id, search }) => {
     if (!id) return failure('ID requerido', 'VALIDATION')
-    const tableName = taxonomy === 'collection' ? 'product_collections' : 'product_seasons'
     const column = taxonomy === 'collection' ? 'collection' : 'season'
 
-    const { data: tax, error: taxErr } = await ctx.adminClient
-      .from(tableName).select('name').eq('id', id).single()
-    if (taxErr || !tax) return failure('Registro no encontrado', 'NOT_FOUND')
-    const taxName = (tax as any).name as string
+    // Para colecciones, el campo en `products` guarda el name; para temporadas, el slug.
+    let valueToMatch: string
+    if (taxonomy === 'collection') {
+      const { data: tax, error: taxErr } = await ctx.adminClient
+        .from('product_collections').select('name').eq('id', id).single()
+      if (taxErr || !tax) return failure('Registro no encontrado', 'NOT_FOUND')
+      valueToMatch = (tax as any).name as string
+    } else {
+      const { data: tax, error: taxErr } = await ctx.adminClient
+        .from('seasons').select('slug').eq('id', id).single()
+      if (taxErr || !tax) return failure('Temporada no encontrada', 'NOT_FOUND')
+      valueToMatch = (tax as any).slug as string
+    }
 
     let q = ctx.adminClient
       .from('products')
@@ -200,7 +208,7 @@ export const listProductsForTaxonomy = protectedAction<
         name: p.name,
         sku: p.sku,
         brand: p.brand,
-        assigned: p[column] === taxName,
+        assigned: p[column] === valueToMatch,
       })),
     )
   },
@@ -223,20 +231,31 @@ export const setTaxonomyProducts = protectedAction<
     if (!id) return failure('ID requerido', 'VALIDATION')
     if (!Array.isArray(productIds)) return failure('productIds inválido', 'VALIDATION')
 
-    const tableName = taxonomy === 'collection' ? 'product_collections' : 'product_seasons'
     const column = taxonomy === 'collection' ? 'collection' : 'season'
 
-    const { data: tax, error: taxErr } = await ctx.adminClient
-      .from(tableName).select('name').eq('id', id).single()
-    if (taxErr || !tax) return failure('Registro no encontrado', 'NOT_FOUND')
-    const taxName = (tax as any).name as string
+    // En collection guardamos el name; en season guardamos el slug.
+    let valueToWrite: string
+    let displayName: string
+    if (taxonomy === 'collection') {
+      const { data: tax, error: taxErr } = await ctx.adminClient
+        .from('product_collections').select('name').eq('id', id).single()
+      if (taxErr || !tax) return failure('Registro no encontrado', 'NOT_FOUND')
+      valueToWrite = (tax as any).name as string
+      displayName = valueToWrite
+    } else {
+      const { data: tax, error: taxErr } = await ctx.adminClient
+        .from('seasons').select('name, slug').eq('id', id).single()
+      if (taxErr || !tax) return failure('Temporada no encontrada', 'NOT_FOUND')
+      valueToWrite = (tax as any).slug as string
+      displayName = (tax as any).name as string
+    }
 
     // Asignar los seleccionados
     let assigned = 0
     if (productIds.length > 0) {
       const { error: updErr, count } = await ctx.adminClient
         .from('products')
-        .update({ [column]: taxName }, { count: 'exact' })
+        .update({ [column]: valueToWrite }, { count: 'exact' })
         .in('id', productIds)
       if (updErr) return failure(updErr.message)
       assigned = count ?? productIds.length
@@ -246,7 +265,7 @@ export const setTaxonomyProducts = protectedAction<
     let desasignQ = ctx.adminClient
       .from('products')
       .update({ [column]: null }, { count: 'exact' })
-      .eq(column, taxName)
+      .eq(column, valueToWrite)
     if (productIds.length > 0) {
       desasignQ = desasignQ.not('id', 'in', `(${productIds.map(x => `"${x}"`).join(',')})`)
     }
@@ -256,35 +275,64 @@ export const setTaxonomyProducts = protectedAction<
     return success({
       assigned,
       unassigned: unassignedCount ?? 0,
-      auditDescription: `${taxonomy === 'collection' ? 'Colección' : 'Temporada'} "${taxName}": ${assigned} asignados, ${unassignedCount ?? 0} desasignados`,
+      auditDescription: `${taxonomy === 'collection' ? 'Colección' : 'Temporada'} "${displayName}": ${assigned} asignados, ${unassignedCount ?? 0} desasignados`,
       auditNewData: { taxonomy, id, productIds },
     } as any)
   },
 )
 
 // ---------------------------------------------------------------------------
-// Temporadas (mismo patrón, tabla distinta)
+// Temporadas
 // ---------------------------------------------------------------------------
+// La fuente de verdad real es la tabla `seasons` (con `slug`, `start_date`,
+// `end_date`, `sort_order`). `products.season` guarda el SLUG de la temporada,
+// no el nombre. La tabla antigua `product_seasons` (migración 127) sigue
+// existiendo por compatibilidad, pero no se utiliza desde el panel.
+
+function slugifySeason(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80)
+}
+
+async function ensureUniqueSeasonSlug(adminClient: any, base: string, ignoreId?: string): Promise<string> {
+  let slug = base
+  let n = 2
+  while (true) {
+    let q = adminClient.from('seasons').select('id').eq('slug', slug)
+    if (ignoreId) q = q.neq('id', ignoreId)
+    const { data: clash } = await q.maybeSingle()
+    if (!clash) return slug
+    slug = `${base}-${n++}`
+    if (n > 50) throw new Error('No se pudo generar un slug único')
+  }
+}
 
 export const listSeasonsAdmin = protectedAction<void, TaxonomyItem[]>(
   { permission: 'products.view', auditModule: 'stock' },
   async (ctx) => {
     const { data: rows, error } = await ctx.adminClient
-      .from('product_seasons')
-      .select('id, name, description, is_active, created_at, updated_at')
+      .from('seasons')
+      .select('id, name, slug, description, is_active, created_at, updated_at')
+      .order('sort_order', { ascending: true })
       .order('name', { ascending: true })
     if (error) return failure(error.message)
 
-    const names = (rows ?? []).map((r: any) => r.name as string)
+    const slugs = (rows ?? []).map((r: any) => r.slug as string).filter(Boolean)
     const counts = new Map<string, number>()
-    if (names.length > 0) {
+    if (slugs.length > 0) {
       const { data: prodRows } = await ctx.adminClient
         .from('products')
         .select('season')
-        .in('season', names)
+        .in('season', slugs)
       for (const p of prodRows ?? []) {
-        const name = (p as any).season as string
-        counts.set(name, (counts.get(name) ?? 0) + 1)
+        const slug = (p as any).season as string
+        if (!slug) continue
+        counts.set(slug, (counts.get(slug) ?? 0) + 1)
       }
     }
 
@@ -294,7 +342,7 @@ export const listSeasonsAdmin = protectedAction<void, TaxonomyItem[]>(
         name: r.name,
         description: r.description,
         is_active: r.is_active,
-        product_count: counts.get(r.name) ?? 0,
+        product_count: counts.get(r.slug) ?? 0,
         created_at: r.created_at,
         updated_at: r.updated_at,
       })),
@@ -306,9 +354,10 @@ export const listSeasonNames = protectedAction<void, { id: string; name: string 
   { permission: 'products.view', auditModule: 'stock' },
   async (ctx) => {
     const { data, error } = await ctx.adminClient
-      .from('product_seasons')
+      .from('seasons')
       .select('id, name')
       .eq('is_active', true)
+      .order('sort_order', { ascending: true })
       .order('name', { ascending: true })
     if (error) return failure(error.message)
     return success((data ?? []) as { id: string; name: string }[])
@@ -323,20 +372,29 @@ export const createSeason = protectedAction<
     permission: 'products.create',
     auditModule: 'stock',
     auditAction: 'create',
-    auditEntity: 'product_season',
-    revalidate: ['/admin/configuracion', '/admin/stock'],
+    auditEntity: 'season',
+    revalidate: ['/admin/configuracion', '/admin/configuracion/temporadas', '/admin/stock'],
   },
   async (ctx, input) => {
     const name = String(input?.name ?? '').trim()
     if (!name) return failure('El nombre es obligatorio', 'VALIDATION')
 
     const { data: existing } = await ctx.adminClient
-      .from('product_seasons').select('id').eq('name', name).maybeSingle()
+      .from('seasons').select('id').eq('name', name).maybeSingle()
     if (existing) return failure('Ya existe una temporada con ese nombre', 'CONFLICT')
 
+    const baseSlug = slugifySeason(name)
+    if (!baseSlug) return failure('No se pudo generar slug', 'VALIDATION')
+    let slug: string
+    try {
+      slug = await ensureUniqueSeasonSlug(ctx.adminClient, baseSlug)
+    } catch (e) {
+      return failure(e instanceof Error ? e.message : 'Error al validar slug', 'VALIDATION')
+    }
+
     const { data, error } = await ctx.adminClient
-      .from('product_seasons')
-      .insert({ name, description: input.description ?? null })
+      .from('seasons')
+      .insert({ name, slug, description: input.description ?? null })
       .select('id, name')
       .single()
     if (error) return failure(error.message)
@@ -357,8 +415,8 @@ export const updateSeason = protectedAction<
     permission: 'products.edit',
     auditModule: 'stock',
     auditAction: 'update',
-    auditEntity: 'product_season',
-    revalidate: ['/admin/configuracion', '/admin/stock'],
+    auditEntity: 'season',
+    revalidate: ['/admin/configuracion', '/admin/configuracion/temporadas', '/admin/stock'],
   },
   async (ctx, { id, ...patch }) => {
     if (!id) return failure('ID requerido', 'VALIDATION')
@@ -372,10 +430,10 @@ export const updateSeason = protectedAction<
     if (patch.is_active !== undefined) update.is_active = !!patch.is_active
 
     const { data: before } = await ctx.adminClient
-      .from('product_seasons').select('*').eq('id', id).single()
+      .from('seasons').select('*').eq('id', id).single()
 
     const { data, error } = await ctx.adminClient
-      .from('product_seasons').update(update).eq('id', id).select('id, name').single()
+      .from('seasons').update(update).eq('id', id).select('id, name').single()
     if (error) return failure(error.message)
     return success({
       id: (data as any).id,
@@ -392,15 +450,23 @@ export const deleteSeason = protectedAction<string, { id: string }>(
     permission: 'products.delete',
     auditModule: 'stock',
     auditAction: 'delete',
-    auditEntity: 'product_season',
-    revalidate: ['/admin/configuracion', '/admin/stock'],
+    auditEntity: 'season',
+    revalidate: ['/admin/configuracion', '/admin/configuracion/temporadas', '/admin/stock'],
   },
   async (ctx, id) => {
     if (!id) return failure('ID requerido', 'VALIDATION')
     const { data: before } = await ctx.adminClient
-      .from('product_seasons').select('*').eq('id', id).single()
+      .from('seasons').select('*').eq('id', id).single()
+    if (!before) return failure('Temporada no encontrada', 'NOT_FOUND')
+
+    // Limpia el slug en productos antes de borrar (en `seasons` no hay cascade).
+    const slug = (before as any).slug as string | null
+    if (slug) {
+      await ctx.adminClient.from('products').update({ season: null }).eq('season', slug)
+    }
+
     const { error } = await ctx.adminClient
-      .from('product_seasons').delete().eq('id', id)
+      .from('seasons').delete().eq('id', id)
     if (error) return failure(error.message)
     return success({
       id,

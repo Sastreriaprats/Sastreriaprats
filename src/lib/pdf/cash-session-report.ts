@@ -34,6 +34,12 @@ export interface CashSessionReportData {
   countedCash: number
   cashDifference: number
   closingNotes?: string
+  // Cobros de pedidos de sastrería desglosados por método (no van en `total*Sales`)
+  sastreriaCashPayments?: number
+  sastreriaCardPayments?: number
+  sastreriaBizumPayments?: number
+  sastreriaTransferPayments?: number
+  sastreriaTotal?: number
 }
 
 const NAVY = '#1B2A4A'
@@ -200,40 +206,74 @@ function buildDocDefinition(d: CashSessionReportData): PdfDocDefinition {
     margin: [0, 8, 0, 0] as [number, number, number, number],
   })
 
-  // ─── RESUMEN DE VENTAS ───────────────────────────────────────────────────
-  content.push(sectionHeader('RESUMEN DE VENTAS'))
+  // ─── RESUMEN DE ENTRADAS (ventas TPV + cobros sastrería) ─────────────────
+  const sastCash = d.sastreriaCashPayments ?? 0
+  const sastCard = d.sastreriaCardPayments ?? 0
+  const sastBizum = d.sastreriaBizumPayments ?? 0
+  const sastTransfer = d.sastreriaTransferPayments ?? 0
+  const sastTotal = d.sastreriaTotal ?? (sastCash + sastCard + sastBizum + sastTransfer)
+  const hasSastreria = sastTotal > 0
+  const totalEntradas = d.totalSales + sastTotal
+
+  const headerRow = hasSastreria
+    ? [
+        { text: 'Método de pago', fontSize: 8, color: LABEL_COLOR, fillColor: LABEL_BG },
+        { text: 'Ventas TPV', fontSize: 8, alignment: 'right' as const, color: LABEL_COLOR, fillColor: LABEL_BG },
+        { text: 'Cobros sastrería', fontSize: 8, alignment: 'right' as const, color: LABEL_COLOR, fillColor: LABEL_BG },
+        { text: 'Total', fontSize: 8, alignment: 'right' as const, color: LABEL_COLOR, fillColor: LABEL_BG },
+      ]
+    : [
+        { text: 'Método de pago', fontSize: 8, color: LABEL_COLOR, fillColor: LABEL_BG },
+        { text: 'Importe', fontSize: 8, alignment: 'right' as const, color: LABEL_COLOR, fillColor: LABEL_BG },
+      ]
+
+  const methodRow = (label: string, tpv: number, sast: number) => hasSastreria
+    ? [
+        { text: label, fontSize: 9, color: TEXT },
+        { text: fmt(tpv), fontSize: 9, alignment: 'right' as const, color: TEXT },
+        { text: fmt(sast), fontSize: 9, alignment: 'right' as const, color: TEXT },
+        { text: fmt(tpv + sast), fontSize: 9, alignment: 'right' as const, color: TEXT, bold: true },
+      ]
+    : [
+        { text: label, fontSize: 9, color: TEXT },
+        { text: fmt(tpv), fontSize: 9, alignment: 'right' as const, color: TEXT },
+      ]
+
+  const totalRow = hasSastreria
+    ? [
+        { text: 'TOTAL ENTRADAS', fontSize: 9, bold: true, color: NAVY },
+        { text: fmt(d.totalSales), fontSize: 9, bold: true, alignment: 'right' as const, color: NAVY },
+        { text: fmt(sastTotal), fontSize: 9, bold: true, alignment: 'right' as const, color: NAVY },
+        { text: fmt(totalEntradas), fontSize: 9, bold: true, alignment: 'right' as const, color: NAVY },
+      ]
+    : [
+        { text: 'TOTAL VENTAS', fontSize: 9, bold: true, color: NAVY },
+        { text: fmt(d.totalSales), fontSize: 9, bold: true, alignment: 'right' as const, color: NAVY },
+      ]
+
+  content.push(sectionHeader(hasSastreria ? 'RESUMEN DE ENTRADAS' : 'RESUMEN DE VENTAS'))
   content.push({
     table: {
-      widths: ['*', 80],
+      widths: hasSastreria ? ['*', 70, 80, 70] : ['*', 80],
       body: [
-        [
-          { text: 'Método de pago', fontSize: 8, color: LABEL_COLOR, fillColor: LABEL_BG },
-          { text: 'Importe', fontSize: 8, alignment: 'right' as const, color: LABEL_COLOR, fillColor: LABEL_BG },
-        ],
-        [
-          { text: 'Efectivo', fontSize: 9, color: TEXT },
-          { text: fmt(d.totalCashSales), fontSize: 9, alignment: 'right' as const, color: TEXT },
-        ],
-        [
-          { text: 'Tarjeta', fontSize: 9, color: TEXT },
-          { text: fmt(d.totalCardSales), fontSize: 9, alignment: 'right' as const, color: TEXT },
-        ],
-        [
-          { text: 'Bizum', fontSize: 9, color: TEXT },
-          { text: fmt(d.totalBizumSales), fontSize: 9, alignment: 'right' as const, color: TEXT },
-        ],
-        [
-          { text: 'Transferencia', fontSize: 9, color: TEXT },
-          { text: fmt(d.totalTransferSales), fontSize: 9, alignment: 'right' as const, color: TEXT },
-        ],
-        [
-          { text: 'Vales', fontSize: 9, color: TEXT },
-          { text: fmt(d.totalVoucherSales), fontSize: 9, alignment: 'right' as const, color: TEXT },
-        ],
-        [
-          { text: 'TOTAL VENTAS', fontSize: 9, bold: true, color: NAVY },
-          { text: fmt(d.totalSales), fontSize: 9, bold: true, alignment: 'right' as const, color: NAVY },
-        ],
+        headerRow,
+        methodRow('Efectivo', d.totalCashSales, sastCash),
+        methodRow('Tarjeta', d.totalCardSales, sastCard),
+        methodRow('Bizum', d.totalBizumSales, sastBizum),
+        methodRow('Transferencia', d.totalTransferSales, sastTransfer),
+        // Vales solo aplica al TPV
+        hasSastreria
+          ? [
+              { text: 'Vales', fontSize: 9, color: TEXT },
+              { text: fmt(d.totalVoucherSales), fontSize: 9, alignment: 'right' as const, color: TEXT },
+              { text: '—', fontSize: 9, alignment: 'right' as const, color: LABEL_COLOR },
+              { text: fmt(d.totalVoucherSales), fontSize: 9, alignment: 'right' as const, color: TEXT, bold: true },
+            ]
+          : [
+              { text: 'Vales', fontSize: 9, color: TEXT },
+              { text: fmt(d.totalVoucherSales), fontSize: 9, alignment: 'right' as const, color: TEXT },
+            ],
+        totalRow,
       ],
     },
     layout: tableLayout,

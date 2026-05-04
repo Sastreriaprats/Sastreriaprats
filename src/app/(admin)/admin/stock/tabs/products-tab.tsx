@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import Image from 'next/image'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -66,18 +66,13 @@ function getProductStockSummary(product: any): { total: number; warehouses: { na
 type StockFilterValue = 'all' | 'out' | 'low' | 'in'
 type WebFilterValue = 'all' | 'yes' | 'no'
 
+const URL_FILTER_KEYS = ['product_type', 'is_visible_web', 'collection', 'season'] as const
+
 export function ProductsTab() {
   const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
   const { can } = usePermissions()
-
-  // Filtros server-side
-  const [typeFilter, setTypeFilter] = useState('all')
-  const [webFilter, setWebFilter] = useState<WebFilterValue>('all')
-  const [collectionFilter, setCollectionFilter] = useState('all')
-  const [seasonFilter, setSeasonFilter] = useState('all')
-
-  // Filtros client-side (sobre la página cargada)
-  const [stockFilter, setStockFilter] = useState<StockFilterValue>('all')
 
   // Opciones dinámicas de los selects
   const [collectionOptions, setCollectionOptions] = useState<string[]>([])
@@ -97,8 +92,34 @@ export function ProductsTab() {
   const {
     data: products, total, totalPages, page, setPage,
     search, setSearch, sortBy, toggleSort, isLoading, pageSize,
-    setFilters, refresh,
-  } = useList(listProducts, { pageSize: 25, defaultSort: 'created_at', defaultOrder: 'desc', syncUrl: true })
+    filters, setFilters, refresh,
+  } = useList(listProducts, {
+    pageSize: 25,
+    defaultSort: 'created_at',
+    defaultOrder: 'desc',
+    syncUrl: true,
+    urlFilterKeys: URL_FILTER_KEYS,
+  })
+
+  // Filtros derivados de `filters` (que vive en useList y se sincroniza con la URL)
+  const typeFilter: string = (filters.product_type as string) || 'all'
+  const webFilter: WebFilterValue = filters.is_visible_web === true ? 'yes' : filters.is_visible_web === false ? 'no' : 'all'
+  const collectionFilter: string = (filters.collection as string) || 'all'
+  const seasonFilter: string = (filters.season as string) || 'all'
+
+  // Filtro de stock: client-side, no se manda al backend, pero sí se persiste en la URL
+  const [stockFilter, setStockFilterState] = useState<StockFilterValue>(() => {
+    const v = searchParams.get('stock')
+    return (v === 'out' || v === 'low' || v === 'in') ? v : 'all'
+  })
+  const setStockFilter = useCallback((v: StockFilterValue) => {
+    setStockFilterState(v)
+    const newParams = new URLSearchParams(searchParams.toString())
+    if (v === 'all') newParams.delete('stock')
+    else newParams.set('stock', v)
+    const qs = newParams.toString()
+    router.replace(`${pathname}${qs ? `?${qs}` : ''}`, { scroll: false })
+  }, [router, pathname, searchParams])
 
   // Cargar opciones de colección y temporada al montar
   useEffect(() => {
@@ -107,35 +128,34 @@ export function ProductsTab() {
   }, [])
 
   const applyType = (v: string) => {
-    setTypeFilter(v)
-    setFilters(prev => ({ ...prev, ...(v !== 'all' ? { product_type: v } : { product_type: undefined }) }))
+    setFilters(prev => ({ ...prev, product_type: v !== 'all' ? v : undefined }))
   }
 
   const applyWeb = (v: WebFilterValue) => {
-    setWebFilter(v)
     setFilters(prev => ({
       ...prev,
-      ...(v === 'yes' ? { is_visible_web: true } : v === 'no' ? { is_visible_web: false } : { is_visible_web: undefined }),
+      is_visible_web: v === 'yes' ? true : v === 'no' ? false : undefined,
     }))
   }
 
   const applyCollection = (v: string) => {
-    setCollectionFilter(v)
-    setFilters(prev => ({ ...prev, ...(v !== 'all' ? { collection: v } : { collection: undefined }) }))
+    setFilters(prev => ({ ...prev, collection: v !== 'all' ? v : undefined }))
   }
 
   const applySeason = (v: string) => {
-    setSeasonFilter(v)
-    setFilters(prev => ({ ...prev, ...(v !== 'all' ? { season: v } : { season: undefined }) }))
+    setFilters(prev => ({ ...prev, season: v !== 'all' ? v : undefined }))
   }
 
   const hasActiveFilters = typeFilter !== 'all' || webFilter !== 'all' || stockFilter !== 'all' || collectionFilter !== 'all' || seasonFilter !== 'all' || Boolean(search.trim())
 
   const clearAllFilters = () => {
-    applyType('all')
-    applyWeb('all')
-    applyCollection('all')
-    applySeason('all')
+    setFilters(prev => ({
+      ...prev,
+      product_type: undefined,
+      is_visible_web: undefined,
+      collection: undefined,
+      season: undefined,
+    }))
     setStockFilter('all')
     setSearch('')
   }

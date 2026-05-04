@@ -3,39 +3,56 @@
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 
+export type ReportChannel = 'all' | 'boutique' | 'tailoring'
+
 export const getSalesReport = protectedAction<
-  { start_date: string; end_date: string; store_id?: string; group_by?: 'day' | 'week' | 'month' },
+  { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel; group_by?: 'day' | 'week' | 'month' },
   {
     chartData: { date: string; pos: number; online: number; tailoring: number; total: number }[]
     totals: { pos: number; online: number; tailoring: number; total: number; ticketCount: number; avgTicket: number }
   }
 >(
   { permission: 'reports.view', auditModule: 'reports' },
-  async (ctx, { start_date, end_date, store_id, group_by = 'day' }) => {
-    let salesQuery = ctx.adminClient
-      .from('sale_lines')
-      .select('quantity, line_total, created_at, sales!inner(store_id, status, created_at)')
-      .gte('sales.created_at', start_date)
-      .lte('sales.created_at', end_date + 'T23:59:59')
-      .eq('sales.status', 'completed')
-    if (store_id) salesQuery = salesQuery.eq('sales.store_id', store_id)
-    const { data: saleLines } = await salesQuery
+  async (ctx, { start_date, end_date, store_id, channel = 'all', group_by = 'day' }) => {
+    const wantBoutique = channel === 'all' || channel === 'boutique'
+    const wantTailoring = channel === 'all' || channel === 'tailoring'
 
-    const { data: onlineOrders } = await ctx.adminClient
-      .from('online_orders')
-      .select('total, created_at, status')
-      .gte('created_at', start_date)
-      .lte('created_at', end_date + 'T23:59:59')
-      .in('status', ['paid', 'processing', 'shipped', 'delivered'])
+    let saleLines: any[] | null = null
+    if (wantBoutique) {
+      let salesQuery = ctx.adminClient
+        .from('sale_lines')
+        .select('quantity, line_total, created_at, sales!inner(store_id, status, created_at)')
+        .gte('sales.created_at', start_date)
+        .lte('sales.created_at', end_date + 'T23:59:59')
+        .eq('sales.status', 'completed')
+      if (store_id) salesQuery = salesQuery.eq('sales.store_id', store_id)
+      const res = await salesQuery
+      saleLines = res.data
+    }
 
-    let tailoringQuery = ctx.adminClient
-      .from('tailoring_orders')
-      .select('total, created_at, status, store_id')
-      .gte('created_at', start_date)
-      .lte('created_at', end_date + 'T23:59:59')
-      .not('status', 'eq', 'cancelled')
-    if (store_id) tailoringQuery = tailoringQuery.eq('store_id', store_id)
-    const { data: tailoringOrders } = await tailoringQuery
+    let onlineOrders: any[] | null = null
+    if (wantBoutique && !store_id) {
+      const res = await ctx.adminClient
+        .from('online_orders')
+        .select('total, created_at, status')
+        .gte('created_at', start_date)
+        .lte('created_at', end_date + 'T23:59:59')
+        .in('status', ['paid', 'processing', 'shipped', 'delivered'])
+      onlineOrders = res.data
+    }
+
+    let tailoringOrders: any[] | null = null
+    if (wantTailoring) {
+      let tailoringQuery = ctx.adminClient
+        .from('tailoring_orders')
+        .select('total, created_at, status, store_id')
+        .gte('created_at', start_date)
+        .lte('created_at', end_date + 'T23:59:59')
+        .not('status', 'eq', 'cancelled')
+      if (store_id) tailoringQuery = tailoringQuery.eq('store_id', store_id)
+      const res = await tailoringQuery
+      tailoringOrders = res.data
+    }
 
     const groupData = (items: Record<string, unknown>[], dateField: string, valueField: string, nestedDate?: string) => {
       const groups: Record<string, number> = {}
@@ -90,7 +107,7 @@ export const getSalesReport = protectedAction<
 )
 
 export const getComparePeriods = protectedAction<
-  { current_start: string; current_end: string; previous_start: string; previous_end: string; store_id?: string },
+  { current_start: string; current_end: string; previous_start: string; previous_end: string; store_id?: string; channel?: ReportChannel },
   {
     current: { revenue: number; newClients: number; ordersCount: number }
     previous: { revenue: number; newClients: number; ordersCount: number }
@@ -98,32 +115,41 @@ export const getComparePeriods = protectedAction<
   }
 >(
   { permission: 'reports.view', auditModule: 'reports' },
-  async (ctx, { current_start, current_end, previous_start, previous_end }) => {
+  async (ctx, { current_start, current_end, previous_start, previous_end, store_id, channel = 'all' }) => {
     const minStart = [current_start, previous_start].sort()[0]
     const maxEnd = [current_end, previous_end].sort()[1]
     const rangeEnd = maxEnd + 'T23:59:59'
 
-    const [
-      saleLinesRes,
-      onlineRes,
-      tailoringRes,
-      clientsRes,
-    ] = await Promise.all([
-      ctx.adminClient.from('sale_lines')
-        .select('line_total, sales!inner(status, created_at)')
-        .gte('sales.created_at', minStart).lte('sales.created_at', rangeEnd)
-        .eq('sales.status', 'completed'),
-      ctx.adminClient.from('online_orders')
-        .select('total, created_at')
-        .gte('created_at', minStart).lte('created_at', rangeEnd)
-        .in('status', ['paid', 'processing', 'shipped', 'delivered']),
-      ctx.adminClient.from('tailoring_orders')
-        .select('total, created_at')
-        .gte('created_at', minStart).lte('created_at', rangeEnd)
-        .not('status', 'eq', 'cancelled'),
-      ctx.adminClient.from('clients')
-        .select('id, created_at')
-        .gte('created_at', minStart).lte('created_at', rangeEnd),
+    const wantBoutique = channel === 'all' || channel === 'boutique'
+    const wantTailoring = channel === 'all' || channel === 'tailoring'
+
+    let saleLinesQ = ctx.adminClient.from('sale_lines')
+      .select('line_total, sales!inner(status, store_id, created_at)')
+      .gte('sales.created_at', minStart).lte('sales.created_at', rangeEnd)
+      .eq('sales.status', 'completed')
+    if (store_id) saleLinesQ = saleLinesQ.eq('sales.store_id', store_id)
+
+    let tailoringQ = ctx.adminClient.from('tailoring_orders')
+      .select('total, created_at, store_id')
+      .gte('created_at', minStart).lte('created_at', rangeEnd)
+      .not('status', 'eq', 'cancelled')
+    if (store_id) tailoringQ = tailoringQ.eq('store_id', store_id)
+
+    let clientsQ = ctx.adminClient.from('clients')
+      .select('id, created_at, home_store_id')
+      .gte('created_at', minStart).lte('created_at', rangeEnd)
+    if (store_id) clientsQ = clientsQ.eq('home_store_id', store_id)
+
+    const [saleLinesRes, onlineRes, tailoringRes, clientsRes] = await Promise.all([
+      wantBoutique ? saleLinesQ : Promise.resolve({ data: [] }),
+      wantBoutique && !store_id
+        ? ctx.adminClient.from('online_orders')
+          .select('total, created_at')
+          .gte('created_at', minStart).lte('created_at', rangeEnd)
+          .in('status', ['paid', 'processing', 'shipped', 'delivered'])
+        : Promise.resolve({ data: [] }),
+      wantTailoring ? tailoringQ : Promise.resolve({ data: [] }),
+      clientsQ,
     ])
 
     const inCurrent = (d: string) => d >= current_start && d <= current_end + 'T23:59:59'
@@ -186,17 +212,20 @@ export const getComparePeriods = protectedAction<
 )
 
 export const getTopProducts = protectedAction<
-  { start_date: string; end_date: string; limit?: number },
+  { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel; limit?: number },
   { name: string; sku: string; units: number; revenue: number }[]
 >(
   { permission: 'reports.view', auditModule: 'reports' },
-  async (ctx, { start_date, end_date, limit = 10 }) => {
-    const { data } = await ctx.adminClient
+  async (ctx, { start_date, end_date, store_id, channel = 'all', limit = 10 }) => {
+    if (channel === 'tailoring') return success([])
+    let q = ctx.adminClient
       .from('sale_lines')
-      .select('description, sku, quantity, line_total, sales!inner(created_at, status)')
+      .select('description, sku, quantity, line_total, sales!inner(created_at, status, store_id)')
       .gte('sales.created_at', start_date)
       .lte('sales.created_at', end_date + 'T23:59:59')
       .eq('sales.status', 'completed')
+    if (store_id) q = q.eq('sales.store_id', store_id)
+    const { data } = await q
 
     const products: Record<string, { name: string; sku: string; units: number; revenue: number }> = {}
     for (const line of data || []) {
@@ -213,17 +242,20 @@ export const getTopProducts = protectedAction<
 )
 
 export const getTailorPerformance = protectedAction<
-  { start_date: string; end_date: string },
+  { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel },
   { tailor_id: string; name: string; orders: number; revenue: number; fittings: number; completed: number; avgOrderValue: number; completionRate: number }[]
 >(
   { permission: 'reports.view', auditModule: 'reports' },
-  async (ctx, { start_date, end_date }) => {
-    const { data: orders } = await ctx.adminClient
+  async (ctx, { start_date, end_date, store_id, channel = 'all' }) => {
+    if (channel === 'boutique') return success([])
+    let q = ctx.adminClient
       .from('tailoring_orders')
-      .select('id, total, status, created_by, profiles!tailoring_orders_created_by_fkey(full_name), tailoring_fittings(count)')
+      .select('id, total, status, created_by, store_id, profiles!tailoring_orders_created_by_fkey(full_name), tailoring_fittings(count)')
       .gte('created_at', start_date)
       .lte('created_at', end_date + 'T23:59:59')
       .not('status', 'eq', 'cancelled')
+    if (store_id) q = q.eq('store_id', store_id)
+    const { data: orders } = await q
 
     const tailors: Record<string, { name: string; orders: number; revenue: number; fittings: number; completed: number }> = {}
     for (const order of orders || []) {
@@ -252,24 +284,33 @@ export const getTailorPerformance = protectedAction<
 )
 
 export const getSalesByStore = protectedAction<
-  { start_date: string; end_date: string },
+  { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel },
   { store_id: string; store_name: string; pos: number; tailoring: number; total: number }[]
 >(
   { permission: 'reports.view', auditModule: 'reports' },
-  async (ctx, { start_date, end_date }) => {
+  async (ctx, { start_date, end_date, store_id, channel = 'all' }) => {
+    const wantBoutique = channel === 'all' || channel === 'boutique'
+    const wantTailoring = channel === 'all' || channel === 'tailoring'
+
+    let saleLinesQ = ctx.adminClient
+      .from('sale_lines')
+      .select('line_total, sales!inner(store_id, stores(name), status, created_at)')
+      .gte('sales.created_at', start_date)
+      .lte('sales.created_at', end_date + 'T23:59:59')
+      .eq('sales.status', 'completed')
+    if (store_id) saleLinesQ = saleLinesQ.eq('sales.store_id', store_id)
+
+    let tailoringQ = ctx.adminClient
+      .from('tailoring_orders')
+      .select('total, store_id, stores(name)')
+      .gte('created_at', start_date)
+      .lte('created_at', end_date + 'T23:59:59')
+      .not('status', 'eq', 'cancelled')
+    if (store_id) tailoringQ = tailoringQ.eq('store_id', store_id)
+
     const [saleLinesRes, tailoringRes] = await Promise.all([
-      ctx.adminClient
-        .from('sale_lines')
-        .select('line_total, sales!inner(store_id, stores(name), status, created_at)')
-        .gte('sales.created_at', start_date)
-        .lte('sales.created_at', end_date + 'T23:59:59')
-        .eq('sales.status', 'completed'),
-      ctx.adminClient
-        .from('tailoring_orders')
-        .select('total, store_id, stores(name)')
-        .gte('created_at', start_date)
-        .lte('created_at', end_date + 'T23:59:59')
-        .not('status', 'eq', 'cancelled'),
+      wantBoutique ? saleLinesQ : Promise.resolve({ data: [] as any[] }),
+      wantTailoring ? tailoringQ : Promise.resolve({ data: [] as any[] }),
     ])
 
     const stores: Record<string, { store_name: string; pos: number; tailoring: number }> = {}
@@ -298,43 +339,87 @@ export const getSalesByStore = protectedAction<
 )
 
 export const getSalesByEmployee = protectedAction<
-  { start_date: string; end_date: string },
-  { employee_id: string; employee_name: string; pos_ops: number; pos_total: number; tailoring_ops: number; tailoring_total: number; total: number }[]
+  { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel },
+  {
+    employee_id: string; employee_name: string
+    pos_ops: number; pos_total: number
+    tailoring_ops: number; tailoring_total: number
+    tailor_orders_count: number; tailor_orders_revenue: number
+    total: number
+  }[]
 >(
   { permission: 'reports.view', auditModule: 'reports' },
-  async (ctx, { start_date, end_date }) => {
-    const [saleLinesRes, paymentsRes] = await Promise.all([
-      ctx.adminClient
-        .from('sale_lines')
-        .select('sale_id, line_total, sales!inner(salesperson_id, status, created_at)')
-        .gte('sales.created_at', start_date)
-        .lte('sales.created_at', end_date + 'T23:59:59')
-        .eq('sales.status', 'completed'),
-      ctx.adminClient
-        .from('tailoring_order_payments')
-        .select('amount, created_by, created_at')
-        .gte('created_at', start_date)
-        .lte('created_at', end_date + 'T23:59:59'),
+  async (ctx, { start_date, end_date, store_id, channel = 'all' }) => {
+    const wantBoutique = channel === 'all' || channel === 'boutique'
+    const wantTailoring = channel === 'all' || channel === 'tailoring'
+
+    let saleLinesQ = ctx.adminClient
+      .from('sale_lines')
+      .select('sale_id, line_total, sales!inner(salesperson_id, status, store_id, created_at)')
+      .gte('sales.created_at', start_date)
+      .lte('sales.created_at', end_date + 'T23:59:59')
+      .eq('sales.status', 'completed')
+    if (store_id) saleLinesQ = saleLinesQ.eq('sales.store_id', store_id)
+
+    let paymentsQ = ctx.adminClient
+      .from('tailoring_order_payments')
+      .select('amount, created_by, created_at, tailoring_orders!inner(store_id)')
+      .gte('created_at', start_date)
+      .lte('created_at', end_date + 'T23:59:59')
+    if (store_id) paymentsQ = paymentsQ.eq('tailoring_orders.store_id', store_id)
+
+    let tailoringOrdersQ = ctx.adminClient
+      .from('tailoring_orders')
+      .select('total, created_by, status, store_id, created_at')
+      .gte('created_at', start_date)
+      .lte('created_at', end_date + 'T23:59:59')
+      .not('status', 'eq', 'cancelled')
+    if (store_id) tailoringOrdersQ = tailoringOrdersQ.eq('store_id', store_id)
+
+    const [saleLinesRes, paymentsRes, tailoringOrdersRes] = await Promise.all([
+      wantBoutique ? saleLinesQ : Promise.resolve({ data: [] as any[] }),
+      wantTailoring ? paymentsQ : Promise.resolve({ data: [] as any[] }),
+      wantTailoring ? tailoringOrdersQ : Promise.resolve({ data: [] as any[] }),
     ])
 
-    const employees: Record<string, { name: string; saleIds: Set<string>; pos_total: number; tailoring_ops: number; tailoring_total: number }> = {}
+    const employees: Record<string, {
+      name: string
+      saleIds: Set<string>; pos_total: number
+      tailoring_ops: number; tailoring_total: number
+      tailor_orders_count: number; tailor_orders_revenue: number
+    }> = {}
+
+    const ensure = (id: string) => {
+      if (!employees[id]) employees[id] = {
+        name: id, saleIds: new Set(),
+        pos_total: 0, tailoring_ops: 0, tailoring_total: 0,
+        tailor_orders_count: 0, tailor_orders_revenue: 0,
+      }
+      return employees[id]
+    }
 
     for (const line of saleLinesRes.data || []) {
       const sale = line.sales as any
       const empId = sale?.salesperson_id || 'unknown'
-      if (!employees[empId]) employees[empId] = { name: empId, saleIds: new Set(), pos_total: 0, tailoring_ops: 0, tailoring_total: 0 }
-      if (line.sale_id) employees[empId].saleIds.add(String(line.sale_id))
-      employees[empId].pos_total += (line.line_total as number) || 0
+      const e = ensure(empId)
+      if (line.sale_id) e.saleIds.add(String(line.sale_id))
+      e.pos_total += (line.line_total as number) || 0
     }
 
     for (const payment of paymentsRes.data || []) {
       const empId = (payment.created_by as string) || 'unknown'
-      if (!employees[empId]) employees[empId] = { name: empId, saleIds: new Set(), pos_total: 0, tailoring_ops: 0, tailoring_total: 0 }
-      employees[empId].tailoring_ops += 1
-      employees[empId].tailoring_total += (payment.amount as number) || 0
+      const e = ensure(empId)
+      e.tailoring_ops += 1
+      e.tailoring_total += (payment.amount as number) || 0
     }
 
-    // Resolve names in one batch query
+    for (const order of tailoringOrdersRes.data || []) {
+      const empId = (order.created_by as string) || 'unknown'
+      const e = ensure(empId)
+      e.tailor_orders_count += 1
+      e.tailor_orders_revenue += (order.total as number) || 0
+    }
+
     const empIds = Object.keys(employees).filter(id => id !== 'unknown')
     if (empIds.length > 0) {
       const { data: profiles } = await ctx.adminClient
@@ -354,6 +439,8 @@ export const getSalesByEmployee = protectedAction<
         pos_total: d.pos_total,
         tailoring_ops: d.tailoring_ops,
         tailoring_total: d.tailoring_total,
+        tailor_orders_count: d.tailor_orders_count,
+        tailor_orders_revenue: d.tailor_orders_revenue,
         total: d.pos_total + d.tailoring_total,
       }))
       .sort((a, b) => b.total - a.total)
@@ -447,26 +534,35 @@ export const getCommissionsByEmployee = protectedAction<
 )
 
 export const getSalesByTimePattern = protectedAction<
-  { start_date: string; end_date: string },
+  { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel },
   {
     byHour: { hour: number; total: number; count: number }[]
     byDayOfWeek: { day: number; label: string; total: number; count: number }[]
   }
 >(
   { permission: 'reports.view', auditModule: 'reports' },
-  async (ctx, { start_date, end_date }) => {
+  async (ctx, { start_date, end_date, store_id, channel = 'all' }) => {
+    const wantBoutique = channel === 'all' || channel === 'boutique'
+    const wantTailoring = channel === 'all' || channel === 'tailoring'
+
+    let saleLinesQ = ctx.adminClient
+      .from('sale_lines')
+      .select('line_total, sales!inner(created_at, status, store_id)')
+      .gte('sales.created_at', start_date)
+      .lte('sales.created_at', end_date + 'T23:59:59')
+      .eq('sales.status', 'completed')
+    if (store_id) saleLinesQ = saleLinesQ.eq('sales.store_id', store_id)
+
+    let paymentsQ = ctx.adminClient
+      .from('tailoring_order_payments')
+      .select('amount, created_at, tailoring_orders!inner(store_id)')
+      .gte('created_at', start_date)
+      .lte('created_at', end_date + 'T23:59:59')
+    if (store_id) paymentsQ = paymentsQ.eq('tailoring_orders.store_id', store_id)
+
     const [saleLinesRes, paymentsRes] = await Promise.all([
-      ctx.adminClient
-        .from('sale_lines')
-        .select('line_total, sales!inner(created_at, status)')
-        .gte('sales.created_at', start_date)
-        .lte('sales.created_at', end_date + 'T23:59:59')
-        .eq('sales.status', 'completed'),
-      ctx.adminClient
-        .from('tailoring_order_payments')
-        .select('amount, created_at')
-        .gte('created_at', start_date)
-        .lte('created_at', end_date + 'T23:59:59'),
+      wantBoutique ? saleLinesQ : Promise.resolve({ data: [] as any[] }),
+      wantTailoring ? paymentsQ : Promise.resolve({ data: [] as any[] }),
     ])
 
     const DAY_LABELS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
@@ -556,7 +652,7 @@ export const getExpensesComparison = protectedAction<
 )
 
 export const getClientsAnalytics = protectedAction<
-  { start_date: string; end_date: string },
+  { start_date: string; end_date: string; store_id?: string },
   {
     newClients: number; totalClients: number
     sources: Record<string, number>
@@ -565,12 +661,19 @@ export const getClientsAnalytics = protectedAction<
   }
 >(
   { permission: 'reports.view', auditModule: 'reports' },
-  async (ctx, { start_date, end_date }) => {
+  async (ctx, { start_date, end_date, store_id }) => {
+    let newClientsQ = ctx.adminClient.from('clients').select('id, source').gte('created_at', start_date).lte('created_at', end_date + 'T23:59:59')
+    let totalQ = ctx.adminClient.from('clients').select('id', { count: 'exact' })
+    let withPurchasesQ = ctx.adminClient.from('clients').select('id', { count: 'exact' }).gt('total_spent', 0)
+    let topClientsQ = ctx.adminClient.from('clients').select('first_name, last_name, total_spent').gt('total_spent', 0).gte('created_at', start_date).lte('created_at', end_date + 'T23:59:59').order('total_spent', { ascending: false }).limit(10)
+    if (store_id) {
+      newClientsQ = newClientsQ.eq('home_store_id', store_id)
+      totalQ = totalQ.eq('home_store_id', store_id)
+      withPurchasesQ = withPurchasesQ.eq('home_store_id', store_id)
+      topClientsQ = topClientsQ.eq('home_store_id', store_id)
+    }
     const [newClientsRes, totalRes, withPurchasesRes, topClientsRes] = await Promise.all([
-      ctx.adminClient.from('clients').select('id, source').gte('created_at', start_date).lte('created_at', end_date + 'T23:59:59'),
-      ctx.adminClient.from('clients').select('id', { count: 'exact' }),
-      ctx.adminClient.from('clients').select('id', { count: 'exact' }).gt('total_spent', 0),
-      ctx.adminClient.from('clients').select('first_name, last_name, total_spent').gt('total_spent', 0).gte('created_at', start_date).lte('created_at', end_date + 'T23:59:59').order('total_spent', { ascending: false }).limit(10),
+      newClientsQ, totalQ, withPurchasesQ, topClientsQ,
     ])
 
     const sources: Record<string, number> = {}

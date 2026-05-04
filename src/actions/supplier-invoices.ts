@@ -258,19 +258,13 @@ export const getOverdueSupplierInvoicesCount = protectedAction<void, number>(
   { permission: PERMISSION, auditModule: 'accounting' },
   async (ctx) => {
     const t = today()
-    const [{ count: invCount }, { count: schedCount }] = await Promise.all([
-      ctx.adminClient
-        .from(TABLE)
-        .select('*', { count: 'exact', head: true })
-        .lt('due_date', t)
-        .in('status', ['pendiente', 'vencida']),
-      ctx.adminClient
-        .from('supplier_order_payment_schedule')
-        .select('*', { count: 'exact', head: true })
-        .lt('due_date', t)
-        .eq('is_paid', false),
-    ])
-    return success((invCount ?? 0) + (schedCount ?? 0))
+    const { count } = await ctx.adminClient
+      .from('ap_supplier_invoice_due_dates')
+      .select('*', { count: 'exact', head: true })
+      .lt('due_date', t)
+      .eq('is_paid', false)
+      .gt('amount', 0)
+    return success(count ?? 0)
   }
 )
 

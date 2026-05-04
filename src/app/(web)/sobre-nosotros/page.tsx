@@ -58,26 +58,28 @@ const TIMELINE: TimelineItem[] = [
 
 export default function SobreNosotrosPage() {
   return (
-    <main className="bg-white">
-      {/* TÍTULO MANUSCRITO */}
-      <section className="py-20 md:py-28 px-6 flex justify-center">
-        <h1 className="sr-only">Auténtico e Imperfecto</h1>
-        <Image
-          src="https://www.sastreriaprats.com/cdn/shop/files/Captura_de_pantalla_2024-11-08_a_las_15.45.28.png?v=1731077134"
-          alt="Auténtico e Imperfecto"
-          width={900}
-          height={220}
-          priority
-          className="w-full max-w-3xl h-auto"
-        />
-      </section>
+    <div className="block bg-white">
+      {/* TÍTULO MANUSCRITO — fila propia a ancho completo */}
+      <header className="block w-full py-20 md:py-28">
+        <div className="mx-auto flex w-full max-w-4xl items-center justify-center px-6">
+          <h1 className="sr-only">Auténtico e Imperfecto</h1>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="https://www.sastreriaprats.com/cdn/shop/files/Captura_de_pantalla_2024-11-08_a_las_15.45.28.png?v=1731077134&width=1200"
+            alt="Auténtico e Imperfecto"
+            width={1200}
+            height={300}
+            className="h-auto w-full"
+          />
+        </div>
+      </header>
 
-      {/* TIMELINE */}
-      <section>
+      {/* TIMELINE — filas independientes */}
+      <div className="block w-full">
         {TIMELINE.map((hito) => (
-          <div
+          <section
             key={hito.year}
-            className="grid grid-cols-1 md:grid-cols-2 items-stretch"
+            className="grid w-full grid-cols-1 items-stretch md:grid-cols-2"
           >
             {hito.layout === 'text-image' ? (
               <>
@@ -90,23 +92,23 @@ export default function SobreNosotrosPage() {
                 <TextBlock year={hito.year} text={hito.text} />
               </>
             )}
-          </div>
+          </section>
         ))}
-      </section>
-    </main>
+      </div>
+    </div>
   )
 }
 
 function TextBlock({ year, text }: { year: string; text: string }) {
   return (
-    <div className="flex flex-col justify-center items-center text-center px-8 md:px-16 py-16 md:py-24 bg-white">
-      <p className="max-w-xl text-sm md:text-base text-black leading-relaxed mb-10">
+    <div className="flex flex-col items-center justify-center bg-white px-8 py-16 text-center md:px-16 md:py-24">
+      <p className="mb-10 max-w-xl text-sm leading-relaxed text-black md:text-base">
         {text}
       </p>
-      <p className="text-3xl md:text-4xl font-normal text-black tracking-wide mb-4">
+      <p className="mb-4 text-3xl font-normal tracking-wide text-black md:text-4xl">
         {year}
       </p>
-      <span className="block w-12 h-px bg-black" />
+      <span className="block h-px w-12 bg-black" />
     </div>
   )
 }

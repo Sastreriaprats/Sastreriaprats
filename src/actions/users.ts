@@ -86,8 +86,29 @@ export async function listAdminUsers(): Promise<{ data?: UserRow[]; error?: stri
   }
 
   const rows = (data || []) as { id: string; email: string; full_name: string | null; first_name?: string | null; last_name?: string | null; is_active: boolean; status: string; last_login_at: string | null; created_at: string; roles: unknown }[]
+
+  // La vista v_users_with_roles no incluye first_name/last_name; los traemos de profiles para que el modal de edición se pueda precargar.
+  const namesByUserId: Record<string, { first_name: string | null; last_name: string | null }> = {}
+  if (rows.length > 0) {
+    const { data: nameRows } = await admin
+      .from('profiles')
+      .select('id, first_name, last_name')
+      .in('id', rows.map(r => r.id))
+    for (const n of nameRows || []) {
+      namesByUserId[(n as { id: string }).id] = {
+        first_name: (n as { first_name: string | null }).first_name ?? null,
+        last_name:  (n as { last_name:  string | null }).last_name  ?? null,
+      }
+    }
+  }
+
   const normalized: UserRow[] = rows
-    .map(row => ({ ...row, roles: normalizeRoles(row.roles) }))
+    .map(row => ({
+      ...row,
+      first_name: namesByUserId[row.id]?.first_name ?? row.first_name ?? null,
+      last_name:  namesByUserId[row.id]?.last_name  ?? row.last_name  ?? null,
+      roles: normalizeRoles(row.roles),
+    }))
     .filter(row => !isClientUser(row.roles)) as UserRow[]
   return { data: serializeForServerAction(normalized) }
   } catch (err) {

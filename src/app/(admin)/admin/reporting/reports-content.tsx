@@ -14,7 +14,8 @@ import {
   Flame, Star, Receipt,
 } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
-import { getSalesReport, getComparePeriods, getTopProducts, getTailorPerformance, getClientsAnalytics, getSalesByStore, getSalesByEmployee, getSalesByTimePattern, getExpensesReport, getExpensesComparison } from '@/actions/reports'
+import { getSalesReport, getComparePeriods, getTopProducts, getTailorPerformance, getClientsAnalytics, getSalesByStore, getSalesByEmployee, getSalesByTimePattern, getExpensesReport, getExpensesComparison, type ReportChannel } from '@/actions/reports'
+import { getStoresList } from '@/actions/config'
 import { SalesChart } from './charts/sales-chart'
 import { TopProductsChart } from './charts/top-products-chart'
 import { TailorTable } from './tables/tailor-table'
@@ -62,8 +63,11 @@ type EmployeeItem = {
   employee_id: string; employee_name: string
   pos_ops: number; pos_total: number
   tailoring_ops: number; tailoring_total: number
+  tailor_orders_count: number; tailor_orders_revenue: number
   total: number
 }
+
+type StoreOption = { id: string; name: string }
 
 type TimePatternData = {
   byHour: { hour: number; total: number; count: number }[]
@@ -94,11 +98,26 @@ export function ReportsContent() {
   const [expensesData, setExpensesData] = useState<ExpensesData | null>(null)
   const [expensesComparison, setExpensesComparison] = useState<ExpensesComparison | null>(null)
   const [isExporting, setIsExporting] = useState(false)
+  const [activeTab, setActiveTab] = useState<string>('sales')
+  const [stores, setStores] = useState<StoreOption[]>([])
+  const [storeFilter, setStoreFilter] = useState<string>(activeStoreId || 'all')
+  const [channelFilter, setChannelFilter] = useState<ReportChannel>('all')
+
+  useEffect(() => {
+    let alive = true
+    getStoresList().then(res => {
+      if (!alive) return
+      if (res.data) setStores(res.data.map(s => ({ id: s.id, name: s.display_name || s.name })))
+    })
+    return () => { alive = false }
+  }, [])
 
   const fetchAll = useCallback(async () => {
     setIsLoading(true)
     try {
       const { start, end } = dateRange
+      const storeId = storeFilter === 'all' ? undefined : storeFilter
+      const channel = channelFilter
 
       const startD = new Date(start)
       const endD = new Date(end)
@@ -110,18 +129,18 @@ export function ReportsContent() {
       const prevEndStr = prevEnd.toISOString().split('T')[0]
 
       const [salesRes, compareRes, productsRes, tailorRes, clientsRes, storeRes, employeeRes, timeRes, expensesRes, expCompRes] = await Promise.all([
-        getSalesReport({ start_date: start, end_date: end, store_id: activeStoreId || undefined, group_by: groupBy }),
+        getSalesReport({ start_date: start, end_date: end, store_id: storeId, channel, group_by: groupBy }),
         getComparePeriods({
           current_start: start, current_end: end,
           previous_start: prevStartStr, previous_end: prevEndStr,
-          store_id: activeStoreId || undefined,
+          store_id: storeId, channel,
         }),
-        getTopProducts({ start_date: start, end_date: end, limit: 10 }),
-        getTailorPerformance({ start_date: start, end_date: end }),
-        getClientsAnalytics({ start_date: start, end_date: end }),
-        getSalesByStore({ start_date: start, end_date: end }),
-        getSalesByEmployee({ start_date: start, end_date: end }),
-        getSalesByTimePattern({ start_date: start, end_date: end }),
+        getTopProducts({ start_date: start, end_date: end, store_id: storeId, channel, limit: 10 }),
+        getTailorPerformance({ start_date: start, end_date: end, store_id: storeId, channel }),
+        getClientsAnalytics({ start_date: start, end_date: end, store_id: storeId }),
+        getSalesByStore({ start_date: start, end_date: end, store_id: storeId, channel }),
+        getSalesByEmployee({ start_date: start, end_date: end, store_id: storeId, channel }),
+        getSalesByTimePattern({ start_date: start, end_date: end, store_id: storeId, channel }),
         getExpensesReport({ start_date: start, end_date: end }),
         getExpensesComparison({ current_start: start, current_end: end, previous_start: prevStartStr, previous_end: prevEndStr }),
       ])
@@ -142,7 +161,7 @@ export function ReportsContent() {
     } finally {
       setIsLoading(false)
     }
-  }, [dateRange, groupBy, activeStoreId])
+  }, [dateRange, groupBy, storeFilter, channelFilter])
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
@@ -161,20 +180,49 @@ export function ReportsContent() {
     setDateRange({ start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] })
   }
 
+  const activeStoreName = storeFilter === 'all'
+    ? 'Todas las tiendas'
+    : (stores.find(s => s.id === storeFilter)?.name || '')
+
+  const channelLabel = channelFilter === 'boutique'
+    ? 'Boutique'
+    : channelFilter === 'tailoring'
+      ? 'Sastrería'
+      : 'Todos los canales'
+
+  const buildExportPayload = () => ({
+    ...dateRange,
+    tab: activeTab,
+    storeFilter: storeFilter === 'all' ? null : storeFilter,
+    storeFilterName: activeStoreName,
+    channelFilter,
+    channelLabel,
+    salesData,
+    compareData,
+    topProducts,
+    tailorData,
+    clientsData,
+    storeData,
+    employeeData,
+    timePatternData,
+    expensesData,
+    expensesComparison,
+  })
+
   const handleExportPDF = async () => {
     setIsExporting(true)
     try {
       const res = await fetch('/api/reports/export-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...dateRange, salesData, compareData, topProducts, tailorData }),
+        body: JSON.stringify(buildExportPayload()),
       })
       if (res.ok) {
         const blob = await res.blob()
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = `informe-prats-${dateRange.start}-${dateRange.end}.html`
+        a.download = `informe-prats-${activeTab}-${dateRange.start}-${dateRange.end}.html`
         a.click()
         URL.revokeObjectURL(url)
         toast.success('PDF descargado')
@@ -191,14 +239,14 @@ export function ReportsContent() {
       const res = await fetch('/api/reports/export-excel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...dateRange, salesData, topProducts, tailorData }),
+        body: JSON.stringify(buildExportPayload()),
       })
       if (res.ok) {
         const blob = await res.blob()
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = `informe-prats-${dateRange.start}-${dateRange.end}.csv`
+        a.download = `informe-prats-${activeTab}-${dateRange.start}-${dateRange.end}.csv`
         a.click()
         URL.revokeObjectURL(url)
         toast.success('Excel descargado')
@@ -256,6 +304,28 @@ export function ReportsContent() {
             <SelectItem value="day">Por día</SelectItem>
             <SelectItem value="week">Por semana</SelectItem>
             <SelectItem value="month">Por mes</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select value={storeFilter} onValueChange={setStoreFilter}>
+          <SelectTrigger className="w-44 h-8 text-xs">
+            <Store className="h-3 w-3 mr-1 text-muted-foreground" />
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas las tiendas</SelectItem>
+            {stores.map(s => (
+              <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={channelFilter} onValueChange={(v: ReportChannel) => setChannelFilter(v)}>
+          <SelectTrigger className="w-36 h-8 text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos los canales</SelectItem>
+            <SelectItem value="boutique">Boutique</SelectItem>
+            <SelectItem value="tailoring">Sastrería</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -316,7 +386,7 @@ export function ReportsContent() {
             </Card>
           </div>
 
-          <Tabs defaultValue="sales">
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList>
               <TabsTrigger value="sales" className="gap-1"><BarChart3 className="h-4 w-4" /> Ventas</TabsTrigger>
               <TabsTrigger value="products" className="gap-1"><ShoppingBag className="h-4 w-4" /> Productos</TabsTrigger>
@@ -484,6 +554,7 @@ function EmployeeTab({ data }: { data: EmployeeItem[] }) {
 
   const hasTpv = data.some(e => e.pos_ops > 0 || e.pos_total > 0)
   const hasTailoring = data.some(e => e.tailoring_ops > 0 || e.tailoring_total > 0)
+  const hasTailorOrders = data.some(e => e.tailor_orders_count > 0 || e.tailor_orders_revenue > 0)
 
   return (
     <div className="space-y-4">
@@ -498,6 +569,8 @@ function EmployeeTab({ data }: { data: EmployeeItem[] }) {
                 {hasTpv && <TableHead className="text-right">Total TPV</TableHead>}
                 {hasTailoring && <TableHead className="text-right">Cobros Sast.</TableHead>}
                 {hasTailoring && <TableHead className="text-right">Total Sast.</TableHead>}
+                {hasTailorOrders && <TableHead className="text-right">Pedidos sastre</TableHead>}
+                {hasTailorOrders && <TableHead className="text-right">Fact. sastre</TableHead>}
                 <TableHead className="text-right">Total</TableHead>
               </TableRow>
             </TableHeader>
@@ -509,6 +582,8 @@ function EmployeeTab({ data }: { data: EmployeeItem[] }) {
                   {hasTpv && <TableCell className="text-right">{formatCurrency(e.pos_total)}</TableCell>}
                   {hasTailoring && <TableCell className="text-right text-muted-foreground">{e.tailoring_ops}</TableCell>}
                   {hasTailoring && <TableCell className="text-right">{formatCurrency(e.tailoring_total)}</TableCell>}
+                  {hasTailorOrders && <TableCell className="text-right text-muted-foreground">{e.tailor_orders_count}</TableCell>}
+                  {hasTailorOrders && <TableCell className="text-right">{formatCurrency(e.tailor_orders_revenue)}</TableCell>}
                   <TableCell className="text-right font-bold">{formatCurrency(e.total)}</TableCell>
                 </TableRow>
               ))}
@@ -519,11 +594,18 @@ function EmployeeTab({ data }: { data: EmployeeItem[] }) {
                   {hasTpv && <TableCell className="text-right">{formatCurrency(data.reduce((s, e) => s + e.pos_total, 0))}</TableCell>}
                   {hasTailoring && <TableCell className="text-right">{data.reduce((s, e) => s + e.tailoring_ops, 0)}</TableCell>}
                   {hasTailoring && <TableCell className="text-right">{formatCurrency(data.reduce((s, e) => s + e.tailoring_total, 0))}</TableCell>}
+                  {hasTailorOrders && <TableCell className="text-right">{data.reduce((s, e) => s + e.tailor_orders_count, 0)}</TableCell>}
+                  {hasTailorOrders && <TableCell className="text-right">{formatCurrency(data.reduce((s, e) => s + e.tailor_orders_revenue, 0))}</TableCell>}
                   <TableCell className="text-right">{formatCurrency(data.reduce((s, e) => s + e.total, 0))}</TableCell>
                 </TableRow>
               )}
             </TableBody>
           </Table>
+          {hasTailorOrders && (
+            <p className="text-[11px] text-muted-foreground mt-2">
+              Pedidos sastre: pedidos de sastrería gestionados por el empleado en el periodo (no se suman al total para evitar duplicar con los cobros).
+            </p>
+          )}
         </CardContent>
       </Card>
 
