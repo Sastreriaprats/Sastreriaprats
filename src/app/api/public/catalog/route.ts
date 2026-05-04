@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   const maxPrice = searchParams.get('max_price')
   const size = searchParams.get('size')
   const color = searchParams.get('color')
-  const sort = searchParams.get('sort') || 'newest'
+  const sort = searchParams.get('sort') || 'name'
   const page = parseInt(searchParams.get('page') || '1')
   const limit = 24
 
@@ -94,8 +94,8 @@ export async function GET(request: NextRequest) {
 
   if (sort === 'price_asc') query = query.order('price_with_tax', { ascending: true })
   else if (sort === 'price_desc') query = query.order('price_with_tax', { ascending: false })
-  else if (sort === 'name') query = query.order('name', { ascending: true })
-  else query = query.order('created_at', { ascending: false })
+  else if (sort === 'newest') query = query.order('created_at', { ascending: false })
+  else query = query.order('name', { ascending: true })
 
   query = query.range((page - 1) * limit, page * limit - 1)
 

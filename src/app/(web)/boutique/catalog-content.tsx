@@ -21,7 +21,7 @@ export function CatalogContent() {
   const [totalPages, setTotalPages] = useState(1)
   const [isLoading, setIsLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [sort, setSort] = useState('newest')
+  const [sort, setSort] = useState('name')
   const [showSort, setShowSort] = useState(false)
   const [clientId, setClientId] = useState<string | null>(null)
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set())
@@ -107,10 +107,10 @@ export function CatalogContent() {
     new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(price)
 
   const sortLabels: Record<string, string> = {
+    name: 'Nombre A-Z',
     newest: 'Novedades',
     price_asc: 'Precio: menor a mayor',
     price_desc: 'Precio: mayor a menor',
-    name: 'Nombre A-Z',
   }
 
   return (
