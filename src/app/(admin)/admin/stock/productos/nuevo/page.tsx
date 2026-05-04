@@ -9,14 +9,13 @@ export default async function NewProductPage() {
   await requirePermission('products.create')
   const admin = createAdminClient()
   const [{ data: categories }, { data: suppliers }] = await Promise.all([
-    admin.from('product_categories').select('id, name, slug, product_type').eq('is_active', true).order('sort_order').order('name'),
+    admin
+      .from('product_categories')
+      .select('id, name, slug, product_type, parent_id, sort_order, is_visible_web')
+      .eq('is_active', true)
+      .order('sort_order')
+      .order('name'),
     admin.from('suppliers').select('id, name').eq('is_active', true).order('name'),
   ])
-  // Solo categorías de gestión interna (nivel 0, no tejidos, no servicios, no subcategorías web)
-  const managementSlugs = new Set([
-    'americana', 'camisa', 'complemento', 'pantalon', 'prenda-exterior',
-    'punto', 'ropa-interior-hogar', 'traje-de-bano', 'trajes', 'varios', 'zapato',
-  ])
-  const filtered = (categories || []).filter((c: any) => managementSlugs.has(c.slug))
-  return <NewProductForm categories={filtered} suppliers={suppliers || []} />
+  return <NewProductForm categories={categories || []} suppliers={suppliers || []} />
 }

@@ -28,7 +28,12 @@ export default async function ProductDetailPage(props: { params: Promise<{ id: s
       `)
       .eq('id', params.id)
       .single(),
-    admin.from('product_categories').select('id, name, slug, product_type').eq('is_active', true).order('sort_order').order('name'),
+    admin
+      .from('product_categories')
+      .select('id, name, slug, product_type, parent_id, sort_order, is_visible_web')
+      .eq('is_active', true)
+      .order('sort_order')
+      .order('name'),
     admin.from('suppliers').select('id, name').eq('is_active', true).order('name'),
     (async () => {
       const { data: physicalStores } = await admin.from('stores').select('id').eq('store_type', 'physical').eq('is_active', true)
@@ -40,15 +45,10 @@ export default async function ProductDetailPage(props: { params: Promise<{ id: s
   ])
 
   if (!product) notFound()
-  const managementSlugs = new Set([
-    'americana', 'camisa', 'complemento', 'pantalon', 'prenda-exterior',
-    'punto', 'ropa-interior-hogar', 'traje-de-bano', 'trajes', 'varios', 'zapato',
-  ])
-  const filtered = (categories || []).filter((c: any) => managementSlugs.has(c.slug))
   return (
     <ProductDetailContent
       product={product}
-      categories={filtered}
+      categories={categories || []}
       suppliers={suppliers || []}
       physicalWarehouses={physicalWarehouses || []}
     />

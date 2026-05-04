@@ -26,7 +26,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { ArrowLeft, Plus, Loader2, X, ImagePlus, Sparkles, Star } from 'lucide-react'
+import { ArrowLeft, Plus, Loader2, X, ImagePlus, Sparkles, Star, Eye, EyeOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAction } from '@/hooks/use-action'
 import { createProductAction, updateProductAction, createVariantAction, updateVariantAction, deleteVariantAction, adjustStock, listPhysicalWarehouses, generateProductSkuAction } from '@/actions/products'
@@ -63,6 +63,66 @@ function getInitialImages(product: any): string[] {
   return []
 }
 
+type CategoryInput = {
+  id: string
+  name: string
+  slug: string
+  product_type?: string | null
+  parent_id?: string | null
+  is_visible_web?: boolean | null
+}
+type CategoryOption = {
+  id: string
+  name: string
+  effective_product_type: string | null
+  level: number
+  is_visible_web: boolean
+}
+
+// Construye la lista de categorías ordenada en DFS (padre → hijos) con el nivel
+// para indentar visualmente, el product_type heredado del padre cuando falta y la
+// visibilidad web tal cual está configurada en la categoría.
+function buildCategoryOptions(rows: CategoryInput[]): CategoryOption[] {
+  const byId = new Map<string, CategoryInput>()
+  const childrenByParent = new Map<string | null, CategoryInput[]>()
+  for (const r of rows) {
+    byId.set(r.id, r)
+    const key = r.parent_id ?? null
+    const arr = childrenByParent.get(key) ?? []
+    arr.push(r)
+    childrenByParent.set(key, arr)
+  }
+  const result: CategoryOption[] = []
+  const walk = (parentId: string | null, level: number, inheritedType: string | null) => {
+    const kids = childrenByParent.get(parentId) ?? []
+    for (const c of kids) {
+      const effective = c.product_type ?? inheritedType
+      result.push({
+        id: c.id,
+        name: c.name,
+        effective_product_type: effective,
+        level,
+        is_visible_web: c.is_visible_web !== false,
+      })
+      walk(c.id, level + 1, effective)
+    }
+  }
+  walk(null, 0, null)
+  // Categorías huérfanas (parent_id apunta a algo que no está en la lista) → tratarlas como raíz
+  for (const r of rows) {
+    if (r.parent_id && !byId.has(r.parent_id) && !result.some(x => x.id === r.id)) {
+      result.push({
+        id: r.id,
+        name: r.name,
+        effective_product_type: r.product_type ?? null,
+        level: 0,
+        is_visible_web: r.is_visible_web !== false,
+      })
+    }
+  }
+  return result
+}
+
 export function ProductForm({
   categories,
   suppliers,
@@ -71,7 +131,7 @@ export function ProductForm({
   onCancel,
   showPageHeader = false,
 }: {
-  categories: { id: string; name: string; slug: string; product_type?: string | null }[]
+  categories: { id: string; name: string; slug: string; product_type?: string | null; parent_id?: string | null; is_visible_web?: boolean | null }[]
   suppliers: { id: string; name: string }[]
   initialProduct?: any
   onSuccess?: () => void
@@ -138,6 +198,20 @@ export function ProductForm({
 
   const supabase = useMemo(() => createClient(), [])
   const metrosInicialesRef = useRef<number>(0)
+
+  const categoryOptions = useMemo(() => buildCategoryOptions(categories), [categories])
+  // Tipos de producto que se consideran equivalentes a la hora de filtrar categorías.
+  // El form usa 'alteration' pero las categorías de configuración sólo tienen 'accessory'/'service'.
+  const productTypeMatchers: Record<string, (t: string | null) => boolean> = {
+    boutique: (t) => !t || t === 'boutique',
+    tailoring_fabric: (t) => !t || t === 'tailoring_fabric',
+    alteration: (t) => !t || t === 'accessory' || t === 'service',
+    service: (t) => !t || t === 'service',
+  }
+  const filteredCategoryOptions = useMemo(() => {
+    const matcher = productTypeMatchers[basico.product_type] ?? (() => true)
+    return categoryOptions.filter(c => matcher(c.effective_product_type))
+  }, [categoryOptions, basico.product_type])
 
   useEffect(() => {
     let cancelled = false
@@ -737,8 +811,9 @@ export function ProductForm({
                   <Select
                     value={basico.product_type}
                     onValueChange={(v: any) => {
-                      const currentCat = categories.find((c) => c.id === basico.category_id)
-                      const keepCategory = currentCat && (currentCat.product_type ?? 'boutique') === v
+                      const currentCat = categoryOptions.find((c) => c.id === basico.category_id)
+                      const matcher = productTypeMatchers[v] ?? (() => true)
+                      const keepCategory = !!currentCat && matcher(currentCat.effective_product_type)
                       setBasico((b) => ({ ...b, product_type: v, category_id: keepCategory ? b.category_id : '' }))
                     }}
                   >
@@ -758,9 +833,27 @@ export function ProductForm({
                   >
                     <SelectTrigger><SelectValue placeholder="Seleccionar categoría" /></SelectTrigger>
                     <SelectContent>
-                      {categories.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                      ))}
+                      {filteredCategoryOptions.length === 0 ? (
+                        <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                          No hay categorías para este tipo
+                        </div>
+                      ) : (
+                        filteredCategoryOptions.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            <span className="inline-flex items-center gap-2">
+                              <span className="text-muted-foreground font-mono">
+                                {c.level === 0 ? '' : '─'.repeat(c.level) + ' '}
+                              </span>
+                              <span>{c.name}</span>
+                              {c.is_visible_web ? (
+                                <Eye className="h-3.5 w-3.5 text-emerald-600" aria-label="Visible en web" />
+                              ) : (
+                                <EyeOff className="h-3.5 w-3.5 text-muted-foreground" aria-label="No visible en web" />
+                              )}
+                            </span>
+                          </SelectItem>
+                        ))
+                      )}
                     </SelectContent>
                   </Select>
                 </div>

@@ -34,7 +34,7 @@ export function ProductDetailContent({
   physicalWarehouses = [],
 }: {
   product: any
-  categories: { id: string; name: string; slug: string }[]
+  categories: { id: string; name: string; slug: string; product_type?: string | null; parent_id?: string | null; is_visible_web?: boolean | null }[]
   suppliers: { id: string; name: string }[]
   physicalWarehouses?: { id: string; name: string; code: string }[]
 }) {
