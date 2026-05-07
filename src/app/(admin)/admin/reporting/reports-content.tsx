@@ -342,7 +342,7 @@ export function ReportsContent() {
           </SelectContent>
         </Select>
 
-        <div className="flex items-center gap-2 rounded-lg border px-3 h-8">
+        <div className="flex items-center gap-2 h-8">
           <Switch
             id="tax-mode"
             checked={taxMode === 'without_tax'}
