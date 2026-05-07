@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json()
   const {
     start, end, tab,
-    storeFilterName, channelLabel,
+    storeFilterName, channelLabel, taxLabel,
     salesData, compareData, topProducts, tailorData, clientsData,
     storeData, employeeData, timePatternData, expensesData, expensesComparison,
   } = body
@@ -40,6 +40,7 @@ export async function POST(request: NextRequest) {
   lines.push(`Periodo,${csv(start)},a,${csv(end)}`)
   if (storeFilterName) lines.push(`Tienda,${csv(storeFilterName)}`)
   if (channelLabel) lines.push(`Canal,${csv(channelLabel)}`)
+  if (taxLabel) lines.push(`Importes,${csv(taxLabel)}`)
   lines.push(`Generado,${csv(new Date().toLocaleString('es-ES'))}`)
   lines.push('')
 

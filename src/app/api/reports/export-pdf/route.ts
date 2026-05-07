@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json()
   const {
     start, end, tab,
-    storeFilterName, channelLabel,
+    storeFilterName, channelLabel, taxLabel,
     salesData, compareData, topProducts, tailorData, clientsData,
     storeData, employeeData, timePatternData, expensesData, expensesComparison,
   } = body
@@ -36,6 +36,7 @@ export async function POST(request: NextRequest) {
   const filtersLine = [
     storeFilterName ? `Tienda: ${storeFilterName}` : null,
     channelLabel ? `Canal: ${channelLabel}` : null,
+    taxLabel ? `Importes: ${taxLabel}` : null,
   ].filter(Boolean).join(' · ')
 
   let section = ''

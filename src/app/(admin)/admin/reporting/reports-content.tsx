@@ -7,6 +7,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Input } from '@/components/ui/input'
 import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   TrendingUp, TrendingDown, DollarSign, Users, ShoppingBag, Scissors,
@@ -14,7 +16,7 @@ import {
   Flame, Star, Receipt,
 } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
-import { getSalesReport, getComparePeriods, getTopProducts, getTailorPerformance, getClientsAnalytics, getSalesByStore, getSalesByEmployee, getSalesByTimePattern, getExpensesReport, getExpensesComparison, type ReportChannel } from '@/actions/reports'
+import { getSalesReport, getComparePeriods, getTopProducts, getTailorPerformance, getClientsAnalytics, getSalesByStore, getSalesByEmployee, getSalesByTimePattern, getExpensesReport, getExpensesComparison, type ReportChannel, type TaxMode } from '@/actions/reports'
 import { getStoresList } from '@/actions/config'
 import { SalesChart } from './charts/sales-chart'
 import { TopProductsChart } from './charts/top-products-chart'
@@ -102,6 +104,7 @@ export function ReportsContent() {
   const [stores, setStores] = useState<StoreOption[]>([])
   const [storeFilter, setStoreFilter] = useState<string>(activeStoreId || 'all')
   const [channelFilter, setChannelFilter] = useState<ReportChannel>('all')
+  const [taxMode, setTaxMode] = useState<TaxMode>('without_tax')
 
   useEffect(() => {
     let alive = true
@@ -118,6 +121,7 @@ export function ReportsContent() {
       const { start, end } = dateRange
       const storeId = storeFilter === 'all' ? undefined : storeFilter
       const channel = channelFilter
+      const tax_mode = taxMode
 
       const startD = new Date(start)
       const endD = new Date(end)
@@ -129,20 +133,20 @@ export function ReportsContent() {
       const prevEndStr = prevEnd.toISOString().split('T')[0]
 
       const [salesRes, compareRes, productsRes, tailorRes, clientsRes, storeRes, employeeRes, timeRes, expensesRes, expCompRes] = await Promise.all([
-        getSalesReport({ start_date: start, end_date: end, store_id: storeId, channel, group_by: groupBy }),
+        getSalesReport({ start_date: start, end_date: end, store_id: storeId, channel, group_by: groupBy, tax_mode }),
         getComparePeriods({
           current_start: start, current_end: end,
           previous_start: prevStartStr, previous_end: prevEndStr,
-          store_id: storeId, channel,
+          store_id: storeId, channel, tax_mode,
         }),
-        getTopProducts({ start_date: start, end_date: end, store_id: storeId, channel, limit: 10 }),
-        getTailorPerformance({ start_date: start, end_date: end, store_id: storeId, channel }),
+        getTopProducts({ start_date: start, end_date: end, store_id: storeId, channel, limit: 10, tax_mode }),
+        getTailorPerformance({ start_date: start, end_date: end, store_id: storeId, channel, tax_mode }),
         getClientsAnalytics({ start_date: start, end_date: end, store_id: storeId }),
-        getSalesByStore({ start_date: start, end_date: end, store_id: storeId, channel }),
-        getSalesByEmployee({ start_date: start, end_date: end, store_id: storeId, channel }),
-        getSalesByTimePattern({ start_date: start, end_date: end, store_id: storeId, channel }),
-        getExpensesReport({ start_date: start, end_date: end }),
-        getExpensesComparison({ current_start: start, current_end: end, previous_start: prevStartStr, previous_end: prevEndStr }),
+        getSalesByStore({ start_date: start, end_date: end, store_id: storeId, channel, tax_mode }),
+        getSalesByEmployee({ start_date: start, end_date: end, store_id: storeId, channel, tax_mode }),
+        getSalesByTimePattern({ start_date: start, end_date: end, store_id: storeId, channel, tax_mode }),
+        getExpensesReport({ start_date: start, end_date: end, tax_mode }),
+        getExpensesComparison({ current_start: start, current_end: end, previous_start: prevStartStr, previous_end: prevEndStr, tax_mode }),
       ])
 
       if (salesRes.success) setSalesData(salesRes.data)
@@ -161,7 +165,7 @@ export function ReportsContent() {
     } finally {
       setIsLoading(false)
     }
-  }, [dateRange, groupBy, storeFilter, channelFilter])
+  }, [dateRange, groupBy, storeFilter, channelFilter, taxMode])
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
@@ -190,6 +194,8 @@ export function ReportsContent() {
       ? 'Sastrería'
       : 'Todos los canales'
 
+  const taxLabel = taxMode === 'without_tax' ? 'Sin IVA (base imponible)' : 'Con IVA'
+
   const buildExportPayload = () => ({
     ...dateRange,
     tab: activeTab,
@@ -197,6 +203,8 @@ export function ReportsContent() {
     storeFilterName: activeStoreName,
     channelFilter,
     channelLabel,
+    taxMode,
+    taxLabel,
     salesData,
     compareData,
     topProducts,
@@ -269,7 +277,12 @@ export function ReportsContent() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Informes</h1>
-          <p className="text-muted-foreground">Análisis de ventas, clientes y rendimiento</p>
+          <p className="text-muted-foreground">
+            Análisis de ventas, clientes y rendimiento
+            <span className="ml-2 inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+              {taxMode === 'without_tax' ? 'Sin IVA' : 'Con IVA'}
+            </span>
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="gap-1" onClick={handleExportPDF} disabled={isExporting || isLoading}>
@@ -328,6 +341,17 @@ export function ReportsContent() {
             <SelectItem value="tailoring">Sastrería</SelectItem>
           </SelectContent>
         </Select>
+
+        <div className="flex items-center gap-2 rounded-lg border px-3 h-8">
+          <Switch
+            id="tax-mode"
+            checked={taxMode === 'without_tax'}
+            onCheckedChange={(checked) => setTaxMode(checked ? 'without_tax' : 'with_tax')}
+          />
+          <Label htmlFor="tax-mode" className="text-xs cursor-pointer select-none">
+            Sin IVA
+          </Label>
+        </div>
       </div>
 
       {isLoading ? (
