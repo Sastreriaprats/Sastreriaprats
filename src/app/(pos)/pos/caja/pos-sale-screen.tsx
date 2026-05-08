@@ -42,8 +42,9 @@ import { generateTicketPdf, printTicketPdf, printGiftTicketPdf } from '@/compone
 import { printGiftCardPdf, downloadGiftCardPdf } from '@/components/pos/gift-card-pdf'
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
 import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
-import { getActiveReservationsForVariant } from '@/actions/reservations'
+import { getActiveReservationsForVariant, listReservations } from '@/actions/reservations'
 import { ReservationDialog } from './reservation-dialog'
+import { ReservationPickupDialog } from './reservation-pickup-dialog'
 import { sortBySize } from '@/lib/utils/sort-sizes'
 
 interface TicketLine {
@@ -140,6 +141,8 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const [invoiceConfirmOpen, setInvoiceConfirmOpen] = useState(false)
   const [clientPendingDebt, setClientPendingDebt] = useState<Array<{ entity_type: 'tailoring_order' | 'sale'; entity_id: string; reference: string; total_pending: number }>>([])
   const [clientDebtLoading, setClientDebtLoading] = useState(false)
+  const [clientReservations, setClientReservations] = useState<any[]>([])
+  const [clientReservationsLoading, setClientReservationsLoading] = useState(false)
   const [showCloseReminderDialog, setShowCloseReminderDialog] = useState(false)
   const [lineToRemove, setLineToRemove] = useState<{ id: string; description: string } | null>(null)
   const [showStockWarning, setShowStockWarning] = useState(false)
@@ -150,6 +153,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const [selectedSalespersonId, setSelectedSalespersonId] = useState<string | null>(null)
   const [lastSaleSalespersonName, setLastSaleSalespersonName] = useState<string | null>(null)
   const [showReservationDialog, setShowReservationDialog] = useState(false)
+  const [reservationPickupOpen, setReservationPickupOpen] = useState(false)
   const [reservedVariantsForClient, setReservedVariantsForClient] = useState<Record<string, number>>({})
 
   // Tarjetas regalo (vales)
@@ -400,6 +404,29 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
       })
       .catch(() => { if (!cancelled) setClientPendingDebt([]) })
       .finally(() => { if (!cancelled) setClientDebtLoading(false) })
+    return () => { cancelled = true }
+  }, [selectedClientId])
+
+  // Reservas activas / pendientes del cliente seleccionado (aviso en caja)
+  useEffect(() => {
+    if (!selectedClientId) { setClientReservations([]); return }
+    let cancelled = false
+    setClientReservationsLoading(true)
+    listReservations({ clientId: selectedClientId, status: 'active', page: 0, pageSize: 20 })
+      .then((result) => {
+        if (cancelled) return
+        const activeRows = result.success && (result.data as any)?.data?.length > 0 ? (result.data as any).data : []
+        setClientReservations(activeRows)
+        return listReservations({ clientId: selectedClientId, status: 'pending_stock', page: 0, pageSize: 20 })
+      })
+      .then((result2) => {
+        if (cancelled || !result2) return
+        if (result2.success && (result2.data as any)?.data?.length > 0) {
+          setClientReservations((prev) => [...prev, ...(result2.data as any).data])
+        }
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setClientReservationsLoading(false) })
     return () => { cancelled = true }
   }, [selectedClientId])
 
@@ -762,6 +789,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
     setPayments([])
     setSelectedClientId(null)
     setSelectedClientName('')
+    setClientReservations([])
     setGlobalDiscount(0)
     setIsTaxFree(false)
     setShowPayment(false)
@@ -1223,7 +1251,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
             ) : (
               <div className="rounded bg-slate-200 border border-slate-300 p-2.5 flex flex-col items-center text-center">
                 <p className="text-sm font-medium text-slate-800 truncate w-full">{selectedClientName}</p>
-                <Button variant="ghost" size="sm" className="h-8 text-xs text-slate-600 font-medium hover:text-slate-800 hover:bg-slate-300 mt-1" onClick={() => { setSelectedClientId(null); setSelectedClientName('') }}>Cambiar</Button>
+                <Button variant="ghost" size="sm" className="h-8 text-xs text-slate-600 font-medium hover:text-slate-800 hover:bg-slate-300 mt-1" onClick={() => { setSelectedClientId(null); setSelectedClientName(''); setClientReservations([]) }}>Cambiar</Button>
               </div>
             )}
             {clientDebtLoading && selectedClientId && <div className="flex items-center gap-1.5 text-xs text-slate-600 mt-1.5"><Loader2 className="h-3 w-3 animate-spin" /> Comprobando...</div>}
@@ -1233,6 +1261,25 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
                 <p className="text-amber-700/90 mt-0.5 leading-tight">Puedes añadirlo al cobro actual.</p>
                 <Button type="button" size="sm" variant="outline" className="mt-2 w-full h-auto min-h-8 py-2 text-xs font-medium border-amber-300 text-amber-800 hover:bg-amber-100 hover:border-amber-400 justify-center text-center whitespace-normal leading-tight" onClick={addPendingDebtToTicket}>
                   Incluir pendientes en este ticket
+                </Button>
+              </div>
+            )}
+            {!clientReservationsLoading && clientReservations.length > 0 && selectedClientId && (
+              <div className="mt-1.5 rounded-lg border border-purple-200 bg-purple-50 p-2.5 text-xs">
+                <p className="font-semibold text-purple-800">
+                  {clientReservations.length} reserva{clientReservations.length !== 1 ? 's' : ''} activa{clientReservations.length !== 1 ? 's' : ''}
+                  {' · '}{formatCurrency(clientReservations.reduce((sum: number, r: any) => sum + (Number(r.total) - Number(r.total_paid || 0)), 0))} pendiente
+                </p>
+                <p className="text-purple-700/90 mt-0.5 leading-tight">
+                  Este cliente tiene reservas pendientes de recoger.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-1.5 h-7 text-xs border-purple-300 text-purple-700 hover:bg-purple-100"
+                  onClick={() => setReservationPickupOpen(true)}
+                >
+                  Ver reservas
                 </Button>
               </div>
             )}
@@ -2051,6 +2098,18 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
         defaultClientId={selectedClientId}
         defaultClientName={selectedClientName}
         onAddReservationToTicket={addReservationPickup}
+      />
+
+      {/* Reservation Pickup Dialog (acceso directo desde banner púrpura) */}
+      <ReservationPickupDialog
+        open={reservationPickupOpen}
+        onOpenChange={setReservationPickupOpen}
+        storeId={activeStoreId}
+        cashSessionId={session.id}
+        onAddToTicket={(payloads) => {
+          addReservationPickup(payloads)
+          setReservationPickupOpen(false)
+        }}
       />
 
       {/* Diálogo: Vender tarjeta regalo */}
