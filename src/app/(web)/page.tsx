@@ -2,6 +2,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { getHomeContent } from '@/actions/cms'
 import { NewsletterForm } from '@/components/web/newsletter-form'
+import { HeroVideo } from '@/components/web/hero-video'
 import type { Metadata } from 'next'
 
 export const revalidate = 3600
@@ -27,18 +28,9 @@ export default async function HomePage() {
   return (
     <main className="bg-white font-sans antialiased">
       {/* HERO — imagen o vídeo B/N pantalla completa */}
-      <section className="relative w-full h-screen overflow-hidden">
+      <section className="relative w-full h-screen overflow-hidden bg-black">
         {hero.video_url ? (
-          <video
-            autoPlay
-            loop
-            muted
-            playsInline
-            poster={hero.image_url}
-            className="absolute inset-0 w-full h-full object-cover object-[center_25%]"
-          >
-            <source src={hero.video_url} type={hero.video_url.endsWith('.webm') ? 'video/webm' : 'video/mp4'} />
-          </video>
+          <HeroVideo videoUrl={hero.video_url} />
         ) : (
           <Image
             src={hero.image_url}

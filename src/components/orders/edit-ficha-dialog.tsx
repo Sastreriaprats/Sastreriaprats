@@ -49,8 +49,8 @@ function defaultsFor(type: 'pantalon' | 'chaleco' | 'camiseria' | 'americana'): 
     confF: '', confD: '', confFP: '', confFV: '', confHA: '', confHB: '', confVD: '',
   }
   if (type === 'camiseria') return {
-    cuello: '', canesu: '', manga: '', frenPecho: '', contPecho: '',
-    cintura: '', cadera: '', largo: '', pIzq: '', pDch: '', hombro: '', biceps: '',
+    cuello: '', canesu: '', largoManga: '', frentePecho: '', pecho: '',
+    cintura: '', cadera: '', largoCuerpo: '', hombro: '', punoDerecho: '', punoIzquierdo: '',
     jareton: false, bolsillo: false, hombroCaido: false, derecho: false, izquierdo: false,
     hombrosAltos: false, hombrosBajos: false, erguido: false, cargado: false,
     espaldaLisa: false, espPliegues: false, espTablonCentr: false, espPinzas: false,
@@ -99,6 +99,12 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
   const [saving, setSaving] = useState(false)
   const [fabricsStock, setFabricsStock] = useState<Array<{ id: string; fabric_code: string | null; name: string }>>([])
   const [tejidoPopoverOpen, setTejidoPopoverOpen] = useState(false)
+
+  useEffect(() => {
+    if (open) {
+      setCfg({ ...defaultsFor(type), ...initialCfg })
+    }
+  }, [open, line?.id])
 
   useEffect(() => {
     if (!open) return
@@ -423,12 +429,27 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
   )
 
   const CamiseriaSection = () => {
-    const MEDIDAS: Array<{ label: string; field: string }> = [
-      { label: 'Cuello', field: 'cuello' }, { label: 'Canesú', field: 'canesu' }, { label: 'Manga', field: 'manga' },
-      { label: 'Fren.Pecho', field: 'frenPecho' }, { label: 'Cont.Pecho', field: 'contPecho' },
-      { label: 'Cintura', field: 'cintura' }, { label: 'Cadera', field: 'cadera' }, { label: 'Lar.Cuerpo', field: 'largo' },
-      { label: 'P.Izq', field: 'pIzq' }, { label: 'P.Dch', field: 'pDch' }, { label: 'Hombro', field: 'hombro' }, { label: 'Bíceps', field: 'biceps' },
+    const MEDIDAS: Array<{ label: string; field: string; fallbacks?: string[] }> = [
+      { label: 'Cuello', field: 'cuello' },
+      { label: 'Canesú', field: 'canesu' },
+      { label: 'Largo manga', field: 'largoManga', fallbacks: ['largo_manga', 'manga'] },
+      { label: 'Frente pecho', field: 'frentePecho', fallbacks: ['frente_pecho', 'frenPecho'] },
+      { label: 'Pecho', field: 'pecho', fallbacks: ['cont_pecho', 'contPecho'] },
+      { label: 'Cintura', field: 'cintura' },
+      { label: 'Cadera', field: 'cadera' },
+      { label: 'Largo cuerpo', field: 'largoCuerpo', fallbacks: ['largo_cuerpo', 'largo'] },
+      { label: 'Hombro', field: 'hombro' },
+      { label: 'Puño dch', field: 'punoDerecho', fallbacks: ['puno_derecho'] },
+      { label: 'Puño izq', field: 'punoIzquierdo', fallbacks: ['puno_izquierdo'] },
     ]
+    const readMedida = (m: { field: string; fallbacks?: string[] }) => {
+      const candidates = [m.field, ...(m.fallbacks ?? [])]
+      for (const k of candidates) {
+        const v = cfg[k]
+        if (v !== undefined && v !== null && String(v) !== '') return str(v)
+      }
+      return ''
+    }
     return (
       <>
         <div className="space-y-1">
@@ -437,7 +458,7 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
             {MEDIDAS.map((m) => (
               <div key={m.field}>
                 <Label className="text-xs text-muted-foreground">{m.label}</Label>
-                <Input className="h-9" value={str(cfg[m.field])} onChange={(e) => set(m.field, e.target.value)} />
+                <Input className="h-9" value={readMedida(m)} onChange={(e) => set(m.field, e.target.value)} />
               </div>
             ))}
           </div>

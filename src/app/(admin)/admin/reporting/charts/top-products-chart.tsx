@@ -9,7 +9,8 @@ type ProductItem = { name: string; sku: string; units: number; revenue: number }
 export function TopProductsChart({ products }: { products: ProductItem[] }) {
   if (!products.length) return <p className="text-center text-muted-foreground py-12">Sin datos</p>
 
-  const maxRevenue = Math.max(...products.map(p => p.revenue))
+  const top10 = products.slice(0, 10)
+  const maxRevenue = Math.max(...top10.map(p => p.revenue))
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
@@ -17,7 +18,7 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
         <CardHeader><CardTitle className="text-base">Top 10 productos por facturación</CardTitle></CardHeader>
         <CardContent>
           <div className="space-y-3">
-            {products.map((p, i) => (
+            {top10.map((p, i) => (
               <div key={i}>
                 <div className="flex justify-between text-sm mb-1">
                   <span className="font-medium truncate max-w-[200px]">{p.name}</span>

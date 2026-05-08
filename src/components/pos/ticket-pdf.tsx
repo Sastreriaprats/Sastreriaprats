@@ -371,53 +371,104 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
   if (mode === 'print') {
     await new Promise<void>((resolve) => {
       (pdf as any).getBlob((blob: Blob) => {
-        const url = URL.createObjectURL(blob)
         const fileName = `${giftMode ? 'ticket-regalo' : 'ticket'}-${data.sale.ticket_number}.pdf`
+        const url = URL.createObjectURL(blob)
 
-        // Abrir en nueva ventana/pestaña y disparar el diálogo de impresión del navegador.
-        // Este approach es más fiable que un iframe oculto: el visor PDF del navegador
-        // carga completamente antes de invocar print(), lo que permite elegir impresora.
-        const printWindow = window.open(url, '_blank')
+        // iframe oculto: dispara el diálogo de impresión sin abrir pestaña ni
+        // depender del popup blocker. Cubre el caso de Chrome con kiosk-printing
+        // para imprimir sin diálogo.
+        const iframe = document.createElement('iframe')
+        iframe.style.position = 'fixed'
+        iframe.style.top = '-9999px'
+        iframe.style.left = '-9999px'
+        iframe.style.width = '0'
+        iframe.style.height = '0'
+        iframe.style.border = 'none'
+        iframe.src = url
 
-        if (!printWindow) {
-          // Popups bloqueados: fallback a descarga
-          const a = document.createElement('a')
-          a.href = url
-          a.download = fileName
-          a.click()
-          setTimeout(() => URL.revokeObjectURL(url), 2000)
-          resolve()
-          return
+        let cleaned = false
+        const cleanup = () => {
+          if (cleaned) return
+          cleaned = true
+          try { iframe.remove() } catch {}
+          try { URL.revokeObjectURL(url) } catch {}
         }
 
-        let printed = false
+        const fallbackToDownload = () => {
+          cleanup()
+          const dlUrl = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = dlUrl
+          a.download = fileName
+          a.click()
+          setTimeout(() => { try { URL.revokeObjectURL(dlUrl) } catch {} }, 2000)
+        }
+
+        const fallbackToWindowOpen = () => {
+          cleanup()
+          const tabUrl = URL.createObjectURL(blob)
+          const printWindow = window.open(tabUrl, '_blank')
+          if (!printWindow) {
+            // Popups bloqueados: caer a descarga
+            const a = document.createElement('a')
+            a.href = tabUrl
+            a.download = fileName
+            a.click()
+            setTimeout(() => { try { URL.revokeObjectURL(tabUrl) } catch {} }, 2000)
+            return
+          }
+          const onLoad = () => setTimeout(() => {
+            try { printWindow.focus(); printWindow.print() } catch {}
+          }, 500)
+          try { printWindow.addEventListener('load', onLoad) } catch {}
+          setTimeout(() => { try { URL.revokeObjectURL(tabUrl) } catch {} }, 60000)
+        }
+
+        let triggered = false
         const triggerPrint = () => {
-          if (printed) return
-          printed = true
+          if (triggered) return
+          triggered = true
+          const cw = iframe.contentWindow
+          if (!cw) {
+            fallbackToWindowOpen()
+            return
+          }
           try {
-            printWindow.focus()
-            printWindow.print()
+            cw.addEventListener('afterprint', cleanup, { once: true })
+          } catch { /* algunos navegadores restringen acceso cross-origin */ }
+          try {
+            cw.focus()
+            cw.print()
           } catch {
-            // Si falla el print, el usuario ya tiene el PDF abierto y puede imprimir manualmente
+            // Fallback 1: print del documento principal
+            try {
+              window.print()
+            } catch {
+              // Fallback 2: descarga
+              fallbackToDownload()
+            }
           }
         }
 
-        // Intentar disparar print cuando la ventana haya cargado el PDF.
-        // El visor PDF puede tardar un poco más tras el evento load.
-        const onLoad = () => setTimeout(triggerPrint, 500)
-        try {
-          printWindow.addEventListener('load', onLoad)
-        } catch {
-          // Algunos navegadores restringen acceso cross-origin al blob window
-        }
-        // Fallback temporal por si load no llega a dispararse
-        setTimeout(triggerPrint, 1500)
+        iframe.addEventListener('load', () => {
+          // Esperar a que el visor PDF renderice antes de llamar print()
+          setTimeout(triggerPrint, 300)
+        })
 
-        // Limpieza del blob URL tras un tiempo prudencial
+        iframe.addEventListener('error', () => {
+          // El navegador no puede cargar el PDF en el iframe (algunos Firefox/Safari)
+          fallbackToWindowOpen()
+        })
+
+        // Si en 5s no se disparó el load, asumir que el iframe no puede renderizar el PDF
         setTimeout(() => {
-          try { URL.revokeObjectURL(url) } catch {}
-        }, 60000)
+          if (!triggered) fallbackToWindowOpen()
+        }, 5000)
 
+        // Limpieza máxima por si afterprint nunca se dispara
+        setTimeout(cleanup, 60000)
+
+        document.body.appendChild(iframe)
         resolve()
       })
     })
@@ -495,12 +546,6 @@ export async function generateReservationPdf(
   data: ReservationTicketData,
   mode: 'download' | 'print' = 'download',
 ): Promise<void> {
-  // IMPORTANTE: si vamos a imprimir, abrimos la pestaña ANTES del primer
-  // await (sin la URL todavía), porque luego de un async el navegador no
-  // considera la llamada user-gesture y el pop-up blocker la rechaza.
-  // Sin esto, la 2.ª impresión seguida fallaba en silencio.
-  const printWindow = mode === 'print' ? window.open('', '_blank') : null
-
   const pdfMake = (await import('pdfmake/build/pdfmake')).default
   const vfsModule = await import('pdfmake/build/vfs_fonts')
   const vfs = (vfsModule as { default?: Record<string, string> }).default
@@ -726,47 +771,104 @@ export async function generateReservationPdf(
   if (mode === 'print') {
     await new Promise<void>((resolve) => {
       (pdf as any).getBlob((blob: Blob) => {
-        const url = URL.createObjectURL(blob)
         const fileName = `reserva-${data.reservation_number}.pdf`
+        const url = URL.createObjectURL(blob)
 
-        if (!printWindow) {
-          // Pop-up bloqueado a pesar de abrir antes del await: fallback a descarga
-          const a = document.createElement('a')
-          a.href = url
-          a.download = fileName
-          a.click()
-          setTimeout(() => URL.revokeObjectURL(url), 2000)
-          resolve()
-          return
+        // iframe oculto: dispara el diálogo de impresión sin abrir pestaña ni
+        // depender del popup blocker. Cubre el caso de Chrome con kiosk-printing
+        // para imprimir sin diálogo.
+        const iframe = document.createElement('iframe')
+        iframe.style.position = 'fixed'
+        iframe.style.top = '-9999px'
+        iframe.style.left = '-9999px'
+        iframe.style.width = '0'
+        iframe.style.height = '0'
+        iframe.style.border = 'none'
+        iframe.src = url
+
+        let cleaned = false
+        const cleanup = () => {
+          if (cleaned) return
+          cleaned = true
+          try { iframe.remove() } catch {}
+          try { URL.revokeObjectURL(url) } catch {}
         }
 
-        // Cargar el blob en la ventana ya abierta
-        printWindow.location.href = url
+        const fallbackToDownload = () => {
+          cleanup()
+          const dlUrl = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = dlUrl
+          a.download = fileName
+          a.click()
+          setTimeout(() => { try { URL.revokeObjectURL(dlUrl) } catch {} }, 2000)
+        }
 
-        let printed = false
+        const fallbackToWindowOpen = () => {
+          cleanup()
+          const tabUrl = URL.createObjectURL(blob)
+          const printWindow = window.open(tabUrl, '_blank')
+          if (!printWindow) {
+            // Popups bloqueados: caer a descarga
+            const a = document.createElement('a')
+            a.href = tabUrl
+            a.download = fileName
+            a.click()
+            setTimeout(() => { try { URL.revokeObjectURL(tabUrl) } catch {} }, 2000)
+            return
+          }
+          const onLoad = () => setTimeout(() => {
+            try { printWindow.focus(); printWindow.print() } catch {}
+          }, 500)
+          try { printWindow.addEventListener('load', onLoad) } catch {}
+          setTimeout(() => { try { URL.revokeObjectURL(tabUrl) } catch {} }, 60000)
+        }
+
+        let triggered = false
         const triggerPrint = () => {
-          if (printed) return
-          printed = true
+          if (triggered) return
+          triggered = true
+          const cw = iframe.contentWindow
+          if (!cw) {
+            fallbackToWindowOpen()
+            return
+          }
           try {
-            printWindow.focus()
-            printWindow.print()
+            cw.addEventListener('afterprint', cleanup, { once: true })
+          } catch { /* algunos navegadores restringen acceso cross-origin */ }
+          try {
+            cw.focus()
+            cw.print()
           } catch {
-            // El usuario puede imprimir manualmente desde el visor PDF
+            // Fallback 1: print del documento principal
+            try {
+              window.print()
+            } catch {
+              // Fallback 2: descarga
+              fallbackToDownload()
+            }
           }
         }
 
-        const onLoad = () => setTimeout(triggerPrint, 500)
-        try {
-          printWindow.addEventListener('load', onLoad)
-        } catch {
-          // Algunos navegadores restringen acceso cross-origin al blob window
-        }
-        setTimeout(triggerPrint, 1500)
+        iframe.addEventListener('load', () => {
+          // Esperar a que el visor PDF renderice antes de llamar print()
+          setTimeout(triggerPrint, 300)
+        })
 
+        iframe.addEventListener('error', () => {
+          // El navegador no puede cargar el PDF en el iframe (algunos Firefox/Safari)
+          fallbackToWindowOpen()
+        })
+
+        // Si en 5s no se disparó el load, asumir que el iframe no puede renderizar el PDF
         setTimeout(() => {
-          try { URL.revokeObjectURL(url) } catch {}
-        }, 60000)
+          if (!triggered) fallbackToWindowOpen()
+        }, 5000)
 
+        // Limpieza máxima por si afterprint nunca se dispara
+        setTimeout(cleanup, 60000)
+
+        document.body.appendChild(iframe)
         resolve()
       })
     })

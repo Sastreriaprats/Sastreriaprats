@@ -498,7 +498,7 @@ export const listTickets = protectedAction<{
   async (ctx, { page = 1, pageSize = 20, clientSearch, dateFrom, dateTo, productSearch }) => {
     let query = ctx.adminClient
       .from('sales')
-      .select('id, ticket_number, created_at, total, payment_method, status, client_id, stores(name), profiles!sales_salesperson_id_fkey(full_name)', { count: 'exact' })
+      .select('id, ticket_number, created_at, total, total_returned, payment_method, status, client_id, stores(name), profiles!sales_salesperson_id_fkey(full_name)', { count: 'exact' })
       .order('created_at', { ascending: false })
 
     if (dateFrom) query = query.gte('created_at', dateFrom + 'T00:00:00')
@@ -565,7 +565,8 @@ export const listTickets = protectedAction<{
       id: s.id,
       ticket_number: s.ticket_number,
       created_at: s.created_at,
-      total: s.total,
+      total: Number(s.total) || 0,
+      total_returned: Number(s.total_returned) || 0,
       payment_method: s.payment_method,
       status: s.status,
       store_name: (s.stores as any)?.name,

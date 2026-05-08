@@ -23,15 +23,31 @@ export const getAccountingSummary = protectedAction<{ year: number }, Accounting
     const end = `${year}-12-31T23:59:59`
 
     const [salesRes, purchasesRes, invoicesRes] = await Promise.all([
-      ctx.adminClient.from('sales').select('total, subtotal, tax_amount, created_at').gte('created_at', start).lte('created_at', end).eq('status', 'completed'),
+      ctx.adminClient.from('sales').select('total, total_returned, subtotal, tax_amount, created_at').gte('created_at', start).lte('created_at', end).in('status', ['completed', 'partially_returned']),
       ctx.adminClient.from('supplier_orders').select('total, tax_amount, created_at').gte('created_at', start).lte('created_at', end).in('status', ['received', 'partially_received']),
       ctx.adminClient.from('invoices').select('id, invoice_number, client_name, invoice_date, total, status').eq('invoice_type', 'issued').order('invoice_date', { ascending: false }).limit(10),
     ])
 
     const sales = salesRes.data || []
     const purchases = purchasesRes.data || []
-    const income = sales.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).subtotal ?? (x as any).total) || 0), 0)
-    const vatCollected = sales.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).tax_amount) || 0), 0)
+
+    // Para ventas con devolución parcial: prorratear subtotal/IVA por la
+    // proporción del importe que NO se devolvió. Las fully_returned ya están
+    // excluidas por el filtro (status IN completed, partially_returned).
+    const netSale = (x: Record<string, unknown>) => {
+      const total = Number((x as any).total) || 0
+      const returned = Number((x as any).total_returned) || 0
+      const subtotal = Number((x as any).subtotal) || 0
+      const tax = Number((x as any).tax_amount) || 0
+      const proportion = total > 0 ? Math.max(0, (total - returned) / total) : 0
+      return {
+        netBase: (subtotal || total) * proportion,
+        netVat: tax * proportion,
+      }
+    }
+
+    const income = sales.reduce((s: number, x: Record<string, unknown>) => s + netSale(x).netBase, 0)
+    const vatCollected = sales.reduce((s: number, x: Record<string, unknown>) => s + netSale(x).netVat, 0)
     const expenses = purchases.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).total) - Number((x as any).tax_amount || 0)), 0)
     const vatPaid = purchases.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).tax_amount) || 0), 0)
 
@@ -45,7 +61,7 @@ export const getAccountingSummary = protectedAction<{ year: number }, Accounting
       if (d) {
         const key = d.slice(0, 7)
         if (!byMonth[key]) byMonth[key] = { income: 0, expenses: 0 }
-        byMonth[key].income += Number((x as any).subtotal ?? (x as any).total) || 0
+        byMonth[key].income += netSale(x).netBase
       }
     }
     for (const x of purchases) {
@@ -251,10 +267,10 @@ export const getVatQuarterly = protectedAction<
 
     // 2 queries para todo el año (antes: 8 = 2 por trimestre)
     const [salesRes, purchasesRes] = await Promise.all([
-      ctx.adminClient.from('sales').select('total, subtotal, tax_amount, created_at').gte('created_at', yearStart).lte('created_at', yearEnd).eq('status', 'completed'),
+      ctx.adminClient.from('sales').select('total, total_returned, subtotal, tax_amount, created_at').gte('created_at', yearStart).lte('created_at', yearEnd).in('status', ['completed', 'partially_returned']),
       ctx.adminClient.from('supplier_orders').select('total, tax_amount, created_at').gte('created_at', yearStart).lte('created_at', yearEnd).in('status', ['received', 'partially_received']),
     ])
-    const sales = (salesRes.data || []) as Array<{ total?: number; subtotal?: number; tax_amount?: number; created_at?: string }>
+    const sales = (salesRes.data || []) as Array<{ total?: number; total_returned?: number; subtotal?: number; tax_amount?: number; created_at?: string }>
     const purchases = (purchasesRes.data || []) as Array<{ total?: number; tax_amount?: number; created_at?: string }>
 
     const quarterFromMonth = (m: number) => Math.ceil(m / 3) as 1 | 2 | 3 | 4
@@ -264,8 +280,11 @@ export const getVatQuarterly = protectedAction<
       if (d) {
         const month = Number(d.slice(5, 7))
         const q = quarterFromMonth(month)
-        const base = Number(x.subtotal ?? x.total) || 0
-        const iva = Number(x.tax_amount) || 0
+        const total = Number(x.total) || 0
+        const returned = Number(x.total_returned) || 0
+        const proportion = total > 0 ? Math.max(0, (total - returned) / total) : 0
+        const base = (Number(x.subtotal ?? x.total) || 0) * proportion
+        const iva = (Number(x.tax_amount) || 0) * proportion
         byQuarter[q].baseSales += base
         byQuarter[q].ivaRepercutido += iva
       }
@@ -853,14 +872,17 @@ export const createInvoiceAction = protectedAction<CreateInvoiceInput, { id: str
 )
 
 // ── Crear factura desde ticket/venta TPV ─────────────────────────────────────
-export const createInvoiceFromSaleAction = protectedAction<string, { id: string; invoice_number: string }>(
+export const createInvoiceFromSaleAction = protectedAction<
+  { saleId: string; draft?: boolean },
+  { id: string; invoice_number: string }
+>(
   {
     permission: 'accounting.manage_invoices',
     auditModule: 'accounting',
     auditAction: 'create',
     auditEntity: 'invoice',
   },
-  async (ctx, saleId) => {
+  async (ctx, { saleId, draft }) => {
     const { data: sale, error: saleError } = await ctx.adminClient
       .from('sales')
       .select('id, subtotal, tax_amount, total, client_id, store_id')
@@ -944,7 +966,7 @@ export const createInvoiceFromSaleAction = protectedAction<string, { id: string;
         irpf_rate: 0,
         irpf_amount: 0,
         total,
-        status: 'issued',
+        status: draft ? 'draft' : 'issued',
         sale_id: saleId,
         store_id: storeId,
         created_by: ctx.userId,
@@ -976,7 +998,11 @@ export const createInvoiceFromSaleAction = protectedAction<string, { id: string;
       return failure(linesError.message ?? 'Error al crear las líneas')
     }
 
-    createInvoiceJournalEntry(inv.id as string).catch((e) => console.error('Journal entry from sale invoice:', e))
+    // Solo crear asiento contable si se emite directamente. En modo draft el
+    // asiento se generará al pulsar "Emitir" desde el editor.
+    if (!draft) {
+      createInvoiceJournalEntry(inv.id as string).catch((e) => console.error('Journal entry from sale invoice:', e))
+    }
     return success({ id: inv.id as string, invoice_number })
   }
 )
@@ -1161,15 +1187,43 @@ export const createInvoiceFromTailoringOrderAction = protectedAction<
 )
 
 // ── Editar factura borrador ───────────────────────────────────────────────────
-export type UpdateInvoiceInput = CreateInvoiceInput & { id: string }
+export type UpdateInvoiceInput = CreateInvoiceInput & { id: string; conceptOnly?: boolean }
 
 export const updateInvoiceAction = protectedAction<UpdateInvoiceInput, { id: string }>(
   { permission: 'accounting.manage_invoices', auditModule: 'accounting', auditAction: 'update', auditEntity: 'invoice' },
   async (ctx, input) => {
-    // Solo se puede editar si está en borrador
     const { data: existing } = await ctx.adminClient.from('invoices').select('status').eq('id', input.id).single()
     if (!existing) return failure('Factura no encontrada', 'NOT_FOUND')
-    if ((existing as { status: string }).status !== 'draft') return failure('Solo se pueden editar facturas en borrador', 'FORBIDDEN')
+    const status = (existing as { status: string }).status
+
+    // Modo "solo concepto": permitido en cualquier estado, solo actualiza
+    // la descripción de cada línea por orden (sort_order). No toca cabecera,
+    // totales, fechas ni pdf_url.
+    if (input.conceptOnly) {
+      const { data: existingLines, error: linesErr } = await ctx.adminClient
+        .from('invoice_lines')
+        .select('id, sort_order')
+        .eq('invoice_id', input.id)
+        .order('sort_order', { ascending: true })
+
+      if (linesErr) return failure(linesErr.message)
+
+      const sorted = (existingLines ?? []) as Array<{ id: string; sort_order: number }>
+      for (let i = 0; i < input.lines.length && i < sorted.length; i++) {
+        const target = sorted[i]
+        const { error: upErr } = await ctx.adminClient
+          .from('invoice_lines')
+          .update({ description: input.lines[i].description })
+          .eq('id', target.id)
+        if (upErr) return failure(upErr.message)
+      }
+
+      // No tocamos pdf_url ni totales: generateInvoicePdf siempre lee
+      // de invoice_lines en caliente y reescribe el archivo del Storage.
+      return success({ id: input.id })
+    }
+
+    if (status !== 'draft') return failure('Solo se pueden editar facturas en borrador', 'FORBIDDEN')
 
     const { error } = await ctx.adminClient.from('invoices').update({
       client_id: input.client_id || null,

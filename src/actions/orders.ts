@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { protectedAction } from '@/lib/server/action-wrapper'
+import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { queryList, queryById, getNextNumber } from '@/lib/server/query-helpers'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createTailoringOrderSchema, tailoringOrderLineSchema, changeOrderStatusSchema } from '@/lib/validations/orders'
@@ -48,6 +48,26 @@ export const listOrders = protectedAction<ListParams & { status?: string }, List
       delete filters.status
     }
 
+    // Búsqueda por nº de pedido o por nombre/teléfono del cliente. Como
+    // PostgREST no permite ilike directo en tablas embebidas, pre-buscamos los
+    // client_id que coinciden y los añadimos al OR como `client_id.in.(...)`.
+    const rawSearch = (params.search || '').trim()
+    // Sanitizamos caracteres que pueden romper el parser .or() de PostgREST
+    // o el patrón ILIKE: comas, paréntesis, comodines, dos puntos, slashes.
+    const safeSearch = rawSearch.replace(/[,()*%:/\\]/g, ' ').trim()
+    let searchOr: string | undefined
+    if (safeSearch) {
+      const { data: matchedClients } = await ctx.adminClient
+        .from('clients')
+        .select('id')
+        .or(`full_name.ilike.%${safeSearch}%,first_name.ilike.%${safeSearch}%,last_name.ilike.%${safeSearch}%,phone.ilike.%${safeSearch}%,email.ilike.%${safeSearch}%,document_number.ilike.%${safeSearch}%`)
+        .limit(500)
+      const clientIds = (matchedClients ?? []).map((r: { id: string }) => r.id)
+      const parts = [`order_number.ilike.%${safeSearch}%`]
+      if (clientIds.length > 0) parts.push(`client_id.in.(${clientIds.join(',')})`)
+      searchOr = parts.join(',')
+    }
+
     let result: Awaited<ReturnType<typeof queryList<any>>>
 
     if (isOverdue) {
@@ -56,7 +76,7 @@ export const listOrders = protectedAction<ListParams & { status?: string }, List
         .select(SELECT_ORDERS, { count: 'exact' })
         .lt('estimated_delivery_date', today)
         .not('status', 'in', '("delivered","cancelled")')
-      if (params.search) query = query.ilike('order_number', `%${params.search}%`)
+      if (searchOr) query = query.or(searchOr)
       if (params.filters?.order_type) query = query.eq('order_type', params.filters.order_type)
       if (params.storeId) query = query.eq('store_id', params.storeId)
       query = query.order(params.sortBy || 'created_at', { ascending: params.sortOrder === 'asc' })
@@ -80,7 +100,7 @@ export const listOrders = protectedAction<ListParams & { status?: string }, List
       result = await queryList('tailoring_orders', {
         ...params,
         filters,
-        searchFields: ['order_number'],
+        customSearchOr: searchOr,
       }, SELECT_ORDERS)
     }
 
@@ -96,7 +116,7 @@ export const listOrders = protectedAction<ListParams & { status?: string }, List
       else if (typeof value === 'string' && value.startsWith('!=')) statusQuery = statusQuery.neq(key, value.slice(2))
       else statusQuery = statusQuery.eq(key, value)
     }
-    if (params.search) statusQuery = statusQuery.ilike('order_number', `%${params.search}%`)
+    if (searchOr) statusQuery = statusQuery.or(searchOr)
     if (params.storeId) statusQuery = statusQuery.eq('store_id', params.storeId)
     const { data: statusData } = await statusQuery
     const statusCounts = (statusData || []).reduce((acc: Record<string, number>, o: { status: string }) => {
@@ -300,6 +320,19 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
       .insert(linesToInsert)
 
     if (linesError) return failure(linesError.message)
+
+    // Descontar metros de tela (no bloquear el pedido si falla)
+    const fabricUsage = new Map<string, number>()
+    for (const line of linesToInsert as Array<{ fabric_id?: string | null; fabric_meters?: number | null }>) {
+      const fId = line.fabric_id || null
+      const meters = Number(line.fabric_meters) || 0
+      if (fId && meters > 0) {
+        fabricUsage.set(fId, (fabricUsage.get(fId) || 0) + meters)
+      }
+    }
+    if (fabricUsage.size > 0) {
+      await applyFabricStockDelta(ctx.adminClient, fabricUsage)
+    }
 
     if (order.client_id) {
       const { data: client } = await ctx.adminClient
@@ -653,6 +686,42 @@ const LINE_EDITABLE_FIELDS = [
   'model_name', 'model_size', 'finishing_notes', 'configuration', 'sort_order',
 ] as const
 
+/**
+ * Aplica un delta de metros a fabrics.stock_meters por cada fabric_id.
+ *   delta > 0 → consumo (resta del stock)
+ *   delta < 0 → devolución (suma al stock)
+ * El stock no baja de 0 (clamp). Errores se logean pero no propagan: el
+ * pedido NO se aborta si falla el descuento de tela.
+ */
+async function applyFabricStockDelta(
+  admin: AdminClient,
+  deltas: Map<string, number>,
+): Promise<void> {
+  for (const [fabricId, delta] of deltas) {
+    if (!fabricId || !Number.isFinite(delta) || delta === 0) continue
+    try {
+      const { data, error: fetchErr } = await admin
+        .from('fabrics')
+        .select('stock_meters')
+        .eq('id', fabricId)
+        .single()
+      if (fetchErr || !data) {
+        console.error('[applyFabricStockDelta] fetch failed for fabric', fabricId, fetchErr)
+        continue
+      }
+      const current = Number(data.stock_meters) || 0
+      const newStock = Math.max(0, current - delta)
+      const { error: updErr } = await admin
+        .from('fabrics')
+        .update({ stock_meters: newStock })
+        .eq('id', fabricId)
+      if (updErr) console.error('[applyFabricStockDelta] update failed for fabric', fabricId, updErr)
+    } catch (err) {
+      console.error('[applyFabricStockDelta] unexpected error for fabric', fabricId, err)
+    }
+  }
+}
+
 function round2(n: number): number {
   return Math.round(n * 100) / 100
 }
@@ -821,6 +890,36 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
       }
     }
 
+    // 3.b Calcular delta de metros de tela (antes vs. después) y aplicarlo.
+    // No bloquea el guardado del pedido si falla.
+    if (input.lines !== undefined) {
+      const beforeMeters = new Map<string, number>()
+      for (const l of linesBeforeArr) {
+        const fId = (l as any).fabric_id as string | null
+        const m = Number((l as any).fabric_meters) || 0
+        if (fId && m > 0) beforeMeters.set(fId, (beforeMeters.get(fId) || 0) + m)
+      }
+      const { data: linesAfterFabric } = await admin
+        .from('tailoring_order_lines')
+        .select('fabric_id, fabric_meters')
+        .eq('tailoring_order_id', input.orderId)
+      const afterMeters = new Map<string, number>()
+      for (const l of (linesAfterFabric || []) as Array<{ fabric_id: string | null; fabric_meters: number | string | null }>) {
+        const fId = l.fabric_id
+        const m = Number(l.fabric_meters) || 0
+        if (fId && m > 0) afterMeters.set(fId, (afterMeters.get(fId) || 0) + m)
+      }
+      const fabricIds = new Set<string>([...beforeMeters.keys(), ...afterMeters.keys()])
+      const deltas = new Map<string, number>()
+      for (const fId of fabricIds) {
+        const delta = (afterMeters.get(fId) || 0) - (beforeMeters.get(fId) || 0)
+        if (delta !== 0) deltas.set(fId, delta)
+      }
+      if (deltas.size > 0) {
+        await applyFabricStockDelta(admin, deltas)
+      }
+    }
+
     // 4. Recalcular totales de cabecera (tras procesar líneas)
     const { data: finalLines } = await admin
       .from('tailoring_order_lines')
@@ -965,7 +1064,9 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
 
     const mainGarmentTypeId = americana?.id ?? firstType?.id
     const camiseriaGarmentTypeId = camiseria?.id ?? firstType?.id
-    const complementGarmentTypeId = camiseria?.id ?? firstType?.id
+    const complemento = (garmentTypes ?? []).find((g: { code?: string }) =>
+      g.code?.toLowerCase() === 'complemento' || g.code?.toLowerCase() === 'boutique')
+    const complementGarmentTypeId = complemento?.id ?? camiseria?.id ?? firstType?.id
 
     if (!mainGarmentTypeId) return failure('No hay tipos de prenda configurados')
 
@@ -1150,9 +1251,16 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
     const entrega = Number(input.entregaACuenta) || 0
     const totalPaid = entrega
 
-    const { error: linesError } = await ctx.adminClient
-      .from('tailoring_order_lines')
-      .insert(linesToInsert.map((l) => ({
+    // Extraer fabric_id / fabric_meters desde configuration (tejidoStockId / tejidoMetros)
+    // y persistirlos también en sus columnas dedicadas para poder descontar stock.
+    const linesPayload = linesToInsert.map((l) => {
+      const cfg = (l.configuration ?? {}) as Record<string, unknown>
+      const fabricIdRaw = (cfg.tejidoStockId ?? cfg.fabric_id) as unknown
+      const fabricId = typeof fabricIdRaw === 'string' && fabricIdRaw.trim() !== '' ? fabricIdRaw : null
+      const fabricMetersRaw = (cfg.tejidoMetros ?? cfg.fabric_meters) as unknown
+      const fabricMetersNum = Number(fabricMetersRaw)
+      const fabricMeters = Number.isFinite(fabricMetersNum) && fabricMetersNum > 0 ? fabricMetersNum : null
+      return {
         tailoring_order_id: l.tailoring_order_id,
         garment_type_id: l.garment_type_id,
         line_type: l.line_type,
@@ -1162,9 +1270,27 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
         finishing_notes: l.finishing_notes,
         configuration: l.configuration,
         sort_order: l.sort_order,
-      })))
+        fabric_id: fabricId,
+        fabric_meters: fabricMeters,
+      }
+    })
+
+    const { error: linesError } = await ctx.adminClient
+      .from('tailoring_order_lines')
+      .insert(linesPayload)
 
     if (linesError) return failure(linesError.message)
+
+    // Descontar metros de tela (no bloquear el pedido si falla)
+    const fabricUsage = new Map<string, number>()
+    for (const row of linesPayload) {
+      if (row.fabric_id && row.fabric_meters && row.fabric_meters > 0) {
+        fabricUsage.set(row.fabric_id, (fabricUsage.get(row.fabric_id) || 0) + row.fabric_meters)
+      }
+    }
+    if (fabricUsage.size > 0) {
+      await applyFabricStockDelta(ctx.adminClient, fabricUsage)
+    }
 
     // Todos los precios incluyen IVA (21%) — desglosar para contabilidad
     const taxAmountCalc = Math.round((subtotalLines - subtotalLines / 1.21) * 100) / 100
@@ -1189,17 +1315,8 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
 
     if (entrega > 0) {
       const today = new Date().toISOString().split('T')[0]
-      await ctx.adminClient.from('tailoring_order_payments').insert({
-        tailoring_order_id: order.id,
-        payment_date: today,
-        payment_method: paymentMethodDb,
-        amount: entrega,
-        reference: `Entrega a cuenta - ${orderNumber}`,
-        notes: `Entrega a cuenta - ${orderNumber}`,
-        created_by: ctx.userId,
-      })
-      const baseAmount = entrega / 1.21
-      const taxAmountManual = entrega - baseAmount
+      // Localizar la sesión de caja abierta ANTES de insertar el pago para
+      // que el cobro quede vinculado y aparezca en "Ventas de la sesión".
       let sessionQuery = ctx.adminClient
         .from('cash_sessions')
         .select('id')
@@ -1208,6 +1325,19 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
       if (input.storeId) sessionQuery = sessionQuery.eq('store_id', input.storeId)
       const { data: activeSession } = await sessionQuery.maybeSingle()
       const activeSessionId = activeSession?.id ?? null
+
+      await ctx.adminClient.from('tailoring_order_payments').insert({
+        tailoring_order_id: order.id,
+        payment_date: today,
+        payment_method: paymentMethodDb,
+        amount: entrega,
+        reference: `Entrega a cuenta - ${orderNumber}`,
+        notes: `Entrega a cuenta - ${orderNumber}`,
+        created_by: ctx.userId,
+        cash_session_id: activeSessionId,
+      })
+      const baseAmount = entrega / 1.21
+      const taxAmountManual = entrega - baseAmount
       const { error: mtError2 } = await ctx.adminClient.from('manual_transactions').insert({
         type: 'income',
         date: today,
@@ -1271,7 +1401,7 @@ export const searchComplementProducts = protectedAction<
       .from('products')
       .select('id, name, sku, price_with_tax, tax_rate, cost_price')
       .eq('product_type', 'boutique')
-      .ilike('name', `%${q}%`)
+      .or(`name.ilike.%${q}%,sku.ilike.%${q}%`)
       .limit(20)
 
     if (productsError) {

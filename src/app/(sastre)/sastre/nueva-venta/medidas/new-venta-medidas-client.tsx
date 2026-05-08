@@ -58,7 +58,7 @@ export function NewVentaMedidasClient({
           clientName={clientName}
           sastreName={sastreName}
           saveRef={saveRef}
-          hideTabs={(tipo === 'camiseria' || tipo === 'camiseria_industrial') ? ['Americana', 'Pantalón', 'Chaleco'] : ['Camisería']}
+          hideTabs={[]}
           onValuesChange={() => setIsDirty(true)}
           onSavingChange={setSaving}
           embedScroll={true}

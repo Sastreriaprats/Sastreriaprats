@@ -7,9 +7,13 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Target, Save, Loader2, ShoppingBag, Scissors, Globe } from 'lucide-react'
+import { Target, Save, Loader2, ShoppingBag, Scissors, Globe, Users, AlertTriangle, ChevronLeft, ChevronRight, Copy } from 'lucide-react'
 import { toast } from 'sonner'
-import { getStoreGoalsForMonth, upsertStoreGoalAction, type StoreGoalsRow, type GoalType } from '@/actions/store-goals'
+import {
+  getStoreGoalsForMonth, upsertStoreGoalAction,
+  getEmployeeGoals, upsertEmployeeGoal, copyEmployeeGoalsFromPreviousMonth,
+  type StoreGoalsRow, type GoalType, type EmployeeGoalRow, type EmployeeGoalType,
+} from '@/actions/store-goals'
 import { formatCurrency } from '@/lib/utils'
 
 const MONTH_NAMES = [
@@ -224,6 +228,419 @@ export function GoalsSection() {
           })}
         </div>
       )}
+
+      <EmployeeGoalsBlock
+        year={year}
+        month={month}
+        setYear={setYear}
+        setMonth={setMonth}
+        storeRows={rows}
+        isPastMonth={isPastMonth}
+      />
+    </div>
+  )
+}
+
+// ─── Sección independiente: objetivos por empleado ─────────────────────────
+
+function EmployeeGoalsBlock({
+  year, month, setYear, setMonth, storeRows, isPastMonth,
+}: {
+  year: number
+  month: number
+  setYear: (y: number) => void
+  setMonth: (m: number) => void
+  storeRows: StoreGoalsRow[]
+  isPastMonth: boolean
+}) {
+  const [storeFilter, setStoreFilter] = useState<string>('all')
+  const [dataByStore, setDataByStore] = useState<Record<string, EmployeeGoalRow[]>>({})
+  const [loading, setLoading] = useState(false)
+  const [drafts, setDrafts] = useState<Record<string, { boutique: string; sastreria: string }>>({}) // key: storeId:employeeId
+  const [savingKey, setSavingKey] = useState<string | null>(null)
+  const [copyingStore, setCopyingStore] = useState<string | null>(null)
+
+  const visibleStores = useMemo(
+    () => storeFilter === 'all' ? storeRows : storeRows.filter(s => s.store_id === storeFilter),
+    [storeRows, storeFilter],
+  )
+
+  const load = useCallback(async () => {
+    if (storeRows.length === 0) {
+      setDataByStore({})
+      return
+    }
+    setLoading(true)
+    const results = await Promise.all(
+      storeRows.map(s => getEmployeeGoals({ storeId: s.store_id, year, month }).then(res => ({ storeId: s.store_id, res }))),
+    )
+    const map: Record<string, EmployeeGoalRow[]> = {}
+    const newDrafts: Record<string, { boutique: string; sastreria: string }> = {}
+    let firstError: string | null = null
+    for (const { storeId, res } of results) {
+      if (res.error) {
+        if (!firstError) firstError = res.error
+        map[storeId] = []
+        continue
+      }
+      const rows = res.data ?? []
+      map[storeId] = rows
+      for (const r of rows) {
+        newDrafts[`${storeId}:${r.employee_id}`] = {
+          boutique: r.boutique_target > 0 ? String(r.boutique_target) : '',
+          sastreria: r.sastreria_target > 0 ? String(r.sastreria_target) : '',
+        }
+      }
+    }
+    if (firstError) toast.error(firstError)
+    setDataByStore(map)
+    setDrafts(newDrafts)
+    setLoading(false)
+  }, [storeRows, year, month])
+
+  useEffect(() => { load() }, [load])
+
+  const goPrev = () => {
+    if (month === 1) { setYear(year - 1); setMonth(12) }
+    else { setMonth(month - 1) }
+  }
+  const goNext = () => {
+    if (month === 12) { setYear(year + 1); setMonth(1) }
+    else { setMonth(month + 1) }
+  }
+
+  const saveCell = async (storeId: string, employeeId: string, goalType: EmployeeGoalType) => {
+    const dKey = `${storeId}:${employeeId}`
+    const draft = drafts[dKey]
+    if (!draft) return
+    const value = draft[goalType] ?? ''
+    const amount = value.trim() === '' ? 0 : Number(value)
+    if (!Number.isFinite(amount) || amount < 0) {
+      toast.error('Importe inválido')
+      return
+    }
+    const rows = dataByStore[storeId] ?? []
+    const row = rows.find(r => r.employee_id === employeeId)
+    const currentTarget = row ? (goalType === 'boutique' ? row.boutique_target : row.sastreria_target) : 0
+    if (amount === currentTarget) return
+
+    const key = `${dKey}:${goalType}`
+    setSavingKey(key)
+    const res = await upsertEmployeeGoal({ storeId, employeeId, year, month, goalType, targetAmount: amount })
+    setSavingKey(null)
+    if (res.error) {
+      toast.error(res.error)
+    } else {
+      setDataByStore(prev => ({
+        ...prev,
+        [storeId]: (prev[storeId] ?? []).map(r => {
+          if (r.employee_id !== employeeId) return r
+          const updated = { ...r }
+          if (goalType === 'boutique') updated.boutique_target = amount
+          else updated.sastreria_target = amount
+          updated.total_target = updated.boutique_target + updated.sastreria_target
+          return updated
+        }),
+      }))
+    }
+  }
+
+  const copyFromPrev = async (storeId: string) => {
+    setCopyingStore(storeId)
+    const res = await copyEmployeeGoalsFromPreviousMonth({ storeId, year, month })
+    setCopyingStore(null)
+    if (res.error) {
+      toast.error(res.error)
+      return
+    }
+    if (res.copied === 0) {
+      toast.info('El mes anterior tampoco tiene objetivos definidos')
+      return
+    }
+    toast.success(`${res.copied} objetivo${res.copied === 1 ? '' : 's'} copiado${res.copied === 1 ? '' : 's'} del mes anterior`)
+    await load()
+  }
+
+  const monthLabel = `${MONTH_NAMES[month - 1]} ${year}`
+  const prevMonthLabel = month === 1 ? `${MONTH_NAMES[11]} ${year - 1}` : `${MONTH_NAMES[month - 2]} ${year}`
+
+  return (
+    <div className="space-y-4 pt-8 mt-4 border-t">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-2">
+          <Users className="h-5 w-5 text-prats-navy" />
+          <div>
+            <h3 className="text-lg font-semibold">Objetivos por empleado</h3>
+            <p className="text-xs text-muted-foreground">{monthLabel} · importes sin IVA</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center rounded-md border">
+            <Button size="sm" variant="ghost" className="h-8 px-2 rounded-r-none" onClick={goPrev} title="Mes anterior">
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <div className="px-3 text-xs font-medium border-x min-w-[140px] text-center tabular-nums">{monthLabel}</div>
+            <Button size="sm" variant="ghost" className="h-8 px-2 rounded-l-none" onClick={goNext} title="Mes siguiente">
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+          <Select value={storeFilter} onValueChange={setStoreFilter}>
+            <SelectTrigger className="w-[180px] h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas las tiendas</SelectItem>
+              {storeRows.map(s => (
+                <SelectItem key={s.store_id} value={s.store_id}>{s.store_name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {loading ? (
+        <Skeleton className="h-40 w-full" />
+      ) : visibleStores.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-8">Sin tiendas para mostrar</p>
+      ) : (
+        visibleStores.map(store => {
+          const rows = dataByStore[store.store_id] ?? []
+          const noGoalsDefined = rows.length > 0 && rows.every(r => r.boutique_target === 0 && r.sastreria_target === 0)
+          return (
+            <Card key={store.store_id}>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    {store.store_name}
+                    <span className="text-xs font-normal text-muted-foreground">{store.store_code}</span>
+                  </CardTitle>
+                  <span className="text-xs text-muted-foreground">{monthLabel}</span>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {noGoalsDefined && (
+                  <div className="flex items-center justify-between gap-3 p-3 rounded-md bg-blue-50 border border-blue-200 text-blue-900 text-xs">
+                    <div className="flex items-start gap-2">
+                      <Copy className="h-4 w-4 shrink-0 mt-0.5" />
+                      <p>No hay objetivos definidos para {monthLabel}. ¿Copiar los objetivos de {prevMonthLabel}?</p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => copyFromPrev(store.store_id)}
+                      disabled={copyingStore === store.store_id}
+                      className="shrink-0"
+                    >
+                      {copyingStore === store.store_id
+                        ? <Loader2 className="h-4 w-4 animate-spin" />
+                        : <><Copy className="h-3.5 w-3.5 mr-1.5" />Copiar mes anterior</>}
+                    </Button>
+                  </div>
+                )}
+
+                <EmployeeTable
+                  storeId={store.store_id}
+                  rows={rows}
+                  drafts={drafts}
+                  setDrafts={setDrafts}
+                  saveCell={saveCell}
+                  savingKey={savingKey}
+                  storeBoutiqueTarget={store.boutique_target}
+                  storeSastreriaTarget={store.sastreria_target}
+                  isPastMonth={isPastMonth}
+                />
+              </CardContent>
+            </Card>
+          )
+        })
+      )}
+    </div>
+  )
+}
+
+function EmployeeTable({
+  storeId, rows, drafts, setDrafts, saveCell, savingKey,
+  storeBoutiqueTarget, storeSastreriaTarget, isPastMonth,
+}: {
+  storeId: string
+  rows: EmployeeGoalRow[]
+  drafts: Record<string, { boutique: string; sastreria: string }>
+  setDrafts: React.Dispatch<React.SetStateAction<Record<string, { boutique: string; sastreria: string }>>>
+  saveCell: (storeId: string, employeeId: string, goalType: EmployeeGoalType) => void
+  savingKey: string | null
+  storeBoutiqueTarget: number
+  storeSastreriaTarget: number
+  isPastMonth: boolean
+}) {
+  const totals = rows.reduce(
+    (acc, r) => {
+      acc.boutique_target += r.boutique_target
+      acc.sastreria_target += r.sastreria_target
+      acc.boutique_actual += r.boutique_actual
+      acc.sastreria_actual += r.sastreria_actual
+      acc.total_actual += r.total_actual
+      return acc
+    },
+    { boutique_target: 0, sastreria_target: 0, boutique_actual: 0, sastreria_actual: 0, total_actual: 0 },
+  )
+
+  const boutiqueMismatch = storeBoutiqueTarget > 0 && totals.boutique_target > 0 && Math.abs(totals.boutique_target - storeBoutiqueTarget) > 0.01
+  const sastreriaMismatch = storeSastreriaTarget > 0 && totals.sastreria_target > 0 && Math.abs(totals.sastreria_target - storeSastreriaTarget) > 0.01
+
+  if (rows.length === 0) {
+    return <p className="text-xs text-muted-foreground py-4 text-center">Sin empleados asignados a esta tienda</p>
+  }
+
+  return (
+    <>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="text-muted-foreground">
+            <tr className="border-b">
+              <th className="text-left py-2 pr-2 font-medium">Empleado</th>
+              <th className="text-right py-2 px-1 font-medium" colSpan={3}>Boutique</th>
+              <th className="text-right py-2 px-1 font-medium" colSpan={3}>Sastrería</th>
+              <th className="text-right py-2 pl-2 font-medium">Total actual</th>
+            </tr>
+            <tr className="border-b text-[10px]">
+              <th></th>
+              <th className="text-right py-1 px-1 font-normal">Objetivo</th>
+              <th className="text-right py-1 px-1 font-normal">Actual</th>
+              <th className="text-right py-1 px-1 font-normal w-[110px]">%</th>
+              <th className="text-right py-1 px-1 font-normal">Objetivo</th>
+              <th className="text-right py-1 px-1 font-normal">Actual</th>
+              <th className="text-right py-1 px-1 font-normal w-[110px]">%</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => {
+              const dKey = `${storeId}:${r.employee_id}`
+              const draft = drafts[dKey] ?? { boutique: '', sastreria: '' }
+              const setField = (field: 'boutique' | 'sastreria', v: string) =>
+                setDrafts(prev => ({ ...prev, [dKey]: { ...(prev[dKey] ?? draft), [field]: v } }))
+              return (
+                <tr key={r.employee_id} className="border-b last:border-b-0 hover:bg-muted/30">
+                  <td className="py-2 pr-2 font-medium">{r.employee_name}</td>
+                  <td className="py-2 px-1">
+                    <CellInput
+                      value={draft.boutique}
+                      onChange={v => setField('boutique', v)}
+                      onBlur={() => saveCell(storeId, r.employee_id, 'boutique')}
+                      saving={savingKey === `${dKey}:boutique`}
+                    />
+                  </td>
+                  <td className="py-2 px-1 text-right tabular-nums">{formatCurrency(r.boutique_actual)}</td>
+                  <td className="py-2 px-1">
+                    <ProgressCell actual={r.boutique_actual} target={r.boutique_target} isPastMonth={isPastMonth} />
+                  </td>
+                  <td className="py-2 px-1">
+                    <CellInput
+                      value={draft.sastreria}
+                      onChange={v => setField('sastreria', v)}
+                      onBlur={() => saveCell(storeId, r.employee_id, 'sastreria')}
+                      saving={savingKey === `${dKey}:sastreria`}
+                    />
+                  </td>
+                  <td className="py-2 px-1 text-right tabular-nums">{formatCurrency(r.sastreria_actual)}</td>
+                  <td className="py-2 px-1">
+                    <ProgressCell actual={r.sastreria_actual} target={r.sastreria_target} isPastMonth={isPastMonth} />
+                  </td>
+                  <td className="py-2 pl-2 text-right tabular-nums font-semibold">
+                    {formatCurrency(r.total_actual)}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+          <tfoot>
+            <tr className="border-t font-semibold bg-muted/50">
+              <td className="py-2 pr-2">TOTAL</td>
+              <td className="py-2 px-1 text-right tabular-nums">{formatCurrency(totals.boutique_target)}</td>
+              <td className="py-2 px-1 text-right tabular-nums">{formatCurrency(totals.boutique_actual)}</td>
+              <td className="py-2 px-1"></td>
+              <td className="py-2 px-1 text-right tabular-nums">{formatCurrency(totals.sastreria_target)}</td>
+              <td className="py-2 px-1 text-right tabular-nums">{formatCurrency(totals.sastreria_actual)}</td>
+              <td className="py-2 px-1"></td>
+              <td className="py-2 pl-2 text-right tabular-nums">{formatCurrency(totals.total_actual)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      {(boutiqueMismatch || sastreriaMismatch) && (
+        <div className="mt-3 flex gap-2 p-2.5 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-[11px]">
+          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            {boutiqueMismatch && (
+              <p>
+                Boutique: la suma de objetivos individuales ({formatCurrency(totals.boutique_target)}) no coincide con el objetivo de la tienda ({formatCurrency(storeBoutiqueTarget)}).
+              </p>
+            )}
+            {sastreriaMismatch && (
+              <p>
+                Sastrería: la suma de objetivos individuales ({formatCurrency(totals.sastreria_target)}) no coincide con el objetivo de la tienda ({formatCurrency(storeSastreriaTarget)}).
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+function CellInput({
+  value, onChange, onBlur, saving,
+}: {
+  value: string
+  onChange: (v: string) => void
+  onBlur: () => void
+  saving: boolean
+}) {
+  return (
+    <div className="relative">
+      <Input
+        type="number"
+        inputMode="decimal"
+        min={0}
+        step="0.01"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        onBlur={onBlur}
+        placeholder="0"
+        className="h-7 text-xs text-right pr-6 w-24 ml-auto"
+      />
+      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground pointer-events-none">
+        {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : '€'}
+      </span>
+    </div>
+  )
+}
+
+function ProgressCell({ actual, target, isPastMonth }: { actual: number; target: number; isPastMonth: boolean }) {
+  if (target <= 0) {
+    return <div className="text-right text-[10px] text-muted-foreground">Sin objetivo</div>
+  }
+  const pct = (actual / target) * 100
+  const reached = pct >= 100
+  const cls = reached
+    ? 'text-green-600'
+    : pct >= 50
+      ? 'text-amber-600'
+      : 'text-red-600'
+  const barCls = reached
+    ? 'bg-green-500'
+    : pct >= 50
+      ? 'bg-amber-500'
+      : 'bg-red-500'
+  const pastLabel = isPastMonth
+    ? (reached ? { text: 'Cumplido', cls: 'text-green-600' } : { text: 'No alcanzado', cls: 'text-red-600' })
+    : null
+  return (
+    <div className="text-right space-y-1 min-w-[100px]">
+      <div className={`tabular-nums text-[11px] font-medium ${cls}`}>{pct.toFixed(0)}%</div>
+      <div className="h-1 w-full bg-muted rounded overflow-hidden">
+        <div className={`h-full ${barCls} transition-all`} style={{ width: `${Math.min(100, pct)}%` }} />
+      </div>
+      {pastLabel && <div className={`text-[10px] font-medium ${pastLabel.cls}`}>{pastLabel.text}</div>}
     </div>
   )
 }

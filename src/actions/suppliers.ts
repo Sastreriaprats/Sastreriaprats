@@ -293,6 +293,22 @@ export const updateSupplierAction = protectedAction<{ id: string; data: any }, a
       }
     }
 
+    // Si cambia el método de pago del proveedor, propagar a sus facturas no pagadas.
+    const beforeMethod = (before as any)?.payment_method ?? null
+    const afterMethod = (supplier as any)?.payment_method ?? null
+    if (beforeMethod !== afterMethod) {
+      try {
+        const { error: invErr } = await ctx.adminClient
+          .from('ap_supplier_invoices')
+          .update({ payment_method: afterMethod })
+          .eq('supplier_id', id)
+          .in('status', ['pendiente', 'parcial', 'vencida'])
+        if (invErr) console.error('[updateSupplierAction] propagación payment_method:', invErr)
+      } catch (e) {
+        console.error('[updateSupplierAction] propagación payment_method:', e)
+      }
+    }
+
     const diff = buildAuditDiff(before as Record<string, unknown> | null, supplier as Record<string, unknown> | null)
     return success({
       ...(supplier as Record<string, unknown>),

@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 import { ProductSchema, BreadcrumbSchema } from '@/components/seo/schema-org'
 import { buildBreadcrumbs } from '@/lib/seo/metadata'
 import { trackViewItem, trackAddToCart } from '@/lib/analytics/events'
+import { sortSizeStrings } from '@/lib/utils/sort-sizes'
 
 export function ProductContent({ slug }: { slug: string }) {
   const router = useRouter()
@@ -106,7 +107,7 @@ export function ProductContent({ slug }: { slug: string }) {
       : []
 
   const variants = product.product_variants as Record<string, unknown>[] | undefined
-  const sizes = [...new Set(variants?.map((v) => v.size as string).filter(Boolean))]
+  const sizes = sortSizeStrings([...new Set(variants?.map((v) => v.size as string).filter(Boolean))])
   const colors = variants
     ?.filter((v) => v.color_hex)
     .map((v) => ({ color: v.color as string, hex: v.color_hex as string }))

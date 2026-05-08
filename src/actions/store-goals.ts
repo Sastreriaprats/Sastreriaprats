@@ -186,3 +186,265 @@ export async function upsertStoreGoalAction(input: {
     return { error: err instanceof Error ? err.message : 'Error al guardar objetivo' }
   }
 }
+
+// ============================================================================
+// Objetivos por empleado dentro de cada tienda
+// ============================================================================
+
+export type EmployeeGoalType = 'boutique' | 'sastreria'
+
+export interface EmployeeGoalRow {
+  employee_id: string
+  employee_name: string
+  boutique_target: number
+  sastreria_target: number
+  boutique_actual: number
+  sastreria_actual: number
+  total_target: number
+  total_actual: number
+}
+
+/**
+ * Devuelve un row por empleado asignado a la tienda con objetivos y ventas
+ * reales del mes. Las ventas se filtran por sales.salesperson_id (la fuente
+ * de verdad: cada venta TPV tiene vendedor obligatorio).
+ *
+ * Importes en base imponible (sin IVA): total - tax_amount.
+ */
+export async function getEmployeeGoals(input: {
+  storeId: string
+  year: number
+  month: number
+}): Promise<{ data?: EmployeeGoalRow[]; error?: string }> {
+  try {
+    const { storeId, year, month } = input
+    const supabase = await createServerSupabaseClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { error: 'No autenticado' }
+
+    const admin = createAdminClient()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const monthStart = `${year}-${pad(month)}-01T00:00:00`
+    const nextMonth = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 }
+    const nextMonthStart = `${nextMonth.y}-${pad(nextMonth.m)}-01T00:00:00`
+
+    const [assignedRes, goalsRes, salesRes] = await Promise.all([
+      admin
+        .from('user_stores')
+        .select('user_id, profiles!user_stores_user_id_fkey(id, full_name, is_active)')
+        .eq('store_id', storeId),
+      admin
+        .from('employee_monthly_goals')
+        .select('employee_id, goal_type, target_amount')
+        .eq('store_id', storeId)
+        .eq('year', year)
+        .eq('month', month),
+      admin
+        .from('sales')
+        .select('salesperson_id, total, tax_amount, sale_type')
+        .eq('store_id', storeId)
+        .eq('status', 'completed')
+        .gte('created_at', monthStart)
+        .lt('created_at', nextMonthStart),
+    ])
+
+    if (assignedRes.error) return { error: assignedRes.error.message }
+    if (goalsRes.error) return { error: goalsRes.error.message }
+    if (salesRes.error) return { error: salesRes.error.message }
+
+    type AssignedRow = { user_id: string; profiles: { id: string; full_name: string | null; is_active: boolean | null } | { id: string; full_name: string | null; is_active: boolean | null }[] | null }
+    const employees = new Map<string, { full_name: string }>()
+    for (const r of (assignedRes.data || []) as AssignedRow[]) {
+      const p = Array.isArray(r.profiles) ? r.profiles[0] : r.profiles
+      if (!p || p.is_active === false) continue
+      employees.set(r.user_id, { full_name: p.full_name ?? 'Sin nombre' })
+    }
+
+    // Asegura que también aparezcan empleados con ventas en la tienda aunque
+    // no estén formalmente asignados (vendedor visitante, traspasos, etc.).
+    const extraSalesperson = new Set<string>()
+    for (const s of (salesRes.data || []) as { salesperson_id: string | null }[]) {
+      if (s.salesperson_id && !employees.has(s.salesperson_id)) {
+        extraSalesperson.add(s.salesperson_id)
+      }
+    }
+    if (extraSalesperson.size > 0) {
+      const { data: extraProfiles } = await admin
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', Array.from(extraSalesperson))
+      for (const p of (extraProfiles || []) as { id: string; full_name: string | null }[]) {
+        employees.set(p.id, { full_name: p.full_name ?? 'Sin nombre' })
+      }
+    }
+
+    const targets = new Map<string, { boutique: number; sastreria: number }>()
+    for (const g of (goalsRes.data || []) as { employee_id: string; goal_type: EmployeeGoalType; target_amount: string | number }[]) {
+      const e = targets.get(g.employee_id) ?? { boutique: 0, sastreria: 0 }
+      e[g.goal_type] = Number(g.target_amount) || 0
+      targets.set(g.employee_id, e)
+    }
+
+    const actuals = new Map<string, { boutique: number; sastreria: number }>()
+    for (const r of (salesRes.data || []) as { salesperson_id: string | null; total: number | string | null; tax_amount: number | string | null; sale_type: string | null }[]) {
+      if (!r.salesperson_id) continue
+      const net = (Number(r.total) || 0) - (Number(r.tax_amount) || 0)
+      const e = actuals.get(r.salesperson_id) ?? { boutique: 0, sastreria: 0 }
+      const st = r.sale_type ?? ''
+      if (BOUTIQUE_SALE_TYPES.includes(st)) e.boutique += net
+      else if (SASTRERIA_SALE_TYPES.includes(st)) e.sastreria += net
+      actuals.set(r.salesperson_id, e)
+    }
+
+    const rows: EmployeeGoalRow[] = Array.from(employees.entries())
+      .map(([employeeId, info]) => {
+        const t = targets.get(employeeId) ?? { boutique: 0, sastreria: 0 }
+        const a = actuals.get(employeeId) ?? { boutique: 0, sastreria: 0 }
+        return {
+          employee_id: employeeId,
+          employee_name: info.full_name,
+          boutique_target: t.boutique,
+          sastreria_target: t.sastreria,
+          boutique_actual: a.boutique,
+          sastreria_actual: a.sastreria,
+          total_target: t.boutique + t.sastreria,
+          total_actual: a.boutique + a.sastreria,
+        }
+      })
+      .sort((a, b) => a.employee_name.localeCompare(b.employee_name, 'es'))
+
+    return { data: rows }
+  } catch (err) {
+    console.error('[getEmployeeGoals]', err)
+    return { error: err instanceof Error ? err.message : 'Error al cargar objetivos de empleados' }
+  }
+}
+
+/** Upsert de un objetivo de empleado concreto. */
+export async function upsertEmployeeGoal(input: {
+  storeId: string
+  employeeId: string
+  year: number
+  month: number
+  goalType: EmployeeGoalType
+  targetAmount: number
+}): Promise<{ success?: boolean; error?: string }> {
+  try {
+    const supabase = await createServerSupabaseClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { error: 'No autenticado' }
+
+    const hasPerm = await checkUserPermission(user.id, 'config.manage_stores')
+    if (!hasPerm) return { error: 'Sin permisos para gestionar objetivos' }
+
+    if (input.month < 1 || input.month > 12) return { error: 'Mes inválido' }
+    if (!['boutique', 'sastreria'].includes(input.goalType)) return { error: 'Tipo inválido' }
+    if (!(input.targetAmount >= 0)) return { error: 'Importe inválido' }
+
+    const admin = createAdminClient()
+
+    const { error } = await admin
+      .from('employee_monthly_goals')
+      .upsert(
+        {
+          store_id: input.storeId,
+          employee_id: input.employeeId,
+          year: input.year,
+          month: input.month,
+          goal_type: input.goalType,
+          target_amount: input.targetAmount,
+          updated_by: user.id,
+          created_by: user.id,
+        },
+        { onConflict: 'store_id,employee_id,year,month,goal_type' },
+      )
+
+    if (error) return { error: error.message }
+
+    await admin.rpc('log_audit', {
+      p_user_id: user.id,
+      p_action: 'update',
+      p_module: 'config',
+      p_entity_type: 'employee_monthly_goal',
+      p_description: `Objetivo empleado ${input.goalType} ${String(input.month).padStart(2, '0')}/${input.year}: ${input.targetAmount.toFixed(2)} €`,
+      p_new_data: input,
+    })
+
+    revalidatePath('/admin/configuracion')
+    return { success: true }
+  } catch (err) {
+    console.error('[upsertEmployeeGoal]', err)
+    return { error: err instanceof Error ? err.message : 'Error al guardar objetivo' }
+  }
+}
+
+/**
+ * Copia los objetivos de empleado del mes anterior al mes/año indicado para
+ * la tienda dada. Útil al abrir un mes nuevo sin objetivos definidos. Solo
+ * copia targets > 0. Idempotente vía UPSERT por la clave única.
+ */
+export async function copyEmployeeGoalsFromPreviousMonth(input: {
+  storeId: string
+  year: number
+  month: number
+}): Promise<{ success?: boolean; copied?: number; error?: string }> {
+  try {
+    const supabase = await createServerSupabaseClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { error: 'No autenticado' }
+
+    const hasPerm = await checkUserPermission(user.id, 'config.manage_stores')
+    if (!hasPerm) return { error: 'Sin permisos' }
+
+    if (input.month < 1 || input.month > 12) return { error: 'Mes inválido' }
+
+    const prev = input.month === 1
+      ? { y: input.year - 1, m: 12 }
+      : { y: input.year, m: input.month - 1 }
+
+    const admin = createAdminClient()
+
+    const { data: prevGoals, error: readErr } = await admin
+      .from('employee_monthly_goals')
+      .select('employee_id, goal_type, target_amount')
+      .eq('store_id', input.storeId)
+      .eq('year', prev.y)
+      .eq('month', prev.m)
+    if (readErr) return { error: readErr.message }
+
+    const rows = ((prevGoals ?? []) as { employee_id: string; goal_type: EmployeeGoalType; target_amount: string | number }[])
+      .filter(g => Number(g.target_amount) > 0)
+      .map(g => ({
+        store_id: input.storeId,
+        employee_id: g.employee_id,
+        year: input.year,
+        month: input.month,
+        goal_type: g.goal_type,
+        target_amount: Number(g.target_amount),
+        created_by: user.id,
+        updated_by: user.id,
+      }))
+
+    if (rows.length === 0) return { success: true, copied: 0 }
+
+    const { error: insErr } = await admin
+      .from('employee_monthly_goals')
+      .upsert(rows, { onConflict: 'store_id,employee_id,year,month,goal_type' })
+    if (insErr) return { error: insErr.message }
+
+    await admin.rpc('log_audit', {
+      p_user_id: user.id,
+      p_action: 'create',
+      p_module: 'config',
+      p_entity_type: 'employee_monthly_goal',
+      p_description: `Copia objetivos empleados ${String(prev.m).padStart(2, '0')}/${prev.y} → ${String(input.month).padStart(2, '0')}/${input.year} (${rows.length})`,
+      p_new_data: { from: prev, to: { year: input.year, month: input.month }, store_id: input.storeId, count: rows.length },
+    })
+
+    revalidatePath('/admin/configuracion')
+    return { success: true, copied: rows.length }
+  } catch (err) {
+    console.error('[copyEmployeeGoalsFromPreviousMonth]', err)
+    return { error: err instanceof Error ? err.message : 'Error al copiar objetivos' }
+  }
+}

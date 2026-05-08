@@ -14,12 +14,14 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { variantSkuFromSize } from '@/lib/constants-sizes'
 import { sortBySize } from '@/lib/utils/sort-sizes'
 import { Textarea } from '@/components/ui/textarea'
 import {
-  ArrowLeft, Plus, ArrowUp, Loader2, Image as ImageIcon, Pencil, ArrowLeftRight, Trash2, Barcode,
+  ArrowLeft, Plus, ArrowUp, Loader2, Image as ImageIcon, Pencil, ArrowLeftRight, Trash2, Barcode, History,
 } from 'lucide-react'
+import { ProductHistoryTab } from './product-history-tab'
 import { useAction } from '@/hooks/use-action'
 import { usePermissions } from '@/hooks/use-permissions'
 import { adjustStock, createVariantAction, deleteVariantAction, generateBarcodeForProduct, moveStockBetweenWarehouses, updateProductAction } from '@/actions/products'
@@ -229,6 +231,12 @@ export function ProductDetailContent({
         </Card>
       )}
 
+      <Tabs defaultValue="stock">
+        <TabsList>
+          <TabsTrigger value="stock" className="gap-1.5"><Barcode className="h-4 w-4" /> Stock y variantes</TabsTrigger>
+          <TabsTrigger value="historial" className="gap-1.5"><History className="h-4 w-4" /> Historial</TabsTrigger>
+        </TabsList>
+        <TabsContent value="stock" className="space-y-6 mt-4">
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -367,6 +375,11 @@ export function ProductDetailContent({
           </CardContent>
         </Card>
       </div>
+        </TabsContent>
+        <TabsContent value="historial" className="mt-4">
+          <ProductHistoryTab productId={product.id} />
+        </TabsContent>
+      </Tabs>
 
       {/* Adjust stock dialog */}
       <Dialog open={showAdjust} onOpenChange={setShowAdjust}>

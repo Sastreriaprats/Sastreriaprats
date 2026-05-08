@@ -48,6 +48,7 @@ function getProductStockSummary(product: any): { total: number; warehouses: { na
   const warehouseMap = new Map<string, { name: string; qty: number }>()
   for (const variant of product.product_variants || []) {
     for (const sl of variant.stock_levels || []) {
+      if (sl.warehouses?.is_active === false) continue
       const wId = sl.warehouse_id
       const wName = sl.warehouses?.name || sl.warehouses?.code || wId
       const existing = warehouseMap.get(wId)
@@ -58,7 +59,7 @@ function getProductStockSummary(product: any): { total: number; warehouses: { na
       }
     }
   }
-  const warehouses = Array.from(warehouseMap.values())
+  const warehouses = Array.from(warehouseMap.values()).sort((a, b) => a.name.localeCompare(b.name, 'es'))
   const total = warehouses.reduce((s, w) => s + w.qty, 0)
   return { total, warehouses }
 }

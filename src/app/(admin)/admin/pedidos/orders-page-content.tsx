@@ -57,6 +57,9 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
   const [tab, setTab] = useState<TabValue>(initialTab)
   const [view, setView] = useState<'table' | 'pipeline'>(initialView as any)
   const [statusFilter, setStatusFilter] = useState(initialStatus || 'all')
+  // Buscador independiente para el tab "Pedidos a proveedor" (no comparte
+  // estado con useList(listOrders), así no dispara queries de sastrería).
+  const [supplierSearch, setSupplierSearch] = useState('')
   // Subtipo dentro del tab Sastrería: all | artesanal | industrial
   const [subTypeFilter, setSubTypeFilter] = useState<'all' | 'artesanal' | 'industrial'>(
     initialType === 'artesanal' || initialType === 'industrial' ? initialType : 'all',
@@ -176,14 +179,14 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
 
   // Pedidos a proveedor filtrados por búsqueda (client-side)
   const filteredSupplierOrders = useMemo(() => {
-    const q = search.trim().toLowerCase()
+    const q = supplierSearch.trim().toLowerCase()
     if (!q) return supplierOrders
     return supplierOrders.filter((so: any) =>
       so.order_number?.toLowerCase().includes(q) ||
       so.suppliers?.name?.toLowerCase().includes(q) ||
       so.tailoring_orders?.order_number?.toLowerCase().includes(q),
     )
-  }, [supplierOrders, search])
+  }, [supplierOrders, supplierSearch])
 
   const tabBadge = (n: number | null, isActive: boolean) => {
     if (n === null) {
@@ -266,7 +269,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
               <div className="relative min-w-[200px] flex-1">
                 <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  placeholder="Buscar por nº pedido..."
+                  placeholder="Buscar por nº pedido o nombre de cliente..."
                   className="pl-8 h-8 text-sm"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
@@ -474,8 +477,8 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
               <Input
                 placeholder="Buscar por nº pedido, proveedor..."
                 className="pl-8 h-8 text-sm"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                value={supplierSearch}
+                onChange={(e) => setSupplierSearch(e.target.value)}
               />
             </div>
           </div>

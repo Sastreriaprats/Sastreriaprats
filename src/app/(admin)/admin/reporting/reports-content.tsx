@@ -92,6 +92,7 @@ export function ReportsContent() {
   const [salesData, setSalesData] = useState<SalesData | null>(null)
   const [compareData, setCompareData] = useState<CompareData | null>(null)
   const [topProducts, setTopProducts] = useState<ProductItem[]>([])
+  const [productSearch, setProductSearch] = useState('')
   const [tailorData, setTailorData] = useState<TailorItem[]>([])
   const [clientsData, setClientsData] = useState<ClientsData | null>(null)
   const [storeData, setStoreData] = useState<StoreItem[]>([])
@@ -139,7 +140,7 @@ export function ReportsContent() {
           previous_start: prevStartStr, previous_end: prevEndStr,
           store_id: storeId, channel, tax_mode,
         }),
-        getTopProducts({ start_date: start, end_date: end, store_id: storeId, channel, limit: 10, tax_mode }),
+        getTopProducts({ start_date: start, end_date: end, store_id: storeId, channel, limit: 50, tax_mode }),
         getTailorPerformance({ start_date: start, end_date: end, store_id: storeId, channel, tax_mode }),
         getClientsAnalytics({ start_date: start, end_date: end, store_id: storeId }),
         getSalesByStore({ start_date: start, end_date: end, store_id: storeId, channel, tax_mode }),
@@ -424,7 +425,24 @@ export function ReportsContent() {
 
             <div className="mt-6">
               <TabsContent value="sales"><VentasTab salesData={salesData} timePatternData={timePatternData} /></TabsContent>
-              <TabsContent value="products"><TopProductsChart products={topProducts} /></TabsContent>
+              <TabsContent value="products">
+                <Input
+                  placeholder="Filtrar por producto o SKU..."
+                  value={productSearch}
+                  onChange={(e) => setProductSearch(e.target.value)}
+                  className="max-w-sm mb-4"
+                />
+                <TopProductsChart
+                  products={
+                    productSearch.trim()
+                      ? topProducts.filter(p =>
+                          p.name.toLowerCase().includes(productSearch.toLowerCase()) ||
+                          (p.sku && p.sku.toLowerCase().includes(productSearch.toLowerCase()))
+                        )
+                      : topProducts
+                  }
+                />
+              </TabsContent>
               <TabsContent value="tailors"><TailorTable data={tailorData} /></TabsContent>
               <TabsContent value="clients"><ClientsChart data={clientsData} /></TabsContent>
               <TabsContent value="stores"><StoreTab data={storeData} /></TabsContent>

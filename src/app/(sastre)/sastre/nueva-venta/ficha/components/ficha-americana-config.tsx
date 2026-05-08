@@ -81,8 +81,9 @@ export function FichaAmericanaConfig({ keyId, cfg, setField }: Props) {
         <Label className="text-white/60 text-xs">Manga</Label>
         <div className="flex flex-wrap gap-3 mt-2">
           {[
-            { v: 'napolit', label: 'Manga napolitana' }, { v: 'reborde', label: 'Manga reborde' },
-            { v: 'sin_reborde', label: 'Manga sin reborde' }, { v: 'con_reborde', label: 'Manga con reborde' },
+            { v: 'napolit', label: 'Manga napolitana' },
+            { v: 'sin_reborde', label: 'Manga sin reborde' },
+            { v: 'con_reborde', label: 'Manga con reborde' },
           ].map(({ v, label }) => (
             <label key={v} className="flex items-center gap-2 cursor-pointer">
               <input type="radio" name={`manga-${keyId}`} checked={cfg.manga === v} onChange={() => setField('manga', v)} className="text-[#c9a96e]" />

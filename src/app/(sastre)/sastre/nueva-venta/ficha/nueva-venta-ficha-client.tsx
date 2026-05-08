@@ -88,7 +88,15 @@ const PRENDAS_DISPONIBLES = [
 function defaultPrendaConfig(slug: string): Record<string, unknown> {
   // Sin valores por defecto en los radios: el sastre los marca al rellenar
   // para que no queden opciones tildadas que se le pasen sin querer.
+  // Los 4 campos de tejido viven AHORA por prenda, no globales.
+  const tejido = {
+    tejidoStockId: '',
+    tejidoStockNombre: '',
+    tejidoCatalogo: '',
+    tejidoMetros: '',
+  }
   if (slug === 'pantalon') return {
+    ...tejido,
     vueltas: '', bragueta: '', pliegues: '', plieguesVal: '',
     p7pasadores: false, p5bolsillos: false, pRefForro: false, pRefExtTela: false,
     pSinBolTrasero: false, p1BolTrasero: false, p2BolTraseros: false,
@@ -99,11 +107,13 @@ function defaultPrendaConfig(slug: string): Record<string, unknown> {
     confAlturaTrasero: '', confFormaGemelo: false, confFVSalida: '',
   }
   if (slug === 'chaleco') return {
+    ...tejido,
     chalecoCorte: '', chalecoBolsillo: '',
     confF: '', confD: '', confFP: '', confFV: '', confHA: '', confHB: '', confVD: '',
   }
   // americana, teba, abrigo, gabardina, frac, chaque, smoking
   return {
+    ...tejido,
     botones: '', aberturas: '', bolsilloTipo: '', cerrilleraExterior: false,
     primerBoton: '', solapa: '', anchoSolapa: '', manga: '',
     ojalesAbiertos: '', ojalesCerrados: '', hTerminado: false, hTerminadoVal: '',
@@ -139,39 +149,36 @@ function defaultCamisa(): CamisaItem {
   return {
     id: crypto.randomUUID(),
     mode: 'a_medida',
-    cuello: '', canesu: '', manga: '', frenPecho: '', contPecho: '',
-    cintura: '', cadera: '', largo: '', pIzq: '', pDch: '', hombro: '', biceps: '',
+    cuello: '', canesu: '', largoManga: '', frentePecho: '', pecho: '',
+    cintura: '', cadera: '', largoCuerpo: '', hombro: '', punoDerecho: '', punoIzquierdo: '',
     jareton: false, bolsillo: false, hombroCaido: false, derecho: false, izquierdo: false,
     hombrosAltos: false, hombrosBajos: false, erguido: false, cargado: false,
     espaldaLisa: false, espPliegues: false, espTablonCentr: false, espPinzas: false,
-    iniciales: false, inicialesTexto: '', modCuello: '', puno: 'sencillo', tejido: '', precio: 0, cantidad: 1, obs: '',
+    iniciales: false, inicialesTexto: '', modCuello: '', puno: 'sencillo', tejido: '', tejidoStockId: undefined, tejidoMetros: undefined, precio: 0, cantidad: 1, obs: '',
     cortador: '', oficial: '', coste: undefined,
   }
 }
 
 function getMeasuresFromRecord(
   v: Record<string, unknown> | null | undefined
-): Pick<CamisaItem, 'cuello' | 'canesu' | 'manga' | 'frenPecho' | 'contPecho' | 'cintura' | 'cadera' | 'largo' | 'pIzq' | 'pDch' | 'hombro' | 'biceps'> {
-  const empty = { cuello: '', canesu: '', manga: '', frenPecho: '', contPecho: '', cintura: '', cadera: '', largo: '', pIzq: '', pDch: '', hombro: '', biceps: '' }
+): Pick<CamisaItem, 'cuello' | 'canesu' | 'largoManga' | 'frentePecho' | 'pecho' | 'cintura' | 'cadera' | 'largoCuerpo' | 'hombro' | 'punoDerecho' | 'punoIzquierdo'> {
+  const empty = { cuello: '', canesu: '', largoManga: '', frentePecho: '', pecho: '', cintura: '', cadera: '', largoCuerpo: '', hombro: '', punoDerecho: '', punoIzquierdo: '' }
   if (!v || typeof v !== 'object') return empty
-  // Cada outKey acepta varias keys posibles porque la migración 072 renombró
-  // los códigos en camisería: manga→largo_manga, fren_pecho→frente_pecho,
-  // cont_pecho→pecho, largo→largo_cuerpo. Y los registros se guardan a veces
-  // con prefijo "camiseria_" (datos antiguos) y a veces sin él (datos nuevos
-  // de saveBodyMeasurements). Probamos todas las combinaciones.
+  // Aceptamos las claves modernas (snake_case BD) y fallbacks legacy. Las
+  // medidas de cliente se guardan a veces con prefijo "camiseria_" (datos
+  // antiguos) y a veces sin él (saveBodyMeasurements actual). Probamos ambos.
   const MEDIDAS_MAP: Array<{ keys: string[]; outKey: keyof CamisaItem }> = [
     { keys: ['cuello'], outKey: 'cuello' },
     { keys: ['canesu'], outKey: 'canesu' },
-    { keys: ['largo_manga', 'manga'], outKey: 'manga' },
-    { keys: ['frente_pecho', 'fren_pecho'], outKey: 'frenPecho' },
-    { keys: ['pecho', 'cont_pecho'], outKey: 'contPecho' },
+    { keys: ['largo_manga', 'manga'], outKey: 'largoManga' },
+    { keys: ['frente_pecho', 'fren_pecho'], outKey: 'frentePecho' },
+    { keys: ['pecho', 'cont_pecho'], outKey: 'pecho' },
     { keys: ['cintura'], outKey: 'cintura' },
     { keys: ['cadera'], outKey: 'cadera' },
-    { keys: ['largo_cuerpo', 'largo'], outKey: 'largo' },
-    { keys: ['p_izq'], outKey: 'pIzq' },
-    { keys: ['p_dch'], outKey: 'pDch' },
+    { keys: ['largo_cuerpo', 'largo'], outKey: 'largoCuerpo' },
     { keys: ['hombro'], outKey: 'hombro' },
-    { keys: ['biceps'], outKey: 'biceps' },
+    { keys: ['puno_derecho'], outKey: 'punoDerecho' },
+    { keys: ['puno_izquierdo'], outKey: 'punoIzquierdo' },
   ]
   const out = { ...empty }
   for (const { keys, outKey } of MEDIDAS_MAP) {
@@ -264,7 +271,8 @@ export function NuevaVentaFichaClient({
   const [sastres, setSastres] = useState<{ id: string; full_name: string }[]>([])
   const [officials, setOfficials] = useState<{ id: string; name: string; specialty: string | null }[]>([])
   const [fabricsStock, setFabricsStock] = useState<{ id: string; fabric_code: string | null; name: string }[]>([])
-  const [tejidoPopoverOpen, setTejidoPopoverOpen] = useState(false)
+  /** Key del popover de tejido abierto (por prenda). null = ninguno abierto. */
+  const [tejidoPopoverOpenKey, setTejidoPopoverOpenKey] = useState<string | null>(null)
   const [client, setClient] = useState<Record<string, unknown> | null>(null)
   const [clientLoading, setClientLoading] = useState(false)
   const [camiseriaMeasurements, setCamiseriaMeasurements] = useState<Record<string, unknown> | null>(null)
@@ -286,10 +294,6 @@ export function NuevaVentaFichaClient({
     telefono2: '',
     horario2: '',
     fechaCobro: new Date().toISOString().split('T')[0],
-    tejidoStockId: '',
-    tejidoStockNombre: '',
-    tejidoCatalogo: '',
-    tejidoMetros: '',
   })
 
   // ── Cart helpers ──────────────────────────────────────────────────────────
@@ -453,7 +457,7 @@ export function NuevaVentaFichaClient({
   // ── Camisa ops ────────────────────────────────────────────────────────────
   const addCamisa = () => {
     const m = getMeasuresFromRecord(camiseriaMeasurements ?? undefined)
-    setCamisas((prev) => [...prev, { id: crypto.randomUUID(), mode: 'a_medida', ...m, jareton: false, bolsillo: false, hombroCaido: false, derecho: false, izquierdo: false, hombrosAltos: false, hombrosBajos: false, erguido: false, cargado: false, espaldaLisa: false, espPliegues: false, espTablonCentr: false, espPinzas: false, iniciales: false, inicialesTexto: '', modCuello: '', puno: 'sencillo', tejido: '', precio: 0, cantidad: 1, obs: '', cortador: '', oficial: '' }])
+    setCamisas((prev) => [...prev, { id: crypto.randomUUID(), mode: 'a_medida', ...m, jareton: false, bolsillo: false, hombroCaido: false, derecho: false, izquierdo: false, hombrosAltos: false, hombrosBajos: false, erguido: false, cargado: false, espaldaLisa: false, espPliegues: false, espTablonCentr: false, espPinzas: false, iniciales: false, inicialesTexto: '', modCuello: '', puno: 'sencillo', tejido: '', tejidoStockId: undefined, tejidoMetros: undefined, precio: 0, cantidad: 1, obs: '', cortador: '', oficial: '', punoDerecho: '', punoIzquierdo: '' }])
   }
   const removeCamisa = (id: string) => setCamisas((prev) => prev.filter((c) => c.id !== id))
   const updateCamisa = (id: string, field: keyof CamisaItem, value: string | number | boolean | undefined) => {
@@ -472,6 +476,11 @@ export function NuevaVentaFichaClient({
     }])
     setAddingComplementQty((prev) => ({ ...prev, [item.id]: 0 }))
     setShowComplementSearch(false); setComplementSearchQuery(''); setComplementResults([])
+    if (item.stock <= 0) {
+      toast.warning(`${item.name} — Sin stock en esta tienda`)
+    } else if (item.stock < cantidad) {
+      toast.warning(`${item.name} — Stock insuficiente (disponible: ${item.stock})`)
+    }
   }
   const addComplementAsFreeText = () => {
     const nombre = complementSearchQuery.trim()
@@ -536,10 +545,7 @@ export function NuevaVentaFichaClient({
     situacionTrabajo: ficha.situacionTrabajo,
     fechaProximaVisita: ficha.fechaProximaVisita,
     fechaCobro: ficha.fechaCobro,
-    tejidoStockId: ficha.tejidoStockId,
-    tejidoStockNombre: ficha.tejidoStockNombre,
-    tejidoCatalogo: ficha.tejidoCatalogo,
-    tejidoMetros: ficha.tejidoMetros,
+    // Tejido y metros viven AHORA por prenda en prendaConfigs[key], no aquí.
     domicilio: ficha.domicilio,
     localidad: ficha.localidad,
     provincia: ficha.provincia,
@@ -567,20 +573,22 @@ export function NuevaVentaFichaClient({
         storeId: defaultStoreId,
         precioPrenda: usePrendasArquitectura ? undefined : 0,
         notas: notas.trim(),
-        prendasSastreria: usePrendasArquitectura ? prendasSastreria : undefined,
-        fichaCommon: usePrendasArquitectura ? buildFichaCommon() : undefined,
+        prendasSastreria,
+        fichaCommon: buildFichaCommon(),
         camisas: camisas.flatMap((c) =>
           Array.from({ length: Math.max(1, c.cantidad) }, () => ({
-            cuello: c.cuello, canesu: c.canesu, manga: c.manga, frenPecho: c.frenPecho,
-            contPecho: c.contPecho, cintura: c.cintura, cadera: c.cadera, largo: c.largo,
-            pIzq: c.pIzq, pDch: c.pDch, hombro: c.hombro, biceps: c.biceps,
+            cuello: c.cuello, canesu: c.canesu, largoManga: c.largoManga, frentePecho: c.frentePecho,
+            pecho: c.pecho, cintura: c.cintura, cadera: c.cadera, largoCuerpo: c.largoCuerpo,
+            hombro: c.hombro, punoDerecho: c.punoDerecho, punoIzquierdo: c.punoIzquierdo,
             jareton: c.jareton, bolsillo: c.bolsillo, hombroCaido: c.hombroCaido,
             derecho: c.derecho, izquierdo: c.izquierdo, hombrosAltos: c.hombrosAltos,
             hombrosBajos: c.hombrosBajos, erguido: c.erguido, cargado: c.cargado,
             espaldaLisa: c.espaldaLisa, espPliegues: c.espPliegues,
             espTablonCentr: c.espTablonCentr, espPinzas: c.espPinzas,
             iniciales: c.iniciales, inicialesTexto: c.inicialesTexto, modCuello: c.modCuello, puno: c.puno,
-            tejido: c.tejido, precio: Number(c.precio) || 0, obs: c.obs,
+            tejido: c.tejido, tejidoStockId: c.tejidoStockId || undefined,
+            tejidoMetros: typeof c.tejidoMetros === 'number' ? c.tejidoMetros : undefined,
+            precio: Number(c.precio) || 0, obs: c.obs,
             cortador: c.cortador || undefined, oficial: c.oficial || undefined,
             coste: Number(c.coste) || 0,
           }))
@@ -775,84 +783,6 @@ export function NuevaVentaFichaClient({
                   </div>
                 </div>
 
-                {/* Tejido — solo cuando hay prendas de sastrería */}
-                {!isCamiseria && hasCartItems && (
-                  <div className="space-y-3 border-t border-[#c9a96e]/20 pt-4">
-                    <h3 className="text-[#c9a96e] text-sm uppercase tracking-wide font-medium">Tejido</h3>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <Label className="text-white/60 text-xs">Tejido en stock</Label>
-                        <Popover open={tejidoPopoverOpen} onOpenChange={setTejidoPopoverOpen}>
-                          <PopoverTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              role="combobox"
-                              aria-expanded={tejidoPopoverOpen}
-                              className="mt-1 w-full min-h-[44px] justify-between bg-[#0d1629] border-[#c9a96e]/20 text-white hover:bg-[#0d1629] hover:text-white font-normal"
-                            >
-                              <span className="truncate">
-                                {ficha.tejidoStockNombre || 'Buscar o seleccionar tejido...'}
-                              </span>
-                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="p-0 bg-[#0d1629] border border-white/20 text-white" align="start" style={{ width: 'var(--radix-popover-trigger-width)' }}>
-                            <Command className="bg-transparent text-white">
-                              <CommandInput placeholder="Buscar por código o nombre..." className="text-white placeholder:text-white/40" />
-                              <CommandList>
-                                <CommandEmpty className="py-4 text-center text-sm text-white/50">Sin resultados</CommandEmpty>
-                                <CommandGroup>
-                                  <CommandItem
-                                    value="__none__"
-                                    onSelect={() => {
-                                      setFicha((prev) => ({ ...prev, tejidoStockId: '', tejidoStockNombre: '' }))
-                                      setTejidoPopoverOpen(false)
-                                    }}
-                                    className="text-white aria-selected:bg-white/10 aria-selected:text-white"
-                                  >
-                                    <Check className={`mr-2 h-4 w-4 ${ficha.tejidoStockId ? 'opacity-0' : 'opacity-100'}`} />
-                                    —
-                                  </CommandItem>
-                                  {fabricsStock.map((f) => {
-                                    const label = f.fabric_code ? `${f.fabric_code} — ${f.name}` : f.name
-                                    return (
-                                      <CommandItem
-                                        key={f.id}
-                                        value={`${f.fabric_code ?? ''} ${f.name}`}
-                                        onSelect={() => {
-                                          setFicha((prev) => ({
-                                            ...prev,
-                                            tejidoStockId: f.id,
-                                            tejidoStockNombre: `${f.fabric_code ?? ''} — ${f.name}`.trim(),
-                                          }))
-                                          setTejidoPopoverOpen(false)
-                                        }}
-                                        className="text-white aria-selected:bg-white/10 aria-selected:text-white"
-                                      >
-                                        <Check className={`mr-2 h-4 w-4 ${ficha.tejidoStockId === f.id ? 'opacity-100' : 'opacity-0'}`} />
-                                        {label}
-                                      </CommandItem>
-                                    )
-                                  })}
-                                </CommandGroup>
-                              </CommandList>
-                            </Command>
-                          </PopoverContent>
-                        </Popover>
-                      </div>
-                      <div>
-                        <Label className="text-white/60 text-xs">Tejido de catálogo</Label>
-                        <Input className="mt-1 min-h-[44px] bg-[#0d1629] border-[#c9a96e]/20 text-white" value={ficha.tejidoCatalogo} onChange={(e) => setFichaField('tejidoCatalogo', e.target.value)} placeholder="Referencia de catálogo" />
-                      </div>
-                      <div>
-                        <Label className="text-white/60 text-xs">Metros a utilizar</Label>
-                        <Input type="number" step="0.1" min="0" className="mt-1 min-h-[44px] bg-[#0d1629] border-[#c9a96e]/20 text-white" value={ficha.tejidoMetros} onChange={(e) => setFichaField('tejidoMetros', e.target.value)} placeholder="Ej: 3.5" />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
                 {/* Características por sub-prenda de cada item del carrito */}
                 {!isCamiseria && cartItems.flatMap(item => {
                   const sections = getSubSections(item.slug, item.label)
@@ -888,6 +818,83 @@ export function NuevaVentaFichaClient({
                         {sp.slug === 'chaleco' && <FichaChalecoConfig keyId={key} cfg={cfg} setField={setField} />}
 
                         {!['pantalon', 'chaleco'].includes(sp.slug) && <FichaAmericanaConfig keyId={key} cfg={cfg} setField={setField} />}
+
+                        {/* Tejido por prenda */}
+                        <div className="space-y-3 border-t border-white/10 pt-4">
+                          <h4 className="text-[#c9a96e] text-xs uppercase tracking-wide font-medium">Tejido de {sp.label}</h4>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                              <Label className="text-white/60 text-xs">Tejido en stock</Label>
+                              <Popover
+                                open={tejidoPopoverOpenKey === key}
+                                onOpenChange={(o) => setTejidoPopoverOpenKey(o ? key : null)}
+                              >
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    role="combobox"
+                                    aria-expanded={tejidoPopoverOpenKey === key}
+                                    className="mt-1 w-full min-h-[44px] justify-between bg-[#0d1629] border-[#c9a96e]/20 text-white hover:bg-[#0d1629] hover:text-white font-normal"
+                                  >
+                                    <span className="truncate">
+                                      {String(cfg.tejidoStockNombre || '') || 'Buscar o seleccionar tejido...'}
+                                    </span>
+                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="p-0 bg-[#0d1629] border border-white/20 text-white" align="start" style={{ width: 'var(--radix-popover-trigger-width)' }}>
+                                  <Command className="bg-transparent text-white">
+                                    <CommandInput placeholder="Buscar por código o nombre..." className="text-white placeholder:text-white/40" />
+                                    <CommandList>
+                                      <CommandEmpty className="py-4 text-center text-sm text-white/50">Sin resultados</CommandEmpty>
+                                      <CommandGroup>
+                                        <CommandItem
+                                          value="__none__"
+                                          onSelect={() => {
+                                            setField('tejidoStockId', '')
+                                            setField('tejidoStockNombre', '')
+                                            setTejidoPopoverOpenKey(null)
+                                          }}
+                                          className="text-white aria-selected:bg-white/10 aria-selected:text-white"
+                                        >
+                                          <Check className={`mr-2 h-4 w-4 ${cfg.tejidoStockId ? 'opacity-0' : 'opacity-100'}`} />
+                                          —
+                                        </CommandItem>
+                                        {fabricsStock.map((f) => {
+                                          const fabricLabel = f.fabric_code ? `${f.fabric_code} — ${f.name}` : f.name
+                                          return (
+                                            <CommandItem
+                                              key={f.id}
+                                              value={`${f.fabric_code ?? ''} ${f.name}`}
+                                              onSelect={() => {
+                                                setField('tejidoStockId', f.id)
+                                                setField('tejidoStockNombre', `${f.fabric_code ?? ''} — ${f.name}`.trim())
+                                                setTejidoPopoverOpenKey(null)
+                                              }}
+                                              className="text-white aria-selected:bg-white/10 aria-selected:text-white"
+                                            >
+                                              <Check className={`mr-2 h-4 w-4 ${cfg.tejidoStockId === f.id ? 'opacity-100' : 'opacity-0'}`} />
+                                              {fabricLabel}
+                                            </CommandItem>
+                                          )
+                                        })}
+                                      </CommandGroup>
+                                    </CommandList>
+                                  </Command>
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+                            <div>
+                              <Label className="text-white/60 text-xs">Tejido de catálogo</Label>
+                              <Input className="mt-1 min-h-[44px] bg-[#0d1629] border-[#c9a96e]/20 text-white" value={String(cfg.tejidoCatalogo || '')} onChange={(e) => setField('tejidoCatalogo', e.target.value)} placeholder="Referencia de catálogo" />
+                            </div>
+                            <div>
+                              <Label className="text-white/60 text-xs">Metros a utilizar</Label>
+                              <Input type="number" step="0.1" min="0" className="mt-1 min-h-[44px] bg-[#0d1629] border-[#c9a96e]/20 text-white" value={String(cfg.tejidoMetros || '')} onChange={(e) => setField('tejidoMetros', e.target.value)} placeholder="Ej: 3.5" />
+                            </div>
+                          </div>
+                        </div>
 
                         {/* Características por prenda */}
                         <div className="mt-4">
@@ -965,6 +972,7 @@ export function NuevaVentaFichaClient({
           camiseriaMeasurements={camiseriaMeasurements}
           camiseriaMeasurementsLoading={camiseriaMeasurementsLoading}
           officials={officials}
+          fabricsStock={fabricsStock}
           addCamisa={addCamisa}
           removeCamisa={removeCamisa}
           updateCamisa={updateCamisa}

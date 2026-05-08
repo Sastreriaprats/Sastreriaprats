@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, Fragment } from 'react'
+import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -37,6 +38,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
 import { formatCurrency, formatDate, cn } from '@/lib/utils'
+import { downloadExcel } from '@/lib/excel/export'
 import { toast } from 'sonner'
 import {
   getAccountingSummary, getInvoices, getEstimates,
@@ -218,14 +220,38 @@ function ClientSearchCombobox({
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 
+const VALID_TABS = ['resumen', 'facturas', 'presupuestos', 'movimientos', 'asientos', 'iva', 'caja'] as const
+
 export function AccountingContent() {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+
+  const urlTab = searchParams.get('tab')
+  const initialTab = urlTab && (VALID_TABS as readonly string[]).includes(urlTab) ? urlTab : 'resumen'
+  const [tab, setTab] = useState<string>(initialTab)
+  const [editId, setEditId] = useState<string | null>(searchParams.get('edit'))
+
+  useEffect(() => {
+    const t = searchParams.get('tab')
+    if (t && (VALID_TABS as readonly string[]).includes(t) && t !== tab) setTab(t)
+    const e = searchParams.get('edit')
+    if (e !== editId) setEditId(e)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
+  const handleEditConsumed = useCallback(() => {
+    setEditId(null)
+    router.replace(`${pathname}?tab=facturas`)
+  }, [router, pathname])
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Contabilidad</h1>
         <p className="text-muted-foreground">Facturas · Presupuestos · Movimientos · Asientos · IVA</p>
       </div>
-      <Tabs defaultValue="resumen">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="resumen"       className="gap-1.5"><TrendingUp    className="h-4 w-4" /> Resumen</TabsTrigger>
           <TabsTrigger value="facturas"      className="gap-1.5"><FileText      className="h-4 w-4" /> Facturas</TabsTrigger>
@@ -237,7 +263,7 @@ export function AccountingContent() {
         </TabsList>
         <div className="mt-6">
           <TabsContent value="resumen">      <SummaryTab /></TabsContent>
-          <TabsContent value="facturas">     <InvoicesTab /></TabsContent>
+          <TabsContent value="facturas">     <InvoicesTab editId={editId} onEditConsumed={handleEditConsumed} /></TabsContent>
           <TabsContent value="presupuestos"> <EstimatesTab /></TabsContent>
           <TabsContent value="movimientos">  <MovimientosTab /></TabsContent>
           <TabsContent value="asientos">     <JournalTab /></TabsContent>
@@ -364,7 +390,7 @@ function SummaryTab() {
 
 type InvoiceLine = { description: string; quantity: number; unit_price: number; tax_rate: number }
 
-function InvoicesTab() {
+function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEditConsumed: () => void }) {
   const [rows, setRows] = useState<InvoiceRow[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -405,6 +431,35 @@ function InvoicesTab() {
   }, [search, status, dateFrom, dateTo])
 
   useEffect(() => { load() }, [load])
+
+  // Filtro client-side adicional sobre las facturas devueltas por el backend.
+  // Útil para refinar la lista ya cargada sin esperar el round-trip del fetch
+  // y para cubrir campos que el backend no busca (ej. notes si se añade).
+  const filteredInvoices = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return rows
+    return rows.filter((inv) =>
+      inv.invoice_number?.toLowerCase().includes(q) ||
+      inv.client_name?.toLowerCase().includes(q),
+    )
+  }, [rows, search])
+
+  const handleExportExcel = async () => {
+    if (filteredInvoices.length === 0) {
+      toast.error('No hay facturas para exportar')
+      return
+    }
+    const data = filteredInvoices.map(inv => ({
+      'Nº Factura': inv.invoice_number,
+      'Cliente': inv.client_name,
+      'Fecha': inv.invoice_date,
+      'Total': Number(inv.total) || 0,
+      'Estado': INVOICE_STATUS[inv.status]?.label ?? inv.status,
+      'Enviada': inv.sent_to_client ? 'Sí' : 'No',
+    }))
+    const range = dateFrom && dateTo ? `-${dateFrom}_a_${dateTo}` : ''
+    await downloadExcel(data, `facturas${range}`, 'Facturas')
+  }
 
   const openDialog = async () => {
     const r = await getClientsForInvoice()
@@ -574,6 +629,9 @@ function InvoicesTab() {
             {getPresetLabel(dateRangePreset, dateFrom, dateTo)}
           </span>
         )}
+        <Button variant="outline" size="sm" onClick={handleExportExcel}>
+          <Download className="h-4 w-4 mr-2" /> Descargar Excel
+        </Button>
         <Button onClick={openDialog}><Plus className="h-4 w-4 mr-1" /> Nueva factura</Button>
       </div>
 
@@ -591,10 +649,10 @@ function InvoicesTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.length === 0 ? (
+              {filteredInvoices.length === 0 ? (
                 <TableRow><TableCell colSpan={6} className="text-center py-12 text-muted-foreground">Sin facturas</TableCell></TableRow>
-              ) : rows.map(inv => (
-                <InvoiceTableRow key={inv.id} inv={inv} onRefresh={load} />
+              ) : filteredInvoices.map(inv => (
+                <InvoiceTableRow key={inv.id} inv={inv} onRefresh={load} autoOpenEditId={editId} onEditConsumed={onEditConsumed} />
               ))}
             </TableBody>
           </Table>
@@ -761,10 +819,11 @@ function InvoicesTab() {
   )
 }
 
-function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () => void }) {
+function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { inv: InvoiceRow; onRefresh: () => void; autoOpenEditId?: string | null; onEditConsumed?: () => void }) {
   const supabase = useMemo(() => createClient(), [])
   const [loadingPdf, setLoadingPdf] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
+  const [conceptOnly, setConceptOnly] = useState(false)
   const [saving, setSaving] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
@@ -792,8 +851,26 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
     if (r.success) {
       setLines(r.data.lines.map(l => ({ description: l.description, quantity: l.quantity, unit_price: l.unit_price, tax_rate: l.tax_rate })))
     }
+    setConceptOnly(false)
     setEditOpen(true)
   }
+
+  const openEditConcept = async () => {
+    const r = await getInvoiceLinesAction(inv.id)
+    if (r.success) {
+      setLines(r.data.lines.map(l => ({ description: l.description, quantity: l.quantity, unit_price: l.unit_price, tax_rate: l.tax_rate })))
+    }
+    setConceptOnly(true)
+    setEditOpen(true)
+  }
+
+  useEffect(() => {
+    if (autoOpenEditId && autoOpenEditId === inv.id && !editOpen) {
+      openEdit()
+      onEditConsumed?.()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenEditId, inv.id])
 
   const addLine = () => setLines(l => [...l, { description: '', quantity: 1, unit_price: 0, tax_rate: 21 }])
   const removeLine = (i: number) => setLines(l => l.filter((_, idx) => idx !== i))
@@ -842,7 +919,7 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
   const total = subtotal + taxAmount - irpfAmount
 
   const handleUpdate = async () => {
-    if (!form.client_name) { toast.error('Indica el cliente'); return }
+    if (!conceptOnly && !form.client_name) { toast.error('Indica el cliente'); return }
     setSaving(true)
     const r = await updateInvoiceAction({
       id: inv.id, client_id: form.client_id || null, client_name: form.client_name,
@@ -850,10 +927,11 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
       subtotal, tax_rate: form.tax_rate, tax_amount: taxAmount, irpf_rate: form.irpf_rate,
       irpf_amount: irpfAmount, total, notes: form.notes || null,
       lines: lines.map(l => ({ description: l.description, quantity: l.quantity, unit_price: l.unit_price, tax_rate: l.tax_rate, line_total: l.quantity * l.unit_price * (1 + l.tax_rate / 100) })),
+      conceptOnly,
     })
     setSaving(false)
     if (!r.success) { toast.error(!r.success && 'error' in r ? r.error : 'Error'); return }
-    toast.success('Factura actualizada')
+    toast.success(conceptOnly ? 'Concepto actualizado' : 'Factura actualizada')
     setEditOpen(false)
     onRefresh()
   }
@@ -950,6 +1028,12 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
                 </Button>
               </>
             )}
+            {(inv.status === 'issued' || inv.status === 'paid') && (
+              <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={openEditConcept} title="Editar solo descripciones de las líneas (no toca importes)">
+                <Pencil className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline text-xs">Editar concepto</span>
+              </Button>
+            )}
             {(inv.status === 'issued' || inv.status === 'overdue') && (
               <Button size="icon" variant="ghost" className="h-8 w-8" onClick={markPaid} title="Marcar como pagada">
                 <CheckCircle className="h-3.5 w-3.5 text-green-600" />
@@ -989,12 +1073,19 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
         </TableCell>
       </TableRow>
 
-      {/* Diálogo edición factura borrador */}
+      {/* Diálogo edición factura borrador / sólo concepto */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
-          <DialogHeader><DialogTitle>Editar factura {inv.invoice_number} (borrador)</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>
+              {conceptOnly
+                ? <>Editar concepto · factura <span className="font-mono">{inv.invoice_number}</span></>
+                : <>Editar factura {inv.invoice_number} (borrador)</>}
+            </DialogTitle>
+          </DialogHeader>
           <ScrollArea className="flex-1 pr-1">
             <div className="space-y-4 p-1">
+              {!conceptOnly && (
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1 col-span-2 sm:col-span-1">
                   <Label>Nombre en factura</Label>
@@ -1019,15 +1110,22 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
                   </div>
                 </div>
               </div>
+              )}
               <div>
                 <div className="mb-2">
                   <Label className="font-semibold text-sm">Líneas</Label>
-                  <p className="text-xs text-muted-foreground mt-0.5 mb-2">Añade líneas manualmente, escoge un producto o carga un pedido de sastrería.</p>
+                  <p className="text-xs text-muted-foreground mt-0.5 mb-2">
+                    {conceptOnly
+                      ? 'Solo se actualiza la descripción de cada línea. Cantidades, precios, IVA y totales no se modifican.'
+                      : 'Añade líneas manualmente, escoge un producto o carga un pedido de sastrería.'}
+                  </p>
+                  {!conceptOnly && (
                   <div className="flex flex-wrap gap-2">
                     <Button size="sm" variant="outline" onClick={addLine}><Plus className="h-3.5 w-3.5 mr-1" /> Añadir línea</Button>
                     <Button size="sm" variant="default" onClick={openProductDialogEdit}><Package className="h-3.5 w-3.5 mr-1" /> Escoger producto</Button>
                     <Button size="sm" variant="outline" onClick={openOrderDialogEdit}><ClipboardList className="h-3.5 w-3.5 mr-1" /> Escoger pedido</Button>
                   </div>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <div className="grid grid-cols-12 gap-1 text-xs font-medium text-muted-foreground px-1">
@@ -1035,18 +1133,36 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
                     <span className="col-span-2 text-center">Precio</span><span className="col-span-2 text-center">IVA %</span><span className="col-span-1" />
                   </div>
                   {lines.map((ln, i) => (
-                    <div key={i} className="grid grid-cols-12 gap-1 items-center">
-                      <Input className="col-span-5 h-8 text-sm" value={ln.description} onChange={e => updateLine(i, 'description', e.target.value)} placeholder="Descripción" />
-                      <Input className="col-span-2 h-8 text-sm text-center" type="number" step={0.01} value={ln.quantity} onChange={e => updateLine(i, 'quantity', Number(e.target.value))} />
-                      <Input className="col-span-2 h-8 text-sm text-center" type="number" step={0.01} value={ln.unit_price} onChange={e => updateLine(i, 'unit_price', Number(e.target.value))} />
-                      <Input className="col-span-2 h-8 text-sm text-center" type="number" value={ln.tax_rate} onChange={e => updateLine(i, 'tax_rate', Number(e.target.value))} />
-                      <Button className="col-span-1 h-8" variant="ghost" size="icon" onClick={() => removeLine(i)} disabled={lines.length === 1}>
-                        <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                      </Button>
+                    <div key={i} className="grid grid-cols-12 gap-1 items-start">
+                      <Textarea
+                        className="col-span-5 min-h-[32px] text-sm resize-y py-1"
+                        value={ln.description}
+                        onChange={e => updateLine(i, 'description', e.target.value)}
+                        placeholder="Descripción"
+                        rows={1}
+                      />
+                      {conceptOnly ? (
+                        <>
+                          <span className="col-span-2 text-sm text-center text-muted-foreground self-center">{ln.quantity}</span>
+                          <span className="col-span-2 text-sm text-center text-muted-foreground self-center">{formatCurrency(ln.unit_price)}</span>
+                          <span className="col-span-2 text-sm text-center text-muted-foreground self-center">{ln.tax_rate}%</span>
+                          <span className="col-span-1" />
+                        </>
+                      ) : (
+                        <>
+                          <Input className="col-span-2 h-8 text-sm text-center" type="number" step={0.01} value={ln.quantity} onChange={e => updateLine(i, 'quantity', Number(e.target.value))} />
+                          <Input className="col-span-2 h-8 text-sm text-center" type="number" step={0.01} value={ln.unit_price} onChange={e => updateLine(i, 'unit_price', Number(e.target.value))} />
+                          <Input className="col-span-2 h-8 text-sm text-center" type="number" value={ln.tax_rate} onChange={e => updateLine(i, 'tax_rate', Number(e.target.value))} />
+                          <Button className="col-span-1 h-8" variant="ghost" size="icon" onClick={() => removeLine(i)} disabled={lines.length === 1}>
+                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                          </Button>
+                        </>
+                      )}
                     </div>
                   ))}
                 </div>
               </div>
+              {!conceptOnly && (
               <div className="flex justify-end">
                 <div className="w-56 space-y-1 text-sm">
                   <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
@@ -1054,10 +1170,13 @@ function InvoiceTableRow({ inv, onRefresh }: { inv: InvoiceRow; onRefresh: () =>
                   <div className="flex justify-between font-bold border-t pt-1"><span>Total</span><span>{formatCurrency(total)}</span></div>
                 </div>
               </div>
+              )}
+              {!conceptOnly && (
               <div className="space-y-1">
                 <Label>Notas</Label>
                 <Textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} />
               </div>
+              )}
             </div>
           </ScrollArea>
           <DialogFooter>
@@ -1616,6 +1735,21 @@ function EstimatesTab() {
     }
   }
 
+  const handleExportExcel = async () => {
+    if (rows.length === 0) {
+      toast.error('No hay presupuestos para exportar')
+      return
+    }
+    const data = rows.map(est => ({
+      'Nº Presupuesto': est.estimate_number,
+      'Cliente': est.client_name,
+      'Fecha': est.estimate_date,
+      'Total': Number(est.total) || 0,
+      'Estado': ESTIMATE_STATUS[est.status]?.label ?? est.status,
+    }))
+    await downloadExcel(data, 'presupuestos', 'Presupuestos')
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2">
@@ -1634,6 +1768,9 @@ function EstimatesTab() {
             <SelectItem value="invoiced">Facturado</SelectItem>
           </SelectContent>
         </Select>
+        <Button variant="outline" size="sm" onClick={handleExportExcel}>
+          <Download className="h-4 w-4 mr-2" /> Descargar Excel
+        </Button>
         <Button onClick={openDialog} disabled={loadingEdit}><Plus className="h-4 w-4 mr-1" /> Nuevo presupuesto</Button>
       </div>
 
@@ -1890,6 +2027,41 @@ function JournalTab() {
   }
   const setAllMonths = () => setMonth(0)
 
+  const handleExportExcel = async () => {
+    if (rows.length === 0) {
+      toast.error('No hay asientos para exportar')
+      return
+    }
+    // Una fila por línea de asiento (cabecera repetida) — formato natural en Excel
+    const data: Record<string, unknown>[] = []
+    for (const e of rows) {
+      const lines = e.lines ?? []
+      if (lines.length === 0) {
+        data.push({
+          'Fecha': e.entry_date,
+          'Nº Asiento': e.entry_number,
+          'Descripción': e.description,
+          'Cuenta': '',
+          'Debe': Number(e.total_debit) || 0,
+          'Haber': Number(e.total_credit) || 0,
+        })
+        continue
+      }
+      for (const ln of lines) {
+        data.push({
+          'Fecha': e.entry_date,
+          'Nº Asiento': e.entry_number,
+          'Descripción': ln.description ?? e.description,
+          'Cuenta': ln.account_code,
+          'Debe': Number(ln.debit) || 0,
+          'Haber': Number(ln.credit) || 0,
+        })
+      }
+    }
+    const monthLabel = month ? `-${year}-${String(month).padStart(2, '0')}` : `-${year}`
+    await downloadExcel(data, `asientos${monthLabel}`, 'Asientos')
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2 items-center">
@@ -1909,6 +2081,10 @@ function JournalTab() {
         <Button type="button" size="sm" variant="outline" className="h-9" onClick={setThisMonth}>Este mes</Button>
         <Button type="button" size="sm" variant="outline" className="h-9" onClick={setLastMonth}>Mes pasado</Button>
         <Button type="button" size="sm" variant="ghost" className="h-9 text-muted-foreground" onClick={setAllMonths}>Todo el año</Button>
+        <div className="flex-1" />
+        <Button variant="outline" size="sm" className="h-9" onClick={handleExportExcel}>
+          <Download className="h-4 w-4 mr-2" /> Descargar Excel
+        </Button>
       </div>
 
       {loading ? <Spinner /> : rows.length === 0 ? (
@@ -2245,6 +2421,25 @@ function MovimientosTab() {
   const totalGastos   = filteredRows.filter(r => r.type === 'expense').reduce((s, r) => s + r.total, 0)
   const resultado     = totalIngresos - totalGastos
 
+  const handleExportExcel = async () => {
+    if (filteredRows.length === 0) {
+      toast.error('No hay movimientos para exportar')
+      return
+    }
+    const data = filteredRows.map(m => ({
+      'Fecha': m.date,
+      'Tipo': m.type === 'income' ? 'Ingreso' : 'Gasto',
+      'Descripción': m.description,
+      'Categoría': m.category ?? '',
+      'Base': Number(m.amount) || 0,
+      'IVA': Number(m.tax_amount) || 0,
+      'Total': Number(m.total) || 0,
+      'Tienda': m.storeName ?? '',
+    }))
+    const monthLabel = filterMonth ? `-${filterYear}-${String(filterMonth).padStart(2, '0')}` : `-${filterYear}`
+    await downloadExcel(data, `movimientos${monthLabel}`, 'Movimientos')
+  }
+
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
@@ -2281,6 +2476,9 @@ function MovimientosTab() {
           </SelectContent>
         </Select>
         <div className="flex-1" />
+        <Button variant="outline" size="sm" onClick={handleExportExcel}>
+          <Download className="h-4 w-4 mr-2" /> Descargar Excel
+        </Button>
         <Button onClick={() => setDialogOpen(true)}><Plus className="h-4 w-4 mr-1" /> Nuevo movimiento</Button>
       </div>
 
@@ -3059,12 +3257,41 @@ function CajaSessionsTab() {
     )
   }
 
+  const handleExportExcel = async () => {
+    if (sessions.length === 0) {
+      toast.error('No hay sesiones de caja para exportar')
+      return
+    }
+    const data = sessions.map(s => ({
+      'Tienda': s.stores?.name ?? '',
+      'Apertura': s.opened_at ?? '',
+      'Cierre': s.closed_at ?? '',
+      'Fondo inicial': Number(s.opening_amount) || 0,
+      'Ventas Efectivo': Number(s.total_cash_sales) || 0,
+      'Ventas Tarjeta': Number(s.total_card_sales) || 0,
+      'Ventas Bizum': Number(s.total_bizum_sales) || 0,
+      'Ventas Transferencia': Number(s.total_transfer_sales) || 0,
+      'Total Ventas': Number(s.total_sales) || 0,
+      'Devoluciones': Number(s.total_returns) || 0,
+      'Diferencia': Number(s.cash_difference) || 0,
+      'Estado': s.status,
+    }))
+    await downloadExcel(data, 'sesiones-caja', 'Caja')
+  }
+
   return (
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Sesiones de caja</CardTitle>
-          <p className="text-sm text-muted-foreground">Agrupadas por mes. Clic en un mes para expandir/colapsar. Clic en una fila para ver el detalle.</p>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <CardTitle className="text-base">Sesiones de caja</CardTitle>
+              <p className="text-sm text-muted-foreground">Agrupadas por mes. Clic en un mes para expandir/colapsar. Clic en una fila para ver el detalle.</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={handleExportExcel}>
+              <Download className="h-4 w-4 mr-2" /> Descargar Excel
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {sessionsByMonth.keys.length === 0 ? (

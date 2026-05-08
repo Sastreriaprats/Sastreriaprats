@@ -2,15 +2,33 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Users, Package, CircleDollarSign, ShoppingCart, Tag, Calendar, Target, TrendingUp, CalendarDays } from 'lucide-react'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Badge } from '@/components/ui/badge'
+import { Users, Package, CircleDollarSign, ShoppingCart, Tag, Calendar, Target, TrendingUp, CalendarDays, Receipt } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
 import { usePermissions } from '@/hooks/use-permissions'
 import { useRequireStore } from '@/hooks/use-require-store'
 import { getVendorDashboardStats, type VendorDashboardStats } from '@/actions/vendor-dashboard-stats'
 import { formatCurrency } from '@/lib/utils'
+
+const PAYMENT_LABELS: Record<string, string> = {
+  cash: 'Efectivo',
+  card: 'Tarjeta',
+  bizum: 'Bizum',
+  transfer: 'Transferencia',
+  voucher: 'Vale',
+  mixed: 'Varios',
+}
+
+function formatHourMinute(iso: string): string {
+  const d = new Date(iso)
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  return `${hh}:${mm}`
+}
 
 const quickLinks = [
   { label: 'Clientes', href: '/vendedor/clientes', icon: Users, description: 'Ver y gestionar clientes' },
@@ -137,6 +155,70 @@ export function VendedorDashboardContent() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-[#1a2744]/10 flex items-center justify-center">
+                <Receipt className="h-5 w-5 text-[#1a2744]" />
+              </div>
+              <div>
+                <CardTitle className="text-base">Mis ventas de hoy</CardTitle>
+                {loadingStats ? (
+                  <Skeleton className="h-4 w-32 mt-1" />
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    {(stats?.todayCount ?? 0)} ticket{(stats?.todayCount ?? 0) === 1 ? '' : 's'} · {formatCurrency(stats?.todayTotal ?? 0)}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {loadingStats ? (
+            <div className="px-6 pb-4 space-y-2">
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-full" />
+            </div>
+          ) : (stats?.todaySales ?? []).length === 0 ? (
+            <p className="text-center text-sm text-muted-foreground py-8">Sin ventas todavía</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-20">Hora</TableHead>
+                    <TableHead>Ticket</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
+                    <TableHead>Pago</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(stats?.todaySales ?? []).slice(0, 20).map((s) => (
+                    <TableRow key={s.id}>
+                      <TableCell className="text-sm text-muted-foreground tabular-nums">{formatHourMinute(s.created_at)}</TableCell>
+                      <TableCell className="font-mono text-sm">{s.ticket_number}</TableCell>
+                      <TableCell className="text-sm">
+                        {s.client_name ?? <span className="text-muted-foreground">Sin cliente</span>}
+                      </TableCell>
+                      <TableCell className="text-right font-medium tabular-nums">{formatCurrency(s.total)}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-xs font-medium">
+                          {PAYMENT_LABELS[s.payment_method] ?? s.payment_method}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {visibleLinks.map((item) => {

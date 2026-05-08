@@ -91,7 +91,13 @@ export function FichaComplementosSection({
                   <li key={item.id} className="flex items-center justify-between gap-2 rounded-lg border border-[#2a3a5c] bg-[#0d1629] p-3">
                     <div className="min-w-0">
                       <p className="font-medium truncate">{item.name}</p>
-                      <p className="text-white/60 text-xs">SKU: {item.sku} · {item.price_with_tax.toFixed(2)} € · Stock: {item.stock}</p>
+                      <p className="text-white/60 text-xs">
+                        SKU: {item.sku} · {item.price_with_tax.toFixed(2)} €
+                        {' · '}
+                        <span className={item.stock <= 0 ? 'text-amber-400 font-semibold' : ''}>
+                          Stock: {item.stock}{item.stock <= 0 ? ' ⚠️' : ''}
+                        </span>
+                      </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <Input type="number" min={1} className="w-14 h-8 text-center bg-[#1a2744] text-gray-300 border border-[#2a3a5c] rounded text-sm" value={qty} onChange={(e) => setAddingComplementQty((p) => ({ ...p, [item.id]: Math.max(1, parseInt(e.target.value, 10) || 1) }))} />

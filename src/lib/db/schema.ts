@@ -1191,6 +1191,7 @@ export const sales = pgTable('sales', {
   discountCode: text('discount_code'),
   taxAmount: decimal('tax_amount', { precision: 12, scale: 2 }).notNull(),
   total: decimal('total', { precision: 12, scale: 2 }).notNull(),
+  totalReturned: decimal('total_returned', { precision: 12, scale: 2 }).default('0').notNull(),
   paymentMethod: paymentMethodTypeEnum('payment_method').notNull(),
   isTaxFree: boolean('is_tax_free').default(false),
   taxFreeProvider: text('tax_free_provider'),

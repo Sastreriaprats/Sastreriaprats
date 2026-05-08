@@ -18,13 +18,15 @@ import { toast } from 'sonner'
 
 const saleTypeLabels: Record<string, string> = {
   boutique: 'Boutique', tailoring_deposit: 'Señal', tailoring_final: 'Pago final', alteration: 'Arreglo', online: 'Online',
-  order_payment: 'Pago pedido',
+  order_payment: 'Cobro pedido',
+  reservation_payment: 'Pago reserva',
+  manual_income: 'Ingreso manual', manual_expense: 'Retiro',
   return_voucher: 'Devolución · Vale', return_exchange: 'Devolución · Cambio',
 }
 
 type SessionMovement = {
   id: string
-  kind: 'sale' | 'order_payment' | 'return'
+  kind: 'sale' | 'order_payment' | 'reservation_payment' | 'manual' | 'return'
   ticket_number: string
   sale_type: string
   subtotal: number
@@ -62,13 +64,21 @@ export function PosSummaryContent() {
       if (sess) {
         const openedAt = sess.opened_at ?? new Date(0).toISOString()
         const closedAt = sess.closed_at ?? new Date().toISOString()
-        const [salesRes, orderPaymentsRes, returnsRes] = await Promise.all([
+        const [salesRes, orderPaymentsRes, reservationPaymentsRes, manualTxRes, returnsRes] = await Promise.all([
           supabase.from('sales')
             .select('id, ticket_number, sale_type, subtotal, discount_amount, tax_amount, total, payment_method, is_tax_free, status, created_at, clients(full_name), profiles!sales_salesperson_id_fkey(full_name)')
             .eq('cash_session_id', sess.id)
             .order('created_at', { ascending: false }),
           supabase.from('tailoring_order_payments')
             .select('id, tailoring_order_id, payment_method, amount, created_at, tailoring_orders(order_number, clients(full_name))')
+            .eq('cash_session_id', sess.id)
+            .order('created_at', { ascending: false }),
+          supabase.from('product_reservation_payments')
+            .select('id, amount, payment_method, created_at, product_reservation_id, product_reservations(reservation_number, clients(full_name))')
+            .eq('cash_session_id', sess.id)
+            .order('created_at', { ascending: false }),
+          supabase.from('manual_transactions')
+            .select('id, type, amount, total, description, category, created_at')
             .eq('cash_session_id', sess.id)
             .order('created_at', { ascending: false }),
           // Devoluciones de la sesión: filtrar por tienda y por rango temporal de la caja
@@ -115,6 +125,44 @@ export function PosSummaryContent() {
           tailoring_order_id: p.tailoring_order_id,
         }))
 
+        const reservationRows: SessionMovement[] = (reservationPaymentsRes.data ?? []).map((p: any) => ({
+          id: p.id,
+          kind: 'reservation_payment',
+          ticket_number: p.product_reservations?.reservation_number ?? '—',
+          sale_type: 'reservation_payment',
+          subtotal: 0,
+          discount_amount: 0,
+          tax_amount: 0,
+          total: Number(p.amount ?? 0),
+          payment_method: p.payment_method,
+          is_tax_free: false,
+          status: 'paid',
+          created_at: p.created_at,
+          clients: p.product_reservations?.clients ?? null,
+          profiles: null,
+        }))
+
+        const manualRows: SessionMovement[] = (manualTxRes.data ?? []).map((m: any) => {
+          const isExpense = m.type === 'expense'
+          const amount = Number(m.total ?? m.amount ?? 0)
+          return {
+            id: m.id,
+            kind: 'manual' as const,
+            ticket_number: String(m.description ?? '—').slice(0, 60),
+            sale_type: isExpense ? 'manual_expense' : 'manual_income',
+            subtotal: 0,
+            discount_amount: 0,
+            tax_amount: 0,
+            total: isExpense ? -Math.abs(amount) : amount,
+            payment_method: '',
+            is_tax_free: false,
+            status: isExpense ? 'expense' : 'income',
+            created_at: m.created_at,
+            clients: null,
+            profiles: null,
+          }
+        })
+
         const returnRows: SessionMovement[] = (returnsRes.data ?? []).map((r: any) => ({
           id: r.id,
           kind: 'return',
@@ -133,7 +181,7 @@ export function PosSummaryContent() {
           return_voucher_code: r.vouchers?.code ?? null,
         }))
 
-        const merged = [...saleRows, ...orderRows, ...returnRows].sort(
+        const merged = [...saleRows, ...orderRows, ...reservationRows, ...manualRows, ...returnRows].sort(
           (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         )
         setSales(merged)
@@ -202,7 +250,7 @@ export function PosSummaryContent() {
   const handleInvoice = async (sale: any) => {
     setInvoicingId(sale.id)
     try {
-      const createRes = await createInvoiceFromSaleAction(sale.id)
+      const createRes = await createInvoiceFromSaleAction({ saleId: sale.id })
       if (!createRes.success || !createRes.data) {
         toast.error('error' in createRes ? createRes.error : 'Error al crear la factura')
         return
@@ -301,22 +349,30 @@ export function PosSummaryContent() {
                 <TableBody>
                   {sales.length === 0 ? (
                     <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">Sin ventas aún</TableCell></TableRow>
-                  ) : sales.map((s) => (
+                  ) : sales.map((s) => {
+                    const isReturn = s.kind === 'return'
+                    const isManual = s.kind === 'manual'
+                    const badgeVariant: 'default' | 'secondary' | 'outline' | 'destructive' =
+                      isReturn ? 'destructive'
+                      : isManual ? 'secondary'
+                      : s.kind === 'order_payment' || s.kind === 'reservation_payment' ? 'secondary'
+                      : 'outline'
+                    return (
                     <TableRow key={`${s.kind}:${s.id}`}>
                       <TableCell className="font-mono text-sm">{s.ticket_number}</TableCell>
                       <TableCell>
-                        <Badge variant={s.kind === 'order_payment' ? 'secondary' : 'outline'} className="text-xs">
+                        <Badge variant={badgeVariant} className="text-xs">
                           {saleTypeLabels[s.sale_type] || s.sale_type}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-sm">{s.clients?.full_name || '\u2014'}</TableCell>
                       <TableCell className="text-sm text-slate-600">{s.profiles?.full_name ?? '\u2014'}</TableCell>
-                      <TableCell className="font-medium">{formatCurrency(s.total)}</TableCell>
-                      <TableCell><PaymentMethodBadge method={s.payment_method} /></TableCell>
+                      <TableCell className={`font-medium ${s.total < 0 ? 'text-red-600' : ''}`}>{formatCurrency(s.total)}</TableCell>
+                      <TableCell>{s.payment_method ? <PaymentMethodBadge method={s.payment_method} /> : <span className="text-muted-foreground">\u2014</span>}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{new Date(s.created_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
-                          {s.kind === 'sale' ? (
+                          {s.kind === 'sale' && (
                             <>
                               <Button
                                 variant="ghost"
@@ -339,7 +395,8 @@ export function PosSummaryContent() {
                                 {invoicingId === s.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
                               </Button>
                             </>
-                          ) : (
+                          )}
+                          {s.kind === 'order_payment' && (
                             <Button
                               variant="ghost"
                               size="icon"
@@ -353,7 +410,8 @@ export function PosSummaryContent() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    )
+                  })}
                 </TableBody>
               </Table>
             </div>

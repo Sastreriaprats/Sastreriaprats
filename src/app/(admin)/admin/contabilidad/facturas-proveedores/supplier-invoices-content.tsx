@@ -51,6 +51,7 @@ import {
   Loader2,
   Plus,
   FileDown,
+  Download,
   Upload,
   Calendar,
   CreditCard,
@@ -63,6 +64,7 @@ import {
   X,
 } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { downloadExcel } from '@/lib/excel/export'
 import { toast } from 'sonner'
 import Papa from 'papaparse'
 import { useAuth } from '@/components/providers/auth-provider'
@@ -312,8 +314,9 @@ export function SupplierInvoicesContent() {
         toast.error(`No se pudo subir el PDF: ${error.message}`)
         return
       }
-      const { data: urlData } = supabase.storage.from('supplier-invoices').getPublicUrl(path)
-      setForm((f) => ({ ...f, attachment_url: urlData.publicUrl }))
+      // El bucket es privado: guardamos solo el path. Al ver el PDF se genera
+      // una signed URL al vuelo (handleOpenAttachment).
+      setForm((f) => ({ ...f, attachment_url: path }))
       setAttachmentName(file.name)
       toast.success('PDF adjuntado')
     } catch (err: any) {
@@ -327,6 +330,54 @@ export function SupplierInvoicesContent() {
     setForm((f) => ({ ...f, attachment_url: '' }))
     setAttachmentName(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const handleExportExcel = async () => {
+    if (rows.length === 0) {
+      toast.error('No hay facturas para exportar')
+      return
+    }
+    const data = rows.map(row => {
+      const paid = paidMap[row.id] ?? 0
+      const pendiente = Math.max(0, Number(row.total_amount) - paid)
+      return {
+        'Proveedor': row.supplier_name,
+        'NIF': row.supplier_cif ?? '',
+        'Nº Factura': row.invoice_number,
+        'Fecha': row.invoice_date,
+        'Vencimiento': row.due_date,
+        'Base Imponible': Number(row.amount) || 0,
+        'IVA': Number(row.tax_amount) || 0,
+        'Total': Number(row.total_amount) || 0,
+        'Pagado': paid,
+        'Pendiente': pendiente,
+        'Estado': STATUS_BADGE[row.status]?.label ?? row.status,
+        'Método Pago': row.payment_method ?? '',
+      }
+    })
+    const range = dateFrom && dateTo ? `-${dateFrom}_a_${dateTo}` : ''
+    await downloadExcel(data, `facturas-proveedores${range}`, 'Facturas proveedor')
+  }
+
+  /** Abre el PDF de factura proveedor generando signed URL al vuelo.
+   *  Soporta retrocompat: si `attachmentPath` viene como URL pública legacy
+   *  (con /storage/v1/object/public/supplier-invoices/), extrae el path. */
+  const handleOpenAttachment = async (attachmentPath: string) => {
+    if (!attachmentPath) return
+    const supabase = createSupabaseClient()
+    let path = attachmentPath
+    const publicMarker = '/storage/v1/object/public/supplier-invoices/'
+    if (path.includes(publicMarker)) {
+      path = path.split(publicMarker)[1]
+    }
+    const { data, error } = await supabase.storage
+      .from('supplier-invoices')
+      .createSignedUrl(path, 3600)
+    if (error || !data?.signedUrl) {
+      toast.error('No se pudo abrir el archivo')
+      return
+    }
+    window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
   }
 
   const openCreate = () => {
@@ -681,6 +732,9 @@ export function SupplierInvoicesContent() {
           </Button>
           <Button variant="outline" onClick={() => { setImportOpen(true); setImportFile(null) }}>
             <Upload className="h-4 w-4 mr-1" /> Importar CSV
+          </Button>
+          <Button variant="outline" onClick={handleExportExcel}>
+            <Download className="h-4 w-4 mr-1" /> Descargar Excel
           </Button>
           <Button onClick={openCreate}>
             <Plus className="h-4 w-4 mr-1" /> Nueva factura
@@ -1318,15 +1372,14 @@ export function SupplierInvoicesContent() {
               {form.attachment_url ? (
                 <div className="flex items-center gap-2 rounded-md border px-3 py-2 bg-muted/30">
                   <FileText className="h-4 w-4 text-red-600 shrink-0" />
-                  <a
-                    href={form.attachment_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-1 text-sm truncate text-prats-navy hover:underline"
+                  <button
+                    type="button"
+                    onClick={() => handleOpenAttachment(form.attachment_url)}
+                    className="flex-1 text-left text-sm truncate text-prats-navy hover:underline cursor-pointer"
                     title={attachmentName || form.attachment_url}
                   >
                     {attachmentName || 'Ver factura'}
-                  </a>
+                  </button>
                   <Button
                     type="button"
                     variant="ghost"

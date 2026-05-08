@@ -17,7 +17,7 @@ import { getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
 // created, fabric_ordered, fabric_received, factory_ordered, in_production,
 // fitting, adjustments, finished, delivered, incident, cancelled
 const allStatusesByType: Record<string, string[]> = {
-  artesanal: ['created', 'in_production', 'fitting', 'adjustments', 'finished', 'delivered', 'cancelled'],
+  artesanal: ['created', 'fabric_ordered', 'fabric_received', 'in_production', 'fitting', 'adjustments', 'finished', 'delivered', 'cancelled'],
   industrial: ['created', 'fabric_ordered', 'fabric_received', 'factory_ordered', 'in_production', 'fitting', 'adjustments', 'finished', 'delivered', 'cancelled'],
   oficial: ['created', 'in_production', 'finished', 'delivered', 'cancelled'],
   proveedor: ['created', 'fabric_ordered', 'fabric_received', 'cancelled'],

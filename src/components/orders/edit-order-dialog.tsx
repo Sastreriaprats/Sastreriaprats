@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
@@ -130,6 +130,9 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [fabrics, setFabrics] = useState<FabricOpt[]>([])
   const [fabricsLoading, setFabricsLoading] = useState(false)
+  // Ref para acceder al catálogo desde callbacks estables sin invalidarlos.
+  const fabricsRef = useRef<FabricOpt[]>([])
+  useEffect(() => { fabricsRef.current = fabrics }, [fabrics])
   const [fabricSelectorFor, setFabricSelectorFor] = useState<string | null>(null)
   const [fabricSearch, setFabricSearch] = useState('')
 
@@ -294,12 +297,23 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
     setLines((prev) => prev.map((l) => {
       if (l._key !== key) return l
       const next = { ...l, [field]: value }
-      // Si cambian los metros y hay precio por metro definido, recalculamos material_cost.
+      // Al cambiar los metros recalculamos material_cost si hay €/m.
+      // Si el cache aún no llegó (precarga async), buscamos el precio en el catálogo.
       // No tocamos si el usuario edita material_cost directamente — eso es override manual.
-      if (field === 'fabric_meters' && next.fabric_price_per_meter != null) {
-        const meters = Number(next.fabric_meters ?? 0)
-        const price = Number(next.fabric_price_per_meter ?? 0)
-        next.material_cost = Math.round(price * meters * 100) / 100
+      if (field === 'fabric_meters') {
+        let price = next.fabric_price_per_meter ?? null
+        if (price == null && next.fabric_id) {
+          const f = fabricsRef.current.find((x) => x.id === next.fabric_id)
+          const fromCatalog = f ? Number(f.price_per_meter ?? 0) : 0
+          if (fromCatalog > 0) {
+            price = fromCatalog
+            next.fabric_price_per_meter = fromCatalog
+          }
+        }
+        if (price != null && price > 0) {
+          const meters = Number(next.fabric_meters ?? 0)
+          next.material_cost = Math.round(price * meters * 100) / 100
+        }
       }
       return next
     }))

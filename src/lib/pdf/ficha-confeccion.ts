@@ -27,8 +27,8 @@ const MEDIDAS_KEYS_POR_PRENDA: Record<string, readonly string[]> = {
   abrigo:    ['talle', 'largo', 'encuentro', 'largo_manga', 'pecho', 'cintura', 'frente_pecho', 'hombro', 'cadera'],
   pantalon:  ['largo', 'tiro', 'cintura', 'cadera', 'rodilla', 'bajo'],
   chaleco:   ['talle', 'largo', 'escote', 'largo_delantero', 'pecho', 'cintura'],
-  camiseria: ['cuello', 'canesu', 'largo_manga', 'frente_pecho', 'pecho', 'cintura', 'cadera', 'largo_cuerpo', 'hombro', 'puno'],
-  camiseria_industrial: ['cuello', 'canesu', 'largo_manga', 'frente_pecho', 'pecho', 'cintura', 'cadera', 'largo_cuerpo', 'hombro', 'puno'],
+  camiseria: ['cuello', 'canesu', 'largo_manga', 'frente_pecho', 'pecho', 'cintura', 'cadera', 'largo_cuerpo', 'hombro', 'puno_derecho', 'puno_izquierdo'],
+  camiseria_industrial: ['cuello', 'canesu', 'largo_manga', 'frente_pecho', 'pecho', 'cintura', 'cadera', 'largo_cuerpo', 'hombro', 'puno_derecho', 'puno_izquierdo'],
 }
 
 export interface FichaConfeccionOrder {
@@ -97,6 +97,8 @@ const MEDIDAS_LABELS: Record<string, string> = {
   largo_delantero: 'L.Delantero',
   largo_cuerpo: 'L.Cuerpo',
   puno: 'Puño',
+  puno_derecho: 'Puño dch',
+  puno_izquierdo: 'Puño izq',
 }
 
 function getMedidasStr(
@@ -683,16 +685,30 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
     },
     {
       table: {
-        widths: ['25%', '75%'],
-        body: [[cellLabel('Configuraciones:'), cellValue(configuracionStr)]],
+        widths: ['18%', '82%'],
+        body: [[cellLabel('Configuraciones:'), { text: configuracionStr, ...valueStyle, fontSize: 8 }]],
       },
       layout: tableLayoutBordersPadded,
+    },
+    {
+      table: {
+        widths: ['25%', '25%', '25%', '25%'],
+        body: [
+          [
+            cellStack('Precio:', `${total.toFixed(2)} €`),
+            cellStack('Entrega:', `${totalPaid.toFixed(2)} €`),
+            cellStack('Pendiente:', `${totalPending.toFixed(2)} €`),
+            cellStack('Fecha cobro:', formatDate(ficha.fechaCobro)),
+          ],
+        ],
+      },
+      layout: tableLayoutBorders,
     },
   ]
 
   content.push({
     table: {
-      widths: ['68%', '32%'],
+      widths: ['75%', '25%'],
       body: [
         [
           { stack: talonLeftStack, border: [false, false, false, false] },
@@ -812,30 +828,24 @@ export async function generateFichaForLine(
   await pdf.download(fileName)
 }
 
-const MEDIDAS_HEADERS_CAMISA = [
-  'CUELLO',
-  'CANESÚ',
-  'L.MANGA',
-  'FR.PECHO',
-  'PECHO',
-  'CINTURA',
-  'CADERA',
-  'LAR.CUERPO',
-  'HOMBRO',
-  'PUÑO',
-] as const
-const MEDIDAS_KEYS_CAMISA = [
-  'cuello',
-  'canesu',
-  'largoManga',
-  'frentePecho',
-  'pecho',
-  'cintura',
-  'cadera',
-  'largoCuerpo',
-  'hombro',
-  'puno',
-] as const
+/**
+ * Cada medida busca primero la clave moderna del formulario (camelCase).
+ * Si no la encuentra, prueba los fallbacks (snake_case BD, legacy camelCase).
+ * Esto cubre tanto pedidos nuevos como antiguos migrados.
+ */
+const MEDIDAS_KEYS_CAMISA: ReadonlyArray<{ key: string; fallbacks: string[]; label: string }> = [
+  { key: 'cuello',         fallbacks: [],                                    label: 'CUELLO' },
+  { key: 'canesu',         fallbacks: [],                                    label: 'CANESÚ' },
+  { key: 'largoManga',     fallbacks: ['largo_manga', 'manga'],              label: 'L.MANGA' },
+  { key: 'frentePecho',    fallbacks: ['frente_pecho', 'frenPecho'],         label: 'FR.PECHO' },
+  { key: 'pecho',          fallbacks: ['cont_pecho', 'contPecho'],           label: 'PECHO' },
+  { key: 'cintura',        fallbacks: [],                                    label: 'CINTURA' },
+  { key: 'cadera',         fallbacks: [],                                    label: 'CADERA' },
+  { key: 'largoCuerpo',    fallbacks: ['largo_cuerpo', 'largo'],             label: 'LAR.CUERPO' },
+  { key: 'hombro',         fallbacks: [],                                    label: 'HOMBRO' },
+  { key: 'punoDerecho',    fallbacks: ['puno_derecho'],                      label: 'PUÑO DCH' },
+  { key: 'punoIzquierdo',  fallbacks: ['puno_izquierdo'],                    label: 'PUÑO IZQ' },
+]
 
 const PUNO_LABELS: Record<string, string> = {
   sencillo: 'Sencillo',
@@ -921,14 +931,21 @@ function buildCamiseriaDocDefinition(
     layout: tableLayoutBorders,
   })
 
-  // Tabla medidas: 12 columnas (headers + valores)
-  const medidaValues = MEDIDAS_KEYS_CAMISA.map((k) => String(cfg[k] ?? '—').trim())
+  // Tabla medidas: una columna por medida (header + valor con fallbacks)
+  const medidaValues = MEDIDAS_KEYS_CAMISA.map(({ key, fallbacks }) => {
+    const candidates = [key, ...fallbacks]
+    for (const k of candidates) {
+      const v = cfg[k]
+      if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim()
+    }
+    return '—'
+  })
   content.push({
     table: {
-      widths: MEDIDAS_HEADERS_CAMISA.map(() => '*'),
+      widths: MEDIDAS_KEYS_CAMISA.map(() => '*'),
       body: [
-        MEDIDAS_HEADERS_CAMISA.map((h) => ({
-          text: h,
+        MEDIDAS_KEYS_CAMISA.map(({ label }) => ({
+          text: label,
           fillColor: LABEL_FILL,
           fontSize: fs7,
           alignment: 'center' as const,

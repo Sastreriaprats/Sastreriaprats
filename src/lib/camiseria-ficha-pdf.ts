@@ -21,11 +21,9 @@ const MEDIDAS_KEYS = [
   { keys: ['cintura'], label: 'Cintura' },
   { keys: ['cadera'], label: 'Cadera' },
   { keys: ['largo_cuerpo'], label: 'Largo Cuerpo' },
-  { keys: ['p_izq'], label: 'P. Izq.' },
-  { keys: ['p_dch'], label: 'P. Dch.' },
   { keys: ['hombro'], label: 'Hombro' },
-  { keys: ['biceps'], label: 'Bíceps' },
-  { keys: ['puno'], label: 'Puño' },
+  { keys: ['puno_derecho', 'punoDerecho'], label: 'Puño dch' },
+  { keys: ['puno_izquierdo', 'punoIzquierdo'], label: 'Puño izq' },
 ] as const
 
 const CARACT_LABELS: Record<string, string> = {

@@ -3,6 +3,16 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 
+export interface VendorTodaySaleRow {
+  id: string
+  ticket_number: string
+  created_at: string
+  total: number
+  payment_method: string
+  client_name: string | null
+  status: string
+}
+
 export interface VendorDashboardStats {
   storeGoal: {
     storeId: string
@@ -12,6 +22,9 @@ export interface VendorDashboardStats {
   } | null
   employeeMonthSales: number
   employeeYearSales: number
+  todaySales: VendorTodaySaleRow[]
+  todayTotal: number
+  todayCount: number
 }
 
 // Estados de online_orders que cuentan como facturación.
@@ -42,9 +55,13 @@ export async function getVendorDashboardStats(
     const nextMonthStart = `${nextMonth.y}-${pad(nextMonth.m)}-01T00:00:00`
     const yearStart = `${year}-01-01T00:00:00`
     const nextYearStart = `${year + 1}-01-01T00:00:00`
+    const day = now.getDate()
+    const todayStart = `${year}-${pad(month)}-${pad(day)}T00:00:00`
+    const tomorrow = new Date(year, month - 1, day + 1)
+    const tomorrowStart = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}T00:00:00`
 
-    // Ventas del propio vendedor (subtotal, sin IVA) — mes y año en paralelo.
-    const [monthSalesRes, yearSalesRes] = await Promise.all([
+    // Ventas del propio vendedor (subtotal, sin IVA) — mes, año y hoy en paralelo.
+    const [monthSalesRes, yearSalesRes, todaySalesRes] = await Promise.all([
       admin
         .from('sales')
         .select('subtotal')
@@ -59,16 +76,37 @@ export async function getVendorDashboardStats(
         .eq('status', 'completed')
         .gte('created_at', yearStart)
         .lt('created_at', nextYearStart),
+      admin
+        .from('sales')
+        .select('id, ticket_number, created_at, total, payment_method, status, clients(full_name)')
+        .eq('salesperson_id', user.id)
+        .eq('status', 'completed')
+        .gte('created_at', todayStart)
+        .lt('created_at', tomorrowStart)
+        .order('created_at', { ascending: false }),
     ])
 
     if (monthSalesRes.error) return { error: monthSalesRes.error.message }
     if (yearSalesRes.error) return { error: yearSalesRes.error.message }
+    if (todaySalesRes.error) return { error: todaySalesRes.error.message }
 
     const sumSubtotal = (rows: { subtotal: number | string | null }[] | null) =>
       (rows || []).reduce((acc, r) => acc + (Number(r.subtotal) || 0), 0)
 
     const employeeMonthSales = sumSubtotal(monthSalesRes.data)
     const employeeYearSales = sumSubtotal(yearSalesRes.data)
+
+    const todaySales: VendorTodaySaleRow[] = ((todaySalesRes.data ?? []) as any[]).map((s) => ({
+      id: s.id,
+      ticket_number: s.ticket_number,
+      created_at: s.created_at,
+      total: Number(s.total) || 0,
+      payment_method: s.payment_method,
+      status: s.status,
+      client_name: (s.clients as any)?.full_name ?? null,
+    }))
+    const todayTotal = todaySales.reduce((acc, s) => acc + s.total, 0)
+    const todayCount = todaySales.length
 
     // Objetivo y ventas reales de la tienda activa (si se recibe storeId).
     let storeGoal: VendorDashboardStats['storeGoal'] = null
@@ -80,12 +118,14 @@ export async function getVendorDashboardStats(
           .select('goal_type, target_amount')
           .eq('store_id', storeId)
           .eq('year', year)
-          .eq('month', month),
+          .eq('month', month)
+          .eq('goal_type', 'boutique'),
         admin
           .from('sales')
-          .select('total')
+          .select('subtotal')
           .eq('store_id', storeId)
           .eq('status', 'completed')
+          .eq('sale_type', 'boutique')
           .gte('created_at', monthStart)
           .lt('created_at', nextMonthStart),
       ])
@@ -100,23 +140,10 @@ export async function getVendorDashboardStats(
             acc + (Number(g.target_amount) || 0),
           0,
         )
-        let actual = (storeSalesRes.data || []).reduce(
-          (acc: number, s: { total: number | string | null }) => acc + (Number(s.total) || 0),
+        const actual = (storeSalesRes.data || []).reduce(
+          (acc: number, s: { subtotal: number | string | null }) => acc + (Number(s.subtotal) || 0),
           0,
         )
-        // Si la tienda hospeda canal online, añadir ventas online del mes.
-        if (storeRes.data.code === ONLINE_HOST_STORE_CODE) {
-          const { data: onlineRes } = await admin
-            .from('online_orders')
-            .select('total')
-            .in('status', ONLINE_COUNTED_STATUSES)
-            .gte('created_at', monthStart)
-            .lt('created_at', nextMonthStart)
-          actual += (onlineRes || []).reduce(
-            (acc: number, o: { total: number | string | null }) => acc + (Number(o.total) || 0),
-            0,
-          )
-        }
         storeGoal = {
           storeId: storeRes.data.id,
           storeName: storeRes.data.name,
@@ -131,6 +158,9 @@ export async function getVendorDashboardStats(
         storeGoal,
         employeeMonthSales,
         employeeYearSales,
+        todaySales,
+        todayTotal,
+        todayCount,
       },
     }
   } catch (err) {

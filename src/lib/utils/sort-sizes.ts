@@ -4,7 +4,7 @@
 
 const TEXT_ORDER: Record<string, number> = {
   'U': 0,
-  'XS': 1, 'S': 2, 'M': 3, 'M/L': 4, 'L': 5, 'XL': 6, 'XXL': 7, 'XXXL': 8,
+  'XXS': 1, 'XS': 2, 'S': 3, 'M': 4, 'M/L': 5, 'L': 6, 'XL': 7, 'XXL': 8, 'XXXL': 9, 'XXXXL': 10,
 }
 
 function sizeSort(sA: string, sB: string): number {

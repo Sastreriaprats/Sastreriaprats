@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -14,8 +15,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Badge } from '@/components/ui/badge'
 import { Loader2, FileDown, Receipt, ChevronLeft, ChevronRight, FileText, Gift } from 'lucide-react'
-import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { formatCurrency, formatDateTime, cn } from '@/lib/utils'
 import { listTickets, getSaleForTicket } from '@/actions/pos'
 import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
 import { generateTicketPdf } from '@/components/pos/ticket-pdf'
@@ -31,7 +37,15 @@ const PAYMENT_LABELS: Record<string, string> = {
   mixed: 'Varios',
 }
 
+const STATUS_BADGE: Record<string, { label: string; className: string } | null> = {
+  completed: null,
+  partially_returned: { label: 'Dev. parcial', className: 'bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-100' },
+  fully_returned:    { label: 'Devuelta',     className: 'bg-red-100 text-red-800 border-red-200 hover:bg-red-100' },
+  voided:            { label: 'Anulada',      className: 'bg-slate-200 text-slate-700 border-slate-300 hover:bg-slate-200' },
+}
+
 export function TicketsContent() {
+  const router = useRouter()
   const [data, setData] = useState<any[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -44,6 +58,7 @@ export function TicketsContent() {
   const [productSearch, setProductSearch] = useState('')
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [invoiceLoadingId, setInvoiceLoadingId] = useState<string | null>(null)
+  const [invoiceConfirmRow, setInvoiceConfirmRow] = useState<any | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -114,25 +129,21 @@ export function TicketsContent() {
     }
   }
 
-  const handleFactura = async (saleId: string) => {
+  const handleFacturaDraft = async (saleId: string) => {
     setInvoiceLoadingId(saleId)
     try {
-      const createRes = await createInvoiceFromSaleAction(saleId)
-      if (!createRes.success || !createRes.data) {
-        toast.error('error' in createRes ? createRes.error : 'Error al crear la factura')
+      const res = await createInvoiceFromSaleAction({ saleId, draft: true })
+      if (!res.success || !res.data) {
+        toast.error('error' in res ? res.error : 'Error al crear la factura')
         return
       }
-      const pdfRes = await generateInvoicePdfAction(createRes.data.id)
-      if (!pdfRes.success || !pdfRes.data?.url) {
-        toast.error('error' in pdfRes ? pdfRes.error : 'Error al generar el PDF')
-        return
-      }
-      window.open(pdfRes.data.url, '_blank', 'noopener,noreferrer')
-      toast.success(`Factura ${createRes.data.invoice_number} generada`)
+      toast.success(`Borrador ${res.data.invoice_number} creado. Redirigiendo al editor…`)
+      router.push(`/admin/contabilidad?tab=facturas&edit=${res.data.id}`)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Error al obtener la factura')
+      toast.error(e instanceof Error ? e.message : 'Error al crear la factura')
     } finally {
       setInvoiceLoadingId(null)
+      setInvoiceConfirmRow(null)
     }
   }
 
@@ -221,14 +232,18 @@ export function TicketsContent() {
                     <TableHead>Productos (resumen)</TableHead>
                     <TableHead>Total</TableHead>
                     <TableHead>Pago</TableHead>
+                    <TableHead>Estado</TableHead>
                     <TableHead>Vendedor</TableHead>
                     <TableHead>Tienda</TableHead>
                     <TableHead className="w-[200px]">PDF / Factura</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {data.map((row) => (
-                    <TableRow key={row.id}>
+                  {data.map((row) => {
+                    const statusBadge = STATUS_BADGE[row.status] ?? null
+                    const isDimmed = row.status === 'fully_returned' || row.status === 'voided'
+                    return (
+                    <TableRow key={row.id} className={cn(isDimmed && 'opacity-60')}>
                       <TableCell className="font-mono">{row.ticket_number}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">{formatDateTime(row.created_at)}</TableCell>
                       <TableCell>
@@ -241,8 +256,28 @@ export function TicketsContent() {
                       <TableCell className="max-w-[200px] truncate text-sm" title={row.products_summary}>
                         {row.products_summary}
                       </TableCell>
-                      <TableCell className="font-medium">{formatCurrency(row.total)}</TableCell>
+                      <TableCell className="font-medium">
+                        {row.total_returned > 0 ? (
+                          <div className="flex items-baseline gap-2">
+                            <span className="line-through text-muted-foreground text-xs">{formatCurrency(row.total)}</span>
+                            {row.status !== 'fully_returned' && (
+                              <span className="text-sm font-bold">{formatCurrency(Number(row.total) - Number(row.total_returned))}</span>
+                            )}
+                          </div>
+                        ) : (
+                          formatCurrency(row.total)
+                        )}
+                      </TableCell>
                       <TableCell className="text-sm capitalize">{PAYMENT_LABELS[row.payment_method] ?? row.payment_method}</TableCell>
+                      <TableCell>
+                        {statusBadge ? (
+                          <Badge variant="outline" className={cn('text-xs font-medium', statusBadge.className)}>
+                            {statusBadge.label}
+                          </Badge>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-sm text-slate-600">{row.salesperson_name ?? '—'}</TableCell>
                       <TableCell className="text-sm">{row.store_name ?? '—'}</TableCell>
                       <TableCell>
@@ -262,7 +297,7 @@ export function TicketsContent() {
                             size="sm"
                             className="gap-1"
                             disabled={invoiceLoadingId === row.id}
-                            onClick={() => handleFactura(row.id)}
+                            onClick={() => setInvoiceConfirmRow(row)}
                           >
                             {invoiceLoadingId === row.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
                             Factura
@@ -270,7 +305,8 @@ export function TicketsContent() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    )
+                  })}
                 </TableBody>
               </Table>
               {totalPages > 1 && (
@@ -292,6 +328,36 @@ export function TicketsContent() {
           )}
         </CardContent>
       </Card>
+
+      <AlertDialog open={Boolean(invoiceConfirmRow)} onOpenChange={(v) => { if (!v) setInvoiceConfirmRow(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Generar factura?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se creará una factura en borrador para el ticket{' '}
+              <span className="font-mono font-semibold">{invoiceConfirmRow?.ticket_number ?? ''}</span>
+              {' '}del cliente{' '}
+              <span className="font-semibold">{invoiceConfirmRow?.client_name || 'Sin cliente'}</span>.
+              {' '}Total:{' '}
+              <span className="font-semibold">{formatCurrency(Number(invoiceConfirmRow?.total) || 0)}</span>.
+              {' '}Podrás editarla antes de emitirla.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={invoiceLoadingId !== null}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={invoiceLoadingId !== null}
+              onClick={(e) => {
+                e.preventDefault()
+                if (invoiceConfirmRow?.id) handleFacturaDraft(invoiceConfirmRow.id)
+              }}
+            >
+              {invoiceLoadingId !== null ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Crear factura
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

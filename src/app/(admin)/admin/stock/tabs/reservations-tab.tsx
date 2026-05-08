@@ -149,20 +149,28 @@ export function ReservationsTab() {
 
   const fetchData = useCallback(async () => {
     setLoading(true)
-    const result = await listReservations({
-      status: status as any,
-      onlyPending: onlyPending || undefined,
-      search: search.trim() || undefined,
-      page,
-      pageSize: PAGE_SIZE,
-    })
-    setLoading(false)
-    if (result.success && result.data) {
-      setReservations(result.data.data as Reservation[])
-      setTotal(result.data.total)
-    } else {
+    try {
+      const result = await listReservations({
+        status: status as any,
+        onlyPending: onlyPending || undefined,
+        search: search.trim() || undefined,
+        page,
+        pageSize: PAGE_SIZE,
+      })
+      if (result.success && result.data) {
+        setReservations(result.data.data as Reservation[])
+        setTotal(result.data.total)
+      } else {
+        setReservations([])
+        setTotal(0)
+      }
+    } catch (err) {
+      console.error('Error cargando reservas:', err)
+      toast.error('Error al cargar las reservas. Inténtalo de nuevo.')
       setReservations([])
       setTotal(0)
+    } finally {
+      setLoading(false)
     }
   }, [page, status, onlyPending, search])
 
@@ -180,49 +188,73 @@ export function ReservationsTab() {
   const saveEdit = async () => {
     if (!editing) return
     setEditSubmitting(true)
-    const res = await updateReservation({
-      id: editing.id,
-      notes: editNotes || null,
-      reason: editReason || null,
-      expires_at: editExpires ? new Date(editExpires).toISOString() : null,
-    })
-    setEditSubmitting(false)
-    if (!res.success) { toast.error(res.error || 'No se pudo actualizar la reserva'); return }
-    toast.success('Reserva actualizada')
-    setEditing(null)
-    fetchData()
+    try {
+      const res = await updateReservation({
+        id: editing.id,
+        notes: editNotes || null,
+        reason: editReason || null,
+        expires_at: editExpires ? new Date(editExpires).toISOString() : null,
+      })
+      if (!res.success) { toast.error(res.error || 'No se pudo actualizar la reserva'); return }
+      toast.success('Reserva actualizada')
+      setEditing(null)
+      fetchData()
+    } catch (err) {
+      console.error('Error actualizando reserva:', err)
+      toast.error('Error al actualizar la reserva. Inténtalo de nuevo.')
+    } finally {
+      setEditSubmitting(false)
+    }
   }
 
   const confirmCancel = async () => {
     if (!cancelTarget) return
     setCancelling(true)
-    const res = await cancelReservation({ id: cancelTarget.id, reason: cancelReasonInput || null })
-    setCancelling(false)
-    if (!res.success) { toast.error(res.error || 'No se pudo cancelar la reserva'); return }
-    toast.success('Reserva cancelada')
-    setCancelTarget(null)
-    setCancelReasonInput('')
-    fetchData()
+    try {
+      const res = await cancelReservation({ id: cancelTarget.id, reason: cancelReasonInput || null })
+      if (!res.success) { toast.error(res.error || 'No se pudo cancelar la reserva'); return }
+      toast.success('Reserva cancelada')
+      setCancelTarget(null)
+      setCancelReasonInput('')
+      fetchData()
+    } catch (err) {
+      console.error('Error cancelando reserva:', err)
+      toast.error('Error al cancelar la reserva. Inténtalo de nuevo.')
+    } finally {
+      setCancelling(false)
+    }
   }
 
   const confirmCancelLine = async () => {
     if (!cancelLineTarget) return
     setCancelling(true)
-    const res = await cancelReservationLine({ line_id: cancelLineTarget.line.id, reason: null })
-    setCancelling(false)
-    if (!res.success) { toast.error(res.error || 'No se pudo cancelar la línea'); return }
-    toast.success('Línea cancelada')
-    setCancelLineTarget(null)
-    fetchData()
+    try {
+      const res = await cancelReservationLine({ line_id: cancelLineTarget.line.id, reason: null })
+      if (!res.success) { toast.error(res.error || 'No se pudo cancelar la línea'); return }
+      toast.success('Línea cancelada')
+      setCancelLineTarget(null)
+      fetchData()
+    } catch (err) {
+      console.error('Error cancelando línea de reserva:', err)
+      toast.error('Error al cancelar la línea. Inténtalo de nuevo.')
+    } finally {
+      setCancelling(false)
+    }
   }
 
   const markLineFulfilled = async (lineId: string) => {
     setActioningLineId(lineId)
-    const res = await fulfillReservationLine({ line_id: lineId, sale_id: null })
-    setActioningLineId(null)
-    if (!res.success) { toast.error(res.error || 'No se pudo marcar como cumplida'); return }
-    toast.success('Línea marcada como cumplida')
-    fetchData()
+    try {
+      const res = await fulfillReservationLine({ line_id: lineId, sale_id: null })
+      if (!res.success) { toast.error(res.error || 'No se pudo marcar como cumplida'); return }
+      toast.success('Línea marcada como cumplida')
+      fetchData()
+    } catch (err) {
+      console.error('Error marcando línea como cumplida:', err)
+      toast.error('Error al marcar la línea como cumplida. Inténtalo de nuevo.')
+    } finally {
+      setActioningLineId(null)
+    }
   }
 
   const openAddPayment = (r: Reservation) => {
@@ -241,18 +273,24 @@ export function ReservationsTab() {
       return
     }
     setPaymentSubmitting(true)
-    const res = await addReservationPayment({
-      reservation_id: paymentTarget.id,
-      payment_method: paymentMethod,
-      amount,
-      reference: paymentReference || null,
-      store_id: paymentTarget.store?.id ?? null,
-    })
-    setPaymentSubmitting(false)
-    if (!res.success) { toast.error(res.error || 'No se pudo registrar el pago'); return }
-    toast.success(`Pago registrado (${formatCurrency(amount)})`)
-    setPaymentTarget(null)
-    fetchData()
+    try {
+      const res = await addReservationPayment({
+        reservation_id: paymentTarget.id,
+        payment_method: paymentMethod,
+        amount,
+        reference: paymentReference || null,
+        store_id: paymentTarget.store?.id ?? null,
+      })
+      if (!res.success) { toast.error(res.error || 'No se pudo registrar el pago'); return }
+      toast.success(`Pago registrado (${formatCurrency(amount)})`)
+      setPaymentTarget(null)
+      fetchData()
+    } catch (err) {
+      console.error('Error registrando pago de reserva:', err)
+      toast.error('Error al registrar el pago. Inténtalo de nuevo.')
+    } finally {
+      setPaymentSubmitting(false)
+    }
   }
 
   const buildReservationTicketData = (r: Reservation): ReservationTicketData => {

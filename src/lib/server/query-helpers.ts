@@ -5,6 +5,9 @@ export interface ListParams {
   pageSize?: number
   search?: string
   searchFields?: string[]
+  // OR filter PostgREST listo para pasar a `query.or(...)`. Si se proporciona, se
+  // usa en lugar del OR automático generado a partir de `searchFields`.
+  customSearchOr?: string
   sortBy?: string
   sortOrder?: 'asc' | 'desc'
   filters?: Record<string, any>
@@ -51,7 +54,9 @@ export async function queryList<T>(
     }
   }
 
-  if (params.search && params.searchFields && params.searchFields.length > 0) {
+  if (params.customSearchOr) {
+    query = query.or(params.customSearchOr)
+  } else if (params.search && params.searchFields && params.searchFields.length > 0) {
     const searchConditions = params.searchFields
       .map(field => `${field}.ilike.%${params.search}%`)
       .join(',')

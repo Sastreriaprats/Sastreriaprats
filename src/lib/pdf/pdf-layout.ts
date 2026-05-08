@@ -203,7 +203,7 @@ export function buildTableBody(lines: PdfLine[]): unknown[][] {
   lines.forEach((ln, i) => {
     const alt = i % 2 === 1 ? ROW_ALT : undefined
     body.push([
-      { text: String(ln.description ?? '').slice(0, 80), fillColor: alt, fontSize: 9 },
+      { text: String(ln.description ?? ''), fillColor: alt, fontSize: 9 },
       { text: String(n(ln.quantity)), fillColor: alt, fontSize: 9, alignment: 'center' },
       { text: eurFormat(n(ln.unit_price)), fillColor: alt, fontSize: 9, alignment: 'right' },
       { text: `${n(ln.tax_rate)}%`, fillColor: alt, fontSize: 9, alignment: 'center' },

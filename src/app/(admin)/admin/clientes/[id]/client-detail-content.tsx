@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import {
   ArrowLeft, Phone, Mail, Trash2,
-  Ruler, StickyNote, Scissors, Shirt, ShoppingBag, History, Pencil, CalendarDays, Receipt, Building2,
+  Ruler, StickyNote, Scissors, Shirt, ShoppingBag, History, Pencil, CalendarDays, Receipt, Building2, BookmarkCheck,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { usePermissions } from '@/hooks/use-permissions'
@@ -29,6 +29,7 @@ import { ClientTicketsTab } from './tabs/client-tickets-tab'
 import { ClientAlterationsTab } from './tabs/client-alterations-tab'
 import { ClientAppointmentsTab } from './tabs/client-appointments-tab'
 import { ClientCompaniesTab } from './tabs/client-companies-tab'
+import { ClientReservationsTab } from './tabs/client-reservations-tab'
 
 const categoryColors: Record<string, string> = {
   standard: 'bg-gray-100 text-gray-700',
@@ -179,6 +180,7 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
           <TabsTrigger value="notas" className="gap-1"><StickyNote className="h-4 w-4" /> Notas</TabsTrigger>
           <TabsTrigger value="pedidos" className="gap-1"><Scissors className="h-4 w-4" /> Pedidos</TabsTrigger>
           <TabsTrigger value="ventas" className="gap-1"><ShoppingBag className="h-4 w-4" /> Ventas</TabsTrigger>
+          <TabsTrigger value="reservas" className="gap-1"><BookmarkCheck className="h-4 w-4" /> Reservas</TabsTrigger>
           <TabsTrigger value="tickets" className="gap-1"><Receipt className="h-4 w-4" /> Tickets</TabsTrigger>
           <TabsTrigger value="arreglos" className="gap-1"><Shirt className="h-4 w-4" /> Arreglos</TabsTrigger>
           <TabsTrigger value="citas" className="gap-1"><CalendarDays className="h-4 w-4" /> Citas</TabsTrigger>
@@ -205,6 +207,9 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
           </TabsContent>
           <TabsContent value="ventas">
             <ClientSalesTab clientId={client.id} />
+          </TabsContent>
+          <TabsContent value="reservas">
+            <ClientReservationsTab clientId={client.id} />
           </TabsContent>
           <TabsContent value="tickets">
             <ClientTicketsTab clientId={client.id} />

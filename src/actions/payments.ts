@@ -38,6 +38,8 @@ export interface AddSalePaymentInput {
   payment_method: PaymentMethod
   amount: number
   reference?: string
+  /** Fecha del pago (YYYY-MM-DD). Si no viene, se usa hoy y la sesión abierta actual. */
+  payment_date?: string
   next_payment_date?: string
   storeId?: string
 }
@@ -177,15 +179,45 @@ export const addSalePayment = protectedAction<AddSalePaymentInput, any>(
   { permission: 'sales.edit', auditAction: 'payment', auditModule: 'sales' },
   async (ctx, input) => {
     try {
-      let sessionQuery = ctx.adminClient
-        .from('cash_sessions')
-        .select('id')
-        .eq('status', 'open')
-        .limit(1)
-      if (input.storeId) sessionQuery = sessionQuery.eq('store_id', input.storeId)
-      const { data: activeSession } = await sessionQuery.maybeSingle()
-      if (!activeSession) return failure('No hay una caja abierta. Abre la caja antes de registrar un cobro.')
-      const activeSessionId = activeSession.id
+      const today = new Date().toISOString().split('T')[0]
+      const paymentDate = input.payment_date ?? today
+
+      // Localizar sesión que cubra paymentDate. Prioridad: 'open' cuya
+      // apertura sea <= fecha. Fallback: cerrada cuyo rango incluya la fecha.
+      // Si no hay ninguna, sessionId queda null y se omiten los updates de
+      // cash_sessions y manual_transactions (consistente con rpc_add_order_payment
+      // tras la mig 135).
+      let sessionId: string | null = null
+      {
+        let q = ctx.adminClient
+          .from('cash_sessions')
+          .select('id, opened_at, closed_at, status')
+          .eq('status', 'open')
+          .lte('opened_at', `${paymentDate}T23:59:59`)
+          .order('opened_at', { ascending: false })
+          .limit(1)
+        if (input.storeId) q = q.eq('store_id', input.storeId)
+        const { data: open } = await q.maybeSingle()
+        if (open) sessionId = (open as { id: string }).id
+      }
+      if (!sessionId) {
+        let q = ctx.adminClient
+          .from('cash_sessions')
+          .select('id, opened_at, closed_at, status')
+          .neq('status', 'open')
+          .lte('opened_at', `${paymentDate}T23:59:59`)
+          .gte('closed_at', `${paymentDate}T00:00:00`)
+          .order('opened_at', { ascending: false })
+          .limit(1)
+        if (input.storeId) q = q.eq('store_id', input.storeId)
+        const { data: closed } = await q.maybeSingle()
+        if (closed) sessionId = (closed as { id: string }).id
+      }
+      // Si la fecha es hoy y no hay sesión abierta, abortar (igual que antes).
+      // Para fechas pasadas/futuras sin sesión, permitir el pago sin vincular.
+      if (!sessionId && paymentDate === today) {
+        return failure('No hay una caja abierta. Abre la caja antes de registrar un cobro.')
+      }
 
       const { data: saleData } = await ctx.adminClient
         .from('sales')
@@ -201,7 +233,7 @@ export const addSalePayment = protectedAction<AddSalePaymentInput, any>(
           amount: input.amount,
           reference: input.reference ?? null,
           next_payment_date: input.next_payment_date ?? null,
-          cash_session_id: activeSessionId,
+          cash_session_id: sessionId,
         })
         .select('id, sale_id, payment_method, amount, reference, next_payment_date, created_at')
         .single()
@@ -235,24 +267,29 @@ export const addSalePayment = protectedAction<AddSalePaymentInput, any>(
           .eq('id', input.sale_id)
       }
 
-      const baseAmount = input.amount / 1.21
-      const taxAmount = input.amount - baseAmount
-      const mtPayloadSale = {
-        type: 'income',
-        date: new Date().toISOString().split('T')[0],
-        description: `Cobro venta - Ticket ${saleData?.ticket_number ?? input.sale_id}`,
-        category: 'boutique',
-        amount: baseAmount,
-        tax_rate: 21,
-        tax_amount: taxAmount,
-        total: input.amount,
-        notes: `Método: ${input.payment_method} - Tipo: ${saleData?.sale_type ?? ''}`,
-        created_by: ctx.userId,
-        cash_session_id: activeSessionId,
-      }
-      const { error: mtErrorSale } = await ctx.adminClient.from('manual_transactions').insert(mtPayloadSale)
-      if (mtErrorSale) {
-        console.error('[addSalePayment] manual_transactions INSERT error:', mtErrorSale.message, { code: (mtErrorSale as any).code, payload: mtPayloadSale })
+      // Solo insertar manual_transaction si el pago se ha vinculado a una sesión.
+      // Cobros con fecha pasada/futura sin sesión disponible quedan registrados
+      // en sale_payments pero no contaminan los totales de la caja actual.
+      if (sessionId) {
+        const baseAmount = input.amount / 1.21
+        const taxAmount = input.amount - baseAmount
+        const mtPayloadSale = {
+          type: 'income',
+          date: paymentDate,
+          description: `Cobro venta - Ticket ${saleData?.ticket_number ?? input.sale_id}`,
+          category: 'boutique',
+          amount: baseAmount,
+          tax_rate: 21,
+          tax_amount: taxAmount,
+          total: input.amount,
+          notes: `Método: ${input.payment_method} - Tipo: ${saleData?.sale_type ?? ''}`,
+          created_by: ctx.userId,
+          cash_session_id: sessionId,
+        }
+        const { error: mtErrorSale } = await ctx.adminClient.from('manual_transactions').insert(mtPayloadSale)
+        if (mtErrorSale) {
+          console.error('[addSalePayment] manual_transactions INSERT error:', mtErrorSale.message, { code: (mtErrorSale as any).code, payload: mtPayloadSale })
+        }
       }
 
       return success(serializeForServerAction(payment!))

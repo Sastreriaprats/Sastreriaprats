@@ -19,10 +19,11 @@ import {
 } from '@/components/ui/alert-dialog'
 import {
   CalendarClock, Search, Loader2, RefreshCw, AlertCircle, Clock,
-  CreditCard, FileText, Check,
+  CreditCard, FileText, Check, Download,
 } from 'lucide-react'
 import { formatCurrency, formatDate, cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { downloadExcel } from '@/lib/excel/export'
 import {
   listSupplierVencimientos,
   getSupplierVencimientosKpis,
@@ -122,6 +123,27 @@ export function VencimientosContent() {
     const t = setTimeout(loadList, 300)
     return () => clearTimeout(t)
   }, [loadList])
+
+  const handleExportExcel = async () => {
+    if (rows.length === 0) {
+      toast.error('No hay vencimientos para exportar')
+      return
+    }
+    const data = rows.map(r => ({
+      'Proveedor': r.supplier_name,
+      'NIF': r.supplier_cif ?? '',
+      'Nº Factura': r.invoice_number,
+      'Fecha Factura': r.invoice_date,
+      'Fecha Vencimiento': r.due_date,
+      'Cuota': `${r.installment_index}/${r.installment_count}`,
+      'Importe': Number(r.installment_amount) || 0,
+      'Pagado': Number(r.amount_paid) || 0,
+      'Pendiente': Number(r.amount_pending) || 0,
+      'Estado': STATUS_BADGE[r.status]?.label ?? r.status,
+      'Días vencida': r.days_overdue,
+    }))
+    await downloadExcel(data, 'vencimientos-proveedores', 'Vencimientos')
+  }
 
   const confirmMarkPaid = async () => {
     if (!confirmRow) return
@@ -228,6 +250,10 @@ export function VencimientosContent() {
           />
           <span>Solo vencidas</span>
         </label>
+        <div className="flex-1" />
+        <Button variant="outline" size="sm" onClick={handleExportExcel}>
+          <Download className="h-4 w-4 mr-2" /> Descargar Excel
+        </Button>
       </div>
 
       {/* Tabla */}
@@ -255,7 +281,6 @@ export function VencimientosContent() {
                 <TableHead className="text-xs text-right">Pendiente</TableHead>
                 <TableHead className="text-xs">Días</TableHead>
                 <TableHead className="text-xs">Estado</TableHead>
-                <TableHead className="w-40" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -310,21 +335,6 @@ export function VencimientosContent() {
                       <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${badge.className}`}>
                         {badge.label}
                       </span>
-                    </TableCell>
-                    <TableCell className="w-40">
-                      {row.is_paid ? (
-                        <span className="text-xs text-muted-foreground">Pagada</span>
-                      ) : (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 text-xs gap-1.5"
-                          onClick={() => setConfirmRow(row)}
-                        >
-                          <Check className="h-3.5 w-3.5" />
-                          Marcar como pagada
-                        </Button>
-                      )}
                     </TableCell>
                   </TableRow>
                 )

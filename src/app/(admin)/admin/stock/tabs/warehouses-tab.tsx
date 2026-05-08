@@ -112,6 +112,7 @@ export function WarehousesTab({ outOfStockFilter = false, onClearOutOfStockFilte
 
   // Aplicar todos los filtros
   const displayedRows = useMemo(() => {
+    const q = search.trim().toLowerCase()
     return rows.filter(r => {
       if (stockFilter === 'out' && r.quantity > 0) return false
       if (stockFilter === 'low' && (r.quantity <= 0 || r.quantity > 5)) return false
@@ -120,9 +121,16 @@ export function WarehousesTab({ outOfStockFilter = false, onClearOutOfStockFilte
       if (sizeFilter !== 'all' && r.size !== sizeFilter) return false
       if (colorFilter !== 'all' && r.color !== colorFilter) return false
       if (supplierFilter !== 'all' && r.supplier_name !== supplierFilter) return false
+      if (q) {
+        const hit =
+          r.product_name?.toLowerCase().includes(q) ||
+          r.product_sku?.toLowerCase().includes(q) ||
+          r.variant_sku?.toLowerCase().includes(q)
+        if (!hit) return false
+      }
       return true
     })
-  }, [rows, stockFilter, typeFilter, sizeFilter, colorFilter, supplierFilter])
+  }, [rows, stockFilter, typeFilter, sizeFilter, colorFilter, supplierFilter, search])
 
   const hasActiveFilters = stockFilter !== 'all' || typeFilter !== 'all' || sizeFilter !== 'all' || colorFilter !== 'all' || supplierFilter !== 'all'
 

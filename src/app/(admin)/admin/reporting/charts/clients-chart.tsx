@@ -13,13 +13,38 @@ type ClientsData = {
 }
 
 const sourceColors: Record<string, string> = {
-  walk_in: 'bg-prats-navy', web_registration: 'bg-blue-500', web_shop: 'bg-green-500',
-  referral: 'bg-purple-500', unknown: 'bg-gray-400',
+  walk_in: '#3B82F6',
+  referral: '#10B981',
+  web: '#8B5CF6',
+  web_registration: '#A78BFA',
+  web_shop: '#6366F1',
+  social_media: '#F59E0B',
+  event: '#EC4899',
+  press: '#14B8A6',
+  other: '#6B7280',
+  online: '#06B6D4',
+  migration: '#9CA3AF',
+  import_excel: '#D1D5DB',
+  unknown: '#E5E7EB',
 }
 const sourceLabels: Record<string, string> = {
-  walk_in: 'Tienda', web_registration: 'Registro web', web_shop: 'Tienda online',
-  referral: 'Referido', unknown: 'Otro',
+  walk_in: 'Visita directa',
+  referral: 'Recomendación',
+  web: 'Web',
+  web_registration: 'Registro web',
+  web_shop: 'Tienda online',
+  social_media: 'Redes sociales',
+  event: 'Evento',
+  press: 'Prensa',
+  other: 'Otro',
+  online: 'Online',
+  migration: 'Migración',
+  import_excel: 'Importación',
+  unknown: 'Sin datos',
 }
+const DEFAULT_SOURCE_COLOR = '#9CA3AF'
+const labelFor = (key: string) =>
+  sourceLabels[key] ?? (key ? key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ') : 'Sin datos')
 
 const MEDAL_COLORS = ['text-yellow-500', 'text-gray-400', 'text-amber-600']
 const MEDAL_BG = ['bg-yellow-50 border-yellow-200', 'bg-gray-50 border-gray-200', 'bg-amber-50 border-amber-200']
@@ -50,9 +75,12 @@ export function ClientsChart({ data }: { data: ClientsData | null }) {
             {Object.entries(sources).map(([key, value]) => (
               <div
                 key={key}
-                className={`${sourceColors[key] || 'bg-gray-400'} transition-all`}
-                style={{ width: `${totalSources > 0 ? (value / totalSources) * 100 : 0}%` }}
-                title={`${sourceLabels[key] || key}: ${value}`}
+                className="transition-all"
+                style={{
+                  width: `${totalSources > 0 ? (value / totalSources) * 100 : 0}%`,
+                  backgroundColor: sourceColors[key] || DEFAULT_SOURCE_COLOR,
+                }}
+                title={`${labelFor(key)}: ${value}`}
               />
             ))}
           </div>
@@ -60,8 +88,11 @@ export function ClientsChart({ data }: { data: ClientsData | null }) {
             {Object.entries(sources).map(([key, value]) => (
               <div key={key} className="flex items-center justify-between text-sm">
                 <span className="flex items-center gap-2">
-                  <span className={`h-3 w-3 rounded-full ${sourceColors[key] || 'bg-gray-400'}`} />
-                  {sourceLabels[key] || key}
+                  <span
+                    className="h-3 w-3 rounded-full"
+                    style={{ backgroundColor: sourceColors[key] || DEFAULT_SOURCE_COLOR }}
+                  />
+                  {labelFor(key)}
                 </span>
                 <span className="font-medium">
                   {value} ({totalSources > 0 ? ((value / totalSources) * 100).toFixed(0) : 0}%)

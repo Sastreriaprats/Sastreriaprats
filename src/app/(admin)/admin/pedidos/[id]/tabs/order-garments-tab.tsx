@@ -50,14 +50,20 @@ export function OrderGarmentsTab({ order }: { order: any }) {
       {lines.map((line: any, idx: number) => {
         const group = getLineGroup(line)
         const canPrintFicha = group !== 'complemento'
+        const displayName = group === 'complemento'
+          ? (line.configuration?.product_name || 'Complemento')
+          : line.garment_types?.name
+        const badgeLabel = group === 'complemento'
+          ? 'Boutique'
+          : (line.line_type === 'artesanal' ? 'Artesanal' : 'Industrial')
         return (
         <Card key={line.id}>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <CardTitle className="text-base flex items-center gap-2">
                 <span className="text-muted-foreground text-sm">#{idx + 1}</span>
-                {line.garment_types?.name}
-                <Badge variant="outline" className="text-xs">{line.line_type === 'artesanal' ? 'Artesanal' : 'Industrial'}</Badge>
+                {displayName}
+                <Badge variant="outline" className="text-xs">{badgeLabel}</Badge>
               </CardTitle>
               <div className="flex items-center gap-2">
                 <Badge className={`text-xs ${getOrderStatusColor(line.status)}`}>{getOrderStatusLabel(line.status)}</Badge>
@@ -130,9 +136,11 @@ export function OrderGarmentsTab({ order }: { order: any }) {
                 'cortador', 'oficial', 'situacionTrabajo', 'SituacionTrabajo',
                 'fechaCompromiso', 'FechaCompromiso', 'descripcion', 'observaciones',
                 'notas', 'Notas', 'caracteristicas',
-                // Camisería - medidas
-                'cuello', 'canesu', 'manga', 'frenPecho', 'contPecho',
-                'cintura', 'cadera', 'largo', 'hombro', 'biceps',
+                // Camisería - medidas (claves modernas + legacy fallback)
+                'cuello', 'canesu', 'largoManga', 'frentePecho', 'pecho',
+                'cintura', 'cadera', 'largoCuerpo', 'hombro', 'punoDerecho', 'punoIzquierdo',
+                // Camisería - medidas legacy (pedidos antiguos pre-mig 072)
+                'manga', 'frenPecho', 'contPecho', 'largo', 'biceps',
                 // Camisería - opciones
                 'modCuello', 'puno', 'jareton', 'espPliegues',
                 'erguido', 'hombrosAltos', 'iniciales', 'obs',

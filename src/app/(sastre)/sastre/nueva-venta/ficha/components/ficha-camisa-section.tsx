@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -9,20 +9,22 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Plus, Trash2 } from 'lucide-react'
 
+type FabricStockItem = { id: string; fabric_code: string | null; name: string }
+
 export type CamisaItem = {
   id: string
   /** 'a_medida' usa medidas + opciones detalladas; 'industrial' es una camisa
    *  estándar facturada solo por precio + cantidad (sin medidas detalladas). */
   mode: 'a_medida' | 'industrial'
-  cuello: string; canesu: string; manga: string; frenPecho: string; contPecho: string
-  cintura: string; cadera: string; largo: string; pIzq: string; pDch: string
-  hombro: string; biceps: string
+  cuello: string; canesu: string; largoManga: string; frentePecho: string; pecho: string
+  cintura: string; cadera: string; largoCuerpo: string
+  hombro: string; punoDerecho: string; punoIzquierdo: string
   jareton: boolean; bolsillo: boolean; hombroCaido: boolean; derecho: boolean; izquierdo: boolean
   hombrosAltos: boolean; hombrosBajos: boolean; erguido: boolean; cargado: boolean
   espaldaLisa: boolean; espPliegues: boolean; espTablonCentr: boolean; espPinzas: boolean
   iniciales: boolean; inicialesTexto: string; modCuello: string
   puno: 'sencillo' | 'gemelo' | 'mixto' | 'mosquetero' | 'otro'
-  tejido: string; precio: number; cantidad: number; obs: string
+  tejido: string; tejidoStockId?: string; tejidoMetros?: number; precio: number; cantidad: number; obs: string
   cortador: string; oficial: string
   coste?: number
 }
@@ -35,48 +37,40 @@ const PUNO_CAMISA_OPTIONS: Array<{ value: CamisaItem['puno']; label: string }> =
   { value: 'otro', label: 'Otro' },
 ]
 
-const MEDIDAS_FIELDS: Array<{ label: string; field: 'cuello' | 'canesu' | 'manga' | 'frenPecho' | 'contPecho' | 'cintura' | 'cadera' | 'largo' | 'pIzq' | 'pDch' | 'hombro' | 'biceps' }> = [
+const MEDIDAS_FIELDS: Array<{ label: string; field: 'cuello' | 'canesu' | 'largoManga' | 'frentePecho' | 'pecho' | 'cintura' | 'cadera' | 'largoCuerpo' | 'hombro' | 'punoDerecho' | 'punoIzquierdo' }> = [
   { label: 'Cuello', field: 'cuello' },
   { label: 'Canesú', field: 'canesu' },
-  { label: 'Manga', field: 'manga' },
-  { label: 'Fren.Pecho', field: 'frenPecho' },
-  { label: 'Cont.Pecho', field: 'contPecho' },
+  { label: 'Largo manga', field: 'largoManga' },
+  { label: 'Frente pecho', field: 'frentePecho' },
+  { label: 'Pecho', field: 'pecho' },
   { label: 'Cintura', field: 'cintura' },
   { label: 'Cadera', field: 'cadera' },
-  { label: 'Lar.Cuerpo', field: 'largo' },
-  { label: 'P.Izq', field: 'pIzq' },
-  { label: 'P.Dch', field: 'pDch' },
+  { label: 'Largo cuerpo', field: 'largoCuerpo' },
   { label: 'Hombro', field: 'hombro' },
-  { label: 'Bíceps', field: 'biceps' },
+  { label: 'Puño dch', field: 'punoDerecho' },
+  { label: 'Puño izq', field: 'punoIzquierdo' },
 ]
 
-function TejidoInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+function TejidoInput({ fabrics, value, onSelect, placeholder }: { fabrics: FabricStockItem[]; value: string; onSelect: (label: string, fabricId?: string) => void; placeholder?: string }) {
   const [showDropdown, setShowDropdown] = useState(false)
-  const [tejidos, setTejidos] = useState<string[]>([])
 
-  useEffect(() => {
-    const load = async () => {
-      const { createClient } = await import('@/lib/supabase/client')
-      const supabase = createClient()
-      const { data } = await supabase.from('products').select('name').eq('product_type', 'tailoring_fabric').limit(50)
-      if (data && Array.isArray(data)) setTejidos(data.map((d: { name?: string }) => String(d?.name ?? '').trim()).filter(Boolean))
-    }
-    load()
-  }, [])
-
-  const filtered = tejidos.filter((t) => t.toLowerCase().includes(value.toLowerCase()))
+  const labelFor = (f: FabricStockItem) => (f.fabric_code ? `${f.fabric_code} — ${f.name}` : f.name)
+  const filtered = fabrics.filter((f) => labelFor(f).toLowerCase().includes(value.toLowerCase()))
 
   return (
     <div className="relative">
       <div className="flex gap-2">
-        <Input className="flex-1 h-10 bg-[#0d1629] border-[#c9a96e]/20 text-white" value={value} onChange={(e) => onChange(e.target.value)} onFocus={() => setShowDropdown(true)} onBlur={() => setTimeout(() => setShowDropdown(false), 200)} placeholder={placeholder ?? 'Escribe o elige tejido'} />
+        <Input className="flex-1 h-10 bg-[#0d1629] border-[#c9a96e]/20 text-white" value={value} onChange={(e) => onSelect(e.target.value, undefined)} onFocus={() => setShowDropdown(true)} onBlur={() => setTimeout(() => setShowDropdown(false), 200)} placeholder={placeholder ?? 'Escribe o elige tejido'} />
         <button type="button" onClick={() => setShowDropdown(!showDropdown)} className="h-10 w-10 rounded-md border border-[#c9a96e]/20 bg-[#0d1629] text-[#c9a96e] flex items-center justify-center hover:bg-[#c9a96e]/10">▾</button>
       </div>
       {showDropdown && filtered.length > 0 && (
         <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-[#1a2744] border border-[#c9a96e]/30 rounded-xl max-h-40 overflow-y-auto shadow-xl">
-          {filtered.map((t) => (
-            <button key={t} type="button" onMouseDown={() => { onChange(t); setShowDropdown(false) }} className="w-full text-left px-3 py-2 text-sm text-white/80 hover:bg-[#c9a96e]/10 hover:text-white border-b border-[#c9a96e]/10 last:border-0">{t}</button>
-          ))}
+          {filtered.map((f) => {
+            const label = labelFor(f)
+            return (
+              <button key={f.id} type="button" onMouseDown={() => { onSelect(label, f.id); setShowDropdown(false) }} className="w-full text-left px-3 py-2 text-sm text-white/80 hover:bg-[#c9a96e]/10 hover:text-white border-b border-[#c9a96e]/10 last:border-0">{label}</button>
+            )
+          })}
         </div>
       )}
     </div>
@@ -89,6 +83,7 @@ interface Props {
   camiseriaMeasurements: Record<string, unknown> | null
   camiseriaMeasurementsLoading: boolean
   officials: { id: string; name: string; specialty: string | null }[]
+  fabricsStock: FabricStockItem[]
   addCamisa: () => void
   removeCamisa: (id: string) => void
   updateCamisa: (id: string, field: keyof CamisaItem, value: string | number | boolean | undefined) => void
@@ -96,7 +91,7 @@ interface Props {
 
 export function FichaCamisaSection({
   isCamiseria, camisas, camiseriaMeasurements, camiseriaMeasurementsLoading,
-  officials, addCamisa, removeCamisa, updateCamisa,
+  officials, fabricsStock, addCamisa, removeCamisa, updateCamisa,
 }: Props) {
   if (!(isCamiseria || camiseriaMeasurements)) return null
 
@@ -118,52 +113,56 @@ export function FichaCamisaSection({
             const isIndustrial = camisa.mode === 'industrial'
             return (
             <div key={camisa.id} className="rounded-lg border border-[#c9a96e]/15 bg-[#0d1629] p-4 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-[#c9a96e] font-medium">CAMISA #{index + 1}</h3>
-                <div className="flex items-center gap-3">
-                  <div className="inline-flex rounded-md border border-[#c9a96e]/30 overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => updateCamisa(camisa.id, 'mode', 'a_medida')}
-                      className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                        !isIndustrial ? 'bg-[#c9a96e]/25 text-[#c9a96e]' : 'bg-transparent text-white/60 hover:text-white'
-                      }`}
-                    >
-                      A medida
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => updateCamisa(camisa.id, 'mode', 'industrial')}
-                      className={`px-3 py-1.5 text-xs font-medium transition-colors border-l border-[#c9a96e]/30 ${
-                        isIndustrial ? 'bg-[#c9a96e]/25 text-[#c9a96e]' : 'bg-transparent text-white/60 hover:text-white'
-                      }`}
-                    >
-                      Industrial
-                    </button>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-[#c9a96e] font-medium">CAMISA #{index + 1}</h3>
+                  <div className="flex items-center gap-3">
+                    <div className="inline-flex rounded-md border border-[#c9a96e]/30 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => updateCamisa(camisa.id, 'mode', 'a_medida')}
+                        className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                          !isIndustrial ? 'bg-[#c9a96e]/25 text-[#c9a96e]' : 'bg-transparent text-white/60 hover:text-white'
+                        }`}
+                      >
+                        A medida
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateCamisa(camisa.id, 'mode', 'industrial')}
+                        className={`px-3 py-1.5 text-xs font-medium transition-colors border-l border-[#c9a96e]/30 ${
+                          isIndustrial ? 'bg-[#c9a96e]/25 text-[#c9a96e]' : 'bg-transparent text-white/60 hover:text-white'
+                        }`}
+                      >
+                        Industrial
+                      </button>
+                    </div>
+                    <Button type="button" variant="ghost" size="sm" className="text-red-400 hover:text-red-300" onClick={() => removeCamisa(camisa.id)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
-                  <div className="flex items-center gap-2">
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <div className="flex-1 min-w-[150px] flex items-center gap-2">
                     <Label className="text-white/60 text-xs whitespace-nowrap">Cortador</Label>
                     <Select value={camisa.cortador || '__none__'} onValueChange={(v) => updateCamisa(camisa.id, 'cortador', v === '__none__' ? '' : v)}>
-                      <SelectTrigger className="min-h-[36px] h-9 bg-[#0d1629] border-[#c9a96e]/20 text-white text-xs w-36"><SelectValue placeholder="—" /></SelectTrigger>
+                      <SelectTrigger className="min-h-[36px] h-9 bg-[#0d1629] border-[#c9a96e]/20 text-white text-xs flex-1"><SelectValue placeholder="—" /></SelectTrigger>
                       <SelectContent className="bg-[#0d1629] border border-white/20 text-white">
                         <SelectItem value="__none__" className="text-white focus:bg-white/10 focus:text-white">—</SelectItem>
                         {officials.filter(o => o.specialty?.split(',').some(s => s.trim().toLowerCase() === 'cortador')).map(o => <SelectItem key={o.id} value={o.name} className="text-white focus:bg-white/10 focus:text-white">{o.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex-1 min-w-[150px] flex items-center gap-2">
                     <Label className="text-white/60 text-xs whitespace-nowrap">Oficial</Label>
                     <Select value={camisa.oficial || '__none__'} onValueChange={(v) => updateCamisa(camisa.id, 'oficial', v === '__none__' ? '' : v)}>
-                      <SelectTrigger className="min-h-[36px] h-9 bg-[#0d1629] border-[#c9a96e]/20 text-white text-xs w-36"><SelectValue placeholder="—" /></SelectTrigger>
+                      <SelectTrigger className="min-h-[36px] h-9 bg-[#0d1629] border-[#c9a96e]/20 text-white text-xs flex-1"><SelectValue placeholder="—" /></SelectTrigger>
                       <SelectContent className="bg-[#0d1629] border border-white/20 text-white">
                         <SelectItem value="__none__" className="text-white focus:bg-white/10 focus:text-white">—</SelectItem>
                         {officials.filter(o => o.specialty?.split(',').some(s => s.trim().toLowerCase() === 'camisería')).map(o => <SelectItem key={o.id} value={o.name} className="text-white focus:bg-white/10 focus:text-white">{o.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
-                  <Button type="button" variant="ghost" size="sm" className="text-red-400 hover:text-red-300" onClick={() => removeCamisa(camisa.id)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
                 </div>
               </div>
 
@@ -301,9 +300,35 @@ export function FichaCamisaSection({
                 </div>
               </div>
               )}
-              <div>
-                <Label className="text-white/70 text-xs">Tejido</Label>
-                <div className="mt-1"><TejidoInput value={camisa.tejido} onChange={(v) => updateCamisa(camisa.id, 'tejido', v)} placeholder="Escribe o elige tejido" /></div>
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr,140px] gap-3">
+                <div>
+                  <Label className="text-white/70 text-xs">Tejido</Label>
+                  <div className="mt-1"><TejidoInput
+                    fabrics={fabricsStock}
+                    value={camisa.tejido}
+                    onSelect={(label, fabricId) => {
+                      updateCamisa(camisa.id, 'tejido', label)
+                      updateCamisa(camisa.id, 'tejidoStockId', fabricId ?? '')
+                    }}
+                    placeholder="Escribe o elige tejido"
+                  /></div>
+                </div>
+                <div>
+                  <Label className="text-white/70 text-xs">Metros</Label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    placeholder="0.0"
+                    value={camisa.tejidoMetros ?? ''}
+                    onChange={(e) => {
+                      const raw = e.target.value
+                      const value = raw === '' ? undefined : (parseFloat(raw) || 0)
+                      updateCamisa(camisa.id, 'tejidoMetros', value)
+                    }}
+                    className="mt-1 h-10 bg-[#1a2744] border-[#c9a96e]/20 text-white"
+                  />
+                </div>
               </div>
               <div>
                 <Label className="text-white/70 text-xs">Observaciones</Label>

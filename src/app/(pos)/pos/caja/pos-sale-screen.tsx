@@ -44,6 +44,7 @@ import { getStorePdfData } from '@/lib/pdf/pdf-company'
 import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
 import { getActiveReservationsForVariant } from '@/actions/reservations'
 import { ReservationDialog } from './reservation-dialog'
+import { sortBySize } from '@/lib/utils/sort-sizes'
 
 interface TicketLine {
   id: string
@@ -194,7 +195,20 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
       setIsSearching(true)
       try {
         const result = await searchProductsForPos({ query: searchQuery.trim(), storeId: activeStoreId })
-        if (result.success) setSearchResults(result.data ?? [])
+        if (result.success) {
+          // Agrupar por producto y ordenar tallas dentro de cada producto.
+          const data = result.data ?? []
+          const byProduct = new Map<string, any[]>()
+          for (const v of data) {
+            const pid = v.products?.id ?? v.product_id ?? '__none__'
+            const arr = byProduct.get(pid) ?? []
+            arr.push(v)
+            byProduct.set(pid, arr)
+          }
+          const sorted: any[] = []
+          for (const arr of byProduct.values()) sorted.push(...sortBySize(arr))
+          setSearchResults(sorted)
+        }
       } catch (e) {
         console.error('[TPV search]', e)
         setSearchResults([])
@@ -999,7 +1013,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
     if (!completedSale?.id) return
     setDownloadingInvoice(true)
     try {
-      const createRes = await createInvoiceFromSaleAction(completedSale.id)
+      const createRes = await createInvoiceFromSaleAction({ saleId: completedSale.id })
       if (!createRes.success || !createRes.data) {
         toast.error('error' in createRes ? createRes.error : 'Error al crear la factura')
         return

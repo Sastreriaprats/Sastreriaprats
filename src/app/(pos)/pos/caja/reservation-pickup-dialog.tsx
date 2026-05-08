@@ -12,9 +12,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Loader2, Search, Bookmark, Clock, Check, ChevronLeft, ShoppingCart,
-  Banknote, CreditCard, Smartphone, ArrowRightLeft, Euro, ImageOff,
+  Banknote, CreditCard, Smartphone, ArrowRightLeft, Euro, ImageOff, XCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -23,6 +24,7 @@ import {
   getReservation,
   addReservationPayment,
   cancelReservationLine,
+  cancelReservation,
 } from '@/actions/reservations'
 import type { ReservationPaymentMethod } from '@/lib/validations/reservations'
 
@@ -144,6 +146,10 @@ export function ReservationPickupDialog({
   const [unselectedConfirmOpen, setUnselectedConfirmOpen] = useState(false)
   const [cancellingUnselected, setCancellingUnselected] = useState(false)
 
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+  const [cancelReason, setCancelReason] = useState('')
+  const [cancelling, setCancelling] = useState(false)
+
   const resetAll = useCallback(() => {
     setStep('search')
     setSearch('')
@@ -155,6 +161,9 @@ export function ReservationPickupDialog({
     setPartialAmount('')
     setUnselectedConfirmOpen(false)
     setCancellingUnselected(false)
+    setShowCancelConfirm(false)
+    setCancelReason('')
+    setCancelling(false)
   }, [])
 
   useEffect(() => {
@@ -206,6 +215,28 @@ export function ReservationPickupDialog({
     const activeLineIds = (detail.lines || []).filter((l) => l.status === 'active').map((l) => l.id)
     setSelectedLineIds(new Set(activeLineIds))
     setStep('detail')
+  }
+
+  const handleCancelReservation = async () => {
+    if (!selected) return
+    setCancelling(true)
+    try {
+      const res = await cancelReservation({ id: selected.id, reason: cancelReason || null })
+      if (!res.success) {
+        toast.error(('error' in res && res.error) || 'No se pudo anular la reserva')
+        return
+      }
+      toast.success('Reserva anulada')
+      setShowCancelConfirm(false)
+      setCancelReason('')
+      setSelected(null)
+      setStep('search')
+      fetchList(search)
+    } catch {
+      toast.error('Error al anular la reserva')
+    } finally {
+      setCancelling(false)
+    }
   }
 
   const pendingAmount = useMemo(() => {
@@ -583,6 +614,16 @@ export function ReservationPickupDialog({
             )}
 
             <DialogFooter className="gap-2 sm:gap-2 min-w-0">
+              {(selected?.status === 'active' || selected?.status === 'pending_stock') && (
+                <Button
+                  variant="outline"
+                  className="gap-1 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 mr-auto"
+                  onClick={() => setShowCancelConfirm(true)}
+                  disabled={loadingDetail || cancelling}
+                >
+                  <XCircle className="h-4 w-4" /> Anular reserva
+                </Button>
+              )}
               {pendingAmount > 0 && (
                 <Button variant="outline" onClick={openPartial} disabled={loadingDetail} className="gap-1">
                   <Euro className="h-4 w-4" /> Cobro parcial
@@ -696,6 +737,37 @@ export function ReservationPickupDialog({
             <AlertDialogCancel disabled={cancellingUnselected} className="w-full mt-0">
               Volver
             </AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirmación: anular reserva completa */}
+      <AlertDialog open={showCancelConfirm} onOpenChange={(v) => { if (!cancelling) setShowCancelConfirm(v) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Anular reserva {selected?.reservation_number}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se cancelará la reserva y se devolverá el stock reservado. Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="py-2">
+            <Textarea
+              placeholder="Motivo de anulación (opcional)"
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              rows={2}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={cancelling}>Volver</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); handleCancelReservation() }}
+              disabled={cancelling}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {cancelling ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+              Sí, anular reserva
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

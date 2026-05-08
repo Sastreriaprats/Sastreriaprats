@@ -250,8 +250,13 @@ export const getTopProducts = protectedAction<
     if (store_id) q = q.eq('sales.store_id', store_id)
     const { data } = await q
 
+    // Excluir cobros pendientes — no son productos vendidos
+    const filteredLines = (data || []).filter(
+      (line: any) => !String(line.description || '').startsWith('Cobro pendiente')
+    )
+
     const products: Record<string, { name: string; sku: string; units: number; revenue: number }> = {}
-    for (const line of data || []) {
+    for (const line of filteredLines) {
       const key = (line.description as string) || (line.sku as string) || 'Desconocido'
       if (!products[key]) products[key] = { name: key, sku: (line.sku as string) || '', units: 0, revenue: 0 }
       products[key].units += (line.quantity as number) || 1

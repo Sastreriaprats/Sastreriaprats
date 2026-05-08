@@ -866,7 +866,7 @@ export function CreateOrderWizard({
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="grid grid-cols-3 gap-3">
-              {['cuello', 'canesu', 'manga', 'fren_pecho', 'cont_pecho', 'cintura', 'cadera', 'largo_cuerpo', 'p_izq', 'p_dch', 'hombro', 'biceps'].map((key) => (
+              {['cuello', 'canesu', 'largo_manga', 'frente_pecho', 'pecho', 'cintura', 'cadera', 'largo_cuerpo', 'hombro', 'puno_derecho', 'puno_izquierdo'].map((key) => (
                 <div key={key} className="space-y-1">
                   <Label className="text-xs">{key.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}</Label>
                   <Input type="number" step="0.5" value={camiseriaConfig[key] ?? ''} onChange={(e) => setCamiseriaConfig(c => ({ ...c, [key]: e.target.value }))} className="h-9" placeholder="cm" />
@@ -997,7 +997,7 @@ export function CreateOrderWizard({
                   <div className="space-y-4 rounded-lg border p-4 bg-muted/30">
                     <h4 className="font-medium text-sm">Ficha Camisería</h4>
                     <div className="grid grid-cols-3 gap-3">
-                      {['cuello', 'canesu', 'manga', 'fren_pecho', 'cont_pecho', 'cintura', 'cadera', 'largo_cuerpo', 'p_izq', 'p_dch', 'hombro', 'biceps'].map((key) => (
+                      {['cuello', 'canesu', 'largo_manga', 'frente_pecho', 'pecho', 'cintura', 'cadera', 'largo_cuerpo', 'hombro', 'puno_derecho', 'puno_izquierdo'].map((key) => (
                         <div key={key} className="space-y-1">
                           <Label className="text-xs">{key.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</Label>
                           <Input

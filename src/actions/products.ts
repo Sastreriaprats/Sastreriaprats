@@ -352,7 +352,7 @@ export const listProducts = protectedAction<ListParams, ListResult<any>>(
       product_categories!products_category_id_fkey(name),
       product_variants(
         id,
-        stock_levels(quantity, warehouse_id, warehouses(id, name, code))
+        stock_levels(quantity, warehouse_id, warehouses(id, name, code, is_active))
       )
     `)
     return success(result)
@@ -2412,5 +2412,163 @@ export const getProductsByIdsForLabels = protectedAction<string[], { id: string;
       .eq('is_active', true)
     const list = (data || []).filter((p: any) => p.barcode)
     return success(list)
+  }
+)
+
+// ── Historial / vida del producto ────────────────────────────────────────────
+export type ProductMovementHistoryRow = {
+  id: string
+  created_at: string
+  movement_type: string
+  quantity: number
+  stock_before: number
+  stock_after: number
+  reason: string | null
+  notes: string | null
+  reference_type: string | null
+  reference_id: string | null
+  product_variant_id: string
+  variant_sku: string
+  size: string | null
+  color: string | null
+  color_hex: string | null
+  warehouse_name: string | null
+  user_name: string | null
+  ticket_number: string | null
+  client_name: string | null
+  supplier_order_number: string | null
+  supplier_name: string | null
+}
+
+export type ProductMovementHistory = {
+  movements: ProductMovementHistoryRow[]
+  variants: { id: string; variant_sku: string; size: string | null; color: string | null }[]
+  kpis: {
+    total_received: number
+    total_sold: number
+    total_returned: number
+    first_reception_at: string | null
+    last_sale_at: string | null
+    days_since_first_reception: number | null
+  }
+}
+
+export const getProductMovementHistory = protectedAction<{ productId: string }, ProductMovementHistory>(
+  { permission: 'products.view', auditModule: 'stock' },
+  async (ctx, { productId }) => {
+    const { data: rawMovements, error } = await ctx.adminClient
+      .from('stock_movements')
+      .select(`
+        id, created_at, movement_type, quantity, stock_before, stock_after,
+        reason, notes, reference_type, reference_id, product_variant_id,
+        product_variants!inner ( variant_sku, size, color, color_hex, product_id ),
+        warehouses ( name ),
+        profiles!created_by ( full_name )
+      `)
+      .eq('product_variants.product_id', productId)
+      .order('created_at', { ascending: false })
+      .limit(1000)
+
+    if (error) return failure(error.message)
+
+    const movements = (rawMovements || []) as any[]
+
+    const saleIds = [...new Set(movements.filter(m => m.reference_type === 'sale' && m.reference_id).map(m => m.reference_id as string))]
+    const supplierOrderIds = [...new Set(movements.filter(m => m.reference_type === 'supplier_order' && m.reference_id).map(m => m.reference_id as string))]
+
+    const [salesRes, supplierOrdersRes, allVariantsRes] = await Promise.all([
+      saleIds.length > 0
+        ? ctx.adminClient.from('sales').select('id, ticket_number, client_id, clients(full_name)').in('id', saleIds)
+        : Promise.resolve({ data: [] as any[] }),
+      supplierOrderIds.length > 0
+        ? ctx.adminClient.from('supplier_orders').select('id, order_number, supplier_id, suppliers(name)').in('id', supplierOrderIds)
+        : Promise.resolve({ data: [] as any[] }),
+      ctx.adminClient.from('product_variants').select('id, variant_sku, size, color').eq('product_id', productId),
+    ])
+
+    const salesMap: Record<string, { ticket_number: string; client_name: string | null }> = {}
+    for (const s of (salesRes.data ?? []) as any[]) {
+      salesMap[s.id] = {
+        ticket_number: s.ticket_number,
+        client_name: (s.clients as any)?.full_name ?? null,
+      }
+    }
+    const ordersMap: Record<string, { order_number: string; supplier_name: string | null }> = {}
+    for (const o of (supplierOrdersRes.data ?? []) as any[]) {
+      ordersMap[o.id] = {
+        order_number: o.order_number,
+        supplier_name: (o.suppliers as any)?.name ?? null,
+      }
+    }
+
+    const enriched: ProductMovementHistoryRow[] = movements.map((m) => {
+      const pv = m.product_variants as any
+      const sale = m.reference_type === 'sale' && m.reference_id ? salesMap[m.reference_id] : null
+      const order = m.reference_type === 'supplier_order' && m.reference_id ? ordersMap[m.reference_id] : null
+      return {
+        id: m.id,
+        created_at: m.created_at,
+        movement_type: m.movement_type,
+        quantity: Number(m.quantity) || 0,
+        stock_before: Number(m.stock_before) || 0,
+        stock_after: Number(m.stock_after) || 0,
+        reason: m.reason ?? null,
+        notes: m.notes ?? null,
+        reference_type: m.reference_type ?? null,
+        reference_id: m.reference_id ?? null,
+        product_variant_id: m.product_variant_id,
+        variant_sku: pv?.variant_sku ?? '',
+        size: pv?.size ?? null,
+        color: pv?.color ?? null,
+        color_hex: pv?.color_hex ?? null,
+        warehouse_name: (m.warehouses as any)?.name ?? null,
+        user_name: (m.profiles as any)?.full_name ?? null,
+        ticket_number: sale?.ticket_number ?? null,
+        client_name: sale?.client_name ?? null,
+        supplier_order_number: order?.order_number ?? null,
+        supplier_name: order?.supplier_name ?? null,
+      }
+    })
+
+    let total_received = 0
+    let total_sold = 0
+    let total_returned = 0
+    let first_reception_at: string | null = null
+    let last_sale_at: string | null = null
+
+    for (const m of enriched) {
+      const qty = Math.abs(m.quantity)
+      switch (m.movement_type) {
+        case 'purchase_receipt':
+        case 'initial':
+        case 'adjustment_positive':
+          total_received += qty
+          if (m.movement_type === 'purchase_receipt' || m.movement_type === 'initial') {
+            if (!first_reception_at || m.created_at < first_reception_at) first_reception_at = m.created_at
+          }
+          break
+        case 'sale':
+          total_sold += qty
+          if (!last_sale_at || m.created_at > last_sale_at) last_sale_at = m.created_at
+          break
+        case 'return':
+          total_returned += qty
+          break
+      }
+    }
+
+    let days_since_first_reception: number | null = null
+    if (first_reception_at) {
+      const ms = Date.now() - new Date(first_reception_at).getTime()
+      days_since_first_reception = Math.max(0, Math.floor(ms / 86_400_000))
+    }
+
+    return success({
+      movements: enriched,
+      variants: ((allVariantsRes.data ?? []) as any[]).map(v => ({
+        id: v.id, variant_sku: v.variant_sku, size: v.size ?? null, color: v.color ?? null,
+      })),
+      kpis: { total_received, total_sold, total_returned, first_reception_at, last_sale_at, days_since_first_reception },
+    })
   }
 )
