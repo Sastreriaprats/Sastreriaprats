@@ -94,6 +94,8 @@ function defaultPrendaConfig(slug: string): Record<string, unknown> {
     tejidoStockNombre: '',
     tejidoCatalogo: '',
     tejidoMetros: '',
+    tejidoPrecioMetro: 0,
+    tejidoCosteMaterial: 0,
   }
   if (slug === 'pantalon') return {
     ...tejido,
@@ -270,7 +272,7 @@ export function NuevaVentaFichaClient({
   const [submitting, setSubmitting] = useState(false)
   const [sastres, setSastres] = useState<{ id: string; full_name: string }[]>([])
   const [officials, setOfficials] = useState<{ id: string; name: string; specialty: string | null }[]>([])
-  const [fabricsStock, setFabricsStock] = useState<{ id: string; fabric_code: string | null; name: string }[]>([])
+  const [fabricsStock, setFabricsStock] = useState<{ id: string; fabric_code: string | null; name: string; price_per_meter: number | null; stock_meters: number | null; composition: string | null }[]>([])
   /** Key del popover de tejido abierto (por prenda). null = ninguno abierto. */
   const [tejidoPopoverOpenKey, setTejidoPopoverOpenKey] = useState<string | null>(null)
   const [client, setClient] = useState<Record<string, unknown> | null>(null)
@@ -854,6 +856,8 @@ export function NuevaVentaFichaClient({
                                           onSelect={() => {
                                             setField('tejidoStockId', '')
                                             setField('tejidoStockNombre', '')
+                                            setField('tejidoPrecioMetro', 0)
+                                            setField('tejidoCosteMaterial', 0)
                                             setTejidoPopoverOpenKey(null)
                                           }}
                                           className="text-white aria-selected:bg-white/10 aria-selected:text-white"
@@ -863,6 +867,7 @@ export function NuevaVentaFichaClient({
                                         </CommandItem>
                                         {fabricsStock.map((f) => {
                                           const fabricLabel = f.fabric_code ? `${f.fabric_code} — ${f.name}` : f.name
+                                          const precioMetro = Number(f.price_per_meter) || 0
                                           return (
                                             <CommandItem
                                               key={f.id}
@@ -870,12 +875,22 @@ export function NuevaVentaFichaClient({
                                               onSelect={() => {
                                                 setField('tejidoStockId', f.id)
                                                 setField('tejidoStockNombre', `${f.fabric_code ?? ''} — ${f.name}`.trim())
+                                                setField('tejidoPrecioMetro', precioMetro)
+                                                const metros = Number(cfg.tejidoMetros) || 0
+                                                if (metros > 0 && precioMetro > 0) {
+                                                  setField('tejidoCosteMaterial', Math.round(precioMetro * metros * 100) / 100)
+                                                } else {
+                                                  setField('tejidoCosteMaterial', 0)
+                                                }
                                                 setTejidoPopoverOpenKey(null)
                                               }}
                                               className="text-white aria-selected:bg-white/10 aria-selected:text-white"
                                             >
                                               <Check className={`mr-2 h-4 w-4 ${cfg.tejidoStockId === f.id ? 'opacity-100' : 'opacity-0'}`} />
-                                              {fabricLabel}
+                                              <span className="truncate">{fabricLabel}</span>
+                                              {precioMetro > 0 && (
+                                                <span className="ml-2 text-xs text-white/50 shrink-0 tabular-nums">· {precioMetro.toFixed(2)} €/m</span>
+                                              )}
                                             </CommandItem>
                                           )
                                         })}
@@ -884,6 +899,21 @@ export function NuevaVentaFichaClient({
                                   </Command>
                                 </PopoverContent>
                               </Popover>
+                              {(() => {
+                                const selectedFabric = fabricsStock.find((f) => f.id === cfg.tejidoStockId)
+                                const precio = Number(cfg.tejidoPrecioMetro) || 0
+                                if (precio <= 0 && !selectedFabric?.composition) return null
+                                const stockM = selectedFabric?.stock_meters != null ? Number(selectedFabric.stock_meters) : null
+                                return (
+                                  <p className="text-[10px] text-white/50 mt-0.5">
+                                    {precio > 0 && <span className="tabular-nums">{precio.toFixed(2)} €/m</span>}
+                                    {precio > 0 && stockM != null && ' · '}
+                                    {stockM != null && <span className="tabular-nums">{stockM.toFixed(1)} m disponibles</span>}
+                                    {selectedFabric?.composition && (precio > 0 || stockM != null) && ' · '}
+                                    {selectedFabric?.composition && <span>{selectedFabric.composition}</span>}
+                                  </p>
+                                )
+                              })()}
                             </div>
                             <div>
                               <Label className="text-white/60 text-xs">Tejido de catálogo</Label>
@@ -891,7 +921,29 @@ export function NuevaVentaFichaClient({
                             </div>
                             <div>
                               <Label className="text-white/60 text-xs">Metros a utilizar</Label>
-                              <Input type="number" step="0.1" min="0" className="mt-1 min-h-[44px] bg-[#0d1629] border-[#c9a96e]/20 text-white" value={String(cfg.tejidoMetros || '')} onChange={(e) => setField('tejidoMetros', e.target.value)} placeholder="Ej: 3.5" />
+                              <Input
+                                type="number"
+                                step="0.1"
+                                min="0"
+                                className="mt-1 min-h-[44px] bg-[#0d1629] border-[#c9a96e]/20 text-white"
+                                value={String(cfg.tejidoMetros || '')}
+                                onChange={(e) => {
+                                  setField('tejidoMetros', e.target.value)
+                                  const metros = Number(e.target.value) || 0
+                                  const precio = Number(cfg.tejidoPrecioMetro) || 0
+                                  if (precio > 0 && metros > 0) {
+                                    setField('tejidoCosteMaterial', Math.round(precio * metros * 100) / 100)
+                                  } else {
+                                    setField('tejidoCosteMaterial', 0)
+                                  }
+                                }}
+                                placeholder="Ej: 3.5"
+                              />
+                              {Number(cfg.tejidoCosteMaterial) > 0 && (
+                                <p className="text-[10px] text-amber-300 mt-0.5 font-medium tabular-nums">
+                                  = {Number(cfg.tejidoCosteMaterial).toFixed(2)} €
+                                </p>
+                              )}
                             </div>
                           </div>
                         </div>

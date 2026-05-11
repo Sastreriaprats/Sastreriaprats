@@ -25,6 +25,7 @@ import {
   addReservationPayment,
   cancelReservationLine,
   cancelReservation,
+  activatePendingReservationsForVariant,
 } from '@/actions/reservations'
 import type { ReservationPaymentMethod } from '@/lib/validations/reservations'
 
@@ -149,6 +150,8 @@ export function ReservationPickupDialog({
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
   const [cancelling, setCancelling] = useState(false)
+
+  const [activatingLineId, setActivatingLineId] = useState<string | null>(null)
 
   const resetAll = useCallback(() => {
     setStep('search')
@@ -412,6 +415,35 @@ export function ReservationPickupDialog({
     if (updated.success) setSelected(updated.data as ReservationRow)
   }
 
+  const handleActivateLine = async (line: any) => {
+    if (!selected || !line?.product_variant_id || !line?.warehouse_id) return
+    setActivatingLineId(line.id)
+    try {
+      const res = await activatePendingReservationsForVariant({
+        variantId: line.product_variant_id,
+        warehouseId: line.warehouse_id,
+      })
+      if (!res.success) {
+        toast.error(('error' in res && res.error) || 'No se pudo verificar el stock')
+        return
+      }
+      const updated = await getReservation({ id: selected.id })
+      if (updated.success) setSelected(updated.data as ReservationRow)
+      const stillPending = updated.success
+        ? ((updated.data as any)?.lines || []).some((l: any) => l.id === line.id && l.status === 'pending_stock')
+        : true
+      if (stillPending) {
+        toast.info('No hay stock disponible todavía para esta línea')
+      } else {
+        toast.success('Stock verificado — la línea ya está disponible')
+      }
+    } catch {
+      toast.error('Error al verificar stock')
+    } finally {
+      setActivatingLineId(null)
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto overflow-x-hidden">
@@ -565,6 +597,16 @@ export function ReservationPickupDialog({
                           </div>
                         </div>
                         <div className="text-sm font-semibold tabular-nums">{formatCurrency(Number(l.line_total))}</div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs border-amber-300 text-amber-700 hover:bg-amber-100 gap-1"
+                          onClick={() => handleActivateLine(l)}
+                          disabled={activatingLineId === l.id}
+                        >
+                          {activatingLineId === l.id ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                          Verificar stock
+                        </Button>
                       </div>
                     ))}
                   </div>

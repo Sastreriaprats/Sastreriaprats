@@ -377,6 +377,38 @@ export const fulfillReservationLine = protectedAction<FulfillReservationLineInpu
  * tiene líneas activas sobre una variante. Suma cantidad de todas
  * las líneas activas (puede haber varias en varias reservas).
  */
+/**
+ * Activa reservas en `pending_stock` para una variante+almacén concreta si
+ * ahora hay stock suficiente. Wrapper de la función SQL fn_activate_pending_reservations
+ * (definida en 105_reservations_on_delivery.sql y refactorizada en 112b_rpcs_reservation_lines.sql).
+ * Devuelve cuántas líneas se han activado y los detalles para feedback en UI.
+ */
+export const activatePendingReservationsForVariant = protectedAction<
+  { variantId: string; warehouseId: string },
+  { activatedCount: number; activated: Array<{ reservation_id: string; reservation_line_id: string; reservation_number: string; client_id: string | null; quantity: number; activated: boolean }> }
+>(
+  { permission: 'reservations.view', auditModule: 'reservations' },
+  async (ctx, { variantId, warehouseId }) => {
+    const { data, error } = await ctx.adminClient.rpc('fn_activate_pending_reservations', {
+      p_product_variant_id: variantId,
+      p_warehouse_id: warehouseId,
+      p_user_id: ctx.userId !== 'system' ? ctx.userId : null,
+    })
+    if (error) return failure(error.message || 'Error al activar reservas pendientes', 'INTERNAL')
+    const rows = Array.isArray(data) ? data : []
+    const activated = rows.map((r: any) => ({
+      reservation_id: String(r?.reservation_id ?? ''),
+      reservation_line_id: String(r?.reservation_line_id ?? ''),
+      reservation_number: String(r?.reservation_number ?? ''),
+      client_id: r?.client_id ?? null,
+      quantity: Number(r?.quantity ?? 0),
+      activated: Boolean(r?.activated),
+    }))
+    const activatedCount = activated.filter((r) => r.activated).length
+    return success({ activatedCount, activated })
+  }
+)
+
 export const getActiveReservationsForVariant = protectedAction<
   { productVariantId: string; warehouseId?: string; clientId?: string },
   { totalReserved: number; count: number; reservations: Array<{ id: string; line_id: string; reservation_number: string; quantity: number; client_id: string }> }

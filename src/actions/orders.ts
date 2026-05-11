@@ -1260,13 +1260,17 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
       const fabricMetersRaw = (cfg.tejidoMetros ?? cfg.fabric_meters) as unknown
       const fabricMetersNum = Number(fabricMetersRaw)
       const fabricMeters = Number.isFinite(fabricMetersNum) && fabricMetersNum > 0 ? fabricMetersNum : null
+      // Coste material calculado en la ficha (precio €/m × metros). Si la ficha
+      // ya lo trae, gana sobre el material_cost previo de la línea.
+      const cfgCosteRaw = Number(cfg.tejidoCosteMaterial as unknown as number)
+      const cfgCoste = Number.isFinite(cfgCosteRaw) && cfgCosteRaw > 0 ? cfgCosteRaw : null
       return {
         tailoring_order_id: l.tailoring_order_id,
         garment_type_id: l.garment_type_id,
         line_type: l.line_type,
         unit_price: l.unit_price,
         line_total: l.line_total,
-        material_cost: l.material_cost ?? 0,
+        material_cost: cfgCoste ?? l.material_cost ?? 0,
         finishing_notes: l.finishing_notes,
         configuration: l.configuration,
         sort_order: l.sort_order,

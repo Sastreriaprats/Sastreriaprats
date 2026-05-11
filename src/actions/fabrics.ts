@@ -7,17 +7,17 @@ import { success, failure } from '@/lib/errors'
 /** Lista tejidos activos para el selector de la ficha de confección (sin restricción de permiso, solo autenticado). */
 export const listActiveFabricsForFicha = protectedAction<
   void,
-  { id: string; fabric_code: string | null; name: string }[]
+  { id: string; fabric_code: string | null; name: string; price_per_meter: number | null; stock_meters: number | null; composition: string | null }[]
 >(
   {},
   async (ctx) => {
     const { data, error } = await ctx.adminClient
       .from('fabrics')
-      .select('id, fabric_code, name')
+      .select('id, fabric_code, name, price_per_meter, stock_meters, composition')
       .eq('is_active', true)
       .order('fabric_code', { ascending: true })
     if (error) return failure(error.message)
-    return success((data ?? []) as { id: string; fabric_code: string | null; name: string }[])
+    return success((data ?? []) as { id: string; fabric_code: string | null; name: string; price_per_meter: number | null; stock_meters: number | null; composition: string | null }[])
   }
 )
 

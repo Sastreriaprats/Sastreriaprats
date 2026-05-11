@@ -857,6 +857,18 @@ export const receiveSupplierOrderLines = protectedAction<
             store_id: (order as any).destination_store_id || null,
           })
         if (movementError) return failure(movementError.message || 'Error al registrar movimiento', 'INTERNAL')
+
+        // Activar reservas pending_stock de esta variante+almacén si llegó
+        // suficiente stock. No bloquea la recepción si falla.
+        try {
+          await ctx.adminClient.rpc('fn_activate_pending_reservations', {
+            p_product_variant_id: variantId,
+            p_warehouse_id: warehouseId,
+            p_user_id: ctx.userId !== 'system' ? ctx.userId : null,
+          })
+        } catch (e) {
+          console.error('[receiveSupplierOrderLines] fn_activate_pending_reservations:', e)
+        }
       } else {
         stockWarnings += 1
         continue

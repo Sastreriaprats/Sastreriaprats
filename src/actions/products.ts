@@ -756,6 +756,21 @@ export const adjustStock = protectedAction<{
       .single()
 
     if (error) return failure(error.message)
+
+    // Si fue ajuste positivo, intentar activar reservas pending_stock de esta
+    // variante+almacén. No bloquea el ajuste si falla.
+    if (delta > 0) {
+      try {
+        await ctx.adminClient.rpc('fn_activate_pending_reservations', {
+          p_product_variant_id: variantId,
+          p_warehouse_id: warehouseId,
+          p_user_id: ctx.userId !== 'system' ? ctx.userId : null,
+        })
+      } catch (e) {
+        console.error('[adjustStock] fn_activate_pending_reservations:', e)
+      }
+    }
+
     const { data: variant } = await ctx.adminClient
       .from('product_variants')
       .select('id, product_id, variant_sku, size, color')
@@ -880,6 +895,18 @@ export const moveStockBetweenWarehouses = protectedAction<
 
     await ctx.adminClient.from('stock_levels').update({ quantity: fromAfter, last_movement_at: new Date().toISOString() }).eq('id', fromLevel.id)
     await ctx.adminClient.from('stock_levels').update({ quantity: toAfter, last_movement_at: new Date().toISOString() }).eq('id', toLevel.id)
+
+    // Activar reservas pending_stock del almacén destino (el origen solo
+    // pierde stock, no procede). No bloquea el traspaso si falla.
+    try {
+      await ctx.adminClient.rpc('fn_activate_pending_reservations', {
+        p_product_variant_id: variantId,
+        p_warehouse_id: toWarehouseId,
+        p_user_id: ctx.userId !== 'system' ? ctx.userId : null,
+      })
+    } catch (e) {
+      console.error('[moveStockBetweenWarehouses] fn_activate_pending_reservations:', e)
+    }
 
     // Generar albarán automáticamente para traspaso directo.
     // Si falla, no bloquea el movimiento de stock.
