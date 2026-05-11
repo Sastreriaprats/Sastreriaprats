@@ -94,10 +94,15 @@ export type UnlinkedDeliveryNoteOption = {
 }
 
 export type SupplierInvoicesKpis = {
+  // Solo ap_supplier_invoices
   totalPendiente: number
   countVencidas: number
   countProximas30: number
   countPagadasEsteMes: number
+  // Solo supplier_order_payment_schedule (cuotas de pedidos a proveedor)
+  totalPendientePedidos: number
+  countVencidasPedidos: number
+  countProximas30Pedidos: number
 }
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -122,6 +127,7 @@ export const getSupplierInvoicesKpis = protectedAction<void, SupplierInvoicesKpi
     ])
 
     const rows = (all || []) as { total_amount: number; status: string; due_date: string; payment_date: string | null }[]
+    // KPIs de facturas (ap_supplier_invoices) — separadas de cuotas de pedidos
     let totalPendiente = 0
     let countVencidas = 0
     let countProximas30 = 0
@@ -139,15 +145,19 @@ export const getSupplierInvoicesKpis = protectedAction<void, SupplierInvoicesKpi
       }
     }
 
-    // Plazos de pago de pedidos (además de facturas AP)
+    // KPIs separados de cuotas de pedidos a proveedor (supplier_order_payment_schedule)
     const schedRows = (schedAll || []) as { amount: number; is_paid: boolean; due_date: string; paid_at: string | null }[]
+    let totalPendientePedidos = 0
+    let countVencidasPedidos = 0
+    let countProximas30Pedidos = 0
     for (const s of schedRows) {
       const amt = Number(s.amount ?? 0)
       if (!s.is_paid) {
-        totalPendiente += amt
-        if (s.due_date < t) countVencidas++
-        else if (s.due_date <= in30Str) countProximas30++
+        totalPendientePedidos += amt
+        if (s.due_date < t) countVencidasPedidos++
+        else if (s.due_date <= in30Str) countProximas30Pedidos++
       } else if (s.paid_at && s.paid_at >= startMonth && s.paid_at <= endMonth) {
+        // "Pagadas este mes" agrega ambas fuentes (es la métrica de actividad de pago)
         countPagadasEsteMes++
       }
     }
@@ -157,6 +167,9 @@ export const getSupplierInvoicesKpis = protectedAction<void, SupplierInvoicesKpi
       countVencidas,
       countProximas30,
       countPagadasEsteMes,
+      totalPendientePedidos,
+      countVencidasPedidos,
+      countProximas30Pedidos,
     })
   }
 )
@@ -186,7 +199,11 @@ export const listSupplierInvoices = protectedAction<
       .select('*')
       .order('due_date', { ascending: false })
 
-    if (status && status !== 'all') q = q.eq('status', status)
+    if (status === 'vencida') {
+      q = q.in('status', ['pendiente', 'parcial']).lt('due_date', new Date().toISOString().slice(0, 10))
+    } else if (status && status !== 'all') {
+      q = q.eq('status', status)
+    }
     if (supplierSearch && supplierSearch.trim()) {
       q = q.ilike('supplier_name', `%${supplierSearch.trim()}%`)
     }

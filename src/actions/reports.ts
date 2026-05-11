@@ -272,7 +272,7 @@ export const getTopProducts = protectedAction<
 
 export const getTailorPerformance = protectedAction<
   { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel; tax_mode?: TaxMode },
-  { tailor_id: string; name: string; orders: number; revenue: number; fittings: number; completed: number; avgOrderValue: number; completionRate: number }[]
+  { tailor_id: string; name: string; orders: number; revenue: number; fittings: number; completed: number; avgOrderValue: number; completionRate: number; paid: number; pending: number; paidRate: number }[]
 >(
   { permission: 'reports.view', auditModule: 'reports' },
   async (ctx, { start_date, end_date, store_id, channel = 'all', tax_mode = 'with_tax' }) => {
@@ -280,21 +280,28 @@ export const getTailorPerformance = protectedAction<
     const net = tax_mode === 'without_tax'
     let q = ctx.adminClient
       .from('tailoring_orders')
-      .select('id, subtotal, total, status, created_by, store_id, profiles!tailoring_orders_created_by_fkey(full_name), tailoring_fittings(count)')
+      .select('id, subtotal, total, total_paid, status, created_by, store_id, profiles!tailoring_orders_created_by_fkey(full_name), tailoring_fittings(count)')
       .gte('created_at', start_date)
       .lte('created_at', end_date + 'T23:59:59')
       .not('status', 'eq', 'cancelled')
     if (store_id) q = q.eq('store_id', store_id)
     const { data: orders } = await q
 
-    const tailors: Record<string, { name: string; orders: number; revenue: number; fittings: number; completed: number }> = {}
+    const tailors: Record<string, { name: string; orders: number; revenue: number; fittings: number; completed: number; paid: number }> = {}
     for (const order of orders || []) {
       const id = (order.created_by as string) || 'unassigned'
       const profile = order.profiles as unknown as Record<string, unknown> | null
       const name = (profile?.full_name as string) || 'Sin asignar'
-      if (!tailors[id]) tailors[id] = { name, orders: 0, revenue: 0, fittings: 0, completed: 0 }
+      if (!tailors[id]) tailors[id] = { name, orders: 0, revenue: 0, fittings: 0, completed: 0, paid: 0 }
       tailors[id].orders++
       tailors[id].revenue += net ? (Number((order as any).subtotal) || 0) : (Number(order.total) || 0)
+      // Pago acumulado, prorrateado al modo IVA para que pending = revenue - paid sea coherente.
+      const orderTotal = Number(order.total) || 0
+      const orderPaid = Number((order as any).total_paid) || 0
+      const orderSubtotal = Number((order as any).subtotal) || 0
+      tailors[id].paid += net && orderTotal > 0
+        ? orderPaid * (orderSubtotal / orderTotal)
+        : orderPaid
       const fittingsData = order.tailoring_fittings as unknown
       const fittingsCount = Array.isArray(fittingsData) && fittingsData.length > 0 && typeof fittingsData[0] === 'object' && fittingsData[0] !== null && 'count' in fittingsData[0]
         ? (fittingsData[0] as { count: number }).count
@@ -304,11 +311,17 @@ export const getTailorPerformance = protectedAction<
     }
 
     return success(
-      Object.entries(tailors).map(([tid, d]) => ({
-        tailor_id: tid, ...d,
-        avgOrderValue: d.orders > 0 ? d.revenue / d.orders : 0,
-        completionRate: d.orders > 0 ? (d.completed / d.orders) * 100 : 0,
-      })).sort((a, b) => b.revenue - a.revenue)
+      Object.entries(tailors).map(([tid, d]) => {
+        const pending = Math.max(0, d.revenue - d.paid)
+        const paidRate = d.revenue > 0 ? Math.round((d.paid / d.revenue) * 100) : 0
+        return {
+          tailor_id: tid, ...d,
+          avgOrderValue: d.orders > 0 ? d.revenue / d.orders : 0,
+          completionRate: d.orders > 0 ? (d.completed / d.orders) * 100 : 0,
+          pending,
+          paidRate,
+        }
+      }).sort((a, b) => b.revenue - a.revenue)
     )
   }
 )

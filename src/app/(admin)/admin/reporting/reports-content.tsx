@@ -50,6 +50,7 @@ type ProductItem = { name: string; sku: string; units: number; revenue: number }
 type TailorItem = {
   tailor_id: string; name: string; orders: number; revenue: number
   fittings: number; completed: number; avgOrderValue: number; completionRate: number
+  paid: number; pending: number; paidRate: number
 }
 
 type ClientsData = {

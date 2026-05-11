@@ -180,7 +180,10 @@ function ClientSearchCombobox({
           }}
         >
           <CommandInput placeholder="Buscar…" />
-          <CommandList>
+          <CommandList
+            className="max-h-[300px] overflow-y-auto"
+            onWheel={(e) => e.stopPropagation()}
+          >
             <CommandEmpty>Sin resultados.</CommandEmpty>
             <CommandGroup>
               {clients.map(c => {
@@ -401,7 +404,8 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
   const dateFrom = dateRangePreset === 'custom' ? customDateFrom : getDateRangeForPreset(dateRangePreset).from
   const dateTo   = dateRangePreset === 'custom' ? customDateTo   : getDateRangeForPreset(dateRangePreset).to
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [clients, setClients] = useState<{ id: string; full_name: string }[]>([])
+  const [clients, setClients] = useState<ClientForInvoice[]>([])
+  const [billTo, setBillTo] = useState<'client' | string>('client')
   const [saving, setSaving] = useState(false)
 
   const [productDialogOpen, setProductDialogOpen] = useState(false)
@@ -668,19 +672,83 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
           <ScrollArea className="flex-1 pr-1">
             <div className="space-y-4 p-1">
               {/* Client */}
+              {(() => {
+                const selected = clients.find(c => c.id === form.client_id)
+                const hasCompanies = !!selected && selected.companies.length > 0
+                return (
               <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
+                <div className="space-y-1 col-span-2">
                   <Label>Cliente</Label>
-                  <Select value={form.client_id} onValueChange={id => {
-                    const c = clients.find(x => x.id === id)
-                    setForm(f => ({ ...f, client_id: id, client_name: c?.full_name ?? '' }))
-                  }}>
-                    <SelectTrigger><SelectValue placeholder="Seleccionar cliente" /></SelectTrigger>
-                    <SelectContent>
-                      {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.full_name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  <ClientSearchCombobox
+                    clients={clients}
+                    value={form.client_id}
+                    onSelect={c => {
+                      if (!c) {
+                        setBillTo('client')
+                        setForm(f => ({ ...f, client_id: '', client_name: '', client_nif: '' }))
+                        return
+                      }
+                      // Si el cliente tiene una empresa por defecto, facturar a esa empresa.
+                      const defaultCompany = c.companies.find(cc => cc.is_default)
+                      if (defaultCompany) {
+                        setBillTo(defaultCompany.id)
+                        setForm(f => ({
+                          ...f,
+                          client_id: c.id,
+                          client_name: defaultCompany.company_name,
+                          client_nif: defaultCompany.nif ?? '',
+                        }))
+                      } else {
+                        setBillTo('client')
+                        setForm(f => ({
+                          ...f,
+                          client_id: c.id,
+                          client_name: c.full_name,
+                          client_nif: c.nif ?? '',
+                        }))
+                      }
+                    }}
+                  />
                 </div>
+                {hasCompanies && selected && (
+                  <div className="space-y-1 col-span-2">
+                    <Label>Facturar a</Label>
+                    <Select
+                      value={billTo}
+                      onValueChange={v => {
+                        setBillTo(v)
+                        if (v === 'client') {
+                          setForm(f => ({
+                            ...f,
+                            client_name: selected.full_name,
+                            client_nif: selected.nif ?? '',
+                          }))
+                        } else {
+                          const company = selected.companies.find(cc => cc.id === v)
+                          if (company) {
+                            setForm(f => ({
+                              ...f,
+                              client_name: company.company_name,
+                              client_nif: company.nif ?? '',
+                            }))
+                          }
+                        }
+                      }}
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="client">
+                          <span className="flex items-center gap-2"><User className="h-3.5 w-3.5" /> Particular · {selected.full_name}</span>
+                        </SelectItem>
+                        {selected.companies.map(cc => (
+                          <SelectItem key={cc.id} value={cc.id}>
+                            <span className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5" /> {cc.company_name}{cc.is_default ? ' (por defecto)' : ''}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <div className="space-y-1">
                   <Label>Nombre factura</Label>
                   <Input value={form.client_name} onChange={e => setForm(f => ({ ...f, client_name: e.target.value }))} placeholder="Nombre en la factura" />
@@ -704,6 +772,8 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
                   </div>
                 </div>
               </div>
+                )
+              })()}
 
               <div>
                 <div className="mb-2">
@@ -834,8 +904,10 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
   const canCancel = ['issued', 'paid', 'partially_paid', 'overdue'].includes(inv.status)
 
   // ── Estado del formulario de edición ──
-  const [form, setForm] = useState({ client_id: inv.client_id ?? '', client_name: inv.client_name, client_nif: '', invoice_date: inv.invoice_date, due_date: '', notes: '', irpf_rate: 0, tax_rate: 21 })
+  const [form, setForm] = useState({ client_id: inv.client_id ?? '', client_name: inv.client_name, client_nif: (inv as any).client_nif ?? '', invoice_date: inv.invoice_date, due_date: '', notes: '', irpf_rate: 0, tax_rate: 21 })
   const [lines, setLines] = useState<InvoiceLine[]>([])
+  const [clients, setClients] = useState<ClientForInvoice[]>([])
+  const [billTo, setBillTo] = useState<'client' | string>('client')
 
   const [productDialogOpen, setProductDialogOpen] = useState(false)
   const [productSearch, setProductSearch] = useState('')
@@ -847,9 +919,20 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
   const [loadingOrderLines, setLoadingOrderLines] = useState(false)
 
   const openEdit = async () => {
-    const r = await getInvoiceLinesAction(inv.id)
+    const [r, cr] = await Promise.all([
+      getInvoiceLinesAction(inv.id),
+      getClientsForInvoice(),
+    ])
     if (r.success) {
       setLines(r.data.lines.map(l => ({ description: l.description, quantity: l.quantity, unit_price: l.unit_price, tax_rate: l.tax_rate })))
+    }
+    if (cr.success) {
+      setClients(cr.data)
+      // Si el client_name de la factura coincide con una empresa del cliente,
+      // pre-seleccionar esa empresa en el selector "Facturar a".
+      const current = cr.data.find(x => x.id === inv.client_id)
+      const matchingCompany = current?.companies.find(cc => cc.company_name === inv.client_name)
+      setBillTo(matchingCompany ? matchingCompany.id : 'client')
     }
     setConceptOnly(false)
     setEditOpen(true)
@@ -1085,8 +1168,74 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
           </DialogHeader>
           <ScrollArea className="flex-1 pr-1">
             <div className="space-y-4 p-1">
-              {!conceptOnly && (
+              {!conceptOnly && (() => {
+                const selected = clients.find(c => c.id === form.client_id)
+                const hasCompanies = !!selected && selected.companies.length > 0
+                return (
               <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1 col-span-2">
+                  <Label>Cliente</Label>
+                  <ClientSearchCombobox
+                    clients={clients}
+                    value={form.client_id}
+                    onSelect={c => {
+                      if (!c) {
+                        setBillTo('client')
+                        setForm(f => ({ ...f, client_id: '', client_name: '', client_nif: '' }))
+                        return
+                      }
+                      const defaultCompany = c.companies.find(cc => cc.is_default)
+                      if (defaultCompany) {
+                        setBillTo(defaultCompany.id)
+                        setForm(f => ({
+                          ...f,
+                          client_id: c.id,
+                          client_name: defaultCompany.company_name,
+                          client_nif: defaultCompany.nif ?? '',
+                        }))
+                      } else {
+                        setBillTo('client')
+                        setForm(f => ({
+                          ...f,
+                          client_id: c.id,
+                          client_name: c.full_name,
+                          client_nif: c.nif ?? '',
+                        }))
+                      }
+                    }}
+                  />
+                </div>
+                {hasCompanies && selected && (
+                  <div className="space-y-1 col-span-2">
+                    <Label>Facturar a</Label>
+                    <Select
+                      value={billTo}
+                      onValueChange={v => {
+                        setBillTo(v)
+                        if (v === 'client') {
+                          setForm(f => ({ ...f, client_name: selected.full_name, client_nif: selected.nif ?? '' }))
+                        } else {
+                          const company = selected.companies.find(cc => cc.id === v)
+                          if (company) {
+                            setForm(f => ({ ...f, client_name: company.company_name, client_nif: company.nif ?? '' }))
+                          }
+                        }
+                      }}
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="client">
+                          <span className="flex items-center gap-2"><User className="h-3.5 w-3.5" /> Particular · {selected.full_name}</span>
+                        </SelectItem>
+                        {selected.companies.map(cc => (
+                          <SelectItem key={cc.id} value={cc.id}>
+                            <span className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5" /> {cc.company_name}{cc.is_default ? ' (por defecto)' : ''}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <div className="space-y-1 col-span-2 sm:col-span-1">
                   <Label>Nombre en factura</Label>
                   <Input value={form.client_name} onChange={e => setForm(f => ({ ...f, client_name: e.target.value }))} />
@@ -1110,7 +1259,8 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                   </div>
                 </div>
               </div>
-              )}
+                )
+              })()}
               <div>
                 <div className="mb-2">
                   <Label className="font-semibold text-sm">Líneas</Label>

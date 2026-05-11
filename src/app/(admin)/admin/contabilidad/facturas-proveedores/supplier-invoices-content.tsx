@@ -235,6 +235,7 @@ export function SupplierInvoicesContent() {
       dateTo: dateTo || undefined,
       paymentMethod: paymentMethodFilter === 'all' ? undefined : paymentMethodFilter,
     })
+    console.log('[DEBUG] listSupplierInvoices result:', r.success, r.success ? r.data?.length : (r as any).error)
     if (r.success) {
       setRows(r.data)
       const ids = r.data.map((x) => x.id)
@@ -244,6 +245,9 @@ export function SupplierInvoicesContent() {
       } else {
         setPaidMap({})
       }
+    } else {
+      console.error('[listSupplierInvoices]', r)
+      toast.error((r as any).error || 'Error al cargar facturas')
     }
     setLoading(false)
   }, [statusFilter, supplierSearch, dateFrom, dateTo, paymentMethodFilter])
@@ -744,29 +748,44 @@ export function SupplierInvoicesContent() {
 
       {/* KPIs */}
       {kpis && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
           <Card>
             <CardContent className="pt-4 pb-3">
               <p className="text-xs text-muted-foreground">Total pendiente</p>
               <p className="text-xl font-bold">{formatCurrency(kpis.totalPendiente)}</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">facturas</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-4 pb-3">
               <p className="text-xs text-muted-foreground">Vencidas</p>
               <p className="text-xl font-bold text-red-600">{kpis.countVencidas}</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">facturas</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-4 pb-3">
               <p className="text-xs text-muted-foreground">Próximas 30 días</p>
               <p className="text-xl font-bold text-amber-600">{kpis.countProximas30}</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">facturas</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-4 pb-3">
               <p className="text-xs text-muted-foreground">Pagadas este mes</p>
               <p className="text-xl font-bold text-green-600">{kpis.countPagadasEsteMes}</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">facturas + cuotas</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 pb-3">
+              <p className="text-xs text-muted-foreground">Cuotas pedidos</p>
+              <p className="text-xl font-bold text-purple-600">
+                {kpis.countVencidasPedidos} <span className="text-xs font-medium text-purple-600/80">vencida{kpis.countVencidasPedidos === 1 ? '' : 's'}</span>
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-0.5 tabular-nums">
+                {formatCurrency(kpis.totalPendientePedidos)} pendiente
+              </p>
             </CardContent>
           </Card>
         </div>
