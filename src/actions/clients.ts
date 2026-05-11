@@ -30,9 +30,9 @@ async function computeClientAggregates(
       .neq('status', 'cancelled'),
     admin
       .from('sales')
-      .select('client_id, total')
+      .select('client_id, total, total_returned, status')
       .in('client_id', clientIds)
-      .eq('status', 'completed'),
+      .in('status', ['completed', 'partially_returned', 'fully_returned']),
   ])
 
   for (const o of (ordersRes.data ?? []) as Array<Record<string, unknown>>) {
@@ -48,7 +48,9 @@ async function computeClientAggregates(
     const id = String(s.client_id || '')
     if (!id) continue
     const cur = map.get(id) ?? { spent: 0, pending: 0, count: 0 }
-    cur.spent += Number(s.total) || 0
+    const total = Number(s.total) || 0
+    const returned = Number(s.total_returned) || 0
+    cur.spent += Math.max(0, total - returned)
     cur.count += 1
     map.set(id, cur)
   }
