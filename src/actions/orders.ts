@@ -1126,6 +1126,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
         store_id: input.storeId,
         status: initialStatus,
         order_number: orderNumber,
+        order_date: (input.fichaCommon?.fechaEmision as string) || undefined,
         estimated_delivery_date: (input.fichaCommon?.fechaProximaVisita as string) || input.fechaCompromiso || null,
         subtotal,
         discount_amount: 0,

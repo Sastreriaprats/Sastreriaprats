@@ -296,6 +296,7 @@ export function NuevaVentaFichaClient({
     telefono2: '',
     horario2: '',
     fechaCobro: new Date().toISOString().split('T')[0],
+    fechaEmision: new Date().toISOString().split('T')[0],
   })
 
   // ── Cart helpers ──────────────────────────────────────────────────────────
@@ -547,6 +548,7 @@ export function NuevaVentaFichaClient({
     situacionTrabajo: ficha.situacionTrabajo,
     fechaProximaVisita: ficha.fechaProximaVisita,
     fechaCobro: ficha.fechaCobro,
+    fechaEmision: ficha.fechaEmision,
     // Tejido y metros viven AHORA por prenda en prendaConfigs[key], no aquí.
     domicilio: ficha.domicilio,
     localidad: ficha.localidad,
@@ -770,7 +772,12 @@ export function NuevaVentaFichaClient({
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   <div>
                     <Label className="text-white/60 text-xs">Fecha emisión</Label>
-                    <p className="mt-1 min-h-[44px] flex items-center text-white">{new Date().toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })}</p>
+                    <Input
+                      type="date"
+                      value={ficha.fechaEmision}
+                      onChange={(e) => setFichaField('fechaEmision', e.target.value)}
+                      className="mt-1 bg-white/5 border-white/10 text-white"
+                    />
                   </div>
                   <div>
                     <Label className="text-white/60 text-xs">Situación trabajo</Label>
