@@ -30,7 +30,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import {
   Loader2, Gift, ChevronLeft, ChevronRight, Receipt, Users, TicketCheck,
-  ArrowLeftRight, CircleDollarSign, CalendarX, MoreHorizontal, UserCog, Ban, CalendarClock, X, Printer,
+  ArrowLeftRight, CircleDollarSign, CalendarX, MoreHorizontal, UserCog, Ban, CalendarClock, X, Printer, Plus,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCurrency, formatDate, cn } from '@/lib/utils'
@@ -38,7 +38,7 @@ import { listVouchers, getVouchersSummaryByClient } from '@/actions/pos'
 import { getStoresList } from '@/actions/config'
 import { listClients } from '@/actions/clients'
 import {
-  cancelVoucherAction, reassignVoucherClientAction, updateVoucherExpiryAction,
+  cancelVoucherAction, reassignVoucherClientAction, updateVoucherExpiryAction, createAdminVoucher,
 } from '@/actions/vouchers'
 import { downloadVoucherPdf } from '@/lib/pdf/voucher-pdf'
 
@@ -100,6 +100,21 @@ export function VouchersContent() {
 
   // Cambiar caducidad
   const [newExpiryDate, setNewExpiryDate] = useState('')
+
+  // ---- Crear vale (nuevo) ----
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createLoading, setCreateLoading] = useState(false)
+  const [createAmount, setCreateAmount] = useState('')
+  const [createKind, setCreateKind] = useState<'gift_card' | 'return'>('gift_card')
+  const [createExpiryDays, setCreateExpiryDays] = useState('365')
+  const [createNotes, setCreateNotes] = useState('')
+  const [createStoreId, setCreateStoreId] = useState<string>('none')
+  const [createClient, setCreateClient] = useState<{ id: string; full_name?: string; client_code?: string } | null>(null)
+  const [createClientInput, setCreateClientInput] = useState('')
+  const [createClientResults, setCreateClientResults] = useState<any[]>([])
+  const [createClientLoading, setCreateClientLoading] = useState(false)
+  const createClientTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [createdVoucher, setCreatedVoucher] = useState<{ id: string; code: string; amount: number; clientName: string | null; storeName: string | null; issuedDate: string; expiryDate: string; notes: string | null } | null>(null)
 
   useEffect(() => {
     getStoresList().then(res => {
@@ -261,6 +276,89 @@ export function VouchersContent() {
     }
   }
 
+  // Buscador de clientes (Nuevo vale) con debounce
+  useEffect(() => {
+    if (!createOpen) return
+    if (createClient) return // ya seleccionado
+    if (createClientTimer.current) clearTimeout(createClientTimer.current)
+    const term = createClientInput.trim()
+    if (term.length < 2) { setCreateClientResults([]); return }
+    createClientTimer.current = setTimeout(async () => {
+      setCreateClientLoading(true)
+      const res = await listClients({ page: 1, pageSize: 10, search: term, sortBy: 'full_name', sortOrder: 'asc' })
+      setCreateClientLoading(false)
+      if (res.success && res.data) setCreateClientResults(res.data.data ?? [])
+    }, 250)
+    return () => { if (createClientTimer.current) clearTimeout(createClientTimer.current) }
+  }, [createClientInput, createOpen, createClient])
+
+  const resetCreateForm = () => {
+    setCreateAmount('')
+    setCreateKind('gift_card')
+    setCreateExpiryDays('365')
+    setCreateNotes('')
+    setCreateStoreId('none')
+    setCreateClient(null)
+    setCreateClientInput('')
+    setCreateClientResults([])
+  }
+
+  const handleCreateVoucher = async () => {
+    const amount = Number(createAmount)
+    if (!amount || amount <= 0) {
+      toast.error('Introduce un importe mayor que 0')
+      return
+    }
+    const expiryDays = Number(createExpiryDays) || 365
+    setCreateLoading(true)
+    const res = await createAdminVoucher({
+      amount,
+      clientId: createClient?.id ?? null,
+      voucherKind: createKind,
+      expiryDays,
+      notes: createNotes.trim() || undefined,
+      storeId: createStoreId !== 'none' ? createStoreId : undefined,
+    })
+    setCreateLoading(false)
+    if (!res.success || !res.data) {
+      toast.error('error' in res ? res.error : 'Error al crear el vale')
+      return
+    }
+    const v = res.data
+    toast.success(`Vale ${v.code} creado por ${formatCurrency(amount)}`)
+    setCreatedVoucher({
+      id: v.id,
+      code: v.code,
+      amount,
+      clientName: createClient?.full_name ?? null,
+      storeName: createStoreId !== 'none' ? (stores.find(s => s.id === createStoreId)?.name ?? null) : null,
+      issuedDate: v.issued_date,
+      expiryDate: v.expiry_date,
+      notes: createNotes.trim() || null,
+    })
+    setCreateOpen(false)
+    resetCreateForm()
+    load()
+  }
+
+  const handlePrintCreated = async () => {
+    if (!createdVoucher) return
+    try {
+      await downloadVoucherPdf({
+        code: createdVoucher.code,
+        kind: 'gift_card',
+        amount: createdVoucher.amount,
+        clientName: createdVoucher.clientName,
+        issuedDate: createdVoucher.issuedDate,
+        expiryDate: createdVoucher.expiryDate,
+        storeName: createdVoucher.storeName,
+        notes: createdVoucher.notes,
+      })
+    } catch (err: any) {
+      toast.error(err?.message || 'Error al generar el PDF del vale')
+    }
+  }
+
   const handleUpdateExpiry = async () => {
     if (!actionTarget) return
     if (!newExpiryDate || !/^\d{4}-\d{2}-\d{2}$/.test(newExpiryDate)) {
@@ -292,6 +390,10 @@ export function VouchersContent() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button size="sm" className="gap-1" onClick={() => { resetCreateForm(); setCreateOpen(true) }}>
+            <Plus className="h-4 w-4" />
+            Nuevo vale
+          </Button>
           <Link href="/admin/tickets">
             <Button variant="outline" size="sm" className="gap-1">
               <Receipt className="h-4 w-4" />
@@ -849,6 +951,162 @@ export function VouchersContent() {
             <Button onClick={handleUpdateExpiry} disabled={actionLoading || !newExpiryDate}>
               {actionLoading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Guardar caducidad
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog: crear nuevo vale ── */}
+      <Dialog open={createOpen} onOpenChange={(open) => { if (!open && !createLoading) { setCreateOpen(false); resetCreateForm() } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Gift className="h-5 w-5" /> Nuevo vale
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Importe (€) *</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={createAmount}
+                  onChange={(e) => setCreateAmount(e.target.value)}
+                  placeholder="0,00"
+                  autoFocus
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Tipo</Label>
+                <Select value={createKind} onValueChange={(v) => setCreateKind(v as 'gift_card' | 'return')}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="gift_card">Tarjeta regalo</SelectItem>
+                    <SelectItem value="return">Vale de devolución</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <Label>Cliente (opcional)</Label>
+              {createClient ? (
+                <div className="flex items-center justify-between border rounded px-3 py-2 text-sm">
+                  <span>
+                    <span className="font-medium">{createClient.full_name ?? 'Sin nombre'}</span>
+                    {createClient.client_code && (
+                      <span className="text-muted-foreground ml-2">({createClient.client_code})</span>
+                    )}
+                  </span>
+                  <Button variant="ghost" size="sm" onClick={() => { setCreateClient(null); setCreateClientInput('') }}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <div className="relative">
+                    <Input
+                      value={createClientInput}
+                      onChange={(e) => setCreateClientInput(e.target.value)}
+                      placeholder="Nombre, email o NIF…"
+                    />
+                    {createClientLoading && (
+                      <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+                    )}
+                  </div>
+                  {createClientInput.trim().length >= 2 && createClientResults.length > 0 && (
+                    <div className="border rounded max-h-44 overflow-y-auto">
+                      {createClientResults.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => { setCreateClient({ id: c.id, full_name: c.full_name, client_code: c.client_code }); setCreateClientInput(''); setCreateClientResults([]) }}
+                          className="w-full text-left px-3 py-2 hover:bg-muted text-sm border-b last:border-0"
+                        >
+                          <span className="font-medium">{c.full_name ?? `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() ?? 'Sin nombre'}</span>
+                          {c.email && <span className="text-muted-foreground ml-2">{c.email}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Caducidad (días)</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={createExpiryDays}
+                  onChange={(e) => setCreateExpiryDays(e.target.value)}
+                />
+              </div>
+              {stores.length > 1 && (
+                <div className="space-y-1">
+                  <Label>Tienda emisora</Label>
+                  <Select value={createStoreId} onValueChange={setCreateStoreId}>
+                    <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">— Sin asignar —</SelectItem>
+                      {stores.map(s => (
+                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <Label>Notas (opcional)</Label>
+              <Textarea
+                value={createNotes}
+                onChange={(e) => setCreateNotes(e.target.value)}
+                rows={2}
+                placeholder="Motivo, referencia, etc."
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setCreateOpen(false); resetCreateForm() }} disabled={createLoading}>Cancelar</Button>
+            <Button onClick={handleCreateVoucher} disabled={createLoading || !createAmount}>
+              {createLoading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Crear vale
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog: vale recién creado · imprimir ── */}
+      <Dialog open={!!createdVoucher} onOpenChange={(open) => { if (!open) setCreatedVoucher(null) }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-green-700">
+              <Gift className="h-5 w-5" /> Vale creado
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 text-sm">
+            <p>
+              Código: <span className="font-mono font-semibold">{createdVoucher?.code}</span>
+            </p>
+            <p>
+              Importe: <span className="font-semibold">{createdVoucher ? formatCurrency(createdVoucher.amount) : ''}</span>
+            </p>
+            {createdVoucher?.clientName && (
+              <p>Cliente: <span className="font-medium">{createdVoucher.clientName}</span></p>
+            )}
+            <p className="text-muted-foreground">
+              Caduca: {createdVoucher ? formatDate(createdVoucher.expiryDate) : ''}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreatedVoucher(null)}>Cerrar</Button>
+            <Button onClick={handlePrintCreated} className="gap-1">
+              <Printer className="h-4 w-4" /> Imprimir vale
             </Button>
           </DialogFooter>
         </DialogContent>

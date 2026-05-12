@@ -165,3 +165,63 @@ export const updateVoucherExpiryAction = protectedAction<
     } as any)
   }
 )
+
+// ─── createAdminVoucher ────────────────────────────────────────────────────
+// Crea un vale directamente desde admin, SIN venta asociada (origin_sale_id=null)
+// y SIN tocar cash_sessions. La compensación contable ocurre al canjearse el
+// vale en una venta vía rpc_create_sale.
+
+export const createAdminVoucher = protectedAction<
+  {
+    amount: number
+    clientId?: string | null
+    voucherKind?: 'gift_card' | 'return'
+    expiryDays?: number
+    notes?: string
+    storeId?: string
+  },
+  { id: string; code: string; original_amount: number; remaining_amount: number; issued_date: string; expiry_date: string }
+>(
+  {
+    permission: 'pos.sell',
+    auditModule: 'vouchers',
+    auditAction: 'create',
+    auditEntity: 'voucher',
+    revalidate: ['/admin/tickets', '/admin/tickets/vales'],
+  },
+  async (ctx, input) => {
+    if (!input.amount || input.amount <= 0) return failure('El importe debe ser mayor que 0', 'VALIDATION')
+
+    const code = 'GC-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase()
+
+    const expiryDate = new Date()
+    expiryDate.setDate(expiryDate.getDate() + (input.expiryDays || 365))
+
+    const { data, error } = await ctx.adminClient
+      .from('vouchers')
+      .insert({
+        code,
+        voucher_type: 'fixed',
+        voucher_kind: input.voucherKind || 'gift_card',
+        original_amount: input.amount,
+        remaining_amount: input.amount,
+        origin_sale_id: null,
+        client_id: input.clientId || null,
+        issued_date: new Date().toISOString().split('T')[0],
+        expiry_date: expiryDate.toISOString().split('T')[0],
+        status: 'active',
+        issued_by_store_id: input.storeId || null,
+        issued_by: ctx.userId,
+        notes: input.notes || null,
+      })
+      .select('id, code, original_amount, remaining_amount, issued_date, expiry_date')
+      .single()
+
+    if (error) return failure(error.message)
+
+    return success({
+      ...data,
+      auditDescription: `Vale ${data.code} creado · ${Number(input.amount).toFixed(2)} €${input.clientId ? ' (con cliente)' : ' (sin cliente)'}`,
+    } as any)
+  }
+)
