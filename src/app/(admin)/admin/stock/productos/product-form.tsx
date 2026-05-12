@@ -625,6 +625,7 @@ export function ProductForm({
     const nextImages = images.filter(u => u !== url)
     setImages(nextImages)
     if (mainImageUrl === url) setMainImageUrl(nextImages[0] ?? null)
+    toast.info('Imagen marcada para eliminar. Pulsa Guardar para confirmar.')
   }
 
   const setAsMain = (url: string) => {
@@ -1093,6 +1094,7 @@ export function ProductForm({
                         <img src={url} alt="" className="h-full w-full object-cover pointer-events-none" />
                         <button
                           type="button"
+                          onPointerDown={(e) => e.stopPropagation()}
                           onClick={() => removeImage(url)}
                           className="absolute top-1 right-1 bg-red-500/80 hover:bg-red-600 text-white rounded-full p-1 shadow-sm transition-colors"
                           title="Eliminar imagen"

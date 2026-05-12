@@ -14,7 +14,7 @@ import { generateCamiseriaFichaPdf } from '@/lib/camiseria-ficha-pdf'
 // Camisería y camisería industrial comparten el mismo registro de medidas:
 // el sastre toma UNA vez las medidas de camisa del cliente y se usan en ambos
 // tipos de pedido. Por eso aquí solo exponemos un único tab "Camisería".
-const GARMENT_NAMES = ['Americana', 'Pantalón', 'Chaleco', 'Camisería']
+const GARMENT_NAMES = ['Americana', 'Pantalón', 'Chaleco', 'Camisería', 'Abrigo', 'Levita']
 /** Índice tab → zona silueta: 0=americana, 1=pantalon, 2=chaleco, 3=frac, 4=abrigo, 5=camiseria */
 const TAB_TO_ZONE = ['americana', 'pantalon', 'chaleco', 'frac', 'abrigo', 'camiseria'] as const
 

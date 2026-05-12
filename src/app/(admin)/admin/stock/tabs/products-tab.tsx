@@ -478,7 +478,12 @@ export function ProductsTab() {
                   <TableCell className="font-mono text-sm">{p.sku}</TableCell>
                   <TableCell>
                     <p className="font-medium">{p.name}</p>
-                    {p.collection && <p className="text-xs text-muted-foreground">{p.collection}{p.season ? ` · ${seasonNameBySlug[p.season] ?? p.season}` : ''}</p>}
+                    {(p.collection || p.season) && (
+                      <p className="text-xs text-muted-foreground">
+                        {[p.collection, p.season ? (seasonNameBySlug[p.season] ?? p.season) : null]
+                          .filter(Boolean).join(' · ')}
+                      </p>
+                    )}
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline" className={`text-xs ${productTypeBadgeColors[p.product_type] || ''}`}>
