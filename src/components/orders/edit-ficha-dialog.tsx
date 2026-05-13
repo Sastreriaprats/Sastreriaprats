@@ -40,7 +40,7 @@ function defaultsFor(type: 'pantalon' | 'chaleco' | 'camiseria' | 'americana'): 
     pSinBolTrasero: false, p1BolTrasero: false, p2BolTraseros: false,
     pBolCostura: false, pBolFrances: false, pBolVivo: false, pBolOreja: false,
     pCenidores: false, pBotonesTirantes: false, pVEnTrasero: false,
-    pretinaCorrida: false, pretina2Botones: false, pretinaTamano: '', pretinaReforzadaDelante: false,
+    pretinaCorrida: false, pretina2Botones: false, pretinaTamano: '', pretinaReforzadaDelante: false, pretinaReforzada: false,
     confFM: '', confFT: '', confPT: '', confMuslo: '', confRodalTrasero: '', confBajadaDelantero: '',
     confAlturaTrasero: '', confFormaGemelo: false, confFVSalida: '',
   }
@@ -266,10 +266,16 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
             </div>
           )}
         </div>
-        <label className="flex items-center gap-2 cursor-pointer text-sm">
-          <input type="checkbox" checked={bool(cfg.pretinaReforzadaDelante)} onChange={(e) => set('pretinaReforzadaDelante', e.target.checked)} />
-          <span>Pretina reforzada por delante</span>
-        </label>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <label className="flex items-center gap-2 cursor-pointer text-sm">
+            <input type="checkbox" checked={bool(cfg.pretinaReforzadaDelante)} onChange={(e) => set('pretinaReforzadaDelante', e.target.checked)} />
+            <span>Pretina reforzada por delante</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer text-sm">
+            <input type="checkbox" checked={bool(cfg.pretinaReforzada)} onChange={(e) => set('pretinaReforzada', e.target.checked)} />
+            <span>Pretina reforzada</span>
+          </label>
+        </div>
       </div>
 
       <div className="space-y-1">

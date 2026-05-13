@@ -129,6 +129,7 @@ export function OrderGarmentsTab({ order }: { order: any }) {
                 'ojalesAbiertos', 'ojalesCerrados', 'medidaHombro', 'sinHombreras',
                 // Sastrería - pantalón
                 'pretinaTamano', 'pretinaCorrida', 'pretina2Botones',
+                'pretinaReforzada', 'pretinaReforzadaDelante',
                 'tejidoPantalon', 'pBotonesTirantes',
                 // Sastrería - chaleco
                 'chalecoCorte', 'chalecoBolsillo', 'tejidoChaleco', 'forroChaleco',

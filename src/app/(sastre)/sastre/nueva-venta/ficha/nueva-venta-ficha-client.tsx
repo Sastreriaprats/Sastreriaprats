@@ -104,7 +104,7 @@ function defaultPrendaConfig(slug: string): Record<string, unknown> {
     pSinBolTrasero: false, p1BolTrasero: false, p2BolTraseros: false,
     pBolCostura: false, pBolFrances: false, pBolVivo: false, pBolOreja: false,
     pCenidores: false, pBotonesTirantes: false, pVEnTrasero: false,
-    pretinaCorrida: false, pretina2Botones: false, pretinaTamano: '', pretinaReforzadaDelante: false,
+    pretinaCorrida: false, pretina2Botones: false, pretinaTamano: '', pretinaReforzadaDelante: false, pretinaReforzada: false,
     confFM: '', confFT: '', confPT: '', confMuslo: '', confRodalTrasero: '', confBajadaDelantero: '',
     confAlturaTrasero: '', confFormaGemelo: false, confFVSalida: '',
   }

@@ -283,6 +283,7 @@ function buildDescripcionAndConfig(config: Record<string, unknown>): { descripci
     if (config.pretina2Botones) partes.push('Pretina 2 botones')
     if (config.pretinaCorrida) partes.push('Pretina corrida')
     if (config.pretinaReforzadaDelante) partes.push('Pretina reforzada por delante')
+    if (config.pretinaReforzada) partes.push('Pretina reforzada')
     const bolsP: string[] = []
     if (config.p7pasadores) bolsP.push('7 pasadores')
     if (config.p5bolsillos) bolsP.push('5 bolsillos')

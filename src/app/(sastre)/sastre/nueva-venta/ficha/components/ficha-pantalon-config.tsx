@@ -93,10 +93,16 @@ export function FichaPantalonConfig({ keyId, cfg, setField }: Props) {
               </div>
             )}
           </div>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={!!cfg.pretinaReforzadaDelante} onChange={(e) => setField('pretinaReforzadaDelante', e.target.checked)} className="text-[#c9a96e]" />
-            <span className="text-white/80 text-sm">Pretina reforzada por delante</span>
-          </label>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={!!cfg.pretinaReforzadaDelante} onChange={(e) => setField('pretinaReforzadaDelante', e.target.checked)} className="text-[#c9a96e]" />
+              <span className="text-white/80 text-sm">Pretina reforzada por delante</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={!!cfg.pretinaReforzada} onChange={(e) => setField('pretinaReforzada', e.target.checked)} className="text-[#c9a96e]" />
+              <span className="text-white/80 text-sm">Pretina reforzada</span>
+            </label>
+          </div>
         </div>
       </div>
       <div>
