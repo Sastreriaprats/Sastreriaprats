@@ -442,7 +442,7 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
                                   type="text"
                                   inputMode="text"
                                   value={String(values[vKey] ?? '')}
-                                  onChange={(e) => setValue(vKey, e.target.value)}
+                                  onChange={(e) => setValue(vKey, e.target.value.replace(',', '.'))}
                                   className="flex-1 h-12 px-4 rounded-xl border border-white/20 bg-white/[0.07] text-white text-lg font-medium placeholder:text-white/30 focus:outline-none focus:border-[#c9a96e] focus:ring-1 focus:ring-[#c9a96e]/30 transition-all"
                                   placeholder="—"
                                 />
@@ -528,7 +528,7 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
                                       type="text"
                                       inputMode="text"
                                       value={String(values[vKey] ?? '')}
-                                      onChange={(e) => setValue(vKey, e.target.value)}
+                                      onChange={(e) => setValue(vKey, e.target.value.replace(',', '.'))}
                                       className="flex-1 h-12 px-4 rounded-xl border border-white/20 bg-white/[0.07] text-white text-lg font-medium placeholder:text-white/30 focus:outline-none focus:border-[#c9a96e] focus:ring-1 focus:ring-[#c9a96e]/30 transition-all touch-manipulation"
                                       placeholder="—"
                                     />

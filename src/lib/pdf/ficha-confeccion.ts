@@ -119,7 +119,8 @@ function getMedidasStr(
       }
     }
     const label = MEDIDAS_LABELS[baseKey] ?? baseKey
-    const n = typeof val === 'number' ? val : Number(val)
+    const raw = typeof val === 'number' ? val : String(val).replace(',', '.')
+    const n = typeof raw === 'number' ? raw : Number(raw)
     if (typeof n === 'number' && Number.isFinite(n)) {
       parts.push(`${label}: ${n}`)
     } else {
