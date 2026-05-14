@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import { normalizeSearchTerm } from '@/lib/utils'
 
 export interface ListParams {
   page?: number
@@ -57,10 +58,19 @@ export async function queryList<T>(
   if (params.customSearchOr) {
     query = query.or(params.customSearchOr)
   } else if (params.search && params.searchFields && params.searchFields.length > 0) {
-    const searchConditions = params.searchFields
-      .map(field => `${field}.ilike.%${params.search}%`)
-      .join(',')
-    query = query.or(searchConditions)
+    if (params.searchFields.includes('search_text')) {
+      // Búsqueda contra columna generada normalizada (unaccent + lower).
+      // Normalizamos el término en JS para que case y acentos coincidan.
+      const normalized = normalizeSearchTerm(params.search)
+      if (normalized) {
+        query = query.ilike('search_text', `%${normalized}%`)
+      }
+    } else {
+      const searchConditions = params.searchFields
+        .map(field => `${field}.ilike.%${params.search}%`)
+        .join(',')
+      query = query.or(searchConditions)
+    }
   }
 
   if (params.storeId) {

@@ -5,6 +5,16 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/**
+ * Normaliza un término de búsqueda: quita acentos/diacríticos, pasa a minúsculas
+ * y trim. Se usa tanto en client-side (`.includes()`) como antes de enviar el
+ * término al servidor cuando se busca contra columnas `search_text` (que ya
+ * están normalizadas en BBDD con unaccent + lower).
+ */
+export function normalizeSearchTerm(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
+}
+
 export function formatCurrency(amount: number | null | undefined): string {
   if (amount === null || amount === undefined) return '-'
   return new Intl.NumberFormat('es-ES', {
@@ -48,7 +58,7 @@ export function slugify(text: string): string {
   return text
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)+/g, '')
 }

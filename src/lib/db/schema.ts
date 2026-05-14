@@ -459,25 +459,34 @@ export const garmentConfigOptions = pgTable('garment_config_options', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
-export const boutiqueAlterations = pgTable('boutique_alterations', {
+export const alterations = pgTable('alterations', {
   id: uuid('id').primaryKey().defaultRandom(),
-  clientId: uuid('client_id').notNull().references(() => clients.id, { onDelete: 'cascade' }),
-  description: text('description').notNull(),
-  garmentDescription: text('garment_description'),
-  alterationDetails: text('alteration_details'),
-  hasCost: boolean('has_cost').default(false),
-  cost: decimal('cost', { precision: 10, scale: 2 }).default('0.00'),
-  isIncluded: boolean('is_included').default(false),
-  saleId: uuid('sale_id'),
-  status: text('status').default('pending'),
-  requestedAt: timestamp('requested_at', { withTimezone: true }).defaultNow().notNull(),
-  estimatedCompletion: date('estimated_completion'),
-  completedAt: timestamp('completed_at', { withTimezone: true }),
-  deliveredAt: timestamp('delivered_at', { withTimezone: true }),
-  registeredBy: uuid('registered_by').references(() => profiles.id, { onDelete: 'set null' }),
+  alterationNumber: text('alteration_number').notNull().unique(),
+  clientId: uuid('client_id').notNull().references(() => clients.id, { onDelete: 'restrict' }),
+  phone: text('phone'),
+  garmentType: text('garment_type'),
+  // `officials` no está modelada en Drizzle (se gestiona vía cliente JS de Supabase).
+  // No declaramos `.references()` para no arrastrar esa tabla aquí.
+  officialId: uuid('official_id'),
+  officialName: text('official_name'),
+  description: text('description'),
+  amount: decimal('amount', { precision: 10, scale: 2 }).default('0.00').notNull(),
+  alterationDate: date('alteration_date').defaultNow().notNull(),
+  workshopSentDate: date('workshop_sent_date'),
+  clientDeliveryDate: date('client_delivery_date'),
+  status: text('status').default('pending').notNull(),
+  paymentMethod: text('payment_method'),
+  notes: text('notes'),
   storeId: uuid('store_id').references(() => stores.id, { onDelete: 'set null' }),
+  createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  // Campos extendidos mig. 069
+  tailoringOrderId: uuid('tailoring_order_id'),
+  saleId: uuid('sale_id'),
+  alterationType: text('alteration_type').default('external').notNull(),
+  isIncluded: boolean('is_included').default(false).notNull(),
+  estimatedCompletion: date('estimated_completion'),
 })
 
 export const clientTags = pgTable('client_tags', {
@@ -1480,7 +1489,7 @@ export const profilesRelations = relations(profiles, ({ many }) => ({
   clientsCreated: many(clients, { relationName: 'clientCreatedBy' }),
   clientNotes: many(clientNotes),
   clientMeasurementsTaken: many(clientMeasurements),
-  boutiqueAlterationsRegistered: many(boutiqueAlterations),
+  alterationsCreated: many(alterations),
   clientEmailsSent: many(clientEmailHistory),
   suppliersCreated: many(suppliers),
   supplierOrdersCreated: many(supplierOrders),
@@ -1517,7 +1526,7 @@ export const storesRelations = relations(stores, ({ many }) => ({
   auditLogs: many(auditLogs),
   clients: many(clients),
   clientMeasurements: many(clientMeasurements),
-  boutiqueAlterations: many(boutiqueAlterations),
+  alterations: many(alterations),
   supplierOrdersDestination: many(supplierOrders),
 }))
 
@@ -1558,7 +1567,7 @@ export const clientsRelations = relations(clients, ({ one, many }) => ({
   contacts: many(clientContacts),
   notes: many(clientNotes),
   measurements: many(clientMeasurements),
-  alterations: many(boutiqueAlterations),
+  alterations: many(alterations),
   emailHistory: many(clientEmailHistory),
 }))
 
@@ -1592,10 +1601,12 @@ export const garmentConfigOptionsRelations = relations(garmentConfigOptions, ({ 
   garmentType: one(garmentTypes, { fields: [garmentConfigOptions.garmentTypeId], references: [garmentTypes.id] }),
 }))
 
-export const boutiqueAlterationsRelations = relations(boutiqueAlterations, ({ one }) => ({
-  client: one(clients, { fields: [boutiqueAlterations.clientId], references: [clients.id] }),
-  registeredByProfile: one(profiles, { fields: [boutiqueAlterations.registeredBy], references: [profiles.id] }),
-  store: one(stores, { fields: [boutiqueAlterations.storeId], references: [stores.id] }),
+export const alterationsRelations = relations(alterations, ({ one }) => ({
+  client: one(clients, { fields: [alterations.clientId], references: [clients.id] }),
+  createdByProfile: one(profiles, { fields: [alterations.createdBy], references: [profiles.id] }),
+  store: one(stores, { fields: [alterations.storeId], references: [stores.id] }),
+  // `officials` no está modelada en Drizzle. El join se hace en runtime vía supabase-js
+  // o en SELECTs explícitos en las server actions (`official:officials ( id, name )`).
 }))
 
 export const clientEmailHistoryRelations = relations(clientEmailHistory, ({ one }) => ({
@@ -1912,8 +1923,8 @@ export type ClientMeasurement = typeof clientMeasurements.$inferSelect
 export type NewClientMeasurement = typeof clientMeasurements.$inferInsert
 export type GarmentConfigOption = typeof garmentConfigOptions.$inferSelect
 export type NewGarmentConfigOption = typeof garmentConfigOptions.$inferInsert
-export type BoutiqueAlteration = typeof boutiqueAlterations.$inferSelect
-export type NewBoutiqueAlteration = typeof boutiqueAlterations.$inferInsert
+export type Alteration = typeof alterations.$inferSelect
+export type NewAlteration = typeof alterations.$inferInsert
 export type ClientTag = typeof clientTags.$inferSelect
 export type NewClientTag = typeof clientTags.$inferInsert
 export type ClientEmailHistory = typeof clientEmailHistory.$inferSelect

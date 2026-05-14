@@ -22,7 +22,7 @@ import { SalesChart } from './charts/sales-chart'
 import { TopProductsChart } from './charts/top-products-chart'
 import { TailorTable } from './tables/tailor-table'
 import { ClientsChart } from './charts/clients-chart'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, normalizeSearchTerm } from '@/lib/utils'
 import { toast } from 'sonner'
 
 function getDefaultStart() {
@@ -434,14 +434,14 @@ export function ReportsContent() {
                   className="max-w-sm mb-4"
                 />
                 <TopProductsChart
-                  products={
-                    productSearch.trim()
-                      ? topProducts.filter(p =>
-                          p.name.toLowerCase().includes(productSearch.toLowerCase()) ||
-                          (p.sku && p.sku.toLowerCase().includes(productSearch.toLowerCase()))
-                        )
-                      : topProducts
-                  }
+                  products={(() => {
+                    const q = normalizeSearchTerm(productSearch)
+                    if (!q) return topProducts
+                    return topProducts.filter(p =>
+                      normalizeSearchTerm(p.name || '').includes(q) ||
+                      normalizeSearchTerm(p.sku || '').includes(q),
+                    )
+                  })()}
                 />
               </TabsContent>
               <TabsContent value="tailors"><TailorTable data={tailorData} /></TabsContent>

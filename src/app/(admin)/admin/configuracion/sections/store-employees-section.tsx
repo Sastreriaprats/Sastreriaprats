@@ -15,6 +15,7 @@ import {
 import { Loader2, Save, Search, Users, Store as StoreIcon, Info } from 'lucide-react'
 import { toast } from 'sonner'
 import { useStores } from '@/hooks/use-cached-queries'
+import { normalizeSearchTerm } from '@/lib/utils'
 import {
   listAvailableEmployees,
   listStoreEmployees,
@@ -128,12 +129,12 @@ export function StoreEmployeesSection() {
   }
 
   const filteredEmployees = useMemo(() => {
-    const q = search.trim().toLowerCase()
+    const q = normalizeSearchTerm(search)
     if (!q) return employees
     return employees.filter(
       (e) =>
-        e.full_name.toLowerCase().includes(q) ||
-        e.email.toLowerCase().includes(q),
+        normalizeSearchTerm(e.full_name || '').includes(q) ||
+        normalizeSearchTerm(e.email || '').includes(q),
     )
   }, [employees, search])
 

@@ -77,6 +77,11 @@ const paymentMethodLabels: Record<string, string> = {
   cash: 'Efectivo', card: 'Tarjeta', bank_draft: 'Giro',
 }
 
+// IVA por defecto del proveedor. Lista propia del formulario de proveedor;
+// NO se comparte con el select de IVA del módulo de facturas a proveedor.
+// El valor se guarda en `suppliers.default_tax_rate` (NUMERIC sin CHECK).
+const TAX_RATE_OPTIONS = [0, 4, 10, 21, 23] as const
+
 const emptyForm = {
   name: '',
   legal_name: '',
@@ -97,6 +102,7 @@ const emptyForm = {
   internal_notes: '',
   is_active: true,
   custom_payment_plan: [] as CustomPaymentPlanItem[],
+  default_tax_rate: 21,
 }
 
 export function SuppliersPageContent() {
@@ -177,6 +183,7 @@ export function SuppliersPageContent() {
         custom_payment_plan: Array.isArray(full.custom_payment_plan)
           ? (full.custom_payment_plan as CustomPaymentPlanItem[])
           : [],
+        default_tax_rate: full.default_tax_rate != null ? Number(full.default_tax_rate) : 21,
       })
       setDialogOpen(true)
     } finally {
@@ -210,6 +217,7 @@ export function SuppliersPageContent() {
       bank_iban: form.bank_iban?.trim() || null,
       internal_notes: form.internal_notes?.trim() || null,
       is_active: form.is_active,
+      default_tax_rate: Number.isFinite(Number(form.default_tax_rate)) ? Number(form.default_tax_rate) : 21,
       custom_payment_plan: form.payment_terms === 'custom'
         ? form.custom_payment_plan.map((it) => ({
             amount: Number(it.amount) || 0,
@@ -544,6 +552,23 @@ export function SuppliersPageContent() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>IVA por defecto</Label>
+              <Select
+                value={String(form.default_tax_rate ?? 21)}
+                onValueChange={(v) => setForm((f) => ({ ...f, default_tax_rate: Number(v) }))}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {TAX_RATE_OPTIONS.map((rate) => (
+                    <SelectItem key={rate} value={String(rate)}>{rate}%</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Se aplicará por defecto al crear una factura de este proveedor.
+              </p>
             </div>
             <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="bank_iban">IBAN</Label>

@@ -155,7 +155,7 @@ async function main(): Promise<void> {
     'sale_payments', 'sale_lines', 'returns', 'sales',
     'tailoring_order_payments', 'tailoring_order_state_history',
     'tailoring_fittings', 'tailoring_order_lines', 'tailoring_orders',
-    'boutique_alterations', 'vouchers',
+    'alterations', 'vouchers',
     'stock_movements', 'stock_levels',
     'supplier_order_lines', 'supplier_delivery_note_lines',
     'supplier_delivery_notes', 'supplier_orders',

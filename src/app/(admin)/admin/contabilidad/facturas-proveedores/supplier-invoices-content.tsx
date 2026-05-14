@@ -126,6 +126,12 @@ const STATUS_BADGE: Record<string, { label: string; className: string }> = {
   pagada: { label: 'Pagada', className: 'bg-green-100 text-green-800' },
 }
 
+// IVA de factura a proveedor. Lista propia del formulario; NO se comparte con
+// otros módulos (factura cliente, POS, productos, pedidos a proveedor).
+// El 23% se incluye para soportar proveedores portugueses / extracomunitarios
+// que facturan con tipo distinto al estándar español 21%.
+const SUPPLIER_INVOICE_TAX_RATES = [0, 4, 10, 21, 23] as const
+
 function today() {
   return new Date().toISOString().slice(0, 10)
 }
@@ -1173,7 +1179,7 @@ export function SupplierInvoicesContent() {
                 >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {[0, 4, 10, 21].map((n) => (
+                    {SUPPLIER_INVOICE_TAX_RATES.map((n) => (
                       <SelectItem key={n} value={String(n)}>{n}%</SelectItem>
                     ))}
                   </SelectContent>

@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
+import { normalizeSearchTerm } from '@/lib/utils'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle,
@@ -298,12 +299,12 @@ function AssignProductsDialog({
   }, [item.id, taxonomy])
 
   const filtered = useMemo(() => {
-    const s = search.trim().toLowerCase()
+    const s = normalizeSearchTerm(search)
     if (!s) return products
     return products.filter(p =>
-      p.name.toLowerCase().includes(s) ||
-      p.sku.toLowerCase().includes(s) ||
-      (p.brand || '').toLowerCase().includes(s)
+      normalizeSearchTerm(p.name || '').includes(s) ||
+      normalizeSearchTerm(p.sku || '').includes(s) ||
+      normalizeSearchTerm(p.brand || '').includes(s)
     )
   }, [products, search])
 

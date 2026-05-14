@@ -77,7 +77,7 @@ export const listClients = protectedAction<ListParams, ListResult<any>>(
   async (ctx, params) => {
     const result = await queryList<Record<string, unknown>>('clients', {
       ...params,
-      searchFields: ['full_name', 'email', 'phone', 'document_number', 'client_code'],
+      searchFields: ['search_text'],
     }, `
       id, client_code, full_name, first_name, last_name, email, phone,
       category, client_type, is_active, total_spent, total_pending,
@@ -99,7 +99,7 @@ export const getClient = protectedAction<string, any>(
     const client = await queryById('clients', clientId, `
       *,
       client_notes ( id, note_type, title, content, is_pinned, created_at, created_by_name ),
-      boutique_alterations ( id, description, cost, status, created_at )
+      alterations ( id, alteration_number, description, amount, status, alteration_date )
     `)
     if (!client) return failure('Cliente no encontrado', 'NOT_FOUND')
 

@@ -27,6 +27,7 @@ export const createSupplierSchema = z.object({
     amount: z.number().min(0),
     days: z.number().min(0).optional(),
   })).optional().nullable().default([]),
+  default_tax_rate: z.number().min(0).max(100).default(21),
 })
 
 export const updateSupplierSchema = createSupplierSchema.partial()

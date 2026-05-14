@@ -2,6 +2,7 @@
 
 import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
+import { normalizeSearchTerm } from '@/lib/utils'
 import {
   buildInstallments,
   computeDueDate,
@@ -205,7 +206,10 @@ export const listSupplierInvoices = protectedAction<
       q = q.eq('status', status)
     }
     if (supplierSearch && supplierSearch.trim()) {
-      q = q.ilike('supplier_name', `%${supplierSearch.trim()}%`)
+      const normalized = normalizeSearchTerm(supplierSearch)
+      if (normalized) {
+        q = q.ilike('search_text', `%${normalized}%`)
+      }
     }
     if (dateFrom) q = q.gte('due_date', dateFrom)
     if (dateTo) q = q.lte('due_date', dateTo)

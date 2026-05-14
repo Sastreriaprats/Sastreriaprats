@@ -7,6 +7,7 @@ import {
 } from '@/lib/validations/pos'
 import { success, failure } from '@/lib/errors'
 import { createSaleJournalEntry } from '@/actions/accounting-triggers'
+import { normalizeSearchTerm } from '@/lib/utils'
 
 /**
  * Lista de empleados que pueden realizar ventas en una tienda.
@@ -506,26 +507,31 @@ export const listTickets = protectedAction<{
 
     let saleIds: string[] | null = null
     if (clientSearch && clientSearch.trim()) {
-      const q = clientSearch.trim()
-      const { data: clients } = await ctx.adminClient
-        .from('clients')
-        .select('id')
-        .or(`full_name.ilike.%${q}%,client_code.ilike.%${q}%`)
-        .limit(500)
-      const ids = (clients ?? []).map((c: any) => c.id)
-      if (ids.length === 0) return success({ data: [], total: 0, page, pageSize, totalPages: 0 })
-      query = query.in('client_id', ids)
+      const q = normalizeSearchTerm(clientSearch)
+      if (q) {
+        const { data: clients } = await ctx.adminClient
+          .from('clients')
+          .select('id')
+          .ilike('search_text', `%${q}%`)
+          .limit(500)
+        const ids = (clients ?? []).map((c: any) => c.id)
+        if (ids.length === 0) return success({ data: [], total: 0, page, pageSize, totalPages: 0 })
+        query = query.in('client_id', ids)
+      }
     }
 
     if (productSearch && productSearch.trim()) {
-      const { data: lines } = await ctx.adminClient
-        .from('sale_lines')
-        .select('sale_id')
-        .ilike('description', '%' + productSearch.trim() + '%')
-        .limit(1000)
-      const ids = [...new Set((lines ?? []).map((l: any) => l.sale_id))]
-      if (ids.length === 0) return success({ data: [], total: 0, page, pageSize, totalPages: 0 })
-      query = query.in('id', ids)
+      const q = normalizeSearchTerm(productSearch)
+      if (q) {
+        const { data: lines } = await ctx.adminClient
+          .from('sale_lines')
+          .select('sale_id')
+          .ilike('description', `%${q}%`)
+          .limit(1000)
+        const ids = [...new Set((lines ?? []).map((l: any) => l.sale_id))]
+        if (ids.length === 0) return success({ data: [], total: 0, page, pageSize, totalPages: 0 })
+        query = query.in('id', ids)
+      }
     }
 
     const from = (page - 1) * pageSize
@@ -1057,18 +1063,23 @@ export const listVouchers = protectedAction<{
     if (storeId && storeId !== 'all') query = query.eq('issued_by_store_id', storeId)
     if (dateFrom) query = query.gte('issued_date', dateFrom)
     if (dateTo) query = query.lte('issued_date', dateTo)
-    if (codeSearch && codeSearch.trim()) query = query.ilike('code', `%${codeSearch.trim().toUpperCase()}%`)
+    if (codeSearch && codeSearch.trim()) {
+      const codeNorm = normalizeSearchTerm(codeSearch)
+      if (codeNorm) query = query.ilike('search_text', `%${codeNorm}%`)
+    }
 
     if (clientSearch && clientSearch.trim()) {
-      const q = clientSearch.trim()
-      const { data: clients } = await ctx.adminClient
-        .from('clients')
-        .select('id')
-        .or(`full_name.ilike.%${q}%,client_code.ilike.%${q}%`)
-        .limit(500)
-      const ids = (clients ?? []).map((c: any) => c.id)
-      if (ids.length === 0) return success({ data: [], total: 0, page, pageSize, totalPages: 0, totals: { originalAmount: 0, remainingAmount: 0 } })
-      query = query.in('client_id', ids)
+      const q = normalizeSearchTerm(clientSearch)
+      if (q) {
+        const { data: clients } = await ctx.adminClient
+          .from('clients')
+          .select('id')
+          .ilike('search_text', `%${q}%`)
+          .limit(500)
+        const ids = (clients ?? []).map((c: any) => c.id)
+        if (ids.length === 0) return success({ data: [], total: 0, page, pageSize, totalPages: 0, totals: { originalAmount: 0, remainingAmount: 0 } })
+        query = query.in('client_id', ids)
+      }
     }
 
     const from = (page - 1) * pageSize

@@ -141,7 +141,7 @@ export const listSuppliers = protectedAction<ListParams, ListResult<any>>(
   async (ctx, params) => {
     const result = await queryList<any>('suppliers', {
       ...params,
-      searchFields: ['name', 'legal_name', 'contact_email', 'contact_name', 'nif_cif'],
+      searchFields: ['search_text'],
     }, `
       id, supplier_code, name, legal_name, nif_cif, supplier_types,
       contact_name, contact_email, contact_phone, city,

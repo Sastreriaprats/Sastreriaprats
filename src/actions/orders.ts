@@ -8,6 +8,7 @@ import { createTailoringOrderSchema, tailoringOrderLineSchema, changeOrderStatus
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { sendOrderConfirmation, sendTailoringStatusUpdate } from '@/lib/email/transactional'
+import { normalizeSearchTerm } from '@/lib/utils'
 
 const SELECT_ORDERS = `
   id, order_number, order_type, status, order_date,
@@ -50,19 +51,20 @@ export const listOrders = protectedAction<ListParams & { status?: string }, List
 
     // Búsqueda por nº de pedido o por nombre/teléfono del cliente. Como
     // PostgREST no permite ilike directo en tablas embebidas, pre-buscamos los
-    // client_id que coinciden y los añadimos al OR como `client_id.in.(...)`.
-    const rawSearch = (params.search || '').trim()
-    // Sanitizamos caracteres que pueden romper el parser .or() de PostgREST
-    // o el patrón ILIKE: comas, paréntesis, comodines, dos puntos, slashes.
-    const safeSearch = rawSearch.replace(/[,()*%:/\\]/g, ' ').trim()
+    // client_id que coinciden contra `clients.search_text` (unaccent + lower)
+    // y los añadimos al OR como `client_id.in.(...)`.
+    const normalizedSearch = normalizeSearchTerm(params.search || '')
+    // Sanitizamos caracteres que pueden romper el parser .or() de PostgREST.
+    const safeSearch = normalizedSearch.replace(/[,()*%:/\\]/g, ' ').trim()
     let searchOr: string | undefined
     if (safeSearch) {
       const { data: matchedClients } = await ctx.adminClient
         .from('clients')
         .select('id')
-        .or(`full_name.ilike.%${safeSearch}%,first_name.ilike.%${safeSearch}%,last_name.ilike.%${safeSearch}%,phone.ilike.%${safeSearch}%,email.ilike.%${safeSearch}%,document_number.ilike.%${safeSearch}%`)
+        .ilike('search_text', `%${safeSearch}%`)
         .limit(500)
       const clientIds = (matchedClients ?? []).map((r: { id: string }) => r.id)
+      // order_number es ASCII (PIN-2026-0053) — basta con un ilike directo.
       const parts = [`order_number.ilike.%${safeSearch}%`]
       if (clientIds.length > 0) parts.push(`client_id.in.(${clientIds.join(',')})`)
       searchOr = parts.join(',')

@@ -2,6 +2,7 @@
 
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
+import { normalizeSearchTerm } from '@/lib/utils'
 import { generateInvoicePdf } from '@/lib/pdf/invoice-pdf'
 import { generateEstimatePdf } from '@/lib/pdf/estimate-pdf'
 import { sendEstimateEmail } from '@/lib/email/transactional'
@@ -164,7 +165,12 @@ export const getEstimates = protectedAction<
       .order('estimate_date', { ascending: false })
 
     if (status && status !== 'all') q = q.eq('status', status)
-    if (search) q = q.or(`estimate_number.ilike.%${search}%,client_name.ilike.%${search}%`)
+    if (search) {
+      const normalized = normalizeSearchTerm(search)
+      if (normalized) {
+        q = q.or(`estimate_number.ilike.%${normalized}%,client_name.ilike.%${normalized}%`)
+      }
+    }
 
     const { data } = await q
     return success((data || []).map((r: Record<string, unknown>) => ({

@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
+import { normalizeSearchTerm } from '@/lib/utils'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle,
@@ -469,10 +470,10 @@ function AssignCategoriesDialog({
   }, [item.id])
 
   const filtered = useMemo(() => {
-    const s = search.trim().toLowerCase()
+    const s = normalizeSearchTerm(search)
     if (!s) return categories
     return categories.filter(c =>
-      c.name.toLowerCase().includes(s) || c.slug.toLowerCase().includes(s),
+      normalizeSearchTerm(c.name || '').includes(s) || normalizeSearchTerm(c.slug || '').includes(s),
     )
   }, [categories, search])
 

@@ -10,6 +10,7 @@ import { generateEAN13, validateEAN13 } from '@/lib/barcode/ean13'
 import { generateSkuBase } from '@/lib/utils/sku'
 import { generateFabricCode } from '@/actions/fabrics'
 import { buildAuditDiff } from '@/lib/audit'
+import { normalizeSearchTerm } from '@/lib/utils'
 
 /** Obtiene el siguiente número correlativo para un SKU base. Cuenta productos con sku LIKE 'skuBase-%' y retorna (count+1) con pad 3. Si el SKU completo ya existe (race), reintenta con el siguiente. */
 export const getNextSkuNumber = protectedAction<
@@ -202,14 +203,14 @@ export const getProductsWithVariantsForBarcodes = protectedAction<
     const products = Array.from(byProduct.values())
 
     // Búsqueda por nombre, SKU producto, SKU variante, barcode o referencia
-    const searchLower = search?.toLowerCase()
+    const searchLower = search ? normalizeSearchTerm(search) : ''
     const searched = searchLower
       ? products.filter((prod) =>
-          prod.product_name.toLowerCase().includes(searchLower) ||
-          prod.product_sku.toLowerCase().includes(searchLower) ||
+          normalizeSearchTerm(prod.product_name || '').includes(searchLower) ||
+          normalizeSearchTerm(prod.product_sku || '').includes(searchLower) ||
           prod.variants.some((v: any) =>
-            (v.variant_sku && v.variant_sku.toLowerCase().includes(searchLower)) ||
-            (v.barcode && v.barcode.startsWith(searchLower))
+            (v.variant_sku && normalizeSearchTerm(v.variant_sku).includes(searchLower)) ||
+            (v.barcode && normalizeSearchTerm(v.barcode).startsWith(searchLower))
           )
         )
       : products
@@ -327,7 +328,7 @@ export const listProductsForBarcodes = protectedAction<ListParams, ListResult<an
   async (ctx, params) => {
     const result = await queryList('products', {
       ...params,
-      searchFields: ['sku', 'name', 'barcode'],
+      searchFields: ['search_text'],
     }, 'id, sku, name, barcode, barcode_generated_at, base_price, is_active')
     return success(result)
   }
@@ -338,7 +339,7 @@ export const listProducts = protectedAction<ListParams, ListResult<any>>(
   async (ctx, params) => {
     const result = await queryList('products', {
       ...params,
-      searchFields: ['sku', 'name', 'brand', 'barcode'],
+      searchFields: ['search_text'],
       filters: {
         ...(params.filters?.product_type === undefined ? { product_type: '!=tailoring_fabric' } : {}),
         ...params.filters,
@@ -365,7 +366,7 @@ export const listProductsForSastre = protectedAction<ListParams, ListResult<any>
   async (ctx, params) => {
     const result = await queryList('products', {
       ...params,
-      searchFields: ['sku', 'name', 'brand', 'barcode'],
+      searchFields: ['search_text'],
     }, `
       id, sku, name, base_price, price_with_tax, category_id, product_type, material, fabric_meters_used,
       product_categories!products_category_id_fkey(name),
@@ -1058,7 +1059,7 @@ export const listTransferCandidates = protectedAction<
       if (variants?.length) allVariants.push(...variants)
     }
 
-    const s = (search || '').trim().toLowerCase()
+    const s = normalizeSearchTerm(search || '')
     const rows = allVariants
       .map((v: any) => ({
         product_variant_id: v.id,
@@ -1078,7 +1079,7 @@ export const listTransferCandidates = protectedAction<
       })
       .filter((r: any) => {
         if (!s) return true
-        return `${r.product_name} ${r.product_sku} ${r.variant_sku}`.toLowerCase().includes(s)
+        return normalizeSearchTerm(`${r.product_name} ${r.product_sku} ${r.variant_sku}`).includes(s)
       })
       .sort((a: any, b: any) => `${a.product_name} ${a.variant_sku}`.localeCompare(`${b.product_name} ${b.variant_sku}`))
 

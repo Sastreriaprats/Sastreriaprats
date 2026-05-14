@@ -37,7 +37,7 @@ import {
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
-import { formatCurrency, formatDate, cn } from '@/lib/utils'
+import { formatCurrency, formatDate, cn, normalizeSearchTerm } from '@/lib/utils'
 import { downloadExcel } from '@/lib/excel/export'
 import { toast } from 'sonner'
 import {
@@ -440,11 +440,11 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
   // Útil para refinar la lista ya cargada sin esperar el round-trip del fetch
   // y para cubrir campos que el backend no busca (ej. notes si se añade).
   const filteredInvoices = useMemo(() => {
-    const q = search.trim().toLowerCase()
+    const q = normalizeSearchTerm(search)
     if (!q) return rows
     return rows.filter((inv) =>
-      inv.invoice_number?.toLowerCase().includes(q) ||
-      inv.client_name?.toLowerCase().includes(q),
+      normalizeSearchTerm(inv.invoice_number || '').includes(q) ||
+      normalizeSearchTerm(inv.client_name || '').includes(q),
     )
   }, [rows, search])
 

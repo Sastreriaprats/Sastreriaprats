@@ -3,6 +3,7 @@
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { success, failure } from '@/lib/errors'
+import { normalizeSearchTerm } from '@/lib/utils'
 
 /** Lista tejidos activos para el selector de la ficha de confección (sin restricción de permiso, solo autenticado). */
 export const listActiveFabricsForFicha = protectedAction<
@@ -66,8 +67,10 @@ export const listFabrics = protectedAction<
       query = query.eq('supplier_id', params.supplierId.trim())
     }
     if (params.search?.trim()) {
-      const term = `%${params.search.trim()}%`
-      query = query.or(`name.ilike.${term},fabric_code.ilike.${term},composition.ilike.${term},color_name.ilike.${term}`)
+      const normalized = normalizeSearchTerm(params.search)
+      if (normalized) {
+        query = query.ilike('search_text', `%${normalized}%`)
+      }
     }
     const limit = Math.min(params.limit ?? 200, 500)
     const { data, error } = await query.limit(limit)

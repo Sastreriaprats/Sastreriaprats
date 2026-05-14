@@ -32,6 +32,7 @@ import {
   moveCategorySortOrderAction,
   type ProductCategoryRow,
 } from '@/actions/categories'
+import { normalizeSearchTerm } from '@/lib/utils'
 
 const PRODUCT_TYPE_OPTIONS = [
   { value: 'boutique', label: 'Boutique' },
@@ -106,9 +107,9 @@ export function CategoriesContent({ initialCategories }: { initialCategories: Pr
 
   // árbol filtrado: aplicamos filtros sobre los hijos pero mantenemos los padres si tienen hijos visibles
   const filteredTree = useMemo(() => {
-    const term = search.trim().toLowerCase()
+    const term = normalizeSearchTerm(search)
     const matches = (c: ProductCategoryRow) => {
-      if (term && !c.name.toLowerCase().includes(term) && !c.slug.toLowerCase().includes(term)) return false
+      if (term && !normalizeSearchTerm(c.name || '').includes(term) && !normalizeSearchTerm(c.slug || '').includes(term)) return false
       if (typeFilter !== 'all' && c.product_type !== typeFilter) return false
       if (onlyWebVisible && !c.is_visible_web) return false
       return true

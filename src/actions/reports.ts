@@ -924,3 +924,9 @@ export const getUserSalesSummary = protectedAction<
     })
   }
 )
+
+// ─── Alterations report — deshabilitado ─────────────────────────────
+// El módulo de arreglos es ficha de seguimiento de confección y NO gestiona
+// cobros. El getter `getAlterationsReport` (que agrupaba por importe) se
+// retira del export hasta que se decida si caja se vincula con arreglos.
+// La columna `alterations.amount` sigue en BBDD por si se rehabilita.

@@ -60,7 +60,7 @@ function norm(s: string): string {
   return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '').trim()
 }
 
-const DEP_TABLES = ['sales', 'tailoring_orders', 'appointments', 'boutique_alterations',
+const DEP_TABLES = ['sales', 'tailoring_orders', 'appointments', 'alterations',
   'client_measurements', 'vouchers', 'returns', 'contact_requests']
 
 async function reassignAndDelete(keepId: string, dupId: string): Promise<number> {

@@ -8,7 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { formatCurrency, formatDate, getOrderStatusLabel } from '@/lib/utils'
 import { PaymentHistory } from '@/components/payments/payment-history'
 import { getOrder, markLineDelivered, updateOrderStatus } from '@/actions/orders'
-import { getAlterationsByOrder, updateAlterationStatus, type AlterationRow } from '@/actions/alterations'
+import { getAlterationsByOrder, updateAlterationStatus } from '@/actions/alterations'
+import type { AlterationRow } from '@/types/alterations'
 import { generateFichaForLine, generateFichaForLineCamiseria } from '@/lib/pdf/ficha-confeccion'
 import { generateTicketComplemento } from '@/lib/pdf/ticket-boutique'
 import { generateTailoringOrderTicketPdf } from '@/lib/pdf/tailoring-order-ticket'
@@ -458,35 +459,41 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
           <p className="text-white/40 text-sm text-center py-4">No hay arreglos vinculados a este pedido.</p>
         ) : (
           <div className="space-y-2">
-            {orderAlterations.map(a => (
+            {orderAlterations.map(a => {
+              const officialName = a.official_name || a.official?.name || 'Sin asignar'
+              return (
               <div key={a.id} className="flex items-center gap-3 py-2.5 border-b border-white/[0.06] last:border-b-0">
                 <div className="flex-1 min-w-0">
-                  <p className="text-white text-sm truncate">{a.description}</p>
+                  <p className="text-white text-sm truncate">
+                    <span className="font-mono text-white/40 text-xs mr-2">{a.alteration_number}</span>
+                    {a.description}
+                  </p>
                   <p className="text-white/40 text-xs mt-0.5">
-                    {a.assigned_to_profile?.full_name ?? 'Sin asignar'}
-                    {a.has_cost ? ` · ${formatCurrency(a.cost)}` : ''}
+                    {officialName}
                   </p>
                 </div>
                 <Select
                   value={a.status}
                   onValueChange={async (v) => {
-                    const res = await updateAlterationStatus({ id: a.id, status: v as 'pending' | 'in_progress' | 'completed' | 'delivered' })
+                    const res = await updateAlterationStatus({ id: a.id, status: v as 'pending' | 'sent' | 'ready' | 'delivered' | 'cancelled' })
                     if (res.success) { toast.success('Estado actualizado'); loadAlterations() }
-                    else toast.error(res.error ?? 'Error')
+                    else toast.error('error' in res ? res.error : 'Error')
                   }}
                 >
-                  <SelectTrigger className="h-7 w-28 bg-transparent border-white/10 text-xs text-white shrink-0">
+                  <SelectTrigger className="h-7 w-32 bg-transparent border-white/10 text-xs text-white shrink-0">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="bg-[#0d1629] border border-white/20 text-white">
                     <SelectItem value="pending" className="text-white text-xs focus:bg-white/10 focus:text-white">Pendiente</SelectItem>
-                    <SelectItem value="in_progress" className="text-white text-xs focus:bg-white/10 focus:text-white">En curso</SelectItem>
-                    <SelectItem value="completed" className="text-white text-xs focus:bg-white/10 focus:text-white">Completado</SelectItem>
+                    <SelectItem value="sent" className="text-white text-xs focus:bg-white/10 focus:text-white">Enviado taller</SelectItem>
+                    <SelectItem value="ready" className="text-white text-xs focus:bg-white/10 focus:text-white">Listo</SelectItem>
                     <SelectItem value="delivered" className="text-white text-xs focus:bg-white/10 focus:text-white">Entregado</SelectItem>
+                    <SelectItem value="cancelled" className="text-white text-xs focus:bg-white/10 focus:text-white">Cancelado</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </section>
@@ -497,6 +504,8 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
         storeId={activeStoreId}
         onCreated={loadAlterations}
         preselectedClientId={order.client_id}
+        preselectedClientName={order.clients?.full_name ?? undefined}
+        preselectedClientPhone={order.clients?.phone ?? null}
         preselectedOrderId={order.id}
       />
 
