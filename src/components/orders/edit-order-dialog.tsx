@@ -407,7 +407,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
   return (
     <>
       <Dialog open={open} onOpenChange={(v) => { if (!saving) onOpenChange(v) }}>
-        <DialogContent className="max-w-5xl w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-[1400px] w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Editar pedido {order?.order_number}</DialogTitle>
           </DialogHeader>
@@ -559,17 +559,17 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[180px]">Prenda</TableHead>
-                      <TableHead className="w-[110px]">Tipo</TableHead>
-                      <TableHead className="w-[90px]">PVP (€)</TableHead>
-                      <TableHead className="w-[80px]">Dto. %</TableHead>
-                      <TableHead className="w-[80px]">IVA %</TableHead>
-                      <TableHead className="w-[90px]">Material</TableHead>
-                      <TableHead className="w-[90px]">M. Obra</TableHead>
-                      <TableHead className="w-[90px]">Fábrica</TableHead>
-                      <TableHead className="w-[140px]">Tejido</TableHead>
-                      <TableHead className="w-[80px]">Metros</TableHead>
-                      <TableHead className="w-[140px]">Notas acabado</TableHead>
+                      <TableHead className="w-[180px] text-xs whitespace-nowrap">Prenda</TableHead>
+                      <TableHead className="w-[100px] text-xs whitespace-nowrap">Tipo</TableHead>
+                      <TableHead className="w-[100px] text-xs whitespace-nowrap">PVP (€)</TableHead>
+                      <TableHead className="w-[60px] text-xs whitespace-nowrap">Dto. %</TableHead>
+                      <TableHead className="w-[60px] text-xs whitespace-nowrap">IVA %</TableHead>
+                      <TableHead className="w-[100px] text-xs whitespace-nowrap">Material</TableHead>
+                      <TableHead className="w-[70px] text-xs whitespace-nowrap">M. Obra</TableHead>
+                      <TableHead className="w-[70px] text-xs whitespace-nowrap">Fábrica</TableHead>
+                      <TableHead className="w-[200px] text-xs whitespace-nowrap">Tejido</TableHead>
+                      <TableHead className="w-[90px] text-xs whitespace-nowrap">Metros</TableHead>
+                      <TableHead className="w-[150px] text-xs whitespace-nowrap">Notas acabado</TableHead>
                       <TableHead className="w-[40px]" />
                     </TableRow>
                   </TableHeader>
