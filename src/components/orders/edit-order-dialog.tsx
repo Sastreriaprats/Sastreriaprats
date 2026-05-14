@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/table'
 import { Loader2, Plus, Trash2, Search, Check, X, Scissors } from 'lucide-react'
 import { toast } from 'sonner'
-import { listClients } from '@/actions/clients'
+import { listClients, getClientMeasurements } from '@/actions/clients'
 import { updateOrderAction } from '@/actions/orders'
 import { listFabrics } from '@/actions/fabrics'
 import { createClient } from '@/lib/supabase/client'
@@ -136,6 +136,14 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
   const [fabricSelectorFor, setFabricSelectorFor] = useState<string | null>(null)
   const [fabricSearch, setFabricSearch] = useState('')
 
+  // Medidas del cliente indexadas por garment_type_id (sólo registros actuales).
+  // Las usamos para precargar `configuration` al añadir una línea y al cambiar
+  // el tipo de prenda, para que las fichas impresas salgan con medidas.
+  const [measurementsByGarmentTypeId, setMeasurementsByGarmentTypeId] =
+    useState<Record<string, Record<string, unknown>>>({})
+  const measurementsRef = useRef<Record<string, Record<string, unknown>>>({})
+  useEffect(() => { measurementsRef.current = measurementsByGarmentTypeId }, [measurementsByGarmentTypeId])
+
   // Cargar tipos de prenda y tiendas
   useEffect(() => {
     if (!open) return
@@ -198,6 +206,24 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
       })
       .finally(() => setFabricsLoading(false))
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cargar medidas actuales del cliente para precargar en líneas nuevas.
+  useEffect(() => {
+    if (!open || !clientId) { setMeasurementsByGarmentTypeId({}); return }
+    let cancelled = false
+    getClientMeasurements({ clientId }).then((res) => {
+      if (cancelled || !res?.success || !Array.isArray(res.data)) return
+      const map: Record<string, Record<string, unknown>> = {}
+      for (const row of res.data as Array<{ garment_type_id?: string; values?: Record<string, unknown>; is_current?: boolean; version?: number }>) {
+        if (!row.is_current || !row.garment_type_id) continue
+        // Nos quedamos con la primera ocurrencia (la consulta ya viene
+        // ordenada por created_at desc, así que es la última versión).
+        if (!map[row.garment_type_id]) map[row.garment_type_id] = row.values ?? {}
+      }
+      setMeasurementsByGarmentTypeId(map)
+    })
+    return () => { cancelled = true }
+  }, [open, clientId])
 
   // Buscar cliente
   useEffect(() => {
@@ -266,6 +292,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
   // Helpers para líneas
   const addLine = () => {
     const defaultGarmentId = garmentTypes[0]?.id ?? ''
+    const preloadMeasurements = measurementsRef.current[defaultGarmentId] ?? {}
     setLines((prev) => [
       ...prev,
       {
@@ -284,7 +311,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
         model_name: '',
         model_size: '',
         finishing_notes: '',
-        configuration: {},
+        configuration: { ...preloadMeasurements },
         sort_order: prev.length,
         _key: `new-${Date.now()}-${Math.random()}`,
       },
@@ -297,6 +324,13 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
     setLines((prev) => prev.map((l) => {
       if (l._key !== key) return l
       const next = { ...l, [field]: value }
+      // Al cambiar el tipo de prenda, fusionamos las medidas del cliente
+      // correspondientes. Las medidas del nuevo garment ganan; otras claves
+      // del configuration (opciones, tejido, etc.) se preservan.
+      if (field === 'garment_type_id') {
+        const newMeasurements = measurementsRef.current[value as string] ?? {}
+        next.configuration = { ...l.configuration, ...newMeasurements }
+      }
       // Al cambiar los metros recalculamos material_cost si hay €/m.
       // Si el cache aún no llegó (precarga async), buscamos el precio en el catálogo.
       // No tocamos si el usuario edita material_cost directamente — eso es override manual.
