@@ -1254,8 +1254,10 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
     const entrega = Number(input.entregaACuenta) || 0
     const totalPaid = entrega
 
-    // Extraer fabric_id / fabric_meters desde configuration (tejidoStockId / tejidoMetros)
-    // y persistirlos también en sus columnas dedicadas para poder descontar stock.
+    // Extraer fabric_id / fabric_meters / fabric_description desde configuration
+    // (tejidoStockId / tejidoMetros / tejidoStockNombre|tejidoCatalogo|tejido)
+    // y persistirlos también en sus columnas dedicadas para poder descontar stock
+    // y para que el render del admin (que lee de las columnas, no del JSON) los muestre.
     const linesPayload = linesToInsert.map((l) => {
       const cfg = (l.configuration ?? {}) as Record<string, unknown>
       const fabricIdRaw = (cfg.tejidoStockId ?? cfg.fabric_id) as unknown
@@ -1263,6 +1265,14 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
       const fabricMetersRaw = (cfg.tejidoMetros ?? cfg.fabric_meters) as unknown
       const fabricMetersNum = Number(fabricMetersRaw)
       const fabricMeters = Number.isFinite(fabricMetersNum) && fabricMetersNum > 0 ? fabricMetersNum : null
+      // Descripción legible del tejido: si está en stock, su nombre; si no, lo escrito
+      // en el input "Tejido de catálogo"; como último fallback, el campo `tejido`
+      // (que es donde camisería antigua guardaba el texto libre).
+      const fabricDescription =
+        (typeof cfg.tejidoStockNombre === 'string' && cfg.tejidoStockNombre.trim()) ||
+        (typeof cfg.tejidoCatalogo === 'string' && cfg.tejidoCatalogo.trim()) ||
+        (typeof cfg.tejido === 'string' && cfg.tejido.trim()) ||
+        null
       // Coste material calculado en la ficha (precio €/m × metros). Si la ficha
       // ya lo trae, gana sobre el material_cost previo de la línea.
       const cfgCosteRaw = Number(cfg.tejidoCosteMaterial as unknown as number)
@@ -1279,6 +1289,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
         sort_order: l.sort_order,
         fabric_id: fabricId,
         fabric_meters: fabricMeters,
+        fabric_description: fabricDescription,
       }
     })
 
