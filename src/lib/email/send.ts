@@ -27,11 +27,34 @@ function parseResendError(res: Response, body: unknown): string {
   return `Error al enviar el email (${res.status}). Comprueba la configuración de Resend.`
 }
 
-export async function sendEmail({ to, subject, html }: { to: string; subject: string; html: string }) {
+export async function sendEmail({
+  to,
+  subject,
+  html,
+  headers,
+}: {
+  to: string
+  subject: string
+  html: string
+  /**
+   * Cabeceras adicionales a inyectar en el email saliente (Resend API field
+   * `headers`). Pensado para List-Unsubscribe / List-Unsubscribe-Post en
+   * envíos masivos. No se usa en transaccionales.
+   */
+  headers?: Record<string, string>
+}) {
   const apiKey = process.env.RESEND_API_KEY
   if (!apiKey || apiKey === 'PEGA_AQUÍ_TU_NUEVA_KEY') {
     throw new Error('RESEND_API_KEY no configurada. Añade tu API key en .env.local (consíguela en resend.com).')
   }
+
+  const body: Record<string, unknown> = {
+    from: process.env.RESEND_FROM_EMAIL || 'Sastrería Prats <no-reply@sastreriaprats.com>',
+    to,
+    subject,
+    html,
+  }
+  if (headers && Object.keys(headers).length > 0) body.headers = headers
 
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -39,12 +62,7 @@ export async function sendEmail({ to, subject, html }: { to: string; subject: st
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      from: process.env.RESEND_FROM_EMAIL || 'Sastrería Prats <no-reply@sastreriaprats.com>',
-      to,
-      subject,
-      html,
-    }),
+    body: JSON.stringify(body),
   })
 
   if (!res.ok) {

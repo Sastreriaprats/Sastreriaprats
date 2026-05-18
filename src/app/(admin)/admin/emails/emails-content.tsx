@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
@@ -7,6 +7,11 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import Link from 'next/link'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -15,6 +20,7 @@ import { Switch } from '@/components/ui/switch'
 import {
   Mail, FileText, Send, Plus, Loader2, Eye, Pencil,
   CheckCircle, XCircle, Clock, Megaphone, ChevronLeft, ChevronRight,
+  ImageIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -29,6 +35,12 @@ import {
   upsertEmailTemplate,
 } from '@/actions/emails'
 import { formatDate, formatDateTime } from '@/lib/utils'
+import { TemplateContentEditorDialog, type TemplateForEditor } from '@/components/admin/template-content-editor-dialog'
+import { EmailTemplatePreviewModal } from '@/components/admin/email-template-preview-modal'
+import { NewsletterContentEditor, type CampaignContent } from '@/components/admin/newsletter-content-editor'
+import { TemplatesGallery } from '@/components/admin/templates-gallery'
+import type { ProductSearchResult } from '@/actions/products'
+import { usePermissions } from '@/hooks/use-permissions'
 
 const statusColors: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-700',
@@ -39,12 +51,22 @@ const statusColors: Record<string, string> = {
 }
 
 const segmentLabels: Record<string, string> = {
-  all: 'Todos los clientes',
-  vip: 'Clientes VIP',
-  new_30d: 'Nuevos (30 días)',
-  inactive_90d: 'Inactivos (90 días)',
-  with_orders: 'Con pedidos',
-  web_registered: 'Registrados web',
+  all: 'Todos los clientes (consentidos)',
+  vip: 'Clientes VIP (consentidos)',
+  new_30d: 'Nuevos 30 días (consentidos)',
+  inactive_90d: 'Inactivos 90 días (consentidos)',
+  with_orders: 'Con pedidos (consentidos)',
+  web_registered: 'Registrados web (consentidos)',
+  optin_invitation: '📨 Invitación opt-in (RGPD — solo campaña inicial)',
+}
+
+/**
+ * Texto de ayuda mostrado bajo el selector de segmento. El segmento
+ * `optin_invitation` se dirige a clientes que aún no han dado consentimiento
+ * marketing: úsalo SOLO con la plantilla `newsletter_optin`.
+ */
+const segmentHelpText: Record<string, string> = {
+  optin_invitation: 'Este segmento envía a clientes que aún no han dado consentimiento marketing. Solo debe usarse con la plantilla "newsletter_optin".',
 }
 
 const categoryOptions: { value: string; label: string }[] = [
@@ -59,6 +81,42 @@ type Template = Record<string, unknown>
 type Campaign = Record<string, unknown>
 type LogEntry = Record<string, unknown>
 
+function emptyContent(): CampaignContent {
+  return {
+    hero_image_url: '',
+    hero_image_alt: '',
+    title_kicker: '',
+    title: '',
+    subtitle: '',
+    description: '',
+    products: [],
+    cta_text: '',
+    cta_url: '',
+  }
+}
+
+function contentFromFilters(filters: unknown): CampaignContent {
+  const base = emptyContent()
+  if (!filters || typeof filters !== 'object') return base
+  const c = (filters as Record<string, unknown>).content
+  if (!c || typeof c !== 'object') return base
+  const raw = c as Record<string, unknown>
+  return {
+    hero_image_url: typeof raw.hero_image_url === 'string' ? raw.hero_image_url : '',
+    hero_image_alt: typeof raw.hero_image_alt === 'string' ? raw.hero_image_alt : '',
+    title_kicker:   typeof raw.title_kicker === 'string' ? raw.title_kicker : '',
+    title:          typeof raw.title === 'string' ? raw.title : '',
+    subtitle:       typeof raw.subtitle === 'string' ? raw.subtitle : '',
+    description:    typeof raw.description === 'string' ? raw.description : '',
+    products:       Array.isArray(raw.products) ? (raw.products as ProductSearchResult[]) : [],
+    cta_text:       typeof raw.cta_text === 'string' ? raw.cta_text : '',
+    cta_url:        typeof raw.cta_url === 'string' ? raw.cta_url : '',
+  }
+}
+
+/** Códigos de plantilla que disparan el editor estructurado en lugar del textarea HTML. */
+const STRUCTURED_TEMPLATE_CODES = new Set(['newsletter_default', 'newsletter_optin'])
+
 function slugFrom(str: string): string {
   return str
     .toLowerCase()
@@ -68,6 +126,8 @@ function slugFrom(str: string): string {
 }
 
 export function EmailsContent() {
+  const { can } = usePermissions()
+  const canEditTemplateHtml = can('emails.manage_templates_html')
   const [templates, setTemplates] = useState<Template[]>([])
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [logs, setLogs] = useState<{ logs: LogEntry[]; total: number; page: number }>({ logs: [], total: 0, page: 1 })
@@ -82,6 +142,7 @@ export function EmailsContent() {
   const [campaignForm, setCampaignForm] = useState({
     name: '', subject: '', segment: 'all', template_id: '', body_html: '',
   })
+  const [campaignContent, setCampaignContent] = useState<CampaignContent>(emptyContent())
 
   const [templateForm, setTemplateForm] = useState({
     id: '',
@@ -103,6 +164,33 @@ export function EmailsContent() {
     segment: 'all',
     template_id: '',
   })
+  const [campaignEditContent, setCampaignEditContent] = useState<CampaignContent>(emptyContent())
+  /** Si != null, el AlertDialog de confirmación de envío masivo está abierto y apunta a esa campaña. */
+  const [confirmSend, setConfirmSend] = useState<{ id: string; name: string; recipients: number } | null>(null)
+  /** Galería de plantillas: si admin activa el toggle, también se ven las del sistema. */
+  const [showSystemTemplates, setShowSystemTemplates] = useState(false)
+  /** Modal de miniatura ampliada — guarda la plantilla cuya miniatura se muestra. */
+  const [zoomThumbnail, setZoomThumbnail] = useState<Template | null>(null)
+  /** Plantilla en edición de contenido (lápiz). null = dialog cerrado. */
+  const [editingContent, setEditingContent] = useState<TemplateForEditor | null>(null)
+
+  /** Abre el dialog "sin código" para editar nombre/asunto/estado. */
+  const openContentEditor = (t: Template) => {
+    setEditingContent({
+      id: t.id as string,
+      code: (t.code as string) || '',
+      name: (t.name as string) || '',
+      subject_es: (t.subject_es as string) || '',
+      is_active: Boolean(t.is_active),
+    })
+  }
+
+  /** Devuelve el `code` de la plantilla por id, o '' si no la encuentra. */
+  const templateCodeFor = useCallback((templateId: string): string => {
+    if (!templateId || templateId === 'none') return ''
+    const t = templates.find((x) => (x.id as string) === templateId)
+    return (t?.code as string) || ''
+  }, [templates])
 
   const loadTemplates = useCallback(async () => {
     const res = await listEmailTemplates()
@@ -220,19 +308,71 @@ export function EmailsContent() {
     }
   }
 
+  /** Pre-rellena el dialog "Nueva campaña" con esta plantilla y lo abre. */
+  const useTemplate = (t: Template) => {
+    setCampaignForm({
+      name: '',
+      subject: (t.subject_es as string) || '',
+      segment: 'all',
+      template_id: t.id as string,
+      body_html: '',
+    })
+    setCampaignContent(emptyContent())
+    setShowNewCampaign(true)
+  }
+
+  /** Activa/desactiva una plantilla persistiendo el cambio. */
+  const toggleTemplateActive = async (t: Template) => {
+    const res = await upsertEmailTemplate({
+      id: t.id,
+      name: t.name,
+      code: t.code,
+      category: t.category,
+      subject_es: t.subject_es,
+      subject_en: t.subject_en ?? null,
+      body_html_es: t.body_html_es ?? '',
+      body_html_en: t.body_html_en ?? null,
+      variables: t.variables ?? [],
+      is_active: !t.is_active,
+    })
+    if (res.success) {
+      toast.success(t.is_active ? 'Plantilla desactivada' : 'Plantilla activada')
+      loadTemplates()
+    } else {
+      toast.error(res.error ?? 'Error al actualizar')
+    }
+  }
+
   const handleCreateCampaign = async () => {
     if (!campaignForm.name || !campaignForm.subject) {
       toast.error('Nombre y asunto obligatorios')
       return
     }
+    const code = templateCodeFor(campaignForm.template_id)
+    const structured = STRUCTURED_TEMPLATE_CODES.has(code)
+
+    // Validación CTA: si hay uno de los dos, deben estar ambos
+    if (structured && code === 'newsletter_default') {
+      const { cta_text, cta_url } = campaignContent
+      if ((cta_text.trim() && !cta_url.trim()) || (!cta_text.trim() && cta_url.trim())) {
+        toast.error('Si añades CTA debes rellenar tanto el texto como la URL')
+        return
+      }
+    }
+
     const res = await createCampaign({
       ...campaignForm,
       template_id: campaignForm.template_id && campaignForm.template_id !== 'none' ? campaignForm.template_id : undefined,
+      // Para plantillas estructuradas guardamos content y dejamos body_html vacío:
+      // el HTML final se genera al enviar a partir de la plantilla.
+      body_html: structured ? '' : campaignForm.body_html,
+      content: structured ? (campaignContent as unknown as Record<string, unknown>) : undefined,
     })
     if (res.success) {
       toast.success(`Campaña creada — ${res.data?.recipients ?? 0} destinatarios`)
       setShowNewCampaign(false)
       setCampaignForm({ name: '', subject: '', segment: 'all', template_id: '', body_html: '' })
+      setCampaignContent(emptyContent())
       loadCampaigns()
     } else {
       toast.error(res.error ?? 'Error al crear')
@@ -253,17 +393,30 @@ export function EmailsContent() {
       segment: (c.segment as string) ?? 'all',
       template_id: (c.template_id as string) || 'none',
     })
+    setCampaignEditContent(contentFromFilters(c.segment_filters))
     setShowEditCampaign(campaignId)
   }
 
   const handleUpdateCampaign = async () => {
     if (!campaignEditForm.id) return
+    const code = templateCodeFor(campaignEditForm.template_id)
+    const structured = STRUCTURED_TEMPLATE_CODES.has(code)
+
+    if (structured && code === 'newsletter_default') {
+      const { cta_text, cta_url } = campaignEditContent
+      if ((cta_text.trim() && !cta_url.trim()) || (!cta_text.trim() && cta_url.trim())) {
+        toast.error('Si añades CTA debes rellenar tanto el texto como la URL')
+        return
+      }
+    }
+
     const res = await updateEmailCampaign({
       id: campaignEditForm.id,
       subject: campaignEditForm.subject.trim(),
-      body_html: campaignEditForm.body_html,
+      body_html: structured ? '' : campaignEditForm.body_html,
       segment: campaignEditForm.segment,
       template_id: campaignEditForm.template_id && campaignEditForm.template_id !== 'none' ? campaignEditForm.template_id : null,
+      content: structured ? (campaignEditContent as unknown as Record<string, unknown>) : undefined,
     })
     if (res.success) {
       toast.success('Campaña actualizada')
@@ -424,12 +577,21 @@ export function EmailsContent() {
                               >
                                 <Pencil className="h-3 w-3" /> Editar
                               </Button>
+                              <Link href={`/admin/emails/preview/${c.id as string}`} target="_blank">
+                                <Button size="sm" variant="outline" className="gap-1 text-xs">
+                                  <Eye className="h-3 w-3" /> Vista previa
+                                </Button>
+                              </Link>
                               <Button
                                 size="sm"
                                 variant="outline"
                                 className="gap-1 text-xs"
                                 disabled={sendingId === (c.id as string)}
-                                onClick={() => handleSendCampaign(c.id as string)}
+                                onClick={() => setConfirmSend({
+                                  id: c.id as string,
+                                  name: (c.name as string) || '',
+                                  recipients: (c.total_recipients as number) || 0,
+                                })}
                               >
                                 {sendingId === (c.id as string)
                                   ? <Loader2 className="h-3 w-3 animate-spin" />
@@ -447,72 +609,21 @@ export function EmailsContent() {
             </div>
           </TabsContent>
 
-          {/* TEMPLATES */}
+          {/* TEMPLATES — galería visual */}
           <TabsContent value="templates">
-            <div className="flex justify-end mb-4">
-              <Button onClick={openNewTemplate} className="gap-2 bg-prats-navy hover:bg-prats-navy/90">
-                <Plus className="h-4 w-4" /> Nueva plantilla
-              </Button>
-            </div>
-            <div className="rounded-lg border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Plantilla</TableHead>
-                    <TableHead>Código</TableHead>
-                    <TableHead>Categoría</TableHead>
-                    <TableHead>Asunto (ES)</TableHead>
-                    <TableHead>Estado</TableHead>
-                    <TableHead>Actualizado</TableHead>
-                    <TableHead className="w-24" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {templates.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">Sin plantillas</TableCell>
-                    </TableRow>
-                  ) : templates.map(t => (
-                    <TableRow key={t.id as string}>
-                      <TableCell className="font-medium">{t.name as string}</TableCell>
-                      <TableCell className="font-mono text-xs">{t.code as string}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-xs">{t.category as string}</Badge>
-                      </TableCell>
-                      <TableCell className="text-sm max-w-[200px] truncate">{t.subject_es as string}</TableCell>
-                      <TableCell>
-                        {t.is_active
-                          ? <Badge className="bg-green-100 text-green-700 text-xs">Activa</Badge>
-                          : <Badge variant="secondary" className="text-xs">Inactiva</Badge>}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{formatDate(t.updated_at as string)}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            title="Vista previa"
-                            onClick={() => setShowPreview(t.id as string)}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            title="Editar"
-                            onClick={() => openEditTemplate(t)}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+            <TemplatesGallery
+              templates={templates}
+              canEditHtml={canEditTemplateHtml}
+              showSystem={showSystemTemplates}
+              onToggleShowSystem={setShowSystemTemplates}
+              onUseTemplate={useTemplate}
+              onEditDefault={openContentEditor}
+              onEditHtml={openEditTemplate}
+              onToggleActive={toggleTemplateActive}
+              onPreview={setShowPreview}
+              onZoom={setZoomThumbnail}
+              onNewTemplate={openNewTemplate}
+            />
           </TabsContent>
 
           {/* LOGS */}
@@ -597,7 +708,7 @@ export function EmailsContent() {
 
       {/* New Campaign Dialog */}
       <Dialog open={showNewCampaign} onOpenChange={setShowNewCampaign}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Nueva campaña de email</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
@@ -626,6 +737,11 @@ export function EmailsContent() {
                   ))}
                 </SelectContent>
               </Select>
+              {segmentHelpText[campaignForm.segment] && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                  {segmentHelpText[campaignForm.segment]}
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label>Plantilla base</Label>
@@ -639,19 +755,13 @@ export function EmailsContent() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label>Contenido HTML</Label>
-              <Textarea
-                value={campaignForm.body_html}
-                onChange={e => setCampaignForm(p => ({ ...p, body_html: e.target.value }))}
-                rows={6}
-                placeholder={'<h2>Tu contenido aquí</h2>\n<p>Usa {{client_name}} para personalizar</p>'}
-                className="font-mono text-xs"
-              />
-              <p className="text-xs text-muted-foreground">
-                Variables disponibles: {'{{client_name}}'}, {'{{first_name}}'}, {'{{client_email}}'}
-              </p>
-            </div>
+            <NewsletterContentEditor
+              templateCode={templateCodeFor(campaignForm.template_id)}
+              content={campaignContent}
+              onContentChange={setCampaignContent}
+              bodyHtml={campaignForm.body_html}
+              onBodyHtmlChange={(v) => setCampaignForm((p) => ({ ...p, body_html: v }))}
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowNewCampaign(false)}>Cancelar</Button>
@@ -664,7 +774,7 @@ export function EmailsContent() {
 
       {/* Edit Campaign Dialog (draft only) */}
       <Dialog open={!!showEditCampaign} onOpenChange={(open) => !open && setShowEditCampaign(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Editar campaña</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
@@ -685,6 +795,11 @@ export function EmailsContent() {
                   ))}
                 </SelectContent>
               </Select>
+              {segmentHelpText[campaignEditForm.segment] && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                  {segmentHelpText[campaignEditForm.segment]}
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label>Plantilla base</Label>
@@ -698,18 +813,27 @@ export function EmailsContent() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label>Contenido HTML</Label>
-              <Textarea
-                value={campaignEditForm.body_html}
-                onChange={e => setCampaignEditForm(p => ({ ...p, body_html: e.target.value }))}
-                rows={6}
-                className="font-mono text-xs"
-              />
-            </div>
+            <NewsletterContentEditor
+              templateCode={templateCodeFor(campaignEditForm.template_id)}
+              content={campaignEditContent}
+              onContentChange={setCampaignEditContent}
+              bodyHtml={campaignEditForm.body_html}
+              onBodyHtmlChange={(v) => setCampaignEditForm((p) => ({ ...p, body_html: v }))}
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEditCampaign(null)}>Cancelar</Button>
+            {campaignEditForm.id &&
+              STRUCTURED_TEMPLATE_CODES.has(templateCodeFor(campaignEditForm.template_id)) && (
+                <Link
+                  href={`/admin/emails/preview/${campaignEditForm.id}`}
+                  target="_blank"
+                >
+                  <Button variant="outline" className="gap-2">
+                    <Eye className="h-4 w-4" /> Vista previa
+                  </Button>
+                </Link>
+              )}
             <Button onClick={handleUpdateCampaign} className="bg-prats-navy hover:bg-prats-navy/90">
               Guardar
             </Button>
@@ -717,12 +841,77 @@ export function EmailsContent() {
         </DialogContent>
       </Dialog>
 
-      {/* Template Create/Edit Modal */}
+      {/* Editor "sin código" de plantilla (lápiz) */}
+      <TemplateContentEditorDialog
+        template={editingContent}
+        onClose={() => setEditingContent(null)}
+        onSaved={() => loadTemplates()}
+      />
+
+      {/* Zoom miniatura plantilla */}
+      <Dialog open={!!zoomThumbnail} onOpenChange={(open) => { if (!open) setZoomThumbnail(null) }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{(zoomThumbnail?.name as string) || 'Vista previa'}</DialogTitle>
+          </DialogHeader>
+          {zoomThumbnail?.thumbnail_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={zoomThumbnail.thumbnail_url as string}
+              alt={zoomThumbnail.name as string}
+              className="w-full h-auto border rounded bg-white"
+            />
+          ) : (
+            <div className="aspect-[600/800] bg-muted/40 rounded flex flex-col items-center justify-center text-muted-foreground">
+              <ImageIcon className="h-8 w-8 mb-2" />
+              <p className="text-sm">Miniatura no disponible</p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirm mass send */}
+      <AlertDialog
+        open={!!confirmSend}
+        onOpenChange={(open) => { if (!open) setConfirmSend(null) }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Enviar campaña a {confirmSend?.recipients ?? 0} destinatarios</AlertDialogTitle>
+            <AlertDialogDescription>
+              Vas a enviar <strong>{confirmSend?.name || 'la campaña'}</strong> a{' '}
+              <strong>{confirmSend?.recipients ?? 0}</strong> destinatarios.
+              Esta acción es irreversible. ¿Continuar?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                if (!confirmSend) return
+                const id = confirmSend.id
+                setConfirmSend(null)
+                await handleSendCampaign(id)
+              }}
+              className="bg-prats-navy hover:bg-prats-navy/90"
+            >
+              Enviar ahora
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Template Create/Edit Modal — editor HTML maestro (admin only) */}
       <Dialog open={!!showTemplateModal} onOpenChange={(open) => !open && setShowTemplateModal(null)}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{templateForm.id ? 'Editar plantilla' : 'Nueva plantilla'}</DialogTitle>
           </DialogHeader>
+          <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+            ⚠ <strong>ZONA TÉCNICA.</strong> Estás editando el HTML maestro de la plantilla. Solo administradores.
+            Un cambio incorrecto puede romper los emails. Para editar solo el contenido visual sin código,
+            vuelve atrás y usa &quot;Editar contenido por defecto&quot;.
+          </div>
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -829,7 +1018,7 @@ export function EmailsContent() {
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Vista previa de plantilla</DialogTitle></DialogHeader>
           {showPreview && (
-            <TemplatePreviewModal
+            <EmailTemplatePreviewModal
               templateId={showPreview}
               onClose={() => setShowPreview(null)}
               onEdit={() => {
@@ -840,92 +1029,6 @@ export function EmailsContent() {
           )}
         </DialogContent>
       </Dialog>
-    </div>
-  )
-}
-
-function TemplatePreviewModal({
-  templateId,
-  onClose,
-  onEdit,
-}: {
-  templateId: string
-  onClose: () => void
-  onEdit: () => void
-}) {
-  const [template, setTemplate] = useState<Record<string, unknown> | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    const load = async () => {
-      const res = await getEmailTemplate(templateId)
-      if (res.success) setTemplate(res.data ?? null)
-      setLoading(false)
-    }
-    load()
-  }, [templateId])
-
-  if (loading) {
-    return (
-      <div className="py-12 text-center">
-        <Loader2 className="mx-auto h-6 w-6 animate-spin" />
-      </div>
-    )
-  }
-  if (!template) {
-    return <p className="py-12 text-center text-muted-foreground">Plantilla no encontrada</p>
-  }
-
-  const html = (template.body_html_es as string) || ''
-  const vars = (template.variables as string[]) ?? []
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4 text-sm">
-        <div>
-          <Label className="text-muted-foreground">Nombre</Label>
-          <p className="font-medium">{template.name as string}</p>
-        </div>
-        <div>
-          <Label className="text-muted-foreground">Código</Label>
-          <p className="font-mono">{template.code as string}</p>
-        </div>
-        <div>
-          <Label className="text-muted-foreground">Categoría</Label>
-          <p>{template.category as string}</p>
-        </div>
-        <div>
-          <Label className="text-muted-foreground">Asunto (ES)</Label>
-          <p>{(template.subject_es as string) || '—'}</p>
-        </div>
-      </div>
-      {vars.length > 0 && (
-        <div>
-          <Label className="text-muted-foreground">Variables</Label>
-          <div className="flex flex-wrap gap-1 mt-1">
-            {vars.map(v => (
-              <Badge key={v} variant="secondary" className="text-xs font-mono">{`{{${v}}}`}</Badge>
-            ))}
-          </div>
-        </div>
-      )}
-      <div>
-        <Label className="text-muted-foreground">Vista previa (HTML renderizado)</Label>
-        <div className="mt-2 rounded-lg border bg-white overflow-hidden">
-          <iframe
-            title="Preview"
-            srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;padding:16px;font-family:system-ui,sans-serif;">${html}</body></html>`}
-            className="w-full min-h-[300px] border-0"
-            sandbox="allow-same-origin"
-          />
-        </div>
-      </div>
-      <div className="flex justify-end gap-2 pt-2">
-        <Button variant="outline" onClick={onClose}>Cerrar</Button>
-        <Button onClick={onEdit} className="bg-prats-navy hover:bg-prats-navy/90">
-          <Pencil className="h-4 w-4 mr-2" /> Editar
-        </Button>
-      </div>
     </div>
   )
 }

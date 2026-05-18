@@ -2600,3 +2600,91 @@ export const getProductMovementHistory = protectedAction<{ productId: string }, 
     })
   }
 )
+
+/**
+ * Resultado simplificado para autocomplete de productos en composer de
+ * campañas de newsletter. Solo incluye datos necesarios para pintar la
+ * tarjeta del producto en el email + enlazarla a su URL pública.
+ */
+export interface ProductSearchResult {
+  id: string
+  name: string
+  image_url: string
+  slug: string
+  public_url: string
+  price: number
+}
+
+/**
+ * Búsqueda de productos para el composer de newsletter. Solo devuelve
+ * productos visibles en la web con slug e imagen principal. El nombre
+ * mostrado prioriza `web_title` sobre `name`.
+ *
+ * Permiso: `emails.view` — mismo nivel que listar campañas, para que
+ * cualquier usuario que pueda editar campañas pueda añadir productos.
+ */
+export const searchProductsForNewsletter = protectedAction<
+  { query: string; limit?: number },
+  ProductSearchResult[]
+>(
+  { permission: 'emails.view', auditModule: 'emails' },
+  async (ctx, { query, limit }) => {
+    const q = (query || '').trim()
+    if (q.length < 2) return success([])
+
+    let safeLimit = Number(limit ?? 10)
+    if (!Number.isFinite(safeLimit) || safeLimit < 1) safeLimit = 10
+    if (safeLimit > 20) safeLimit = 20
+
+    // Escapar comodines y comas en el término. La coma rompe el `.or()` de
+    // PostgREST (es el separador de condiciones); `%` y `_` son comodines de
+    // ILIKE que no queremos que el usuario controle.
+    const escaped = q.replace(/[,%_]/g, (c) => `\\${c}`)
+    const pattern = `%${escaped}%`
+
+    const { data, error } = await ctx.adminClient
+      .from('products')
+      .select('id, name, web_title, main_image_url, web_slug, price_with_tax, base_price')
+      .eq('is_active', true)
+      .eq('is_visible_web', true)
+      .not('web_slug', 'is', null)
+      .not('main_image_url', 'is', null)
+      .or(`name.ilike.${pattern},web_title.ilike.${pattern}`)
+      .order('name', { ascending: true })
+      .limit(safeLimit)
+
+    if (error) {
+      console.error('[searchProductsForNewsletter]', error)
+      return success([])
+    }
+
+    const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://sastreriaprats.com').replace(/\/+$/, '')
+    if (!process.env.NEXT_PUBLIC_APP_URL) {
+      console.warn('[searchProductsForNewsletter] NEXT_PUBLIC_APP_URL no configurada, usando fallback sastreriaprats.com')
+    }
+
+    const results: ProductSearchResult[] = (data ?? []).map((row) => {
+      const r = row as {
+        id: string
+        name: string | null
+        web_title: string | null
+        main_image_url: string | null
+        web_slug: string | null
+        price_with_tax: string | number | null
+        base_price: string | number | null
+      }
+      const displayName = (r.web_title?.trim() || r.name || '').trim()
+      const price = Number(r.price_with_tax ?? r.base_price ?? 0) || 0
+      return {
+        id: r.id,
+        name: displayName,
+        image_url: r.main_image_url || '',
+        slug: r.web_slug || '',
+        public_url: `${baseUrl}/boutique/${r.web_slug}`,
+        price,
+      }
+    })
+
+    return success(results)
+  }
+)
