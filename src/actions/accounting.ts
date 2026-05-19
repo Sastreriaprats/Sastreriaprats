@@ -1035,15 +1035,25 @@ export const createInvoiceFromSaleAction = protectedAction<
     const { error: linesError } = await ctx.adminClient
       .from('invoice_lines')
       .insert(
-        saleLines.map((l: { description: string; quantity: number; unit_price: number; tax_rate?: number; line_total: number }, i: number) => ({
-          invoice_id: inv.id,
-          description: l.description,
-          quantity: l.quantity,
-          unit_price: l.unit_price,
-          tax_rate: l.tax_rate ?? 21,
-          line_total: Number(l.line_total),
-          sort_order: i,
-        }))
+        saleLines.map((l: { description: string; quantity: number; unit_price: number; tax_rate?: number; line_total: number }, i: number) => {
+          // sale_lines.unit_price viene CON IVA (PVP del TPV).
+          // invoice_lines.unit_price es la base imponible (SIN IVA).
+          // Convertimos vía line_total para evitar errores acumulados de redondeo
+          // (mismo patrón que createInvoiceFromTailoringOrderAction).
+          const qty = Math.max(1, Number(l.quantity) || 1)
+          const taxRate = Number(l.tax_rate) || 21
+          const lineTotal = Number(l.line_total)
+          const unitPriceNoTax = lineTotal / (1 + taxRate / 100) / qty
+          return {
+            invoice_id: inv.id,
+            description: l.description,
+            quantity: qty,
+            unit_price: Number(unitPriceNoTax.toFixed(2)),
+            tax_rate: taxRate,
+            line_total: lineTotal,
+            sort_order: i,
+          }
+        })
       )
 
     if (linesError) {
