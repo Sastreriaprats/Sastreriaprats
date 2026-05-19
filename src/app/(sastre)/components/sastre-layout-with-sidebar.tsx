@@ -68,9 +68,9 @@ export function SastreLayoutWithSidebar({ sastreName, isSastrePlus = false, chil
   }
 
   return (
-    <div className="min-h-screen flex items-start" style={{ background: 'radial-gradient(ellipse at top, #1a2744 0%, #0a1020 70%)' }}>
+    <div className="min-h-screen" style={{ background: 'radial-gradient(ellipse at top, #1a2744 0%, #0a1020 70%)' }}>
       <aside
-        className="w-28 shrink-0 flex flex-col border-r border-[#c9a96e]/20 sticky top-0 h-screen overflow-y-auto"
+        className="w-28 fixed top-0 left-0 z-30 flex flex-col border-r border-[#c9a96e]/20 h-screen overflow-y-auto overscroll-y-contain"
         style={{ backgroundColor: '#0d1629' }}
       >
         <Link href="/sastre/nueva-venta" className="p-2 flex flex-col gap-1">
@@ -163,7 +163,7 @@ export function SastreLayoutWithSidebar({ sastreName, isSastrePlus = false, chil
           </button>
         </div>
       </aside>
-      <div className="flex-1 min-h-0 flex flex-col min-w-0">
+      <div className="pl-28 min-h-screen flex flex-col">
         {children}
       </div>
     </div>

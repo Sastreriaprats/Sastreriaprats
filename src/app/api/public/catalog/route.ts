@@ -87,6 +87,8 @@ export async function GET(request: NextRequest) {
     `, { count: 'exact' })
     .eq('is_active', true)
     .eq('is_visible_web', true)
+    .not('main_image_url', 'is', null)
+    .neq('main_image_url', '')
 
   // Productos sin temporada (NULL/'') siempre, más los que tengan slug en activos.
   const seasonOrParts = ['season.is.null', 'season.eq.']

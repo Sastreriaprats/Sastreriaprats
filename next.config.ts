@@ -5,12 +5,17 @@ const nextConfig: NextConfig = {
     root: process.cwd(),
   },
   images: {
+    // Loader custom (src/lib/image-loader.ts) que delega la optimización en
+    // Supabase Image Transformations en lugar del optimizador de Vercel, que
+    // tiene cuota mensual y devolvía 402 cuando se agotaba.
+    loader: 'custom',
+    loaderFile: './src/lib/image-loader.ts',
     remotePatterns: [
       {
         protocol: 'https',
         hostname: 'fvjdqazfgjspxmwlvkpg.supabase.co',
         port: '',
-        pathname: '/storage/v1/object/public/**',
+        pathname: '/storage/v1/**',
       },
       { protocol: 'https', hostname: 'www.sastreriaprats.com', port: '', pathname: '/**' },
       { protocol: 'https', hostname: 'cdn.suitsupply.com', port: '', pathname: '/**' },

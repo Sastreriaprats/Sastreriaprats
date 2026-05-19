@@ -210,6 +210,8 @@ export async function updateSession(request: NextRequest) {
     const isProductosRoute     = pathname.startsWith('/admin/stock/productos')
     const isStockDashboardRoute = pathname === '/admin/stock'
     const isCalendarioRoute    = pathname.startsWith('/admin/calendario')
+    const isPedidosRoute       = pathname.startsWith('/admin/pedidos')
+    const isAlbaranesRoute     = pathname.startsWith('/admin/almacen/albaranes')
     if (hasSastreRole) {
       const url = request.nextUrl.clone()
       url.pathname = '/sastre'
@@ -218,7 +220,7 @@ export async function updateSession(request: NextRequest) {
       setSecurityHeaders(redirectRes)
       return redirectRes
     }
-    if (hasVendedorRole && !(isVendedorAvanzado && (isCodigosBarrasRoute || isProductosRoute || isStockDashboardRoute)) && !isCalendarioRoute) {
+    if (hasVendedorRole && !(isVendedorAvanzado && (isCodigosBarrasRoute || isProductosRoute || isStockDashboardRoute || isPedidosRoute || isAlbaranesRoute)) && !isCalendarioRoute) {
       const url = request.nextUrl.clone()
       url.pathname = '/vendedor'
       const redirectRes = NextResponse.redirect(url)
