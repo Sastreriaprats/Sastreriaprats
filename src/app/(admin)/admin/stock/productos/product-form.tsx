@@ -163,6 +163,12 @@ export function ProductForm({
     tax_rate: 21,
     min_stock_alert: '' as number | '',
   })
+  // Desglose tela + manufactura: solo visible para productos Prats (no tejido).
+  // No se persiste en BBDD — la suma actualiza precios.cost_price. Si el usuario
+  // edita un producto Prats existente y no rellena estos campos, el cost_price
+  // guardado se conserva tal cual.
+  const [costoTela, setCostoTela] = useState<number | ''>('')
+  const [costoManufactura, setCostoManufactura] = useState<number | ''>('')
   const [web, setWeb] = useState({
     is_visible_web: false,
     web_slug: '',
@@ -212,6 +218,23 @@ export function ProductForm({
     const matcher = productTypeMatchers[basico.product_type] ?? (() => true)
     return categoryOptions.filter(c => matcher(c.effective_product_type))
   }, [categoryOptions, basico.product_type])
+
+  // Desglose de coste para productos de marca Prats (excluye tejidos).
+  const isPrats = basico.brand.trim().toLowerCase().includes('prats')
+  const isTailoringFabric = basico.product_type === 'tailoring_fabric'
+  const showDesglose = isPrats && !isTailoringFabric
+  const desgloseTocado = costoTela !== '' || costoManufactura !== ''
+
+  // Si el usuario teclea algo en el desglose, recalcula cost_price. Si no toca
+  // nada y está editando, el cost_price persistido se conserva intacto.
+  useEffect(() => {
+    if (!showDesglose) return
+    if (!desgloseTocado) return
+    const t = costoTela === '' ? 0 : Number(costoTela)
+    const m = costoManufactura === '' ? 0 : Number(costoManufactura)
+    const total = Math.round((t + m) * 100) / 100
+    setPrecios((p) => ({ ...p, cost_price: total > 0 ? total : '' }))
+  }, [showDesglose, desgloseTocado, costoTela, costoManufactura])
 
   useEffect(() => {
     let cancelled = false
@@ -1018,17 +1041,59 @@ export function ProductForm({
               )}
             </CardHeader>
             <CardContent className="space-y-4">
+              {showDesglose && (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Precio de tela (€)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={costoTela === '' ? '' : costoTela}
+                      onChange={(e) => setCostoTela(e.target.value === '' ? '' : Number(e.target.value))}
+                      placeholder="0,00"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Precio de manufactura (€)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={costoManufactura === '' ? '' : costoManufactura}
+                      onChange={(e) => setCostoManufactura(e.target.value === '' ? '' : Number(e.target.value))}
+                      placeholder="0,00"
+                    />
+                  </div>
+                  {isEdit && precios.cost_price !== '' && Number(precios.cost_price) > 0 && !desgloseTocado && (
+                    <p className="md:col-span-2 text-xs text-muted-foreground -mt-1">
+                      Coste actual: <span className="font-medium">{formatCurrency(Number(precios.cost_price))}</span>. Rellena los campos para recalcular.
+                    </p>
+                  )}
+                </div>
+              )}
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>{basico.product_type === 'tailoring_fabric' ? 'Coste por m²' : 'Precio coste'}</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    step={0.01}
-                    value={precios.cost_price === '' ? '' : precios.cost_price}
-                    onChange={(e) => setPrecios((p) => ({ ...p, cost_price: e.target.value === '' ? '' : Number(e.target.value) }))}
-                    placeholder="0,00"
-                  />
+                  {showDesglose ? (
+                    <>
+                      <div className="flex h-10 items-center rounded-md border bg-muted/30 px-3 text-sm text-muted-foreground">
+                        {precios.cost_price === '' || Number(precios.cost_price) <= 0
+                          ? '—'
+                          : formatCurrency(Number(precios.cost_price))}
+                      </div>
+                      <p className="text-xs text-muted-foreground">Calculado automáticamente: tela + manufactura</p>
+                    </>
+                  ) : (
+                    <Input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={precios.cost_price === '' ? '' : precios.cost_price}
+                      onChange={(e) => setPrecios((p) => ({ ...p, cost_price: e.target.value === '' ? '' : Number(e.target.value) }))}
+                      placeholder="0,00"
+                    />
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label>{basico.product_type === 'tailoring_fabric' ? 'PVP por m² (con IVA) *' : 'PVP (precio con IVA) *'}</Label>

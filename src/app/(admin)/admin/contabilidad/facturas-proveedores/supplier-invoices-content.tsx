@@ -925,6 +925,17 @@ export function SupplierInvoicesContent() {
                         >
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
+                        {row.attachment_url?.trim() && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 text-blue-600"
+                            onClick={() => handleOpenAttachment(row.attachment_url!)}
+                            title="Ver PDF de la factura"
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                         <Button
                           size="sm"
                           variant="ghost"
