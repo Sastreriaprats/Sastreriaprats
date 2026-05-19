@@ -1,5 +1,6 @@
 'use server'
 
+import { revalidatePath } from 'next/cache'
 import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { queryList, queryById, getNextNumber } from '@/lib/server/query-helpers'
 import { createProductSchema, updateProductSchema, createVariantSchema, updateVariantSchema } from '@/lib/validations/products'
@@ -422,7 +423,7 @@ export const createProductAction = protectedAction<any, any>(
     auditModule: 'stock',
     auditAction: 'create',
     auditEntity: 'product',
-    revalidate: ['/admin/stock'],
+    revalidate: ['/admin/stock', '/boutique'],
   },
   async (ctx, input) => {
     const parsed = createProductSchema.safeParse(input)
@@ -577,7 +578,7 @@ export const updateProductAction = protectedAction<{ id: string; data: any }, an
     auditModule: 'stock',
     auditAction: 'update',
     auditEntity: 'product',
-    revalidate: ['/admin/stock'],
+    revalidate: ['/admin/stock', '/boutique'],
   },
   async (ctx, { id, data: input }) => {
     const parsed = updateProductSchema.safeParse(input)
@@ -593,6 +594,17 @@ export const updateProductAction = protectedAction<{ id: string; data: any }, an
 
     if (error) return failure(error.message)
     const diff = buildAuditDiff(before as Record<string, unknown> | null, product as Record<string, unknown> | null)
+
+    // Invalidar el ISR de la ficha pública del producto. El wrapper ya
+    // revalida `/admin/stock` y `/boutique` (lista), pero `/boutique/[slug]`
+    // es una ruta dinámica y necesita revalidatePath con tipo 'page' o el
+    // slug concreto. Lo hacemos aquí con el slug real, sólo si cambió o si
+    // existe slug actual (caso típico tras subir imagen, cambiar precio…).
+    const newSlug = (product as any)?.web_slug as string | null | undefined
+    const oldSlug = (before as any)?.web_slug as string | null | undefined
+    if (newSlug) revalidatePath(`/boutique/${newSlug}`)
+    if (oldSlug && oldSlug !== newSlug) revalidatePath(`/boutique/${oldSlug}`)
+
     return success({
       ...(product as Record<string, unknown>),
       auditDescription: `Producto: ${(product as any)?.name ?? (product as any)?.sku ?? id}`,

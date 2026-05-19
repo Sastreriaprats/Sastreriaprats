@@ -1,6 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
+// El catálogo público debe reflejar los cambios del admin de forma inmediata
+// (subir/cambiar imágenes, ajustar precios, marcar productos como visibles).
+// Sin esto, Vercel Edge cachea la respuesta JSON y los cambios tardan en
+// propagarse, lo que provoca que las nuevas fotos aparezcan como rotas.
+export const dynamic = 'force-dynamic'
+
+/** Cabeceras anti-caché aplicadas a TODAS las respuestas (200 y errores).
+ *  Defense in depth ante proxies intermedios y CDN externos. */
+const NO_STORE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+  Pragma: 'no-cache',
+}
+
 function sanitizeSearchPattern(input: string): string {
   return input.replace(/[%_\\]/g, '\\$&')
 }
@@ -100,7 +113,7 @@ export async function GET(request: NextRequest) {
   query = query.range((page - 1) * limit, page * limit - 1)
 
   const { data, count, error } = await query
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: error.message }, { status: 500, headers: NO_STORE_HEADERS })
 
   let products = (data || []).map((p: Record<string, unknown>) => ({
     ...p,
@@ -133,9 +146,9 @@ export async function GET(request: NextRequest) {
     total: count || 0,
     page,
     totalPages: Math.ceil((count || 0) / limit),
-  })
+  }, { headers: NO_STORE_HEADERS })
   } catch (err) {
     console.error('[catalog]', err)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500, headers: NO_STORE_HEADERS })
   }
 }

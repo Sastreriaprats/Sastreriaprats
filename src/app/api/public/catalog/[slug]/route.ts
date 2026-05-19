@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
+// Mismo motivo que /api/public/catalog: el detalle público debe ver al
+// instante los cambios del admin (nueva imagen, precio, descripción).
+export const dynamic = 'force-dynamic'
+
+const NO_STORE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+  Pragma: 'no-cache',
+}
+
 export async function GET(_: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   try {
   const { slug } = await params
@@ -20,7 +29,7 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ slug: 
     .eq('is_visible_web', true)
     .single()
 
-  if (error || !data) return NextResponse.json({ error: 'Product not found' }, { status: 404 })
+  if (error || !data) return NextResponse.json({ error: 'Product not found' }, { status: 404, headers: NO_STORE_HEADERS })
 
   // Resolver guía de tallas: override del producto → guía de la categoría.
   const productGuideId = (data as any).size_guide_id as string | null
@@ -52,9 +61,9 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ slug: 
       })),
   }
 
-  return NextResponse.json(product)
+  return NextResponse.json(product, { headers: NO_STORE_HEADERS })
   } catch (err) {
     console.error('[catalog/slug]', err)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500, headers: NO_STORE_HEADERS })
   }
 }
