@@ -42,7 +42,7 @@ import { downloadExcel } from '@/lib/excel/export'
 import { toast } from 'sonner'
 import {
   getAccountingSummary, getInvoices, getEstimates,
-  getJournalEntries, getVatQuarterly, getClientsForInvoice,
+  getJournalEntries, getVatQuarterly, getClientsForInvoice, getClientForInvoiceById,
   getManualTransactions, createManualTransaction, deleteManualTransaction, updateManualTransaction,
   getAccountingMovements,
   getProductsForInvoice, listTailoringOrdersForInvoice, getTailoringOrderLinesForInvoice,
@@ -139,20 +139,49 @@ const MONTHS = [
 // ─── Shared UI ──────────────────────────────────────────────────────────────
 
 function ClientSearchCombobox({
-  clients,
   value,
+  selectedClient,
   onSelect,
   placeholder = 'Buscar cliente por nombre, email o NIF…',
   disabled = false,
 }: {
-  clients: ClientForInvoice[]
   value: string
+  /** El cliente actualmente seleccionado (para pintar su nombre en el trigger).
+   *  Lo gestiona el caller en estado local, no se busca en BBDD. */
+  selectedClient: ClientForInvoice | null
   onSelect: (client: ClientForInvoice | null) => void
   placeholder?: string
   disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
-  const selected = clients.find(c => c.id === value) || null
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<ClientForInvoice[]>([])
+  const [loading, setLoading] = useState(false)
+
+  // Debounce 300ms sobre la query y consulta server-side.
+  useEffect(() => {
+    if (!open) return
+    const q = query.trim()
+    if (q.length < 2) {
+      setResults([])
+      return
+    }
+    setLoading(true)
+    const handle = setTimeout(async () => {
+      const r = await getClientsForInvoice({ query: q })
+      if (r.success) setResults(r.data ?? [])
+      setLoading(false)
+    }, 300)
+    return () => clearTimeout(handle)
+  }, [query, open])
+
+  // Al abrir, resetear el input y resultados previos.
+  useEffect(() => {
+    if (!open) {
+      setQuery('')
+      setResults([])
+    }
+  }, [open])
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -165,38 +194,39 @@ function ClientSearchCombobox({
           disabled={disabled}
           className="w-full justify-between font-normal"
         >
-          <span className={cn('truncate', !selected && 'text-muted-foreground')}>
-            {selected ? selected.full_name : placeholder}
+          <span className={cn('truncate', !selectedClient && 'text-muted-foreground')}>
+            {selectedClient ? selectedClient.full_name : placeholder}
           </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-        <Command
-          filter={(value, search) => {
-            const normalizedSearch = search.toLowerCase().trim()
-            if (!normalizedSearch) return 1
-            return value.toLowerCase().includes(normalizedSearch) ? 1 : 0
-          }}
-        >
-          <CommandInput placeholder="Buscar…" />
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder="Escribe nombre, email o NIF…"
+            value={query}
+            onValueChange={setQuery}
+          />
           <CommandList
             className="max-h-[300px] overflow-y-auto"
             onWheel={(e) => e.stopPropagation()}
           >
-            <CommandEmpty>Sin resultados.</CommandEmpty>
-            <CommandGroup>
-              {clients.map(c => {
-                const searchValue = [
-                  c.full_name,
-                  c.email ?? '',
-                  c.nif ?? '',
-                  ...c.companies.flatMap(cc => [cc.company_name, cc.nif ?? '']),
-                ].join(' ')
-                return (
+            {query.trim().length < 2 ? (
+              <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+                Escribe al menos 2 caracteres
+              </div>
+            ) : loading ? (
+              <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+                Buscando…
+              </div>
+            ) : results.length === 0 ? (
+              <CommandEmpty>Sin resultados.</CommandEmpty>
+            ) : (
+              <CommandGroup>
+                {results.map((c) => (
                   <CommandItem
                     key={c.id}
-                    value={`${searchValue} ${c.id}`}
+                    value={c.id}
                     onSelect={() => {
                       onSelect(c.id === value ? null : c)
                       setOpen(false)
@@ -211,9 +241,9 @@ function ClientSearchCombobox({
                       </span>
                     </div>
                   </CommandItem>
-                )
-              })}
-            </CommandGroup>
+                ))}
+              </CommandGroup>
+            )}
           </CommandList>
         </Command>
       </PopoverContent>
@@ -404,7 +434,7 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
   const dateFrom = dateRangePreset === 'custom' ? customDateFrom : getDateRangeForPreset(dateRangePreset).from
   const dateTo   = dateRangePreset === 'custom' ? customDateTo   : getDateRangeForPreset(dateRangePreset).to
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [clients, setClients] = useState<ClientForInvoice[]>([])
+  const [selectedClient, setSelectedClient] = useState<ClientForInvoice | null>(null)
   const [billTo, setBillTo] = useState<'client' | string>('client')
   const [saving, setSaving] = useState(false)
 
@@ -465,9 +495,8 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
     await downloadExcel(data, `facturas${range}`, 'Facturas')
   }
 
-  const openDialog = async () => {
-    const r = await getClientsForInvoice()
-    if (r.success) setClients(r.data)
+  const openDialog = () => {
+    setSelectedClient(null)
     setDialogOpen(true)
   }
 
@@ -673,16 +702,16 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
             <div className="space-y-4 p-1">
               {/* Client */}
               {(() => {
-                const selected = clients.find(c => c.id === form.client_id)
-                const hasCompanies = !!selected && selected.companies.length > 0
+                const hasCompanies = !!selectedClient && selectedClient.companies.length > 0
                 return (
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1 col-span-2">
                   <Label>Cliente</Label>
                   <ClientSearchCombobox
-                    clients={clients}
+                    selectedClient={selectedClient}
                     value={form.client_id}
                     onSelect={c => {
+                      setSelectedClient(c)
                       if (!c) {
                         setBillTo('client')
                         setForm(f => ({ ...f, client_id: '', client_name: '', client_nif: '' }))
@@ -710,7 +739,7 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
                     }}
                   />
                 </div>
-                {hasCompanies && selected && (
+                {hasCompanies && selectedClient && (
                   <div className="space-y-1 col-span-2">
                     <Label>Facturar a</Label>
                     <Select
@@ -720,11 +749,11 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
                         if (v === 'client') {
                           setForm(f => ({
                             ...f,
-                            client_name: selected.full_name,
-                            client_nif: selected.nif ?? '',
+                            client_name: selectedClient!.full_name,
+                            client_nif: selectedClient!.nif ?? '',
                           }))
                         } else {
-                          const company = selected.companies.find(cc => cc.id === v)
+                          const company = selectedClient!.companies.find(cc => cc.id === v)
                           if (company) {
                             setForm(f => ({
                               ...f,
@@ -738,9 +767,9 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="client">
-                          <span className="flex items-center gap-2"><User className="h-3.5 w-3.5" /> Particular · {selected.full_name}</span>
+                          <span className="flex items-center gap-2"><User className="h-3.5 w-3.5" /> Particular · {selectedClient!.full_name}</span>
                         </SelectItem>
-                        {selected.companies.map(cc => (
+                        {selectedClient!.companies.map(cc => (
                           <SelectItem key={cc.id} value={cc.id}>
                             <span className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5" /> {cc.company_name}{cc.is_default ? ' (por defecto)' : ''}</span>
                           </SelectItem>
@@ -906,7 +935,7 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
   // ── Estado del formulario de edición ──
   const [form, setForm] = useState({ client_id: inv.client_id ?? '', client_name: inv.client_name, client_nif: (inv as any).client_nif ?? '', invoice_date: inv.invoice_date, due_date: '', notes: '', irpf_rate: 0, tax_rate: 21 })
   const [lines, setLines] = useState<InvoiceLine[]>([])
-  const [clients, setClients] = useState<ClientForInvoice[]>([])
+  const [selectedClient, setSelectedClient] = useState<ClientForInvoice | null>(null)
   const [billTo, setBillTo] = useState<'client' | string>('client')
 
   const [productDialogOpen, setProductDialogOpen] = useState(false)
@@ -921,18 +950,20 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
   const openEdit = async () => {
     const [r, cr] = await Promise.all([
       getInvoiceLinesAction(inv.id),
-      getClientsForInvoice(),
+      inv.client_id ? getClientForInvoiceById(inv.client_id) : Promise.resolve({ success: true as const, data: null }),
     ])
     if (r.success) {
       setLines(r.data.lines.map(l => ({ description: l.description, quantity: l.quantity, unit_price: l.unit_price, tax_rate: l.tax_rate })))
     }
-    if (cr.success) {
-      setClients(cr.data)
+    if (cr.success && cr.data) {
+      setSelectedClient(cr.data)
       // Si el client_name de la factura coincide con una empresa del cliente,
       // pre-seleccionar esa empresa en el selector "Facturar a".
-      const current = cr.data.find(x => x.id === inv.client_id)
-      const matchingCompany = current?.companies.find(cc => cc.company_name === inv.client_name)
+      const matchingCompany = cr.data.companies.find(cc => cc.company_name === inv.client_name)
       setBillTo(matchingCompany ? matchingCompany.id : 'client')
+    } else {
+      setSelectedClient(null)
+      setBillTo('client')
     }
     setConceptOnly(false)
     setEditOpen(true)
@@ -1169,16 +1200,16 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
           <ScrollArea className="flex-1 pr-1">
             <div className="space-y-4 p-1">
               {!conceptOnly && (() => {
-                const selected = clients.find(c => c.id === form.client_id)
-                const hasCompanies = !!selected && selected.companies.length > 0
+                const hasCompanies = !!selectedClient && selectedClient.companies.length > 0
                 return (
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1 col-span-2">
                   <Label>Cliente</Label>
                   <ClientSearchCombobox
-                    clients={clients}
+                    selectedClient={selectedClient}
                     value={form.client_id}
                     onSelect={c => {
+                      setSelectedClient(c)
                       if (!c) {
                         setBillTo('client')
                         setForm(f => ({ ...f, client_id: '', client_name: '', client_nif: '' }))
@@ -1205,7 +1236,7 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                     }}
                   />
                 </div>
-                {hasCompanies && selected && (
+                {hasCompanies && selectedClient && (
                   <div className="space-y-1 col-span-2">
                     <Label>Facturar a</Label>
                     <Select
@@ -1213,9 +1244,9 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                       onValueChange={v => {
                         setBillTo(v)
                         if (v === 'client') {
-                          setForm(f => ({ ...f, client_name: selected.full_name, client_nif: selected.nif ?? '' }))
+                          setForm(f => ({ ...f, client_name: selectedClient!.full_name, client_nif: selectedClient!.nif ?? '' }))
                         } else {
-                          const company = selected.companies.find(cc => cc.id === v)
+                          const company = selectedClient!.companies.find(cc => cc.id === v)
                           if (company) {
                             setForm(f => ({ ...f, client_name: company.company_name, client_nif: company.nif ?? '' }))
                           }
@@ -1225,9 +1256,9 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="client">
-                          <span className="flex items-center gap-2"><User className="h-3.5 w-3.5" /> Particular · {selected.full_name}</span>
+                          <span className="flex items-center gap-2"><User className="h-3.5 w-3.5" /> Particular · {selectedClient!.full_name}</span>
                         </SelectItem>
-                        {selected.companies.map(cc => (
+                        {selectedClient!.companies.map(cc => (
                           <SelectItem key={cc.id} value={cc.id}>
                             <span className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5" /> {cc.company_name}{cc.is_default ? ' (por defecto)' : ''}</span>
                           </SelectItem>
@@ -1698,7 +1729,7 @@ function EstimatesTab() {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [clients, setClients] = useState<ClientForInvoice[]>([])
+  const [selectedClient, setSelectedClient] = useState<ClientForInvoice | null>(null)
   const [billTo, setBillTo] = useState<'client' | string>('client')
   const [saving, setSaving] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -1742,24 +1773,26 @@ function EstimatesTab() {
 
   const openDialog = async () => {
     resetForm()
-    const r = await getClientsForInvoice()
-    if (r.success) setClients(r.data)
+    setSelectedClient(null)
     setDialogOpen(true)
   }
 
   const openEditDialog = async (estimateId: string) => {
     setLoadingEdit(true)
     try {
-      const [clientsRes, detailRes] = await Promise.all([
-        getClientsForInvoice(),
-        getEstimateDetail({ estimateId }),
-      ])
-      if (clientsRes.success) setClients(clientsRes.data)
+      const detailRes = await getEstimateDetail({ estimateId })
       if (!detailRes.success) {
         toast.error('error' in detailRes ? detailRes.error : 'No se pudo cargar el presupuesto')
         return
       }
       const d = detailRes.data
+      // Hidratar el cliente concreto si la factura ya tiene client_id.
+      if (d.client_id) {
+        const cr = await getClientForInvoiceById(d.client_id)
+        if (cr.success) setSelectedClient(cr.data)
+      } else {
+        setSelectedClient(null)
+      }
       setEditingId(d.id)
       setEditingNumber(d.estimate_number)
       setBillTo('client')
@@ -1956,16 +1989,16 @@ function EstimatesTab() {
           <ScrollArea className="flex-1 pr-1">
             <div className="space-y-4 p-1">
               {(() => {
-                const selected = clients.find(c => c.id === form.client_id)
-                const hasCompanies = !!selected && selected.companies.length > 0
+                const hasCompanies = !!selectedClient && selectedClient.companies.length > 0
                 return (
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1 col-span-2">
                       <Label>Cliente</Label>
                       <ClientSearchCombobox
-                        clients={clients}
+                        selectedClient={selectedClient}
                         value={form.client_id}
                         onSelect={c => {
+                          setSelectedClient(c)
                           if (!c) {
                             setBillTo('client')
                             setForm(f => ({ ...f, client_id: '', client_name: '', client_email: '', client_nif: '' }))
@@ -1982,7 +2015,7 @@ function EstimatesTab() {
                         }}
                       />
                     </div>
-                    {hasCompanies && selected && (
+                    {hasCompanies && selectedClient && (
                       <div className="space-y-1 col-span-2">
                         <Label>Facturar a</Label>
                         <Select
@@ -1992,17 +2025,17 @@ function EstimatesTab() {
                             if (v === 'client') {
                               setForm(f => ({
                                 ...f,
-                                client_name: selected.full_name,
-                                client_email: selected.email ?? '',
-                                client_nif: selected.nif ?? '',
+                                client_name: selectedClient!.full_name,
+                                client_email: selectedClient!.email ?? '',
+                                client_nif: selectedClient!.nif ?? '',
                               }))
                             } else {
-                              const company = selected.companies.find(cc => cc.id === v)
+                              const company = selectedClient!.companies.find(cc => cc.id === v)
                               if (company) {
                                 setForm(f => ({
                                   ...f,
                                   client_name: company.company_name,
-                                  client_email: company.contact_email ?? selected.email ?? '',
+                                  client_email: company.contact_email ?? selectedClient!.email ?? '',
                                   client_nif: company.nif ?? '',
                                 }))
                               }
@@ -2012,9 +2045,9 @@ function EstimatesTab() {
                           <SelectTrigger><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="client">
-                              <span className="flex items-center gap-2"><User className="h-3.5 w-3.5" /> Particular · {selected.full_name}</span>
+                              <span className="flex items-center gap-2"><User className="h-3.5 w-3.5" /> Particular · {selectedClient!.full_name}</span>
                             </SelectItem>
-                            {selected.companies.map(cc => (
+                            {selectedClient!.companies.map(cc => (
                               <SelectItem key={cc.id} value={cc.id}>
                                 <span className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5" /> {cc.company_name}{cc.is_default ? ' (por defecto)' : ''}</span>
                               </SelectItem>

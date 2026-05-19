@@ -346,14 +346,26 @@ export type ClientForInvoice = {
   companies: ClientForInvoiceCompany[]
 }
 
-export const getClientsForInvoice = protectedAction<void, ClientForInvoice[]>(
+export const getClientsForInvoice = protectedAction<{ query?: string } | void, ClientForInvoice[]>(
   { permission: 'accounting.edit', auditModule: 'accounting' },
-  async (ctx) => {
+  async (ctx, input) => {
+    const q = ((input && typeof input === 'object' && 'query' in input ? input.query : '') || '').trim()
+    // Sin término o término muy corto → no devolver nada. Evita cargar
+    // los 1800+ clientes al abrir el dialog y deja el combobox limpio
+    // hasta que el usuario escribe.
+    if (q.length < 2) return success([])
+
+    // Escape de caracteres especiales de PostgREST: la coma rompe el `.or()`
+    // y `%`/`_` son comodines de ILIKE que el usuario no debe controlar.
+    const escaped = q.replace(/[,%_]/g, (c) => `\\${c}`)
+    const pattern = `%${escaped}%`
+
     const { data } = await ctx.adminClient
       .from('clients')
       .select('id, first_name, last_name, full_name, email, document_number, client_companies(id, company_name, nif, contact_email, is_default)')
-      .order('last_name')
-      .limit(500)
+      .or(`full_name.ilike.${pattern},first_name.ilike.${pattern},last_name.ilike.${pattern},email.ilike.${pattern},document_number.ilike.${pattern}`)
+      .order('full_name')
+      .limit(30)
     return success((data || []).map((c: Record<string, unknown>) => {
       const fn = (c as any).full_name ?? `${(c as any).first_name ?? ''} ${(c as any).last_name ?? ''}`.trim()
       const rawCompanies = ((c as any).client_companies ?? []) as Record<string, unknown>[]
@@ -374,6 +386,41 @@ export const getClientsForInvoice = protectedAction<void, ClientForInvoice[]>(
         companies,
       }
     }))
+  }
+)
+
+/** Carga un cliente concreto por id en el formato ClientForInvoice. Útil
+ *  para hidratar el combobox cuando se edita una factura/presupuesto que
+ *  ya tiene cliente asignado, sin recargar la lista entera. */
+export const getClientForInvoiceById = protectedAction<string, ClientForInvoice | null>(
+  { permission: 'accounting.edit', auditModule: 'accounting' },
+  async (ctx, id) => {
+    if (!id) return success(null)
+    const { data } = await ctx.adminClient
+      .from('clients')
+      .select('id, first_name, last_name, full_name, email, document_number, client_companies(id, company_name, nif, contact_email, is_default)')
+      .eq('id', id)
+      .maybeSingle()
+    if (!data) return success(null)
+    const c = data as Record<string, unknown>
+    const fn = (c as any).full_name ?? `${(c as any).first_name ?? ''} ${(c as any).last_name ?? ''}`.trim()
+    const rawCompanies = ((c as any).client_companies ?? []) as Record<string, unknown>[]
+    const companies: ClientForInvoiceCompany[] = rawCompanies
+      .map(cc => ({
+        id: String(cc.id),
+        company_name: String((cc as any).company_name ?? ''),
+        nif: ((cc as any).nif as string) ?? null,
+        contact_email: ((cc as any).contact_email as string) ?? null,
+        is_default: Boolean((cc as any).is_default),
+      }))
+      .sort((a, b) => Number(b.is_default) - Number(a.is_default))
+    return success({
+      id: String(c.id),
+      full_name: String(fn || 'Sin nombre'),
+      email: (c.email as string) ?? null,
+      nif: ((c as any).document_number as string) ?? null,
+      companies,
+    })
   }
 )
 
