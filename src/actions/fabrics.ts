@@ -237,8 +237,8 @@ export const updateFabricAction = protectedAction<{ id: string; data: any }, any
   },
   async (ctx, { id, data: input }) => {
     const allowed = [
-      'fabric_code', 'name', 'description', 'supplier_id', 'category_id', 'composition',
-      'color_name', 'color_hex', 'price_per_meter', 'min_stock_meters', 'warehouse_id', 'status',
+      'fabric_code', 'name', 'description', 'supplier_id', 'supplier_reference', 'category_id', 'composition',
+      'color_name', 'color_hex', 'price_per_meter', 'min_stock_meters', 'warehouse_id', 'status', 'is_active',
     ]
     const payload: Record<string, unknown> = {}
     for (const k of allowed) {

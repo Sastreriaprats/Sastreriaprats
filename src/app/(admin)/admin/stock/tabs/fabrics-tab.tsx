@@ -20,6 +20,7 @@ import { listFabrics, updateFabricAction } from '@/actions/fabrics'
 import { listSuppliers } from '@/actions/suppliers'
 import { formatCurrency } from '@/lib/utils'
 import { toast } from 'sonner'
+import { EditFabricDialog, type FabricRow } from '@/components/admin/edit-fabric-dialog'
 
 export const FabricsTab = forwardRef<{ openNewFabricDialog: () => void }>(function FabricsTab(_, ref) {
   const router = useRouter()
@@ -32,6 +33,11 @@ export const FabricsTab = forwardRef<{ openNewFabricDialog: () => void }>(functi
   const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [togglingId, setTogglingId] = useState<string | null>(null)
+  /** Tejido en edición/visualización. null = dialog cerrado. */
+  const [selectedFabric, setSelectedFabric] = useState<FabricRow | null>(null)
+  /** Trigger interno para refrescar el listado tras guardar en el modal. */
+  const [refreshTrigger, setRefreshTrigger] = useState(0)
+  const canEditFabric = can('stock.create_product') || can('products.edit')
 
   useImperativeHandle(ref, () => ({
     openNewFabricDialog: () => router.push('/admin/stock/productos/nuevo'),
@@ -59,7 +65,7 @@ export const FabricsTab = forwardRef<{ openNewFabricDialog: () => void }>(functi
       setIsLoading(false)
     }, 250)
     return () => clearTimeout(handler)
-  }, [search, supplierId, statusFilter])
+  }, [search, supplierId, statusFilter, refreshTrigger])
 
   async function toggleActive(fabric: any) {
     setTogglingId(fabric.id)
@@ -190,11 +196,11 @@ export const FabricsTab = forwardRef<{ openNewFabricDialog: () => void }>(functi
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => router.push(`/admin/stock/tejidos/${f.id}`)}>
+                          <DropdownMenuItem onClick={() => setSelectedFabric(f as FabricRow)}>
                             <Eye className="mr-2 h-4 w-4" /> Ver detalle
                           </DropdownMenuItem>
-                          {can('products.edit') && (
-                            <DropdownMenuItem onClick={() => router.push(`/admin/stock/tejidos/${f.id}?edit=true`)}>
+                          {canEditFabric && (
+                            <DropdownMenuItem onClick={() => setSelectedFabric(f as FabricRow)}>
                               <Pencil className="mr-2 h-4 w-4" /> Editar
                             </DropdownMenuItem>
                           )}
@@ -221,6 +227,17 @@ export const FabricsTab = forwardRef<{ openNewFabricDialog: () => void }>(functi
       <p className="text-xs text-muted-foreground">
         {!isLoading && `${fabrics.length} tejido${fabrics.length !== 1 ? 's' : ''}`}
       </p>
+
+      <EditFabricDialog
+        fabric={selectedFabric}
+        suppliers={suppliers}
+        canEdit={canEditFabric}
+        onClose={() => setSelectedFabric(null)}
+        onSaved={() => {
+          setSelectedFabric(null)
+          setRefreshTrigger((n) => n + 1)
+        }}
+      />
     </div>
   )
 })
