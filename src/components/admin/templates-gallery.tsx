@@ -32,6 +32,7 @@ export function TemplatesGallery({
   onNewTemplate,
 }: {
   templates: Template[]
+  /** Permiso emails.manage_templates_html: gestiona el menú ··· y "Nueva plantilla". */
   canEditHtml: boolean
   showSystem: boolean
   onToggleShowSystem: (v: boolean) => void
@@ -57,12 +58,13 @@ export function TemplatesGallery({
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {canEditHtml && (
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Switch checked={showSystem} onCheckedChange={onToggleShowSystem} />
-              Mostrar plantillas del sistema
-            </label>
-          )}
+          {/* Toggle disponible para cualquier user con emails.view: permite
+              ver las plantillas transaccionales (bienvenida, confirmación de
+              pedido, etc.) y editar nombre/asunto/estado sin tocar HTML. */}
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Switch checked={showSystem} onCheckedChange={onToggleShowSystem} />
+            Mostrar plantillas del sistema
+          </label>
           {canEditHtml && (
             <Button onClick={onNewTemplate} className="gap-2 bg-prats-navy hover:bg-prats-navy/90">
               <Plus className="h-4 w-4" /> Nueva plantilla
@@ -94,8 +96,8 @@ export function TemplatesGallery({
         </div>
       )}
 
-      {/* Sistema (solo admin con toggle activo) */}
-      {canEditHtml && showSystem && system.length > 0 && (
+      {/* Sistema (transaccionales — visible para todos cuando el toggle está activo) */}
+      {showSystem && system.length > 0 && (
         <div className="space-y-3 pt-4 border-t">
           <div>
             <h3 className="text-sm font-semibold text-muted-foreground">Sistema (no usar para campañas)</h3>
@@ -205,17 +207,18 @@ function TemplateCard({
               Usar esta plantilla
             </Button>
           )}
-          {canEditHtml && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="text-xs"
-              onClick={() => onEditDefault(template)}
-              title="Editar contenido por defecto"
-            >
-              <Pencil className="h-3 w-3" />
-            </Button>
-          )}
+          {/* Lápiz visible para cualquier user con emails.view. Edita nombre,
+              asunto y estado vía updateTemplateContent — sin tocar HTML. */}
+          <Button
+            size="sm"
+            variant="outline"
+            className={isSystem ? 'flex-1 text-xs gap-1' : 'text-xs'}
+            onClick={() => onEditDefault(template)}
+            title="Editar nombre, asunto y estado"
+          >
+            <Pencil className="h-3 w-3" />
+            {isSystem && <span>Editar</span>}
+          </Button>
           {canEditHtml && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

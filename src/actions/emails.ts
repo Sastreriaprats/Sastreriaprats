@@ -82,6 +82,48 @@ export const getEmailTemplate = protectedAction<string, Record<string, unknown>>
   }
 )
 
+/**
+ * Edición "sin código" de una plantilla: solo nombre, asunto y estado activo.
+ * Pensado para que usuarios sin permiso técnico (Maryana, Mónica, etc.)
+ * puedan ajustar metadatos de cualquier plantilla — incluyendo
+ * transaccionales — sin tocar el HTML maestro.
+ *
+ * El HTML completo sigue protegido por `emails.manage_templates_html`
+ * vía `upsertEmailTemplate`.
+ */
+export const updateTemplateContent = protectedAction<
+  { id: string; name: string; subject_es: string; is_active: boolean },
+  { id: string }
+>(
+  {
+    permission: 'emails.view',
+    auditModule: 'emails',
+    auditAction: 'update',
+    auditEntity: 'email_template',
+    revalidate: ['/admin/emails'],
+  },
+  async (ctx, input) => {
+    if (!input.id) return failure('Falta el id de la plantilla', 'VALIDATION')
+    const name = (input.name ?? '').trim()
+    const subject = (input.subject_es ?? '').trim()
+    if (name.length < 3) return failure('El nombre debe tener al menos 3 caracteres', 'VALIDATION')
+    if (subject.length < 5) return failure('El asunto debe tener al menos 5 caracteres', 'VALIDATION')
+
+    const { error } = await ctx.adminClient
+      .from('email_templates')
+      .update({
+        name,
+        subject_es: subject,
+        is_active: !!input.is_active,
+        updated_by: ctx.userId,
+      })
+      .eq('id', input.id)
+
+    if (error) return failure(error.message)
+    return success({ id: input.id })
+  }
+)
+
 export const upsertEmailTemplate = protectedAction<Record<string, unknown>, { id: string }>(
   {
     permission: 'emails.manage_templates_html',

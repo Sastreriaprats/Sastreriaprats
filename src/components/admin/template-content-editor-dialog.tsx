@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { upsertEmailTemplate } from '@/actions/emails'
+import { updateTemplateContent } from '@/actions/emails'
 
 /**
  * Editor "sin código" de plantilla. Permite a los administradores editar el
@@ -63,9 +63,10 @@ export function TemplateContentEditorDialog({ template, onClose, onSaved }: Prop
 
     setSaving(true)
     try {
-      // Update parcial: upsertEmailTemplate hace `update({ ...data })` con
-      // los campos que reciba, sin tocar body_html_es ni otros que no pasemos.
-      const res = await upsertEmailTemplate({
+      // updateTemplateContent requiere solo permiso emails.view → cualquier
+      // usuario que pueda ver el módulo puede editar nombre/asunto/estado
+      // sin tocar el HTML maestro.
+      const res = await updateTemplateContent({
         id: template.id,
         name: trimmedName,
         subject_es: trimmedSubject,

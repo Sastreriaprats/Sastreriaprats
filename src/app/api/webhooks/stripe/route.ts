@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createOnlineOrderJournalEntry } from '@/actions/accounting-triggers'
+import { sendOrderConfirmation } from '@/lib/email/transactional'
 import Stripe from 'stripe'
 
 function getStripe() {
@@ -117,44 +118,20 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          if (process.env.RESEND_API_KEY && session.customer_email) {
+          if (session.customer_email) {
+            // Email de confirmación: usa la plantilla `order_confirmation` con
+            // el layout corporativo (logo + footer). Sin items detallados aquí
+            // porque las líneas reales vienen del backend del pedido online.
             try {
-              const res = await fetch('https://api.resend.com/emails', {
-                method: 'POST',
-                headers: {
-                  Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  from: process.env.RESEND_FROM_EMAIL || 'noreply@sastreriaprats.com',
-                  to: session.customer_email,
-                  subject: `Pedido confirmado — ${orderNumber}`,
-                  html: `<h2>¡Gracias por tu compra!</h2>
-                    <p>Tu pedido <strong>${orderNumber}</strong> ha sido confirmado.</p>
-                    <p>Te enviaremos un email cuando se prepare el envío.</p>
-                    <p>Un saludo,<br>Sastrería Prats</p>`,
-                }),
+              await sendOrderConfirmation({
+                order_number: orderNumber,
+                client_name: session.customer_details?.name || session.customer_email.split('@')[0],
+                client_email: session.customer_email,
+                total: (session.amount_total || 0) / 100,
+                items: [],
               })
-              const data = res.ok ? await res.json().catch(() => null) : null
-              await admin.from('email_logs').insert({
-                recipient_email: session.customer_email,
-                subject: `Pedido confirmado — ${orderNumber}`,
-                email_type: 'transactional',
-                status: res.ok ? 'sent' : 'failed',
-                sent_at: new Date().toISOString(),
-                resend_id: (data as { id?: string } | null)?.id ?? null,
-                ...(res.ok ? {} : { error_message: `HTTP ${res.status}` }),
-              })
-              if (!res.ok) console.error('[Stripe webhook] Order confirmation email failed:', res.status)
             } catch (e) {
               console.error('[Stripe webhook] Order confirmation email error:', e)
-              await admin.from('email_logs').insert({
-                recipient_email: session.customer_email,
-                subject: `Pedido confirmado — ${orderNumber}`,
-                email_type: 'transactional',
-                status: 'failed',
-                error_message: e instanceof Error ? e.message : 'Unknown error',
-              })
             }
           }
         } else if (orderId && orderNumber) {
@@ -196,41 +173,17 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          if (process.env.RESEND_API_KEY && session.customer_email) {
+          if (session.customer_email) {
             try {
-              const res = await fetch('https://api.resend.com/emails', {
-                method: 'POST',
-                headers: {
-                  Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  from: process.env.RESEND_FROM_EMAIL || 'noreply@sastreriaprats.com',
-                  to: session.customer_email,
-                  subject: `Pedido confirmado — ${orderNumber}`,
-                  html: `<h2>¡Gracias por tu compra!</h2><p>Tu pedido <strong>${orderNumber}</strong> ha sido confirmado.</p><p>Un saludo,<br>Sastrería Prats</p>`,
-                }),
+              await sendOrderConfirmation({
+                order_number: orderNumber,
+                client_name: session.customer_details?.name || session.customer_email.split('@')[0],
+                client_email: session.customer_email,
+                total: (session.amount_total || 0) / 100,
+                items: [],
               })
-              const data = res.ok ? await res.json().catch(() => null) : null
-              await admin.from('email_logs').insert({
-                recipient_email: session.customer_email,
-                subject: `Pedido confirmado — ${orderNumber}`,
-                email_type: 'transactional',
-                status: res.ok ? 'sent' : 'failed',
-                sent_at: new Date().toISOString(),
-                resend_id: (data as { id?: string } | null)?.id ?? null,
-                ...(res.ok ? {} : { error_message: `HTTP ${res.status}` }),
-              })
-              if (!res.ok) console.error('[Stripe webhook] Order confirmation email failed:', res.status)
             } catch (e) {
               console.error('[Stripe webhook] Order confirmation email error:', e)
-              await admin.from('email_logs').insert({
-                recipient_email: session.customer_email,
-                subject: `Pedido confirmado — ${orderNumber}`,
-                email_type: 'transactional',
-                status: 'failed',
-                error_message: e instanceof Error ? e.message : 'Unknown error',
-              })
             }
           }
         } else if (session.metadata?.order_id) {
