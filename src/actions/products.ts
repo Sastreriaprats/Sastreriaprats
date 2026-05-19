@@ -1940,6 +1940,7 @@ export const listPhysicalWarehouses = protectedAction<void, any[]>(
         id: w.id,
         name: w.name || w.code,
         code: w.code,
+        storeId: w.store_id,
         storeName: storeMap[w.store_id] || '',
       })))
     } catch (err: any) {

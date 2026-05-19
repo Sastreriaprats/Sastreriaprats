@@ -83,7 +83,7 @@ type ClientResult = {
   phone?: string | null
 }
 
-type WarehouseOption = { id: string; name: string; code: string; storeName?: string }
+type WarehouseOption = { id: string; name: string; code: string; storeId: string; storeName?: string }
 
 type EmployeeOption = { id: string; full_name: string }
 
@@ -162,6 +162,14 @@ export function ReservationFormDialog({
   const [partialAmount, setPartialAmount] = useState<string>('')
   const [submitting, setSubmitting] = useState(false)
 
+  // En TPV `storeId` viene siempre por prop. En admin (allowWarehouseSelection)
+  // se deriva del almacén seleccionado, porque cada almacén físico pertenece
+  // a una única tienda. Mientras el admin no haya elegido almacén,
+  // effectiveStoreId es null y el resto del formulario queda bloqueado.
+  const effectiveStoreId = storeId
+    ?? warehouseOptions.find((w) => w.id === warehouseId)?.storeId
+    ?? null
+
   const resetForm = useCallback(() => {
     setProductQuery('')
     setProductResults([])
@@ -187,10 +195,10 @@ export function ReservationFormDialog({
   }, [open, defaultClientId, defaultClientName])
 
   useEffect(() => {
-    if (!open || !storeId) { setEmployees([]); return }
+    if (!open || !effectiveStoreId) { setEmployees([]); return }
     let cancelled = false
     setEmployeesLoading(true)
-    listPosEmployees({ store_id: storeId })
+    listPosEmployees({ store_id: effectiveStoreId })
       .then((res) => {
         if (cancelled) return
         if (res.success && res.data) {
@@ -206,7 +214,7 @@ export function ReservationFormDialog({
       })
       .finally(() => { if (!cancelled) setEmployeesLoading(false) })
     return () => { cancelled = true }
-  }, [open, storeId, profile?.id])
+  }, [open, effectiveStoreId, profile?.id])
 
   useEffect(() => {
     if (!open) return
@@ -242,14 +250,14 @@ export function ReservationFormDialog({
   useEffect(() => {
     if (!open) return
     const q = productQuery.trim()
-    if (q.length < 2 || !storeId) {
+    if (q.length < 2 || !effectiveStoreId) {
       setProductResults([])
       return
     }
     let cancelled = false
     setProductSearching(true)
     const timer = setTimeout(() => {
-      searchProductsForPos({ query: q, storeId })
+      searchProductsForPos({ query: q, storeId: effectiveStoreId })
         .then((res) => {
           if (cancelled) return
           if (res.success) setProductResults((res.data as ProductVariantResult[]) || [])
@@ -259,7 +267,7 @@ export function ReservationFormDialog({
         })
     }, 300)
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [productQuery, storeId, open])
+  }, [productQuery, effectiveStoreId, open])
 
   useEffect(() => {
     if (!open || lockClient) return
@@ -370,7 +378,7 @@ export function ReservationFormDialog({
       const result = await createReservation({
         client_id: clientId,
         employee_id: employeeId,
-        store_id: storeId ?? null,
+        store_id: effectiveStoreId ?? null,
         cash_session_id: cashSessionId ?? null,
         lines: lines.map((l) => ({
           product_variant_id: l.variant.id,
@@ -501,11 +509,12 @@ export function ReservationFormDialog({
             <Select
               value={employeeId ?? ''}
               onValueChange={(v) => setEmployeeId(v || null)}
-              disabled={!storeId || employeesLoading || employees.length === 0}
+              disabled={!effectiveStoreId || employeesLoading || employees.length === 0}
             >
               <SelectTrigger>
                 <SelectValue placeholder={
-                  !storeId ? 'Selecciona una tienda primero' :
+                  !effectiveStoreId
+                    ? (allowWarehouseSelection ? 'Selecciona un almacén primero' : 'Selecciona una tienda primero') :
                   employeesLoading ? 'Cargando vendedores...' :
                   employees.length === 0 ? 'Sin vendedores disponibles' :
                   'Selecciona vendedor'
@@ -606,15 +615,18 @@ export function ReservationFormDialog({
                   placeholder={lines.length === 0 ? 'Buscar primer producto...' : 'Añadir otro producto...'}
                   value={productQuery}
                   onChange={(e) => setProductQuery(e.target.value)}
-                  disabled={!storeId}
+                  disabled={!effectiveStoreId}
                 />
                 {productSearching && (
                   <Loader2 className="absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
                 )}
               </div>
-              {!storeId && (
+              {!effectiveStoreId && (
                 <p className="text-xs text-amber-700 flex items-center gap-1">
-                  <AlertCircle className="h-3 w-3" /> Necesitas una tienda activa para buscar productos.
+                  <AlertCircle className="h-3 w-3" />{' '}
+                  {allowWarehouseSelection
+                    ? 'Selecciona un almacén primero para buscar productos.'
+                    : 'Necesitas una tienda activa para buscar productos.'}
                 </p>
               )}
               {productResults.length > 0 && (
