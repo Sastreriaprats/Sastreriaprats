@@ -75,8 +75,9 @@ interface FallbackPayload {
 }
 
 /**
- * Carga la plantilla por code, interpola variables, envuelve con layout y
- * envía. Si la plantilla no existe en BD, usa el fallback proporcionado.
+ * Carga la plantilla por code, interpola variables (con dos pasadas para
+ * resolver variables anidadas dentro de `editable_fields`), envuelve con
+ * layout y envía. Si la plantilla no existe en BD, usa el fallback.
  *
  * El log en email_logs queda con email_type='transactional'.
  */
@@ -92,15 +93,26 @@ async function sendFromTemplate(
   // Cargar plantilla activa por code. Si no existe o no está activa, fallback.
   const { data: template } = await admin
     .from('email_templates')
-    .select('subject_es, body_html_es, is_active')
+    .select('subject_es, body_html_es, is_active, editable_fields')
     .eq('code', code)
     .maybeSingle()
 
   let subject: string
   let bodyHtml: string
   if (template && (template.is_active as boolean) && (template.body_html_es as string | null)) {
-    subject = renderTemplate((template.subject_es as string) || fallback.subject, vars)
-    bodyHtml = renderTemplate(template.body_html_es as string, vars)
+    // Paso 1: resolver editable_fields contra las variables dinámicas
+    // (los textos editables pueden contener {{order_number}}, {{client_name}}…
+    // que se sustituyen por los datos reales del email).
+    const editable = (template.editable_fields as Record<string, string> | null) || {}
+    const resolvedEditable: Record<string, string> = {}
+    for (const [k, v] of Object.entries(editable)) {
+      resolvedEditable[k] = renderTemplate(String(v ?? ''), vars)
+    }
+    // Paso 2: el merge final tiene los editables ya resueltos + las dinámicas.
+    // En caso de colisión gana el dinámico (datos reales priman sobre defaults).
+    const finalVars = { ...resolvedEditable, ...vars }
+    subject = renderTemplate((template.subject_es as string) || fallback.subject, finalVars)
+    bodyHtml = renderTemplate(template.body_html_es as string, finalVars)
   } else {
     subject = renderTemplate(fallback.subject, vars)
     bodyHtml = renderTemplate(fallback.bodyHtml, vars)

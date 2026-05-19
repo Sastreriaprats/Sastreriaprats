@@ -41,6 +41,8 @@ export interface NewsletterRecipient {
 export interface NewsletterTemplate {
   code?: string | null
   body_html_es?: string | null
+  /** Defaults editables sin código por plantilla (mig 152/153). */
+  editable_fields?: Record<string, string> | null
 }
 
 export interface NewsletterUrls {
@@ -192,12 +194,40 @@ export function composeNewsletterEmail(opts: ComposeOpts): string {
 
   if (code === 'newsletter_optin') {
     const c: NewsletterContent = content || {}
+    const ef = (template.editable_fields || {}) as Record<string, string>
+
+    // Pre-resolver {{first_name}} dentro del cuerpo del opt-in (única
+    // variable dinámica que el admin puede mencionar dentro del texto).
+    // El nombre se sustituye SIN escapar aquí: el escape se aplica más
+    // abajo al construir cada <p> sobre el bloque entero, así evitamos
+    // doble escape.
+    const optinBodyRaw = String(ef.optin_body ?? '')
+    const optinBodyWithName = optinBodyRaw.replace(/\{\{first_name\}\}/g, firstName)
+
+    // Convertir saltos de línea a párrafos HTML (cada bloque separado por
+    // línea en blanco doble queda como un <p>). Los \n simples dentro de
+    // un mismo párrafo se convierten en <br>.
+    const optinBodyHtml = optinBodyWithName
+      .split(/\n{2,}/)
+      .map(block => block.trim())
+      .filter(Boolean)
+      .map(block => `<p style="margin:0 0 14px;font-size:13px;line-height:1.6;color:#555555;">${
+        escapeHtml(block).replace(/\n/g, '<br>')
+      }</p>`)
+      .join('')
+
     return renderTemplate(body, {
       logo_url: logoUrl,
       hero_image_url: c.hero_image_url || '',
       first_name: firstName,
       confirmation_url: urls.confirmationUrl || '',
       client_email: clientEmail,
+      optin_title_kicker: ef.optin_title_kicker ?? '',
+      optin_title: ef.optin_title ?? '',
+      optin_body: optinBodyWithName,
+      optin_body_html: optinBodyHtml,
+      optin_cta_text: ef.optin_cta_text ?? 'SÍ, QUIERO SUSCRIBIRME',
+      optin_footer_note: ef.optin_footer_note ?? '',
     })
   }
 

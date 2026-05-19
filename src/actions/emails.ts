@@ -92,7 +92,15 @@ export const getEmailTemplate = protectedAction<string, Record<string, unknown>>
  * vía `upsertEmailTemplate`.
  */
 export const updateTemplateContent = protectedAction<
-  { id: string; name: string; subject_es: string; is_active: boolean },
+  {
+    id: string
+    name: string
+    subject_es: string
+    is_active: boolean
+    /** Diccionario de textos editables sin código (campos definidos por la
+     *  plantilla en `editable_fields`). Opcional: si no se pasa, no se toca. */
+    editable_fields?: Record<string, string>
+  },
   { id: string }
 >(
   {
@@ -109,14 +117,25 @@ export const updateTemplateContent = protectedAction<
     if (name.length < 3) return failure('El nombre debe tener al menos 3 caracteres', 'VALIDATION')
     if (subject.length < 5) return failure('El asunto debe tener al menos 5 caracteres', 'VALIDATION')
 
+    const update: Record<string, unknown> = {
+      name,
+      subject_es: subject,
+      is_active: !!input.is_active,
+      updated_by: ctx.userId,
+    }
+    if (input.editable_fields && typeof input.editable_fields === 'object') {
+      // Sanitización mínima: nos quedamos con entradas string. Sin validar
+      // claves específicas porque cada plantilla define las suyas.
+      const clean: Record<string, string> = {}
+      for (const [k, v] of Object.entries(input.editable_fields)) {
+        if (typeof v === 'string') clean[k] = v
+      }
+      update.editable_fields = clean
+    }
+
     const { error } = await ctx.adminClient
       .from('email_templates')
-      .update({
-        name,
-        subject_es: subject,
-        is_active: !!input.is_active,
-        updated_by: ctx.userId,
-      })
+      .update(update)
       .eq('id', input.id)
 
     if (error) return failure(error.message)
