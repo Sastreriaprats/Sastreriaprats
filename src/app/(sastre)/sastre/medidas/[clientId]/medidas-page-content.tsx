@@ -14,7 +14,7 @@ import { generateCamiseriaFichaPdf } from '@/lib/camiseria-ficha-pdf'
 // Camisería y camisería industrial comparten el mismo registro de medidas:
 // el sastre toma UNA vez las medidas de camisa del cliente y se usan en ambos
 // tipos de pedido. Por eso aquí solo exponemos un único tab "Camisería".
-const GARMENT_NAMES = ['Americana', 'Pantalón', 'Chaleco', 'Camisería', 'Abrigo', 'Levita']
+const GARMENT_NAMES = ['Americana', 'Pantalón', 'Chaleco', 'Camisería', 'Abrigo', 'Levita', 'Frac']
 /** Índice tab → zona silueta: 0=americana, 1=pantalon, 2=chaleco, 3=frac, 4=abrigo, 5=camiseria */
 const TAB_TO_ZONE = ['americana', 'pantalon', 'chaleco', 'frac', 'abrigo', 'camiseria'] as const
 
@@ -111,7 +111,7 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
       const bodyKeys = Object.fromEntries(
         Object.entries(normalized).filter(([k]) =>
           k.startsWith('americana_') || k.startsWith('pantalon_') || k.startsWith('chaleco_') ||
-          k.startsWith('frac_') || k.startsWith('abrigo_')
+          k.startsWith('frac_') || k.startsWith('abrigo_') || k.startsWith('levita_')
         )
       )
       setValues((prev) => ({ ...prev, ...bodyKeys }))
@@ -288,7 +288,7 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
         await loadCamiseriaMeasurements(currentGroup.id)
         return true
       } else {
-        // Guardar todas las claves body del estado (americana_, pantalon_, chaleco_)
+        // Guardar todas las claves body del estado (americana_, pantalon_, chaleco_, frac_, abrigo_, levita_)
         const fullValues: Record<string, string> = {}
         for (const [k, v] of Object.entries(values)) {
           if (
@@ -296,7 +296,8 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
             k.startsWith('pantalon_') ||
             k.startsWith('chaleco_') ||
             k.startsWith('frac_') ||
-            k.startsWith('abrigo_')
+            k.startsWith('abrigo_') ||
+            k.startsWith('levita_')
           ) {
             if (v !== '' && v !== null && v !== undefined) {
               fullValues[k] = String(v)
@@ -487,25 +488,41 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
                     })()}
                     {(() => {
                       const groupPrefix = getGarmentPrefix(currentGroup.name)
-                      // Solo campos de medidas físicas (no configuración ni características)
-                      const measurementFields = currentGroup.fields.filter((f) => {
+                      // Mostramos los campos numéricos de medidas físicas y los
+                      // del grupo "Configuración" (medidas técnicas que también
+                      // se versionan por cliente). Se excluyen otros grupos
+                      // legacy (características/opciones/acabados) si existieran.
+                      const isConfigField = (f: MeasurementField) =>
+                        (f.field_group || '').toLowerCase().includes('config')
+                      const visibleFields = currentGroup.fields.filter((f) => {
                         const group = (f.field_group || '').toLowerCase()
-                        const isConfigGroup =
-                          group.includes('config') ||
-                          group.includes('caracteristic') ||
-                          group.includes('opcion') ||
-                          group.includes('acabado')
-                        return (
-                          (f.field_type === 'number' || f.field_type === 'decimal') && !isConfigGroup
-                        )
+                        const isOtherLegacyGroup =
+                          !isConfigField(f) && (
+                            group.includes('caracteristic') ||
+                            group.includes('opcion') ||
+                            group.includes('acabado')
+                          )
+                        if (isOtherLegacyGroup) return false
+                        if (isConfigField(f)) {
+                          // En Configuración aceptamos numéricos y booleanos.
+                          return f.field_type === 'number' || f.field_type === 'decimal' || f.field_type === 'boolean'
+                        }
+                        return f.field_type === 'number' || f.field_type === 'decimal'
                       })
+                      // Ordena: primero "medidas" (y grupos no-config) y al
+                      // final el bloque Configuración.
                       const byGroup: Record<string, MeasurementField[]> = {}
-                      for (const f of measurementFields) {
-                        const key = f.field_group || '__default__'
+                      for (const f of visibleFields) {
+                        const key = isConfigField(f) ? 'Configuración técnica' : (f.field_group || '__default__')
                         if (!byGroup[key]) byGroup[key] = []
                         byGroup[key].push(f)
                       }
-                      return Object.entries(byGroup).map(([groupName, groupFields]) => (
+                      const groupEntries = Object.entries(byGroup).sort(([a], [b]) => {
+                        if (a === 'Configuración técnica') return 1
+                        if (b === 'Configuración técnica') return -1
+                        return 0
+                      })
+                      return groupEntries.map(([groupName, groupFields]) => (
                         <div key={groupName}>
                           {groupName !== '__default__' && (
                             <h3 className="text-xs font-semibold text-[#c9a96e] uppercase tracking-[0.2em] mb-4 pb-2 border-b border-[#c9a96e]/15">{groupName}</h3>
@@ -514,6 +531,22 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
                             {groupFields.map((f) => {
                               const vKey = valueKey(groupPrefix, f.code)
                               const unit = (f.unit || 'cm').toLowerCase()
+                              if (f.field_type === 'boolean') {
+                                const checked = String(values[vKey] ?? '') === 'true'
+                                return (
+                                  <div key={f.id} className="space-y-1">
+                                    <label className="flex items-center gap-3 h-12 px-4 rounded-xl border border-white/20 bg-white/[0.07] cursor-pointer touch-manipulation">
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={(e) => setValue(vKey, e.target.checked ? 'true' : '')}
+                                        className="h-5 w-5 accent-[#c9a96e]"
+                                      />
+                                      <span className="text-white/90 text-base font-medium">{f.name}</span>
+                                    </label>
+                                  </div>
+                                )
+                              }
                               return (
                                 <div
                                   key={f.id}

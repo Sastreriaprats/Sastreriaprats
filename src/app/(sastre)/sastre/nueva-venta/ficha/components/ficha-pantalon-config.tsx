@@ -105,28 +105,6 @@ export function FichaPantalonConfig({ keyId, cfg, setField }: Props) {
           </div>
         </div>
       </div>
-      <div>
-        <Label className="text-white/60 text-xs">Configuración</Label>
-        <div className="flex flex-wrap gap-3 mt-2">
-          {[
-            { k: 'confFM', label: 'FM' }, { k: 'confFT', label: 'FT' },
-            { k: 'confPT', label: 'PT' }, { k: 'confMuslo', label: 'Muslo' },
-            { k: 'confRodalTrasero', label: 'Rodal trasero' },
-            { k: 'confBajadaDelantero', label: 'Bajada delantero' },
-            { k: 'confAlturaTrasero', label: 'Altura trasero' },
-            { k: 'confFVSalida', label: 'FV con salida' },
-          ].map(({ k, label }) => (
-            <div key={k} className="flex items-center gap-1.5">
-              <span className="text-white/80 text-sm font-medium">{label}</span>
-              <Input className="h-7 w-16 bg-[#0d1629] border-[#c9a96e]/20 text-white text-sm px-2" value={String(cfg[k] ?? '')} onChange={(e) => setField(k, e.target.value)} placeholder="—" />
-            </div>
-          ))}
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={!!cfg.confFormaGemelo} onChange={(e) => setField('confFormaGemelo', e.target.checked)} className="text-[#c9a96e]" />
-            <span className="text-white/80 text-sm">Forma gemelo</span>
-          </label>
-        </div>
-      </div>
     </>
   )
 }

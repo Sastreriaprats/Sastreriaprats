@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, Copy } from 'lucide-react'
 
 type FabricStockItem = { id: string; fabric_code: string | null; name: string }
 
@@ -86,18 +86,19 @@ interface Props {
   fabricsStock: FabricStockItem[]
   addCamisa: () => void
   removeCamisa: (id: string) => void
+  duplicateCamisa: (id: string) => void
   updateCamisa: (id: string, field: keyof CamisaItem, value: string | number | boolean | undefined) => void
 }
 
 export function FichaCamisaSection({
   isCamiseria, camisas, camiseriaMeasurements, camiseriaMeasurementsLoading,
-  officials, fabricsStock, addCamisa, removeCamisa, updateCamisa,
+  officials, fabricsStock, addCamisa, removeCamisa, duplicateCamisa, updateCamisa,
 }: Props) {
   if (!(isCamiseria || camiseriaMeasurements)) return null
 
   return (
     <section className="rounded-xl border border-[#c9a96e]/20 bg-[#1a2744]/80 p-5 space-y-4">
-      <h2 className="font-serif text-lg text-[#c9a96e]">{isCamiseria ? 'Camisería' : 'Camisas a medida'}</h2>
+      <h2 className="font-serif text-lg text-[#c9a96e]">{isCamiseria ? 'Camisería' : 'Camisas'}</h2>
       {camiseriaMeasurementsLoading ? (
         <p className="text-white/60 text-sm">Cargando medidas de camisería...</p>
       ) : !camiseriaMeasurements && !isCamiseria ? (
@@ -142,6 +143,14 @@ export function FichaCamisaSection({
                     </Button>
                   </div>
                 </div>
+                <Button
+                  type="button"
+                  onClick={() => duplicateCamisa(camisa.id)}
+                  className="w-full min-h-[48px] gap-2 bg-[#c9a96e]/15 border border-[#c9a96e]/30 text-[#c9a96e] font-medium hover:bg-[#c9a96e]/25 transition-all"
+                  title="Duplicar esta camisa con sus características (sin tejido ni precio)"
+                >
+                  <Copy className="h-5 w-5" /> Duplicar camisa
+                </Button>
                 <div className="flex flex-wrap gap-3">
                   <div className="flex-1 min-w-[150px] flex items-center gap-2">
                     <Label className="text-white/60 text-xs whitespace-nowrap">Cortador</Label>

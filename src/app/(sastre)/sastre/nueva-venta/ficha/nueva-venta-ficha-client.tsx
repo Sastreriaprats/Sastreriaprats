@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Plus } from 'lucide-react'
+import { ArrowLeft, Plus, Copy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -20,8 +20,9 @@ import {
 } from '@/components/ui/command'
 import { Check, ChevronsUpDown } from 'lucide-react'
 import { createFichaOrder, searchComplementProducts, getOrder, getNextTalonNumber } from '@/actions/orders'
-import { getClient, getClientMeasurements } from '@/actions/clients'
+import { getClient, getClientMeasurements, saveBodyMeasurements } from '@/actions/clients'
 import { listActiveFabricsForFicha } from '@/actions/fabrics'
+import { useGarmentTypes } from '@/hooks/use-cached-queries'
 import { NuevaVentaSteps } from '../nueva-venta-steps'
 import { generateFichaConfeccionPDF, generateFichaForLine } from '@/lib/pdf/ficha-confeccion'
 import { toast } from 'sonner'
@@ -82,10 +83,49 @@ const PRENDAS_DISPONIBLES = [
   { slug: 'abrigo', label: 'Abrigo' },
   { slug: 'gabardina', label: 'Gabardina' },
   { slug: 'frac', label: 'Frac' },
-  { slug: 'camiseria_industrial', label: 'Camisería Industrial' },
 ]
 
-function defaultPrendaConfig(slug: string): Record<string, unknown> {
+// Campos de "Configuración técnica" que ahora viven en
+// client_measurements del garment_type 'body' (con prefijo de la prenda)
+// y se pre-rellenan automáticamente en la ficha. Cubre pantalon,
+// americana, chaleco (Fase A) y abrigo, levita, frac (Fase B —
+// mismos 7 confXX que americana). El frac comparte CAMPOS con
+// americana pero NO VALORES: tiene patronaje propio y se guarda con
+// prefijo frac_. Otros slugs (teba, gabardina, chaqué, smoking) no
+// pre-rellenan estos campos.
+const CONF_AMERICANA_LIKE: string[] = ['confF', 'confD', 'confFP', 'confFV', 'confHA', 'confHB', 'confVD']
+const CONF_NUMERIC_KEYS: Record<string, string[]> = {
+  pantalon: ['confFM', 'confFT', 'confPT', 'confMuslo', 'confRodalTrasero', 'confBajadaDelantero', 'confAlturaTrasero', 'confFVSalida'],
+  americana: CONF_AMERICANA_LIKE,
+  chaleco: CONF_AMERICANA_LIKE,
+  abrigo: CONF_AMERICANA_LIKE,
+  levita: CONF_AMERICANA_LIKE,
+  frac: CONF_AMERICANA_LIKE,
+}
+const CONF_BOOLEAN_KEYS: Record<string, string[]> = {
+  pantalon: ['confFormaGemelo'],
+  americana: [],
+  chaleco: [],
+  abrigo: [],
+  levita: [],
+  frac: [],
+}
+
+function extractConfFromMeasurements(slug: string, measurements: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  const m = measurements ?? {}
+  for (const k of CONF_NUMERIC_KEYS[slug] ?? []) {
+    const v = m[`${slug}_${k}`]
+    out[k] = v == null || v === '' ? '' : String(v)
+  }
+  for (const k of CONF_BOOLEAN_KEYS[slug] ?? []) {
+    const v = m[`${slug}_${k}`]
+    out[k] = String(v) === 'true'
+  }
+  return out
+}
+
+function defaultPrendaConfig(slug: string, measurements?: Record<string, unknown> | null): Record<string, unknown> {
   // Sin valores por defecto en los radios: el sastre los marca al rellenar
   // para que no queden opciones tildadas que se le pasen sin querer.
   // Los 4 campos de tejido viven AHORA por prenda, no globales.
@@ -97,6 +137,7 @@ function defaultPrendaConfig(slug: string): Record<string, unknown> {
     tejidoPrecioMetro: 0,
     tejidoCosteMaterial: 0,
   }
+  const conf = extractConfFromMeasurements(slug, measurements)
   if (slug === 'pantalon') return {
     ...tejido,
     vueltas: '', bragueta: '', pliegues: '', plieguesVal: '',
@@ -107,13 +148,16 @@ function defaultPrendaConfig(slug: string): Record<string, unknown> {
     pretinaCorrida: false, pretina2Botones: false, pretinaTamano: '', pretinaReforzadaDelante: false, pretinaReforzada: false,
     confFM: '', confFT: '', confPT: '', confMuslo: '', confRodalTrasero: '', confBajadaDelantero: '',
     confAlturaTrasero: '', confFormaGemelo: false, confFVSalida: '',
+    ...conf,
   }
   if (slug === 'chaleco') return {
     ...tejido,
     chalecoCorte: '', chalecoBolsillo: '',
     confF: '', confD: '', confFP: '', confFV: '', confHA: '', confHB: '', confVD: '',
+    ...conf,
   }
   // americana, teba, abrigo, gabardina, frac, chaque, smoking
+  // Solo se pre-rellenan los confXX si el slug es 'americana'.
   return {
     ...tejido,
     botones: '', aberturas: '', bolsilloTipo: '', cerrilleraExterior: false,
@@ -122,6 +166,7 @@ function defaultPrendaConfig(slug: string): Record<string, unknown> {
     escote: false, escoteVal: '', sinHombreras: false, picado34: false, sinHombrera: false,
     hombrerasTraseras: false, pocaHombrera: false, forro: '',
     confF: '', confD: '', confFP: '', confFV: '', confHA: '', confHB: '', confVD: '',
+    ...conf,
   }
 }
 
@@ -250,6 +295,8 @@ export function NuevaVentaFichaClient({
   const orderType = tipoProp || orderTypeProp || ''
   const router = useRouter()
   const isCamiseria = orderType === 'camiseria' || orderType === 'camiseria_industrial'
+  const { data: garmentTypesData } = useGarmentTypes()
+  const bodyGarmentTypeId = garmentTypesData?.find((g) => g.code === 'body')?.id ?? null
 
   // ── Cart ──────────────────────────────────────────────────────────────────
   const [cartItems, setCartItems] = useState<CartItem[]>([])
@@ -311,10 +358,10 @@ export function NuevaVentaFichaClient({
     const subSections = sections.length > 0 ? sections : [{ slug: prendaDef.slug, label: prendaDef.label }]
     setCartItems(prev => [...prev, { id, slug: prendaDef.slug, label: prendaDef.label, precio: 0 }])
     const initConfigs: Record<string, Record<string, unknown>> = {}
-    for (const sp of subSections) initConfigs[`${id}_${sp.slug}`] = defaultPrendaConfig(sp.slug)
+    for (const sp of subSections) initConfigs[`${id}_${sp.slug}`] = defaultPrendaConfig(sp.slug, camiseriaMeasurements)
     setPrendaConfigs(prev => ({ ...prev, ...initConfigs }))
     setShowPrendaSelector(false)
-  }, [])
+  }, [camiseriaMeasurements])
 
   const removeFromCart = (id: string) => {
     const item = cartItems.find(c => c.id === id)
@@ -333,14 +380,70 @@ export function NuevaVentaFichaClient({
     })
   }
 
+  /** Duplica una prenda del carrito clonando configs y oficiales por
+   *  cada sub-prenda, pero vaciando el tejido (las 6 claves) y poniendo
+   *  precio=0, coste=undefined. El duplicado se inserta inmediatamente
+   *  después del original en el array. */
+  const duplicateCartItem = (originalId: string) => {
+    const original = cartItems.find(c => c.id === originalId)
+    if (!original) return
+    const newId = crypto.randomUUID()
+
+    setCartItems(prev => {
+      const idx = prev.findIndex(c => c.id === originalId)
+      if (idx === -1) return prev
+      const copy: CartItem = { ...original, id: newId, precio: 0, coste: undefined }
+      const next = [...prev]
+      next.splice(idx + 1, 0, copy)
+      return next
+    })
+
+    const sections = getSubSections(original.slug, original.label)
+    const prefixOld = `${originalId}_`
+    const prefixNew = `${newId}_`
+
+    setPrendaConfigs(prev => {
+      const next = { ...prev }
+      for (const sp of sections) {
+        const oldKey = `${prefixOld}${sp.slug}`
+        const srcCfg = prev[oldKey]
+        if (!srcCfg) continue
+        const clone = (typeof structuredClone === 'function'
+          ? structuredClone(srcCfg)
+          : JSON.parse(JSON.stringify(srcCfg))) as Record<string, unknown>
+        // Vaciar la tela en el duplicado (6 claves, tipos respetados)
+        clone.tejidoStockId = ''
+        clone.tejidoStockNombre = ''
+        clone.tejidoCatalogo = ''
+        clone.tejidoMetros = ''
+        clone.tejidoPrecioMetro = 0
+        clone.tejidoCosteMaterial = 0
+        next[`${prefixNew}${sp.slug}`] = clone
+      }
+      return next
+    })
+
+    setOficiales(prev => {
+      const next = { ...prev }
+      for (const sp of sections) {
+        const oldKey = `${prefixOld}${sp.slug}`
+        if (prev[oldKey] !== undefined) next[`${prefixNew}${sp.slug}`] = prev[oldKey]
+      }
+      return next
+    })
+  }
+
   const setPCField = (itemId: string, subSlug: string, field: string, value: unknown) => {
     const key = `${itemId}_${subSlug}`
     setPrendaConfigs(prev => ({ ...prev, [key]: { ...(prev[key] ?? {}), [field]: value } }))
   }
 
-  // Seed cart from URL param on mount
+  // Seed cart from URL param on mount. Esperamos a que terminen de
+  // cargarse las medidas del cliente para poder pre-rellenar los
+  // campos de "Configuración técnica" (confXX) en los configs.
   useEffect(() => {
     if (seededRef.current || !prenda || isCamiseria) return
+    if (camiseriaMeasurementsLoading) return
     const prendaDef = PRENDAS_DISPONIBLES.find(p => p.slug === prenda)
     if (!prendaDef) return
     seededRef.current = true
@@ -349,9 +452,9 @@ export function NuevaVentaFichaClient({
     const subSections = sections.length > 0 ? sections : [{ slug: prendaDef.slug, label: prendaDef.label }]
     setCartItems([{ id, slug: prendaDef.slug, label: prendaDef.label, precio: 0 }])
     const initConfigs: Record<string, Record<string, unknown>> = {}
-    for (const sp of subSections) initConfigs[`${id}_${sp.slug}`] = defaultPrendaConfig(sp.slug)
+    for (const sp of subSections) initConfigs[`${id}_${sp.slug}`] = defaultPrendaConfig(sp.slug, camiseriaMeasurements)
     setPrendaConfigs(initConfigs)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [camiseriaMeasurementsLoading, camiseriaMeasurements, prenda, isCamiseria])
 
   // ── Data loading ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -466,6 +569,31 @@ export function NuevaVentaFichaClient({
   const updateCamisa = (id: string, field: keyof CamisaItem, value: string | number | boolean | undefined) => {
     setCamisas((prev) => prev.map((c) => (c.id === id ? { ...c, [field]: value } : c)))
   }
+  /** Duplica una camisa clonando opciones/medidas pero vaciando
+   *  tejido (3 claves) y precio/coste. El duplicado se inserta
+   *  inmediatamente después de la original. */
+  const duplicateCamisa = (originalId: string) => {
+    setCamisas((prev) => {
+      const idx = prev.findIndex((c) => c.id === originalId)
+      if (idx === -1) return prev
+      const original = prev[idx]
+      const cloned = (typeof structuredClone === 'function'
+        ? structuredClone(original)
+        : JSON.parse(JSON.stringify(original))) as CamisaItem
+      const copy: CamisaItem = {
+        ...cloned,
+        id: crypto.randomUUID(),
+        tejido: '',
+        tejidoStockId: undefined,
+        tejidoMetros: undefined,
+        precio: 0,
+        coste: undefined,
+      }
+      const next = [...prev]
+      next.splice(idx + 1, 0, copy)
+      return next
+    })
+  }
 
   // ── Complement ops ────────────────────────────────────────────────────────
   const addComplementFromSearch = (item: ComplementResult, cantidad: number) => {
@@ -561,6 +689,103 @@ export function NuevaVentaFichaClient({
     observaciones: ficha.observaciones,
   })
 
+  // ── Propagación de confXX a las medidas del cliente ─────────────────────
+  // Tras crear el pedido, si alguna prenda pantalón/americana/chaleco trae
+  // valores confXX distintos a los del cliente en client_measurements, se
+  // crea una versión nueva. Si los valores coinciden, no se hace nada (no
+  // se genera ruido en historial).
+  const propagateConfMeasurementsIfChanged = async (sasLines: Array<{ configuration?: Record<string, unknown> | null }>) => {
+    if (!bodyGarmentTypeId) return
+    if (!sasLines || sasLines.length === 0) return
+    try {
+      // 1) Construir las claves prefijadas a partir de las líneas creadas.
+      const newConfKeys: Record<string, string> = {}
+      for (const ln of sasLines) {
+        const cfg = (ln?.configuration ?? {}) as Record<string, unknown>
+        const slug = String(cfg.prendaSlug ?? '').toLowerCase()
+        if (!CONF_NUMERIC_KEYS[slug]) continue
+        for (const k of CONF_NUMERIC_KEYS[slug]) {
+          const v = cfg[k]
+          if (v !== null && v !== undefined && v !== '') {
+            newConfKeys[`${slug}_${k}`] = String(v)
+          }
+        }
+        for (const k of CONF_BOOLEAN_KEYS[slug] ?? []) {
+          const v = cfg[k]
+          if (v === true || v === 'true') {
+            newConfKeys[`${slug}_${k}`] = 'true'
+          }
+        }
+      }
+      // 2) Detectar diferencias respecto a las medidas actuales del cliente.
+      const measures = camiseriaMeasurements ?? {}
+      let hasChanges = false
+      const changedKeys: string[] = []
+      for (const [k, v] of Object.entries(newConfKeys)) {
+        if (String(measures[k] ?? '') !== v) {
+          hasChanges = true
+          changedKeys.push(k)
+        }
+      }
+      // Detectar también claves desaparecidas: hoy en las medidas del cliente
+      // pero NO presentes (o vacías) en la venta nueva → significa que el
+      // sastre las quitó conscientemente.
+      const slugsTocados = new Set<string>()
+      for (const ln of sasLines) {
+        const slug = String((ln?.configuration ?? {}).prendaSlug ?? '').toLowerCase()
+        if (CONF_NUMERIC_KEYS[slug]) slugsTocados.add(slug)
+      }
+      for (const slug of slugsTocados) {
+        const allKeys = [
+          ...(CONF_NUMERIC_KEYS[slug] ?? []),
+          ...(CONF_BOOLEAN_KEYS[slug] ?? []),
+        ]
+        for (const k of allKeys) {
+          const fullKey = `${slug}_${k}`
+          if (measures[fullKey] != null && measures[fullKey] !== '' && newConfKeys[fullKey] === undefined) {
+            hasChanges = true
+            changedKeys.push(fullKey)
+          }
+        }
+      }
+      if (!hasChanges) return
+
+      // 3) Construir el conjunto FULL de claves del body a guardar:
+      //    mantenemos las medidas físicas existentes (americana_, pantalon_,
+      //    chaleco_, frac_, abrigo_) y sobre-escribimos solo las confXX
+      //    tocadas por esta venta.
+      const fullValues: Record<string, string> = {}
+      for (const [k, v] of Object.entries(measures)) {
+        if (v == null || v === '') continue
+        const isBodyKey =
+          k.startsWith('americana_') || k.startsWith('pantalon_') ||
+          k.startsWith('chaleco_') || k.startsWith('frac_') ||
+          k.startsWith('abrigo_') || k.startsWith('levita_')
+        if (!isBodyKey) continue
+        // Si esta clave es un confXX de un slug tocado y NO está en newConfKeys,
+        // significa que se eliminó: no la incluimos.
+        const slugForKey = k.split('_')[0]
+        const isConfKey = k.includes('_conf')
+        if (isConfKey && slugsTocados.has(slugForKey) && newConfKeys[k] === undefined) continue
+        fullValues[k] = String(v)
+      }
+      for (const [k, v] of Object.entries(newConfKeys)) fullValues[k] = v
+
+      const saveRes = await saveBodyMeasurements({
+        client_id: clientId,
+        garment_type_id: bodyGarmentTypeId,
+        values: fullValues,
+      })
+      if (saveRes?.success) {
+        console.info('[Ficha] confXX propagados a medidas del cliente:', changedKeys)
+      } else {
+        console.warn('[Ficha] propagación de confXX fallida:', saveRes)
+      }
+    } catch (e) {
+      console.error('[Ficha] propagateConfMeasurementsIfChanged:', e)
+    }
+  }
+
   // ── Submit ────────────────────────────────────────────────────────────────
   const handleCreateOrder = async () => {
     if (!clientId || !defaultStoreId) { toast.error('Faltan cliente o tienda.'); return }
@@ -620,6 +845,10 @@ export function NuevaVentaFichaClient({
             const sasLines = (orderRes.data.tailoring_order_lines ?? []).filter(
               (l: any) => !l.configuration?.tipo && !l.configuration?.product_name
             )
+            // Propaga los confXX de la venta a las medidas del cliente si
+            // algún valor difiere del actual. Solo crea versión nueva si
+            // realmente hay cambios.
+            await propagateConfMeasurementsIfChanged(sasLines)
             if (usePrendasArquitectura && sasLines.length > 0) {
               for (const line of sasLines) await generateFichaForLine(orderRes.data, line)
             } else {
@@ -683,30 +912,40 @@ export function NuevaVentaFichaClient({
             <h2 className="font-serif text-lg text-[#c9a96e]">Prendas</h2>
 
             {cartItems.map(item => (
-              <div key={item.id} className="flex items-start gap-3 py-2 border-b border-white/[0.06] last:border-0">
-                <span className="text-white flex-1 min-w-0 font-medium pt-2">{getCartItemDisplayLabel(item, cartItems)}</span>
-                <div className="flex flex-col gap-1">
-                  <Input
-                    type="number" min={0} step={0.01} placeholder="PVP"
-                    className="w-28 h-9 bg-white/[0.07] border-white/20 text-white text-sm"
-                    value={item.precio || ''}
-                    onChange={e => setCartItems(prev => prev.map(c => c.id === item.id ? { ...c, precio: parseFloat(e.target.value) || 0 } : c))}
-                  />
-                  <Input
-                    type="number" min={0} step={0.01} placeholder="Opcional"
-                    title="Coste estimado (material + mano de obra)"
-                    className="w-28 h-7 bg-transparent border-white/10 text-white/70 text-xs"
-                    value={item.coste ?? ''}
-                    onChange={e => {
-                      const raw = e.target.value
-                      const value = raw === '' ? undefined : (parseFloat(raw) || 0)
-                      setCartItems(prev => prev.map(c => c.id === item.id ? { ...c, coste: value } : c))
-                    }}
-                  />
-                  <span className="text-[10px] text-white/40 text-right -mt-0.5">Coste est. (€)</span>
+              <div key={item.id} className="py-2 border-b border-white/[0.06] last:border-0 space-y-2">
+                <div className="flex items-start gap-3">
+                  <span className="text-white flex-1 min-w-0 font-medium pt-2">{getCartItemDisplayLabel(item, cartItems)}</span>
+                  <div className="flex flex-col gap-1">
+                    <Input
+                      type="number" min={0} step={0.01} placeholder="PVP"
+                      className="w-28 h-9 bg-white/[0.07] border-white/20 text-white text-sm"
+                      value={item.precio || ''}
+                      onChange={e => setCartItems(prev => prev.map(c => c.id === item.id ? { ...c, precio: parseFloat(e.target.value) || 0 } : c))}
+                    />
+                    <Input
+                      type="number" min={0} step={0.01} placeholder="Opcional"
+                      title="Coste estimado (material + mano de obra)"
+                      className="w-28 h-7 bg-transparent border-white/10 text-white/70 text-xs"
+                      value={item.coste ?? ''}
+                      onChange={e => {
+                        const raw = e.target.value
+                        const value = raw === '' ? undefined : (parseFloat(raw) || 0)
+                        setCartItems(prev => prev.map(c => c.id === item.id ? { ...c, coste: value } : c))
+                      }}
+                    />
+                    <span className="text-[10px] text-white/40 text-right -mt-0.5">Coste est. (€)</span>
+                  </div>
+                  <span className="text-white/40 text-sm shrink-0 pt-2">€</span>
+                  <button type="button" onClick={() => removeFromCart(item.id)} className="text-red-400 hover:text-red-300 shrink-0 text-lg leading-none pt-2">✕</button>
                 </div>
-                <span className="text-white/40 text-sm shrink-0 pt-2">€</span>
-                <button type="button" onClick={() => removeFromCart(item.id)} className="text-red-400 hover:text-red-300 shrink-0 text-lg leading-none pt-2">✕</button>
+                <Button
+                  type="button"
+                  onClick={() => duplicateCartItem(item.id)}
+                  className="w-full min-h-[48px] gap-2 bg-[#c9a96e]/15 border border-[#c9a96e]/30 text-[#c9a96e] font-medium hover:bg-[#c9a96e]/25 transition-all"
+                  title="Duplicar esta prenda con sus características (sin tejido ni precio)"
+                >
+                  <Copy className="h-5 w-5" /> Duplicar prenda
+                </Button>
               </div>
             ))}
 
@@ -1034,6 +1273,7 @@ export function NuevaVentaFichaClient({
           fabricsStock={fabricsStock}
           addCamisa={addCamisa}
           removeCamisa={removeCamisa}
+          duplicateCamisa={duplicateCamisa}
           updateCamisa={updateCamisa}
         />
 

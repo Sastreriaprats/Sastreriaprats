@@ -304,6 +304,7 @@ function buildDescripcionAndConfig(config: Record<string, unknown>): { descripci
     if (config.confFM) confParts.push(`FM ${config.confFM}`)
     if (config.confFT) confParts.push(`FT ${config.confFT}`)
     if (config.confPT) confParts.push(`PT ${config.confPT}`)
+    if (config.confMuslo) confParts.push(`Muslo ${config.confMuslo}`)
     if (config.confRodalTrasero) confParts.push(`Rodal trasero ${config.confRodalTrasero}`)
     if (config.confBajadaDelantero) confParts.push(`Bajada delantero ${config.confBajadaDelantero}`)
     if (config.confAlturaTrasero) confParts.push(`Altura trasero ${config.confAlturaTrasero}`)
