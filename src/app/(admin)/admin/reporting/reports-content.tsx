@@ -16,7 +16,7 @@ import {
   Flame, Star, Receipt,
 } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
-import { getSalesReport, getComparePeriods, getTopProducts, getTailorPerformance, getClientsAnalytics, getSalesByStore, getSalesByEmployee, getSalesByTimePattern, getExpensesReport, getExpensesComparison, type ReportChannel, type TaxMode } from '@/actions/reports'
+import { getSalesReport, getComparePeriods, getTopProducts, getTailorPerformance, getClientsAnalytics, getClientsAdvancedAnalytics, getSalesByStore, getSalesByEmployee, getSalesByTimePattern, getExpensesReport, getExpensesComparison, type ReportChannel, type TaxMode, type ClientsAdvancedAnalytics } from '@/actions/reports'
 import { getStoresList } from '@/actions/config'
 import { SalesChart } from './charts/sales-chart'
 import { TopProductsChart } from './charts/top-products-chart'
@@ -50,11 +50,11 @@ type ProductItem = { name: string; sku: string; units: number; revenue: number }
 type TailorItem = {
   tailor_id: string; name: string; orders: number; revenue: number
   fittings: number; completed: number; avgOrderValue: number; completionRate: number
-  paid: number; pending: number; paidRate: number
+  paid_in_period: number; pending_of_period_orders: number; paidRate: number
 }
 
 type ClientsData = {
-  newClients: number; totalClients: number
+  newClients: number; totalClientsHistorical: number
   sources: Record<string, number>
   topClients: { full_name: string; total_revenue: number }[]
   clientsWithPurchases: number
@@ -96,6 +96,7 @@ export function ReportsContent() {
   const [productSearch, setProductSearch] = useState('')
   const [tailorData, setTailorData] = useState<TailorItem[]>([])
   const [clientsData, setClientsData] = useState<ClientsData | null>(null)
+  const [clientsAdvanced, setClientsAdvanced] = useState<ClientsAdvancedAnalytics | null>(null)
   const [storeData, setStoreData] = useState<StoreItem[]>([])
   const [employeeData, setEmployeeData] = useState<EmployeeItem[]>([])
   const [timePatternData, setTimePatternData] = useState<TimePatternData | null>(null)
@@ -134,7 +135,7 @@ export function ReportsContent() {
       const prevStartStr = prevStart.toISOString().split('T')[0]
       const prevEndStr = prevEnd.toISOString().split('T')[0]
 
-      const [salesRes, compareRes, productsRes, tailorRes, clientsRes, storeRes, employeeRes, timeRes, expensesRes, expCompRes] = await Promise.all([
+      const [salesRes, compareRes, productsRes, tailorRes, clientsRes, clientsAdvRes, storeRes, employeeRes, timeRes, expensesRes, expCompRes] = await Promise.all([
         getSalesReport({ start_date: start, end_date: end, store_id: storeId, channel, group_by: groupBy, tax_mode }),
         getComparePeriods({
           current_start: start, current_end: end,
@@ -144,6 +145,7 @@ export function ReportsContent() {
         getTopProducts({ start_date: start, end_date: end, store_id: storeId, channel, limit: 50, tax_mode }),
         getTailorPerformance({ start_date: start, end_date: end, store_id: storeId, channel, tax_mode }),
         getClientsAnalytics({ start_date: start, end_date: end, store_id: storeId }),
+        getClientsAdvancedAnalytics({ start_date: start, end_date: end, store_id: storeId }),
         getSalesByStore({ start_date: start, end_date: end, store_id: storeId, channel, tax_mode }),
         getSalesByEmployee({ start_date: start, end_date: end, store_id: storeId, channel, tax_mode }),
         getSalesByTimePattern({ start_date: start, end_date: end, store_id: storeId, channel, tax_mode }),
@@ -156,6 +158,7 @@ export function ReportsContent() {
       if (productsRes.success) setTopProducts(productsRes.data)
       if (tailorRes.success) setTailorData(tailorRes.data)
       if (clientsRes.success) setClientsData(clientsRes.data)
+      if (clientsAdvRes.success) setClientsAdvanced(clientsAdvRes.data)
       if (storeRes.success) setStoreData(storeRes.data)
       if (employeeRes.success) setEmployeeData(employeeRes.data)
       if (timeRes.success) setTimePatternData(timeRes.data)
@@ -212,6 +215,7 @@ export function ReportsContent() {
     topProducts,
     tailorData,
     clientsData,
+    clientsAdvanced,
     storeData,
     employeeData,
     timePatternData,
@@ -445,7 +449,7 @@ export function ReportsContent() {
                 />
               </TabsContent>
               <TabsContent value="tailors"><TailorTable data={tailorData} /></TabsContent>
-              <TabsContent value="clients"><ClientsChart data={clientsData} /></TabsContent>
+              <TabsContent value="clients"><ClientsChart data={clientsData} advanced={clientsAdvanced} /></TabsContent>
               <TabsContent value="stores"><StoreTab data={storeData} /></TabsContent>
               <TabsContent value="employees"><EmployeeTab data={employeeData} /></TabsContent>
               <TabsContent value="time"><TimePatternTab data={timePatternData} /></TabsContent>
@@ -644,11 +648,22 @@ function EmployeeTab({ data }: { data: EmployeeItem[] }) {
               )}
             </TableBody>
           </Table>
-          {hasTailorOrders && (
-            <p className="text-[11px] text-muted-foreground mt-2">
-              Pedidos sastre: pedidos de sastrería gestionados por el empleado en el periodo (no se suman al total para evitar duplicar con los cobros).
-            </p>
-          )}
+          <div className="text-[11px] text-muted-foreground mt-3 space-y-1">
+            <p>Esta tabla muestra el dinero que <strong>pasó por las manos</strong> de cada empleado en el periodo.</p>
+            {hasTailoring && (
+              <p>
+                <strong>Cobros Sast.</strong>: pagos de sastrería registrados por este empleado en su POS, incluso
+                si el pedido es de otro sastre. La pestaña &ldquo;Sastres&rdquo; muestra los mismos cobros agrupados
+                por el sastre del pedido.
+              </p>
+            )}
+            {hasTailorOrders && (
+              <p>
+                <strong>Pedidos sastre</strong>: pedidos creados por este sastre en el periodo (informativo, NO se
+                suma al Total para evitar duplicar con los cobros que ya se contabilizan al cobrarse).
+              </p>
+            )}
+          </div>
         </CardContent>
       </Card>
 

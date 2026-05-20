@@ -102,8 +102,13 @@ export type InvoiceRow = {
   invoice_number: string
   client_id: string | null
   client_name: string
+  client_nif: string | null
   invoice_date: string
+  due_date: string | null
   total: number
+  tax_rate: number
+  irpf_rate: number
+  notes: string | null
   status: string
   pdf_url: string | null
   sent_to_client: boolean
@@ -117,7 +122,7 @@ export const getInvoices = protectedAction<
   async (ctx, { search, status, dateFrom, dateTo }) => {
     let q = ctx.adminClient
       .from('invoices')
-      .select('id, invoice_number, client_id, client_name, invoice_date, total, status, pdf_url, sent_to_client')
+      .select('id, invoice_number, client_id, client_name, client_nif, invoice_date, due_date, total, tax_rate, irpf_rate, notes, status, pdf_url, sent_to_client')
       .eq('invoice_type', 'issued')
       .order('invoice_date', { ascending: false })
 
@@ -132,12 +137,32 @@ export const getInvoices = protectedAction<
       invoice_number: String(r.invoice_number ?? ''),
       client_id: (r.client_id as string) ?? null,
       client_name: String(r.client_name ?? ''),
+      client_nif: (r.client_nif as string) ?? null,
       invoice_date: String(r.invoice_date ?? ''),
+      due_date: (r.due_date as string) ?? null,
       total: Number(r.total ?? 0),
+      tax_rate: Number(r.tax_rate ?? 21),
+      irpf_rate: Number(r.irpf_rate ?? 0),
+      notes: (r.notes as string) ?? null,
       status: String(r.status ?? 'draft'),
       pdf_url: (r.pdf_url as string) ?? null,
       sent_to_client: Boolean(r.sent_to_client),
     })))
+  }
+)
+
+/** Re-fetch ligero del status actual de una factura (para pre-check antes de
+ *  editar — el listado puede estar stale si otro usuario emitió/anuló). */
+export const getInvoiceStatusAction = protectedAction<string, { status: string }>(
+  { permission: 'accounting.manage_invoices', auditModule: 'accounting' },
+  async (ctx, invoiceId) => {
+    const { data, error } = await ctx.adminClient
+      .from('invoices')
+      .select('status')
+      .eq('id', invoiceId)
+      .single()
+    if (error || !data) return failure('Factura no encontrada', 'NOT_FOUND')
+    return success({ status: String((data as { status?: string }).status ?? '') })
   }
 )
 
@@ -260,6 +285,10 @@ export type VatQuarterRow = {
   baseImponiblePurchases: number
   ivaSoportado: number
   resultado: number
+  /** Nº de tickets/ventas que contribuyeron al trimestre. */
+  salesCount: number
+  /** Nº de facturas recibidas que contribuyeron al trimestre. */
+  purchasesCount: number
 }
 
 export const getVatQuarterly = protectedAction<
@@ -271,16 +300,29 @@ export const getVatQuarterly = protectedAction<
     const yearStart = `${year}-01-01T00:00:00`
     const yearEnd = `${year}-12-31T23:59:59`
 
-    // 2 queries para todo el año (antes: 8 = 2 por trimestre)
+    // Ventas: sigue siendo sales (tickets TPV). Compras: AHORA se lee de
+    // ap_supplier_invoices (facturas RECIBIDAS, con su IVA desglosado), NO
+    // de supplier_orders (pedidos al proveedor, que rara vez llevan IVA
+    // discriminado y que daban "IVA soportado = 0").
+    // Sin filtro de status: el IVA soportado se contabiliza al RECIBIR la
+    // factura, independientemente del estado de pago.
     const [salesRes, purchasesRes] = await Promise.all([
       ctx.adminClient.from('sales').select('total, total_returned, subtotal, tax_amount, created_at').gte('created_at', yearStart).lte('created_at', yearEnd).in('status', ['completed', 'partially_returned']),
-      ctx.adminClient.from('supplier_orders').select('total, tax_amount, created_at').gte('created_at', yearStart).lte('created_at', yearEnd).in('status', ['received', 'partially_received']),
+      ctx.adminClient.from('ap_supplier_invoices').select('amount, tax_amount, invoice_date').gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`),
     ])
     const sales = (salesRes.data || []) as Array<{ total?: number; total_returned?: number; subtotal?: number; tax_amount?: number; created_at?: string }>
-    const purchases = (purchasesRes.data || []) as Array<{ total?: number; tax_amount?: number; created_at?: string }>
+    const purchases = (purchasesRes.data || []) as Array<{ amount?: number; tax_amount?: number; invoice_date?: string }>
 
     const quarterFromMonth = (m: number) => Math.ceil(m / 3) as 1 | 2 | 3 | 4
-    const byQuarter: Record<number, { baseSales: number; ivaRepercutido: number; basePurchases: number; ivaSoportado: number }> = { 1: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0 }, 2: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0 }, 3: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0 }, 4: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0 } }
+    const byQuarter: Record<number, {
+      baseSales: number; ivaRepercutido: number; basePurchases: number; ivaSoportado: number
+      salesCount: number; purchasesCount: number
+    }> = {
+      1: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0, salesCount: 0, purchasesCount: 0 },
+      2: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0, salesCount: 0, purchasesCount: 0 },
+      3: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0, salesCount: 0, purchasesCount: 0 },
+      4: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0, salesCount: 0, purchasesCount: 0 },
+    }
     for (const x of sales) {
       const d = x.created_at
       if (d) {
@@ -293,17 +335,17 @@ export const getVatQuarterly = protectedAction<
         const iva = (Number(x.tax_amount) || 0) * proportion
         byQuarter[q].baseSales += base
         byQuarter[q].ivaRepercutido += iva
+        byQuarter[q].salesCount += 1
       }
     }
     for (const x of purchases) {
-      const d = x.created_at
+      const d = x.invoice_date
       if (d) {
         const month = Number(d.slice(5, 7))
         const q = quarterFromMonth(month)
-        const total = Number(x.total) || 0
-        const iva = Number(x.tax_amount) || 0
-        byQuarter[q].basePurchases += total - iva
-        byQuarter[q].ivaSoportado += iva
+        byQuarter[q].basePurchases += Number(x.amount) || 0
+        byQuarter[q].ivaSoportado += Number(x.tax_amount) || 0
+        byQuarter[q].purchasesCount += 1
       }
     }
 
@@ -323,11 +365,164 @@ export const getVatQuarterly = protectedAction<
         baseImponiblePurchases: v.basePurchases,
         ivaSoportado: v.ivaSoportado,
         resultado: v.ivaRepercutido - v.ivaSoportado,
+        salesCount: v.salesCount,
+        purchasesCount: v.purchasesCount,
       })
     }
     const totalRepercutido = quarters.reduce((s, x) => s + x.ivaRepercutido, 0)
     const totalSoportado = quarters.reduce((s, x) => s + x.ivaSoportado, 0)
     return success({ quarters, totalRepercutido, totalSoportado })
+  }
+)
+
+// ─── IVA trimestral: detalle para Excel descargable ─────────────────────────
+export type VatInvoiceIssuedRow = {
+  trimestre: string
+  invoice_number: string
+  invoice_date: string
+  client_name: string
+  client_nif: string | null
+  subtotal: number
+  tax_rate: number
+  tax_amount: number
+  irpf_rate: number
+  irpf_amount: number
+  total: number
+  status: string
+  origen: 'ticket' | 'sastrería' | 'presupuesto' | 'manual'
+}
+export type VatInvoiceReceivedRow = {
+  trimestre: string
+  invoice_number: string
+  invoice_date: string
+  supplier_name: string
+  supplier_cif: string | null
+  amount: number
+  tax_amount: number
+  iva_pct_calculado: number | null
+  total_amount: number
+  retention_amount: number
+  status: string
+  payment_date: string | null
+}
+
+export const getVatQuarterlyDetail = protectedAction<
+  { year: number },
+  {
+    quarters: VatQuarterRow[]
+    totalRepercutido: number
+    totalSoportado: number
+    invoicesIssued: VatInvoiceIssuedRow[]
+    invoicesReceived: VatInvoiceReceivedRow[]
+  }
+>(
+  { permission: 'accounting.view', auditModule: 'accounting' },
+  async (ctx, { year }) => {
+    const yearStart = `${year}-01-01`
+    const yearEnd = `${year}-12-31`
+    const quarterFromMonth = (m: number) => Math.ceil(m / 3) as 1 | 2 | 3 | 4
+    const quarterTag = (iso?: string | null) => {
+      if (!iso) return 'T?'
+      const month = Number(iso.slice(5, 7))
+      return `T${quarterFromMonth(month)}`
+    }
+
+    // El resumen de cuadre lo reusamos del action existente — misma fuente.
+    const summaryRes = await getVatQuarterly({ year })
+    if (!summaryRes.success) return failure(summaryRes.error)
+
+    // Facturas EMITIDAS del año. Excluye draft y cancelled del modelo 303.
+    const [issuedRes, receivedRes] = await Promise.all([
+      ctx.adminClient
+        .from('invoices')
+        .select('invoice_number, invoice_date, client_name, client_nif, subtotal, tax_rate, tax_amount, irpf_rate, irpf_amount, total, status, sale_id, tailoring_order_id, id')
+        .gte('invoice_date', yearStart)
+        .lte('invoice_date', yearEnd)
+        .not('status', 'in', '(draft,cancelled)')
+        .order('invoice_date', { ascending: true }),
+      ctx.adminClient
+        .from('ap_supplier_invoices')
+        .select('invoice_number, invoice_date, supplier_name, supplier_cif, amount, tax_amount, total_amount, retention_amount, status, payment_date')
+        .gte('invoice_date', yearStart)
+        .lte('invoice_date', yearEnd)
+        .order('invoice_date', { ascending: true }),
+    ])
+
+    // Para determinar el "origen" de cada factura emitida sin sale_id ni
+    // tailoring_order_id, miramos si hay un estimate enlazado.
+    const issuedRows = (issuedRes.data || []) as Array<{
+      id: string; invoice_number?: string; invoice_date?: string; client_name?: string; client_nif?: string | null
+      subtotal?: number; tax_rate?: number; tax_amount?: number; irpf_rate?: number; irpf_amount?: number
+      total?: number; status?: string; sale_id?: string | null; tailoring_order_id?: string | null
+    }>
+    const issuedWithoutSourceIds = issuedRows
+      .filter(r => !r.sale_id && !r.tailoring_order_id)
+      .map(r => r.id)
+    const estimateInvoiceIds = new Set<string>()
+    if (issuedWithoutSourceIds.length > 0) {
+      const { data: estimates } = await ctx.adminClient
+        .from('estimates')
+        .select('invoice_id')
+        .in('invoice_id', issuedWithoutSourceIds)
+      for (const e of (estimates ?? []) as Array<{ invoice_id?: string | null }>) {
+        if (e.invoice_id) estimateInvoiceIds.add(e.invoice_id)
+      }
+    }
+
+    const invoicesIssued: VatInvoiceIssuedRow[] = issuedRows.map((r) => {
+      let origen: VatInvoiceIssuedRow['origen']
+      if (r.sale_id) origen = 'ticket'
+      else if (r.tailoring_order_id) origen = 'sastrería'
+      else if (estimateInvoiceIds.has(r.id)) origen = 'presupuesto'
+      else origen = 'manual'
+      return {
+        trimestre: quarterTag(r.invoice_date),
+        invoice_number: String(r.invoice_number ?? ''),
+        invoice_date: String(r.invoice_date ?? ''),
+        client_name: String(r.client_name ?? ''),
+        client_nif: r.client_nif ?? null,
+        subtotal: Number(r.subtotal) || 0,
+        tax_rate: Number(r.tax_rate) || 0,
+        tax_amount: Number(r.tax_amount) || 0,
+        irpf_rate: Number(r.irpf_rate) || 0,
+        irpf_amount: Number(r.irpf_amount) || 0,
+        total: Number(r.total) || 0,
+        status: String(r.status ?? ''),
+        origen,
+      }
+    })
+
+    const invoicesReceived: VatInvoiceReceivedRow[] = ((receivedRes.data || []) as Array<{
+      invoice_number?: string; invoice_date?: string; supplier_name?: string; supplier_cif?: string | null
+      amount?: number; tax_amount?: number; total_amount?: number; retention_amount?: number
+      status?: string; payment_date?: string | null
+    }>).map((r) => {
+      const base = Number(r.amount) || 0
+      const iva = Number(r.tax_amount) || 0
+      const ivaPct = base > 0 ? Math.round((iva / base * 100) * 100) / 100 : null
+      return {
+        trimestre: quarterTag(r.invoice_date),
+        invoice_number: String(r.invoice_number ?? ''),
+        invoice_date: String(r.invoice_date ?? ''),
+        supplier_name: String(r.supplier_name ?? ''),
+        supplier_cif: r.supplier_cif ?? null,
+        amount: base,
+        tax_amount: iva,
+        iva_pct_calculado: ivaPct,
+        total_amount: Number(r.total_amount) || 0,
+        retention_amount: Number(r.retention_amount) || 0,
+        status: String(r.status ?? ''),
+        payment_date: r.payment_date ?? null,
+      }
+    })
+
+    return success({
+      quarters: summaryRes.data.quarters,
+      totalRepercutido: summaryRes.data.totalRepercutido,
+      totalSoportado: summaryRes.data.totalSoportado,
+      invoicesIssued,
+      invoicesReceived,
+    })
   }
 )
 
@@ -1306,10 +1501,12 @@ export const updateInvoiceAction = protectedAction<UpdateInvoiceInput, { id: str
 
     if (error) return failure(error.message)
 
-    // Reemplazar líneas
+    // Reemplazar líneas. Idealmente esto debería ser atómico (RPC), pero
+    // por ahora al menos capturamos el error del INSERT — si fallara, las
+    // líneas quedan vacías y el sastre lo verá inmediatamente.
     await ctx.adminClient.from('invoice_lines').delete().eq('invoice_id', input.id)
     if (input.lines.length > 0) {
-      await ctx.adminClient.from('invoice_lines').insert(
+      const { error: insertLinesError } = await ctx.adminClient.from('invoice_lines').insert(
         input.lines.map((l, i) => ({
           invoice_id: input.id,
           description: l.description,
@@ -1320,6 +1517,7 @@ export const updateInvoiceAction = protectedAction<UpdateInvoiceInput, { id: str
           sort_order: i,
         }))
       )
+      if (insertLinesError) return failure(insertLinesError.message)
     }
     return success({ id: input.id })
   }
@@ -1842,7 +2040,11 @@ export const convertEstimateToInvoiceAction = protectedAction<{ estimateId: stri
     revalidate: ['/admin/contabilidad'],
   },
   async (ctx, { estimateId }) => {
-    const { data: est } = await ctx.adminClient.from('estimates').select('id, status, client_name, total, estimate_number').eq('id', estimateId).single()
+    const { data: est } = await ctx.adminClient
+      .from('estimates')
+      .select('id, status, client_id, client_name, client_nif, client_email, subtotal, tax_rate, tax_amount, irpf_rate, irpf_amount, total, estimate_number, notes')
+      .eq('id', estimateId)
+      .single()
     if (!est) return failure('Presupuesto no encontrado')
     if (est.status !== 'accepted') return failure('Solo se pueden facturar presupuestos aceptados')
 
@@ -1853,21 +2055,29 @@ export const convertEstimateToInvoiceAction = protectedAction<{ estimateId: stri
 
     const { data: lines } = await ctx.adminClient.from('estimate_lines').select('description, quantity, unit_price, tax_rate, total').eq('estimate_id', estimateId)
 
+    // Copiamos el header directamente del estimate (es la fuente de verdad).
+    // Antes esta función hardcodeaba tax_rate=21 y recalculaba subtotal como
+    // total/1.21, lo cual ignoraba el IVA real (productos al 4/10/0%) y la
+    // descomposición ya persistida. También perdía client_id, client_nif,
+    // irpf y notes.
     const { data: inv, error } = await ctx.adminClient.from('invoices').insert({
       invoice_number,
       invoice_series: 'F',
       invoice_type: 'issued',
+      client_id: est.client_id ?? null,
       client_name: est.client_name,
+      client_nif: est.client_nif ?? null,
       company_name: 'Sastrería Prats',
       company_nif: 'B12345678',
       company_address: 'Madrid, España',
       invoice_date: new Date().toISOString().split('T')[0],
-      subtotal: Number(est.total) / 1.21,
-      tax_rate: 21,
-      tax_amount: Number(est.total) - Number(est.total) / 1.21,
-      irpf_rate: 0,
-      irpf_amount: 0,
+      subtotal: Number(est.subtotal),
+      tax_rate: Number(est.tax_rate ?? 21),
+      tax_amount: Number(est.tax_amount),
+      irpf_rate: Number(est.irpf_rate ?? 0),
+      irpf_amount: Number(est.irpf_amount ?? 0),
       total: Number(est.total),
+      notes: est.notes ?? null,
       status: 'draft',
     }).select('id').single()
 

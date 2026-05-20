@@ -6,17 +6,28 @@ import { Badge } from '@/components/ui/badge'
 import { formatCurrency } from '@/lib/utils'
 
 type TailorItem = {
-  tailor_id: string; name: string; orders: number; revenue: number
-  fittings: number; completed: number; avgOrderValue: number; completionRate: number
-  paid: number; pending: number; paidRate: number
+  tailor_id: string
+  name: string
+  orders: number
+  revenue: number
+  fittings: number
+  completed: number
+  avgOrderValue: number
+  completionRate: number
+  /** Cobros REGISTRADOS en el periodo, agrupados por sastre del pedido. */
+  paid_in_period: number
+  /** Lo que falta por cobrar de los pedidos creados en el periodo (acumulado real). */
+  pending_of_period_orders: number
+  /** paid_in_period / revenue * 100. */
+  paidRate: number
 }
 
 export function TailorTable({ data }: { data: TailorItem[] }) {
   if (!data.length) return <p className="text-center text-muted-foreground py-12">Sin datos</p>
 
   const totalRevenue = data.reduce((s, t) => s + t.revenue, 0)
-  const totalPaid = data.reduce((s, t) => s + t.paid, 0)
-  const totalPending = data.reduce((s, t) => s + t.pending, 0)
+  const totalPaid = data.reduce((s, t) => s + t.paid_in_period, 0)
+  const totalPending = data.reduce((s, t) => s + t.pending_of_period_orders, 0)
   const totalPaidRate = totalRevenue > 0 ? Math.round((totalPaid / totalRevenue) * 100) : 0
 
   return (
@@ -32,8 +43,8 @@ export function TailorTable({ data }: { data: TailorItem[] }) {
               <TableHead className="text-right">% Completado</TableHead>
               <TableHead className="text-right">Pruebas</TableHead>
               <TableHead className="text-right">Facturación</TableHead>
-              <TableHead className="text-right">Cobrado</TableHead>
-              <TableHead className="text-right">Pendiente</TableHead>
+              <TableHead className="text-right">Cobrado en periodo</TableHead>
+              <TableHead className="text-right">Pendiente de pedidos</TableHead>
               <TableHead className="text-right">% Cobrado</TableHead>
               <TableHead className="text-right">Ticket medio</TableHead>
             </TableRow>
@@ -54,9 +65,9 @@ export function TailorTable({ data }: { data: TailorItem[] }) {
                 </TableCell>
                 <TableCell className="text-right">{t.fittings}</TableCell>
                 <TableCell className="text-right font-bold">{formatCurrency(t.revenue)}</TableCell>
-                <TableCell className="text-right font-medium text-emerald-700 tabular-nums">{formatCurrency(t.paid)}</TableCell>
-                <TableCell className={`text-right font-medium tabular-nums ${t.pending > 0 ? 'text-red-700' : 'text-muted-foreground'}`}>
-                  {formatCurrency(t.pending)}
+                <TableCell className="text-right font-medium text-emerald-700 tabular-nums">{formatCurrency(t.paid_in_period)}</TableCell>
+                <TableCell className={`text-right font-medium tabular-nums ${t.pending_of_period_orders > 0 ? 'text-red-700' : 'text-muted-foreground'}`}>
+                  {formatCurrency(t.pending_of_period_orders)}
                 </TableCell>
                 <TableCell className="text-right">
                   <Badge
@@ -92,6 +103,22 @@ export function TailorTable({ data }: { data: TailorItem[] }) {
             </TableRow>
           </TableBody>
         </Table>
+        <div className="text-[11px] text-muted-foreground mt-3 space-y-1">
+          <p>Esta tabla muestra los pedidos <strong>creados</strong> por cada sastre en el periodo seleccionado.</p>
+          <p>
+            <strong>Cobrado en periodo</strong>: cobros registrados en este periodo, agrupados por el sastre del pedido
+            (independientemente de quién registró el cobro físicamente).
+          </p>
+          <p>
+            <strong>Pendiente de pedidos</strong>: lo que falta por cobrar de los pedidos creados en el periodo (basado en
+            el total_paid acumulado de esos pedidos hasta hoy — refleja la deuda real del pedido, no del periodo).
+          </p>
+          <p>
+            El <strong>TOTAL de Cobrado en periodo</strong> coincide con el <strong>TOTAL de Cobros Sast.</strong>
+            de la pestaña &ldquo;Por empleado&rdquo;: ambos suman los mismos pagos, agrupados por dimensiones distintas
+            (sastre del pedido vs cajero que registró).
+          </p>
+        </div>
       </CardContent>
     </Card>
   )

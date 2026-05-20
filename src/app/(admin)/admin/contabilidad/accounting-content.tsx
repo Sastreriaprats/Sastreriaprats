@@ -30,6 +30,7 @@ import {
   Send, CheckCircle, FileOutput, Trash2, RefreshCw, ArrowUpCircle, Download,
   Receipt, ExternalLink, Package, ClipboardList, Pencil, Calendar, XCircle, Store,
   Check, ChevronsUpDown, Building2, User, MoreHorizontal, Ban,
+  FileSpreadsheet, AlertTriangle,
 } from 'lucide-react'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -38,15 +39,15 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
 import { formatCurrency, formatDate, cn, normalizeSearchTerm } from '@/lib/utils'
-import { downloadExcel } from '@/lib/excel/export'
+import { downloadExcel, downloadExcelMulti } from '@/lib/excel/export'
 import { toast } from 'sonner'
 import {
   getAccountingSummary, getInvoices, getEstimates,
-  getJournalEntries, getVatQuarterly, getClientsForInvoice, getClientForInvoiceById,
+  getJournalEntries, getVatQuarterly, getVatQuarterlyDetail, getClientsForInvoice, getClientForInvoiceById,
   getManualTransactions, createManualTransaction, deleteManualTransaction, updateManualTransaction,
   getAccountingMovements,
   getProductsForInvoice, listTailoringOrdersForInvoice, getTailoringOrderLinesForInvoice,
-  createInvoiceAction, updateInvoiceAction, issueInvoiceAction, deleteInvoiceAction, cancelInvoiceAction,
+  createInvoiceAction, updateInvoiceAction, getInvoiceStatusAction, issueInvoiceAction, deleteInvoiceAction, cancelInvoiceAction,
   createEstimateAction, updateEstimateAction, updateEstimateFullAction, getEstimateDetail, sendEstimateAction, acceptEstimateAction, rejectEstimateAction, convertEstimateToInvoiceAction,
   getInvoiceLinesAction, updateJournalEntryDescriptionAction,
   generateInvoicePdfAction, generateEstimatePdfAction,
@@ -933,7 +934,18 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
   const canCancel = ['issued', 'paid', 'partially_paid', 'overdue'].includes(inv.status)
 
   // ── Estado del formulario de edición ──
-  const [form, setForm] = useState({ client_id: inv.client_id ?? '', client_name: inv.client_name, client_nif: (inv as any).client_nif ?? '', invoice_date: inv.invoice_date, due_date: '', notes: '', irpf_rate: 0, tax_rate: 21 })
+  // Defaults precargados desde el registro real (antes pisaba due_date/notes/
+  // irpf_rate/tax_rate con valores en blanco al guardar — datos perdidos).
+  const [form, setForm] = useState({
+    client_id: inv.client_id ?? '',
+    client_name: inv.client_name,
+    client_nif: inv.client_nif ?? '',
+    invoice_date: inv.invoice_date,
+    due_date: inv.due_date ?? '',
+    notes: inv.notes ?? '',
+    irpf_rate: Number(inv.irpf_rate ?? 0),
+    tax_rate: Number(inv.tax_rate ?? 21),
+  })
   const [lines, setLines] = useState<InvoiceLine[]>([])
   const [selectedClient, setSelectedClient] = useState<ClientForInvoice | null>(null)
   const [billTo, setBillTo] = useState<'client' | string>('client')
@@ -1034,6 +1046,22 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
 
   const handleUpdate = async () => {
     if (!conceptOnly && !form.client_name) { toast.error('Indica el cliente'); return }
+
+    // Pre-check de status: el listado puede estar stale (otro usuario emitió/
+    // anuló/pagó mientras el editor estaba abierto). Re-fetch antes de enviar
+    // para evitar el rechazo 'FORBIDDEN' del server. No aplica a conceptOnly,
+    // que admite editar descripciones en cualquier estado.
+    if (!conceptOnly) {
+      const statusRes = await getInvoiceStatusAction(inv.id)
+      if (statusRes.success && statusRes.data.status !== 'draft') {
+        const label = INVOICE_STATUS[statusRes.data.status]?.label ?? statusRes.data.status
+        toast.warning(`Esta factura ya no está en borrador (estado actual: ${label}). El listado se ha actualizado.`)
+        setEditOpen(false)
+        onRefresh()
+        return
+      }
+    }
+
     setSaving(true)
     const r = await updateInvoiceAction({
       id: inv.id, client_id: form.client_id || null, client_name: form.client_name,
@@ -2383,6 +2411,7 @@ function VatTab() {
   const [totRep, setTotRep] = useState(0)
   const [totSop, setTotSop] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [exporting, setExporting] = useState(false)
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i)
 
   useEffect(() => {
@@ -2400,15 +2429,129 @@ function VatTab() {
 
   const baseSalesTotal  = quarters.reduce((s, q) => s + q.baseImponibleSales, 0)
   const basePurchTotal  = quarters.reduce((s, q) => s + q.baseImponiblePurchases, 0)
+  const totalSalesCount = quarters.reduce((s, q) => s + q.salesCount, 0)
+  const totalPurchCount = quarters.reduce((s, q) => s + q.purchasesCount, 0)
+
+  const handleExportExcel = async () => {
+    setExporting(true)
+    try {
+      const res = await getVatQuarterlyDetail({ year })
+      if (!res.success) {
+        toast.error('error' in res ? res.error : 'No se pudo generar el Excel')
+        return
+      }
+      const { quarters: qs, totalRepercutido, totalSoportado, invoicesIssued, invoicesReceived } = res.data
+      const resumenRows: Record<string, unknown>[] = qs.map(q => ({
+        'Trimestre': q.quarter,
+        'Periodo': q.period,
+        'Nº facturas emitidas': q.salesCount,
+        'Base ventas': q.baseImponibleSales,
+        'IVA repercutido': q.ivaRepercutido,
+        'Nº facturas recibidas': q.purchasesCount,
+        'Base compras': q.baseImponiblePurchases,
+        'IVA soportado': q.ivaSoportado,
+        'Resultado': q.resultado,
+      }))
+      resumenRows.push({
+        'Trimestre': 'TOTAL',
+        'Periodo': String(year),
+        'Nº facturas emitidas': totalSalesCount,
+        'Base ventas': baseSalesTotal,
+        'IVA repercutido': totalRepercutido,
+        'Nº facturas recibidas': totalPurchCount,
+        'Base compras': basePurchTotal,
+        'IVA soportado': totalSoportado,
+        'Resultado': totalRepercutido - totalSoportado,
+      })
+
+      const emitidasRows: Record<string, unknown>[] = invoicesIssued.map(r => ({
+        'Trimestre': r.trimestre,
+        'Nº factura': r.invoice_number,
+        'Fecha': r.invoice_date,
+        'Cliente': r.client_name,
+        'NIF': r.client_nif ?? '',
+        'Base': r.subtotal,
+        'IVA %': r.tax_rate,
+        'IVA €': r.tax_amount,
+        'IRPF %': r.irpf_rate,
+        'IRPF €': r.irpf_amount,
+        'Total': r.total,
+        'Estado': r.status,
+        'Origen': r.origen,
+      }))
+      if (emitidasRows.length > 0) {
+        emitidasRows.push({
+          'Trimestre': 'TOTAL', 'Nº factura': '', 'Fecha': '', 'Cliente': '', 'NIF': '',
+          'Base': invoicesIssued.reduce((s, r) => s + r.subtotal, 0),
+          'IVA %': '',
+          'IVA €': invoicesIssued.reduce((s, r) => s + r.tax_amount, 0),
+          'IRPF %': '',
+          'IRPF €': invoicesIssued.reduce((s, r) => s + r.irpf_amount, 0),
+          'Total': invoicesIssued.reduce((s, r) => s + r.total, 0),
+          'Estado': '', 'Origen': '',
+        })
+      }
+
+      const recibidasRows: Record<string, unknown>[] = invoicesReceived.map(r => ({
+        'Trimestre': r.trimestre,
+        'Nº factura': r.invoice_number,
+        'Fecha': r.invoice_date,
+        'Proveedor': r.supplier_name,
+        'NIF': r.supplier_cif ?? '',
+        'Base': r.amount,
+        'IVA €': r.tax_amount,
+        'IVA % calculado': r.iva_pct_calculado ?? '',
+        'Retención IRPF': r.retention_amount,
+        'Total': r.total_amount,
+        'Estado pago': r.status,
+        'Fecha pago': r.payment_date ?? '',
+      }))
+      if (recibidasRows.length > 0) {
+        recibidasRows.push({
+          'Trimestre': 'TOTAL', 'Nº factura': '', 'Fecha': '', 'Proveedor': '', 'NIF': '',
+          'Base': invoicesReceived.reduce((s, r) => s + r.amount, 0),
+          'IVA €': invoicesReceived.reduce((s, r) => s + r.tax_amount, 0),
+          'IVA % calculado': '',
+          'Retención IRPF': invoicesReceived.reduce((s, r) => s + r.retention_amount, 0),
+          'Total': invoicesReceived.reduce((s, r) => s + r.total_amount, 0),
+          'Estado pago': '', 'Fecha pago': '',
+        })
+      }
+
+      await downloadExcelMulti([
+        { name: 'Resumen', rows: resumenRows },
+        { name: 'Facturas emitidas', rows: emitidasRows },
+        { name: 'Facturas recibidas', rows: recibidasRows },
+      ], `iva-trimestral-${year}`)
+      toast.success('Excel descargado')
+    } catch (err) {
+      console.error('[accounting] export VAT Excel:', err)
+      toast.error('Error al generar el Excel')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <Select value={String(year)} onValueChange={v => setYear(Number(v))}>
-          <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
-          <SelectContent>{years.map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
-        </Select>
-        <p className="text-sm text-muted-foreground">Modelo 303 — Resumen trimestral de IVA</p>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap">
+          <Select value={String(year)} onValueChange={v => setYear(Number(v))}>
+            <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+            <SelectContent>{years.map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+          </Select>
+          <p className="text-sm text-muted-foreground">Modelo 303 — Resumen trimestral de IVA</p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleExportExcel}
+          disabled={exporting || loading}
+          className="gap-2"
+        >
+          {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+          Descargar Excel
+        </Button>
       </div>
 
       {loading ? <Spinner /> : (
@@ -2435,6 +2578,7 @@ function VatTab() {
                 <TableRow>
                   <TableHead>Trimestre</TableHead>
                   <TableHead>Periodo</TableHead>
+                  <TableHead className="text-right">Facturas</TableHead>
                   <TableHead className="text-right">Base ventas</TableHead>
                   <TableHead className="text-right">IVA repercutido</TableHead>
                   <TableHead className="text-right">Base compras</TableHead>
@@ -2443,21 +2587,42 @@ function VatTab() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {quarters.map(q => (
-                  <TableRow key={q.quarter}>
-                    <TableCell className="font-bold">{q.quarter}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{q.period}</TableCell>
-                    <TableCell className="text-right">{formatCurrency(q.baseImponibleSales)}</TableCell>
-                    <TableCell className="text-right">{formatCurrency(q.ivaRepercutido)}</TableCell>
-                    <TableCell className="text-right">{formatCurrency(q.baseImponiblePurchases)}</TableCell>
-                    <TableCell className="text-right">{formatCurrency(q.ivaSoportado)}</TableCell>
-                    <TableCell className={`text-right font-bold ${q.resultado >= 0 ? 'text-red-600' : 'text-green-600'}`}>
-                      {formatCurrency(q.resultado)}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {quarters.map(q => {
+                  // Heurística: si hay base de compras pero el IVA soportado es 0,
+                  // probablemente faltan IVAs registrados en facturas de proveedor.
+                  const inconsistente = q.baseImponiblePurchases > 0 && q.ivaSoportado === 0 && q.purchasesCount > 0
+                  return (
+                    <TableRow key={q.quarter}>
+                      <TableCell className="font-bold">{q.quarter}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{q.period}</TableCell>
+                      <TableCell className="text-right text-xs text-muted-foreground tabular-nums">
+                        {q.salesCount} · {q.purchasesCount}
+                      </TableCell>
+                      <TableCell className="text-right">{formatCurrency(q.baseImponibleSales)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(q.ivaRepercutido)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(q.baseImponiblePurchases)}</TableCell>
+                      <TableCell className="text-right">
+                        <span className="inline-flex items-center gap-1 justify-end w-full">
+                          {inconsistente && (
+                            <AlertTriangle
+                              className="h-3.5 w-3.5 text-amber-500"
+                              aria-label="Posible inconsistencia: hay base de compras sin IVA registrado"
+                            />
+                          )}
+                          {formatCurrency(q.ivaSoportado)}
+                        </span>
+                      </TableCell>
+                      <TableCell className={`text-right font-bold ${q.resultado >= 0 ? 'text-red-600' : 'text-green-600'}`}>
+                        {formatCurrency(q.resultado)}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
                 <TableRow className="bg-muted/60 font-bold">
                   <TableCell colSpan={2}>TOTAL ANUAL {year}</TableCell>
+                  <TableCell className="text-right text-xs text-muted-foreground tabular-nums">
+                    {totalSalesCount} · {totalPurchCount}
+                  </TableCell>
                   <TableCell className="text-right">{formatCurrency(baseSalesTotal)}</TableCell>
                   <TableCell className="text-right">{formatCurrency(totRep)}</TableCell>
                   <TableCell className="text-right">{formatCurrency(basePurchTotal)}</TableCell>
@@ -2468,6 +2633,16 @@ function VatTab() {
                 </TableRow>
               </TableBody>
             </Table>
+          </div>
+
+          <div className="text-[11px] text-muted-foreground space-y-1 px-1">
+            <p>Columna <strong>Facturas</strong>: nº de tickets de ventas · nº de facturas de proveedor en el trimestre.</p>
+            <p><strong>Base ventas</strong>: importe sin IVA de tickets cobrados (modelo 303 casilla 01).</p>
+            <p><strong>IVA repercutido</strong>: IVA que cobras a tus clientes (casilla 03).</p>
+            <p><strong>Base compras</strong>: importe sin IVA de facturas recibidas (casilla 28).</p>
+            <p><strong>IVA soportado</strong>: IVA que pagas a tus proveedores y te puedes deducir (casilla 29).</p>
+            <p><strong>Resultado</strong>: IVA repercutido − soportado. Positivo = a ingresar a Hacienda; negativo = a tu favor (casilla 71).</p>
+            <p>El icono <AlertTriangle className="inline-block h-3 w-3 text-amber-500 -mt-0.5" /> junto a IVA soportado indica que el trimestre tiene base de compras pero IVA registrado a 0 — posible inconsistencia en las facturas de proveedor.</p>
           </div>
         </>
       )}

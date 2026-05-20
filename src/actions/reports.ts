@@ -272,12 +272,33 @@ export const getTopProducts = protectedAction<
 
 export const getTailorPerformance = protectedAction<
   { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel; tax_mode?: TaxMode },
-  { tailor_id: string; name: string; orders: number; revenue: number; fittings: number; completed: number; avgOrderValue: number; completionRate: number; paid: number; pending: number; paidRate: number }[]
+  {
+    tailor_id: string
+    name: string
+    orders: number
+    revenue: number
+    fittings: number
+    completed: number
+    avgOrderValue: number
+    completionRate: number
+    /** Cobros REGISTRADOS en el periodo, agrupados por sastre del pedido
+     *  (independientemente de quién registró el cobro físicamente). */
+    paid_in_period: number
+    /** Lo que falta por cobrar de los pedidos creados en el periodo
+     *  (revenue − total_paid acumulado de esos pedidos hasta hoy). */
+    pending_of_period_orders: number
+    /** % cobrado del periodo sobre la facturación del periodo. */
+    paidRate: number
+  }[]
 >(
   { permission: 'reports.view', auditModule: 'reports' },
   async (ctx, { start_date, end_date, store_id, channel = 'all', tax_mode = 'with_tax' }) => {
     if (channel === 'boutique') return success([])
     const net = tax_mode === 'without_tax'
+    const stripDefault = (gross: number) => gross / (1 + DEFAULT_TAX_RATE / 100)
+
+    // 1) Pedidos creados en el periodo (revenue, completados, pruebas y
+    //    total_paid acumulado de esos pedidos — usado para "pendiente real").
     let q = ctx.adminClient
       .from('tailoring_orders')
       .select('id, subtotal, total, total_paid, status, created_by, store_id, profiles!tailoring_orders_created_by_fkey(full_name), tailoring_fittings(count)')
@@ -287,19 +308,29 @@ export const getTailorPerformance = protectedAction<
     if (store_id) q = q.eq('store_id', store_id)
     const { data: orders } = await q
 
-    const tailors: Record<string, { name: string; orders: number; revenue: number; fittings: number; completed: number; paid: number }> = {}
+    type TailorAccum = {
+      name: string
+      orders: number
+      revenue: number
+      fittings: number
+      completed: number
+      paid_of_period_orders: number   // total_paid acumulado de pedidos del periodo
+      paid_in_period: number          // cobros realizados en el periodo (cualquier pedido)
+    }
+    const tailors: Record<string, TailorAccum> = {}
+
     for (const order of orders || []) {
       const id = (order.created_by as string) || 'unassigned'
       const profile = order.profiles as unknown as Record<string, unknown> | null
       const name = (profile?.full_name as string) || 'Sin asignar'
-      if (!tailors[id]) tailors[id] = { name, orders: 0, revenue: 0, fittings: 0, completed: 0, paid: 0 }
+      if (!tailors[id]) tailors[id] = { name, orders: 0, revenue: 0, fittings: 0, completed: 0, paid_of_period_orders: 0, paid_in_period: 0 }
       tailors[id].orders++
       tailors[id].revenue += net ? (Number((order as any).subtotal) || 0) : (Number(order.total) || 0)
-      // Pago acumulado, prorrateado al modo IVA para que pending = revenue - paid sea coherente.
+      // total_paid prorrateado al modo IVA para que pending = revenue − paid_of_period_orders sea coherente.
       const orderTotal = Number(order.total) || 0
       const orderPaid = Number((order as any).total_paid) || 0
       const orderSubtotal = Number((order as any).subtotal) || 0
-      tailors[id].paid += net && orderTotal > 0
+      tailors[id].paid_of_period_orders += net && orderTotal > 0
         ? orderPaid * (orderSubtotal / orderTotal)
         : orderPaid
       const fittingsData = order.tailoring_fittings as unknown
@@ -310,18 +341,65 @@ export const getTailorPerformance = protectedAction<
       if (['finished', 'delivered'].includes(order.status as string)) tailors[id].completed++
     }
 
+    // 2) Cobros realizados en el periodo, agrupados por el sastre del pedido.
+    //    Esta query SUSTITUYE el bug anterior (que usaba total_paid acumulado
+    //    filtrado por created_at del pedido — métrica semánticamente errónea).
+    //    Ahora suma exactamente los pagos cuyo created_at cae en el periodo,
+    //    independientemente de cuándo se creó el pedido. Se atribuye al sastre
+    //    del pedido (no al cajero que registró el cobro).
+    let paymentsQ = ctx.adminClient
+      .from('tailoring_order_payments')
+      .select('amount, tailoring_orders!inner(created_by, store_id)')
+      .gte('created_at', start_date)
+      .lte('created_at', end_date + 'T23:59:59')
+    if (store_id) paymentsQ = paymentsQ.eq('tailoring_orders.store_id', store_id)
+    const { data: payments } = await paymentsQ
+
+    for (const p of payments || []) {
+      const orderRef = (p as any).tailoring_orders as { created_by?: string } | null
+      const sastreId = orderRef?.created_by
+      if (!sastreId) continue
+      if (!tailors[sastreId]) {
+        // Sastre con cobros en el periodo pero sin pedidos creados en el periodo.
+        // Aparece en la tabla con orders=0, revenue=0.
+        tailors[sastreId] = { name: '', orders: 0, revenue: 0, fittings: 0, completed: 0, paid_of_period_orders: 0, paid_in_period: 0 }
+      }
+      const amt = Number((p as any).amount) || 0
+      tailors[sastreId].paid_in_period += net ? stripDefault(amt) : amt
+    }
+
+    // 3) Resolver nombres de sastres añadidos por la query de payments que no
+    //    tenían pedido en el periodo.
+    const missingIds = Object.entries(tailors).filter(([, t]) => !t.name).map(([id]) => id)
+    if (missingIds.length > 0) {
+      const { data: profs } = await ctx.adminClient.from('profiles').select('id, full_name').in('id', missingIds)
+      for (const p of profs || []) {
+        const t = tailors[(p as { id: string }).id]
+        if (t) t.name = (p as { full_name?: string }).full_name || (p as { id: string }).id
+      }
+    }
+
     return success(
       Object.entries(tailors).map(([tid, d]) => {
-        const pending = Math.max(0, d.revenue - d.paid)
-        const paidRate = d.revenue > 0 ? Math.round((d.paid / d.revenue) * 100) : 0
+        const pending_of_period_orders = Math.max(0, d.revenue - d.paid_of_period_orders)
+        // % cobrado del periodo sobre la facturación del periodo. Puede
+        // superar 100 si el sastre cobra mucho de pedidos antiguos y poco
+        // de pedidos nuevos (señal de que su carga del periodo es residual).
+        const paidRate = d.revenue > 0 ? Math.round((d.paid_in_period / d.revenue) * 100) : 0
         return {
-          tailor_id: tid, ...d,
+          tailor_id: tid,
+          name: d.name || 'Sin asignar',
+          orders: d.orders,
+          revenue: d.revenue,
+          fittings: d.fittings,
+          completed: d.completed,
+          paid_in_period: d.paid_in_period,
+          pending_of_period_orders,
+          paidRate,
           avgOrderValue: d.orders > 0 ? d.revenue / d.orders : 0,
           completionRate: d.orders > 0 ? (d.completed / d.orders) * 100 : 0,
-          pending,
-          paidRate,
         }
-      }).sort((a, b) => b.revenue - a.revenue)
+      }).sort((a, b) => b.revenue - a.revenue || b.paid_in_period - a.paid_in_period)
     )
   }
 )
@@ -717,7 +795,8 @@ export const getExpensesComparison = protectedAction<
 export const getClientsAnalytics = protectedAction<
   { start_date: string; end_date: string; store_id?: string },
   {
-    newClients: number; totalClients: number
+    newClients: number
+    totalClientsHistorical: number
     sources: Record<string, number>
     topClients: { full_name: string; total_revenue: number }[]
     clientsWithPurchases: number
@@ -725,18 +804,61 @@ export const getClientsAnalytics = protectedAction<
 >(
   { permission: 'reports.view', auditModule: 'reports' },
   async (ctx, { start_date, end_date, store_id }) => {
+    // Clientes NUEVOS = creados en el periodo (atributo clients.created_at)
     let newClientsQ = ctx.adminClient.from('clients').select('id, source').gte('created_at', start_date).lte('created_at', end_date + 'T23:59:59')
+    // TOTAL HISTÓRICO de clients (sin filtro de fecha — la UI lo etiqueta
+    // como "Total clientes (BBDD)" para que se entienda que no es del periodo).
     let totalQ = ctx.adminClient.from('clients').select('id', { count: 'exact' })
-    let withPurchasesQ = ctx.adminClient.from('clients').select('id', { count: 'exact' }).gt('total_spent', 0)
+    // TODO: topClients tiene un sesgo conocido — filtra por created_at del
+    // cliente (solo nuevos en el periodo) y por clients.total_spent histórico
+    // (que NO se actualiza desde tailoring_orders). Para un "top clientes
+    // del periodo" correcto habría que agregar sales+tailoring_orders por
+    // client_id sumando totales. Fuera de scope del fix actual.
     let topClientsQ = ctx.adminClient.from('clients').select('first_name, last_name, total_spent').gt('total_spent', 0).gte('created_at', start_date).lte('created_at', end_date + 'T23:59:59').order('total_spent', { ascending: false }).limit(10)
     if (store_id) {
       newClientsQ = newClientsQ.eq('home_store_id', store_id)
       totalQ = totalQ.eq('home_store_id', store_id)
-      withPurchasesQ = withPurchasesQ.eq('home_store_id', store_id)
       topClientsQ = topClientsQ.eq('home_store_id', store_id)
     }
-    const [newClientsRes, totalRes, withPurchasesRes, topClientsRes] = await Promise.all([
-      newClientsQ, totalQ, withPurchasesQ, topClientsQ,
+
+    // "Con compras en el periodo" — clientes únicos con AL MENOS una venta
+    // en sales o tailoring_orders dentro del rango (filtrado por store_id si
+    // procede). Antes esto consultaba clients.total_spent > 0, que es un
+    // histórico acumulativo y no se mantiene desde tailoring_orders → daba 0
+    // aunque hubiera tráfico en el periodo.
+    const [salesRes, tailoringRes] = await Promise.all([
+      (() => {
+        let q = ctx.adminClient
+          .from('sales')
+          .select('client_id')
+          .not('client_id', 'is', null)
+          .gte('created_at', start_date)
+          .lte('created_at', end_date + 'T23:59:59')
+        if (store_id) q = q.eq('store_id', store_id)
+        return q
+      })(),
+      (() => {
+        let q = ctx.adminClient
+          .from('tailoring_orders')
+          .select('client_id')
+          .not('client_id', 'is', null)
+          .gte('created_at', start_date)
+          .lte('created_at', end_date + 'T23:59:59')
+        if (store_id) q = q.eq('store_id', store_id)
+        return q
+      })(),
+    ])
+    const uniqueIds = new Set<string>()
+    for (const r of (salesRes.data ?? []) as Array<{ client_id: string | null }>) {
+      if (r.client_id) uniqueIds.add(r.client_id)
+    }
+    for (const r of (tailoringRes.data ?? []) as Array<{ client_id: string | null }>) {
+      if (r.client_id) uniqueIds.add(r.client_id)
+    }
+    const clientsWithPurchases = uniqueIds.size
+
+    const [newClientsRes, totalRes, topClientsRes] = await Promise.all([
+      newClientsQ, totalQ, topClientsQ,
     ])
 
     const sources: Record<string, number> = {}
@@ -752,10 +874,45 @@ export const getClientsAnalytics = protectedAction<
 
     return success({
       newClients: newClientsRes.data?.length || 0,
-      totalClients: totalRes.count || 0,
+      totalClientsHistorical: totalRes.count || 0,
       sources,
       topClients,
-      clientsWithPurchases: withPurchasesRes.count || 0,
+      clientsWithPurchases,
+    })
+  }
+)
+
+// ── Análisis avanzado de clientes (RPC agregado, 1 round-trip) ──────────────
+export type ClientsAdvancedAnalytics = {
+  with_purchases: number
+  granularity: 'day' | 'week' | 'month'
+  by_store: Array<{ store_id: string; store_name: string; clients_count: number }>
+  by_day: Array<{ day: string; clients_count: number }>
+  new_vs_returning: { new_count: number; returning_count: number; total: number }
+}
+
+export const getClientsAdvancedAnalytics = protectedAction<
+  { start_date: string; end_date: string; store_id?: string },
+  ClientsAdvancedAnalytics
+>(
+  { permission: 'reports.view', auditModule: 'reports' },
+  async (ctx, { start_date, end_date, store_id }) => {
+    // RPC clients_advanced_analytics (mig 158): devuelve JSONB con 4
+    // estructuras en una sola llamada (with_purchases, by_store, by_day,
+    // new_vs_returning) + granularity (day/week/month según rango).
+    const { data, error } = await ctx.adminClient.rpc('clients_advanced_analytics', {
+      p_start: start_date,
+      p_end: end_date + 'T23:59:59',
+      p_store: store_id || null,
+    })
+    if (error) return failure(error.message || 'Error al consultar analytics de clientes')
+    const payload = (data ?? {}) as Partial<ClientsAdvancedAnalytics>
+    return success({
+      with_purchases: Number(payload.with_purchases ?? 0),
+      granularity: (payload.granularity ?? 'day') as ClientsAdvancedAnalytics['granularity'],
+      by_store: Array.isArray(payload.by_store) ? payload.by_store : [],
+      by_day: Array.isArray(payload.by_day) ? payload.by_day : [],
+      new_vs_returning: payload.new_vs_returning ?? { new_count: 0, returning_count: 0, total: 0 },
     })
   }
 )

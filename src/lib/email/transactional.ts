@@ -16,11 +16,12 @@
  */
 import { createAdminClient } from '@/lib/supabase/admin'
 import { sendEmail, renderTemplate } from '@/lib/email/send'
+import { EMAIL_LOGO_URL, EMAIL_PUBLIC_URL } from './branding'
 
 /* ── Layout común ────────────────────────────────────────────────────────── */
 
-const PUBLIC_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://sastreriaprats.com'
-const LOGO_URL = `${PUBLIC_URL.replace(/\/+$/, '')}/logo-prats.png`
+const PUBLIC_URL = EMAIL_PUBLIC_URL
+const LOGO_URL = EMAIL_LOGO_URL
 const COMPANY_ADDRESS = 'Calle de los Hermanos Pinzón 4, 28036 Madrid, Madrid, España'
 const COMPANY_PHONE = '+34 669 98 55 47'
 const COMPANY_EMAIL = 'info@sastreriaprats.com'

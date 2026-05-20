@@ -18,6 +18,7 @@ import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAction } from '@/hooks/use-action'
 import { createClientAction } from '@/actions/clients'
+import { CLIENT_SOURCES } from '@/lib/clients/sources'
 
 // Nacionalidades: Española primero, resto en orden alfabético
 const NATIONALITIES = [
@@ -254,13 +255,9 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess, onSuccessWit
               <Select value={form.source || ''} onValueChange={(v) => set('source', v)}>
                 <SelectTrigger className={!form.source ? 'border-red-300' : ''}><SelectValue placeholder="¿Cómo nos conoció?" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="walk_in">Visita tienda</SelectItem>
-                  <SelectItem value="referral">Recomendación</SelectItem>
-                  <SelectItem value="web">Web</SelectItem>
-                  <SelectItem value="social_media">Redes sociales</SelectItem>
-                  <SelectItem value="event">Evento</SelectItem>
-                  <SelectItem value="press">Prensa</SelectItem>
-                  <SelectItem value="other">Otro</SelectItem>
+                  {CLIENT_SOURCES.filter(s => s.manual).map(s => (
+                    <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               {!form.source && <p className="text-xs text-red-500">Indica cómo nos conoció</p>}

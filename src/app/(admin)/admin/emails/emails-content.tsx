@@ -18,7 +18,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import {
-  Mail, FileText, Send, Plus, Loader2, Eye, Pencil,
+  Mail, FileText, Send, Plus, Loader2, Eye, Pencil, Trash2,
   CheckCircle, XCircle, Clock, Megaphone, ChevronLeft, ChevronRight,
   ImageIcon,
 } from 'lucide-react'
@@ -33,6 +33,7 @@ import {
   sendCampaign,
   updateEmailCampaign,
   upsertEmailTemplate,
+  deleteCampaignAction,
 } from '@/actions/emails'
 import { formatDate, formatDateTime } from '@/lib/utils'
 import { TemplateContentEditorDialog, type TemplateForEditor } from '@/components/admin/template-content-editor-dialog'
@@ -167,6 +168,9 @@ export function EmailsContent() {
   const [campaignEditContent, setCampaignEditContent] = useState<CampaignContent>(emptyContent())
   /** Si != null, el AlertDialog de confirmación de envío masivo está abierto y apunta a esa campaña. */
   const [confirmSend, setConfirmSend] = useState<{ id: string; name: string; recipients: number } | null>(null)
+  /** Si != null, el AlertDialog de confirmación de eliminación está abierto y apunta a esa campaña. */
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string; status: string } | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   /** Galería de plantillas: si admin activa el toggle, también se ven las del sistema. */
   const [showSystemTemplates, setShowSystemTemplates] = useState(false)
   /** Modal de miniatura ampliada — guarda la plantilla cuya miniatura se muestra. */
@@ -439,6 +443,19 @@ export function EmailsContent() {
     setSendingId(null)
   }
 
+  const handleDeleteCampaign = async (id: string) => {
+    setDeletingId(id)
+    const res = await deleteCampaignAction(id)
+    if (res.success) {
+      toast.success('Campaña eliminada')
+      setConfirmDelete(null)
+      loadCampaigns()
+    } else {
+      toast.error('error' in res ? res.error : 'Error al eliminar la campaña')
+    }
+    setDeletingId(null)
+  }
+
   const totalSent = campaigns.reduce((s, c) => s + ((c.sent_count as number) || 0), 0)
   const totalOpened = campaigns.reduce((s, c) => s + ((c.opened_count as number) || 0), 0)
   const totalLogsPages = Math.max(1, Math.ceil(logs.total / LOGS_PAGE_SIZE))
@@ -600,6 +617,23 @@ export function EmailsContent() {
                               </Button>
                             </>
                           )}
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-red-500 hover:text-red-700 hover:bg-red-50"
+                            disabled={deletingId === (c.id as string)}
+                            onClick={() => setConfirmDelete({
+                              id: c.id as string,
+                              name: (c.name as string) || '',
+                              status: (c.status as string) || '',
+                            })}
+                            title="Eliminar campaña"
+                            aria-label="Eliminar campaña"
+                          >
+                            {deletingId === (c.id as string)
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <Trash2 className="h-3.5 w-3.5" />}
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -896,6 +930,66 @@ export function EmailsContent() {
               className="bg-prats-navy hover:bg-prats-navy/90"
             >
               Enviar ahora
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirm delete (soft delete) */}
+      <AlertDialog
+        open={!!confirmDelete}
+        onOpenChange={(open) => { if (!open) setConfirmDelete(null) }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar campaña?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>
+                  Vas a eliminar <strong>{confirmDelete?.name || 'esta campaña'}</strong>.
+                </p>
+                {confirmDelete?.status === 'draft' && (
+                  <p className="text-muted-foreground">
+                    Esta campaña aún no se ha enviado. Se eliminará del listado.
+                  </p>
+                )}
+                {confirmDelete?.status === 'sending' && (
+                  <p className="text-amber-700">
+                    Esta campaña se está enviando ahora mismo. Al eliminarla, los envíos en curso continuarán pero
+                    dejará de aparecer en el historial.
+                  </p>
+                )}
+                {confirmDelete?.status === 'sent' && (
+                  <p className="text-muted-foreground">
+                    Esta campaña ya se ha enviado. Al eliminarla, ya no aparecerá en el historial (las métricas y
+                    logs de envío se conservan internamente).
+                  </p>
+                )}
+                {(confirmDelete?.status === 'cancelled' || confirmDelete?.status === 'failed') && (
+                  <p className="text-muted-foreground">
+                    Esta campaña está en estado <strong>{confirmDelete.status}</strong>. Se eliminará del listado.
+                  </p>
+                )}
+                {confirmDelete && !['draft', 'sending', 'sent', 'cancelled', 'failed'].includes(confirmDelete.status) && (
+                  <p className="text-muted-foreground">
+                    Estado actual: <strong>{confirmDelete.status}</strong>. Se eliminará del listado.
+                  </p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingId !== null}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deletingId !== null}
+              onClick={async () => {
+                if (!confirmDelete) return
+                await handleDeleteCampaign(confirmDelete.id)
+              }}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {deletingId !== null ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+              Eliminar
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

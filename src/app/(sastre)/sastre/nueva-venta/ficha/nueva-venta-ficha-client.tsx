@@ -54,8 +54,10 @@ const PRENDA_LABELS: Record<string, string> = {
   camiseria_industrial: 'Camisería Industrial',
 }
 
-function getPrendasFromSlug(prenda: string): Array<{ slug: string; label: string }> {
-  const map: Record<string, Array<{ slug: string; label: string }>> = {
+type SubPrenda = { slug: string; label: string; parentSlug?: string }
+
+function getPrendasFromSlug(prenda: string): SubPrenda[] {
+  const map: Record<string, SubPrenda[]> = {
     traje_2_piezas: [{ slug: 'americana', label: 'Americana' }, { slug: 'pantalon', label: 'Pantalón' }],
     traje_3_piezas: [{ slug: 'americana', label: 'Americana' }, { slug: 'pantalon', label: 'Pantalón' }, { slug: 'chaleco', label: 'Chaleco' }],
     americana_sola: [{ slug: 'americana', label: 'Americana' }],
@@ -66,7 +68,15 @@ function getPrendasFromSlug(prenda: string): Array<{ slug: string; label: string
     chaque: [{ slug: 'chaque', label: 'Chaqué' }, { slug: 'pantalon', label: 'Pantalón' }, { slug: 'chaleco', label: 'Chaleco' }],
     abrigo: [{ slug: 'abrigo', label: 'Abrigo' }],
     gabardina: [{ slug: 'gabardina', label: 'Gabardina' }],
-    frac: [{ slug: 'americana', label: 'Americana' }, { slug: 'pantalon', label: 'Pantalón' }, { slug: 'chaleco', label: 'Chaleco' }],
+    // frac: el patronaje es propio aunque internamente se cose como 3 piezas.
+    // parentSlug='frac' hace que defaultPrendaConfig/propagación lean y
+    // escriban los confXX en client_measurements con prefijo frac_ en lugar
+    // de americana_/pantalon_/chaleco_.
+    frac: [
+      { slug: 'americana', label: 'Americana', parentSlug: 'frac' },
+      { slug: 'pantalon',  label: 'Pantalón',  parentSlug: 'frac' },
+      { slug: 'chaleco',   label: 'Chaleco',   parentSlug: 'frac' },
+    ],
   }
   return map[prenda] ?? []
 }
@@ -111,24 +121,36 @@ const CONF_BOOLEAN_KEYS: Record<string, string[]> = {
   frac: [],
 }
 
-function extractConfFromMeasurements(slug: string, measurements: Record<string, unknown> | null | undefined): Record<string, unknown> {
+function extractConfFromMeasurements(
+  slug: string,
+  measurements: Record<string, unknown> | null | undefined,
+  parentSlug?: string,
+): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   const m = measurements ?? {}
+  // Las claves de confXX dependen del slug propio (americana/pantalon/chaleco
+  // tienen listados distintos). El PREFIJO con el que se buscan en las
+  // medidas del cliente es el del parentSlug si existe (ej. una venta de
+  // Frac lee frac_confF en lugar de americana_confF).
+  const prefix = parentSlug ?? slug
   for (const k of CONF_NUMERIC_KEYS[slug] ?? []) {
-    const v = m[`${slug}_${k}`]
+    const v = m[`${prefix}_${k}`]
     out[k] = v == null || v === '' ? '' : String(v)
   }
   for (const k of CONF_BOOLEAN_KEYS[slug] ?? []) {
-    const v = m[`${slug}_${k}`]
+    const v = m[`${prefix}_${k}`]
     out[k] = String(v) === 'true'
   }
   return out
 }
 
-function defaultPrendaConfig(slug: string, measurements?: Record<string, unknown> | null): Record<string, unknown> {
+function defaultPrendaConfig(slug: string, measurements?: Record<string, unknown> | null, parentSlug?: string): Record<string, unknown> {
   // Sin valores por defecto en los radios: el sastre los marca al rellenar
   // para que no queden opciones tildadas que se le pasen sin querer.
-  // Los 4 campos de tejido viven AHORA por prenda, no globales.
+  // Los campos de tela (tejido + forro) viven AHORA por prenda, no globales.
+  // El forro se inicializa para TODAS las sub-prendas aunque solo
+  // americana/abrigo/levita lo muestren en UI (el resto lo ignora — el
+  // PDF tampoco lo imprime si está vacío).
   const tejido = {
     tejidoStockId: '',
     tejidoStockNombre: '',
@@ -136,8 +158,14 @@ function defaultPrendaConfig(slug: string, measurements?: Record<string, unknown
     tejidoMetros: '',
     tejidoPrecioMetro: 0,
     tejidoCosteMaterial: 0,
+    forroStockId: '',
+    forroStockNombre: '',
+    forroCatalogo: '',
+    forroMetros: '',
+    forroPrecioMetro: 0,
+    forroCosteMaterial: 0,
   }
-  const conf = extractConfFromMeasurements(slug, measurements)
+  const conf = extractConfFromMeasurements(slug, measurements, parentSlug)
   if (slug === 'pantalon') return {
     ...tejido,
     vueltas: '', bragueta: '', pliegues: '', plieguesVal: '',
@@ -268,6 +296,168 @@ function getCartItemDisplayLabel(item: CartItem, allItems: CartItem[]): string {
   return `${item.label} ${index}`
 }
 
+type FabricStockItem = { id: string; fabric_code: string | null; name: string; price_per_meter: number | null; stock_meters: number | null; composition: string | null }
+
+/** Bloque "TEJIDO" o "FORRO" reutilizable. Lee/escribe las 6 claves
+ *  `${prefix}StockId/Nombre/Catalogo/Metros/PrecioMetro/CosteMaterial`
+ *  en el config de la sub-prenda. El popover compone su clave global
+ *  como `${itemKey}-${prefix}` para que tejido y forro puedan coexistir
+ *  abiertos simultáneamente en sub-prendas distintas. */
+function FabricBlock({
+  itemKey,
+  prefix,
+  label,
+  cfg,
+  setField,
+  fabricsStock,
+  popoverOpenKey,
+  setPopoverOpenKey,
+}: {
+  itemKey: string
+  prefix: 'tejido' | 'forro'
+  label: string
+  cfg: Record<string, unknown>
+  setField: (field: string, value: unknown) => void
+  fabricsStock: FabricStockItem[]
+  popoverOpenKey: string | null
+  setPopoverOpenKey: (k: string | null) => void
+}) {
+  const popoverKey = `${itemKey}-${prefix}`
+  const stockIdKey = `${prefix}StockId` as const
+  const stockNombreKey = `${prefix}StockNombre` as const
+  const catalogoKey = `${prefix}Catalogo` as const
+  const metrosKey = `${prefix}Metros` as const
+  const precioKey = `${prefix}PrecioMetro` as const
+  const costeKey = `${prefix}CosteMaterial` as const
+
+  const recalcCoste = (metros: number, precio: number) => {
+    if (precio > 0 && metros > 0) setField(costeKey, Math.round(precio * metros * 100) / 100)
+    else setField(costeKey, 0)
+  }
+
+  return (
+    <div className="space-y-3 border-t border-white/10 pt-4">
+      <h4 className="text-[#c9a96e] text-xs uppercase tracking-wide font-medium">{label}</h4>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <Label className="text-white/60 text-xs">{prefix === 'tejido' ? 'Tejido en stock' : 'Forro en stock'}</Label>
+          <Popover open={popoverOpenKey === popoverKey} onOpenChange={(o) => setPopoverOpenKey(o ? popoverKey : null)}>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                role="combobox"
+                aria-expanded={popoverOpenKey === popoverKey}
+                className="mt-1 w-full min-h-[44px] justify-between bg-[#0d1629] border-[#c9a96e]/20 text-white hover:bg-[#0d1629] hover:text-white font-normal"
+              >
+                <span className="truncate">
+                  {String(cfg[stockNombreKey] || '') || (prefix === 'tejido' ? 'Buscar o seleccionar tejido...' : 'Buscar o seleccionar forro...')}
+                </span>
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="p-0 bg-[#0d1629] border border-white/20 text-white" align="start" style={{ width: 'var(--radix-popover-trigger-width)' }}>
+              <Command className="bg-transparent text-white">
+                <CommandInput placeholder="Buscar por código o nombre..." className="text-white placeholder:text-white/40" />
+                <CommandList>
+                  <CommandEmpty className="py-4 text-center text-sm text-white/50">Sin resultados</CommandEmpty>
+                  <CommandGroup>
+                    <CommandItem
+                      value="__none__"
+                      onSelect={() => {
+                        setField(stockIdKey, '')
+                        setField(stockNombreKey, '')
+                        setField(precioKey, 0)
+                        setField(costeKey, 0)
+                        setPopoverOpenKey(null)
+                      }}
+                      className="text-white aria-selected:bg-white/10 aria-selected:text-white"
+                    >
+                      <Check className={`mr-2 h-4 w-4 ${cfg[stockIdKey] ? 'opacity-0' : 'opacity-100'}`} />
+                      —
+                    </CommandItem>
+                    {fabricsStock.map((f) => {
+                      const fabricLabel = f.fabric_code ? `${f.fabric_code} — ${f.name}` : f.name
+                      const precioMetro = Number(f.price_per_meter) || 0
+                      return (
+                        <CommandItem
+                          key={f.id}
+                          value={`${f.fabric_code ?? ''} ${f.name}`}
+                          onSelect={() => {
+                            setField(stockIdKey, f.id)
+                            setField(stockNombreKey, `${f.fabric_code ?? ''} — ${f.name}`.trim())
+                            setField(precioKey, precioMetro)
+                            const metros = Number(cfg[metrosKey]) || 0
+                            recalcCoste(metros, precioMetro)
+                            setPopoverOpenKey(null)
+                          }}
+                          className="text-white aria-selected:bg-white/10 aria-selected:text-white"
+                        >
+                          <Check className={`mr-2 h-4 w-4 ${cfg[stockIdKey] === f.id ? 'opacity-100' : 'opacity-0'}`} />
+                          <span className="truncate">{fabricLabel}</span>
+                          {precioMetro > 0 && (
+                            <span className="ml-2 text-xs text-white/50 shrink-0 tabular-nums">· {precioMetro.toFixed(2)} €/m</span>
+                          )}
+                        </CommandItem>
+                      )
+                    })}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+          {(() => {
+            const selectedFabric = fabricsStock.find((f) => f.id === cfg[stockIdKey])
+            const precio = Number(cfg[precioKey]) || 0
+            if (precio <= 0 && !selectedFabric?.composition) return null
+            const stockM = selectedFabric?.stock_meters != null ? Number(selectedFabric.stock_meters) : null
+            return (
+              <p className="text-[10px] text-white/50 mt-0.5">
+                {precio > 0 && <span className="tabular-nums">{precio.toFixed(2)} €/m</span>}
+                {precio > 0 && stockM != null && ' · '}
+                {stockM != null && <span className="tabular-nums">{stockM.toFixed(1)} m disponibles</span>}
+                {selectedFabric?.composition && (precio > 0 || stockM != null) && ' · '}
+                {selectedFabric?.composition && <span>{selectedFabric.composition}</span>}
+              </p>
+            )
+          })()}
+        </div>
+        <div>
+          <Label className="text-white/60 text-xs">{prefix === 'tejido' ? 'Tejido de catálogo' : 'Forro de catálogo'}</Label>
+          <Input
+            className="mt-1 min-h-[44px] bg-[#0d1629] border-[#c9a96e]/20 text-white"
+            value={String(cfg[catalogoKey] || '')}
+            onChange={(e) => setField(catalogoKey, e.target.value)}
+            placeholder="Referencia de catálogo"
+          />
+        </div>
+        <div>
+          <Label className="text-white/60 text-xs">Metros a utilizar</Label>
+          <Input
+            type="number"
+            step="0.1"
+            min="0"
+            className="mt-1 min-h-[44px] bg-[#0d1629] border-[#c9a96e]/20 text-white"
+            value={String(cfg[metrosKey] || '')}
+            onChange={(e) => {
+              setField(metrosKey, e.target.value)
+              const metros = Number(e.target.value) || 0
+              const precio = Number(cfg[precioKey]) || 0
+              recalcCoste(metros, precio)
+            }}
+            placeholder="Ej: 3.5"
+          />
+          {Number(cfg[costeKey]) > 0 && (
+            <p className="text-[10px] text-amber-300 mt-0.5 font-medium tabular-nums">
+              = {Number(cfg[costeKey]).toFixed(2)} €
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function NuevaVentaFichaClient({
   clientId,
   tipo: tipoProp,
@@ -320,8 +510,10 @@ export function NuevaVentaFichaClient({
   const [sastres, setSastres] = useState<{ id: string; full_name: string }[]>([])
   const [officials, setOfficials] = useState<{ id: string; name: string; specialty: string | null }[]>([])
   const [fabricsStock, setFabricsStock] = useState<{ id: string; fabric_code: string | null; name: string; price_per_meter: number | null; stock_meters: number | null; composition: string | null }[]>([])
-  /** Key del popover de tejido abierto (por prenda). null = ninguno abierto. */
-  const [tejidoPopoverOpenKey, setTejidoPopoverOpenKey] = useState<string | null>(null)
+  /** Key del popover de tela abierto (tejido o forro). Compone clave como
+   *  `${itemKey}-tejido` o `${itemKey}-forro` para que ambos puedan
+   *  coexistir abiertos en sub-prendas distintas. */
+  const [popoverOpenKey, setPopoverOpenKey] = useState<string | null>(null)
   const [client, setClient] = useState<Record<string, unknown> | null>(null)
   const [clientLoading, setClientLoading] = useState(false)
   const [camiseriaMeasurements, setCamiseriaMeasurements] = useState<Record<string, unknown> | null>(null)
@@ -355,10 +547,10 @@ export function NuevaVentaFichaClient({
   const addToCart = useCallback((prendaDef: { slug: string; label: string }) => {
     const id = crypto.randomUUID()
     const sections = getPrendasFromSlug(prendaDef.slug)
-    const subSections = sections.length > 0 ? sections : [{ slug: prendaDef.slug, label: prendaDef.label }]
+    const subSections: SubPrenda[] = sections.length > 0 ? sections : [{ slug: prendaDef.slug, label: prendaDef.label }]
     setCartItems(prev => [...prev, { id, slug: prendaDef.slug, label: prendaDef.label, precio: 0 }])
     const initConfigs: Record<string, Record<string, unknown>> = {}
-    for (const sp of subSections) initConfigs[`${id}_${sp.slug}`] = defaultPrendaConfig(sp.slug, camiseriaMeasurements)
+    for (const sp of subSections) initConfigs[`${id}_${sp.slug}`] = defaultPrendaConfig(sp.slug, camiseriaMeasurements, sp.parentSlug)
     setPrendaConfigs(prev => ({ ...prev, ...initConfigs }))
     setShowPrendaSelector(false)
   }, [camiseriaMeasurements])
@@ -411,13 +603,19 @@ export function NuevaVentaFichaClient({
         const clone = (typeof structuredClone === 'function'
           ? structuredClone(srcCfg)
           : JSON.parse(JSON.stringify(srcCfg))) as Record<string, unknown>
-        // Vaciar la tela en el duplicado (6 claves, tipos respetados)
+        // Vaciar la tela en el duplicado (tejido + forro, tipos respetados).
         clone.tejidoStockId = ''
         clone.tejidoStockNombre = ''
         clone.tejidoCatalogo = ''
         clone.tejidoMetros = ''
         clone.tejidoPrecioMetro = 0
         clone.tejidoCosteMaterial = 0
+        clone.forroStockId = ''
+        clone.forroStockNombre = ''
+        clone.forroCatalogo = ''
+        clone.forroMetros = ''
+        clone.forroPrecioMetro = 0
+        clone.forroCosteMaterial = 0
         next[`${prefixNew}${sp.slug}`] = clone
       }
       return next
@@ -449,10 +647,10 @@ export function NuevaVentaFichaClient({
     seededRef.current = true
     const id = crypto.randomUUID()
     const sections = getPrendasFromSlug(prendaDef.slug)
-    const subSections = sections.length > 0 ? sections : [{ slug: prendaDef.slug, label: prendaDef.label }]
+    const subSections: SubPrenda[] = sections.length > 0 ? sections : [{ slug: prendaDef.slug, label: prendaDef.label }]
     setCartItems([{ id, slug: prendaDef.slug, label: prendaDef.label, precio: 0 }])
     const initConfigs: Record<string, Record<string, unknown>> = {}
-    for (const sp of subSections) initConfigs[`${id}_${sp.slug}`] = defaultPrendaConfig(sp.slug, camiseriaMeasurements)
+    for (const sp of subSections) initConfigs[`${id}_${sp.slug}`] = defaultPrendaConfig(sp.slug, camiseriaMeasurements, sp.parentSlug)
     setPrendaConfigs(initConfigs)
   }, [camiseriaMeasurementsLoading, camiseriaMeasurements, prenda, isCamiseria])
 
@@ -656,6 +854,15 @@ export function NuevaVentaFichaClient({
         const key = `${item.id}_${sp.slug}`
         const config = prendaConfigs[key] ?? {}
         const lineLabel = sp.label === item.label ? itemDisplayLabel : `${sp.label} — ${itemDisplayLabel}`
+        // prendaParentSlug se omite del JSON si es undefined; solo se persiste
+        // cuando la sub-prenda viene de un padre con prefijo propio en
+        // client_measurements (caso frac: confXX bajo frac_*, no americana_*).
+        const configuration: Record<string, unknown> = {
+          ...config,
+          prendaLabel: lineLabel,
+          prendaSlug: sp.slug,
+        }
+        if (sp.parentSlug) configuration.prendaParentSlug = sp.parentSlug
         result.push({
           slug: sp.slug,
           label: lineLabel,
@@ -663,7 +870,7 @@ export function NuevaVentaFichaClient({
           // El coste estimado solo se aplica a la primera sub-prenda (la que recoge el importe)
           coste: idx === 0 ? (Number(item.coste) || 0) : 0,
           oficial: oficiales[key] ?? '',
-          configuration: { ...config, prendaLabel: lineLabel, prendaSlug: sp.slug },
+          configuration,
         })
       })
     }
@@ -699,21 +906,27 @@ export function NuevaVentaFichaClient({
     if (!sasLines || sasLines.length === 0) return
     try {
       // 1) Construir las claves prefijadas a partir de las líneas creadas.
+      //    El prefijo es prendaParentSlug si existe (ej. frac: las 3
+      //    sub-líneas escriben bajo frac_*), si no el prendaSlug propio.
+      //    Las CLAVES de confXX siguen dependiendo del slug propio
+      //    (americana/pantalon/chaleco tienen listas distintas).
       const newConfKeys: Record<string, string> = {}
       for (const ln of sasLines) {
         const cfg = (ln?.configuration ?? {}) as Record<string, unknown>
         const slug = String(cfg.prendaSlug ?? '').toLowerCase()
+        const parentSlug = cfg.prendaParentSlug ? String(cfg.prendaParentSlug).toLowerCase() : undefined
         if (!CONF_NUMERIC_KEYS[slug]) continue
+        const prefix = parentSlug ?? slug
         for (const k of CONF_NUMERIC_KEYS[slug]) {
           const v = cfg[k]
           if (v !== null && v !== undefined && v !== '') {
-            newConfKeys[`${slug}_${k}`] = String(v)
+            newConfKeys[`${prefix}_${k}`] = String(v)
           }
         }
         for (const k of CONF_BOOLEAN_KEYS[slug] ?? []) {
           const v = cfg[k]
           if (v === true || v === 'true') {
-            newConfKeys[`${slug}_${k}`] = 'true'
+            newConfKeys[`${prefix}_${k}`] = 'true'
           }
         }
       }
@@ -729,19 +942,28 @@ export function NuevaVentaFichaClient({
       }
       // Detectar también claves desaparecidas: hoy en las medidas del cliente
       // pero NO presentes (o vacías) en la venta nueva → significa que el
-      // sastre las quitó conscientemente.
-      const slugsTocados = new Set<string>()
+      // sastre las quitó conscientemente. El "prefijo tocado" es el prefijo
+      // efectivo (parentSlug si lo hay, slug si no); en el caso del frac es
+      // 'frac' una sola vez aunque haya 3 sub-líneas.
+      const prefixesTocados = new Map<string, Set<string>>()  // prefix → slugs propios que contribuyen claves
       for (const ln of sasLines) {
-        const slug = String((ln?.configuration ?? {}).prendaSlug ?? '').toLowerCase()
-        if (CONF_NUMERIC_KEYS[slug]) slugsTocados.add(slug)
+        const cfg = (ln?.configuration ?? {}) as Record<string, unknown>
+        const slug = String(cfg.prendaSlug ?? '').toLowerCase()
+        const parentSlug = cfg.prendaParentSlug ? String(cfg.prendaParentSlug).toLowerCase() : undefined
+        if (!CONF_NUMERIC_KEYS[slug]) continue
+        const prefix = parentSlug ?? slug
+        if (!prefixesTocados.has(prefix)) prefixesTocados.set(prefix, new Set())
+        prefixesTocados.get(prefix)!.add(slug)
       }
-      for (const slug of slugsTocados) {
-        const allKeys = [
-          ...(CONF_NUMERIC_KEYS[slug] ?? []),
-          ...(CONF_BOOLEAN_KEYS[slug] ?? []),
-        ]
+      for (const [prefix, slugs] of prefixesTocados) {
+        // Unión de claves de todos los slugs que contribuyen a este prefijo.
+        const allKeys = new Set<string>()
+        for (const slug of slugs) {
+          for (const k of CONF_NUMERIC_KEYS[slug] ?? []) allKeys.add(k)
+          for (const k of CONF_BOOLEAN_KEYS[slug] ?? []) allKeys.add(k)
+        }
         for (const k of allKeys) {
-          const fullKey = `${slug}_${k}`
+          const fullKey = `${prefix}_${k}`
           if (measures[fullKey] != null && measures[fullKey] !== '' && newConfKeys[fullKey] === undefined) {
             hasChanges = true
             changedKeys.push(fullKey)
@@ -752,8 +974,8 @@ export function NuevaVentaFichaClient({
 
       // 3) Construir el conjunto FULL de claves del body a guardar:
       //    mantenemos las medidas físicas existentes (americana_, pantalon_,
-      //    chaleco_, frac_, abrigo_) y sobre-escribimos solo las confXX
-      //    tocadas por esta venta.
+      //    chaleco_, frac_, abrigo_, levita_) y sobre-escribimos solo las
+      //    confXX tocadas por esta venta.
       const fullValues: Record<string, string> = {}
       for (const [k, v] of Object.entries(measures)) {
         if (v == null || v === '') continue
@@ -762,11 +984,11 @@ export function NuevaVentaFichaClient({
           k.startsWith('chaleco_') || k.startsWith('frac_') ||
           k.startsWith('abrigo_') || k.startsWith('levita_')
         if (!isBodyKey) continue
-        // Si esta clave es un confXX de un slug tocado y NO está en newConfKeys,
-        // significa que se eliminó: no la incluimos.
-        const slugForKey = k.split('_')[0]
+        // Si esta clave es un confXX de un prefijo tocado y NO está en
+        // newConfKeys, significa que se eliminó: no la incluimos.
+        const prefixForKey = k.split('_')[0]
         const isConfKey = k.includes('_conf')
-        if (isConfKey && slugsTocados.has(slugForKey) && newConfKeys[k] === undefined) continue
+        if (isConfKey && prefixesTocados.has(prefixForKey) && newConfKeys[k] === undefined) continue
         fullValues[k] = String(v)
       }
       for (const [k, v] of Object.entries(newConfKeys)) fullValues[k] = v
@@ -1067,132 +1289,48 @@ export function NuevaVentaFichaClient({
 
                         {!['pantalon', 'chaleco'].includes(sp.slug) && <FichaAmericanaConfig keyId={key} cfg={cfg} setField={setField} />}
 
-                        {/* Tejido por prenda */}
-                        <div className="space-y-3 border-t border-white/10 pt-4">
-                          <h4 className="text-[#c9a96e] text-xs uppercase tracking-wide font-medium">Tejido de {sp.label}</h4>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div>
-                              <Label className="text-white/60 text-xs">Tejido en stock</Label>
-                              <Popover
-                                open={tejidoPopoverOpenKey === key}
-                                onOpenChange={(o) => setTejidoPopoverOpenKey(o ? key : null)}
-                              >
-                                <PopoverTrigger asChild>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    role="combobox"
-                                    aria-expanded={tejidoPopoverOpenKey === key}
-                                    className="mt-1 w-full min-h-[44px] justify-between bg-[#0d1629] border-[#c9a96e]/20 text-white hover:bg-[#0d1629] hover:text-white font-normal"
-                                  >
-                                    <span className="truncate">
-                                      {String(cfg.tejidoStockNombre || '') || 'Buscar o seleccionar tejido...'}
-                                    </span>
-                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                  </Button>
-                                </PopoverTrigger>
-                                <PopoverContent className="p-0 bg-[#0d1629] border border-white/20 text-white" align="start" style={{ width: 'var(--radix-popover-trigger-width)' }}>
-                                  <Command className="bg-transparent text-white">
-                                    <CommandInput placeholder="Buscar por código o nombre..." className="text-white placeholder:text-white/40" />
-                                    <CommandList>
-                                      <CommandEmpty className="py-4 text-center text-sm text-white/50">Sin resultados</CommandEmpty>
-                                      <CommandGroup>
-                                        <CommandItem
-                                          value="__none__"
-                                          onSelect={() => {
-                                            setField('tejidoStockId', '')
-                                            setField('tejidoStockNombre', '')
-                                            setField('tejidoPrecioMetro', 0)
-                                            setField('tejidoCosteMaterial', 0)
-                                            setTejidoPopoverOpenKey(null)
-                                          }}
-                                          className="text-white aria-selected:bg-white/10 aria-selected:text-white"
-                                        >
-                                          <Check className={`mr-2 h-4 w-4 ${cfg.tejidoStockId ? 'opacity-0' : 'opacity-100'}`} />
-                                          —
-                                        </CommandItem>
-                                        {fabricsStock.map((f) => {
-                                          const fabricLabel = f.fabric_code ? `${f.fabric_code} — ${f.name}` : f.name
-                                          const precioMetro = Number(f.price_per_meter) || 0
-                                          return (
-                                            <CommandItem
-                                              key={f.id}
-                                              value={`${f.fabric_code ?? ''} ${f.name}`}
-                                              onSelect={() => {
-                                                setField('tejidoStockId', f.id)
-                                                setField('tejidoStockNombre', `${f.fabric_code ?? ''} — ${f.name}`.trim())
-                                                setField('tejidoPrecioMetro', precioMetro)
-                                                const metros = Number(cfg.tejidoMetros) || 0
-                                                if (metros > 0 && precioMetro > 0) {
-                                                  setField('tejidoCosteMaterial', Math.round(precioMetro * metros * 100) / 100)
-                                                } else {
-                                                  setField('tejidoCosteMaterial', 0)
-                                                }
-                                                setTejidoPopoverOpenKey(null)
-                                              }}
-                                              className="text-white aria-selected:bg-white/10 aria-selected:text-white"
-                                            >
-                                              <Check className={`mr-2 h-4 w-4 ${cfg.tejidoStockId === f.id ? 'opacity-100' : 'opacity-0'}`} />
-                                              <span className="truncate">{fabricLabel}</span>
-                                              {precioMetro > 0 && (
-                                                <span className="ml-2 text-xs text-white/50 shrink-0 tabular-nums">· {precioMetro.toFixed(2)} €/m</span>
-                                              )}
-                                            </CommandItem>
-                                          )
-                                        })}
-                                      </CommandGroup>
-                                    </CommandList>
-                                  </Command>
-                                </PopoverContent>
-                              </Popover>
-                              {(() => {
-                                const selectedFabric = fabricsStock.find((f) => f.id === cfg.tejidoStockId)
-                                const precio = Number(cfg.tejidoPrecioMetro) || 0
-                                if (precio <= 0 && !selectedFabric?.composition) return null
-                                const stockM = selectedFabric?.stock_meters != null ? Number(selectedFabric.stock_meters) : null
-                                return (
-                                  <p className="text-[10px] text-white/50 mt-0.5">
-                                    {precio > 0 && <span className="tabular-nums">{precio.toFixed(2)} €/m</span>}
-                                    {precio > 0 && stockM != null && ' · '}
-                                    {stockM != null && <span className="tabular-nums">{stockM.toFixed(1)} m disponibles</span>}
-                                    {selectedFabric?.composition && (precio > 0 || stockM != null) && ' · '}
-                                    {selectedFabric?.composition && <span>{selectedFabric.composition}</span>}
-                                  </p>
-                                )
-                              })()}
-                            </div>
-                            <div>
-                              <Label className="text-white/60 text-xs">Tejido de catálogo</Label>
-                              <Input className="mt-1 min-h-[44px] bg-[#0d1629] border-[#c9a96e]/20 text-white" value={String(cfg.tejidoCatalogo || '')} onChange={(e) => setField('tejidoCatalogo', e.target.value)} placeholder="Referencia de catálogo" />
-                            </div>
-                            <div>
-                              <Label className="text-white/60 text-xs">Metros a utilizar</Label>
-                              <Input
-                                type="number"
-                                step="0.1"
-                                min="0"
-                                className="mt-1 min-h-[44px] bg-[#0d1629] border-[#c9a96e]/20 text-white"
-                                value={String(cfg.tejidoMetros || '')}
-                                onChange={(e) => {
-                                  setField('tejidoMetros', e.target.value)
-                                  const metros = Number(e.target.value) || 0
-                                  const precio = Number(cfg.tejidoPrecioMetro) || 0
-                                  if (precio > 0 && metros > 0) {
-                                    setField('tejidoCosteMaterial', Math.round(precio * metros * 100) / 100)
-                                  } else {
-                                    setField('tejidoCosteMaterial', 0)
-                                  }
-                                }}
-                                placeholder="Ej: 3.5"
-                              />
-                              {Number(cfg.tejidoCosteMaterial) > 0 && (
-                                <p className="text-[10px] text-amber-300 mt-0.5 font-medium tabular-nums">
-                                  = {Number(cfg.tejidoCosteMaterial).toFixed(2)} €
+                        {/* Tejido por sub-prenda */}
+                        <FabricBlock
+                          itemKey={key}
+                          prefix="tejido"
+                          label={`TEJIDO DE ${sp.label.toUpperCase()}`}
+                          cfg={cfg}
+                          setField={setField}
+                          fabricsStock={fabricsStock}
+                          popoverOpenKey={popoverOpenKey}
+                          setPopoverOpenKey={setPopoverOpenKey}
+                        />
+
+                        {/* Forro: solo americana (incluida la del frac), abrigo y levita.
+                            Pantalón/chaleco (incluso del frac), teba, gabardina, chaqué
+                            no muestran el bloque. */}
+                        {(sp.slug === 'americana' || sp.slug === 'abrigo' || sp.slug === 'levita') && (() => {
+                          const hasForroData = Boolean(
+                            cfg.forroStockId
+                            || (typeof cfg.forroCatalogo === 'string' && cfg.forroCatalogo.trim())
+                            || cfg.forroMetros
+                          )
+                          const incoherencia = cfg.forro === 'sin_forro' && hasForroData
+                          return (
+                            <>
+                              {incoherencia && (
+                                <p className="text-xs text-amber-300 -mb-2 pl-1">
+                                  Has marcado &ldquo;Sin forro&rdquo; pero has añadido tela de forro. Revisa la coherencia o ignora si es intencional.
                                 </p>
                               )}
-                            </div>
-                          </div>
-                        </div>
+                              <FabricBlock
+                                itemKey={key}
+                                prefix="forro"
+                                label={`FORRO DE ${sp.label.toUpperCase()}`}
+                                cfg={cfg}
+                                setField={setField}
+                                fabricsStock={fabricsStock}
+                                popoverOpenKey={popoverOpenKey}
+                                setPopoverOpenKey={setPopoverOpenKey}
+                              />
+                            </>
+                          )
+                        })()}
 
                         {/* Características por prenda */}
                         <div className="mt-4">

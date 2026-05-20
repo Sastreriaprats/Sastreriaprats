@@ -9,6 +9,7 @@
  * sin grid, sin pseudoclases, sin @media (que Gmail descarta).
  */
 import { renderTemplate } from '@/lib/email/send'
+import { EMAIL_LOGO_URL } from './branding'
 
 /* ── Tipos ──────────────────────────────────────────────────────────────── */
 
@@ -50,7 +51,10 @@ export interface NewsletterUrls {
   unsubscribeUrl?: string
   /** Para campañas optin_invitation: enlace de confirmación con token. */
   confirmationUrl?: string
-  publicSiteUrl: string
+  /** Deprecated: el logo ahora se sirve desde EMAIL_LOGO_URL (branding.ts).
+   *  Se mantiene opcional para no romper callers legacy; nuevos callers
+   *  no deberían pasarlo. */
+  publicSiteUrl?: string
 }
 
 /* ── Helpers de escape ──────────────────────────────────────────────────── */
@@ -167,7 +171,7 @@ export function composeNewsletterEmail(opts: ComposeOpts): string {
   const firstName = resolveFirstName(recipient)
   const clientEmail = (recipient.email || '').trim()
 
-  const logoUrl = `${(urls.publicSiteUrl || '').replace(/\/+$/, '')}/logo-prats.png`
+  const logoUrl = EMAIL_LOGO_URL
 
   if (code === 'newsletter_default') {
     const c: NewsletterContent = content || {}

@@ -362,6 +362,20 @@ function getFichaFromOrder(order: FichaConfeccionOrder): Record<string, unknown>
     caracteristicasStr = '—'
   }
 
+  // Forro: espejo del tejido. Solo se construye si la prenda lo lleva
+  // (americana/abrigo/levita); el resto deja forroStr vacío y el PDF no
+  // imprime el bloque.
+  const forroNombre = String(config.forroStockNombre || config.forroCatalogo || '').trim()
+  const forroMetros = config.forroMetros
+  let forroStr = ''
+  if (forroNombre && forroMetros !== undefined && forroMetros !== null && forroMetros !== '') {
+    forroStr = `${forroNombre} — ${forroMetros} m`
+  } else if (forroNombre) {
+    forroStr = forroNombre
+  } else if (forroMetros !== undefined && forroMetros !== null && forroMetros !== '') {
+    forroStr = `${forroMetros} m`
+  }
+
   return {
     cortador: config.cortador ?? '',
     oficial: config.oficial ?? '',
@@ -377,6 +391,9 @@ function getFichaFromOrder(order: FichaConfeccionOrder): Record<string, unknown>
     caracteristicas: caracteristicasStr,
     caracteristicasPrenda: String(config.caracteristicasPrenda ?? '').trim(),
     tejido: tejidoStr,
+    // Tela del forro (espejo del bloque tejido). Distinto de config.forro,
+    // que es el radio sin_forro/medio/completo de estilo.
+    forroTela: forroStr,
     metros: config.metros ?? '',
     medidas: medidasStr,
     domicilio: config.domicilio ?? '',
@@ -471,6 +488,7 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
       ? String(ficha.oficial).trim()
       : ''
   const caracteristicasStr = String(ficha.caracteristicas ?? '—').trim() || '—'
+  const forroStr = String(ficha.forroTela ?? '').trim()
   const medidasStr = String(ficha.medidas ?? '—').trim() || '—'
   const descripcionStr = String(ficha.descripcion ?? ficha.observaciones ?? '').trim() || '—'
   const configuracionStr = String(ficha.configuracion ?? '—').trim() || '—'
@@ -548,6 +566,18 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
     },
     layout: tableLayoutBorders,
   })
+
+  // Forro: solo si la prenda lo lleva (americana/abrigo/levita) y se ha
+  // rellenado tela de forro. Mismo estilo visual que el bloque Tejido.
+  if (forroStr) {
+    content.push({
+      table: {
+        widths: ['30%', '70%'],
+        body: [[cellLabel('Forro:'), cellValue(forroStr)]],
+      },
+      layout: tableLayoutBorders,
+    })
+  }
 
   // Medidas: 2 columnas
   content.push({
@@ -672,6 +702,15 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
       },
       layout: tableLayoutBorders,
     },
+    // Forro: misma estructura que tejido. Solo se renderiza si la prenda
+    // lo lleva y hay datos.
+    ...(forroStr ? [{
+      table: {
+        widths: ['30%', '70%'],
+        body: [[cellLabel('Forro:'), cellValue(forroStr)]],
+      },
+      layout: tableLayoutBorders,
+    }] : []),
     {
       table: {
         widths: ['25%', '75%'],

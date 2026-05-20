@@ -18,6 +18,7 @@ import {
 import { toast } from 'sonner'
 import { usePermissions } from '@/hooks/use-permissions'
 import { hardDeleteClientAction } from '@/actions/clients'
+import { clientSourceLabel } from '@/lib/clients/sources'
 import { getInitials, formatCurrency, formatDate } from '@/lib/utils'
 import { ClientDataTab } from './tabs/client-data-tab'
 import { ClientMeasurementsTab } from './tabs/client-measurements-tab'
@@ -49,7 +50,7 @@ function ClientSummaryTab({ client }: { client: any }) {
           {client.address && <p><span className="text-muted-foreground">Dirección:</span> {client.address}, {client.city} {client.postal_code}</p>}
           {client.nationality && <p><span className="text-muted-foreground">Nacionalidad:</span> {client.nationality}</p>}
           <p><span className="text-muted-foreground">Alta:</span> {formatDate(client.created_at)}</p>
-          {client.source && <p><span className="text-muted-foreground">Origen:</span> {client.source}</p>}
+          {client.source && <p><span className="text-muted-foreground">Origen:</span> {clientSourceLabel(client.source)}</p>}
         </CardContent>
       </Card>
       <Card>

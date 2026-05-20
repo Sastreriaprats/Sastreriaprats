@@ -182,8 +182,33 @@ export const listCampaigns = protectedAction<void, Record<string, unknown>[]>(
     const { data } = await ctx.adminClient
       .from('email_campaigns')
       .select('id, name, subject, status, segment, total_recipients, sent_count, delivered_count, opened_count, clicked_count, created_at, scheduled_at, sent_at')
+      .is('deleted_at', null)
       .order('created_at', { ascending: false })
     return success(data || [])
+  }
+)
+
+/** Soft delete de una campaña. Se marca deleted_at=NOW() y deja de
+ *  aparecer en el listado. Los email_logs y métricas asociadas se
+ *  conservan (su FK no se toca). Idempotente: si ya está eliminada,
+ *  no hace nada. */
+export const deleteCampaignAction = protectedAction<string, { deleted: true }>(
+  {
+    permission: 'emails.send',
+    auditModule: 'emails',
+    auditAction: 'delete',
+    auditEntity: 'email_campaign',
+    revalidate: ['/admin/emails'],
+  },
+  async (ctx, campaignId) => {
+    if (!campaignId?.trim()) return failure('ID de campaña requerido', 'VALIDATION')
+    const { error } = await ctx.adminClient
+      .from('email_campaigns')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', campaignId)
+      .is('deleted_at', null)
+    if (error) return failure(error.message)
+    return success({ deleted: true })
   }
 )
 
@@ -436,7 +461,6 @@ export const sendCampaign = protectedAction<string, { sent: number; total: numbe
               urls: {
                 unsubscribeUrl: unsubUrl || undefined,
                 confirmationUrl: confirmationUrl || undefined,
-                publicSiteUrl: publicUrl,
               },
               subject: campaign.subject as string,
             })
@@ -717,7 +741,7 @@ export const previewCampaignEmail = protectedAction<
         template: template as NewsletterTemplate,
         content,
         recipient: rec,
-        urls: { unsubscribeUrl, confirmationUrl, publicSiteUrl: publicUrl },
+        urls: { unsubscribeUrl, confirmationUrl },
         subject: campaign.subject as string,
       })
     } else {
@@ -799,7 +823,7 @@ export const sendCampaignTestEmail = protectedAction<
         template: template as NewsletterTemplate,
         content,
         recipient: rec,
-        urls: { unsubscribeUrl, confirmationUrl, publicSiteUrl: publicUrl },
+        urls: { unsubscribeUrl, confirmationUrl },
         subject: campaign.subject as string,
       })
     } else {
