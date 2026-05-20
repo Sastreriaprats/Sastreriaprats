@@ -5,6 +5,7 @@ import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { queryList, queryById, getNextNumber } from '@/lib/server/query-helpers'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createTailoringOrderSchema, tailoringOrderLineSchema, changeOrderStatusSchema } from '@/lib/validations/orders'
+import { ALL_VISIBLE_STATUSES, type OrderStatus } from '@/lib/orders/statuses'
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { sendOrderConfirmation, sendTailoringStatusUpdate } from '@/lib/email/transactional'
@@ -81,7 +82,7 @@ export const listOrders = protectedAction<ListParams & { status?: string }, List
       if (searchOr) query = query.or(searchOr)
       if (params.filters?.order_type) query = query.eq('order_type', params.filters.order_type)
       if (params.storeId) query = query.eq('store_id', params.storeId)
-      query = query.order(params.sortBy || 'created_at', { ascending: params.sortOrder === 'asc' })
+      query = query.order(params.sortBy || 'order_date', { ascending: params.sortOrder === 'asc' })
       const page = params.page || 1
       const pageSize = params.pageSize || 20
       const from = (page - 1) * pageSize
@@ -283,6 +284,11 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
 
     const orderNumber = await getNextNumber('tailoring_orders', 'order_number', prefix)
 
+    const initialStatus =
+      parsedOrder.data.order_type === 'industrial' || (parsedOrder.data.order_type as string) === 'camiseria_industrial'
+        ? 'factory_ordered'
+        : 'created'
+
     let subtotal = 0
     const processedLines = linesInput.map((line: any, idx: number) => {
       const lineDiscount = line.unit_price * (line.discount_percentage || 0) / 100
@@ -300,6 +306,7 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
       .from('tailoring_orders')
       .insert({
         ...parsedOrder.data,
+        status: initialStatus,
         order_number: orderNumber,
         subtotal,
         discount_amount: orderDiscount,
@@ -371,7 +378,7 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
 
     await ctx.adminClient.from('tailoring_order_state_history').insert({
       tailoring_order_id: order.id,
-      to_status: 'created',
+      to_status: initialStatus,
       changed_by: ctx.userId,
       changed_by_name: ctx.userName,
     })
@@ -585,6 +592,11 @@ export const updateOrderStatus = protectedAction<
   async (ctx, { orderId, newStatus, lineId }) => {
     if (!orderId?.trim() || !newStatus?.trim()) return failure('Parámetros no válidos', 'VALIDATION')
 
+    const trimmedStatus = newStatus.trim()
+    if (!ALL_VISIBLE_STATUSES.includes(trimmedStatus as OrderStatus)) {
+      return failure(`Estado no válido: ${trimmedStatus}`, 'VALIDATION')
+    }
+
     let fromStatus: string | null = null
     if (lineId?.trim()) {
       const { data: prevLine } = await ctx.adminClient
@@ -595,7 +607,7 @@ export const updateOrderStatus = protectedAction<
       fromStatus = (prevLine as any)?.status ?? null
       const { error } = await ctx.adminClient
         .from('tailoring_order_lines')
-        .update({ status: newStatus.trim() })
+        .update({ status: trimmedStatus })
         .eq('id', lineId.trim())
         .eq('tailoring_order_id', orderId.trim())
 
@@ -609,10 +621,56 @@ export const updateOrderStatus = protectedAction<
       fromStatus = (prevOrder as any)?.status ?? null
       const { error } = await ctx.adminClient
         .from('tailoring_orders')
-        .update({ status: newStatus.trim() })
+        .update({
+          status: trimmedStatus,
+          ...(trimmedStatus === 'delivered' ? { actual_delivery_date: new Date().toISOString().split('T')[0] } : {}),
+        })
         .eq('id', orderId.trim())
 
       if (error) return failure(error.message, 'INTERNAL')
+
+      // Cascada a líneas en 'created' (réplica de changeOrderStatus admin).
+      await ctx.adminClient
+        .from('tailoring_order_lines')
+        .update({ status: trimmedStatus })
+        .eq('tailoring_order_id', orderId.trim())
+        .eq('status', 'created')
+    }
+
+    // Historial de la transición — antes la action sastre no lo escribía,
+    // por eso los cambios desde /sastre/pedidos no aparecían en el tab Historial.
+    await ctx.adminClient.from('tailoring_order_state_history').insert({
+      tailoring_order_id: orderId.trim(),
+      tailoring_order_line_id: lineId?.trim() || null,
+      from_status: fromStatus,
+      to_status: trimmedStatus,
+      changed_by: ctx.userId,
+      changed_by_name: ctx.userName,
+    })
+
+    // Email al cliente cuando se marca entregado (réplica de changeOrderStatus admin).
+    // Solo en cambio de pedido completo, no de línea individual.
+    if (!lineId?.trim() && trimmedStatus === 'delivered') {
+      const { data: orderWithClient } = await ctx.adminClient
+        .from('tailoring_orders')
+        .select('order_number, clients(email, full_name, first_name, last_name)')
+        .eq('id', orderId.trim())
+        .single()
+      const client = (orderWithClient as { clients?: { email?: string; full_name?: string; first_name?: string; last_name?: string } | null } | null)?.clients
+      const clientEmail = client?.email
+      if (clientEmail) {
+        const clientName = client?.full_name || [client?.first_name, client?.last_name].filter(Boolean).join(' ') || 'Cliente'
+        try {
+          await sendTailoringStatusUpdate({
+            client_name: clientName,
+            client_email: clientEmail,
+            order_number: (orderWithClient as { order_number: string }).order_number,
+            new_status: trimmedStatus,
+          })
+        } catch (e) {
+          console.error('[updateOrderStatus] sendTailoringStatusUpdate:', e)
+        }
+      }
     }
 
     revalidatePath(`/sastre/pedidos/${orderId}`)
@@ -624,13 +682,13 @@ export const updateOrderStatus = protectedAction<
       ready: 'Listo', delivered: 'Entregado', cancelled: 'Cancelado', pending: 'Pendiente',
     }
     const fromEs = fromStatus ? (statusEs[fromStatus] ?? fromStatus) : '—'
-    const toEs = statusEs[newStatus.trim()] ?? newStatus.trim()
+    const toEs = statusEs[trimmedStatus] ?? trimmedStatus
     return success({
       orderId,
       auditEntityId: orderId,
       auditDescription: `Pedido ${orderNumber}: ${fromEs} → ${toEs}${lineId ? ' (línea)' : ''}`,
       auditOldData: { estado: fromStatus },
-      auditNewData: { estado: newStatus.trim() },
+      auditNewData: { estado: trimmedStatus },
       auditMetadata: { linea_id: lineId ?? null },
     })
   }
@@ -1326,7 +1384,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
 
     await ctx.adminClient.from('tailoring_order_state_history').insert({
       tailoring_order_id: order.id,
-      to_status: 'created',
+      to_status: initialStatus,
       changed_by: ctx.userId,
       changed_by_name: ctx.userName,
     })

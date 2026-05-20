@@ -67,7 +67,7 @@ export function OrderDetailContent({ order, lines, history }: {
             </Badge>
           </div>
           <p className="text-sm text-gray-400 mt-1">
-            {formatDate((order.created_at || order.order_date) as string)}
+            {formatDate((order.order_date || order.created_at) as string)}
           </p>
         </div>
         <p className="text-2xl font-bold text-prats-navy">{formatCurrency(order.total as number)}</p>

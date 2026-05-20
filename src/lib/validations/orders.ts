@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ALL_VISIBLE_STATUSES } from '@/lib/orders/statuses'
 
 export const createTailoringOrderSchema = z.object({
   client_id: z.string().uuid().optional().nullable(),
@@ -41,11 +42,7 @@ export const tailoringOrderLineSchema = z.object({
 export const changeOrderStatusSchema = z.object({
   order_id: z.string().uuid(),
   line_id: z.string().uuid().optional(),
-  new_status: z.enum([
-    'created', 'fabric_ordered', 'fabric_received', 'factory_ordered',
-    'in_production', 'fitting', 'adjustments', 'finished', 'delivered',
-    'incident', 'cancelled', 'requested', 'supplier_delivered',
-  ]),
+  new_status: z.enum(ALL_VISIBLE_STATUSES as [string, ...string[]]),
   notes: z.string().optional(),
 })
 

@@ -62,7 +62,7 @@ export function ClientDashboard({ client, recentOnline, recentTailoring, onlineO
   type OrderItem = Record<string, unknown> & { type: string; _date: string }
   const allOrders: OrderItem[] = [
     ...recentOnline.map(o => ({ ...o, type: 'online', _date: o.created_at as string })),
-    ...recentTailoring.map(o => ({ ...o, type: 'tailoring', _date: (o.created_at || o.order_date) as string })),
+    ...recentTailoring.map(o => ({ ...o, type: 'tailoring', _date: (o.order_date || o.created_at) as string })),
   ].sort((a, b) =>
     new Date(b._date).getTime() - new Date(a._date).getTime()
   ).slice(0, 5)

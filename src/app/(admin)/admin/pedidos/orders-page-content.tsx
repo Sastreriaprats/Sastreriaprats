@@ -128,7 +128,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
     statusCounts: statusCountsFromApi, totalAll,
   } = useList(listOrders, {
     pageSize: 25,
-    defaultSort: 'created_at',
+    defaultSort: 'order_date',
     defaultOrder: 'desc',
     defaultFilters: initialStatus === 'overdue'
       ? { status: 'overdue', ...(subTypeFilter !== 'all' ? { order_type: subTypeFilter } : {}) }
@@ -362,7 +362,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                       <TableHead>Encargo</TableHead>
                       <TableHead>Tipo</TableHead>
                       <TableHead>Estado</TableHead>
-                      <SortHeader field="created_at">Fecha</SortHeader>
+                      <SortHeader field="order_date">Fecha</SortHeader>
                       <SortHeader field="estimated_delivery_date">Entrega est.</SortHeader>
                       <TableHead>Total</TableHead>
                       <TableHead>Pagado</TableHead>
@@ -417,7 +417,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                           </TableCell>
                           <TableCell><Badge variant="outline" className="text-xs">{order.order_type === 'artesanal' ? 'Artesanal' : 'Industrial'}</Badge></TableCell>
                           <TableCell><Badge className={`text-xs ${getOrderStatusColor(order.status)}`}>{getOrderStatusLabel(order.status)}</Badge></TableCell>
-                          <TableCell className="text-sm">{formatDate(order.created_at)}</TableCell>
+                          <TableCell className="text-sm">{formatDate(order.order_date || order.created_at)}</TableCell>
                           <TableCell className={`text-sm ${isOverdue ? 'text-red-600 font-medium' : ''}`}>{formatDate(order.estimated_delivery_date)}</TableCell>
                           <TableCell className="font-medium">{formatCurrency(order.total)}</TableCell>
                           <TableCell>{formatCurrency(order.total_paid)}</TableCell>

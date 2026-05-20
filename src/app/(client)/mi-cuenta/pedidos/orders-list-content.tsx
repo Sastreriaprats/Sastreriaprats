@@ -62,7 +62,7 @@ export function OrdersListContent({ onlineOrders, tailoringOrders }: {
   type OrderItem = Record<string, unknown> & { type: string; date: string }
   const allOrders: OrderItem[] = [
     ...onlineOrders.map(o => ({ ...o, type: 'online', date: o.created_at as string })),
-    ...tailoringOrders.map(o => ({ ...o, type: 'tailoring', date: (o.created_at || o.order_date) as string })),
+    ...tailoringOrders.map(o => ({ ...o, type: 'tailoring', date: (o.order_date || o.created_at) as string })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
   const filtered = filter === 'all' ? allOrders : allOrders.filter(o => o.type === filter)

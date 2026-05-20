@@ -12,28 +12,19 @@ import { Loader2, ArrowRight } from 'lucide-react'
 import { useAction } from '@/hooks/use-action'
 import { changeOrderStatus } from '@/actions/orders'
 import { getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
-
-// Estados válidos del enum tailoring_order_status:
-// created, fabric_ordered, fabric_received, factory_ordered, in_production,
-// fitting, adjustments, finished, delivered, incident, cancelled
-const allStatusesByType: Record<string, string[]> = {
-  artesanal: ['created', 'fabric_ordered', 'fabric_received', 'in_production', 'fitting', 'adjustments', 'finished', 'delivered', 'cancelled'],
-  industrial: ['created', 'fabric_ordered', 'fabric_received', 'factory_ordered', 'in_production', 'fitting', 'adjustments', 'finished', 'delivered', 'cancelled'],
-  oficial: ['created', 'in_production', 'finished', 'delivered', 'cancelled'],
-  proveedor: ['created', 'fabric_ordered', 'fabric_received', 'cancelled'],
-}
+import { getStatusesFor } from '@/lib/orders/statuses'
 
 export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus, lines, orderType = 'artesanal' }: {
   open: boolean; onOpenChange: (open: boolean) => void
   orderId: string; currentStatus: string; lines: any[]
-  orderType?: 'artesanal' | 'industrial' | 'proveedor' | 'oficial'
+  orderType?: string
 }) {
   const router = useRouter()
   const [newStatus, setNewStatus] = useState('')
   const [lineId, setLineId] = useState<string>('')
   const [notes, setNotes] = useState('')
 
-  const allStatuses = allStatusesByType[orderType] || allStatusesByType.artesanal
+  const allStatuses = getStatusesFor(orderType)
   const allowedStatuses = allStatuses.filter(s => s !== currentStatus)
 
 

@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatCurrency, formatDate, getOrderStatusLabel } from '@/lib/utils'
+import { getStatusesFor } from '@/lib/orders/statuses'
 import { PaymentHistory } from '@/components/payments/payment-history'
 import { getOrder, markLineDelivered, updateOrderStatus } from '@/actions/orders'
 import { getAlterationsByOrder, updateAlterationStatus } from '@/actions/alterations'
@@ -174,10 +175,12 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
     }
   }
 
-  const SASTRE_STATUSES = ['in_production', 'fitting', 'adjustments', 'finished', 'delivered', 'cancelled'] as const
-  const statusOptions = SASTRE_STATUSES.includes(order?.status as any)
-    ? [...SASTRE_STATUSES]
-    : [order?.status, ...SASTRE_STATUSES].filter(Boolean)
+  // Fuente única compartida con el admin (src/lib/orders/statuses.ts) — el
+  // sastre ve exactamente los mismos estados que el admin para el mismo tipo.
+  const typeStatuses = getStatusesFor(order?.order_type)
+  const statusOptions = (typeStatuses as readonly string[]).includes(order?.status)
+    ? [...typeStatuses]
+    : [order?.status, ...typeStatuses].filter(Boolean) as string[]
 
   const handleStatusChange = async (newStatus: string) => {
     if (!order?.id || newStatus === order.status) return
@@ -299,10 +302,12 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
                       onChange={(e) => handleLineStatusChange(line.id, e.target.value)}
                       className="bg-white/[0.07] text-white border border-white/15 rounded-lg px-2 py-1 text-xs font-medium hover:bg-white/10 cursor-pointer focus:outline-none focus:border-[#c9a96e]/50 transition-all shrink-0 ml-2 [&>option]:bg-[#0d1629] [&>option]:text-white"
                     >
-                      <option value="in_production">En confección</option>
-                      <option value="fitting">En prueba</option>
-                      <option value="adjustments">Arreglos</option>
-                      <option value="finished">Finalizada</option>
+                      {((typeStatuses as readonly string[]).includes(line.status)
+                        ? typeStatuses
+                        : [line.status, ...typeStatuses].filter(Boolean) as string[]
+                      ).map((s) => (
+                        <option key={s} value={s}>{getOrderStatusLabel(s)}</option>
+                      ))}
                     </select>
                     {line.status === 'finished' && !line.delivered_at && (
                       <button
