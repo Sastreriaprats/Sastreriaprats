@@ -292,12 +292,18 @@ export const getStoresWithStats = protectedAction<{ includeInactive?: boolean } 
       warehousesRes,
       goalsRes,
       onlineMonthRes,
+      tailoringPaymentsRes,
     ] = await Promise.all([
       admin.from('sales').select('store_id, total').in('store_id', storeIds).gte('created_at', `${today}T00:00:00`).eq('status', 'completed'),
       admin.from('sales').select('store_id, total, tax_amount, sale_type').in('store_id', storeIds).gte('created_at', `${monthStart}T00:00:00`).eq('status', 'completed'),
       admin.from('warehouses').select('id, store_id').in('store_id', storeIds),
       admin.from('store_monthly_goals').select('store_id, goal_type, target_amount').in('store_id', storeIds).eq('year', year).eq('month', month),
       admin.from('online_orders').select('total, tax_amount').in('status', ONLINE_COUNTED_STATUSES).gte('created_at', `${monthStart}T00:00:00`),
+      admin
+        .from('tailoring_order_payments')
+        .select('amount, tailoring_orders!inner(store_id, total, tax_amount)')
+        .gte('payment_date', monthStart)
+        .lte('payment_date', today),
     ])
 
     const warehouses = (warehousesRes.data || []) as { id: string; store_id: string }[]
@@ -336,6 +342,23 @@ export const getStoresWithStats = protectedAction<{ includeInactive?: boolean } 
       } else if (SASTRERIA_SALE_TYPES.includes(st)) {
         sastreriaByStore[r.store_id] = (sastreriaByStore[r.store_id] ?? 0) + net
       }
+    }
+
+    // Pagos a pedidos de sastrería (flujo backoffice, fuera de la tabla `sales`):
+    // proratamos cada importe a base imponible usando el ratio del pedido padre.
+    type TailoringPaymentRow = {
+      amount: number | string | null
+      tailoring_orders: { store_id: string; total: number | string | null; tax_amount: number | string | null } | null
+    }
+    for (const p of (tailoringPaymentsRes.data || []) as TailoringPaymentRow[]) {
+      const order = p.tailoring_orders
+      if (!order?.store_id) continue
+      const amount = Number(p.amount) || 0
+      if (amount === 0) continue
+      const orderTotal = Number(order.total) || 0
+      const orderTax = Number(order.tax_amount) || 0
+      const netFactor = orderTotal > 0 ? (orderTotal - orderTax) / orderTotal : 1
+      sastreriaByStore[order.store_id] = (sastreriaByStore[order.store_id] ?? 0) + amount * netFactor
     }
 
     const onlineMonthTotal = (onlineMonthRes.data || []).reduce(
