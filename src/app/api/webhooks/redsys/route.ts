@@ -1,33 +1,14 @@
-// Webhook de Redsys
+// Webhook de Redsys (MERCHANTURL): aquí se confirma el pago oficialmente.
+// Es el ÚNICO punto que tiene autoridad para marcar online_orders.status='paid'.
+// Verifica la firma con HMAC_SHA256_V1 antes de tocar nada.
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createOnlineOrderJournalEntry } from '@/actions/accounting-triggers'
-import crypto from 'crypto'
-
-function verifyRedsysSignature(merchantParams: string, receivedSignature: string): boolean {
-  const secretKey = process.env.REDSYS_SECRET_KEY
-  if (!secretKey) return false
-
-  const decoded = JSON.parse(Buffer.from(merchantParams, 'base64').toString('utf8'))
-  const orderNumber = decoded.Ds_Order || ''
-
-  // Diversificar clave con 3DES-CBC usando el número de pedido
-  const keyBuffer = Buffer.from(secretKey, 'base64')
-  const iv = Buffer.alloc(8, 0)
-  const orderPadded = Buffer.alloc(8, 0)
-  Buffer.from(orderNumber).copy(orderPadded)
-  const cipher = crypto.createCipheriv('des-ede3-cbc', keyBuffer, iv)
-  cipher.setAutoPadding(false)
-  const diversifiedKey = Buffer.concat([cipher.update(orderPadded), cipher.final()])
-
-  // HMAC-SHA256 de los parámetros con la clave diversificada
-  const hmac = crypto.createHmac('sha256', diversifiedKey)
-  hmac.update(merchantParams)
-  const calculatedSignature = hmac.digest('base64')
-
-  const normalize = (s: string) => s.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-  return normalize(calculatedSignature) === normalize(receivedSignature)
-}
+import { sendOrderConfirmation } from '@/lib/email/transactional'
+import {
+  decodeMerchantParameters,
+  verifyRedsysSignature,
+} from '@/lib/payments/redsys'
 
 export async function POST(request: NextRequest) {
   try {
@@ -39,34 +20,146 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing parameters' }, { status: 400 })
     }
 
-    if (!verifyRedsysSignature(dsMerchantParameters, dsSignature || '')) {
-      console.error('Redsys webhook: invalid signature')
+    const secretKey = process.env.REDSYS_SECRET_KEY
+    if (!secretKey) {
+      console.error('[redsys webhook] REDSYS_SECRET_KEY no configurada')
+      return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 })
+    }
+
+    const params = decodeMerchantParameters(dsMerchantParameters)
+    const dsOrder = String(params.Ds_Order || '')
+
+    if (!verifyRedsysSignature(dsSignature || '', dsMerchantParameters, dsOrder, secretKey)) {
+      console.error('[redsys webhook] firma inválida para Ds_Order', dsOrder)
       return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
     }
 
-    const params = JSON.parse(Buffer.from(dsMerchantParameters, 'base64').toString('utf8'))
-    const responseCode = parseInt(params.Ds_Response || '9999')
-    const orderNumber = params.Ds_Order
-    const amount = parseInt(params.Ds_Amount) / 100 // Redsys envía en céntimos
+    const responseCode = parseInt(String(params.Ds_Response || '9999'))
+    const amount = parseInt(String(params.Ds_Amount || '0')) / 100  // Redsys envía céntimos
 
     // Pago aprobado: código de respuesta < 100
-    if (responseCode < 100) {
-      const admin = createAdminClient()
-      const { data: order } = await admin
-        .from('online_orders')
-        .update({ status: 'paid', payment_reference: orderNumber })
-        .eq('order_number', orderNumber.replace(/^0+/, ''))
-        .select('id')
-        .single()
+    if (responseCode >= 100) {
+      return NextResponse.json({ ok: true, ignored: 'response_code_ko', responseCode })
+    }
 
-      if (order) {
-        await createOnlineOrderJournalEntry(order.id).catch(() => {})
+    const admin = createAdminClient()
+
+    // Buscar el pending por token = ds_order (los generamos iguales en checkout).
+    const { data: pending } = await admin
+      .from('pending_online_orders')
+      .select('*')
+      .eq('token', dsOrder)
+      .single()
+
+    if (!pending) {
+      // Idempotencia: si el pedido ya se creó en una llamada previa (RedSys
+      // reintenta el webhook), no fallamos.
+      const { data: existing } = await admin
+        .from('online_orders')
+        .select('id')
+        .eq('redsys_order_code', dsOrder)
+        .maybeSingle()
+      if (existing) return NextResponse.json({ ok: true, duplicate: true })
+      console.error('[redsys webhook] pending_online_orders no encontrado para', dsOrder)
+      return NextResponse.json({ error: 'Pending order not found' }, { status: 404 })
+    }
+
+    const customer = pending.customer as Record<string, unknown>
+    const orderLines = pending.order_lines as Array<{
+      variant_id: string
+      product_name: string
+      variant_sku: string
+      quantity: number
+      unit_price: number
+      total: number
+    }>
+
+    const { data: order, error: orderError } = await admin
+      .from('online_orders')
+      .insert({
+        order_number: pending.order_number,
+        client_id: pending.client_id,
+        status: 'paid',
+        subtotal: pending.subtotal,
+        tax_amount: pending.tax_amount,
+        shipping_cost: pending.shipping_cost,
+        total: pending.total,
+        payment_method: 'redsys',
+        redsys_order_code: dsOrder,
+        shipping_address: customer,
+        locale: pending.locale || 'es',
+        paid_at: new Date().toISOString(),
+      })
+      .select('id')
+      .single()
+
+    if (orderError || !order) {
+      console.error('[redsys webhook] insert online_orders', orderError)
+      return NextResponse.json({ error: orderError?.message || 'insert error' }, { status: 500 })
+    }
+
+    for (const line of orderLines) {
+      await admin.from('online_order_lines').insert({
+        order_id: order.id,
+        variant_id: line.variant_id,
+        product_name: line.product_name,
+        variant_sku: line.variant_sku,
+        quantity: line.quantity,
+        unit_price: line.unit_price,
+        total: line.total,
+      })
+    }
+
+    await createOnlineOrderJournalEntry(order.id).catch(() => {})
+
+    // Decremento de stock (mismo patrón que el webhook Stripe).
+    for (const line of orderLines) {
+      if (!line.variant_id) continue
+      const { data: sl } = await admin
+        .from('stock_levels')
+        .select('id, quantity, warehouse_id')
+        .eq('product_variant_id', line.variant_id)
+        .limit(1)
+        .single()
+      if (!sl) continue
+      const newQty = Math.max(0, sl.quantity - line.quantity)
+      await admin.from('stock_levels').update({ quantity: newQty }).eq('id', sl.id)
+      await admin.from('stock_movements').insert({
+        product_variant_id: line.variant_id,
+        warehouse_id: sl.warehouse_id,
+        movement_type: 'sale',
+        quantity: -line.quantity,
+        stock_before: sl.quantity,
+        stock_after: newQty,
+        reason: `Pedido online ${pending.order_number}`,
+      })
+    }
+
+    // Email de confirmación al cliente.
+    const customerEmail = (customer.email as string | undefined) || ''
+    const customerName = (customer.first_name as string | undefined) || customerEmail.split('@')[0] || 'Cliente'
+    if (customerEmail) {
+      try {
+        await sendOrderConfirmation({
+          order_number: pending.order_number,
+          client_name: customerName,
+          client_email: customerEmail,
+          total: Number(pending.total),
+          items: orderLines.map(l => l.product_name),
+        })
+      } catch (e) {
+        console.error('[redsys webhook] sendOrderConfirmation', e)
       }
     }
 
-    return NextResponse.json({ ok: true })
+    // Limpiar pending (idempotencia: si el webhook se repite, ya no existirá
+    // y el lookup por redsys_order_code de arriba lo detecta como duplicado).
+    await admin.from('pending_online_orders').delete().eq('token', dsOrder)
+
+    void amount  // disponible si se quiere registrar la cantidad concreta
+    return NextResponse.json({ ok: true, orderId: order.id })
   } catch (error) {
-    console.error('Redsys webhook error:', error)
+    console.error('[redsys webhook] unhandled', error)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }
 }

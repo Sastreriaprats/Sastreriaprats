@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import Stripe from 'stripe'
 import { isRateLimited } from '@/lib/rate-limit'
+import { generateRedsysOrder } from '@/lib/payments/redsys'
 
 function getStripe() {
   return new Stripe(process.env.STRIPE_SECRET_KEY!, {
@@ -165,15 +166,18 @@ export async function POST(request: NextRequest) {
   }
 
   if (payment_method === 'redsys') {
-    if (!process.env.REDSYS_MERCHANT_CODE) {
+    if (!process.env.REDSYS_MERCHANT_CODE || !process.env.REDSYS_SECRET_KEY) {
       return NextResponse.json(
         { error: 'TPV Redsys no configurado. Configure REDSYS_MERCHANT_CODE y REDSYS_SECRET_KEY en .env o use tarjeta.' },
         { status: 503 }
       )
     }
-    const token = crypto.randomUUID()
+    // Generamos Ds_Order con formato RedSys (12 dígitos numéricos) y lo usamos
+    // TAMBIÉN como token del pending: así el webhook y la página de éxito
+    // pueden encontrar el pedido por el mismo identificador sin columnas extra.
+    const dsOrder = generateRedsysOrder()
     await admin.from('pending_online_orders').insert({
-      token,
+      token: dsOrder,
       order_number: orderNumber,
       client_id: clientId,
       customer,
@@ -184,24 +188,13 @@ export async function POST(request: NextRequest) {
       total,
       locale: locale || 'es',
     })
+    // El frontend hace window.location.href = checkout_url. Devolvemos una URL
+    // a un endpoint nuestro que sirve el form HTML autosubmit con la firma —
+    // RedSys exige POST con Ds_SignatureVersion + Ds_MerchantParameters +
+    // Ds_Signature, así que un simple GET con query string no vale.
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
-    const urlOk = `${baseUrl}/api/public/checkout/redsys-success?token=${encodeURIComponent(token)}`
-    const merchantParams = {
-      DS_MERCHANT_AMOUNT: Math.round(total * 100).toString(),
-      DS_MERCHANT_ORDER: orderNumber.replace(/[^A-Za-z0-9]/g, '').slice(0, 12),
-      DS_MERCHANT_MERCHANTCODE: process.env.REDSYS_MERCHANT_CODE,
-      DS_MERCHANT_CURRENCY: '978',
-      DS_MERCHANT_TRANSACTIONTYPE: '0',
-      DS_MERCHANT_TERMINAL: process.env.REDSYS_TERMINAL || '1',
-      DS_MERCHANT_MERCHANTURL: `${baseUrl}/api/webhooks/redsys`,
-      DS_MERCHANT_URLOK: urlOk,
-      DS_MERCHANT_URLKO: `${baseUrl}/carrito`,
-    }
-    const redsysUrl = process.env.REDSYS_URL || 'https://sis-t.redsys.es:25443/sis/realizarPago'
-    const encodedParams = Buffer.from(JSON.stringify(merchantParams)).toString('base64')
     return NextResponse.json({
-      checkout_url: `${redsysUrl}?Ds_MerchantParameters=${encodedParams}`,
-      redsys_params: merchantParams,
+      checkout_url: `${baseUrl}/api/public/checkout/redsys-redirect?token=${encodeURIComponent(dsOrder)}`,
     })
   }
 
