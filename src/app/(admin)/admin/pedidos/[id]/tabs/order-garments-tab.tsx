@@ -10,6 +10,7 @@ import { Printer, Pencil, Loader2 } from 'lucide-react'
 import { formatCurrency, getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
 import { generateFichaForLine, generateFichaForLineCamiseria } from '@/lib/pdf/ficha-confeccion'
 import { EditFichaDialog } from '@/components/orders/edit-ficha-dialog'
+import { usePermissions } from '@/hooks/use-permissions'
 import { toast } from 'sonner'
 
 type LineGroup = 'sastreria' | 'camiseria' | 'complemento'
@@ -25,6 +26,8 @@ const LOCKED_STATUSES = new Set(['delivered', 'cancelled'])
 
 export function OrderGarmentsTab({ order }: { order: any }) {
   const router = useRouter()
+  const { can } = usePermissions()
+  const canViewCosts = can('orders.view_costs')
   const lines = order.tailoring_order_lines || []
   const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null)
   const [editingLine, setEditingLine] = useState<any | null>(null)
@@ -183,7 +186,7 @@ export function OrderGarmentsTab({ order }: { order: any }) {
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
               <div><span className="text-muted-foreground block text-xs">PVP</span><span className="font-medium">{formatCurrency(line.unit_price)}</span></div>
               {line.discount_percentage > 0 && <div><span className="text-muted-foreground block text-xs">Dto.</span>-{line.discount_percentage}%</div>}
-              {(() => {
+              {canViewCosts && (() => {
                 const material = Number(line.material_cost) || 0
                 const labor = Number(line.labor_cost) || 0
                 const factory = Number(line.factory_cost) || 0

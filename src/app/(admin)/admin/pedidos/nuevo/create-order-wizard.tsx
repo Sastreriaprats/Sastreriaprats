@@ -26,6 +26,7 @@ import { toast } from 'sonner'
 import { useAction } from '@/hooks/use-action'
 import { useGarmentTypes } from '@/hooks/use-cached-queries'
 import { useAuth } from '@/components/providers/auth-provider'
+import { usePermissions } from '@/hooks/use-permissions'
 import { createOrderAction } from '@/actions/orders'
 import { getClientMeasurements } from '@/actions/clients'
 import { listSuppliers, createSupplierOrderAction } from '@/actions/suppliers'
@@ -134,6 +135,8 @@ export function CreateOrderWizard({
   const searchParams = useSearchParams()
   const supabase = useMemo(() => createClient(), [])
   const { activeStoreId } = useAuth()
+  const { can } = usePermissions()
+  const canViewCosts = can('orders.view_costs')
   const clientIdFromUrl = searchParams.get('clientId')
 
   const [orderType, setOrderType] = useState<OrderType | null>(initialOrderType ?? null)
@@ -1153,11 +1156,13 @@ export function CreateOrderWizard({
                     <Input type="number" min={0} max={100} value={lineForm.discount_percentage || ''} onChange={(e) => setLineForm(p => ({ ...p, discount_percentage: parseFloat(e.target.value) || 0 }))} />
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="space-y-2"><Label>Coste material</Label><Input type="number" step="0.01" value={lineForm.material_cost || ''} onChange={(e) => setLineForm(p => ({ ...p, material_cost: parseFloat(e.target.value) || 0 }))} /></div>
-                  <div className="space-y-2"><Label>Mano obra</Label><Input type="number" step="0.01" value={lineForm.labor_cost || ''} onChange={(e) => setLineForm(p => ({ ...p, labor_cost: parseFloat(e.target.value) || 0 }))} /></div>
-                  <div className="space-y-2"><Label>Fábrica</Label><Input type="number" step="0.01" value={lineForm.factory_cost || ''} onChange={(e) => setLineForm(p => ({ ...p, factory_cost: parseFloat(e.target.value) || 0 }))} /></div>
-                </div>
+                {canViewCosts && (
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="space-y-2"><Label>Coste material</Label><Input type="number" step="0.01" value={lineForm.material_cost || ''} onChange={(e) => setLineForm(p => ({ ...p, material_cost: parseFloat(e.target.value) || 0 }))} /></div>
+                    <div className="space-y-2"><Label>Mano obra</Label><Input type="number" step="0.01" value={lineForm.labor_cost || ''} onChange={(e) => setLineForm(p => ({ ...p, labor_cost: parseFloat(e.target.value) || 0 }))} /></div>
+                    <div className="space-y-2"><Label>Fábrica</Label><Input type="number" step="0.01" value={lineForm.factory_cost || ''} onChange={(e) => setLineForm(p => ({ ...p, factory_cost: parseFloat(e.target.value) || 0 }))} /></div>
+                  </div>
+                )}
                 <div className="space-y-2"><Label>Acabado</Label><Textarea value={lineForm.finishing_notes || ''} onChange={(e) => setLineForm(p => ({ ...p, finishing_notes: e.target.value }))} rows={2} /></div>
                 <Separator />
                 <div className="space-y-2">

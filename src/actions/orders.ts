@@ -10,6 +10,7 @@ import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { sendOrderConfirmation, sendTailoringStatusUpdate } from '@/lib/email/transactional'
 import { normalizeSearchTerm } from '@/lib/utils'
+import { checkUserPermission } from '@/actions/auth'
 
 const SELECT_ORDERS = `
   id, order_number, order_type, status, order_date,
@@ -255,6 +256,25 @@ export const getOrder = protectedAction<string, any>(
         }
       }
       order.clientMeasurements = { values: merged }
+    }
+
+    // Defense-in-depth: ocultar coste y margen a quien no tenga el permiso.
+    // El gateo en UI no basta: cualquier rol con 'orders.view' que invoque
+    // esta action recibiría las cifras en el JSON. Aquí las anulamos.
+    const canViewCosts = await checkUserPermission(ctx.userId, 'orders.view_costs')
+    if (!canViewCosts) {
+      order.total_material_cost = null
+      order.total_labor_cost = null
+      order.total_factory_cost = null
+      order.total_cost = null
+      const linesArr = order.tailoring_order_lines as Record<string, unknown>[] | undefined
+      if (Array.isArray(linesArr)) {
+        for (const line of linesArr) {
+          line.material_cost = null
+          line.labor_cost = null
+          line.factory_cost = null
+        }
+      }
     }
 
     return success(order)

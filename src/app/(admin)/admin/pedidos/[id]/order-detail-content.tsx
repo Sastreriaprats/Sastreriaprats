@@ -25,6 +25,7 @@ import { Pencil } from 'lucide-react'
 export function OrderDetailContent({ order }: { order: any }) {
   const router = useRouter()
   const { can, isAdmin } = usePermissions()
+  const canViewCosts = can('orders.view_costs')
   const [showStatusDialog, setShowStatusDialog] = useState(false)
   const [showEditDialog, setShowEditDialog] = useState(false)
 
@@ -76,7 +77,7 @@ export function OrderDetailContent({ order }: { order: any }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+      <div className={`grid grid-cols-2 gap-4 ${canViewCosts ? 'md:grid-cols-6' : 'md:grid-cols-4'}`}>
         <Card><CardContent className="pt-4 pb-3">
           <p className="text-xs text-muted-foreground">Total</p>
           <p className="text-xl font-bold">{formatCurrency(order.total)}</p>
@@ -89,15 +90,19 @@ export function OrderDetailContent({ order }: { order: any }) {
           <p className="text-xs text-muted-foreground">Pendiente</p>
           <p className={`text-xl font-bold ${order.total_pending > 0 ? 'text-amber-600' : ''}`}>{formatCurrency(order.total_pending)}</p>
         </CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3">
-          <p className="text-xs text-muted-foreground">Coste</p>
-          <p className="text-xl font-bold">{formatCurrency(totalCost)}</p>
-        </CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3">
-          <p className="text-xs text-muted-foreground">Margen</p>
-          <p className={`text-xl font-bold ${marginColor}`}>{formatCurrency(marginAmount)}</p>
-          <p className={`text-xs font-medium ${marginColor}`}>{marginPct.toFixed(1)}%</p>
-        </CardContent></Card>
+        {canViewCosts && (
+          <>
+            <Card><CardContent className="pt-4 pb-3">
+              <p className="text-xs text-muted-foreground">Coste</p>
+              <p className="text-xl font-bold">{formatCurrency(totalCost)}</p>
+            </CardContent></Card>
+            <Card><CardContent className="pt-4 pb-3">
+              <p className="text-xs text-muted-foreground">Margen</p>
+              <p className={`text-xl font-bold ${marginColor}`}>{formatCurrency(marginAmount)}</p>
+              <p className={`text-xs font-medium ${marginColor}`}>{marginPct.toFixed(1)}%</p>
+            </CardContent></Card>
+          </>
+        )}
         <Card><CardContent className="pt-4 pb-3">
           <p className="text-xs text-muted-foreground">Entrega est.</p>
           <p className={`text-lg font-bold ${isOverdue ? 'text-red-600' : ''}`}>{formatDate(order.estimated_delivery_date)}</p>

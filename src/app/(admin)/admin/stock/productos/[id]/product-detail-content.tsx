@@ -42,6 +42,7 @@ export function ProductDetailContent({
 }) {
   const router = useRouter()
   const { can } = usePermissions()
+  const canViewCosts = can('products.view_costs')
   const variants = sortBySize(product.product_variants || []) as any[]
 
   const [showEditDialog, setShowEditDialog] = useState(false)
@@ -197,9 +198,11 @@ export function ProductDetailContent({
         )}
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div className={`grid grid-cols-2 gap-4 ${canViewCosts ? 'md:grid-cols-5' : 'md:grid-cols-4'}`}>
         <Card><CardContent className="pt-4 pb-3"><p className="text-xs text-muted-foreground">PVP</p><p className="text-xl font-bold">{formatCurrency(product.price_with_tax)}</p></CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3"><p className="text-xs text-muted-foreground">Coste</p><p className="text-xl font-bold">{formatCurrency(product.cost_price)}</p></CardContent></Card>
+        {canViewCosts && (
+          <Card><CardContent className="pt-4 pb-3"><p className="text-xs text-muted-foreground">Coste</p><p className="text-xl font-bold">{formatCurrency(product.cost_price)}</p></CardContent></Card>
+        )}
         <Card><CardContent className="pt-4 pb-3"><p className="text-xs text-muted-foreground">IVA</p><p className="text-xl font-bold">{product.tax_rate}%</p></CardContent></Card>
         <Card><CardContent className="pt-4 pb-3">
           <p className="text-xs text-muted-foreground">{isFabric ? 'Metros disponibles' : 'Stock total'}</p>
@@ -360,20 +363,22 @@ export function ProductDetailContent({
             <p><span className="text-muted-foreground">Web:</span> {product.is_visible_web ? 'Visible' : 'No visible'}</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader><CardTitle className="text-base">Márgenes</CardTitle></CardHeader>
-          <CardContent className="text-sm space-y-2">
-            {product.cost_price > 0 ? (
-              <>
-                <p><span className="text-muted-foreground">Margen bruto:</span> <span className="font-medium">{formatCurrency(product.base_price - product.cost_price)}</span></p>
-                <p><span className="text-muted-foreground">% Margen:</span> <span className="font-medium">{((product.base_price - product.cost_price) / product.base_price * 100).toFixed(1)}%</span></p>
-                <p><span className="text-muted-foreground">Multiplicador:</span> <span className="font-medium">&times;{(product.base_price / product.cost_price).toFixed(2)}</span></p>
-              </>
-            ) : (
-              <p className="text-muted-foreground">Sin coste definido</p>
-            )}
-          </CardContent>
-        </Card>
+        {canViewCosts && (
+          <Card>
+            <CardHeader><CardTitle className="text-base">Márgenes</CardTitle></CardHeader>
+            <CardContent className="text-sm space-y-2">
+              {product.cost_price > 0 ? (
+                <>
+                  <p><span className="text-muted-foreground">Margen bruto:</span> <span className="font-medium">{formatCurrency(product.base_price - product.cost_price)}</span></p>
+                  <p><span className="text-muted-foreground">% Margen:</span> <span className="font-medium">{((product.base_price - product.cost_price) / product.base_price * 100).toFixed(1)}%</span></p>
+                  <p><span className="text-muted-foreground">Multiplicador:</span> <span className="font-medium">&times;{(product.base_price / product.cost_price).toFixed(2)}</span></p>
+                </>
+              ) : (
+                <p className="text-muted-foreground">Sin coste definido</p>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
         </TabsContent>
         <TabsContent value="historial" className="mt-4">

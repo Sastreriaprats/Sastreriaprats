@@ -12,6 +12,7 @@ import { generateSkuBase } from '@/lib/utils/sku'
 import { generateFabricCode } from '@/actions/fabrics'
 import { buildAuditDiff } from '@/lib/audit'
 import { normalizeSearchTerm } from '@/lib/utils'
+import { checkUserPermission } from '@/actions/auth'
 
 /** Obtiene el siguiente número correlativo para un SKU base. Cuenta productos con sku LIKE 'skuBase-%' y retorna (count+1) con pad 3. Si el SKU completo ya existe (race), reintenta con el siguiente. */
 export const getNextSkuNumber = protectedAction<
@@ -413,6 +414,18 @@ export const getProduct = protectedAction<string, any>(
       )
     `)
     if (!product) return failure('Producto no encontrado', 'NOT_FOUND')
+
+    // Defense-in-depth: ocultar coste a quien no tenga 'products.view_costs'.
+    // El gateo en UI no basta: vendedor_avanzado puede invocar esta action.
+    const canViewCosts = await checkUserPermission(ctx.userId, 'products.view_costs')
+    if (!canViewCosts) {
+      ;(product as Record<string, unknown>).cost_price = null
+      const variants = (product as Record<string, unknown>).product_variants as Record<string, unknown>[] | undefined
+      if (Array.isArray(variants)) {
+        for (const v of variants) v.cost_price_override = null
+      }
+    }
+
     return success(product)
   }
 )

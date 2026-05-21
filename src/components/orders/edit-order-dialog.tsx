@@ -27,6 +27,7 @@ import { updateOrderAction } from '@/actions/orders'
 import { listFabrics } from '@/actions/fabrics'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/utils'
+import { usePermissions } from '@/hooks/use-permissions'
 
 type EditableLine = {
   id?: string
@@ -81,6 +82,8 @@ const LINE_TYPES: Array<{ value: 'artesanal' | 'industrial'; label: string }> = 
 
 export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrderDialogProps) {
   const router = useRouter()
+  const { can } = usePermissions()
+  const canViewCosts = can('orders.view_costs')
 
   // Cabecera
   const [clientId, setClientId] = useState<string | null>(order?.client_id ?? null)
@@ -598,9 +601,13 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                       <TableHead className="w-[100px] text-xs whitespace-nowrap">PVP (€)</TableHead>
                       <TableHead className="w-[60px] text-xs whitespace-nowrap">Dto. %</TableHead>
                       <TableHead className="w-[60px] text-xs whitespace-nowrap">IVA %</TableHead>
-                      <TableHead className="w-[100px] text-xs whitespace-nowrap">Material</TableHead>
-                      <TableHead className="w-[70px] text-xs whitespace-nowrap">M. Obra</TableHead>
-                      <TableHead className="w-[70px] text-xs whitespace-nowrap">Fábrica</TableHead>
+                      {canViewCosts && (
+                        <>
+                          <TableHead className="w-[100px] text-xs whitespace-nowrap">Material</TableHead>
+                          <TableHead className="w-[70px] text-xs whitespace-nowrap">M. Obra</TableHead>
+                          <TableHead className="w-[70px] text-xs whitespace-nowrap">Fábrica</TableHead>
+                        </>
+                      )}
                       <TableHead className="w-[200px] text-xs whitespace-nowrap">Tejido</TableHead>
                       <TableHead className="w-[90px] text-xs whitespace-nowrap">Metros</TableHead>
                       <TableHead className="w-[150px] text-xs whitespace-nowrap">Notas acabado</TableHead>
@@ -638,18 +645,22 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                           <Input className="h-8 text-xs" type="number" min={0} max={100} step={0.01}
                             value={l.tax_rate} onChange={(e) => updateLine(l._key, 'tax_rate', parseFloat(e.target.value) || 0)} />
                         </TableCell>
-                        <TableCell>
-                          <Input className="h-8 text-xs" type="number" min={0} step={0.01}
-                            value={l.material_cost} onChange={(e) => updateLine(l._key, 'material_cost', parseFloat(e.target.value) || 0)} />
-                        </TableCell>
-                        <TableCell>
-                          <Input className="h-8 text-xs" type="number" min={0} step={0.01}
-                            value={l.labor_cost} onChange={(e) => updateLine(l._key, 'labor_cost', parseFloat(e.target.value) || 0)} />
-                        </TableCell>
-                        <TableCell>
-                          <Input className="h-8 text-xs" type="number" min={0} step={0.01}
-                            value={l.factory_cost} onChange={(e) => updateLine(l._key, 'factory_cost', parseFloat(e.target.value) || 0)} />
-                        </TableCell>
+                        {canViewCosts && (
+                          <>
+                            <TableCell>
+                              <Input className="h-8 text-xs" type="number" min={0} step={0.01}
+                                value={l.material_cost} onChange={(e) => updateLine(l._key, 'material_cost', parseFloat(e.target.value) || 0)} />
+                            </TableCell>
+                            <TableCell>
+                              <Input className="h-8 text-xs" type="number" min={0} step={0.01}
+                                value={l.labor_cost} onChange={(e) => updateLine(l._key, 'labor_cost', parseFloat(e.target.value) || 0)} />
+                            </TableCell>
+                            <TableCell>
+                              <Input className="h-8 text-xs" type="number" min={0} step={0.01}
+                                value={l.factory_cost} onChange={(e) => updateLine(l._key, 'factory_cost', parseFloat(e.target.value) || 0)} />
+                            </TableCell>
+                          </>
+                        )}
                         <TableCell>
                           <div className="flex items-center gap-1">
                             <Input
@@ -724,23 +735,27 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                 <p className="text-xs text-muted-foreground">Total</p>
                 <p className="text-base font-bold tabular-nums">{formatCurrency(summary.total)}</p>
               </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Coste total</p>
-                <p className="font-semibold tabular-nums">{formatCurrency(summary.totalCost)}</p>
-              </div>
-              <div className="md:col-span-2">
-                <p className="text-xs text-muted-foreground">Margen</p>
-                <p className={`text-base font-bold tabular-nums ${marginColor}`}>
-                  {formatCurrency(summary.margin)} <span className="text-xs">({summary.marginPct.toFixed(1)}%)</span>
-                </p>
-              </div>
+              {canViewCosts && (
+                <>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Coste total</p>
+                    <p className="font-semibold tabular-nums">{formatCurrency(summary.totalCost)}</p>
+                  </div>
+                  <div className="md:col-span-2">
+                    <p className="text-xs text-muted-foreground">Margen</p>
+                    <p className={`text-base font-bold tabular-nums ${marginColor}`}>
+                      {formatCurrency(summary.margin)} <span className="text-xs">({summary.marginPct.toFixed(1)}%)</span>
+                    </p>
+                  </div>
+                </>
+              )}
               <div>
                 <Badge variant="outline">
                   {lines.length} {lines.length === 1 ? 'prenda' : 'prendas'}
                 </Badge>
               </div>
             </div>
-            {summary.fabricBreakdown.length > 0 && (
+            {canViewCosts && summary.fabricBreakdown.length > 0 && (
               <div className="mt-3 pt-3 border-t">
                 <p className="text-xs text-muted-foreground mb-1">Tejidos utilizados</p>
                 <ul className="text-xs space-y-0.5">

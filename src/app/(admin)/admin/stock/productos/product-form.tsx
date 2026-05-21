@@ -29,6 +29,7 @@ import { Badge } from '@/components/ui/badge'
 import { ArrowLeft, Plus, Loader2, X, ImagePlus, Sparkles, Star, Eye, EyeOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAction } from '@/hooks/use-action'
+import { usePermissions } from '@/hooks/use-permissions'
 import { createProductAction, updateProductAction, createVariantAction, updateVariantAction, deleteVariantAction, adjustStock, listPhysicalWarehouses, generateProductSkuAction } from '@/actions/products'
 import { listCollectionNames } from '@/actions/product-taxonomies'
 import { listSeasons, type SeasonRow } from '@/actions/seasons'
@@ -139,6 +140,8 @@ export function ProductForm({
   showPageHeader?: boolean
 }) {
   const router = useRouter()
+  const { can } = usePermissions()
+  const canViewCosts = can('products.view_costs')
   const isEdit = !!initialProduct?.id
   const [activeTab, setActiveTab] = useState('basico')
 
@@ -1041,7 +1044,7 @@ export function ProductForm({
               )}
             </CardHeader>
             <CardContent className="space-y-4">
-              {showDesglose && (
+              {canViewCosts && showDesglose && (
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Precio de tela (€)</Label>
@@ -1073,28 +1076,30 @@ export function ProductForm({
                 </div>
               )}
               <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>{basico.product_type === 'tailoring_fabric' ? 'Coste por m²' : 'Precio coste'}</Label>
-                  {showDesglose ? (
-                    <>
-                      <div className="flex h-10 items-center rounded-md border bg-muted/30 px-3 text-sm text-muted-foreground">
-                        {precios.cost_price === '' || Number(precios.cost_price) <= 0
-                          ? '—'
-                          : formatCurrency(Number(precios.cost_price))}
-                      </div>
-                      <p className="text-xs text-muted-foreground">Calculado automáticamente: tela + manufactura</p>
-                    </>
-                  ) : (
-                    <Input
-                      type="number"
-                      min={0}
-                      step={0.01}
-                      value={precios.cost_price === '' ? '' : precios.cost_price}
-                      onChange={(e) => setPrecios((p) => ({ ...p, cost_price: e.target.value === '' ? '' : Number(e.target.value) }))}
-                      placeholder="0,00"
-                    />
-                  )}
-                </div>
+                {canViewCosts && (
+                  <div className="space-y-2">
+                    <Label>{basico.product_type === 'tailoring_fabric' ? 'Coste por m²' : 'Precio coste'}</Label>
+                    {showDesglose ? (
+                      <>
+                        <div className="flex h-10 items-center rounded-md border bg-muted/30 px-3 text-sm text-muted-foreground">
+                          {precios.cost_price === '' || Number(precios.cost_price) <= 0
+                            ? '—'
+                            : formatCurrency(Number(precios.cost_price))}
+                        </div>
+                        <p className="text-xs text-muted-foreground">Calculado automáticamente: tela + manufactura</p>
+                      </>
+                    ) : (
+                      <Input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        value={precios.cost_price === '' ? '' : precios.cost_price}
+                        onChange={(e) => setPrecios((p) => ({ ...p, cost_price: e.target.value === '' ? '' : Number(e.target.value) }))}
+                        placeholder="0,00"
+                      />
+                    )}
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label>{basico.product_type === 'tailoring_fabric' ? 'PVP por m² (con IVA) *' : 'PVP (precio con IVA) *'}</Label>
                   <Input
