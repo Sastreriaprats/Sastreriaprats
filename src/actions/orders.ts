@@ -1144,9 +1144,17 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
       if (!openSession) return failure('No hay una caja abierta. Abre la caja antes de registrar una entrega a cuenta.')
     }
 
-    const paymentMethodDb = input.metodoPago
-      ? { efectivo: 'cash', tarjeta: 'card', transferencia: 'transfer', bizum: 'card' }[input.metodoPago] ?? 'cash'
-      : 'cash'
+    // Mapping de método de pago (UI → BD). Bizum tiene su propia columna
+    // total_bizum_sales: NO mapear a 'card'. Si entrega > 0 la validación de
+    // arriba (input.metodoPago obligatorio) garantiza que llegamos aquí con
+    // método definido; si entrega == 0 el valor no se usa luego.
+    const PAYMENT_METHOD_MAP = {
+      efectivo: 'cash',
+      tarjeta: 'card',
+      transferencia: 'transfer',
+      bizum: 'bizum',
+    } as const
+    const paymentMethodDb = input.metodoPago ? PAYMENT_METHOD_MAP[input.metodoPago] : null
 
     const { data: store } = await ctx.adminClient
       .from('stores').select('order_prefix').eq('id', input.storeId).single()
@@ -1390,69 +1398,35 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
     })
 
     if (entrega > 0) {
-      const today = new Date().toISOString().split('T')[0]
-      // Localizar la sesión de caja abierta ANTES de insertar el pago para
-      // que el cobro quede vinculado y aparezca en "Ventas de la sesión".
-      let sessionQuery = ctx.adminClient
-        .from('cash_sessions')
-        .select('id')
-        .eq('status', 'open')
-        .limit(1)
-      if (input.storeId) sessionQuery = sessionQuery.eq('store_id', input.storeId)
-      const { data: activeSession } = await sessionQuery.maybeSingle()
-      const activeSessionId = activeSession?.id ?? null
+      // El método ya está garantizado por la validación de arriba (línea ~1134).
+      if (!paymentMethodDb) return failure('Falta el método de pago de la entrega a cuenta.')
 
-      await ctx.adminClient.from('tailoring_order_payments').insert({
-        tailoring_order_id: order.id,
-        payment_date: today,
-        payment_method: paymentMethodDb,
-        amount: entrega,
-        reference: `Entrega a cuenta - ${orderNumber}`,
-        notes: `Entrega a cuenta - ${orderNumber}`,
-        created_by: ctx.userId,
-        cash_session_id: activeSessionId,
+      const today = new Date().toISOString().split('T')[0]
+
+      // Delegar TODO el registro contable del cobro en la RPC canónica
+      // rpc_add_order_payment (mig 135). Beneficios frente al inline antiguo:
+      //   - Un único camino que escribe tailoring_order_payments,
+      //     manual_transactions y cash_sessions.total_*_sales → imposible
+      //     que diverjan (caso PIN-2026-0082: tarjeta en el pedido, efectivo
+      //     en el cierre).
+      //   - Mapea bien `bizum` a total_bizum_sales (antes se mapeaba a card).
+      //   - Vincula a la sesión por fecha de pago, no por "open actual".
+      const { error: rpcError } = await ctx.adminClient.rpc('rpc_add_order_payment', {
+        p_tailoring_order_id: order.id,
+        p_payment_date: today,
+        p_payment_method: paymentMethodDb,
+        p_amount: entrega,
+        p_reference: `Entrega a cuenta - ${orderNumber}`,
+        p_notes: `Entrega a cuenta - ${orderNumber}`,
+        p_next_payment_date: null,
+        p_store_id: input.storeId ?? null,
+        p_user_id: ctx.userId,
       })
-      const baseAmount = entrega / 1.21
-      const taxAmountManual = entrega - baseAmount
-      const { error: mtError2 } = await ctx.adminClient.from('manual_transactions').insert({
-        type: 'income',
-        date: today,
-        description: `Entrega a cuenta - ${orderNumber}`,
-        category: 'sastreria',
-        amount: baseAmount,
-        tax_rate: 21,
-        tax_amount: taxAmountManual,
-        total: entrega,
-        notes: `Pedido ${orderNumber} - ${input.metodoPago ?? 'efectivo'}`,
-        created_by: ctx.userId,
-        cash_session_id: activeSessionId,
-      })
-      if (mtError2) console.error('[createFichaOrder] manual_transactions error:', mtError2)
-      if (activeSessionId) {
-        const methodMap: Record<string, string> = {
-          cash: 'total_cash_sales',
-          card: 'total_card_sales',
-          transfer: 'total_transfer_sales',
-          bizum: 'total_bizum_sales',
-        }
-        const field = input.metodoPago === 'bizum' ? 'total_bizum_sales' : methodMap[paymentMethodDb]
-        if (field) {
-          const { data: currentSession } = await ctx.adminClient
-            .from('cash_sessions')
-            .select(`total_sales, ${field}`)
-            .eq('id', activeSessionId)
-            .single()
-          if (currentSession) {
-            const session = currentSession as unknown as { total_sales?: number; [k: string]: unknown }
-            await ctx.adminClient
-              .from('cash_sessions')
-              .update({
-                total_sales: (session.total_sales || 0) + entrega,
-                [field]: ((session[field] as number) || 0) + entrega,
-              })
-              .eq('id', activeSessionId)
-          }
-        }
+      if (rpcError) {
+        // La ficha y sus líneas ya están creadas; no rompemos el flujo, pero
+        // dejamos rastro para que el descuadre se pueda investigar igual que
+        // antes (el insert manual antiguo también log-only en errores).
+        console.error('[createFichaOrder] rpc_add_order_payment error:', rpcError)
       }
     }
 

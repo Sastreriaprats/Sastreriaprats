@@ -110,37 +110,36 @@ export const deleteOrderPayment = protectedAction<{ payment_id: string; tailorin
   { permission: 'orders.edit', auditAction: 'delete', auditModule: 'orders' },
   async (ctx, { payment_id, tailoring_order_id }) => {
     try {
-      const { error } = await ctx.adminClient
-        .from('tailoring_order_payments')
-        .delete()
-        .eq('id', payment_id)
+      // Delegar en rpc_remove_order_payment (mig 150): revierte
+      // manual_transactions + cash_sessions.total_*_sales y borra la fila
+      // en una transacción. Bloquea el borrado si el pago vivía en una
+      // sesión de caja ya cerrada (no se puede tocar caja cerrada).
+      const { error: rpcError } = await ctx.adminClient.rpc('rpc_remove_order_payment', {
+        p_payment_id: payment_id,
+      })
 
-      if (error) {
-        console.error('[deleteOrderPayment]', error)
-        return failure(error.message)
+      if (rpcError) {
+        console.error('[deleteOrderPayment]', rpcError)
+        return failure(rpcError.message)
       }
 
-      // Recalcular totales tras eliminar
-      const { data: agg } = await ctx.adminClient
-        .from('tailoring_order_payments')
-        .select('amount')
-        .eq('tailoring_order_id', tailoring_order_id)
-
-      const totalPaid = (agg ?? []).reduce((sum, p) => sum + Number(p.amount), 0)
-
+      // total_pending no lo gestiona la RPC (no es contable, sólo UI).
+      // Lo recalculamos aquí a partir de los pagos restantes.
       const { data: order } = await ctx.adminClient
         .from('tailoring_orders')
-        .select('total')
+        .select('total, total_paid')
         .eq('id', tailoring_order_id)
         .single()
 
       if (order) {
-        const totalPending = Math.max(0, Number(order.total) - totalPaid)
+        const totalPending = Math.max(0, Number(order.total) - Number(order.total_paid))
         await ctx.adminClient
           .from('tailoring_orders')
-          .update({ total_paid: totalPaid, total_pending: totalPending })
+          .update({ total_pending: totalPending })
           .eq('id', tailoring_order_id)
       }
+
+      revalidatePath(`/sastre/pedidos/${tailoring_order_id}`)
 
       return success(undefined)
     } catch (e) {
