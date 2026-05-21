@@ -147,7 +147,7 @@ export function OrderGarmentsTab({ order }: { order: any }) {
                 'manga', 'frenPecho', 'contPecho', 'largo', 'biceps',
                 // Camisería - opciones
                 'modCuello', 'puno', 'jareton', 'espPliegues',
-                'erguido', 'hombrosAltos', 'iniciales', 'obs',
+                'erguido', 'hombrosAltos', 'iniciales', 'inicialesTexto', 'obs',
                 // Camisería - tipo
                 'tipo',
                 // Complementos

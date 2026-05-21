@@ -1027,7 +1027,12 @@ function buildCamiseriaDocDefinition(
     punoVal === p ? `● PUÑO ${PUNO_LABELS[p] ?? p}` : `○ PUÑO ${PUNO_LABELS[p] ?? p}`
   )
   const col4 = [
-    { text: ch('INICIALES', !!cfg.iniciales), fontSize: fs8 },
+    {
+      text: cfg.iniciales
+        ? `☑ INICIALES: ${String(cfg.inicialesTexto ?? '').trim() || '—'}`
+        : '☐ INICIALES',
+      fontSize: fs8,
+    },
     { text: `MOD. CUELLO: ${String(cfg.modCuello ?? '—').trim()}`, fontSize: fs8 },
     ...punoLines.map((t) => ({ text: t, fontSize: fs8 })),
   ]
