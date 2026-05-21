@@ -19,6 +19,15 @@ import { listActiveFabricsForFicha } from '@/actions/fabrics'
 
 type Cfg = Record<string, unknown>
 
+/** Props que reciben las secciones por tipo de prenda. El state y los setters
+ *  viven en `EditFichaDialog`; las secciones son puramente presentacionales. */
+interface SectionProps {
+  cfg: Cfg
+  set: <T,>(field: string, value: T) => void
+  bool: (v: unknown) => boolean
+  str: (v: unknown) => string
+}
+
 function detectType(line: any, cfg: Cfg): 'pantalon' | 'chaleco' | 'camiseria' | 'americana' {
   const slug = (cfg.prendaSlug as string) ?? (cfg.prenda as string) ?? ''
   if (slug === 'pantalon') return 'pantalon'
@@ -66,6 +75,375 @@ function defaultsFor(type: 'pantalon' | 'chaleco' | 'camiseria' | 'americana'): 
     confF: '', confD: '', confFP: '', confFV: '', confHA: '', confHB: '', confVD: '',
   }
 }
+
+// ─── Sub-componentes (top-level del módulo) ────────────────────────────────
+//
+// IMPORTANTE: estas funciones viven FUERA de EditFichaDialog deliberadamente.
+// Si se declaran dentro del padre, React las trata como referencias nuevas en
+// cada render y desmonta/remonta sus inputs en cada keystroke — el iPad pierde
+// el foco del Textarea de "Observaciones" tras teclear una letra (bug real).
+// Top-level + props evita el problema.
+
+function RadioGroup({ name, value, options, onChange }: {
+  name: string
+  value: unknown
+  options: Array<{ v: string; label: string }>
+  onChange: (v: string) => void
+}) {
+  return (
+    <div className="flex flex-wrap gap-3">
+      {options.map(({ v, label }) => (
+        <label key={v} className="flex items-center gap-2 cursor-pointer text-sm">
+          <input type="radio" name={name} checked={value === v} onChange={() => onChange(v)} />
+          <span>{label}</span>
+        </label>
+      ))}
+    </div>
+  )
+}
+
+function CheckboxGrid({ items, cfg, set, bool }: {
+  items: Array<{ k: string; label: string }>
+} & SectionProps) {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+      {items.map(({ k, label }) => (
+        <label key={k} className="flex items-center gap-2 cursor-pointer text-sm">
+          <input type="checkbox" checked={bool(cfg[k])} onChange={(e) => set(k, e.target.checked)} />
+          <span>{label}</span>
+        </label>
+      ))}
+    </div>
+  )
+}
+
+function PantalonSection({ cfg, set, bool, str }: SectionProps) {
+  return (
+    <>
+      <div className="space-y-1">
+        <Label>Vueltas</Label>
+        <div className="flex flex-wrap gap-3">
+          <label className="flex items-center gap-2 cursor-pointer text-sm">
+            <input type="radio" name="vueltas" checked={cfg.vueltas === 'sin_vueltas'} onChange={() => set('vueltas', 'sin_vueltas')} />
+            <span>Sin vueltas</span>
+          </label>
+          <span className="text-muted-foreground text-sm self-center">Con vuelta:</span>
+          {['3.5', '4', '4.5', '5'].map((v) => (
+            <label key={v} className="flex items-center gap-2 cursor-pointer text-sm">
+              <input type="radio" name="vueltas" checked={cfg.vueltas === v} onChange={() => set('vueltas', v)} />
+              <span>{v} cm</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <Label>Bragueta</Label>
+        <RadioGroup name="bragueta" value={cfg.bragueta} onChange={(v) => set('bragueta', v)}
+          options={[{ v: 'cremallera', label: 'Br. cremallera' }, { v: 'botones', label: 'Br. botones' }]} />
+      </div>
+
+      <div className="space-y-1">
+        <Label>Pliegues</Label>
+        <div className="flex items-center gap-3 flex-wrap">
+          {[{ v: 'sin_pliegues', label: 'Sin pliegues' }, { v: '1_pliegue', label: '1 pliegue' }, { v: '2_pliegues', label: '2 pliegues' }].map(({ v, label }) => (
+            <label key={v} className="flex items-center gap-2 cursor-pointer text-sm">
+              <input type="radio" name="pliegues" checked={cfg.pliegues === v} onChange={() => set('pliegues', v)} />
+              <span>{label}</span>
+            </label>
+          ))}
+          <Input className="h-7 w-20" value={str(cfg.plieguesVal)} onChange={(e) => set('plieguesVal', e.target.value)} placeholder="cm" />
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <Label>Bolsillos y detalles</Label>
+        <CheckboxGrid cfg={cfg} set={set} bool={bool} str={str} items={[
+          { k: 'p7pasadores', label: '7 pasadores' }, { k: 'p5bolsillos', label: '5 bolsillos' },
+          { k: 'pRefForro', label: 'Ref. forro' }, { k: 'pRefExtTela', label: 'Ref. ext. tela' },
+          { k: 'pSinBolTrasero', label: 'Sin bol. trasero' }, { k: 'p1BolTrasero', label: '1 bol. trasero' },
+          { k: 'p2BolTraseros', label: '2 bol. traseros' }, { k: 'pBolCostura', label: 'Bol. costura' },
+          { k: 'pBolFrances', label: 'Bol. francés' }, { k: 'pBolVivo', label: 'Bol. vivo' }, { k: 'pBolOreja', label: 'Bol. oreja' },
+          { k: 'pCenidores', label: 'Ceñidores costados' }, { k: 'pBotonesTirantes', label: 'Botones tirantes' },
+          { k: 'pVEnTrasero', label: 'V en trasero' },
+        ]} />
+      </div>
+
+      <div className="space-y-2">
+        <Label>Pretina</Label>
+        <label className="flex items-center gap-2 cursor-pointer text-sm">
+          <input type="checkbox" checked={bool(cfg.pretinaCorrida)} onChange={(e) => set('pretinaCorrida', e.target.checked)} />
+          <span>Pretina corrida a 13 y un pasador a 7 en pico</span>
+        </label>
+        <div className="flex items-center gap-3 flex-wrap">
+          <label className="flex items-center gap-2 cursor-pointer text-sm">
+            <input type="checkbox" checked={bool(cfg.pretina2Botones)} onChange={(e) => set('pretina2Botones', e.target.checked)} />
+            <span>Pretina de dos botones en punta</span>
+          </label>
+          {bool(cfg.pretina2Botones) && (
+            <div className="flex gap-3">
+              {['4', '4.5', '5'].map((v) => (
+                <label key={v} className="flex items-center gap-1 cursor-pointer text-sm">
+                  <input type="radio" name="pretinaTamano" checked={cfg.pretinaTamano === v} onChange={() => set('pretinaTamano', v)} />
+                  <span>{v} cm</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <label className="flex items-center gap-2 cursor-pointer text-sm">
+            <input type="checkbox" checked={bool(cfg.pretinaReforzadaDelante)} onChange={(e) => set('pretinaReforzadaDelante', e.target.checked)} />
+            <span>Pretina reforzada por delante</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer text-sm">
+            <input type="checkbox" checked={bool(cfg.pretinaReforzada)} onChange={(e) => set('pretinaReforzada', e.target.checked)} />
+            <span>Pretina reforzada</span>
+          </label>
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <Label>Configuración</Label>
+        <div className="flex flex-wrap gap-3">
+          {[
+            { k: 'confFM', label: 'FM' }, { k: 'confFT', label: 'FT' }, { k: 'confPT', label: 'PT' },
+            { k: 'confRodalTrasero', label: 'Rodal trasero' }, { k: 'confBajadaDelantero', label: 'Bajada delantero' },
+            { k: 'confAlturaTrasero', label: 'Altura trasero' }, { k: 'confFVSalida', label: 'FV con salida' },
+          ].map(({ k, label }) => (
+            <div key={k} className="flex items-center gap-1.5">
+              <span className="text-sm font-medium">{label}</span>
+              <Input className="h-8 w-20" value={str(cfg[k])} onChange={(e) => set(k, e.target.value)} placeholder="—" />
+            </div>
+          ))}
+          <label className="flex items-center gap-2 cursor-pointer text-sm">
+            <input type="checkbox" checked={bool(cfg.confFormaGemelo)} onChange={(e) => set('confFormaGemelo', e.target.checked)} />
+            <span>Forma gemelo</span>
+          </label>
+        </div>
+      </div>
+    </>
+  )
+}
+
+function ChalecoSection({ cfg, set, str }: SectionProps) {
+  return (
+    <>
+      <div className="space-y-1">
+        <Label>Corte</Label>
+        <RadioGroup name="chalecoCorte" value={cfg.chalecoCorte} onChange={(v) => set('chalecoCorte', v)}
+          options={[{ v: 'recto', label: 'Recto' }, { v: 'cruzado', label: 'Cruzado' }]} />
+      </div>
+      <div className="space-y-1">
+        <Label>Bolsillo</Label>
+        <RadioGroup name="chalecoBolsillo" value={cfg.chalecoBolsillo} onChange={(v) => set('chalecoBolsillo', v)}
+          options={[{ v: 'cartera', label: 'Bols. cartera' }, { v: 'vivo', label: 'Bolsillo vivo' }]} />
+      </div>
+      <div className="space-y-1">
+        <Label>Configuración</Label>
+        <div className="flex flex-wrap gap-3">
+          {[
+            { k: 'confF', label: 'F' }, { k: 'confD', label: 'D' }, { k: 'confFP', label: 'FP' },
+            { k: 'confFV', label: 'FV' }, { k: 'confHA', label: 'HA' }, { k: 'confHB', label: 'HB' }, { k: 'confVD', label: 'VD' },
+          ].map(({ k, label }) => (
+            <div key={k} className="flex items-center gap-1.5">
+              <span className="text-sm font-medium">{label}</span>
+              <Input className="h-8 w-20" value={str(cfg[k])} onChange={(e) => set(k, e.target.value)} placeholder="—" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  )
+}
+
+function AmericanaSection({ cfg, set, bool, str }: SectionProps) {
+  return (
+    <>
+      <div className="space-y-1">
+        <Label>Botones</Label>
+        <RadioGroup name="botones" value={cfg.botones} onChange={(v) => set('botones', v)}
+          options={[
+            { v: '1fila_1', label: '1 Fila 1 botón' }, { v: '1fila_2', label: '1 Fila 2 botones' },
+            { v: '1fila_3para2', label: '1 Fila 3 para 2' }, { v: '2filas_6', label: '2 Filas 6 btns 2 adorno' },
+          ]} />
+      </div>
+      <div className="space-y-1">
+        <Label>Aberturas</Label>
+        <RadioGroup name="aberturas" value={cfg.aberturas} onChange={(v) => set('aberturas', v)}
+          options={[{ v: '2aberturas', label: '2 Aberturas' }, { v: '1abertura', label: '1 Abertura' }, { v: 'sin_abertura', label: 'Sin abertura' }]} />
+      </div>
+      <div className="space-y-1">
+        <Label>Bolsillos</Label>
+        <RadioGroup name="bolsilloTipo" value={cfg.bolsilloTipo} onChange={(v) => set('bolsilloTipo', v)}
+          options={[
+            { v: 'recto', label: 'Bolsillo recto' }, { v: 'inclinado', label: 'Bol. inclinado' },
+            { v: 'parche', label: 'Bolsillo parche' }, { v: 'bercheta', label: 'Bol. pecho bercheta' },
+            { v: 'bercheta_parche', label: 'Bol. pecho parche bercheta' },
+          ]} />
+        <div className="flex items-center gap-3 mt-2">
+          <label className="flex items-center gap-2 cursor-pointer text-sm">
+            <input type="checkbox" checked={bool(cfg.cerrilleraExterior)} onChange={(e) => set('cerrilleraExterior', e.target.checked)} />
+            <span>Cerillera exterior</span>
+          </label>
+          <div className="flex items-center gap-2">
+            <Label className="text-xs text-muted-foreground">Primer botón</Label>
+            <Input className="h-8 w-24" value={str(cfg.primerBoton)} onChange={(e) => set('primerBoton', e.target.value)} placeholder="cm" />
+          </div>
+        </div>
+      </div>
+      <div className="space-y-1">
+        <Label>Solapa</Label>
+        <div className="flex flex-wrap items-center gap-3">
+          <RadioGroup name="solapa" value={cfg.solapa} onChange={(v) => set('solapa', v)}
+            options={[{ v: 'normal', label: 'Normal' }, { v: 'pico', label: 'Pico' }, { v: 'chal', label: 'Chal' }]} />
+          <div className="flex items-center gap-2">
+            <Label className="text-xs text-muted-foreground">Ancho</Label>
+            <Input className="h-8 w-20" value={str(cfg.anchoSolapa)} onChange={(e) => set('anchoSolapa', e.target.value)} placeholder="cm" />
+          </div>
+        </div>
+      </div>
+      <div className="space-y-1">
+        <Label>Manga</Label>
+        <RadioGroup name="manga" value={cfg.manga} onChange={(v) => set('manga', v)}
+          options={[
+            { v: 'napolit', label: 'Napolitana' }, { v: 'reborde', label: 'Reborde' },
+            { v: 'sin_reborde', label: 'Sin reborde' }, { v: 'con_reborde', label: 'Con reborde' },
+          ]} />
+        <div className="grid grid-cols-2 gap-3 mt-2">
+          <div>
+            <Label className="text-xs text-muted-foreground">Ojales abiertos</Label>
+            <Input className="h-9" value={str(cfg.ojalesAbiertos)} onChange={(e) => set('ojalesAbiertos', e.target.value)} placeholder="nº" />
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground">Ojales cerrados</Label>
+            <Input className="h-9" value={str(cfg.ojalesCerrados)} onChange={(e) => set('ojalesCerrados', e.target.value)} placeholder="nº" />
+          </div>
+        </div>
+      </div>
+      <div className="space-y-1">
+        <Label>Hombros</Label>
+        <CheckboxGrid cfg={cfg} set={set} bool={bool} str={str} items={[
+          { k: 'medidaHombro', label: 'Medida hombro' }, { k: 'sinHombreras', label: 'Sin hombreras' },
+          { k: 'picado34', label: 'Picado 3/4 todo' }, { k: 'sinHombrera', label: 'Sin hombrera' },
+          { k: 'hombrerasTraseras', label: 'Hombreras traseras' }, { k: 'pocaHombrera', label: 'Poca hombrera' },
+        ]} />
+        <div className="flex flex-wrap items-center gap-4 mt-2">
+          <label className="flex items-center gap-2 cursor-pointer text-sm">
+            <input type="checkbox" checked={bool(cfg.hTerminado)} onChange={(e) => set('hTerminado', e.target.checked)} />
+            <span>H. terminado</span>
+            <Input className="h-7 w-20" value={str(cfg.hTerminadoVal)} onChange={(e) => set('hTerminadoVal', e.target.value)} placeholder="cm" />
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer text-sm">
+            <input type="checkbox" checked={bool(cfg.escote)} onChange={(e) => set('escote', e.target.checked)} />
+            <span>Escote</span>
+            <Input className="h-7 w-20" value={str(cfg.escoteVal)} onChange={(e) => set('escoteVal', e.target.value)} placeholder="cm" />
+          </label>
+        </div>
+      </div>
+      <div className="space-y-1">
+        <Label>Forro</Label>
+        <RadioGroup name="forro" value={cfg.forro} onChange={(v) => set('forro', v)}
+          options={[{ v: 'sin_forro', label: 'Sin forro' }, { v: 'medio', label: 'Medio forro' }, { v: 'completo', label: 'Forro completo' }]} />
+      </div>
+      <div className="space-y-1">
+        <Label>Configuración</Label>
+        <div className="flex flex-wrap gap-3">
+          {[
+            { k: 'confF', label: 'F' }, { k: 'confD', label: 'D' }, { k: 'confFP', label: 'FP' },
+            { k: 'confFV', label: 'FV' }, { k: 'confHA', label: 'HA' }, { k: 'confHB', label: 'HB' }, { k: 'confVD', label: 'VD' },
+          ].map(({ k, label }) => (
+            <div key={k} className="flex items-center gap-1.5">
+              <span className="text-sm font-medium">{label}</span>
+              <Input className="h-8 w-20" value={str(cfg[k])} onChange={(e) => set(k, e.target.value)} placeholder="—" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  )
+}
+
+function CamiseriaSection({ cfg, set, bool, str }: SectionProps) {
+  const MEDIDAS: Array<{ label: string; field: string; fallbacks?: string[] }> = [
+    { label: 'Cuello', field: 'cuello' },
+    { label: 'Canesú', field: 'canesu' },
+    { label: 'Largo manga', field: 'largoManga', fallbacks: ['largo_manga', 'manga'] },
+    { label: 'Frente pecho', field: 'frentePecho', fallbacks: ['frente_pecho', 'frenPecho'] },
+    { label: 'Pecho', field: 'pecho', fallbacks: ['cont_pecho', 'contPecho'] },
+    { label: 'Cintura', field: 'cintura' },
+    { label: 'Cadera', field: 'cadera' },
+    { label: 'Largo cuerpo', field: 'largoCuerpo', fallbacks: ['largo_cuerpo', 'largo'] },
+    { label: 'Hombro', field: 'hombro' },
+    { label: 'Puño dch', field: 'punoDerecho', fallbacks: ['puno_derecho'] },
+    { label: 'Puño izq', field: 'punoIzquierdo', fallbacks: ['puno_izquierdo'] },
+  ]
+  const readMedida = (m: { field: string; fallbacks?: string[] }) => {
+    const candidates = [m.field, ...(m.fallbacks ?? [])]
+    for (const k of candidates) {
+      const v = cfg[k]
+      if (v !== undefined && v !== null && String(v) !== '') return str(v)
+    }
+    return ''
+  }
+  return (
+    <>
+      <div className="space-y-1">
+        <Label>Medidas</Label>
+        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+          {MEDIDAS.map((m) => (
+            <div key={m.field}>
+              <Label className="text-xs text-muted-foreground">{m.label}</Label>
+              <Input className="h-9" value={readMedida(m)} onChange={(e) => set(m.field, e.target.value)} />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="space-y-1">
+        <Label>Opciones</Label>
+        <CheckboxGrid cfg={cfg} set={set} bool={bool} str={str} items={[
+          { k: 'jareton', label: 'Jaretón' }, { k: 'bolsillo', label: 'Bolsillo' },
+          { k: 'hombroCaido', label: 'Hombro caído' }, { k: 'derecho', label: 'Derecho' },
+          { k: 'izquierdo', label: 'Izquierdo' }, { k: 'hombrosAltos', label: 'Hombros altos' },
+          { k: 'hombrosBajos', label: 'Hombros bajos' }, { k: 'erguido', label: 'Erguido' },
+          { k: 'cargado', label: 'Cargado' }, { k: 'espaldaLisa', label: 'Espalda lisa' },
+          { k: 'espPliegues', label: 'Esp. pliegues' }, { k: 'espTablonCentr', label: 'Esp. tablón central' },
+          { k: 'espPinzas', label: 'Esp. pinzas' }, { k: 'iniciales', label: 'Iniciales' },
+        ]} />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {bool(cfg.iniciales) && (
+          <div>
+            <Label className="text-xs text-muted-foreground">Texto iniciales</Label>
+            <Input className="h-9" value={str(cfg.inicialesTexto)} onChange={(e) => set('inicialesTexto', e.target.value)} placeholder="Ej: J.G.M." />
+          </div>
+        )}
+        <div>
+          <Label className="text-xs text-muted-foreground">Mod. cuello</Label>
+          <Input className="h-9" value={str(cfg.modCuello)} onChange={(e) => set('modCuello', e.target.value)} />
+        </div>
+      </div>
+      <div className="space-y-1">
+        <Label>Puño</Label>
+        <RadioGroup name="puno" value={cfg.puno} onChange={(v) => set('puno', v)}
+          options={[
+            { v: 'sencillo', label: 'Sencillo' }, { v: 'gemelo', label: 'Gemelo' },
+            { v: 'mixto', label: 'Mixto' }, { v: 'mosquetero', label: 'Mosquetero' }, { v: 'otro', label: 'Otro' },
+          ]} />
+      </div>
+      <div className="space-y-1">
+        <Label>Tejido</Label>
+        <Input value={str(cfg.tejido)} onChange={(e) => set('tejido', e.target.value)} />
+      </div>
+      <div className="space-y-1">
+        <Label>Observaciones de camisa</Label>
+        <Textarea rows={2} value={str(cfg.obs)} onChange={(e) => set('obs', e.target.value)} />
+      </div>
+    </>
+  )
+}
+
+// ─── Componente principal ──────────────────────────────────────────────────
 
 interface EditFichaDialogProps {
   open: boolean
@@ -169,350 +547,6 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
     onSaved?.()
   }
 
-  // ─── Sub-renders ──────────────────────────────────────────────────────────
-  const RadioGroup = ({ name, value, options, onChange }: { name: string; value: unknown; options: Array<{ v: string; label: string }>; onChange: (v: string) => void }) => (
-    <div className="flex flex-wrap gap-3">
-      {options.map(({ v, label }) => (
-        <label key={v} className="flex items-center gap-2 cursor-pointer text-sm">
-          <input type="radio" name={name} checked={value === v} onChange={() => onChange(v)} />
-          <span>{label}</span>
-        </label>
-      ))}
-    </div>
-  )
-
-  const CheckboxGrid = ({ items }: { items: Array<{ k: string; label: string }> }) => (
-    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-      {items.map(({ k, label }) => (
-        <label key={k} className="flex items-center gap-2 cursor-pointer text-sm">
-          <input type="checkbox" checked={bool(cfg[k])} onChange={(e) => set(k, e.target.checked)} />
-          <span>{label}</span>
-        </label>
-      ))}
-    </div>
-  )
-
-  // ─── Secciones por tipo ───────────────────────────────────────────────────
-  const PantalonSection = () => (
-    <>
-      <div className="space-y-1">
-        <Label>Vueltas</Label>
-        <div className="flex flex-wrap gap-3">
-          <label className="flex items-center gap-2 cursor-pointer text-sm">
-            <input type="radio" name="vueltas" checked={cfg.vueltas === 'sin_vueltas'} onChange={() => set('vueltas', 'sin_vueltas')} />
-            <span>Sin vueltas</span>
-          </label>
-          <span className="text-muted-foreground text-sm self-center">Con vuelta:</span>
-          {['3.5', '4', '4.5', '5'].map((v) => (
-            <label key={v} className="flex items-center gap-2 cursor-pointer text-sm">
-              <input type="radio" name="vueltas" checked={cfg.vueltas === v} onChange={() => set('vueltas', v)} />
-              <span>{v} cm</span>
-            </label>
-          ))}
-        </div>
-      </div>
-
-      <div className="space-y-1">
-        <Label>Bragueta</Label>
-        <RadioGroup name="bragueta" value={cfg.bragueta} onChange={(v) => set('bragueta', v)}
-          options={[{ v: 'cremallera', label: 'Br. cremallera' }, { v: 'botones', label: 'Br. botones' }]} />
-      </div>
-
-      <div className="space-y-1">
-        <Label>Pliegues</Label>
-        <div className="flex items-center gap-3 flex-wrap">
-          {[{ v: 'sin_pliegues', label: 'Sin pliegues' }, { v: '1_pliegue', label: '1 pliegue' }, { v: '2_pliegues', label: '2 pliegues' }].map(({ v, label }) => (
-            <label key={v} className="flex items-center gap-2 cursor-pointer text-sm">
-              <input type="radio" name="pliegues" checked={cfg.pliegues === v} onChange={() => set('pliegues', v)} />
-              <span>{label}</span>
-            </label>
-          ))}
-          <Input className="h-7 w-20" value={str(cfg.plieguesVal)} onChange={(e) => set('plieguesVal', e.target.value)} placeholder="cm" />
-        </div>
-      </div>
-
-      <div className="space-y-1">
-        <Label>Bolsillos y detalles</Label>
-        <CheckboxGrid items={[
-          { k: 'p7pasadores', label: '7 pasadores' }, { k: 'p5bolsillos', label: '5 bolsillos' },
-          { k: 'pRefForro', label: 'Ref. forro' }, { k: 'pRefExtTela', label: 'Ref. ext. tela' },
-          { k: 'pSinBolTrasero', label: 'Sin bol. trasero' }, { k: 'p1BolTrasero', label: '1 bol. trasero' },
-          { k: 'p2BolTraseros', label: '2 bol. traseros' }, { k: 'pBolCostura', label: 'Bol. costura' },
-          { k: 'pBolFrances', label: 'Bol. francés' }, { k: 'pBolVivo', label: 'Bol. vivo' }, { k: 'pBolOreja', label: 'Bol. oreja' },
-          { k: 'pCenidores', label: 'Ceñidores costados' }, { k: 'pBotonesTirantes', label: 'Botones tirantes' },
-          { k: 'pVEnTrasero', label: 'V en trasero' },
-        ]} />
-      </div>
-
-      <div className="space-y-2">
-        <Label>Pretina</Label>
-        <label className="flex items-center gap-2 cursor-pointer text-sm">
-          <input type="checkbox" checked={bool(cfg.pretinaCorrida)} onChange={(e) => set('pretinaCorrida', e.target.checked)} />
-          <span>Pretina corrida a 13 y un pasador a 7 en pico</span>
-        </label>
-        <div className="flex items-center gap-3 flex-wrap">
-          <label className="flex items-center gap-2 cursor-pointer text-sm">
-            <input type="checkbox" checked={bool(cfg.pretina2Botones)} onChange={(e) => set('pretina2Botones', e.target.checked)} />
-            <span>Pretina de dos botones en punta</span>
-          </label>
-          {bool(cfg.pretina2Botones) && (
-            <div className="flex gap-3">
-              {['4', '4.5', '5'].map((v) => (
-                <label key={v} className="flex items-center gap-1 cursor-pointer text-sm">
-                  <input type="radio" name="pretinaTamano" checked={cfg.pretinaTamano === v} onChange={() => set('pretinaTamano', v)} />
-                  <span>{v} cm</span>
-                </label>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-          <label className="flex items-center gap-2 cursor-pointer text-sm">
-            <input type="checkbox" checked={bool(cfg.pretinaReforzadaDelante)} onChange={(e) => set('pretinaReforzadaDelante', e.target.checked)} />
-            <span>Pretina reforzada por delante</span>
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer text-sm">
-            <input type="checkbox" checked={bool(cfg.pretinaReforzada)} onChange={(e) => set('pretinaReforzada', e.target.checked)} />
-            <span>Pretina reforzada</span>
-          </label>
-        </div>
-      </div>
-
-      <div className="space-y-1">
-        <Label>Configuración</Label>
-        <div className="flex flex-wrap gap-3">
-          {[
-            { k: 'confFM', label: 'FM' }, { k: 'confFT', label: 'FT' }, { k: 'confPT', label: 'PT' },
-            { k: 'confRodalTrasero', label: 'Rodal trasero' }, { k: 'confBajadaDelantero', label: 'Bajada delantero' },
-            { k: 'confAlturaTrasero', label: 'Altura trasero' }, { k: 'confFVSalida', label: 'FV con salida' },
-          ].map(({ k, label }) => (
-            <div key={k} className="flex items-center gap-1.5">
-              <span className="text-sm font-medium">{label}</span>
-              <Input className="h-8 w-20" value={str(cfg[k])} onChange={(e) => set(k, e.target.value)} placeholder="—" />
-            </div>
-          ))}
-          <label className="flex items-center gap-2 cursor-pointer text-sm">
-            <input type="checkbox" checked={bool(cfg.confFormaGemelo)} onChange={(e) => set('confFormaGemelo', e.target.checked)} />
-            <span>Forma gemelo</span>
-          </label>
-        </div>
-      </div>
-    </>
-  )
-
-  const ChalecoSection = () => (
-    <>
-      <div className="space-y-1">
-        <Label>Corte</Label>
-        <RadioGroup name="chalecoCorte" value={cfg.chalecoCorte} onChange={(v) => set('chalecoCorte', v)}
-          options={[{ v: 'recto', label: 'Recto' }, { v: 'cruzado', label: 'Cruzado' }]} />
-      </div>
-      <div className="space-y-1">
-        <Label>Bolsillo</Label>
-        <RadioGroup name="chalecoBolsillo" value={cfg.chalecoBolsillo} onChange={(v) => set('chalecoBolsillo', v)}
-          options={[{ v: 'cartera', label: 'Bols. cartera' }, { v: 'vivo', label: 'Bolsillo vivo' }]} />
-      </div>
-      <div className="space-y-1">
-        <Label>Configuración</Label>
-        <div className="flex flex-wrap gap-3">
-          {[
-            { k: 'confF', label: 'F' }, { k: 'confD', label: 'D' }, { k: 'confFP', label: 'FP' },
-            { k: 'confFV', label: 'FV' }, { k: 'confHA', label: 'HA' }, { k: 'confHB', label: 'HB' }, { k: 'confVD', label: 'VD' },
-          ].map(({ k, label }) => (
-            <div key={k} className="flex items-center gap-1.5">
-              <span className="text-sm font-medium">{label}</span>
-              <Input className="h-8 w-20" value={str(cfg[k])} onChange={(e) => set(k, e.target.value)} placeholder="—" />
-            </div>
-          ))}
-        </div>
-      </div>
-    </>
-  )
-
-  const AmericanaSection = () => (
-    <>
-      <div className="space-y-1">
-        <Label>Botones</Label>
-        <RadioGroup name="botones" value={cfg.botones} onChange={(v) => set('botones', v)}
-          options={[
-            { v: '1fila_1', label: '1 Fila 1 botón' }, { v: '1fila_2', label: '1 Fila 2 botones' },
-            { v: '1fila_3para2', label: '1 Fila 3 para 2' }, { v: '2filas_6', label: '2 Filas 6 btns 2 adorno' },
-          ]} />
-      </div>
-      <div className="space-y-1">
-        <Label>Aberturas</Label>
-        <RadioGroup name="aberturas" value={cfg.aberturas} onChange={(v) => set('aberturas', v)}
-          options={[{ v: '2aberturas', label: '2 Aberturas' }, { v: '1abertura', label: '1 Abertura' }, { v: 'sin_abertura', label: 'Sin abertura' }]} />
-      </div>
-      <div className="space-y-1">
-        <Label>Bolsillos</Label>
-        <RadioGroup name="bolsilloTipo" value={cfg.bolsilloTipo} onChange={(v) => set('bolsilloTipo', v)}
-          options={[
-            { v: 'recto', label: 'Bolsillo recto' }, { v: 'inclinado', label: 'Bol. inclinado' },
-            { v: 'parche', label: 'Bolsillo parche' }, { v: 'bercheta', label: 'Bol. pecho bercheta' },
-            { v: 'bercheta_parche', label: 'Bol. pecho parche bercheta' },
-          ]} />
-        <div className="flex items-center gap-3 mt-2">
-          <label className="flex items-center gap-2 cursor-pointer text-sm">
-            <input type="checkbox" checked={bool(cfg.cerrilleraExterior)} onChange={(e) => set('cerrilleraExterior', e.target.checked)} />
-            <span>Cerillera exterior</span>
-          </label>
-          <div className="flex items-center gap-2">
-            <Label className="text-xs text-muted-foreground">Primer botón</Label>
-            <Input className="h-8 w-24" value={str(cfg.primerBoton)} onChange={(e) => set('primerBoton', e.target.value)} placeholder="cm" />
-          </div>
-        </div>
-      </div>
-      <div className="space-y-1">
-        <Label>Solapa</Label>
-        <div className="flex flex-wrap items-center gap-3">
-          <RadioGroup name="solapa" value={cfg.solapa} onChange={(v) => set('solapa', v)}
-            options={[{ v: 'normal', label: 'Normal' }, { v: 'pico', label: 'Pico' }, { v: 'chal', label: 'Chal' }]} />
-          <div className="flex items-center gap-2">
-            <Label className="text-xs text-muted-foreground">Ancho</Label>
-            <Input className="h-8 w-20" value={str(cfg.anchoSolapa)} onChange={(e) => set('anchoSolapa', e.target.value)} placeholder="cm" />
-          </div>
-        </div>
-      </div>
-      <div className="space-y-1">
-        <Label>Manga</Label>
-        <RadioGroup name="manga" value={cfg.manga} onChange={(v) => set('manga', v)}
-          options={[
-            { v: 'napolit', label: 'Napolitana' }, { v: 'reborde', label: 'Reborde' },
-            { v: 'sin_reborde', label: 'Sin reborde' }, { v: 'con_reborde', label: 'Con reborde' },
-          ]} />
-        <div className="grid grid-cols-2 gap-3 mt-2">
-          <div>
-            <Label className="text-xs text-muted-foreground">Ojales abiertos</Label>
-            <Input className="h-9" value={str(cfg.ojalesAbiertos)} onChange={(e) => set('ojalesAbiertos', e.target.value)} placeholder="nº" />
-          </div>
-          <div>
-            <Label className="text-xs text-muted-foreground">Ojales cerrados</Label>
-            <Input className="h-9" value={str(cfg.ojalesCerrados)} onChange={(e) => set('ojalesCerrados', e.target.value)} placeholder="nº" />
-          </div>
-        </div>
-      </div>
-      <div className="space-y-1">
-        <Label>Hombros</Label>
-        <CheckboxGrid items={[
-          { k: 'medidaHombro', label: 'Medida hombro' }, { k: 'sinHombreras', label: 'Sin hombreras' },
-          { k: 'picado34', label: 'Picado 3/4 todo' }, { k: 'sinHombrera', label: 'Sin hombrera' },
-          { k: 'hombrerasTraseras', label: 'Hombreras traseras' }, { k: 'pocaHombrera', label: 'Poca hombrera' },
-        ]} />
-        <div className="flex flex-wrap items-center gap-4 mt-2">
-          <label className="flex items-center gap-2 cursor-pointer text-sm">
-            <input type="checkbox" checked={bool(cfg.hTerminado)} onChange={(e) => set('hTerminado', e.target.checked)} />
-            <span>H. terminado</span>
-            <Input className="h-7 w-20" value={str(cfg.hTerminadoVal)} onChange={(e) => set('hTerminadoVal', e.target.value)} placeholder="cm" />
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer text-sm">
-            <input type="checkbox" checked={bool(cfg.escote)} onChange={(e) => set('escote', e.target.checked)} />
-            <span>Escote</span>
-            <Input className="h-7 w-20" value={str(cfg.escoteVal)} onChange={(e) => set('escoteVal', e.target.value)} placeholder="cm" />
-          </label>
-        </div>
-      </div>
-      <div className="space-y-1">
-        <Label>Forro</Label>
-        <RadioGroup name="forro" value={cfg.forro} onChange={(v) => set('forro', v)}
-          options={[{ v: 'sin_forro', label: 'Sin forro' }, { v: 'medio', label: 'Medio forro' }, { v: 'completo', label: 'Forro completo' }]} />
-      </div>
-      <div className="space-y-1">
-        <Label>Configuración</Label>
-        <div className="flex flex-wrap gap-3">
-          {[
-            { k: 'confF', label: 'F' }, { k: 'confD', label: 'D' }, { k: 'confFP', label: 'FP' },
-            { k: 'confFV', label: 'FV' }, { k: 'confHA', label: 'HA' }, { k: 'confHB', label: 'HB' }, { k: 'confVD', label: 'VD' },
-          ].map(({ k, label }) => (
-            <div key={k} className="flex items-center gap-1.5">
-              <span className="text-sm font-medium">{label}</span>
-              <Input className="h-8 w-20" value={str(cfg[k])} onChange={(e) => set(k, e.target.value)} placeholder="—" />
-            </div>
-          ))}
-        </div>
-      </div>
-    </>
-  )
-
-  const CamiseriaSection = () => {
-    const MEDIDAS: Array<{ label: string; field: string; fallbacks?: string[] }> = [
-      { label: 'Cuello', field: 'cuello' },
-      { label: 'Canesú', field: 'canesu' },
-      { label: 'Largo manga', field: 'largoManga', fallbacks: ['largo_manga', 'manga'] },
-      { label: 'Frente pecho', field: 'frentePecho', fallbacks: ['frente_pecho', 'frenPecho'] },
-      { label: 'Pecho', field: 'pecho', fallbacks: ['cont_pecho', 'contPecho'] },
-      { label: 'Cintura', field: 'cintura' },
-      { label: 'Cadera', field: 'cadera' },
-      { label: 'Largo cuerpo', field: 'largoCuerpo', fallbacks: ['largo_cuerpo', 'largo'] },
-      { label: 'Hombro', field: 'hombro' },
-      { label: 'Puño dch', field: 'punoDerecho', fallbacks: ['puno_derecho'] },
-      { label: 'Puño izq', field: 'punoIzquierdo', fallbacks: ['puno_izquierdo'] },
-    ]
-    const readMedida = (m: { field: string; fallbacks?: string[] }) => {
-      const candidates = [m.field, ...(m.fallbacks ?? [])]
-      for (const k of candidates) {
-        const v = cfg[k]
-        if (v !== undefined && v !== null && String(v) !== '') return str(v)
-      }
-      return ''
-    }
-    return (
-      <>
-        <div className="space-y-1">
-          <Label>Medidas</Label>
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-            {MEDIDAS.map((m) => (
-              <div key={m.field}>
-                <Label className="text-xs text-muted-foreground">{m.label}</Label>
-                <Input className="h-9" value={readMedida(m)} onChange={(e) => set(m.field, e.target.value)} />
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="space-y-1">
-          <Label>Opciones</Label>
-          <CheckboxGrid items={[
-            { k: 'jareton', label: 'Jaretón' }, { k: 'bolsillo', label: 'Bolsillo' },
-            { k: 'hombroCaido', label: 'Hombro caído' }, { k: 'derecho', label: 'Derecho' },
-            { k: 'izquierdo', label: 'Izquierdo' }, { k: 'hombrosAltos', label: 'Hombros altos' },
-            { k: 'hombrosBajos', label: 'Hombros bajos' }, { k: 'erguido', label: 'Erguido' },
-            { k: 'cargado', label: 'Cargado' }, { k: 'espaldaLisa', label: 'Espalda lisa' },
-            { k: 'espPliegues', label: 'Esp. pliegues' }, { k: 'espTablonCentr', label: 'Esp. tablón central' },
-            { k: 'espPinzas', label: 'Esp. pinzas' }, { k: 'iniciales', label: 'Iniciales' },
-          ]} />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          {bool(cfg.iniciales) && (
-            <div>
-              <Label className="text-xs text-muted-foreground">Texto iniciales</Label>
-              <Input className="h-9" value={str(cfg.inicialesTexto)} onChange={(e) => set('inicialesTexto', e.target.value)} placeholder="Ej: J.G.M." />
-            </div>
-          )}
-          <div>
-            <Label className="text-xs text-muted-foreground">Mod. cuello</Label>
-            <Input className="h-9" value={str(cfg.modCuello)} onChange={(e) => set('modCuello', e.target.value)} />
-          </div>
-        </div>
-        <div className="space-y-1">
-          <Label>Puño</Label>
-          <RadioGroup name="puno" value={cfg.puno} onChange={(v) => set('puno', v)}
-            options={[
-              { v: 'sencillo', label: 'Sencillo' }, { v: 'gemelo', label: 'Gemelo' },
-              { v: 'mixto', label: 'Mixto' }, { v: 'mosquetero', label: 'Mosquetero' }, { v: 'otro', label: 'Otro' },
-            ]} />
-        </div>
-        <div className="space-y-1">
-          <Label>Tejido</Label>
-          <Input value={str(cfg.tejido)} onChange={(e) => set('tejido', e.target.value)} />
-        </div>
-        <div className="space-y-1">
-          <Label>Observaciones de camisa</Label>
-          <Textarea rows={2} value={str(cfg.obs)} onChange={(e) => set('obs', e.target.value)} />
-        </div>
-      </>
-    )
-  }
-
   // ─── Render principal ─────────────────────────────────────────────────────
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!saving) onOpenChange(v) }}>
@@ -614,10 +648,10 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
               {type === 'camiseria' && 'Configuración de camisa'}
               {type === 'americana' && 'Configuración de la prenda'}
             </h3>
-            {type === 'pantalon' && <PantalonSection />}
-            {type === 'chaleco' && <ChalecoSection />}
-            {type === 'camiseria' && <CamiseriaSection />}
-            {type === 'americana' && <AmericanaSection />}
+            {type === 'pantalon' && <PantalonSection cfg={cfg} set={set} bool={bool} str={str} />}
+            {type === 'chaleco' && <ChalecoSection cfg={cfg} set={set} bool={bool} str={str} />}
+            {type === 'camiseria' && <CamiseriaSection cfg={cfg} set={set} bool={bool} str={str} />}
+            {type === 'americana' && <AmericanaSection cfg={cfg} set={set} bool={bool} str={str} />}
           </section>
 
           {/* Características / notas de prenda (no aplica a camisería porque allí ya está obs) */}
