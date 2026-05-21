@@ -453,7 +453,7 @@ export const createProductAction = protectedAction<any, any>(
         return failure('Para crear una tela debes seleccionar un proveedor', 'VALIDATION')
       }
 
-      const fabricCode = await generateFabricCode(ctx.adminClient, data.supplier_id)
+      const fabricCode = await generateFabricCode(ctx.adminClient)
       const { data: fabric, error: fabricError } = await ctx.adminClient
         .from('fabrics')
         .insert({

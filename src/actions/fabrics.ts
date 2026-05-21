@@ -23,29 +23,32 @@ export const listActiveFabricsForFicha = protectedAction<
 )
 
 /**
- * Genera un fabric_code automático con formato XXXX-TEL-NNN.
- * Recibe el adminClient ya instanciado para reutilizarlo.
+ * Genera el siguiente fabric_code en formato AT##### (AT + 5 dígitos).
+ *
+ * Estrategia: ORDER BY fabric_code DESC LIMIT 1 sobre el patrón canónico
+ * para obtener el máximo real. NO usar COUNT(*) — si en algún momento se
+ * borra un tejido, COUNT colisiona con el UNIQUE constraint del siguiente
+ * insert.
+ *
+ * El argumento del proveedor ya no se usa (formato anterior era XXXX-TEL-NNN
+ * derivado del nombre del proveedor); se mantiene la lista limpia con un
+ * único correlativo global que la tienda usa físicamente en sus etiquetas.
  */
-export async function generateFabricCode(adminClient: ReturnType<typeof createAdminClient>, supplierId: string): Promise<string> {
-  const { data: supplier } = await adminClient
-    .from('suppliers')
-    .select('name')
-    .eq('id', supplierId)
-    .single()
-
-  const prefix = ((supplier as any)?.name || '')
-    .toUpperCase()
-    .replace(/[^A-Z]/g, '')
-    .slice(0, 4)
-    .padEnd(4, 'X')
-
-  const { count } = await adminClient
+export async function generateFabricCode(adminClient: ReturnType<typeof createAdminClient>): Promise<string> {
+  const { data } = await adminClient
     .from('fabrics')
-    .select('*', { count: 'exact', head: true })
-    .ilike('fabric_code', `${prefix}-TEL-%`)
+    .select('fabric_code')
+    .ilike('fabric_code', 'AT%')
+    .order('fabric_code', { ascending: false })
+    .limit(1)
 
-  const next = (count ?? 0) + 1
-  return `${prefix}-TEL-${String(next).padStart(3, '0')}`
+  let maxNum = 0
+  for (const row of data ?? []) {
+    const match = String((row as { fabric_code?: string | null }).fabric_code ?? '').match(/^AT(\d{5})$/)
+    if (match) maxNum = Math.max(maxNum, parseInt(match[1], 10))
+  }
+  const next = maxNum + 1
+  return `AT${String(next).padStart(5, '0')}`
 }
 
 /** Lista tejidos con búsqueda y filtros (usa cliente admin para evitar RLS). */
@@ -190,7 +193,7 @@ export const createFabricAction = protectedAction<
     if (!input.supplier_id?.trim()) return failure('Proveedor obligatorio', 'VALIDATION')
     const unitVal = input.unit === 'yards' || input.unit === 'pieces' ? input.unit : 'meters'
     const fabricCode = input.fabric_code?.trim()
-      || await generateFabricCode(ctx.adminClient, input.supplier_id)
+      || await generateFabricCode(ctx.adminClient)
     const { data, error } = await ctx.adminClient
       .from('fabrics')
       .insert({
