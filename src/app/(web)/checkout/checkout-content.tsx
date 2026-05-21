@@ -50,12 +50,13 @@ export function CheckoutContent() {
   const [discountInput, setDiscountInput] = useState('')
   const [discountLoading, setDiscountLoading] = useState(false)
   const [appliedDiscount, setAppliedDiscount] = useState<{
-    code: string; discount_type: string; discount_value: number; discount_amount: number; description: string | null
+    code: string; discount_type: string; discount_value: number; discount_amount: number; free_shipping?: boolean; description: string | null
   } | null>(null)
 
   const freeShippingByAmount = subtotal >= 200
   const isStorePickup = deliveryMethod === 'store'
-  const shippingCost = isStorePickup ? 0 : (freeShippingByAmount ? 0 : 9.90)
+  const freeShippingByCoupon = !!appliedDiscount?.free_shipping
+  const shippingCost = isStorePickup || freeShippingByAmount || freeShippingByCoupon ? 0 : 9.90
   const freeShipping = shippingCost === 0
   const discountAmount = appliedDiscount?.discount_amount || 0
   const afterDiscount = subtotal - discountAmount
@@ -409,12 +410,17 @@ export function CheckoutContent() {
             <div className="mt-4 mb-2">
               {appliedDiscount ? (
                 <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <Tag className="h-4 w-4 text-green-600" />
                     <span className="text-sm font-medium text-green-700">{appliedDiscount.code}</span>
                     <span className="text-xs text-green-600">
                       −{appliedDiscount.discount_type === 'percentage' ? `${appliedDiscount.discount_value}%` : formatPrice(appliedDiscount.discount_value)}
                     </span>
+                    {appliedDiscount.free_shipping && (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-green-700 bg-green-100 px-1.5 py-0.5 rounded">
+                        <Truck className="h-3 w-3" /> Envío gratis
+                      </span>
+                    )}
                   </div>
                   <button onClick={removeDiscount} className="text-green-600 hover:text-green-800">
                     <X className="h-4 w-4" />
@@ -449,7 +455,9 @@ export function CheckoutContent() {
                 </div>
               )}
               <div className="flex justify-between">
-                <span className="text-gray-500">Envío</span>
+                <span className="text-gray-500">
+                  Envío{freeShippingByCoupon ? ' (cupón)' : ''}
+                </span>
                 <span>{freeShipping ? 'Gratuito' : formatPrice(shippingCost)}</span>
               </div>
               <div className="flex justify-between">
