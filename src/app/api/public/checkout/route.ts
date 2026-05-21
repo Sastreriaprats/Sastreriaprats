@@ -64,6 +64,7 @@ export async function POST(request: NextRequest) {
 
   // Validar y aplicar descuento
   let validatedDiscount = 0
+  let couponFreeShipping = false
   if (discount_code) {
     const { data: dc } = await admin
       .from('discount_codes')
@@ -82,6 +83,7 @@ export async function POST(request: NextRequest) {
         } else {
           validatedDiscount = Math.min(parseFloat(dc.discount_value), subtotal)
         }
+        couponFreeShipping = !!dc.free_shipping
         // Incrementar usos
         await admin
           .from('discount_codes')
@@ -94,7 +96,9 @@ export async function POST(request: NextRequest) {
   const afterDiscount = subtotal - validatedDiscount
   // afterDiscount ya incluye IVA (unit_price = price_with_tax). Extraemos el IVA contenido.
   const taxAmount = Math.round((afterDiscount - afterDiscount / 1.21) * 100) / 100
-  const total = afterDiscount + (shipping_cost || 0)
+  // Si el cupón aplica envío gratuito, anulamos el shipping_cost recibido del cliente.
+  const effectiveShipping = couponFreeShipping ? 0 : (shipping_cost || 0)
+  const total = afterDiscount + effectiveShipping
 
   let clientId: string | null = null
   const { data: existingClient } = await admin
@@ -141,11 +145,11 @@ export async function POST(request: NextRequest) {
         },
         quantity: line.quantity,
       })),
-      ...(shipping_cost > 0 ? {
+      ...(effectiveShipping > 0 ? {
         shipping_options: [{
           shipping_rate_data: {
             type: 'fixed_amount' as const,
-            fixed_amount: { amount: Math.round(shipping_cost * 100), currency: 'eur' },
+            fixed_amount: { amount: Math.round(effectiveShipping * 100), currency: 'eur' },
             display_name: 'Envío estándar',
           },
         }],
@@ -156,7 +160,7 @@ export async function POST(request: NextRequest) {
         order_number: orderNumber,
         client_id: clientId || '',
         customer: JSON.stringify(customer),
-        shipping_cost: String(shipping_cost || 0),
+        shipping_cost: String(effectiveShipping),
         tax_amount: String(taxAmount),
         total: String(total),
         order_lines: JSON.stringify(orderLines),
@@ -184,7 +188,7 @@ export async function POST(request: NextRequest) {
       order_lines: orderLines,
       subtotal,
       tax_amount: taxAmount,
-      shipping_cost: shipping_cost || 0,
+      shipping_cost: effectiveShipping,
       total,
       locale: locale || 'es',
     })
@@ -205,7 +209,7 @@ export async function POST(request: NextRequest) {
       status: 'paid',
       subtotal,
       tax_amount: taxAmount,
-      shipping_cost: shipping_cost || 0,
+      shipping_cost: effectiveShipping,
       total,
       payment_method: 'demo',
       shipping_address: customer,

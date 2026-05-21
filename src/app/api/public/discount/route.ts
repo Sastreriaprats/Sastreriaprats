@@ -71,6 +71,7 @@ export async function GET(request: NextRequest) {
       discount_type: dc.discount_type,
       discount_value: parseFloat(dc.discount_value),
       discount_amount: discountAmount,
+      free_shipping: !!dc.free_shipping,
       description: dc.description,
     })
   } catch (err) {
