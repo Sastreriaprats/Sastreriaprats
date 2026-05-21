@@ -321,3 +321,93 @@ export const subtractFabricStockAction = protectedAction<
     return success(updated)
   }
 )
+
+/**
+ * Ajuste manual de stock de tejido. Cubre los 4 casos operativos:
+ *   - reception          (+) entrada de proveedor
+ *   - adjustment_positive (+) corrección al alza
+ *   - adjustment_negative (-) corrección a la baja (rotura, error)
+ *   - inventory_set       (=) recuento físico, sobreescribe la cantidad
+ *
+ * Cada llamada registra una fila en fabric_stock_movements con
+ * reference_type='manual' para que el histórico distinga los ajustes
+ * humanos de los consumos automáticos por ficha (reference_type='tailoring_order').
+ */
+export const adjustFabricStock = protectedAction<
+  {
+    fabricId: string
+    quantity: number
+    movementType: 'reception' | 'adjustment_positive' | 'adjustment_negative' | 'inventory_set'
+    reason: string
+  },
+  { stock_before: number; stock_after: number }
+>(
+  {
+    permission: 'stock.edit',
+    auditModule: 'stock',
+    auditAction: 'update',
+    auditEntity: 'fabric',
+    revalidate: ['/admin/stock'],
+  },
+  async (ctx, { fabricId, quantity, movementType, reason }) => {
+    if (!fabricId?.trim()) return failure('ID de tejido requerido', 'VALIDATION')
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      return failure('La cantidad debe ser mayor que cero', 'VALIDATION')
+    }
+    if ((movementType === 'adjustment_negative' || movementType === 'inventory_set') && !reason?.trim()) {
+      return failure('Indica un motivo para este tipo de ajuste', 'VALIDATION')
+    }
+
+    const { data: row, error: fetchError } = await ctx.adminClient
+      .from('fabrics')
+      .select('stock_meters')
+      .eq('id', fabricId)
+      .single()
+    if (fetchError || !row) return failure('Tejido no encontrado', 'NOT_FOUND')
+
+    const before = Number(row.stock_meters) || 0
+    let after: number
+    let delta: number
+    if (movementType === 'inventory_set') {
+      after = quantity
+      delta = quantity - before
+    } else {
+      const sign = movementType === 'reception' || movementType === 'adjustment_positive' ? 1 : -1
+      delta = sign * quantity
+      after = before + delta
+    }
+    // Redondear a 2 decimales para evitar arrastre de coma flotante.
+    after = Math.round(after * 100) / 100
+    delta = Math.round(delta * 100) / 100
+
+    if (after < 0) {
+      return failure(`El stock no puede ser negativo (actual: ${before.toFixed(2)} m, resultado: ${after.toFixed(2)} m)`, 'VALIDATION')
+    }
+
+    const { error: updateError } = await ctx.adminClient
+      .from('fabrics')
+      .update({ stock_meters: after, updated_at: new Date().toISOString() })
+      .eq('id', fabricId)
+    if (updateError) return failure(updateError.message, 'INTERNAL')
+
+    const { error: movementError } = await ctx.adminClient
+      .from('fabric_stock_movements')
+      .insert({
+        fabric_id: fabricId,
+        movement_type: movementType,
+        quantity_delta: delta,
+        stock_before: before,
+        stock_after: after,
+        reason: reason?.trim() || null,
+        reference_type: 'manual',
+        reference_id: null,
+        created_by: ctx.userId !== 'system' ? ctx.userId : null,
+      })
+    if (movementError) {
+      // El UPDATE ya fue. No podemos rollback aquí; logueamos para auditar.
+      console.error('[adjustFabricStock] failed to insert movement row:', movementError)
+    }
+
+    return success({ stock_before: before, stock_after: after })
+  }
+)

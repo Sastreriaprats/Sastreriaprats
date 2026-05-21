@@ -14,13 +14,14 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Search, Loader2, Plus, MoreHorizontal, Eye, Pencil, PowerOff } from 'lucide-react'
+import { Search, Loader2, Plus, MoreHorizontal, Eye, Pencil, PowerOff, SlidersHorizontal } from 'lucide-react'
 import { usePermissions } from '@/hooks/use-permissions'
 import { listFabrics, updateFabricAction } from '@/actions/fabrics'
 import { listSuppliers } from '@/actions/suppliers'
 import { formatCurrency } from '@/lib/utils'
 import { toast } from 'sonner'
 import { EditFabricDialog, type FabricRow } from '@/components/admin/edit-fabric-dialog'
+import { AdjustFabricStockDialog } from '@/components/admin/adjust-fabric-stock-dialog'
 
 export const FabricsTab = forwardRef<{ openNewFabricDialog: () => void }>(function FabricsTab(_, ref) {
   const router = useRouter()
@@ -35,9 +36,12 @@ export const FabricsTab = forwardRef<{ openNewFabricDialog: () => void }>(functi
   const [togglingId, setTogglingId] = useState<string | null>(null)
   /** Tejido en edición/visualización. null = dialog cerrado. */
   const [selectedFabric, setSelectedFabric] = useState<FabricRow | null>(null)
+  /** Tejido cuyo stock se está ajustando. null = dialog cerrado. */
+  const [adjustingFabric, setAdjustingFabric] = useState<FabricRow | null>(null)
   /** Trigger interno para refrescar el listado tras guardar en el modal. */
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const canEditFabric = can('stock.create_product') || can('products.edit')
+  const canAdjustStock = can('stock.edit')
 
   useImperativeHandle(ref, () => ({
     openNewFabricDialog: () => router.push('/admin/stock/productos/nuevo'),
@@ -204,6 +208,11 @@ export const FabricsTab = forwardRef<{ openNewFabricDialog: () => void }>(functi
                               <Pencil className="mr-2 h-4 w-4" /> Editar
                             </DropdownMenuItem>
                           )}
+                          {canAdjustStock && (
+                            <DropdownMenuItem onClick={() => setAdjustingFabric(f as FabricRow)}>
+                              <SlidersHorizontal className="mr-2 h-4 w-4" /> Ajustar stock
+                            </DropdownMenuItem>
+                          )}
                           {can('products.edit') && (
                             <DropdownMenuItem
                               onClick={() => toggleActive(f)}
@@ -237,6 +246,13 @@ export const FabricsTab = forwardRef<{ openNewFabricDialog: () => void }>(functi
           setSelectedFabric(null)
           setRefreshTrigger((n) => n + 1)
         }}
+      />
+
+      <AdjustFabricStockDialog
+        open={!!adjustingFabric}
+        onOpenChange={(o) => { if (!o) setAdjustingFabric(null) }}
+        fabric={adjustingFabric}
+        onSuccess={() => setRefreshTrigger((n) => n + 1)}
       />
     </div>
   )

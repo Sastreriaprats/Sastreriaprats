@@ -360,7 +360,7 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
       }
     }
     if (fabricUsage.size > 0) {
-      await applyFabricStockDelta(ctx.adminClient, fabricUsage)
+      await applyFabricStockDelta(ctx.adminClient, fabricUsage, { orderId: order.id, userId: ctx.userId })
     }
 
     if (order.client_id) {
@@ -776,7 +776,11 @@ const LINE_EDITABLE_FIELDS = [
 async function applyFabricStockDelta(
   admin: AdminClient,
   deltas: Map<string, number>,
+  opts?: { orderId?: string | null; userId?: string | null },
 ): Promise<void> {
+  const orderId = opts?.orderId ?? null
+  const userId = opts?.userId && opts.userId !== 'system' ? opts.userId : null
+
   for (const [fabricId, delta] of deltas) {
     if (!fabricId || !Number.isFinite(delta) || delta === 0) continue
     try {
@@ -795,7 +799,34 @@ async function applyFabricStockDelta(
         .from('fabrics')
         .update({ stock_meters: newStock })
         .eq('id', fabricId)
-      if (updErr) console.error('[applyFabricStockDelta] update failed for fabric', fabricId, updErr)
+      if (updErr) {
+        console.error('[applyFabricStockDelta] update failed for fabric', fabricId, updErr)
+        continue
+      }
+
+      // Trazabilidad: registrar el movimiento en fabric_stock_movements
+      // para que el histórico distinga consumos (negativos) y devoluciones
+      // (positivos) automáticos por ficha de los ajustes manuales.
+      // delta > 0  → consumo            → quantity_delta negativo
+      // delta < 0  → revert (devolución) → quantity_delta positivo
+      const quantityDelta = newStock - current
+      const movementType = quantityDelta < 0 ? 'consumption' : 'consumption_revert'
+      const { error: movementError } = await admin
+        .from('fabric_stock_movements')
+        .insert({
+          fabric_id: fabricId,
+          movement_type: movementType,
+          quantity_delta: quantityDelta,
+          stock_before: current,
+          stock_after: newStock,
+          reason: null,
+          reference_type: orderId ? 'tailoring_order' : null,
+          reference_id: orderId,
+          created_by: userId,
+        })
+      if (movementError) {
+        console.error('[applyFabricStockDelta] failed to log movement for fabric', fabricId, movementError)
+      }
     } catch (err) {
       console.error('[applyFabricStockDelta] unexpected error for fabric', fabricId, err)
     }
@@ -996,7 +1027,7 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
         if (delta !== 0) deltas.set(fId, delta)
       }
       if (deltas.size > 0) {
-        await applyFabricStockDelta(admin, deltas)
+        await applyFabricStockDelta(admin, deltas, { orderId: input.orderId, userId: ctx.userId })
       }
     }
 
@@ -1393,7 +1424,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
       }
     }
     if (fabricUsage.size > 0) {
-      await applyFabricStockDelta(ctx.adminClient, fabricUsage)
+      await applyFabricStockDelta(ctx.adminClient, fabricUsage, { orderId: order.id, userId: ctx.userId })
     }
 
     // Todos los precios incluyen IVA (21%) — desglosar para contabilidad

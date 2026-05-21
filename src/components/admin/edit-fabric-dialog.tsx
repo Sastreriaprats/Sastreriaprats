@@ -322,7 +322,7 @@ export function EditFabricDialog({ fabric, suppliers, canEdit, onClose, onSaved 
               <p className="text-xs text-muted-foreground">
                 Stock actual: <strong className="text-foreground">{fabric.stock_meters} m</strong>
                 {' · '}
-                Para modificar el stock usa los movimientos de entrada/salida desde el listado.
+                Para modificar usa &laquo;Ajustar stock&raquo; en el menú del listado.
               </p>
             </div>
           )}
