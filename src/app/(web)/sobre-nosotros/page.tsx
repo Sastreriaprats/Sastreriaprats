@@ -26,7 +26,7 @@ const TIMELINE: TimelineItem[] = [
     year: '1978',
     text: 'Con apenas dos años, el pequeño Joaquín ya comenzaba a jugar con las telas y patrones que sus padres, oficiales de sastrería, tenían en casa. Seguro no imaginaba que lo que por entonces parecía simplemente un juego, en realidad eran sus primeros pasos en un camino que mucho más adelante le convertiría en el sastre de una buena parte de los hombres más influyentes de España.',
     image:
-      'https://www.sastreriaprats.com/cdn/shop/files/BN.jpg?v=1739364243&width=1200',
+      'https://sastreriaprats.myshopify.com/cdn/shop/files/BN.jpg?v=1739364243&width=1200',
     imageAlt: 'Joaquín de niño',
     layout: 'text-image',
   },
@@ -34,7 +34,7 @@ const TIMELINE: TimelineItem[] = [
     year: '1995',
     text: 'Como toda ayuda en casa era bienvenida y los estudios no eran su fuerte, al iniciar su adolescencia Joaquín empezó a echar a sus padres con los encargos que recibían de los sastres para los que trabajaban. Con 16 años empezó a trabajar fuera de casa como aprendiz en diversas sastrerías, compatibilizándolo poco después con sus estudios en la Escuela Superior de Sastrería  "La Confianza" … Y así, año tras año, sus manos fueron poco a poco descubriendo las técnicas y secretos que sólo los verdaderos artesanos conocen.',
     image:
-      'https://www.sastreriaprats.com/cdn/shop/files/Scan_0007.jpg?v=1731077624&width=1200',
+      'https://sastreriaprats.myshopify.com/cdn/shop/files/Scan_0007.jpg?v=1731077624&width=1200',
     imageAlt: 'Joaquín como aprendiz de sastre',
     layout: 'image-text',
   },
@@ -42,7 +42,7 @@ const TIMELINE: TimelineItem[] = [
     year: '2019',
     text: 'Y por fin, con la maestría y confianza que dan más de 3 décadas en el oficio, Joaquín cumple su sueño y abre su propia sastrería en la zona más exclusiva de madrileño barrio de Chamartín. Un espacio de dos plantas que cuenta con un taller en el que se confeccionan las prendas artesanales. Gracias a la extraordinaria cartera de clientes construida a lo largo de los años, su local se convierte desde el inicio en uno de los templos de la sastrería en España. Pocos meses después abre un segundo espacio en la capital.',
     image:
-      'https://www.sastreriaprats.com/cdn/shop/files/Scan_0004.jpg?v=1731077636&width=1200',
+      'https://sastreriaprats.myshopify.com/cdn/shop/files/Scan_0004.jpg?v=1731077636&width=1200',
     imageAlt: 'Reportaje sobre la sastrería Prats',
     layout: 'text-image',
   },
@@ -50,7 +50,7 @@ const TIMELINE: TimelineItem[] = [
     year: '2025',
     text: 'Tras años de sólido crecimiento, Joaquín da un nuevo salto. Lo que había nacido 6 años antes como "Sastrería Fernández Prats" se convierte en PRATS, una marca de moda masculina donde conviven las prendas artesanales de la sastrería clásica junto a una colección prêt-à-porter de estilo atemporal. Un puro reflejo de la forma que tiene Joaquín, no sólo de ver la moda masculina, si no de ser. Auténtico e imperfecto',
     image:
-      'https://www.sastreriaprats.com/cdn/shop/files/bolsa.jpg?v=1738690195&width=1200',
+      'https://sastreriaprats.myshopify.com/cdn/shop/files/bolsa.jpg?v=1738690195&width=1200',
     imageAlt: 'Bolsa PRATS — Auténtico e Imperfecto',
     layout: 'image-text',
   },
@@ -65,7 +65,7 @@ export default function SobreNosotrosPage() {
           <h1 className="sr-only">Auténtico e Imperfecto</h1>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="https://www.sastreriaprats.com/cdn/shop/files/Captura_de_pantalla_2024-11-08_a_las_15.45.28.png?v=1731077134&width=1200"
+            src="https://sastreriaprats.myshopify.com/cdn/shop/files/Captura_de_pantalla_2024-11-08_a_las_15.45.28.png?v=1731077134&width=1200"
             alt="Auténtico e Imperfecto"
             width={1200}
             height={300}

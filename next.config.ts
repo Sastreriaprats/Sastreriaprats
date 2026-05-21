@@ -18,6 +18,7 @@ const nextConfig: NextConfig = {
         pathname: '/storage/v1/**',
       },
       { protocol: 'https', hostname: 'www.sastreriaprats.com', port: '', pathname: '/**' },
+      { protocol: 'https', hostname: 'sastreriaprats.myshopify.com', port: '', pathname: '/**' },
       { protocol: 'https', hostname: 'cdn.suitsupply.com', port: '', pathname: '/**' },
       { protocol: 'https', hostname: 'cdn.shopify.com', port: '', pathname: '/**' },
     ],

@@ -20,7 +20,7 @@ const SERVICES = [
     title: 'Sastrería Artesanal',
     text: 'Guiados por Joaquín Fernández Prats, en nuestro taller se elaboran artesanalmente cada una de las prendas. El proceso comienza con una conversación para comprender al cliente, seguida de una toma de medidas exhaustiva. A partir de ahí, se traza el patrón a mano, se corta el tejido seleccionado y se realiza una primera prueba hilvanada. Tras sucesivos ajustes — cada uno más fino que el anterior — la prenda adquiere su forma definitiva. Un traje verdaderamente a medida que solo las manos expertas pueden crear.',
     image:
-      'https://www.sastreriaprats.com/cdn/shop/files/RAYA_BEIGE-4_52e6b747-132d-4b7f-80fc-fd7238eb6d1c.jpg?v=1748424021&width=640',
+      'https://sastreriaprats.myshopify.com/cdn/shop/files/RAYA_BEIGE-4_52e6b747-132d-4b7f-80fc-fd7238eb6d1c.jpg?v=1748424021&width=640',
     imageAlt: 'Sastrería artesanal — detalle de tejido',
   },
   {
@@ -28,7 +28,7 @@ const SERVICES = [
     title: 'Made to Measure',
     text: 'Tras la toma de medidas, el patrón se ajusta digitalmente y se envía a un plotter antes de confeccionar en taller. La prenda llega a la sastrería, el cliente se la prueba y se realizan los ajustes finales necesarios. Es la opción ideal para quienes buscan introducirse en el mundo de la medida con plazos más cortos o un presupuesto más ajustado, sin renunciar a un resultado personalizado y de calidad.',
     image:
-      'https://www.sastreriaprats.com/cdn/shop/files/IMG_0620.jpg?v=1748365135&width=640',
+      'https://sastreriaprats.myshopify.com/cdn/shop/files/IMG_0620.jpg?v=1748365135&width=640',
     imageAlt: 'Made to Measure — proceso de confección',
   },
   {
@@ -36,7 +36,7 @@ const SERVICES = [
     title: 'Ready to Wear',
     text: 'Bajo la marca PRATS, ofrecemos una colección de prendas y complementos de esencia atemporal. Confeccionadas con los mismos tejidos que utilizamos en la sastrería artesanal y con producción nacional, cada pieza mantiene nuestra exigencia de calidad. La colección se complementa con una selección de marcas italianas e inglesas de prestigio, creando un armario masculino completo donde tradición y estilo contemporáneo conviven.',
     image:
-      'https://www.sastreriaprats.com/cdn/shop/files/SS25_CAMISA-LINO-CUELLO-VISTA-NEGRA_1.jpg?v=1748364985&width=640',
+      'https://sastreriaprats.myshopify.com/cdn/shop/files/SS25_CAMISA-LINO-CUELLO-VISTA-NEGRA_1.jpg?v=1748364985&width=640',
     imageAlt: 'Ready to Wear — colección PRATS',
   },
 ]
@@ -47,7 +47,7 @@ export default function SastreriaPage() {
       {/* HERO */}
       <section className="relative h-screen overflow-hidden group">
         <Image
-          src="https://www.sastreriaprats.com/cdn/shop/files/recursos_taller_-3.jpg?v=1718892989&width=2000"
+          src="https://sastreriaprats.myshopify.com/cdn/shop/files/recursos_taller_-3.jpg?v=1718892989&width=2000"
           alt="Taller de sastrería Prats"
           fill
           className="object-cover object-center transition-transform duration-1000 group-hover:scale-105"
