@@ -350,7 +350,7 @@ export const getStoresWithStats = protectedAction<{ includeInactive?: boolean } 
       amount: number | string | null
       tailoring_orders: { store_id: string; total: number | string | null; tax_amount: number | string | null } | null
     }
-    for (const p of (tailoringPaymentsRes.data || []) as TailoringPaymentRow[]) {
+    for (const p of (tailoringPaymentsRes.data || []) as unknown as TailoringPaymentRow[]) {
       const order = p.tailoring_orders
       if (!order?.store_id) continue
       const amount = Number(p.amount) || 0
