@@ -1,9 +1,14 @@
+import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { ClientSidebar } from '@/components/client/client-sidebar'
 import { WebHeader } from '@/components/web/header'
 import { WebFooter } from '@/components/web/footer'
 import { CartProvider } from '@/components/providers/cart-provider'
+
+export const metadata: Metadata = {
+  robots: { index: false, follow: false, nocache: true },
+}
 
 export default async function ClientLayout({
   children,

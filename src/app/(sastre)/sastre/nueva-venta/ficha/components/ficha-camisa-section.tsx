@@ -22,7 +22,10 @@ export type CamisaItem = {
   jareton: boolean; bolsillo: boolean; hombroCaido: boolean; derecho: boolean; izquierdo: boolean
   hombrosAltos: boolean; hombrosBajos: boolean; erguido: boolean; cargado: boolean
   espaldaLisa: boolean; espPliegues: boolean; espTablonCentr: boolean; espPinzas: boolean
-  iniciales: boolean; inicialesTexto: string; modCuello: string
+  iniciales: boolean; inicialesTexto: string
+  inicialesSituacion: '' | 'puno_derecho' | 'puno_izquierdo' | 'pecho' | 'talle'
+  inicialesColor: string
+  modCuello: string
   puno: 'sencillo' | 'gemelo' | 'mixto' | 'mosquetero' | 'otro'
   tejido: string; tejidoStockId?: string; tejidoMetros?: number; precio: number; cantidad: number; obs: string
   cortador: string; oficial: string
@@ -36,6 +39,17 @@ const PUNO_CAMISA_OPTIONS: Array<{ value: CamisaItem['puno']; label: string }> =
   { value: 'mosquetero', label: 'Mosquetero' },
   { value: 'otro', label: 'Otro' },
 ]
+
+export const INICIALES_SITUACION_OPTIONS: Array<{ value: Exclude<CamisaItem['inicialesSituacion'], ''>; label: string }> = [
+  { value: 'puno_derecho',   label: 'Puño derecho' },
+  { value: 'puno_izquierdo', label: 'Puño izquierdo' },
+  { value: 'pecho',          label: 'Pecho' },
+  { value: 'talle',          label: 'Talle' },
+]
+
+export function inicialesSituacionLabel(value: CamisaItem['inicialesSituacion']): string {
+  return INICIALES_SITUACION_OPTIONS.find((o) => o.value === value)?.label ?? ''
+}
 
 const MEDIDAS_FIELDS: Array<{ label: string; field: 'cuello' | 'canesu' | 'largoManga' | 'frentePecho' | 'pecho' | 'cintura' | 'cadera' | 'largoCuerpo' | 'hombro' | 'punoDerecho' | 'punoIzquierdo' }> = [
   { label: 'Cuello', field: 'cuello' },
@@ -286,7 +300,33 @@ export function FichaCamisaSection({
                       <span className="text-white/80 text-sm">Iniciales</span>
                     </label>
                     {camisa.iniciales && (
-                      <Input className="h-9 bg-[#1a2744] border-[#c9a96e]/20 text-white text-sm" value={camisa.inicialesTexto} onChange={(e) => updateCamisa(camisa.id, 'inicialesTexto', e.target.value)} placeholder="Ej: J.G.M." />
+                      <div className="flex flex-col gap-2 pl-6">
+                        <Input
+                          className="h-9 bg-[#1a2744] border-[#c9a96e]/20 text-white text-sm"
+                          value={camisa.inicialesTexto}
+                          onChange={(e) => updateCamisa(camisa.id, 'inicialesTexto', e.target.value)}
+                          placeholder="Ej: J.G.M."
+                        />
+                        <Select
+                          value={camisa.inicialesSituacion || undefined}
+                          onValueChange={(v) => updateCamisa(camisa.id, 'inicialesSituacion', v as CamisaItem['inicialesSituacion'])}
+                        >
+                          <SelectTrigger className="h-9 bg-[#1a2744] border-[#c9a96e]/20 text-white text-sm">
+                            <SelectValue placeholder="Situación…" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {INICIALES_SITUACION_OPTIONS.map((opt) => (
+                              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          className="h-9 bg-[#1a2744] border-[#c9a96e]/20 text-white text-sm"
+                          value={camisa.inicialesColor}
+                          onChange={(e) => updateCamisa(camisa.id, 'inicialesColor', e.target.value)}
+                          placeholder="Color del bordado"
+                        />
+                      </div>
                     )}
                     <div>
                       <Label className="text-white/70 text-xs">Mod. cuello</Label>

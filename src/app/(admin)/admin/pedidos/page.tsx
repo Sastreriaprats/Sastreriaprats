@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: 'Pedidos de Sastrería' }
 export default async function OrdersPage(props: { searchParams: Promise<{ view?: string; status?: string; type?: string; tab?: string }> }) {
   await requirePermission('orders.view')
   const searchParams = await props.searchParams
-  const validTabs = ['tailoring', 'supplier', 'reservations'] as const
+  const validTabs = ['tailoring', 'supplier', 'reservations', 'online'] as const
   const initialTab = validTabs.includes(searchParams.tab as any) ? (searchParams.tab as (typeof validTabs)[number]) : 'tailoring'
   return (
     <OrdersPageContent

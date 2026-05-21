@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createOnlineOrderJournalEntry } from '@/actions/accounting-triggers'
 import { sendOrderConfirmation } from '@/lib/email/transactional'
+import { notifyNewOnlineOrder } from '@/lib/notifications/create-notification'
 import Stripe from 'stripe'
 
 function getStripe() {
@@ -86,6 +87,12 @@ export async function POST(request: NextRequest) {
 
           await createOnlineOrderJournalEntry(order.id).catch(() => {})
 
+          try {
+            await notifyNewOnlineOrder(orderNumber, total)
+          } catch (e) {
+            console.error('[Stripe webhook] notifyNewOnlineOrder', e)
+          }
+
           const { data: lines } = await admin
             .from('online_order_lines')
             .select('variant_id, quantity')
@@ -143,6 +150,13 @@ export async function POST(request: NextRequest) {
           }).eq('id', orderId)
 
           await createOnlineOrderJournalEntry(orderId).catch(() => {})
+
+          try {
+            const sessionTotal = (session.amount_total || 0) / 100
+            await notifyNewOnlineOrder(orderNumber, sessionTotal)
+          } catch (e) {
+            console.error('[Stripe webhook] notifyNewOnlineOrder', e)
+          }
 
           const { data: lines } = await admin
             .from('online_order_lines')

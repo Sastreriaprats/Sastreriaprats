@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
-import { CreditCard, Loader2, Lock, ShoppingBag, Truck, Store, AlertCircle, FlaskConical, Tag, X } from 'lucide-react'
+import { Loader2, Lock, ShoppingBag, Truck, Store, AlertCircle, Tag, X } from 'lucide-react'
+import { AcceptedCards } from './accepted-cards'
 import { useCart } from '@/components/providers/cart-provider'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -32,11 +33,7 @@ type ClientProfile = {
 
 export function CheckoutContent() {
   const { items, subtotal, clearCart } = useCart()
-  const enableDemoPayment = process.env.NEXT_PUBLIC_ENABLE_DEMO_PAYMENT !== 'false'
   const [isProcessing, setIsProcessing] = useState(false)
-  const [paymentMethod, setPaymentMethod] = useState<'stripe' | 'redsys' | 'demo'>(
-    enableDemoPayment ? 'demo' : 'stripe'
-  )
   const [deliveryMethod, setDeliveryMethod] = useState<'home' | 'store'>('home')
   const [clientProfile, setClientProfile] = useState<ClientProfile | null>(null)
   const [profileLoaded, setProfileLoaded] = useState(false)
@@ -161,7 +158,7 @@ export function CheckoutContent() {
             product_name: i.product_name,
           })),
           customer: customerPayload,
-          payment_method: paymentMethod,
+          payment_method: 'redsys',
           shipping_cost: shippingCost,
           delivery_method: deliveryMethod,
           discount_code: appliedDiscount?.code || null,
@@ -336,52 +333,6 @@ export function CheckoutContent() {
           </section>
           )}
 
-          {/* Payment method */}
-          <section>
-            <h2 className="text-lg font-semibold text-prats-navy mb-4 flex items-center gap-2">
-              <CreditCard className="h-5 w-5" />Método de pago
-            </h2>
-            <div className={cn('grid gap-3', enableDemoPayment ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-2')}>
-              <button
-                onClick={() => setPaymentMethod('stripe')}
-                className={cn(
-                  'p-4 rounded-xl border-2 text-left transition-all',
-                  paymentMethod === 'stripe' ? 'border-prats-navy bg-prats-navy/5' : 'border-gray-200 hover:border-gray-300'
-                )}
-              >
-                <CreditCard className="h-5 w-5 text-prats-navy mb-2" />
-                <p className="text-sm font-medium">Tarjeta de crédito/débito</p>
-                <p className="text-xs text-gray-500">Visa, Mastercard, Amex</p>
-              </button>
-              <button
-                onClick={() => setPaymentMethod('redsys')}
-                className={cn(
-                  'p-4 rounded-xl border-2 text-left transition-all',
-                  paymentMethod === 'redsys' ? 'border-prats-navy bg-prats-navy/5' : 'border-gray-200 hover:border-gray-300'
-                )}
-              >
-                <div className="h-5 w-5 bg-red-600 rounded text-white text-[8px] font-bold flex items-center justify-center mb-2">
-                  RS
-                </div>
-                <p className="text-sm font-medium">TPV Virtual (Redsys)</p>
-                <p className="text-xs text-gray-500">Tarjetas españolas</p>
-              </button>
-              {enableDemoPayment && (
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('demo')}
-                  className={cn(
-                    'p-4 rounded-xl border-2 text-left transition-all border-amber-200 bg-amber-50/50',
-                    paymentMethod === 'demo' ? 'border-amber-500 bg-amber-100 ring-2 ring-amber-500/30' : 'hover:border-amber-300'
-                  )}
-                >
-                  <FlaskConical className="h-5 w-5 text-amber-600 mb-2" />
-                  <p className="text-sm font-medium text-amber-800">Modo demo</p>
-                  <p className="text-xs text-amber-600">Sin cobro real, para pruebas</p>
-                </button>
-              )}
-            </div>
-          </section>
         </div>
 
         {/* Order summary */}
@@ -485,6 +436,10 @@ export function CheckoutContent() {
             </Button>
             <p className="text-xs text-gray-500 text-center mt-3 flex items-center justify-center gap-1">
               <Lock className="h-3 w-3" />Pago seguro
+            </p>
+            <AcceptedCards className="mt-3" />
+            <p className="text-[10px] text-gray-400 text-center mt-1.5">
+              Aceptamos Visa, Mastercard, American Express y Maestro
             </p>
           </div>
         </div>

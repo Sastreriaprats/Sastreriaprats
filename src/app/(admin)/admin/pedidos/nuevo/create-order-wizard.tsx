@@ -887,9 +887,29 @@ export function CreateOrderWizard({
                 ))}
               </div>
               <div className="grid grid-cols-2 gap-2 mt-2">
-                <div><Label className="text-xs">Iniciales</Label><Input value={camiseriaConfig.iniciales ?? ''} onChange={(e) => setCamiseriaConfig(c => ({ ...c, iniciales: e.target.value }))} className="h-9" /></div>
+                <div><Label className="text-xs">Iniciales</Label><Input value={camiseriaConfig.iniciales ?? ''} onChange={(e) => setCamiseriaConfig(c => ({ ...c, iniciales: e.target.value }))} className="h-9" placeholder="Ej: J.G.M." /></div>
                 <div><Label className="text-xs">Mod. Cuello</Label><Input value={camiseriaConfig.mod_cuello ?? ''} onChange={(e) => setCamiseriaConfig(c => ({ ...c, mod_cuello: e.target.value }))} className="h-9" /></div>
               </div>
+              {camiseriaConfig.iniciales && (
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <div>
+                    <Label className="text-xs">Situación bordado</Label>
+                    <Select value={camiseriaConfig.iniciales_situacion || undefined} onValueChange={(v) => setCamiseriaConfig(c => ({ ...c, iniciales_situacion: v }))}>
+                      <SelectTrigger className="h-9"><SelectValue placeholder="Seleccionar…" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="puno_derecho">Puño derecho</SelectItem>
+                        <SelectItem value="puno_izquierdo">Puño izquierdo</SelectItem>
+                        <SelectItem value="pecho">Pecho</SelectItem>
+                        <SelectItem value="talle">Talle</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Color bordado</Label>
+                    <Input value={camiseriaConfig.iniciales_color ?? ''} onChange={(e) => setCamiseriaConfig(c => ({ ...c, iniciales_color: e.target.value }))} className="h-9" placeholder="Color" />
+                  </div>
+                </div>
+              )}
             </div>
             <div className="space-y-2">
               <Label className="text-xs">Puño</Label>
@@ -1034,9 +1054,32 @@ export function CreateOrderWizard({
                         })}
                       </div>
                       <div className="grid grid-cols-2 gap-2 mt-2">
-                        <div><Label className="text-xs">Iniciales</Label><Input value={(lineForm.configuration || {}).iniciales ?? ''} onChange={(e) => setLineForm(p => ({ ...p, configuration: { ...(p.configuration || {}), iniciales: e.target.value } }))} className="h-9" /></div>
+                        <div><Label className="text-xs">Iniciales</Label><Input value={(lineForm.configuration || {}).iniciales ?? ''} onChange={(e) => setLineForm(p => ({ ...p, configuration: { ...(p.configuration || {}), iniciales: e.target.value } }))} className="h-9" placeholder="Ej: J.G.M." /></div>
                         <div><Label className="text-xs">Mod. Cuello</Label><Input value={(lineForm.configuration || {}).mod_cuello ?? ''} onChange={(e) => setLineForm(p => ({ ...p, configuration: { ...(p.configuration || {}), mod_cuello: e.target.value } }))} className="h-9" /></div>
                       </div>
+                      {(lineForm.configuration || {}).iniciales && (
+                        <div className="grid grid-cols-2 gap-2 mt-2">
+                          <div>
+                            <Label className="text-xs">Situación bordado</Label>
+                            <Select
+                              value={((lineForm.configuration || {}).iniciales_situacion as string) || undefined}
+                              onValueChange={(v) => setLineForm(p => ({ ...p, configuration: { ...(p.configuration || {}), iniciales_situacion: v } }))}
+                            >
+                              <SelectTrigger className="h-9"><SelectValue placeholder="Seleccionar…" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="puno_derecho">Puño derecho</SelectItem>
+                                <SelectItem value="puno_izquierdo">Puño izquierdo</SelectItem>
+                                <SelectItem value="pecho">Pecho</SelectItem>
+                                <SelectItem value="talle">Talle</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label className="text-xs">Color bordado</Label>
+                            <Input value={(lineForm.configuration || {}).iniciales_color ?? ''} onChange={(e) => setLineForm(p => ({ ...p, configuration: { ...(p.configuration || {}), iniciales_color: e.target.value } }))} className="h-9" placeholder="Color" />
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div className="space-y-2">
                       <Label className="text-xs">Puño</Label>

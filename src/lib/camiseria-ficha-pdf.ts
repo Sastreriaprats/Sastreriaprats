@@ -48,6 +48,13 @@ const PUNO_KEYS = [
   { key: 'puno_otro', label: 'Otro' },
 ] as const
 
+const SITUACION_INICIALES_LABELS: Record<string, string> = {
+  puno_derecho: 'puño derecho',
+  puno_izquierdo: 'puño izquierdo',
+  pecho: 'pecho',
+  talle: 'talle',
+}
+
 export interface CamiseriaFichaPdfParams {
   clientName: string
   values: Record<string, string>
@@ -131,12 +138,19 @@ export async function generateCamiseriaFichaPdf(params: CamiseriaFichaPdfParams)
     .filter(([key]) => getChecked(params.values, prefix, key))
     .map(([, label]) => label)
   const iniciales = getVal(params.values, prefix, 'iniciales')
+  const inicialesSituacion = getVal(params.values, prefix, 'iniciales_situacion')
+  const inicialesColor = getVal(params.values, prefix, 'iniciales_color')
   const modCuello = getVal(params.values, prefix, 'mod_cuello')
   doc.setFont('helvetica', 'normal')
   if (checkedCaract.length) doc.text(checkedCaract.join(' · '), MARGIN, y)
   y += LINE
   if (iniciales !== '—') {
-    doc.text('Iniciales: ' + iniciales, MARGIN, y)
+    const situLabel = SITUACION_INICIALES_LABELS[inicialesSituacion] || (inicialesSituacion !== '—' ? inicialesSituacion : '')
+    const extras: string[] = []
+    if (situLabel) extras.push(situLabel)
+    if (inicialesColor !== '—') extras.push(`color ${inicialesColor}`)
+    const suffix = extras.length ? ` (${extras.join(', ')})` : ''
+    doc.text('Iniciales: ' + iniciales + suffix, MARGIN, y)
     y += LINE
   }
   if (modCuello !== '—') {

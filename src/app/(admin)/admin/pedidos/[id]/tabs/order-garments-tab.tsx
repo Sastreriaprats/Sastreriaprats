@@ -147,7 +147,10 @@ export function OrderGarmentsTab({ order }: { order: any }) {
                 'manga', 'frenPecho', 'contPecho', 'largo', 'biceps',
                 // Camisería - opciones
                 'modCuello', 'puno', 'jareton', 'espPliegues',
-                'erguido', 'hombrosAltos', 'iniciales', 'inicialesTexto', 'obs',
+                'erguido', 'hombrosAltos', 'iniciales', 'inicialesTexto',
+                'inicialesSituacion', 'inicialesColor',
+                'iniciales_situacion', 'iniciales_color',
+                'obs',
                 // Camisería - tipo
                 'tipo',
                 // Complementos
@@ -158,6 +161,18 @@ export function OrderGarmentsTab({ order }: { order: any }) {
                 val != null && val !== '' && val !== 0 && val !== false
               )
               if (entries.length === 0) return null
+              const INICIALES_SITUACION_LABEL: Record<string, string> = {
+                puno_derecho: 'Puño derecho',
+                puno_izquierdo: 'Puño izquierdo',
+                pecho: 'Pecho',
+                talle: 'Talle',
+              }
+              const formatValue = (key: string, val: unknown): string => {
+                if ((key === 'inicialesSituacion' || key === 'iniciales_situacion') && typeof val === 'string') {
+                  return INICIALES_SITUACION_LABEL[val] ?? val
+                }
+                return String(val)
+              }
               return (
                 <>
                   <Separator />
@@ -169,7 +184,7 @@ export function OrderGarmentsTab({ order }: { order: any }) {
                           <span className="text-muted-foreground capitalize">
                             {key.replace(/_/g, ' ')}:
                           </span>
-                          <span className="font-medium">{String(val)}</span>
+                          <span className="font-medium">{formatValue(key, val)}</span>
                         </span>
                       ))}
                     </div>

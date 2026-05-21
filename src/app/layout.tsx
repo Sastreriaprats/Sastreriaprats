@@ -25,25 +25,43 @@ const playfair = Playfair_Display({
 
 export const metadata: Metadata = {
   title: {
-    default: 'Sastrería Prats — Panel de Gestión',
+    default: 'Sastrería Prats — Madrid · Sastrería a medida y boutique',
     template: '%s | Sastrería Prats',
   },
-  description: 'Sistema de gestión integral para Sastrería Prats. Pedidos a medida, boutique, TPV, clientes, stock y contabilidad.',
-  keywords: ['sastrería', 'gestión', 'pedidos', 'boutique', 'Madrid', 'trajes a medida'],
-  authors: [{ name: 'FastIA', url: 'https://fastia.es' }],
-  creator: 'FastIA',
-  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'),
+  description: 'Sastrería de lujo en Madrid desde 1985. Trajes a medida, americanas, camisería y colección boutique. Tradición artesanal y producto de boutique online.',
+  keywords: ['sastrería Madrid', 'traje a medida Madrid', 'sastrería de lujo', 'camisería a medida', 'sastrería Prats', 'boutique hombre Madrid', 'americana a medida'],
+  authors: [{ name: 'Sastrería Prats' }],
+  creator: 'Sastrería Prats',
+  publisher: 'Sastrería Prats',
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://sastreriaprats.com'),
+  alternates: {
+    canonical: '/',
+    // Cuando se publique la versión en inglés, descomenta:
+    // languages: { 'es-ES': '/', 'en-US': '/en', 'x-default': '/' },
+  },
   openGraph: {
     type: 'website',
     locale: 'es_ES',
     url: process.env.NEXT_PUBLIC_APP_URL || 'https://sastreriaprats.com',
     siteName: 'Sastrería Prats',
-    title: 'Sastrería Prats — Panel de Gestión',
-    description: 'Sistema de gestión integral para sastrería de lujo.',
+    title: 'Sastrería Prats — Madrid · Sastrería a medida y boutique',
+    description: 'Sastrería de lujo en Madrid desde 1985.',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Sastrería Prats — Madrid',
+    description: 'Sastrería de lujo en Madrid desde 1985.',
   },
   robots: {
-    index: false,
-    follow: false,
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+      'max-video-preview': -1,
+    },
   },
   manifest: '/manifest.json',
   icons: {
@@ -51,6 +69,8 @@ export const metadata: Metadata = {
     shortcut: '/favicon.png',
     apple: '/favicon.png',
   },
+  // Cuando tengas el código de verificación de Search Console, descomenta y pega:
+  // verification: { google: 'TU_CODIGO_AQUI' },
 }
 
 export const viewport: Viewport = {

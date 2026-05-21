@@ -1,48 +1,19 @@
 'use client'
 
-import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Badge } from '@/components/ui/badge'
 import {
-  ShoppingBag, Globe, FileText, Settings, Package, Mail,
-  Loader2, ExternalLink, RefreshCw, Layout,
+  ShoppingBag, Globe, Settings, Package, Mail, ExternalLink, Layout,
 } from 'lucide-react'
-import { getOnlineOrdersList, type OnlineOrderRow } from '@/actions/online-orders'
-import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { HomeContentEditor } from './home-content-editor'
-
-const STATUS_LABELS: Record<string, string> = {
-  pending_payment: 'Pago pendiente',
-  paid: 'Pagado',
-  processing: 'En preparación',
-  shipped: 'Enviado',
-  delivered: 'Entregado',
-  cancelled: 'Cancelado',
-  refunded: 'Reembolsado',
-}
+import { OnlineOrdersList } from './online-orders-list'
 
 export function TiendaOnlineContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const tab = searchParams.get('tab') || 'dashboard'
-  const [orders, setOrders] = useState<OnlineOrderRow[]>([])
-  const [ordersLoading, setOrdersLoading] = useState(false)
-
-  const loadOrders = async () => {
-    setOrdersLoading(true)
-    const res = await getOnlineOrdersList({ limit: 30 })
-    if (res.success && res.data) setOrders(res.data)
-    setOrdersLoading(false)
-  }
-
-  useEffect(() => {
-    if (tab === 'pedidos') loadOrders()
-  }, [tab])
 
   return (
     <div className="space-y-6">
@@ -123,52 +94,7 @@ export function TiendaOnlineContent() {
         </TabsContent>
 
         <TabsContent value="pedidos" className="mt-6">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-base">Pedidos online</CardTitle>
-              <Button variant="outline" size="sm" className="gap-1" onClick={loadOrders} disabled={ordersLoading}>
-                <RefreshCw className={`h-4 w-4 ${ordersLoading ? 'animate-spin' : ''}`} /> Actualizar
-              </Button>
-            </CardHeader>
-            <CardContent>
-              {ordersLoading ? (
-                <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-prats-navy" /></div>
-              ) : orders.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">No hay pedidos online todavía.</p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Nº pedido</TableHead>
-                      <TableHead>Estado</TableHead>
-                      <TableHead>Total</TableHead>
-                      <TableHead>Pago</TableHead>
-                      <TableHead>Fecha</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {orders.map((o) => (
-                      <TableRow key={o.id} className="cursor-pointer hover:bg-muted/50" onClick={() => router.push(`/admin/tienda-online/pedidos/${o.id}`)}>
-                        <TableCell>
-                          <Link
-                            href={`/admin/tienda-online/pedidos/${o.id}`}
-                            className="font-mono text-sm text-prats-navy hover:underline"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {o.order_number}
-                          </Link>
-                        </TableCell>
-                        <TableCell><Badge variant="outline">{STATUS_LABELS[o.status] ?? o.status}</Badge></TableCell>
-                        <TableCell>{formatCurrency(o.total)}</TableCell>
-                        <TableCell className="text-muted-foreground">{o.payment_method ?? '—'}</TableCell>
-                        <TableCell className="text-muted-foreground text-sm">{formatDateTime(o.created_at)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
+          {tab === 'pedidos' && <OnlineOrdersList />}
         </TabsContent>
 
         <TabsContent value="contenido-web" className="mt-6">

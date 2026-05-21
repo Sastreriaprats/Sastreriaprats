@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createOnlineOrderJournalEntry } from '@/actions/accounting-triggers'
 import { sendOrderConfirmation } from '@/lib/email/transactional'
+import { notifyNewOnlineOrder } from '@/lib/notifications/create-notification'
 import {
   decodeMerchantParameters,
   verifyRedsysSignature,
@@ -111,6 +112,12 @@ export async function POST(request: NextRequest) {
     }
 
     await createOnlineOrderJournalEntry(order.id).catch(() => {})
+
+    try {
+      await notifyNewOnlineOrder(pending.order_number, Number(pending.total) || 0)
+    } catch (e) {
+      console.error('[redsys webhook] notifyNewOnlineOrder', e)
+    }
 
     // Decremento de stock (mismo patrón que el webhook Stripe).
     for (const line of orderLines) {

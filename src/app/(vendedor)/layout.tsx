@@ -1,3 +1,4 @@
+import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { unstable_cache } from 'next/cache'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
@@ -6,6 +7,10 @@ import { Toaster } from '@/components/ui/sonner'
 import { StoreGate } from '@/components/store-gate'
 
 export const dynamic = 'force-dynamic'
+
+export const metadata: Metadata = {
+  robots: { index: false, follow: false, nocache: true },
+}
 
 const VENDEDOR_ROLES = ['vendedor_avanzado', 'vendedor_basico']
 

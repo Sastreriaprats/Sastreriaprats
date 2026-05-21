@@ -1,8 +1,13 @@
+import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { getServerProfile } from '@/actions/auth'
 import { AuthProvider } from '@/components/providers/auth-provider'
 import { StoreGate } from '@/components/store-gate'
+
+export const metadata: Metadata = {
+  robots: { index: false, follow: false, nocache: true },
+}
 
 export default async function PosLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createServerSupabaseClient()

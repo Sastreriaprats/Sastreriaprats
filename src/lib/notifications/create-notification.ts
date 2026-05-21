@@ -58,8 +58,9 @@ export async function notifyNewOnlineOrder(orderNumber: string, total: number) {
     type: 'order_update',
     title: `Nuevo pedido online: ${orderNumber}`,
     message: `Total: €${total.toFixed(2)}`,
-    link: '/admin/pedidos?filter=online',
+    link: '/admin/tienda-online?tab=pedidos',
     module: 'orders',
+    entity_type: 'online_order',
   })
 }
 

@@ -1,3 +1,4 @@
+import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -6,6 +7,10 @@ import { SastreSessionGate } from '@/app/(sastre)/components/sastre-session-gate
 import { StoreGate } from '@/components/store-gate'
 
 export const dynamic = 'force-dynamic'
+
+export const metadata: Metadata = {
+  robots: { index: false, follow: false, nocache: true },
+}
 
 const SASTRE_ROLES = ['sastre_plus']
 

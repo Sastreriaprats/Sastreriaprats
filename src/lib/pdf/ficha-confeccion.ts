@@ -1026,6 +1026,19 @@ function buildCamiseriaDocDefinition(
   const punoLines = (['sencillo', 'gemelo', 'mixto', 'mosquetero', 'otro'] as const).map((p) =>
     punoVal === p ? `● PUÑO ${PUNO_LABELS[p] ?? p}` : `○ PUÑO ${PUNO_LABELS[p] ?? p}`
   )
+  const inicialesSituacionLabel: Record<string, string> = {
+    puno_derecho: 'puño dch.',
+    puno_izquierdo: 'puño izq.',
+    pecho: 'pecho',
+    talle: 'talle',
+  }
+  const inicialesExtras: string[] = []
+  if (cfg.iniciales) {
+    const situ = String(cfg.inicialesSituacion ?? '').trim()
+    if (situ) inicialesExtras.push(inicialesSituacionLabel[situ] ?? situ)
+    const color = String(cfg.inicialesColor ?? '').trim()
+    if (color) inicialesExtras.push(`color ${color}`)
+  }
   const col4 = [
     {
       text: cfg.iniciales
@@ -1033,6 +1046,9 @@ function buildCamiseriaDocDefinition(
         : '☐ INICIALES',
       fontSize: fs8,
     },
+    ...(inicialesExtras.length
+      ? [{ text: `   (${inicialesExtras.join(' · ')})`, fontSize: fs8 }]
+      : []),
     { text: `MOD. CUELLO: ${String(cfg.modCuello ?? '—').trim()}`, fontSize: fs8 },
     ...punoLines.map((t) => ({ text: t, fontSize: fs8 })),
   ]

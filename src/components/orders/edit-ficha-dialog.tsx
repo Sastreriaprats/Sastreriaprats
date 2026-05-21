@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
@@ -63,7 +64,8 @@ function defaultsFor(type: 'pantalon' | 'chaleco' | 'camiseria' | 'americana'): 
     jareton: false, bolsillo: false, hombroCaido: false, derecho: false, izquierdo: false,
     hombrosAltos: false, hombrosBajos: false, erguido: false, cargado: false,
     espaldaLisa: false, espPliegues: false, espTablonCentr: false, espPinzas: false,
-    iniciales: false, inicialesTexto: '', modCuello: '', puno: '', tejido: '', obs: '',
+    iniciales: false, inicialesTexto: '', inicialesSituacion: '', inicialesColor: '',
+    modCuello: '', puno: '', tejido: '', obs: '',
   }
   // americana y similares
   return {
@@ -411,17 +413,33 @@ function CamiseriaSection({ cfg, set, bool, str }: SectionProps) {
           { k: 'espPinzas', label: 'Esp. pinzas' }, { k: 'iniciales', label: 'Iniciales' },
         ]} />
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        {bool(cfg.iniciales) && (
+      {bool(cfg.iniciales) && (
+        <div className="grid grid-cols-3 gap-3 rounded-md border border-dashed p-3">
           <div>
             <Label className="text-xs text-muted-foreground">Texto iniciales</Label>
             <Input className="h-9" value={str(cfg.inicialesTexto)} onChange={(e) => set('inicialesTexto', e.target.value)} placeholder="Ej: J.G.M." />
           </div>
-        )}
-        <div>
-          <Label className="text-xs text-muted-foreground">Mod. cuello</Label>
-          <Input className="h-9" value={str(cfg.modCuello)} onChange={(e) => set('modCuello', e.target.value)} />
+          <div>
+            <Label className="text-xs text-muted-foreground">Situación</Label>
+            <Select value={str(cfg.inicialesSituacion) || undefined} onValueChange={(v) => set('inicialesSituacion', v)}>
+              <SelectTrigger className="h-9"><SelectValue placeholder="Seleccionar…" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="puno_derecho">Puño derecho</SelectItem>
+                <SelectItem value="puno_izquierdo">Puño izquierdo</SelectItem>
+                <SelectItem value="pecho">Pecho</SelectItem>
+                <SelectItem value="talle">Talle</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground">Color bordado</Label>
+            <Input className="h-9" value={str(cfg.inicialesColor)} onChange={(e) => set('inicialesColor', e.target.value)} placeholder="Color" />
+          </div>
         </div>
+      )}
+      <div>
+        <Label className="text-xs text-muted-foreground">Mod. cuello</Label>
+        <Input className="h-9" value={str(cfg.modCuello)} onChange={(e) => set('modCuello', e.target.value)} />
       </div>
       <div className="space-y-1">
         <Label>Puño</Label>

@@ -229,7 +229,8 @@ function defaultCamisa(): CamisaItem {
     jareton: false, bolsillo: false, hombroCaido: false, derecho: false, izquierdo: false,
     hombrosAltos: false, hombrosBajos: false, erguido: false, cargado: false,
     espaldaLisa: false, espPliegues: false, espTablonCentr: false, espPinzas: false,
-    iniciales: false, inicialesTexto: '', modCuello: '', puno: 'sencillo', tejido: '', tejidoStockId: undefined, tejidoMetros: undefined, precio: 0, cantidad: 1, obs: '',
+    iniciales: false, inicialesTexto: '', inicialesSituacion: '', inicialesColor: '',
+    modCuello: '', puno: 'sencillo', tejido: '', tejidoStockId: undefined, tejidoMetros: undefined, precio: 0, cantidad: 1, obs: '',
     cortador: '', oficial: '', coste: undefined,
   }
 }
@@ -761,7 +762,7 @@ export function NuevaVentaFichaClient({
   // ── Camisa ops ────────────────────────────────────────────────────────────
   const addCamisa = () => {
     const m = getMeasuresFromRecord(camiseriaMeasurements ?? undefined)
-    setCamisas((prev) => [...prev, { id: crypto.randomUUID(), mode: 'a_medida', ...m, jareton: false, bolsillo: false, hombroCaido: false, derecho: false, izquierdo: false, hombrosAltos: false, hombrosBajos: false, erguido: false, cargado: false, espaldaLisa: false, espPliegues: false, espTablonCentr: false, espPinzas: false, iniciales: false, inicialesTexto: '', modCuello: '', puno: 'sencillo', tejido: '', tejidoStockId: undefined, tejidoMetros: undefined, precio: 0, cantidad: 1, obs: '', cortador: '', oficial: '', punoDerecho: '', punoIzquierdo: '' }])
+    setCamisas((prev) => [...prev, { id: crypto.randomUUID(), mode: 'a_medida', ...m, jareton: false, bolsillo: false, hombroCaido: false, derecho: false, izquierdo: false, hombrosAltos: false, hombrosBajos: false, erguido: false, cargado: false, espaldaLisa: false, espPliegues: false, espTablonCentr: false, espPinzas: false, iniciales: false, inicialesTexto: '', inicialesSituacion: '', inicialesColor: '', modCuello: '', puno: 'sencillo', tejido: '', tejidoStockId: undefined, tejidoMetros: undefined, precio: 0, cantidad: 1, obs: '', cortador: '', oficial: '', punoDerecho: '', punoIzquierdo: '' }])
   }
   const removeCamisa = (id: string) => setCamisas((prev) => prev.filter((c) => c.id !== id))
   const updateCamisa = (id: string, field: keyof CamisaItem, value: string | number | boolean | undefined) => {
@@ -1036,7 +1037,10 @@ export function NuevaVentaFichaClient({
             hombrosBajos: c.hombrosBajos, erguido: c.erguido, cargado: c.cargado,
             espaldaLisa: c.espaldaLisa, espPliegues: c.espPliegues,
             espTablonCentr: c.espTablonCentr, espPinzas: c.espPinzas,
-            iniciales: c.iniciales, inicialesTexto: c.inicialesTexto, modCuello: c.modCuello, puno: c.puno,
+            iniciales: c.iniciales, inicialesTexto: c.inicialesTexto,
+            inicialesSituacion: c.inicialesSituacion || undefined,
+            inicialesColor: c.inicialesColor || undefined,
+            modCuello: c.modCuello, puno: c.puno,
             tejido: c.tejido, tejidoStockId: c.tejidoStockId || undefined,
             tejidoMetros: typeof c.tejidoMetros === 'number' ? c.tejidoMetros : undefined,
             precio: Number(c.precio) || 0, obs: c.obs,

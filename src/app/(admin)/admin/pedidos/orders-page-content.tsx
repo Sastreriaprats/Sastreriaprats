@@ -30,6 +30,7 @@ import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { OrdersPipeline } from './orders-pipeline'
 import { ReservationsTab } from '@/app/(admin)/admin/stock/tabs/reservations-tab'
+import { OnlineOrdersList } from '@/app/(admin)/admin/tienda-online/online-orders-list'
 
 const orderStatuses = [
   'created', 'fabric_ordered', 'fabric_received', 'factory_ordered',
@@ -41,7 +42,10 @@ const supplierOrderStatusLabels: Record<string, string> = {
   partially_received: 'Parcial', received: 'Recibido', incident: 'Incidencia', cancelled: 'Cancelado',
 }
 
-type TabValue = 'tailoring' | 'supplier' | 'reservations'
+type TabValue = 'tailoring' | 'supplier' | 'reservations' | 'online'
+
+// Estados de pedido online considerados "activos" (requieren acción del admin)
+const ONLINE_ACTIVE_STATUSES = ['pending_payment', 'paid', 'processing', 'shipped']
 
 interface Props {
   initialView: string
@@ -73,6 +77,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
   // Contadores para badges de los tabs
   const [supplierActiveCount, setSupplierActiveCount] = useState<number | null>(null)
   const [reservationsActiveCount, setReservationsActiveCount] = useState<number | null>(null)
+  const [onlineActiveCount, setOnlineActiveCount] = useState<number | null>(null)
 
   // Cambiar tab y sincronizar con URL
   const changeTab = (next: TabValue) => {
@@ -119,6 +124,12 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
       const t2 = b.success ? b.data.total : 0
       setReservationsActiveCount(t1 + t2)
     })
+
+    supabase
+      .from('online_orders')
+      .select('id', { count: 'exact', head: true })
+      .in('status', ONLINE_ACTIVE_STATUSES)
+      .then(({ count }) => setOnlineActiveCount(count ?? 0))
   }, [])
 
   const {
@@ -218,6 +229,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
             {tab === 'tailoring' && (isLoading ? 'Cargando...' : `Pedidos de sastrería · ${total}`)}
             {tab === 'supplier' && (loadingSupplier ? 'Cargando...' : `Pedidos a proveedor · ${supplierOrders.length}`)}
             {tab === 'reservations' && 'Reservas de producto'}
+            {tab === 'online' && 'Pedidos de la tienda online'}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -249,6 +261,9 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
           </TabsTrigger>
           <TabsTrigger value="reservations" className={tabTriggerClass}>
             Reservas {tabBadge(reservationsActiveCount, tab === 'reservations')}
+          </TabsTrigger>
+          <TabsTrigger value="online" className={tabTriggerClass}>
+            Online {tabBadge(onlineActiveCount, tab === 'online')}
           </TabsTrigger>
         </TabsList>
 
@@ -561,6 +576,11 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
         {/* TAB: Reservas */}
         <TabsContent value="reservations" className="mt-6">
           <ReservationsTab />
+        </TabsContent>
+
+        {/* TAB: Online */}
+        <TabsContent value="online" className="mt-6">
+          {tab === 'online' && <OnlineOrdersList />}
         </TabsContent>
       </Tabs>
 
