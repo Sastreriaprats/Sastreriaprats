@@ -456,6 +456,11 @@ export const changeOrderStatus = protectedAction<any, any>(
       if (!order) return failure('Pedido no encontrado')
       fromStatus = (order as any).status ?? null
 
+      // 'cancelled' es estado TERMINAL: no se puede reactivar.
+      if (fromStatus === 'cancelled' && new_status !== 'cancelled') {
+        return failure('No se puede reactivar un pedido cancelado. Crea un pedido nuevo si es necesario.', 'VALIDATION')
+      }
+
       await ctx.adminClient
         .from('tailoring_orders')
         .update({
@@ -467,6 +472,12 @@ export const changeOrderStatus = protectedAction<any, any>(
       await ctx.adminClient
         .from('tailoring_order_lines').update({ status: new_status }).eq('tailoring_order_id', order_id).eq('status', 'created')
       fromStatus = fromStatus ?? (order as any).status ?? null
+
+      // Reponer stock de tejido si entramos en cancelled desde otro estado.
+      // revertFabricStockForOrder es idempotente (no doble reposición).
+      if (new_status === 'cancelled' && fromStatus !== 'cancelled') {
+        await revertFabricStockForOrder(ctx.adminClient, order_id, ctx.userId)
+      }
 
       await ctx.adminClient.from('tailoring_order_state_history').insert({
         tailoring_order_id: order_id,
@@ -639,6 +650,12 @@ export const updateOrderStatus = protectedAction<
         .eq('id', orderId.trim())
         .single()
       fromStatus = (prevOrder as any)?.status ?? null
+
+      // 'cancelled' es estado TERMINAL: no se puede reactivar.
+      if (fromStatus === 'cancelled' && trimmedStatus !== 'cancelled') {
+        return failure('No se puede reactivar un pedido cancelado. Crea un pedido nuevo si es necesario.', 'VALIDATION')
+      }
+
       const { error } = await ctx.adminClient
         .from('tailoring_orders')
         .update({
@@ -655,6 +672,11 @@ export const updateOrderStatus = protectedAction<
         .update({ status: trimmedStatus })
         .eq('tailoring_order_id', orderId.trim())
         .eq('status', 'created')
+
+      // Reponer stock de tejido al cancelar (idempotente).
+      if (trimmedStatus === 'cancelled' && fromStatus !== 'cancelled') {
+        await revertFabricStockForOrder(ctx.adminClient, orderId.trim(), ctx.userId)
+      }
     }
 
     // Historial de la transición — antes la action sastre no lo escribía,
@@ -831,6 +853,60 @@ async function applyFabricStockDelta(
       console.error('[applyFabricStockDelta] unexpected error for fabric', fabricId, err)
     }
   }
+}
+
+/**
+ * Repone al stock de tejidos los metros consumidos por las líneas de un
+ * pedido. Idempotente: si tailoring_orders.fabric_stock_reverted_at ya
+ * está poblado, no hace nada (evita doble reposición si se cancela dos
+ * veces o se borra un pedido ya cancelado).
+ *
+ * Llamadas: changeOrderStatus/updateOrderStatus cuando status→'cancelled'
+ * y deleteOrder antes de eliminar las líneas.
+ *
+ * La trazabilidad la hereda gratis de applyFabricStockDelta, que ya
+ * inserta una fila en fabric_stock_movements con movement_type
+ * 'consumption_revert' y reference_id = orderId (mig 160).
+ */
+async function revertFabricStockForOrder(
+  admin: AdminClient,
+  orderId: string,
+  userId: string | null,
+): Promise<void> {
+  const { data: order, error: fetchErr } = await admin
+    .from('tailoring_orders')
+    .select('fabric_stock_reverted_at')
+    .eq('id', orderId)
+    .single()
+  if (fetchErr || !order) {
+    console.error('[revertFabricStockForOrder] order fetch failed', orderId, fetchErr)
+    return
+  }
+  if ((order as { fabric_stock_reverted_at?: string | null }).fabric_stock_reverted_at) return
+
+  const { data: lines } = await admin
+    .from('tailoring_order_lines')
+    .select('fabric_id, fabric_meters')
+    .eq('tailoring_order_id', orderId)
+
+  const revert = new Map<string, number>()
+  for (const l of (lines ?? []) as Array<{ fabric_id: string | null; fabric_meters: number | string | null }>) {
+    const fId = l.fabric_id
+    const m = Number(l.fabric_meters) || 0
+    if (fId && m > 0) revert.set(fId, (revert.get(fId) || 0) + m)
+  }
+
+  if (revert.size > 0) {
+    // applyFabricStockDelta resta lo que recibe; pasamos NEGATIVO para sumar al stock.
+    const deltas = new Map<string, number>()
+    for (const [fId, m] of revert) deltas.set(fId, -m)
+    await applyFabricStockDelta(admin, deltas, { orderId, userId })
+  }
+
+  await admin
+    .from('tailoring_orders')
+    .update({ fabric_stock_reverted_at: new Date().toISOString() })
+    .eq('id', orderId)
 }
 
 function round2(n: number): number {
@@ -1585,13 +1661,37 @@ export const deleteOrder = protectedAction<string, void>(
       return failure('Pedido no encontrado', 'NOT_FOUND')
     }
 
-    // Borrar líneas del pedido
+    // 1. Reponer stock de tejido ANTES de borrar las líneas (necesita leerlas
+    //    para saber qué metros volver al stock). Idempotente.
+    await revertFabricStockForOrder(admin, orderId, ctx.userId)
+
+    // 2. Limpiar cobros de sastrería vía RPC simétrica (mig 150). Reverte
+    //    cash_sessions.total_*_sales y borra los manual_transactions espejo.
+    //    Si algún pago vive en una sesión de caja ya cerrada, la RPC lanza
+    //    excepción y se aborta el borrado para no descuadrar caja.
+    const { data: orderPayments } = await admin
+      .from('tailoring_order_payments')
+      .select('id')
+      .eq('tailoring_order_id', orderId)
+
+    for (const p of (orderPayments ?? []) as Array<{ id: string }>) {
+      const { error: rpcErr } = await admin.rpc('rpc_remove_order_payment', { p_payment_id: p.id })
+      if (rpcErr) {
+        console.error('[deleteOrder] rpc_remove_order_payment error:', rpcErr)
+        return failure(
+          'No se puede borrar este pedido: tiene cobros vinculados a una sesión de caja ya cerrada. Si necesitas eliminarlo, contacta con administración.',
+          'VALIDATION',
+        )
+      }
+    }
+
+    // 3. Borrar líneas del pedido
     await admin.from('tailoring_order_lines').delete().eq('tailoring_order_id', orderId)
 
-    // Borrar pagos asociados
+    // 4. Borrar pagos legacy (tabla `payments`, distinta de tailoring_order_payments)
     await admin.from('payments').delete().eq('tailoring_order_id', orderId)
 
-    // Borrar el pedido
+    // 5. Borrar el pedido (ON DELETE CASCADE limpia el resto)
     const { error: deleteError } = await admin
       .from('tailoring_orders')
       .delete()
