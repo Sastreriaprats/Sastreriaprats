@@ -15,6 +15,7 @@ export interface DiscountCodeRow {
   valid_from: string | null
   valid_until: string | null
   applies_to: string
+  free_shipping: boolean
   is_active: boolean
   created_at: string
 }
@@ -29,6 +30,7 @@ export interface CreateDiscountCodeInput {
   valid_from: string | null
   valid_until: string | null
   applies_to: 'all' | 'online' | 'boutique'
+  free_shipping: boolean
 }
 
 export const listDiscountCodes = protectedAction<void, DiscountCodeRow[]>(
@@ -68,6 +70,7 @@ export const createDiscountCode = protectedAction<CreateDiscountCodeInput, Disco
         valid_from: input.valid_from,
         valid_until: input.valid_until,
         applies_to: input.applies_to,
+        free_shipping: input.free_shipping,
         is_active: true,
         current_uses: 0,
       })

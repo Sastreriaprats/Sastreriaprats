@@ -18,10 +18,11 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { Plus, Loader2, Copy, Power, Trash2, Tag } from 'lucide-react'
+import { Plus, Loader2, Copy, Power, Trash2, Tag, Truck } from 'lucide-react'
 import { toast } from 'sonner'
 
 export interface DiscountCode {
@@ -36,6 +37,7 @@ export interface DiscountCode {
   valid_from: string | null
   valid_until: string | null
   applies_to: string
+  free_shipping: boolean
   is_active: boolean
   created_at: string
 }
@@ -50,6 +52,7 @@ const EMPTY_FORM = {
   valid_from: '',
   valid_until: '',
   applies_to: 'all',
+  free_shipping: false,
 }
 
 function generateCode(): string {
@@ -92,6 +95,7 @@ export function DescuentosContent({ initialCodes }: { initialCodes: DiscountCode
         valid_from: form.valid_from || null,
         valid_until: form.valid_until || null,
         applies_to: form.applies_to as 'all' | 'online' | 'boutique',
+        free_shipping: form.free_shipping,
       })
       if (!res.success) {
         toast.error(res.error || 'Error al crear')
@@ -219,6 +223,20 @@ export function DescuentosContent({ initialCodes }: { initialCodes: DiscountCode
                   <Input type="date" value={form.valid_until} onChange={e => updateField('valid_until', e.target.value)} />
                 </div>
               </div>
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div className="flex items-center gap-2">
+                  <Truck className="h-4 w-4 text-muted-foreground" />
+                  <div>
+                    <Label htmlFor="free-shipping-toggle" className="cursor-pointer">Incluir envío gratuito</Label>
+                    <p className="text-xs text-muted-foreground">Al canjear el cupón, el pedido no pagará gastos de envío.</p>
+                  </div>
+                </div>
+                <Switch
+                  id="free-shipping-toggle"
+                  checked={form.free_shipping}
+                  onCheckedChange={v => setForm(prev => ({ ...prev, free_shipping: v }))}
+                />
+              </div>
               <div className="flex justify-end gap-2 pt-2">
                 <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>Cancelar</Button>
                 <Button onClick={handleSave} disabled={saving}>
@@ -270,14 +288,21 @@ export function DescuentosContent({ initialCodes }: { initialCodes: DiscountCode
                         {dc.description && <p className="text-xs text-muted-foreground mt-0.5">{dc.description}</p>}
                       </TableCell>
                       <TableCell>
-                        <span className="font-semibold">
-                          {dc.discount_type === 'percentage'
-                            ? `${parseFloat(dc.discount_value)}%`
-                            : `${parseFloat(dc.discount_value).toFixed(2)}€`}
-                        </span>
-                        {dc.min_purchase && (
-                          <span className="text-xs text-muted-foreground ml-1">(min {parseFloat(dc.min_purchase).toFixed(0)}€)</span>
-                        )}
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold">
+                            {dc.discount_type === 'percentage'
+                              ? `${parseFloat(dc.discount_value)}%`
+                              : `${parseFloat(dc.discount_value).toFixed(2)}€`}
+                          </span>
+                          {dc.min_purchase && (
+                            <span className="text-xs text-muted-foreground">(min {parseFloat(dc.min_purchase).toFixed(0)}€)</span>
+                          )}
+                          {dc.free_shipping && (
+                            <Badge variant="outline" className="gap-1 text-xs text-blue-700 border-blue-200 bg-blue-50">
+                              <Truck className="h-3 w-3" /> Envío gratis
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="text-sm">
                         {dc.valid_from && dc.valid_until
