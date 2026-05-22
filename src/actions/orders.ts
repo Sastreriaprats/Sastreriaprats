@@ -304,10 +304,7 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
 
     const orderNumber = await getNextNumber('tailoring_orders', 'order_number', prefix)
 
-    const initialStatus =
-      parsedOrder.data.order_type === 'industrial' || (parsedOrder.data.order_type as string) === 'camiseria_industrial'
-        ? 'factory_ordered'
-        : 'created'
+    const initialStatus: OrderStatus = 'created'
 
     let subtotal = 0
     const processedLines = linesInput.map((line: any, idx: number) => {
@@ -1228,12 +1225,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
     const orderTypeDb: 'artesanal' | 'industrial' =
       input.orderType === 'artesanal' ? 'artesanal' : 'industrial'
 
-    const initialStatus =
-      input.orderType === 'artesanal' ? 'in_production'
-      : input.orderType === 'industrial' ? 'factory_ordered'
-      : input.orderType === 'camiseria' ? 'in_production'
-      : input.orderType === 'camiseria_industrial' ? 'factory_ordered'
-      : 'created'
+    const initialStatus = 'created'
 
     const { data: garmentTypes } = await ctx.adminClient
       .from('garment_types')
