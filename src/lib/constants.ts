@@ -53,7 +53,7 @@ export const GARMENT_TYPES = [
   { key: 'pantalon', label: 'Pantalón' },
   { key: 'camisa', label: 'Camisa' },
   { key: 'abrigo', label: 'Abrigo' },
-  { key: 'chaquet', label: 'Chaqué' },
+  { key: 'chaque', label: 'Chaqué' },
   { key: 'smoking', label: 'Smoking' },
   { key: 'bata', label: 'Bata' },
   { key: 'falda', label: 'Falda' },

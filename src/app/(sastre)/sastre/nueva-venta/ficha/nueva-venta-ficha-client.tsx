@@ -98,10 +98,10 @@ const PRENDAS_DISPONIBLES = [
 // Campos de "Configuración técnica" que ahora viven en
 // client_measurements del garment_type 'body' (con prefijo de la prenda)
 // y se pre-rellenan automáticamente en la ficha. Cubre pantalon,
-// americana, chaleco (Fase A) y abrigo, levita, frac (Fase B —
+// americana, chaleco (Fase A) y abrigo, levita, frac, chaque (Fase B —
 // mismos 7 confXX que americana). El frac comparte CAMPOS con
 // americana pero NO VALORES: tiene patronaje propio y se guarda con
-// prefijo frac_. Otros slugs (teba, gabardina, chaqué, smoking) no
+// prefijo frac_. Otros slugs (teba, gabardina, smoking) no
 // pre-rellenan estos campos.
 const CONF_AMERICANA_LIKE: string[] = ['confF', 'confD', 'confFP', 'confFV', 'confHA', 'confHB', 'confVD']
 const CONF_NUMERIC_KEYS: Record<string, string[]> = {
@@ -111,6 +111,7 @@ const CONF_NUMERIC_KEYS: Record<string, string[]> = {
   abrigo: CONF_AMERICANA_LIKE,
   levita: CONF_AMERICANA_LIKE,
   frac: CONF_AMERICANA_LIKE,
+  chaque: CONF_AMERICANA_LIKE,
 }
 const CONF_BOOLEAN_KEYS: Record<string, string[]> = {
   pantalon: ['confFormaGemelo'],
@@ -119,6 +120,7 @@ const CONF_BOOLEAN_KEYS: Record<string, string[]> = {
   abrigo: [],
   levita: [],
   frac: [],
+  chaque: [],
 }
 
 function extractConfFromMeasurements(
