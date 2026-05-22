@@ -361,6 +361,14 @@ export function ProductDetailContent({
             {!isFabric && <p><span className="text-muted-foreground">Color:</span> {product.color || (variants[0] as any)?.color || '-'}</p>}
             <p><span className="text-muted-foreground">Material:</span> {product.material || '-'}</p>
             <p><span className="text-muted-foreground">Web:</span> {product.is_visible_web ? 'Visible' : 'No visible'}</p>
+            <p><span className="text-muted-foreground">Título web:</span> {product.web_title || '-'}</p>
+
+            {product.web_description && (
+              <div className="pt-3 mt-2 border-t border-muted/30">
+                <p className="text-muted-foreground text-xs uppercase tracking-wide mb-1.5">Descripción web</p>
+                <p className="whitespace-pre-line leading-relaxed break-words">{product.web_description}</p>
+              </div>
+            )}
           </CardContent>
         </Card>
         {canViewCosts && (
