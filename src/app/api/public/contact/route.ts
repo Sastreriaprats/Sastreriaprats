@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { isRateLimited } from '@/lib/rate-limit'
 
-const TEAM_EMAIL = process.env.CONTACT_TEAM_EMAIL || process.env.RESEND_FROM_EMAIL || 'info@sastreriaprats.es'
+const TEAM_EMAIL = process.env.CONTACT_TEAM_EMAIL || 'info@sastreriaprats.com'
 
 const MONTHS_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
 
