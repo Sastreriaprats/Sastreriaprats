@@ -13,7 +13,7 @@ export function CartContent() {
   const formatPrice = (p: number) =>
     new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(p)
 
-  const freeShipping = subtotal >= 200
+  const freeShipping = subtotal >= 500
 
   if (items.length === 0) {
     return (
@@ -106,7 +106,7 @@ export function CartContent() {
               </div>
             </div>
             {!freeShipping && (
-              <p className="text-xs text-gray-400 mt-3">Envío gratuito a partir de 200€</p>
+              <p className="text-xs text-gray-400 mt-3">Envío gratuito a partir de 500€</p>
             )}
             <Link href="/checkout">
               <Button

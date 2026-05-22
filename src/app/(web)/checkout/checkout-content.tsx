@@ -50,7 +50,7 @@ export function CheckoutContent() {
     code: string; discount_type: string; discount_value: number; discount_amount: number; free_shipping?: boolean; description: string | null
   } | null>(null)
 
-  const freeShippingByAmount = subtotal >= 200
+  const freeShippingByAmount = subtotal >= 500
   const isStorePickup = deliveryMethod === 'store'
   const freeShippingByCoupon = !!appliedDiscount?.free_shipping
   const shippingCost = isStorePickup || freeShippingByAmount || freeShippingByCoupon ? 0 : 9.90

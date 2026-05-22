@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
-  ArrowLeft, ShoppingBag, Minus, Plus, Check, Truck, Shield, Ruler, Loader2, Heart, ChevronDown,
+  ArrowLeft, ShoppingBag, Minus, Plus, Check, Truck, Ruler, Loader2, Heart, ChevronDown,
 } from 'lucide-react'
 import { useCart } from '@/components/providers/cart-provider'
 import { toast } from 'sonner'
@@ -391,10 +391,7 @@ export function ProductContent({ slug }: { slug: string }) {
 
             <div className="space-y-2 text-sm text-gray-500 py-2">
               <div className="flex items-center gap-2">
-                <Truck className="h-4 w-4 text-gray-400" />Envío gratuito a partir de 200€
-              </div>
-              <div className="flex items-center gap-2">
-                <Shield className="h-4 w-4 text-gray-400" />Devolución en 30 días
+                <Truck className="h-4 w-4 text-gray-400" />Envío gratuito a partir de 500€
               </div>
             </div>
           </div>
