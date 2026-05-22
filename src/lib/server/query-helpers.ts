@@ -61,15 +61,26 @@ export async function queryList<T>(
     if (params.searchFields.includes('search_text')) {
       // Búsqueda contra columna generada normalizada (unaccent + lower).
       // Normalizamos el término en JS para que case y acentos coincidan.
+      // Multi-palabra: cada token debe estar presente (AND), no la cadena completa.
+      // Así "jorge ll" encuentra a "Jorge Llavona" aunque el orden interno sea
+      // "apellido nombre" o haya nombres compuestos.
       const normalized = normalizeSearchTerm(params.search)
       if (normalized) {
-        query = query.ilike('search_text', `%${normalized}%`)
+        const tokens = normalized.split(/\s+/).filter(Boolean)
+        for (const token of tokens) {
+          query = query.ilike('search_text', `%${token}%`)
+        }
       }
     } else {
-      const searchConditions = params.searchFields
-        .map(field => `${field}.ilike.%${params.search}%`)
-        .join(',')
-      query = query.or(searchConditions)
+      // Fallback sin search_text: cada token aplica un OR sobre todos los
+      // searchFields, y los tokens se combinan con AND.
+      const tokens = params.search.split(/\s+/).filter(Boolean)
+      for (const token of tokens) {
+        const conditions = params.searchFields
+          .map(field => `${field}.ilike.%${token}%`)
+          .join(',')
+        query = query.or(conditions)
+      }
     }
   }
 
