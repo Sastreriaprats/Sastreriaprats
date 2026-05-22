@@ -235,10 +235,25 @@ function defaultCamisa(): CamisaItem {
   }
 }
 
+type CamisaMedidas = Pick<CamisaItem, 'cuello' | 'canesu' | 'largoManga' | 'frentePecho' | 'pecho' | 'cintura' | 'cadera' | 'largoCuerpo' | 'hombro' | 'punoDerecho' | 'punoIzquierdo'>
+
+/** Extrae solo las medidas físicas de una camisa del array. Se usa al añadir
+ *  una camisa nueva para heredar las medidas de la anterior — el resto
+ *  (tejido, precio, opciones, iniciales) se queda en defaults porque cada
+ *  camisa puede tener tejido y precio distintos aunque las medidas se repitan. */
+function pickMedidasFromCamisa(c: CamisaItem): CamisaMedidas {
+  return {
+    cuello: c.cuello, canesu: c.canesu, largoManga: c.largoManga,
+    frentePecho: c.frentePecho, pecho: c.pecho, cintura: c.cintura,
+    cadera: c.cadera, largoCuerpo: c.largoCuerpo, hombro: c.hombro,
+    punoDerecho: c.punoDerecho, punoIzquierdo: c.punoIzquierdo,
+  }
+}
+
 function getMeasuresFromRecord(
   v: Record<string, unknown> | null | undefined
-): Pick<CamisaItem, 'cuello' | 'canesu' | 'largoManga' | 'frentePecho' | 'pecho' | 'cintura' | 'cadera' | 'largoCuerpo' | 'hombro' | 'punoDerecho' | 'punoIzquierdo'> {
-  const empty = { cuello: '', canesu: '', largoManga: '', frentePecho: '', pecho: '', cintura: '', cadera: '', largoCuerpo: '', hombro: '', punoDerecho: '', punoIzquierdo: '' }
+): CamisaMedidas {
+  const empty: CamisaMedidas = { cuello: '', canesu: '', largoManga: '', frentePecho: '', pecho: '', cintura: '', cadera: '', largoCuerpo: '', hombro: '', punoDerecho: '', punoIzquierdo: '' }
   if (!v || typeof v !== 'object') return empty
   // Aceptamos las claves modernas (snake_case BD) y fallbacks legacy. Las
   // medidas de cliente se guardan a veces con prefijo "camiseria_" (datos
@@ -760,9 +775,25 @@ export function NuevaVentaFichaClient({
   }, [setFichaField])
 
   // ── Camisa ops ────────────────────────────────────────────────────────────
+  /** Añade una camisa nueva. Para las MEDIDAS, lógica híbrida:
+   *  1. Si la última camisa del array tiene medidas rellenas (cuello/canesú/
+   *     pecho) → clona sus medidas. Útil cuando el sastre tomó las medidas a
+   *     mano en la primera camisa (cliente sin medidas en BD) o las ajustó.
+   *  2. Si no → usa las medidas del cliente (`camiseriaMeasurements`).
+   *  3. Si tampoco → vacío (cae al `defaultCamisa`).
+   *
+   *  El resto de campos (tejido, precio, opciones, iniciales, observaciones,
+   *  cantidad, etc.) NO se heredan — siempre quedan en defaults. Cada camisa
+   *  suele cambiar de tejido y opciones aunque las medidas se repitan. */
   const addCamisa = () => {
-    const m = getMeasuresFromRecord(camiseriaMeasurements ?? undefined)
-    setCamisas((prev) => [...prev, { id: crypto.randomUUID(), mode: 'a_medida', ...m, jareton: false, bolsillo: false, hombroCaido: false, derecho: false, izquierdo: false, hombrosAltos: false, hombrosBajos: false, erguido: false, cargado: false, espaldaLisa: false, espPliegues: false, espTablonCentr: false, espPinzas: false, iniciales: false, inicialesTexto: '', inicialesSituacion: '', inicialesColor: '', modCuello: '', puno: 'sencillo', tejido: '', tejidoStockId: undefined, tejidoMetros: undefined, precio: 0, cantidad: 1, obs: '', cortador: '', oficial: '', punoDerecho: '', punoIzquierdo: '' }])
+    setCamisas((prev) => {
+      const last = prev[prev.length - 1]
+      const lastHasMedidas = last && (last.cuello || last.canesu || last.pecho)
+      const base: CamisaMedidas = lastHasMedidas
+        ? pickMedidasFromCamisa(last)
+        : getMeasuresFromRecord(camiseriaMeasurements ?? undefined)
+      return [...prev, { ...defaultCamisa(), ...base }]
+    })
   }
   const removeCamisa = (id: string) => setCamisas((prev) => prev.filter((c) => c.id !== id))
   const updateCamisa = (id: string, field: keyof CamisaItem, value: string | number | boolean | undefined) => {
