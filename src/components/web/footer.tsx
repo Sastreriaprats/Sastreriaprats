@@ -53,9 +53,9 @@ export function WebFooter() {
             <h4 className="text-sm font-bold uppercase tracking-wide text-black mb-4">POLÍTICAS</h4>
             <ul className="space-y-2">
               <li><Link href="/privacidad" className="text-sm text-gray-600 hover:text-black transition-colors">Política de privacidad</Link></li>
-              <li><Link href="/aviso-legal" className="text-sm text-gray-600 hover:text-black transition-colors">Política de reembolsos</Link></li>
-              <li><Link href="/aviso-legal" className="text-sm text-gray-600 hover:text-black transition-colors">Política de envíos</Link></li>
-              <li><Link href="/aviso-legal" className="text-sm text-gray-600 hover:text-black transition-colors">Términos del servicio</Link></li>
+              <li><Link href="/reembolsos" className="text-sm text-gray-600 hover:text-black transition-colors">Política de reembolsos</Link></li>
+              <li><Link href="/envios" className="text-sm text-gray-600 hover:text-black transition-colors">Política de envíos</Link></li>
+              <li><Link href="/terminos" className="text-sm text-gray-600 hover:text-black transition-colors">Términos del servicio</Link></li>
             </ul>
           </div>
 

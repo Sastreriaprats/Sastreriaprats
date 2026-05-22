@@ -84,7 +84,10 @@ export const MAX_PAGE_SIZE = 100
 
 export const BRAND = {
   name: 'Sastrería Prats',
-  legalName: 'Prast, Eugercios y González S.L.',
+  legalName: 'Prats Eugercios y González, S.L.',
+  cif: 'B88391834',
+  fiscalAddress: 'Calle Hermanos Pinzón, 4 - 28036 Madrid',
+  adminEmail: 'administracion@sastreriaprats.com',
   domain: 'sastreriaprats.com',
   email: 'info@sastreriaprats.com',
   phone: '+34 669 98 55 47',
