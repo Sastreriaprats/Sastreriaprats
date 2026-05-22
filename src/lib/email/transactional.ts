@@ -395,6 +395,53 @@ export async function sendNewsletterWelcome(subscriber: { email: string }) {
   })
 }
 
+export async function sendContactAcknowledgment(params: {
+  to: string
+  clientName: string
+  service?: string
+  preferredDate?: string
+  message?: string
+}) {
+  const { to, clientName, service, preferredDate, message } = params
+
+  // Eco de la solicitud — card beige solo si hay al menos un dato real.
+  // Si los 3 vienen vacíos, no se renderiza nada (el usuario rellenó solo
+  // nombre y email, sin más detalles). Sigue el mismo patrón visual que la
+  // card de artículos de sendOrderConfirmation.
+  const hasDetails = !!(service?.trim() || preferredDate?.trim() || message?.trim())
+  const detailsBlock = hasDetails
+    ? `<tr><td align="center" style="padding:0 60px 24px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f0e8;border-radius:6px;">
+          <tr><td style="padding:16px 20px;">
+            <p style="margin:0 0 10px;font-size:11px;letter-spacing:1.5px;color:#888888;text-transform:uppercase;">Tu solicitud</p>
+            ${service?.trim() ? `<p style="margin:6px 0;font-size:13px;color:#333333;"><strong style="color:#1a2942;">Servicio:</strong> ${escapeHtml(service.trim())}</p>` : ''}
+            ${preferredDate?.trim() ? `<p style="margin:6px 0;font-size:13px;color:#333333;"><strong style="color:#1a2942;">Fecha preferida:</strong> ${escapeHtml(preferredDate.trim())}</p>` : ''}
+            ${message?.trim() ? `<p style="margin:10px 0 0;font-size:13px;color:#333333;line-height:1.6;"><strong style="color:#1a2942;">Mensaje:</strong><br/>${escapeHtml(message.trim()).replace(/\n/g, '<br/>')}</p>` : ''}
+          </td></tr>
+        </table>
+      </td></tr>`
+    : ''
+
+  await sendFromTemplate('contact_acknowledgment', to, {
+    client_name: clientName,
+    details_block: detailsBlock,
+  }, {
+    subject: 'Hemos recibido tu mensaje — Sastrería Prats',
+    bodyHtml: `
+      <tr><td align="center" style="padding:0 60px 32px;">
+        <h2 style="margin:0 0 12px;font-size:18px;font-weight:bold;color:#1a2942;">Gracias por contactar con nosotros</h2>
+        <p style="margin:0 0 12px;font-size:14px;color:#555555;">Estimado/a {{client_name}},</p>
+        <p style="margin:0 0 8px;font-size:13px;line-height:1.6;color:#555555;">Hemos recibido tu mensaje correctamente. Nuestro equipo lo está revisando y se pondrá en contacto contigo lo antes posible, normalmente en menos de 24 horas hábiles.</p>
+      </td></tr>
+      {{details_block}}
+      <tr><td align="center" style="padding:0 60px 32px;">
+        <p style="margin:0 0 8px;font-size:12px;letter-spacing:1px;color:#888888;text-transform:uppercase;">Si tu solicitud es urgente</p>
+        <p style="margin:0;font-size:16px;font-weight:bold;color:#1a2942;">+34 669 98 55 47</p>
+      </td></tr>
+    `,
+  })
+}
+
 export async function sendPasswordReset(email: string, resetUrl: string) {
   await sendFromTemplate('password_reset', email, {
     reset_url: resetUrl,

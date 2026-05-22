@@ -107,45 +107,22 @@ export async function POST(request: NextRequest) {
         })
       }
 
-      const userSubject = 'Hemos recibido tu mensaje — Sastrería Prats'
+      // Acuse al cliente: pasa por el sistema unificado de emails transaccionales,
+      // que ya envuelve con el layout corporativo (logo header + footer con
+      // dirección/teléfono/email/copyright) y registra en email_logs.
       try {
-        const res = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            from: fromEmail,
-            to: email.trim(),
-            subject: userSubject,
-            html: `
-              <h2>Gracias por contactar con Sastrería Prats</h2>
-              <p>Estimado/a ${escapeHtml(name.trim())},</p>
-              <p>Hemos recibido tu mensaje correctamente. Nuestro equipo se pondrá en contacto contigo lo antes posible.</p>
-              <p>Atentamente,<br/>El equipo de Sastrería Prats</p>
-            `,
-          }),
-        })
-        const data = res.ok ? await res.json().catch(() => null) : null
-        await admin.from('email_logs').insert({
-          recipient_email: email.trim(),
-          subject: userSubject,
-          email_type: 'transactional',
-          status: res.ok ? 'sent' : 'failed',
-          sent_at: new Date().toISOString(),
-          resend_id: (data as { id?: string } | null)?.id ?? null,
-          ...(res.ok ? {} : { error_message: `HTTP ${res.status}` }),
+        const { sendContactAcknowledgment } = await import('@/lib/email/transactional')
+        await sendContactAcknowledgment({
+          to: email.trim(),
+          clientName: name.trim(),
+          service: service?.trim() || undefined,
+          preferredDate: preferredDate?.trim() ? formatPreferredDate(preferredDate) : undefined,
+          message: message?.trim() || undefined,
         })
       } catch (e) {
+        // No bloqueamos la respuesta al cliente si el acuse falla — el mensaje
+        // ya quedó persistido en contact_requests + notificado al equipo.
         console.error('[Contact API] Auto-reply email failed:', e)
-        await admin.from('email_logs').insert({
-          recipient_email: email.trim(),
-          subject: userSubject,
-          email_type: 'transactional',
-          status: 'failed',
-          error_message: e instanceof Error ? e.message : 'Unknown error',
-        })
       }
     }
 
