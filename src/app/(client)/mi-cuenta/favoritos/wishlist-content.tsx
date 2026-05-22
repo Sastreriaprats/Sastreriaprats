@@ -56,7 +56,7 @@ export function WishlistContent({ items, clientId }: {
                         src={product.main_image_url as string}
                         alt={product.name as string}
                         fill
-                        className="object-cover group-hover:scale-105 transition-transform duration-500"
+                        className="object-cover group-hover:scale-110 transition-transform duration-700 ease-out"
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-gray-300">
