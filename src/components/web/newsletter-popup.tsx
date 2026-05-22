@@ -40,7 +40,8 @@ export function NewsletterPopup() {
             alt="Sastrería Prats"
             width={180}
             height={180}
-            className="object-contain opacity-90 invert brightness-200"
+            className="object-contain opacity-90"
+            style={{ filter: 'brightness(0) invert(1)' }}
           />
         </div>
 
