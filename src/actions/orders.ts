@@ -11,6 +11,7 @@ import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { sendOrderConfirmation, sendTailoringStatusUpdate } from '@/lib/email/transactional'
 import { normalizeSearchTerm } from '@/lib/utils'
 import { checkUserPermission } from '@/actions/auth'
+import { syncOrderLineMeasurementsToClient } from '@/lib/measurements/sync-from-order'
 
 const SELECT_ORDERS = `
   id, order_number, order_type, status, order_date,
@@ -1074,7 +1075,36 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
       }
     }
 
-    // 3.b Calcular delta de metros de tela (antes vs. después) y aplicarlo.
+    // 3.b Sincronizar medidas a client_measurements (no bloqueante).
+    // Cuando el sastre edita la ficha de una prenda y guarda valores en
+    // tailoring_order_lines.configuration, esos valores deben reflejarse
+    // también en la ficha del cliente con versionado (historial).
+    if (input.lines !== undefined) {
+      const clientId = (orderBefore as { client_id?: string | null }).client_id ?? null
+      if (clientId) {
+        const synced: Array<{ garmentTypeId: string; configuration: unknown }> = []
+        for (const diff of linesAfterDiff) {
+          if (diff.action === 'delete') continue
+          const after = diff.after as { garment_type_id?: string; configuration?: unknown } | undefined
+          if (!after?.garment_type_id) continue
+          synced.push({ garmentTypeId: String(after.garment_type_id), configuration: after.configuration })
+        }
+        // Deduplicar por garment_type_id (si el pedido tiene varias prendas del
+        // mismo tipo, la última gana — coherente con cómo el dialog reemplaza).
+        const byGarment = new Map<string, unknown>()
+        for (const s of synced) byGarment.set(s.garmentTypeId, s.configuration)
+        for (const [garmentTypeId, configuration] of byGarment) {
+          await syncOrderLineMeasurementsToClient(admin, {
+            clientId: String(clientId),
+            lineGarmentTypeId: garmentTypeId,
+            configuration: (configuration ?? {}) as Record<string, unknown>,
+            userId: ctx.userId,
+          })
+        }
+      }
+    }
+
+    // 3.c Calcular delta de metros de tela (antes vs. después) y aplicarlo.
     // No bloquea el guardado del pedido si falla.
     if (input.lines !== undefined) {
       const beforeMeters = new Map<string, number>()
@@ -1483,6 +1513,25 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
       .insert(linesPayload)
 
     if (linesError) return failure(linesError.message)
+
+    // Sincronizar medidas hacia client_measurements (no bloqueante).
+    // Deduplicamos por garment_type_id: si una ficha tiene varias prendas del
+    // mismo tipo, la última gana.
+    if (input.clientId) {
+      const byGarment = new Map<string, Record<string, unknown>>()
+      for (const row of linesPayload) {
+        if (!row.garment_type_id) continue
+        byGarment.set(String(row.garment_type_id), (row.configuration ?? {}) as Record<string, unknown>)
+      }
+      for (const [garmentTypeId, configuration] of byGarment) {
+        await syncOrderLineMeasurementsToClient(ctx.adminClient, {
+          clientId: String(input.clientId),
+          lineGarmentTypeId: garmentTypeId,
+          configuration,
+          userId: ctx.userId,
+        })
+      }
+    }
 
     // Descontar metros de tela (no bloquear el pedido si falla)
     const fabricUsage = new Map<string, number>()

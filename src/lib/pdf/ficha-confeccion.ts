@@ -1002,28 +1002,56 @@ function buildCamiseriaDocDefinition(
   const ch = (label: string, checked: boolean) =>
     (checked ? '☑ ' : '☐ ') + label
 
+  // Lectura tolerante: las características pueden venir en camelCase (dialog de
+  // edición, wizard del sastre) o en snake_case con string 'true' (wizard admin
+  // /admin/pedidos/nuevo). Probamos ambas formas.
+  const boolKey = (...keys: string[]): boolean => {
+    for (const k of keys) {
+      const v = cfg[k]
+      if (v === true || v === 'true' || v === '1' || v === 1) return true
+    }
+    return false
+  }
+  const strKey = (...keys: string[]): string => {
+    for (const k of keys) {
+      const v = cfg[k]
+      if (v === undefined || v === null || typeof v === 'boolean') continue
+      const s = String(v).trim()
+      if (s !== '') return s
+    }
+    return ''
+  }
+
   // Tabla checkboxes 4 columnas
   const col1 = [
-    ch('JARETÓN', !!cfg.jareton),
-    ch('BOLSILLO', !!cfg.bolsillo),
-    ch('HOMBRO CAÍDO', !!cfg.hombroCaido),
-    ch('DERECHO', !!cfg.derecho),
-    ch('IZQUIERDO', !!cfg.izquierdo),
+    ch('JARETÓN', boolKey('jareton')),
+    ch('BOLSILLO', boolKey('bolsillo')),
+    ch('HOMBRO CAÍDO', boolKey('hombroCaido', 'hombro_caido')),
+    ch('DERECHO', boolKey('derecho')),
+    ch('IZQUIERDO', boolKey('izquierdo')),
   ].map((t) => ({ text: t, fontSize: fs8 }))
   const col2 = [
-    ch('HOMBROS ALTOS', !!cfg.hombrosAltos),
-    ch('HOMBROS BAJOS', !!cfg.hombrosBajos),
-    ch('ERGUIDO', !!cfg.erguido),
-    ch('CARGADO', !!cfg.cargado),
+    ch('HOMBROS ALTOS', boolKey('hombrosAltos', 'hombros_altos')),
+    ch('HOMBROS BAJOS', boolKey('hombrosBajos', 'hombros_bajos')),
+    ch('ERGUIDO', boolKey('erguido')),
+    ch('CARGADO', boolKey('cargado')),
   ].map((t) => ({ text: t, fontSize: fs8 }))
   const col3 = [
-    ch('ESPALDA LISA', !!cfg.espaldaLisa),
-    ch('ESP. PLIEGUES', !!cfg.espPliegues),
-    ch('ESP. TABLÓN CENTR.', !!cfg.espTablonCentr),
-    ch('ESP. PINZAS', !!cfg.espPinzas),
+    ch('ESPALDA LISA', boolKey('espaldaLisa', 'espalda_lisa')),
+    ch('ESP. PLIEGUES', boolKey('espPliegues', 'esp_pliegues')),
+    ch('ESP. TABLÓN CENTR.', boolKey('espTablonCentr', 'esp_tablon_centr')),
+    ch('ESP. PINZAS', boolKey('espPinzas', 'esp_pinzas')),
   ].map((t) => ({ text: t, fontSize: fs8 }))
-  const punoVal = String(cfg.puno ?? 'sencillo').toLowerCase()
-  const punoLines = (['sencillo', 'gemelo', 'mixto', 'mosquetero', 'otro'] as const).map((p) =>
+  // Puño: el dialog guarda `cfg.puno = 'sencillo'|...`; el wizard admin guarda
+  // los booleanos `cfg.puno_sencillo = 'true'` etc.
+  const PUNO_OPTIONS = ['sencillo', 'gemelo', 'mixto', 'mosquetero', 'otro'] as const
+  const punoVal = (() => {
+    const direct = String(cfg.puno ?? '').trim().toLowerCase()
+    if (PUNO_OPTIONS.includes(direct as (typeof PUNO_OPTIONS)[number])) return direct
+    for (const p of PUNO_OPTIONS) if (boolKey(`puno_${p}`)) return p
+    return ''
+  })()
+  const punoLines = PUNO_OPTIONS.map((p) =>
     punoVal === p ? `● PUÑO ${PUNO_LABELS[p] ?? p}` : `○ PUÑO ${PUNO_LABELS[p] ?? p}`
   )
   const inicialesSituacionLabel: Record<string, string> = {
@@ -1032,24 +1060,33 @@ function buildCamiseriaDocDefinition(
     pecho: 'pecho',
     talle: 'talle',
   }
+  // Iniciales:
+  //  - dialog edición / wizard sastre: `cfg.iniciales` es bool y el texto va en `cfg.inicialesTexto`
+  //  - wizard admin: `cfg.iniciales` es directamente el texto, sin booleano
+  const inicialesTexto =
+    strKey('inicialesTexto') ||
+    (typeof cfg.iniciales === 'string' ? String(cfg.iniciales).trim() : '')
+  const inicialesChecked =
+    inicialesTexto !== '' || cfg.iniciales === true || cfg.iniciales === 'true'
+  const inicialesSitu = strKey('inicialesSituacion', 'iniciales_situacion')
+  const inicialesColor = strKey('inicialesColor', 'iniciales_color')
   const inicialesExtras: string[] = []
-  if (cfg.iniciales) {
-    const situ = String(cfg.inicialesSituacion ?? '').trim()
-    if (situ) inicialesExtras.push(inicialesSituacionLabel[situ] ?? situ)
-    const color = String(cfg.inicialesColor ?? '').trim()
-    if (color) inicialesExtras.push(`color ${color}`)
+  if (inicialesChecked) {
+    if (inicialesSitu) inicialesExtras.push(inicialesSituacionLabel[inicialesSitu] ?? inicialesSitu)
+    if (inicialesColor) inicialesExtras.push(`color ${inicialesColor}`)
   }
+  const modCuello = strKey('modCuello', 'mod_cuello') || '—'
   const col4 = [
     {
-      text: cfg.iniciales
-        ? `☑ INICIALES: ${String(cfg.inicialesTexto ?? '').trim() || '—'}`
+      text: inicialesChecked
+        ? `☑ INICIALES: ${inicialesTexto || '—'}`
         : '☐ INICIALES',
       fontSize: fs8,
     },
     ...(inicialesExtras.length
       ? [{ text: `   (${inicialesExtras.join(' · ')})`, fontSize: fs8 }]
       : []),
-    { text: `MOD. CUELLO: ${String(cfg.modCuello ?? '—').trim()}`, fontSize: fs8 },
+    { text: `MOD. CUELLO: ${modCuello}`, fontSize: fs8 },
     ...punoLines.map((t) => ({ text: t, fontSize: fs8 })),
   ]
   const maxRows = Math.max(col1.length, col2.length, col3.length, col4.length)
