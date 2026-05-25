@@ -39,6 +39,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
 import { formatCurrency, formatDate, cn, normalizeSearchTerm } from '@/lib/utils'
+import { formatClientAddress } from '@/lib/clients/format'
 import { downloadExcel, downloadExcelMulti } from '@/lib/excel/export'
 import { toast } from 'sonner'
 import {
@@ -729,9 +730,14 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
                       setSelectedClient(c)
                       if (!c) {
                         setBillTo('client')
-                        setForm(f => ({ ...f, client_id: '', client_name: '', client_nif: '' }))
+                        setForm(f => ({ ...f, client_id: '', client_name: '', client_nif: '', client_address: '', client_email: '', client_phone: '' }))
                         return
                       }
+                      // La dirección/email/teléfono siempre se snapshot-an del
+                      // cliente persona, aunque se facture a una de sus
+                      // empresas. El usuario puede editarlos a mano si la
+                      // empresa tiene otro domicilio.
+                      const clientAddress = formatClientAddress(c)
                       // Si el cliente tiene una empresa por defecto, facturar a esa empresa.
                       const defaultCompany = c.companies.find(cc => cc.is_default)
                       if (defaultCompany) {
@@ -741,6 +747,9 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
                           client_id: c.id,
                           client_name: defaultCompany.company_name,
                           client_nif: defaultCompany.nif ?? '',
+                          client_address: clientAddress,
+                          client_email: c.email ?? '',
+                          client_phone: c.phone ?? '',
                         }))
                       } else {
                         setBillTo('client')
@@ -749,6 +758,9 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
                           client_id: c.id,
                           client_name: c.full_name,
                           client_nif: c.nif ?? '',
+                          client_address: clientAddress,
+                          client_email: c.email ?? '',
+                          client_phone: c.phone ?? '',
                         }))
                       }
                     }}
@@ -1364,9 +1376,10 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                       setSelectedClient(c)
                       if (!c) {
                         setBillTo('client')
-                        setForm(f => ({ ...f, client_id: '', client_name: '', client_nif: '' }))
+                        setForm(f => ({ ...f, client_id: '', client_name: '', client_nif: '', client_address: '', client_email: '', client_phone: '' }))
                         return
                       }
+                      const clientAddress = formatClientAddress(c)
                       const defaultCompany = c.companies.find(cc => cc.is_default)
                       if (defaultCompany) {
                         setBillTo(defaultCompany.id)
@@ -1375,6 +1388,9 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                           client_id: c.id,
                           client_name: defaultCompany.company_name,
                           client_nif: defaultCompany.nif ?? '',
+                          client_address: clientAddress,
+                          client_email: c.email ?? '',
+                          client_phone: c.phone ?? '',
                         }))
                       } else {
                         setBillTo('client')
@@ -1383,6 +1399,9 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                           client_id: c.id,
                           client_name: c.full_name,
                           client_nif: c.nif ?? '',
+                          client_address: clientAddress,
+                          client_email: c.email ?? '',
+                          client_phone: c.phone ?? '',
                         }))
                       }
                     }}

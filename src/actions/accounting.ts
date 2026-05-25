@@ -7,6 +7,7 @@ import { generateInvoicePdf } from '@/lib/pdf/invoice-pdf'
 import { generateEstimatePdf } from '@/lib/pdf/estimate-pdf'
 import { sendEstimateEmail } from '@/lib/email/transactional'
 import { createInvoiceJournalEntry } from '@/actions/accounting-triggers'
+import { formatClientAddress } from '@/lib/clients/format'
 
 export type AccountingSummary = {
   income: number
@@ -552,7 +553,13 @@ export type ClientForInvoice = {
   id: string
   full_name: string
   email: string | null
+  phone: string | null
   nif: string | null
+  address: string | null
+  postal_code: string | null
+  city: string | null
+  province: string | null
+  country: string | null
   companies: ClientForInvoiceCompany[]
 }
 
@@ -572,7 +579,7 @@ export const getClientsForInvoice = protectedAction<{ query?: string } | void, C
 
     const { data } = await ctx.adminClient
       .from('clients')
-      .select('id, first_name, last_name, full_name, email, document_number, client_companies(id, company_name, nif, contact_email, is_default)')
+      .select('id, first_name, last_name, full_name, email, phone, document_number, address, postal_code, city, province, country, client_companies(id, company_name, nif, contact_email, is_default)')
       .or(`full_name.ilike.${pattern},first_name.ilike.${pattern},last_name.ilike.${pattern},email.ilike.${pattern},document_number.ilike.${pattern}`)
       .order('full_name')
       .limit(30)
@@ -592,7 +599,13 @@ export const getClientsForInvoice = protectedAction<{ query?: string } | void, C
         id: String(c.id),
         full_name: String(fn || 'Sin nombre'),
         email: (c.email as string) ?? null,
+        phone: ((c as any).phone as string) ?? null,
         nif: ((c as any).document_number as string) ?? null,
+        address: ((c as any).address as string) ?? null,
+        postal_code: ((c as any).postal_code as string) ?? null,
+        city: ((c as any).city as string) ?? null,
+        province: ((c as any).province as string) ?? null,
+        country: ((c as any).country as string) ?? null,
         companies,
       }
     }))
@@ -608,7 +621,7 @@ export const getClientForInvoiceById = protectedAction<string, ClientForInvoice 
     if (!id) return success(null)
     const { data } = await ctx.adminClient
       .from('clients')
-      .select('id, first_name, last_name, full_name, email, document_number, client_companies(id, company_name, nif, contact_email, is_default)')
+      .select('id, first_name, last_name, full_name, email, phone, document_number, address, postal_code, city, province, country, client_companies(id, company_name, nif, contact_email, is_default)')
       .eq('id', id)
       .maybeSingle()
     if (!data) return success(null)
@@ -628,7 +641,13 @@ export const getClientForInvoiceById = protectedAction<string, ClientForInvoice 
       id: String(c.id),
       full_name: String(fn || 'Sin nombre'),
       email: (c.email as string) ?? null,
+      phone: ((c as any).phone as string) ?? null,
       nif: ((c as any).document_number as string) ?? null,
+      address: ((c as any).address as string) ?? null,
+      postal_code: ((c as any).postal_code as string) ?? null,
+      city: ((c as any).city as string) ?? null,
+      province: ((c as any).province as string) ?? null,
+      country: ((c as any).country as string) ?? null,
       companies,
     })
   }
@@ -1264,14 +1283,14 @@ export const createInvoiceFromSaleAction = protectedAction<
     if (clientId) {
       const { data: client } = await ctx.adminClient
         .from('clients')
-        .select('full_name, company_name, company_nif, document_number, address, email, phone')
+        .select('full_name, company_name, company_nif, document_number, address, postal_code, city, province, country, email, phone')
         .eq('id', clientId)
         .single()
       if (client) {
-        const c = client as { full_name?: string; company_name?: string; company_nif?: string; document_number?: string; address?: string; email?: string; phone?: string }
+        const c = client as { full_name?: string; company_name?: string; company_nif?: string; document_number?: string; address?: string; postal_code?: string; city?: string; province?: string; country?: string; email?: string; phone?: string }
         clientName = c.full_name || c.company_name || clientName
         clientNif = c.company_nif || c.document_number || null
-        clientAddress = c.address || null
+        clientAddress = formatClientAddress(c) || null
         clientEmail = c.email || null
         clientPhone = c.phone || null
       }
@@ -1466,14 +1485,14 @@ export const createInvoiceFromTailoringOrderAction = protectedAction<
     if (clientId) {
       const { data: client } = await ctx.adminClient
         .from('clients')
-        .select('full_name, company_name, company_nif, document_number, address, email, phone')
+        .select('full_name, company_name, company_nif, document_number, address, postal_code, city, province, country, email, phone')
         .eq('id', clientId)
         .single()
       if (client) {
-        const c = client as { full_name?: string; company_name?: string; company_nif?: string; document_number?: string; address?: string; email?: string; phone?: string }
+        const c = client as { full_name?: string; company_name?: string; company_nif?: string; document_number?: string; address?: string; postal_code?: string; city?: string; province?: string; country?: string; email?: string; phone?: string }
         clientName = c.full_name || c.company_name || clientName
         clientNif = c.company_nif || c.document_number || null
-        clientAddress = c.address || null
+        clientAddress = formatClientAddress(c) || null
         clientEmail = c.email || null
         clientPhone = c.phone || null
       }
