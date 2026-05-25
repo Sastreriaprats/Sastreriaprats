@@ -15,7 +15,7 @@ export default async function NewProductPage() {
       .eq('is_active', true)
       .order('sort_order')
       .order('name'),
-    admin.from('suppliers').select('id, name').eq('is_active', true).order('name'),
+    admin.from('suppliers').select('id, name, nif_cif, supplier_code').eq('is_active', true).order('name'),
   ])
   return <NewProductForm categories={categories || []} suppliers={suppliers || []} />
 }

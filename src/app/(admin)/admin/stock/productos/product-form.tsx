@@ -30,6 +30,7 @@ import { ArrowLeft, Plus, Loader2, X, ImagePlus, Sparkles, Star, Eye, EyeOff } f
 import { toast } from 'sonner'
 import { useAction } from '@/hooks/use-action'
 import { usePermissions } from '@/hooks/use-permissions'
+import { SupplierCombobox } from '@/components/admin/supplier-combobox'
 import { createProductAction, updateProductAction, createVariantAction, updateVariantAction, deleteVariantAction, adjustStock, listPhysicalWarehouses, generateProductSkuAction } from '@/actions/products'
 import { listCollectionNames } from '@/actions/product-taxonomies'
 import { listSeasons, type SeasonRow } from '@/actions/seasons'
@@ -133,7 +134,7 @@ export function ProductForm({
   showPageHeader = false,
 }: {
   categories: { id: string; name: string; slug: string; product_type?: string | null; parent_id?: string | null; is_visible_web?: boolean | null }[]
-  suppliers: { id: string; name: string }[]
+  suppliers: { id: string; name: string; nif_cif?: string | null; supplier_code?: string | null }[]
   initialProduct?: any
   onSuccess?: () => void
   onCancel?: () => void
@@ -974,17 +975,12 @@ export function ProductForm({
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>{basico.product_type === 'tailoring_fabric' ? 'Proveedor *' : 'Proveedor'}</Label>
-                  <Select
-                    value={basico.supplier_id}
-                    onValueChange={(v) => setBasico((b) => ({ ...b, supplier_id: v }))}
-                  >
-                    <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
-                    <SelectContent>
-                      {suppliers.map((s) => (
-                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SupplierCombobox
+                    suppliers={suppliers}
+                    value={basico.supplier_id || null}
+                    onChange={(v) => setBasico((b) => ({ ...b, supplier_id: v ?? '' }))}
+                    placeholder="Seleccionar proveedor..."
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Referencia proveedor</Label>

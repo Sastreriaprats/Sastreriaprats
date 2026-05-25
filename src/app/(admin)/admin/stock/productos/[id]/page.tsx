@@ -34,7 +34,7 @@ export default async function ProductDetailPage(props: { params: Promise<{ id: s
       .eq('is_active', true)
       .order('sort_order')
       .order('name'),
-    admin.from('suppliers').select('id, name').eq('is_active', true).order('name'),
+    admin.from('suppliers').select('id, name, nif_cif, supplier_code').eq('is_active', true).order('name'),
     (async () => {
       const { data: physicalStores } = await admin.from('stores').select('id').eq('store_type', 'physical').eq('is_active', true)
       const storeIds = (physicalStores ?? []).map((s: { id: string }) => s.id)

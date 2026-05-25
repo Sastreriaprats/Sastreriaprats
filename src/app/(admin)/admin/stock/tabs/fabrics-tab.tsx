@@ -22,6 +22,7 @@ import { formatCurrency } from '@/lib/utils'
 import { toast } from 'sonner'
 import { EditFabricDialog, type FabricRow } from '@/components/admin/edit-fabric-dialog'
 import { AdjustFabricStockDialog } from '@/components/admin/adjust-fabric-stock-dialog'
+import { SupplierCombobox } from '@/components/admin/supplier-combobox'
 
 export const FabricsTab = forwardRef<{ openNewFabricDialog: () => void }>(function FabricsTab(_, ref) {
   const router = useRouter()
@@ -31,7 +32,7 @@ export const FabricsTab = forwardRef<{ openNewFabricDialog: () => void }>(functi
   const [supplierId, setSupplierId] = useState('all')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('active')
   const [fabrics, setFabrics] = useState<any[]>([])
-  const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([])
+  const [suppliers, setSuppliers] = useState<{ id: string; name: string; nif_cif?: string | null; supplier_code?: string | null }[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [togglingId, setTogglingId] = useState<string | null>(null)
   /** Tejido en edición/visualización. null = dialog cerrado. */
@@ -97,17 +98,16 @@ export const FabricsTab = forwardRef<{ openNewFabricDialog: () => void }>(functi
           />
         </div>
 
-        <Select value={supplierId} onValueChange={setSupplierId}>
-          <SelectTrigger className="h-8 w-[180px] text-sm">
-            <SelectValue placeholder="Proveedor" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos los proveedores</SelectItem>
-            {suppliers.map((s) => (
-              <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <SupplierCombobox
+          suppliers={suppliers}
+          value={supplierId === 'all' ? null : supplierId}
+          onChange={(v) => setSupplierId(v ?? 'all')}
+          allowNone
+          noneLabel="Todos los proveedores"
+          triggerClassName="h-8 w-[200px] text-sm"
+        />
+
+
 
         <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
           <SelectTrigger className="h-8 w-[130px] text-sm">

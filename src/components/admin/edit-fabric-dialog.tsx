@@ -11,9 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select'
+import { SupplierCombobox } from '@/components/admin/supplier-combobox'
 import { updateFabricAction } from '@/actions/fabrics'
 
 /**
@@ -41,7 +39,7 @@ export interface FabricRow {
 
 interface Props {
   fabric: FabricRow | null
-  suppliers: { id: string; name: string }[]
+  suppliers: { id: string; name: string; nif_cif?: string | null; supplier_code?: string | null }[]
   canEdit: boolean
   onClose: () => void
   onSaved: () => void
@@ -195,19 +193,14 @@ export function EditFabricDialog({ fabric, suppliers, canEdit, onClose, onSaved 
 
           <div className="space-y-1.5">
             <Label htmlFor="fabric-supplier">Proveedor</Label>
-            <Select
-              value={form.supplier_id || 'none'}
-              onValueChange={(v) => setField('supplier_id', v === 'none' ? '' : v)}
+            <SupplierCombobox
+              suppliers={suppliers}
+              value={form.supplier_id || null}
+              onChange={(v) => setField('supplier_id', v ?? '')}
+              allowNone
+              noneLabel="Sin proveedor"
               disabled={readonly}
-            >
-              <SelectTrigger id="fabric-supplier"><SelectValue placeholder="Sin proveedor" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Sin proveedor</SelectItem>
-                {suppliers.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
