@@ -41,3 +41,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 import-log.json
+
+# one-shot import reports & local CSVs
+/tmp/
+/scripts/data/
