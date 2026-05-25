@@ -24,6 +24,9 @@ type InvoiceRecord = {
   client_name: string
   client_nif: string | null
   client_address: string | null
+  client_email: string | null
+  client_phone: string | null
+  payment_method: string | null
   company_name: string
   company_nif: string
   company_address: string
@@ -48,6 +51,7 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
   const { data: inv, error: invError } = await admin
     .from('invoices')
     .select(`id, status, invoice_number, client_name, client_nif, client_address,
+      client_email, client_phone, payment_method,
       company_name, company_nif, company_address,
       invoice_date, due_date, subtotal, tax_rate, tax_amount,
       irpf_rate, irpf_amount, total, notes`)
@@ -74,7 +78,7 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
 
   const paymentBlock = buildSectionBox('CONDICIONES DE PAGO', [
     { text: 'Forma de pago:', margin: [8, 6, 8, 2] as [number, number, number, number], fontSize: 9, bold: true },
-    { text: COMPANY.payment.form, margin: [8, 0, 8, 4] as [number, number, number, number], fontSize: 9, color: HEADER_BG },
+    { text: invoice.payment_method || COMPANY.payment.form, margin: [8, 0, 8, 4] as [number, number, number, number], fontSize: 9, color: HEADER_BG },
     { text: 'Nº Cuenta para ingreso:', margin: [8, 4, 8, 2] as [number, number, number, number], fontSize: 9, bold: true },
     { text: `Beneficiario: ${COMPANY.payment.beneficiary}`, margin: [8, 0, 8, 2] as [number, number, number, number], fontSize: 9 },
     { text: `Banco: ${COMPANY.payment.bank}`, margin: [8, 0, 8, 2] as [number, number, number, number], fontSize: 9 },
@@ -87,6 +91,8 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
       clientName: invoice.client_name,
       clientNif: invoice.client_nif,
       clientAddress: invoice.client_address,
+      clientEmail: invoice.client_email,
+      clientPhone: invoice.client_phone,
       label1: 'Fecha:',
       date1: invoice.invoice_date,
       label2: 'Vencimiento:',

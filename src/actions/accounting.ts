@@ -104,6 +104,9 @@ export type InvoiceRow = {
   client_name: string
   client_nif: string | null
   client_address: string | null
+  client_email: string | null
+  client_phone: string | null
+  payment_method: string | null
   invoice_date: string
   due_date: string | null
   total: number
@@ -124,7 +127,7 @@ export const getInvoices = protectedAction<
   async (ctx, { search, status, dateFrom, dateTo }) => {
     let q = ctx.adminClient
       .from('invoices')
-      .select('id, invoice_number, client_id, client_name, client_nif, client_address, invoice_date, due_date, total, tax_rate, irpf_rate, notes, status, pdf_url, sent_to_client, verifactu_sent')
+      .select('id, invoice_number, client_id, client_name, client_nif, client_address, client_email, client_phone, payment_method, invoice_date, due_date, total, tax_rate, irpf_rate, notes, status, pdf_url, sent_to_client, verifactu_sent')
       .eq('invoice_type', 'issued')
       .order('invoice_date', { ascending: false })
 
@@ -141,6 +144,9 @@ export const getInvoices = protectedAction<
       client_name: String(r.client_name ?? ''),
       client_nif: (r.client_nif as string) ?? null,
       client_address: (r.client_address as string) ?? null,
+      client_email: (r.client_email as string) ?? null,
+      client_phone: (r.client_phone as string) ?? null,
+      payment_method: (r.payment_method as string) ?? null,
       invoice_date: String(r.invoice_date ?? ''),
       due_date: (r.due_date as string) ?? null,
       total: Number(r.total ?? 0),
@@ -157,16 +163,21 @@ export const getInvoices = protectedAction<
 
 /** Re-fetch ligero del status actual de una factura (para pre-check antes de
  *  editar — el listado puede estar stale si otro usuario emitió/anuló). */
-export const getInvoiceStatusAction = protectedAction<string, { status: string }>(
+export const getInvoiceStatusAction = protectedAction<string, { status: string; verifactu_sent: boolean; sent_to_client: boolean }>(
   { permission: 'accounting.manage_invoices', auditModule: 'accounting' },
   async (ctx, invoiceId) => {
     const { data, error } = await ctx.adminClient
       .from('invoices')
-      .select('status')
+      .select('status, verifactu_sent, sent_to_client')
       .eq('id', invoiceId)
       .single()
     if (error || !data) return failure('Factura no encontrada', 'NOT_FOUND')
-    return success({ status: String((data as { status?: string }).status ?? '') })
+    const d = data as { status?: string; verifactu_sent?: boolean; sent_to_client?: boolean }
+    return success({
+      status: String(d.status ?? ''),
+      verifactu_sent: d.verifactu_sent === true,
+      sent_to_client: d.sent_to_client === true,
+    })
   }
 )
 
@@ -1032,6 +1043,9 @@ export type CreateInvoiceInput = {
   client_name: string
   client_nif: string | null
   client_address: string | null
+  client_email: string | null
+  client_phone: string | null
+  payment_method: string | null
   invoice_date: string
   due_date: string | null
   subtotal: number
@@ -1046,8 +1060,74 @@ export type CreateInvoiceInput = {
     quantity: number
     unit_price: number
     tax_rate: number
+    discount_percentage?: number
     line_total: number
   }[]
+}
+
+/**
+ * Recalcula totales de factura en SERVIDOR a partir de las líneas.
+ * El cliente envía cifras pero confiamos solo en estas. Aplica
+ * descuento por línea (discount_percentage) y el IRPF global de la
+ * cabecera (irpf_rate). El tax_rate "global" guardado es el de la
+ * primera línea, solo para reporting agregado.
+ *
+ * Fórmula por línea:
+ *   subtotal_línea = unit_price × quantity × (1 - dto/100)
+ *   iva_línea      = subtotal_línea × tax_rate/100
+ *   line_total     = subtotal_línea + iva_línea
+ */
+function recalculateInvoiceTotals(
+  lines: CreateInvoiceInput['lines'],
+  irpfRate: number,
+): {
+  subtotal: number
+  taxAmount: number
+  irpfAmount: number
+  total: number
+  taxRate: number
+  computedLines: Array<{
+    description: string
+    quantity: number
+    unit_price: number
+    tax_rate: number
+    discount_percentage: number
+    line_total: number
+  }>
+} {
+  let subtotal = 0
+  let taxAmount = 0
+  const computedLines = lines.map((l) => {
+    const qty = Number(l.quantity) || 0
+    const price = Number(l.unit_price) || 0
+    const dto = Number(l.discount_percentage ?? 0) || 0
+    const tax = Number(l.tax_rate) || 0
+    const lineSubtotal = price * qty * (1 - dto / 100)
+    const lineTax = lineSubtotal * (tax / 100)
+    const lineTotal = lineSubtotal + lineTax
+    subtotal += lineSubtotal
+    taxAmount += lineTax
+    return {
+      description: l.description,
+      quantity: qty,
+      unit_price: price,
+      tax_rate: tax,
+      discount_percentage: dto,
+      line_total: Math.round(lineTotal * 100) / 100,
+    }
+  })
+  const irpf = Math.max(0, Number(irpfRate) || 0)
+  const irpfAmount = subtotal * (irpf / 100)
+  const total = subtotal + taxAmount - irpfAmount
+  const taxRate = computedLines[0]?.tax_rate ?? 21
+  return {
+    subtotal: Math.round(subtotal * 100) / 100,
+    taxAmount: Math.round(taxAmount * 100) / 100,
+    irpfAmount: Math.round(irpfAmount * 100) / 100,
+    total: Math.round(total * 100) / 100,
+    taxRate,
+    computedLines,
+  }
 }
 
 export const createInvoiceAction = protectedAction<CreateInvoiceInput, { id: string; invoice_number: string }>(
@@ -1067,6 +1147,8 @@ export const createInvoiceAction = protectedAction<CreateInvoiceInput, { id: str
     const seq = String((count ?? 0) + 1).padStart(4, '0')
     const invoice_number = `F${year}-${seq}`
 
+    const recalc = recalculateInvoiceTotals(input.lines, input.irpf_rate)
+
     const { data: inv, error } = await ctx.adminClient
       .from('invoices')
       .insert({
@@ -1077,17 +1159,20 @@ export const createInvoiceAction = protectedAction<CreateInvoiceInput, { id: str
         client_name: input.client_name,
         client_nif: input.client_nif || null,
         client_address: input.client_address || null,
+        client_email: input.client_email || null,
+        client_phone: input.client_phone || null,
+        payment_method: input.payment_method || null,
         company_name: 'Sastrería Prats',
         company_nif: 'B12345678',
         company_address: 'Madrid, España',
         invoice_date: input.invoice_date,
         due_date: input.due_date || null,
-        subtotal: input.subtotal,
-        tax_rate: input.tax_rate,
-        tax_amount: input.tax_amount,
+        subtotal: recalc.subtotal,
+        tax_rate: recalc.taxRate,
+        tax_amount: recalc.taxAmount,
         irpf_rate: input.irpf_rate,
-        irpf_amount: input.irpf_amount,
-        total: input.total,
+        irpf_amount: recalc.irpfAmount,
+        total: recalc.total,
         status: 'draft',
         notes: input.notes || null,
         created_by: ctx.userId,
@@ -1103,12 +1188,13 @@ export const createInvoiceAction = protectedAction<CreateInvoiceInput, { id: str
     const { error: linesError } = await ctx.adminClient
       .from('invoice_lines')
       .insert(
-        input.lines.map((l, i) => ({
+        recalc.computedLines.map((l, i) => ({
           invoice_id: inv.id,
           description: l.description,
           quantity: l.quantity,
           unit_price: l.unit_price,
           tax_rate: l.tax_rate,
+          discount_percentage: l.discount_percentage,
           line_total: l.line_total,
           sort_order: i,
         }))
@@ -1120,7 +1206,7 @@ export const createInvoiceAction = protectedAction<CreateInvoiceInput, { id: str
     }
 
     const displayNumber = `F-${invoice_number}`
-    const auditDescription = `Factura ${displayNumber} · ${Number(input.total).toFixed(2)}€`
+    const auditDescription = `Factura ${displayNumber} · ${recalc.total.toFixed(2)}€`
     return success({ id: inv.id as string, invoice_number, auditDescription })
   }
 )
@@ -1172,18 +1258,22 @@ export const createInvoiceFromSaleAction = protectedAction<
     let clientName = 'Consumidor final'
     let clientNif: string | null = null
     let clientAddress: string | null = null
+    let clientEmail: string | null = null
+    let clientPhone: string | null = null
     const clientId = (sale as { client_id?: string }).client_id ?? null
     if (clientId) {
       const { data: client } = await ctx.adminClient
         .from('clients')
-        .select('full_name, company_name, company_nif, document_number, address')
+        .select('full_name, company_name, company_nif, document_number, address, email, phone')
         .eq('id', clientId)
         .single()
       if (client) {
-        const c = client as { full_name?: string; company_name?: string; company_nif?: string; document_number?: string; address?: string }
+        const c = client as { full_name?: string; company_name?: string; company_nif?: string; document_number?: string; address?: string; email?: string; phone?: string }
         clientName = c.full_name || c.company_name || clientName
         clientNif = c.company_nif || c.document_number || null
         clientAddress = c.address || null
+        clientEmail = c.email || null
+        clientPhone = c.phone || null
       }
     }
 
@@ -1213,6 +1303,8 @@ export const createInvoiceFromSaleAction = protectedAction<
         client_name: clientName,
         client_nif: clientNif,
         client_address: clientAddress,
+        client_email: clientEmail,
+        client_phone: clientPhone,
         company_name: 'Sastrería Prats',
         company_nif: 'B12345678',
         company_address: 'Madrid, España',
@@ -1368,18 +1460,22 @@ export const createInvoiceFromTailoringOrderAction = protectedAction<
     let clientName = 'Consumidor final'
     let clientNif: string | null = null
     let clientAddress: string | null = null
+    let clientEmail: string | null = null
+    let clientPhone: string | null = null
     const clientId = (order as { client_id?: string }).client_id ?? null
     if (clientId) {
       const { data: client } = await ctx.adminClient
         .from('clients')
-        .select('full_name, company_name, company_nif, document_number, address')
+        .select('full_name, company_name, company_nif, document_number, address, email, phone')
         .eq('id', clientId)
         .single()
       if (client) {
-        const c = client as { full_name?: string; company_name?: string; company_nif?: string; document_number?: string; address?: string }
+        const c = client as { full_name?: string; company_name?: string; company_nif?: string; document_number?: string; address?: string; email?: string; phone?: string }
         clientName = c.full_name || c.company_name || clientName
         clientNif = c.company_nif || c.document_number || null
         clientAddress = c.address || null
+        clientEmail = c.email || null
+        clientPhone = c.phone || null
       }
     }
 
@@ -1409,6 +1505,8 @@ export const createInvoiceFromTailoringOrderAction = protectedAction<
         client_name: clientName,
         client_nif: clientNif,
         client_address: clientAddress,
+        client_email: clientEmail,
+        client_phone: clientPhone,
         company_name: 'Sastrería Prats',
         company_nif: 'B12345678',
         company_address: 'Madrid, España',
@@ -1463,13 +1561,28 @@ export type UpdateInvoiceInput = CreateInvoiceInput & { id: string; conceptOnly?
 export const updateInvoiceAction = protectedAction<UpdateInvoiceInput, { id: string }>(
   { permission: 'accounting.manage_invoices', auditModule: 'accounting', auditAction: 'update', auditEntity: 'invoice' },
   async (ctx, input) => {
-    const { data: existing } = await ctx.adminClient.from('invoices').select('status').eq('id', input.id).single()
+    const { data: existing } = await ctx.adminClient
+      .from('invoices')
+      .select('status, verifactu_sent')
+      .eq('id', input.id)
+      .single()
     if (!existing) return failure('Factura no encontrada', 'NOT_FOUND')
     const status = (existing as { status: string }).status
+    const verifactuSent = (existing as { verifactu_sent?: boolean }).verifactu_sent === true
 
-    // Modo "solo concepto": permitido en cualquier estado, solo actualiza
-    // la descripción de cada línea por orden (sort_order). No toca cabecera,
-    // totales, fechas ni pdf_url.
+    // Verifactu lock: si ya está en Hacienda, no se puede tocar nada
+    // (ni siquiera descripciones de líneas). Hay que emitir rectificativa.
+    if (verifactuSent) {
+      return failure(
+        'Esta factura ya fue enviada a Hacienda (Verifactu). No se puede editar — emite una factura rectificativa.',
+        'FORBIDDEN',
+      )
+    }
+
+    // Modo "solo concepto": permitido en estados emitidos (issued/paid/etc.)
+    // siempre que no esté en Verifactu. Solo actualiza la descripción de
+    // cada línea por orden (sort_order). No toca cabecera, totales,
+    // fechas ni pdf_url.
     if (input.conceptOnly) {
       const { data: existingLines, error: linesErr } = await ctx.adminClient
         .from('invoice_lines')
@@ -1494,21 +1607,41 @@ export const updateInvoiceAction = protectedAction<UpdateInvoiceInput, { id: str
       return success({ id: input.id })
     }
 
-    if (status !== 'draft') return failure('Solo se pueden editar facturas en borrador', 'FORBIDDEN')
+    // Estados editables completos (sin Verifactu): draft + ciclo de vida
+    // posterior mientras no se haya enviado a Hacienda. Cancelled/rectified
+    // siguen siendo no editables (solo borrables o readonly).
+    const editableStatuses = ['draft', 'issued', 'paid', 'partially_paid', 'overdue']
+    if (!editableStatuses.includes(status)) {
+      return failure(
+        `No se pueden editar facturas en estado "${status}".`,
+        'FORBIDDEN',
+      )
+    }
+
+    if (!input.lines || input.lines.length === 0) {
+      return failure('La factura necesita al menos una línea', 'VALIDATION')
+    }
+
+    // Recálculo de totales en servidor (fuente de verdad). Ignoramos lo
+    // que envíe el cliente para subtotal/tax_amount/irpf_amount/total.
+    const recalc = recalculateInvoiceTotals(input.lines, input.irpf_rate)
 
     const { error } = await ctx.adminClient.from('invoices').update({
       client_id: input.client_id || null,
       client_name: input.client_name,
       client_nif: input.client_nif || null,
       client_address: input.client_address || null,
+      client_email: input.client_email || null,
+      client_phone: input.client_phone || null,
+      payment_method: input.payment_method || null,
       invoice_date: input.invoice_date,
       due_date: input.due_date || null,
-      subtotal: input.subtotal,
-      tax_rate: input.tax_rate,
-      tax_amount: input.tax_amount,
+      subtotal: recalc.subtotal,
+      tax_rate: recalc.taxRate,
+      tax_amount: recalc.taxAmount,
       irpf_rate: input.irpf_rate,
-      irpf_amount: input.irpf_amount,
-      total: input.total,
+      irpf_amount: recalc.irpfAmount,
+      total: recalc.total,
       notes: input.notes || null,
       pdf_url: null, // regenerar PDF al siguiente acceso
     }).eq('id', input.id)
@@ -1519,14 +1652,15 @@ export const updateInvoiceAction = protectedAction<UpdateInvoiceInput, { id: str
     // por ahora al menos capturamos el error del INSERT — si fallara, las
     // líneas quedan vacías y el sastre lo verá inmediatamente.
     await ctx.adminClient.from('invoice_lines').delete().eq('invoice_id', input.id)
-    if (input.lines.length > 0) {
+    if (recalc.computedLines.length > 0) {
       const { error: insertLinesError } = await ctx.adminClient.from('invoice_lines').insert(
-        input.lines.map((l, i) => ({
+        recalc.computedLines.map((l, i) => ({
           invoice_id: input.id,
           description: l.description,
           quantity: l.quantity,
           unit_price: l.unit_price,
           tax_rate: l.tax_rate,
+          discount_percentage: l.discount_percentage,
           line_total: l.line_total,
           sort_order: i,
         }))

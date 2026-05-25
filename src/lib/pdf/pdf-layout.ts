@@ -84,12 +84,14 @@ export function buildInfoSection(params: {
   clientName: string | null
   clientNif: string | null
   clientAddress: string | null
+  clientEmail?: string | null
+  clientPhone?: string | null
   label1: string
   date1: string | null
   label2?: string
   date2?: string | null
 }): Content[] {
-  const { clientName, clientNif, clientAddress, label1, date1, label2, date2 } = params
+  const { clientName, clientNif, clientAddress, clientEmail, clientPhone, label1, date1, label2, date2 } = params
 
   const infoTable: Content = {
     table: {
@@ -128,7 +130,13 @@ export function buildInfoSection(params: {
             stack: [
               { text: clientName || '—', fontSize: 10, bold: true, color: 'black', margin: [0, 0, 0, 2] as [number, number, number, number] },
               { text: `NIF / CIF: ${clientNif ?? ''}`, fontSize: 9, color: HEADER_BG, margin: [0, 0, 0, 1] as [number, number, number, number] },
-              { text: `Dirección: ${clientAddress ?? ''}`, fontSize: 9, color: HEADER_BG },
+              { text: `Dirección: ${clientAddress ?? ''}`, fontSize: 9, color: HEADER_BG, margin: [0, 0, 0, 1] as [number, number, number, number] },
+              ...(clientEmail
+                ? [{ text: `Email: ${clientEmail}`, fontSize: 9, color: HEADER_BG, margin: [0, 0, 0, 1] as [number, number, number, number] }]
+                : []),
+              ...(clientPhone
+                ? [{ text: `Tel: ${clientPhone}`, fontSize: 9, color: HEADER_BG }]
+                : []),
             ],
             border: [false, false, false, false] as [boolean, boolean, boolean, boolean],
             margin: [0, 4, 0, 10] as [number, number, number, number],

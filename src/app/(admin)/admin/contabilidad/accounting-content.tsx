@@ -30,7 +30,7 @@ import {
   Send, CheckCircle, FileOutput, Trash2, RefreshCw, ArrowUpCircle, Download,
   Receipt, ExternalLink, Package, ClipboardList, Pencil, Calendar, XCircle, Store,
   Check, ChevronsUpDown, Building2, User, MoreHorizontal, Ban,
-  FileSpreadsheet, AlertTriangle,
+  FileSpreadsheet, AlertTriangle, Lock,
 } from 'lucide-react'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -422,7 +422,10 @@ function SummaryTab() {
 
 // ─── Tab: Facturas ───────────────────────────────────────────────────────────
 
-type InvoiceLine = { description: string; quantity: number; unit_price: number; tax_rate: number }
+type InvoiceLine = { description: string; quantity: number; unit_price: number; tax_rate: number; discount_percentage?: number }
+
+const PAYMENT_METHOD_PRESETS = ['Efectivo', 'Tarjeta', 'Transferencia', 'Bizum', 'Cheque', 'Mixto'] as const
+const PAYMENT_METHOD_OTHER = 'Otro'
 
 function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEditConsumed: () => void }) {
   const [rows, setRows] = useState<InvoiceRow[]>([])
@@ -451,6 +454,7 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
   // Form state
   const [form, setForm] = useState({
     client_id: '', client_name: '', client_nif: '', client_address: '',
+    client_email: '', client_phone: '', payment_method: '',
     invoice_date: new Date().toISOString().split('T')[0],
     due_date: '', notes: '', irpf_rate: 0, tax_rate: 21,
   })
@@ -501,7 +505,7 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
     setDialogOpen(true)
   }
 
-  const addLine = () => setLines(l => [...l, { description: '', quantity: 1, unit_price: 0, tax_rate: 21 }])
+  const addLine = () => setLines(l => [...l, { description: '', quantity: 1, unit_price: 0, tax_rate: 21, discount_percentage: 0 }])
   const removeLine = (i: number) => setLines(l => l.filter((_, idx) => idx !== i))
   const updateLine = (i: number, field: keyof InvoiceLine, value: string | number) =>
     setLines(l => l.map((ln, idx) => idx === i ? { ...ln, [field]: value } : ln))
@@ -520,7 +524,7 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
     setLoadingProducts(false)
   }
   const addProductAsLine = (p: { name: string; sku: string; base_price: number }) => {
-    setLines(l => [...l, { description: p.name || p.sku || 'Producto', quantity: 1, unit_price: p.base_price, tax_rate: 21 }])
+    setLines(l => [...l, { description: p.name || p.sku || 'Producto', quantity: 1, unit_price: p.base_price, tax_rate: 21, discount_percentage: 0 }])
     setProductDialogOpen(false)
     setProductSearch('')
   }
@@ -544,14 +548,15 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
       quantity: l.quantity,
       unit_price: l.unit_price,
       tax_rate: l.tax_rate,
+      discount_percentage: 0,
     }))
     setLines(prev => [...prev, ...newLines])
     toast.success(`${newLines.length} línea(s) añadida(s) desde el pedido`)
     setOrderDialogOpen(false)
   }
 
-  const subtotal = lines.reduce((s, l) => s + l.quantity * l.unit_price, 0)
-  const taxAmount = lines.reduce((s, l) => s + l.quantity * l.unit_price * (l.tax_rate / 100), 0)
+  const subtotal = lines.reduce((s, l) => s + l.quantity * l.unit_price * (1 - (l.discount_percentage ?? 0) / 100), 0)
+  const taxAmount = lines.reduce((s, l) => s + l.quantity * l.unit_price * (1 - (l.discount_percentage ?? 0) / 100) * (l.tax_rate / 100), 0)
   const irpfAmount = subtotal * (form.irpf_rate / 100)
   const total = subtotal + taxAmount - irpfAmount
 
@@ -565,6 +570,9 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
         client_name: form.client_name,
         client_nif: form.client_nif || null,
         client_address: form.client_address || null,
+        client_email: form.client_email || null,
+        client_phone: form.client_phone || null,
+        payment_method: form.payment_method || null,
         invoice_date: form.invoice_date,
         due_date: form.due_date || null,
         subtotal,
@@ -574,13 +582,18 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
         irpf_amount: irpfAmount,
         total,
         notes: form.notes || null,
-        lines: lines.map(l => ({
-          description: l.description,
-          quantity: l.quantity,
-          unit_price: l.unit_price,
-          tax_rate: l.tax_rate,
-          line_total: l.quantity * l.unit_price * (1 + l.tax_rate / 100),
-        })),
+        lines: lines.map(l => {
+          const dto = l.discount_percentage ?? 0
+          const lineSubtotal = l.quantity * l.unit_price * (1 - dto / 100)
+          return {
+            description: l.description,
+            quantity: l.quantity,
+            unit_price: l.unit_price,
+            tax_rate: l.tax_rate,
+            discount_percentage: dto,
+            line_total: lineSubtotal * (1 + l.tax_rate / 100),
+          }
+        }),
       })
 
       if (!result.success) {
@@ -592,7 +605,7 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
       toast.success(`Factura ${result.data.invoice_number} creada como borrador`)
       setDialogOpen(false)
       setLines([{ description: '', quantity: 1, unit_price: 0, tax_rate: 21 }])
-      setForm({ client_id: '', client_name: '', client_nif: '', client_address: '', invoice_date: new Date().toISOString().split('T')[0], due_date: '', notes: '', irpf_rate: 0, tax_rate: 21 })
+      setForm({ client_id: '', client_name: '', client_nif: '', client_address: '', client_email: '', client_phone: '', payment_method: '', invoice_date: new Date().toISOString().split('T')[0], due_date: '', notes: '', irpf_rate: 0, tax_rate: 21 })
       load()
     } catch (error) {
       console.error('Error creating invoice:', error)
@@ -788,6 +801,24 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
                   <Label>NIF / CIF</Label>
                   <Input value={form.client_nif} onChange={e => setForm(f => ({ ...f, client_nif: e.target.value }))} />
                 </div>
+                <div className="space-y-1">
+                  <Label>Email</Label>
+                  <Input
+                    type="email"
+                    placeholder="cliente@ejemplo.com"
+                    value={form.client_email}
+                    onChange={e => setForm(f => ({ ...f, client_email: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Teléfono</Label>
+                  <Input
+                    type="tel"
+                    placeholder="+34 600 000 000"
+                    value={form.client_phone}
+                    onChange={e => setForm(f => ({ ...f, client_phone: e.target.value }))}
+                  />
+                </div>
                 <div className="space-y-1 col-span-2">
                   <Label>Dirección de facturación</Label>
                   <Textarea
@@ -796,6 +827,43 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
                     value={form.client_address}
                     onChange={e => setForm(f => ({ ...f, client_address: e.target.value }))}
                   />
+                </div>
+                <div className="space-y-1 col-span-2">
+                  <Label>Forma de pago</Label>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <Select
+                      value={
+                        form.payment_method === ''
+                          ? ''
+                          : (PAYMENT_METHOD_PRESETS as readonly string[]).includes(form.payment_method)
+                            ? form.payment_method
+                            : PAYMENT_METHOD_OTHER
+                      }
+                      onValueChange={v => {
+                        if (v === PAYMENT_METHOD_OTHER) {
+                          setForm(f => ({ ...f, payment_method: (PAYMENT_METHOD_PRESETS as readonly string[]).includes(f.payment_method) ? '' : f.payment_method }))
+                        } else {
+                          setForm(f => ({ ...f, payment_method: v }))
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="w-44"><SelectValue placeholder="Seleccionar…" /></SelectTrigger>
+                      <SelectContent>
+                        {PAYMENT_METHOD_PRESETS.map(m => (
+                          <SelectItem key={m} value={m}>{m}</SelectItem>
+                        ))}
+                        <SelectItem value={PAYMENT_METHOD_OTHER}>{PAYMENT_METHOD_OTHER}…</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {!(PAYMENT_METHOD_PRESETS as readonly string[]).includes(form.payment_method) && (
+                      <Input
+                        className="flex-1 min-w-[180px]"
+                        placeholder="Forma de pago libre"
+                        value={form.payment_method}
+                        onChange={e => setForm(f => ({ ...f, payment_method: e.target.value }))}
+                      />
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <Label>Fecha factura</Label>
@@ -942,6 +1010,11 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
   const s = INVOICE_STATUS[inv.status] ?? INVOICE_STATUS.draft
   const canDelete = inv.status === 'draft' || (inv.status === 'cancelled' && !inv.verifactu_sent)
   const canCancel = ['issued', 'paid', 'partially_paid', 'overdue'].includes(inv.status)
+  // Edición plena: estados activos + sin enviar a Hacienda. cancelled
+  // y rectified quedan fuera (rastro fiscal). verifactu_sent bloquea
+  // todo cambio — solo rectificativa.
+  const canEditFull = !inv.verifactu_sent && ['draft', 'issued', 'paid', 'partially_paid', 'overdue'].includes(inv.status)
+  const isReadonlyLock = inv.verifactu_sent
 
   // ── Estado del formulario de edición ──
   // Defaults precargados desde el registro real (antes pisaba due_date/notes/
@@ -951,6 +1024,9 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
     client_name: inv.client_name,
     client_nif: inv.client_nif ?? '',
     client_address: inv.client_address ?? '',
+    client_email: inv.client_email ?? '',
+    client_phone: inv.client_phone ?? '',
+    payment_method: inv.payment_method ?? '',
     invoice_date: inv.invoice_date,
     due_date: inv.due_date ?? '',
     notes: inv.notes ?? '',
@@ -992,15 +1068,6 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
     setEditOpen(true)
   }
 
-  const openEditConcept = async () => {
-    const r = await getInvoiceLinesAction(inv.id)
-    if (r.success) {
-      setLines(r.data.lines.map(l => ({ description: l.description, quantity: l.quantity, unit_price: l.unit_price, tax_rate: l.tax_rate })))
-    }
-    setConceptOnly(true)
-    setEditOpen(true)
-  }
-
   useEffect(() => {
     if (autoOpenEditId && autoOpenEditId === inv.id && !editOpen) {
       openEdit()
@@ -1009,7 +1076,7 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpenEditId, inv.id])
 
-  const addLine = () => setLines(l => [...l, { description: '', quantity: 1, unit_price: 0, tax_rate: 21 }])
+  const addLine = () => setLines(l => [...l, { description: '', quantity: 1, unit_price: 0, tax_rate: 21, discount_percentage: 0 }])
   const removeLine = (i: number) => setLines(l => l.filter((_, idx) => idx !== i))
   const updateLine = (i: number, field: keyof InvoiceLine, value: string | number) =>
     setLines(l => l.map((ln, idx) => idx === i ? { ...ln, [field]: value } : ln))
@@ -1028,7 +1095,7 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
     setLoadingProducts(false)
   }
   const addProductAsLineEdit = (p: { name: string; sku: string; base_price: number }) => {
-    setLines(l => [...l, { description: p.name || p.sku || 'Producto', quantity: 1, unit_price: p.base_price, tax_rate: 21 }])
+    setLines(l => [...l, { description: p.name || p.sku || 'Producto', quantity: 1, unit_price: p.base_price, tax_rate: 21, discount_percentage: 0 }])
     setProductDialogOpen(false)
     setProductSearch('')
   }
@@ -1044,43 +1111,80 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
     const r = await getTailoringOrderLinesForInvoice(orderId)
     setLoadingOrderLines(false)
     if (!r.success || !r.data.length) { toast.error(!r.success && 'error' in r ? r.error : 'El pedido no tiene líneas'); return }
-    const newLines: InvoiceLine[] = r.data.map(l => ({ description: l.description, quantity: l.quantity, unit_price: l.unit_price, tax_rate: l.tax_rate }))
+    const newLines: InvoiceLine[] = r.data.map(l => ({ description: l.description, quantity: l.quantity, unit_price: l.unit_price, tax_rate: l.tax_rate, discount_percentage: 0 }))
     setLines(prev => [...prev, ...newLines])
     toast.success(`${newLines.length} línea(s) añadida(s) desde el pedido`)
     setOrderDialogOpen(false)
   }
 
-  const subtotal  = lines.reduce((s, l) => s + l.quantity * l.unit_price, 0)
-  const taxAmount = lines.reduce((s, l) => s + l.quantity * l.unit_price * (l.tax_rate / 100), 0)
+  const subtotal  = lines.reduce((s, l) => s + l.quantity * l.unit_price * (1 - (l.discount_percentage ?? 0) / 100), 0)
+  const taxAmount = lines.reduce((s, l) => s + l.quantity * l.unit_price * (1 - (l.discount_percentage ?? 0) / 100) * (l.tax_rate / 100), 0)
   const irpfAmount = subtotal * (form.irpf_rate / 100)
   const total = subtotal + taxAmount - irpfAmount
 
   const handleUpdate = async () => {
     if (!conceptOnly && !form.client_name) { toast.error('Indica el cliente'); return }
 
-    // Pre-check de status: el listado puede estar stale (otro usuario emitió/
-    // anuló/pagó mientras el editor estaba abierto). Re-fetch antes de enviar
-    // para evitar el rechazo 'FORBIDDEN' del server. No aplica a conceptOnly,
-    // que admite editar descripciones en cualquier estado.
-    if (!conceptOnly) {
-      const statusRes = await getInvoiceStatusAction(inv.id)
-      if (statusRes.success && statusRes.data.status !== 'draft') {
-        const label = INVOICE_STATUS[statusRes.data.status]?.label ?? statusRes.data.status
-        toast.warning(`Esta factura ya no está en borrador (estado actual: ${label}). El listado se ha actualizado.`)
-        setEditOpen(false)
-        onRefresh()
-        return
-      }
+    // Pre-check fresco contra BBDD: el listado puede estar stale (otro
+    // usuario envió a Verifactu, anuló, etc. mientras el editor estaba
+    // abierto). Evita el rechazo FORBIDDEN del server y, además, dispara
+    // la advertencia "sent_to_client".
+    const statusRes = await getInvoiceStatusAction(inv.id)
+    if (!statusRes.success) {
+      toast.error('No se pudo verificar el estado actual de la factura')
+      return
+    }
+    const fresh = statusRes.data
+
+    if (fresh.verifactu_sent) {
+      toast.error('Esta factura ya fue enviada a Hacienda. Para corregirla, emite una rectificativa.')
+      setEditOpen(false)
+      onRefresh()
+      return
+    }
+
+    const editableStatuses = ['draft', 'issued', 'paid', 'partially_paid', 'overdue']
+    if (!editableStatuses.includes(fresh.status)) {
+      const label = INVOICE_STATUS[fresh.status]?.label ?? fresh.status
+      toast.warning(`Esta factura ya no se puede editar (estado actual: ${label}). El listado se ha actualizado.`)
+      setEditOpen(false)
+      onRefresh()
+      return
+    }
+
+    // Si ya se envió al cliente, advertir que el PDF cambiará.
+    if (!conceptOnly && fresh.sent_to_client) {
+      const ok = typeof window !== 'undefined'
+        ? window.confirm(
+            'Esta factura ya se envió al cliente.\n\n' +
+            'Si guardas los cambios, el PDF se regenerará y deberás reenviar la versión actualizada al cliente.\n\n' +
+            '¿Continuar?'
+          )
+        : true
+      if (!ok) return
     }
 
     setSaving(true)
     const r = await updateInvoiceAction({
       id: inv.id, client_id: form.client_id || null, client_name: form.client_name,
       client_nif: form.client_nif || null, client_address: form.client_address || null,
+      client_email: form.client_email || null, client_phone: form.client_phone || null,
+      payment_method: form.payment_method || null,
       invoice_date: form.invoice_date, due_date: form.due_date || null,
       subtotal, tax_rate: form.tax_rate, tax_amount: taxAmount, irpf_rate: form.irpf_rate,
       irpf_amount: irpfAmount, total, notes: form.notes || null,
-      lines: lines.map(l => ({ description: l.description, quantity: l.quantity, unit_price: l.unit_price, tax_rate: l.tax_rate, line_total: l.quantity * l.unit_price * (1 + l.tax_rate / 100) })),
+      lines: lines.map(l => {
+        const dto = l.discount_percentage ?? 0
+        const lineSubtotal = l.quantity * l.unit_price * (1 - dto / 100)
+        return {
+          description: l.description,
+          quantity: l.quantity,
+          unit_price: l.unit_price,
+          tax_rate: l.tax_rate,
+          discount_percentage: dto,
+          line_total: lineSubtotal * (1 + l.tax_rate / 100),
+        }
+      }),
       conceptOnly,
     })
     setSaving(false)
@@ -1170,23 +1274,22 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
               <Download className="h-3.5 w-3.5" />
               <span className="hidden sm:inline text-xs">Descargar</span>
             </Button>
-            {inv.status === 'draft' && (
-              <>
-                <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={openEdit}>
-                  <Pencil className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline text-xs">Editar</span>
-                </Button>
-                <Button size="sm" variant="default" className="h-8 gap-1.5 bg-blue-700 hover:bg-blue-800" onClick={handleIssue}>
-                  <Send className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline text-xs">Emitir</span>
-                </Button>
-              </>
-            )}
-            {(inv.status === 'issued' || inv.status === 'paid') && (
-              <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={openEditConcept} title="Editar solo descripciones de las líneas (no toca importes)">
+            {canEditFull && (
+              <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={openEdit}>
                 <Pencil className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline text-xs">Editar concepto</span>
+                <span className="hidden sm:inline text-xs">Editar</span>
               </Button>
+            )}
+            {inv.status === 'draft' && (
+              <Button size="sm" variant="default" className="h-8 gap-1.5 bg-blue-700 hover:bg-blue-800" onClick={handleIssue}>
+                <Send className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline text-xs">Emitir</span>
+              </Button>
+            )}
+            {isReadonlyLock && (
+              <span className="text-xs text-amber-700 font-medium flex items-center gap-1 px-2" title="Factura enviada a Hacienda (Verifactu)">
+                <Lock className="h-3 w-3" /> Hacienda
+              </span>
             )}
             {(inv.status === 'issued' || inv.status === 'overdue') && (
               <Button size="icon" variant="ghost" className="h-8 w-8" onClick={markPaid} title="Marcar como pagada">
@@ -1239,6 +1342,15 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
           </DialogHeader>
           <ScrollArea className="flex-1 pr-1">
             <div className="space-y-4 p-1">
+              {!conceptOnly && inv.status !== 'draft' && (
+                <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                  <div>
+                    Esta factura ya está <strong>emitida</strong> (aún no enviada a Hacienda).
+                    Si la editas, el PDF se regenerará. Una vez se envíe a Verifactu solo podrá corregirse mediante factura rectificativa.
+                  </div>
+                </div>
+              )}
               {!conceptOnly && (() => {
                 const hasCompanies = !!selectedClient && selectedClient.companies.length > 0
                 return (
@@ -1315,6 +1427,24 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                   <Label>NIF / CIF</Label>
                   <Input value={form.client_nif} onChange={e => setForm(f => ({ ...f, client_nif: e.target.value }))} />
                 </div>
+                <div className="space-y-1">
+                  <Label>Email</Label>
+                  <Input
+                    type="email"
+                    placeholder="cliente@ejemplo.com"
+                    value={form.client_email}
+                    onChange={e => setForm(f => ({ ...f, client_email: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Teléfono</Label>
+                  <Input
+                    type="tel"
+                    placeholder="+34 600 000 000"
+                    value={form.client_phone}
+                    onChange={e => setForm(f => ({ ...f, client_phone: e.target.value }))}
+                  />
+                </div>
                 <div className="space-y-1 col-span-2">
                   <Label>Dirección de facturación</Label>
                   <Textarea
@@ -1323,6 +1453,43 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                     value={form.client_address}
                     onChange={e => setForm(f => ({ ...f, client_address: e.target.value }))}
                   />
+                </div>
+                <div className="space-y-1 col-span-2">
+                  <Label>Forma de pago</Label>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <Select
+                      value={
+                        form.payment_method === ''
+                          ? ''
+                          : (PAYMENT_METHOD_PRESETS as readonly string[]).includes(form.payment_method)
+                            ? form.payment_method
+                            : PAYMENT_METHOD_OTHER
+                      }
+                      onValueChange={v => {
+                        if (v === PAYMENT_METHOD_OTHER) {
+                          setForm(f => ({ ...f, payment_method: (PAYMENT_METHOD_PRESETS as readonly string[]).includes(f.payment_method) ? '' : f.payment_method }))
+                        } else {
+                          setForm(f => ({ ...f, payment_method: v }))
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="w-44"><SelectValue placeholder="Seleccionar…" /></SelectTrigger>
+                      <SelectContent>
+                        {PAYMENT_METHOD_PRESETS.map(m => (
+                          <SelectItem key={m} value={m}>{m}</SelectItem>
+                        ))}
+                        <SelectItem value={PAYMENT_METHOD_OTHER}>{PAYMENT_METHOD_OTHER}…</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {!(PAYMENT_METHOD_PRESETS as readonly string[]).includes(form.payment_method) && (
+                      <Input
+                        className="flex-1 min-w-[180px]"
+                        placeholder="Forma de pago libre"
+                        value={form.payment_method}
+                        onChange={e => setForm(f => ({ ...f, payment_method: e.target.value }))}
+                      />
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <Label>Fecha factura</Label>
@@ -1359,13 +1526,17 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                 </div>
                 <div className="space-y-1">
                   <div className="grid grid-cols-12 gap-1 text-xs font-medium text-muted-foreground px-1">
-                    <span className="col-span-5">Descripción</span><span className="col-span-2 text-center">Cant.</span>
-                    <span className="col-span-2 text-center">Precio</span><span className="col-span-2 text-center">IVA %</span><span className="col-span-1" />
+                    <span className="col-span-4">Descripción</span>
+                    <span className="col-span-2 text-center">Cant.</span>
+                    <span className="col-span-2 text-center">Precio</span>
+                    <span className="col-span-1 text-center">Dto %</span>
+                    <span className="col-span-2 text-center">IVA %</span>
+                    <span className="col-span-1" />
                   </div>
                   {lines.map((ln, i) => (
                     <div key={i} className="grid grid-cols-12 gap-1 items-start">
                       <Textarea
-                        className="col-span-5 min-h-[32px] text-sm resize-y py-1"
+                        className="col-span-4 min-h-[32px] text-sm resize-y py-1"
                         value={ln.description}
                         onChange={e => updateLine(i, 'description', e.target.value)}
                         placeholder="Descripción"
@@ -1375,6 +1546,7 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                         <>
                           <span className="col-span-2 text-sm text-center text-muted-foreground self-center">{ln.quantity}</span>
                           <span className="col-span-2 text-sm text-center text-muted-foreground self-center">{formatCurrency(ln.unit_price)}</span>
+                          <span className="col-span-1 text-sm text-center text-muted-foreground self-center">{ln.discount_percentage ?? 0}%</span>
                           <span className="col-span-2 text-sm text-center text-muted-foreground self-center">{ln.tax_rate}%</span>
                           <span className="col-span-1" />
                         </>
@@ -1382,6 +1554,7 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                         <>
                           <Input className="col-span-2 h-8 text-sm text-center" type="number" step={0.01} value={ln.quantity} onChange={e => updateLine(i, 'quantity', Number(e.target.value))} />
                           <Input className="col-span-2 h-8 text-sm text-center" type="number" step={0.01} value={ln.unit_price} onChange={e => updateLine(i, 'unit_price', Number(e.target.value))} />
+                          <Input className="col-span-1 h-8 text-sm text-center" type="number" step={1} min={0} max={100} value={ln.discount_percentage ?? 0} onChange={e => updateLine(i, 'discount_percentage', Number(e.target.value))} />
                           <Input className="col-span-2 h-8 text-sm text-center" type="number" value={ln.tax_rate} onChange={e => updateLine(i, 'tax_rate', Number(e.target.value))} />
                           <Button className="col-span-1 h-8" variant="ghost" size="icon" onClick={() => removeLine(i)} disabled={lines.length === 1}>
                             <Trash2 className="h-3.5 w-3.5 text-red-500" />
