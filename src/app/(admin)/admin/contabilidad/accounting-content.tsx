@@ -450,7 +450,7 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
 
   // Form state
   const [form, setForm] = useState({
-    client_id: '', client_name: '', client_nif: '',
+    client_id: '', client_name: '', client_nif: '', client_address: '',
     invoice_date: new Date().toISOString().split('T')[0],
     due_date: '', notes: '', irpf_rate: 0, tax_rate: 21,
   })
@@ -564,6 +564,7 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
         client_id: form.client_id || null,
         client_name: form.client_name,
         client_nif: form.client_nif || null,
+        client_address: form.client_address || null,
         invoice_date: form.invoice_date,
         due_date: form.due_date || null,
         subtotal,
@@ -591,7 +592,7 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
       toast.success(`Factura ${result.data.invoice_number} creada como borrador`)
       setDialogOpen(false)
       setLines([{ description: '', quantity: 1, unit_price: 0, tax_rate: 21 }])
-      setForm({ client_id: '', client_name: '', client_nif: '', invoice_date: new Date().toISOString().split('T')[0], due_date: '', notes: '', irpf_rate: 0, tax_rate: 21 })
+      setForm({ client_id: '', client_name: '', client_nif: '', client_address: '', invoice_date: new Date().toISOString().split('T')[0], due_date: '', notes: '', irpf_rate: 0, tax_rate: 21 })
       load()
     } catch (error) {
       console.error('Error creating invoice:', error)
@@ -787,6 +788,15 @@ function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEdit
                   <Label>NIF / CIF</Label>
                   <Input value={form.client_nif} onChange={e => setForm(f => ({ ...f, client_nif: e.target.value }))} />
                 </div>
+                <div className="space-y-1 col-span-2">
+                  <Label>Dirección de facturación</Label>
+                  <Textarea
+                    rows={2}
+                    placeholder="Calle, número, código postal, ciudad, país"
+                    value={form.client_address}
+                    onChange={e => setForm(f => ({ ...f, client_address: e.target.value }))}
+                  />
+                </div>
                 <div className="space-y-1">
                   <Label>Fecha factura</Label>
                   <DatePickerPopover value={form.invoice_date} onChange={date => setForm(f => ({ ...f, invoice_date: date }))} />
@@ -930,7 +940,7 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
   const [cancelReason, setCancelReason] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
   const s = INVOICE_STATUS[inv.status] ?? INVOICE_STATUS.draft
-  const canDelete = inv.status === 'draft'
+  const canDelete = inv.status === 'draft' || (inv.status === 'cancelled' && !inv.verifactu_sent)
   const canCancel = ['issued', 'paid', 'partially_paid', 'overdue'].includes(inv.status)
 
   // ── Estado del formulario de edición ──
@@ -940,6 +950,7 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
     client_id: inv.client_id ?? '',
     client_name: inv.client_name,
     client_nif: inv.client_nif ?? '',
+    client_address: inv.client_address ?? '',
     invoice_date: inv.invoice_date,
     due_date: inv.due_date ?? '',
     notes: inv.notes ?? '',
@@ -1065,7 +1076,8 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
     setSaving(true)
     const r = await updateInvoiceAction({
       id: inv.id, client_id: form.client_id || null, client_name: form.client_name,
-      client_nif: form.client_nif || null, invoice_date: form.invoice_date, due_date: form.due_date || null,
+      client_nif: form.client_nif || null, client_address: form.client_address || null,
+      invoice_date: form.invoice_date, due_date: form.due_date || null,
       subtotal, tax_rate: form.tax_rate, tax_amount: taxAmount, irpf_rate: form.irpf_rate,
       irpf_amount: irpfAmount, total, notes: form.notes || null,
       lines: lines.map(l => ({ description: l.description, quantity: l.quantity, unit_price: l.unit_price, tax_rate: l.tax_rate, line_total: l.quantity * l.unit_price * (1 + l.tax_rate / 100) })),
@@ -1194,7 +1206,7 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                       onClick={() => setDeleteOpen(true)}
                       className="text-red-600 focus:text-red-700 focus:bg-red-50"
                     >
-                      <Trash2 className="mr-2 h-4 w-4" /> Eliminar borrador
+                      <Trash2 className="mr-2 h-4 w-4" /> Eliminar
                     </DropdownMenuItem>
                   )}
                   {canCancel && (
@@ -1302,6 +1314,15 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                 <div className="space-y-1">
                   <Label>NIF / CIF</Label>
                   <Input value={form.client_nif} onChange={e => setForm(f => ({ ...f, client_nif: e.target.value }))} />
+                </div>
+                <div className="space-y-1 col-span-2">
+                  <Label>Dirección de facturación</Label>
+                  <Textarea
+                    rows={2}
+                    placeholder="Calle, número, código postal, ciudad, país"
+                    value={form.client_address}
+                    onChange={e => setForm(f => ({ ...f, client_address: e.target.value }))}
+                  />
                 </div>
                 <div className="space-y-1">
                   <Label>Fecha factura</Label>

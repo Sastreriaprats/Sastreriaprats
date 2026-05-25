@@ -103,6 +103,7 @@ export type InvoiceRow = {
   client_id: string | null
   client_name: string
   client_nif: string | null
+  client_address: string | null
   invoice_date: string
   due_date: string | null
   total: number
@@ -112,6 +113,7 @@ export type InvoiceRow = {
   status: string
   pdf_url: string | null
   sent_to_client: boolean
+  verifactu_sent: boolean
 }
 
 export const getInvoices = protectedAction<
@@ -122,7 +124,7 @@ export const getInvoices = protectedAction<
   async (ctx, { search, status, dateFrom, dateTo }) => {
     let q = ctx.adminClient
       .from('invoices')
-      .select('id, invoice_number, client_id, client_name, client_nif, invoice_date, due_date, total, tax_rate, irpf_rate, notes, status, pdf_url, sent_to_client')
+      .select('id, invoice_number, client_id, client_name, client_nif, client_address, invoice_date, due_date, total, tax_rate, irpf_rate, notes, status, pdf_url, sent_to_client, verifactu_sent')
       .eq('invoice_type', 'issued')
       .order('invoice_date', { ascending: false })
 
@@ -138,6 +140,7 @@ export const getInvoices = protectedAction<
       client_id: (r.client_id as string) ?? null,
       client_name: String(r.client_name ?? ''),
       client_nif: (r.client_nif as string) ?? null,
+      client_address: (r.client_address as string) ?? null,
       invoice_date: String(r.invoice_date ?? ''),
       due_date: (r.due_date as string) ?? null,
       total: Number(r.total ?? 0),
@@ -147,6 +150,7 @@ export const getInvoices = protectedAction<
       status: String(r.status ?? 'draft'),
       pdf_url: (r.pdf_url as string) ?? null,
       sent_to_client: Boolean(r.sent_to_client),
+      verifactu_sent: Boolean(r.verifactu_sent),
     })))
   }
 )
@@ -1027,6 +1031,7 @@ export type CreateInvoiceInput = {
   client_id: string | null
   client_name: string
   client_nif: string | null
+  client_address: string | null
   invoice_date: string
   due_date: string | null
   subtotal: number
@@ -1071,6 +1076,7 @@ export const createInvoiceAction = protectedAction<CreateInvoiceInput, { id: str
         client_id: input.client_id || null,
         client_name: input.client_name,
         client_nif: input.client_nif || null,
+        client_address: input.client_address || null,
         company_name: 'Sastrería Prats',
         company_nif: 'B12345678',
         company_address: 'Madrid, España',
@@ -1143,6 +1149,7 @@ export const createInvoiceFromSaleAction = protectedAction<
       .from('invoices')
       .select('id, invoice_number')
       .eq('sale_id', saleId)
+      .not('status', 'in', '(cancelled)')
       .limit(1)
       .maybeSingle()
 
@@ -1164,17 +1171,19 @@ export const createInvoiceFromSaleAction = protectedAction<
 
     let clientName = 'Consumidor final'
     let clientNif: string | null = null
+    let clientAddress: string | null = null
     const clientId = (sale as { client_id?: string }).client_id ?? null
     if (clientId) {
       const { data: client } = await ctx.adminClient
         .from('clients')
-        .select('full_name, company_name, company_nif, document_number')
+        .select('full_name, company_name, company_nif, document_number, address')
         .eq('id', clientId)
         .single()
       if (client) {
-        const c = client as { full_name?: string; company_name?: string; company_nif?: string; document_number?: string }
+        const c = client as { full_name?: string; company_name?: string; company_nif?: string; document_number?: string; address?: string }
         clientName = c.full_name || c.company_name || clientName
         clientNif = c.company_nif || c.document_number || null
+        clientAddress = c.address || null
       }
     }
 
@@ -1203,6 +1212,7 @@ export const createInvoiceFromSaleAction = protectedAction<
         client_id: clientId,
         client_name: clientName,
         client_nif: clientNif,
+        client_address: clientAddress,
         company_name: 'Sastrería Prats',
         company_nif: 'B12345678',
         company_address: 'Madrid, España',
@@ -1357,17 +1367,19 @@ export const createInvoiceFromTailoringOrderAction = protectedAction<
 
     let clientName = 'Consumidor final'
     let clientNif: string | null = null
+    let clientAddress: string | null = null
     const clientId = (order as { client_id?: string }).client_id ?? null
     if (clientId) {
       const { data: client } = await ctx.adminClient
         .from('clients')
-        .select('full_name, company_name, company_nif, document_number')
+        .select('full_name, company_name, company_nif, document_number, address')
         .eq('id', clientId)
         .single()
       if (client) {
-        const c = client as { full_name?: string; company_name?: string; company_nif?: string; document_number?: string }
+        const c = client as { full_name?: string; company_name?: string; company_nif?: string; document_number?: string; address?: string }
         clientName = c.full_name || c.company_name || clientName
         clientNif = c.company_nif || c.document_number || null
+        clientAddress = c.address || null
       }
     }
 
@@ -1396,6 +1408,7 @@ export const createInvoiceFromTailoringOrderAction = protectedAction<
         client_id: clientId,
         client_name: clientName,
         client_nif: clientNif,
+        client_address: clientAddress,
         company_name: 'Sastrería Prats',
         company_nif: 'B12345678',
         company_address: 'Madrid, España',
@@ -1487,6 +1500,7 @@ export const updateInvoiceAction = protectedAction<UpdateInvoiceInput, { id: str
       client_id: input.client_id || null,
       client_name: input.client_name,
       client_nif: input.client_nif || null,
+      client_address: input.client_address || null,
       invoice_date: input.invoice_date,
       due_date: input.due_date || null,
       subtotal: input.subtotal,
@@ -1552,15 +1566,24 @@ export const deleteInvoiceAction = protectedAction<string, { deleted: true }>(
 
     const { data: inv } = await ctx.adminClient
       .from('invoices')
-      .select('id, invoice_number, status')
+      .select('id, invoice_number, status, verifactu_sent')
       .eq('id', invoiceId)
       .single()
     if (!inv) return failure('Factura no encontrada', 'NOT_FOUND')
 
     const status = (inv as { status: string }).status
-    if (status !== 'draft') {
+    const verifactuSent = (inv as { verifactu_sent?: boolean }).verifactu_sent === true
+
+    if (status !== 'draft' && status !== 'cancelled') {
       return failure(
-        'Solo se pueden eliminar facturas en borrador. Para una factura emitida, anúlala (cambio de estado a "cancelada").',
+        'Solo se pueden eliminar borradores o facturas canceladas. Para una factura emitida, anúlala primero.',
+        'CONFLICT',
+      )
+    }
+
+    if (status === 'cancelled' && verifactuSent) {
+      return failure(
+        'Esta factura ya fue enviada a Hacienda (Verifactu). No se puede borrar — debe quedar como rastro fiscal.',
         'CONFLICT',
       )
     }
