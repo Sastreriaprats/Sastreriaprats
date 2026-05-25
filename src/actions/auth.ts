@@ -6,7 +6,7 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import type { UserWithRoles } from '@/lib/types/auth'
-import { sendWelcomeEmail } from '@/lib/email/transactional'
+import { sendWelcomeEmail, sendPasswordReset } from '@/lib/email/transactional'
 import { cookies } from 'next/headers'
 import bcrypt from 'bcryptjs'
 
@@ -801,5 +801,64 @@ export async function getServerProfile(userId: string): Promise<UserWithRoles | 
   } catch (err) {
     console.error('[getServerProfile]', err)
     return null
+  }
+}
+
+// ==========================================
+// SOLICITAR RESTABLECIMIENTO DE CONTRASEÑA (público)
+// ==========================================
+/**
+ * Server action pública. Acepta un email, genera un link de recovery
+ * vía Supabase Admin y lo envía usando la plantilla custom
+ * `password_reset` (branding Prats, español).
+ *
+ * Anti-enumeración: SIEMPRE devuelve éxito al cliente independientemente
+ * de si el email existe en BBDD. Los errores reales se loguean en server.
+ */
+export async function requestPasswordResetAction(
+  rawEmail: string,
+): Promise<{ success: true } | { error: string }> {
+  const parsed = z.string().trim().toLowerCase().email().safeParse(rawEmail)
+  if (!parsed.success) {
+    return { error: 'Email no válido' }
+  }
+  const email = parsed.data
+
+  const publicUrl = process.env.NEXT_PUBLIC_APP_URL
+  if (!publicUrl || publicUrl.trim() === '') {
+    console.error('[requestPasswordResetAction] NEXT_PUBLIC_APP_URL no está configurada — no se puede generar redirectTo')
+    // Mensaje genérico al cliente (no exponemos detalle de configuración).
+    return { success: true }
+  }
+
+  const admin = createAdminClient()
+
+  try {
+    // Comprueba si el email existe en auth.users SIN exponerlo al cliente.
+    // Si no existe, devolvemos éxito igualmente para evitar enumeración.
+    const { data: linkRes, error: linkErr } = await admin.auth.admin.generateLink({
+      type: 'recovery',
+      email,
+      options: { redirectTo: `${publicUrl}/auth/restablecer` },
+    })
+
+    if (linkErr) {
+      // Casos comunes: usuario no existe ("User not found"). Loguear sin
+      // exponer.
+      console.warn('[requestPasswordResetAction] generateLink:', linkErr.message)
+      return { success: true }
+    }
+
+    const actionLink = (linkRes?.properties as { action_link?: string } | null)?.action_link
+    if (!actionLink) {
+      console.error('[requestPasswordResetAction] generateLink no devolvió action_link')
+      return { success: true }
+    }
+
+    await sendPasswordReset(email, actionLink)
+    return { success: true }
+  } catch (err) {
+    console.error('[requestPasswordResetAction] error inesperado:', err)
+    return { success: true }
   }
 }

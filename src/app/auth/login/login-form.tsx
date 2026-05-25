@@ -171,6 +171,12 @@ export function LoginForm({ redirectTo, mode }: LoginFormProps) {
         )}
       </Button>
 
+      <div className="text-center">
+        <Link href="/auth/recuperar" className="text-sm text-prats-navy hover:underline">
+          ¿Olvidaste tu contraseña?
+        </Link>
+      </div>
+
       {lastEmailNotConfirmed && email && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-center">
           <p className="text-xs text-amber-800 mb-2">¿No recibiste el correo?</p>
