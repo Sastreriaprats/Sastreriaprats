@@ -465,6 +465,8 @@ export const createProductAction = protectedAction<any, any>(
           collection: data.collection || null,
           season: data.season || null,
           description: data.description || null,
+          price_per_meter: data.price_with_tax ?? null,
+          min_stock_meters: data.min_stock_alert ?? null,
           stock_meters: metros_iniciales != null ? metros_iniciales : 0,
           is_active: data.is_active !== false,
         })
