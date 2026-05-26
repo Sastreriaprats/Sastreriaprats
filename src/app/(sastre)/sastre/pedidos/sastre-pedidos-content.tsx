@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -38,7 +37,6 @@ function getBadgeClass(status: string): string {
 
 export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
   const router = useRouter()
-  const [localSearch, setLocalSearch] = useState('')
 
   const {
     data: orders,
@@ -46,6 +44,8 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
     totalPages,
     page,
     setPage,
+    search,
+    setSearch,
     sortBy,
     toggleSort,
     isLoading,
@@ -55,17 +55,6 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
     defaultOrder: 'desc',
     defaultFilters: {},
   })
-
-  // Filtrado client-side: número, nombre de cliente y estado (label legible)
-  const q = localSearch.trim().toLowerCase()
-  const visibleOrders = q
-    ? (orders as any[]).filter((o) => {
-        const num = String(o.order_number ?? '').toLowerCase()
-        const name = String(o.clients?.full_name ?? '').toLowerCase()
-        const estado = getOrderStatusLabel(o.status ?? '').toLowerCase()
-        return num.includes(q) || name.includes(q) || estado.includes(q)
-      })
-    : orders
 
   const SortHeader = ({ field, children }: { field: string; children: React.ReactNode }) => (
     <TableHead className="cursor-pointer select-none" onClick={() => toggleSort(field)}>
@@ -94,9 +83,9 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
                 <Input
-                  placeholder="Buscar por número, cliente o estado..."
-                  value={localSearch}
-                  onChange={(e) => setLocalSearch(e.target.value)}
+                  placeholder="Buscar por número o cliente..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
                   className="pl-8 w-72 h-9 bg-white/10 border-[#c9a96e]/30 text-white placeholder:text-white/40"
                 />
               </div>
@@ -116,7 +105,7 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
               <div className="p-8">
                 <Skeleton className="h-64 w-full bg-white/10" />
               </div>
-            ) : (visibleOrders as any[]).length === 0 ? (
+            ) : (orders as any[]).length === 0 ? (
               <div className="p-12 text-center text-white/60">No hay pedidos</div>
             ) : (
               <Table>
@@ -132,7 +121,7 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(visibleOrders as any[]).map((o) => (
+                  {(orders as any[]).map((o) => (
                     <TableRow
                       key={o.id}
                       className="border-[#c9a96e]/10 hover:bg-white/5 cursor-pointer"
