@@ -20,7 +20,8 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { Loader2, Plus, Trash2, Search, Check, X, Scissors } from 'lucide-react'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Loader2, Plus, Trash2, Search, Check, X, Scissors, UserCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { listClients, getClientMeasurements } from '@/actions/clients'
 import { updateOrderAction } from '@/actions/orders'
@@ -50,6 +51,8 @@ type EditableLine = {
   finishing_notes?: string | null
   configuration: Record<string, unknown>
   sort_order: number
+  official_id?: string | null
+  official_name?: string | null
   // Local-only
   _key: string
 }
@@ -123,6 +126,8 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
       finishing_notes: l.finishing_notes ?? '',
       configuration: (l.configuration as Record<string, unknown>) ?? {},
       sort_order: l.sort_order ?? idx,
+      official_id: l.official_id ?? null,
+      official_name: (l.officials?.name as string | undefined) ?? null,
       _key: `existing-${l.id}`,
     })),
   )
@@ -138,6 +143,37 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
   useEffect(() => { fabricsRef.current = fabrics }, [fabrics])
   const [fabricSelectorFor, setFabricSelectorFor] = useState<string | null>(null)
   const [fabricSearch, setFabricSearch] = useState('')
+
+  // Selector de oficial por línea. Mismo patrón que el wizard CREAR
+  // (create-order-wizard.tsx:1212-1244) adaptado al contexto tabla inline:
+  // `officialPopoverFor` identifica la línea cuyo Popover está abierto;
+  // el search/resultados/loading son globales pero sólo se activan mientras
+  // ese popover esté visible.
+  const [officialPopoverFor, setOfficialPopoverFor] = useState<string | null>(null)
+  const [lineOfficialSearch, setLineOfficialSearch] = useState('')
+  const [lineOfficialResults, setLineOfficialResults] = useState<Array<{ id: string; name: string; specialty?: string | null }>>([])
+  const [isSearchingLineOfficial, setIsSearchingLineOfficial] = useState(false)
+
+  useEffect(() => {
+    if (!officialPopoverFor || lineOfficialSearch.length < 2) {
+      setLineOfficialResults([])
+      setIsSearchingLineOfficial(false)
+      return
+    }
+    const timeout = setTimeout(async () => {
+      setIsSearchingLineOfficial(true)
+      const sb = createClient()
+      const { data } = await sb
+        .from('officials')
+        .select('id, name, specialty')
+        .ilike('name', `%${lineOfficialSearch}%`)
+        .eq('is_active', true)
+        .limit(10)
+      if (data) setLineOfficialResults(data as Array<{ id: string; name: string; specialty?: string | null }>)
+      setIsSearchingLineOfficial(false)
+    }, 300)
+    return () => clearTimeout(timeout)
+  }, [lineOfficialSearch, officialPopoverFor])
 
   // Medidas del cliente indexadas por garment_type_id (sólo registros actuales).
   // Las usamos para precargar `configuration` al añadir una línea y al cambiar
@@ -316,6 +352,8 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
         finishing_notes: '',
         configuration: { ...preloadMeasurements },
         sort_order: prev.length,
+        official_id: null,
+        official_name: null,
         _key: `new-${Date.now()}-${Math.random()}`,
       },
     ])
@@ -430,6 +468,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
         finishing_notes: l.finishing_notes || null,
         configuration: l.configuration ?? {},
         sort_order: i,
+        official_id: l.official_id || null,
       })),
     })
     setSaving(false)
@@ -611,6 +650,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                       <TableHead className="w-[200px] text-xs whitespace-nowrap">Tejido</TableHead>
                       <TableHead className="w-[90px] text-xs whitespace-nowrap">Metros</TableHead>
                       <TableHead className="w-[150px] text-xs whitespace-nowrap">Notas acabado</TableHead>
+                      <TableHead className="w-[160px] text-xs whitespace-nowrap">Oficial</TableHead>
                       <TableHead className="w-[40px]" />
                     </TableRow>
                   </TableHeader>
@@ -698,6 +738,81 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                         <TableCell>
                           <Input className="h-8 text-xs"
                             value={l.finishing_notes ?? ''} onChange={(e) => updateLine(l._key, 'finishing_notes', e.target.value)} />
+                        </TableCell>
+                        <TableCell>
+                          <Popover
+                            open={officialPopoverFor === l._key}
+                            onOpenChange={(open) => {
+                              if (open) {
+                                setOfficialPopoverFor(l._key)
+                                setLineOfficialSearch('')
+                                setLineOfficialResults([])
+                              } else if (officialPopoverFor === l._key) {
+                                setOfficialPopoverFor(null)
+                                setLineOfficialSearch('')
+                                setLineOfficialResults([])
+                              }
+                            }}
+                          >
+                            <PopoverTrigger asChild>
+                              <Button variant="outline" size="sm" className="h-8 w-full justify-between text-xs font-normal">
+                                {l.official_id && l.official_name ? (
+                                  <span className="flex items-center gap-1 truncate">
+                                    <UserCheck className="h-3 w-3 text-green-600 shrink-0" />
+                                    <span className="truncate">{l.official_name}</span>
+                                  </span>
+                                ) : (
+                                  <span className="text-muted-foreground">Asignar…</span>
+                                )}
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[280px] p-3" align="start">
+                              <div className="space-y-2">
+                                <Label className="text-xs">Confección por oficial (opcional)</Label>
+                                <div className="relative">
+                                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                  <Input
+                                    placeholder="Buscar oficial..."
+                                    className="pl-9 h-8 text-xs"
+                                    value={lineOfficialSearch}
+                                    onChange={(e) => setLineOfficialSearch(e.target.value)}
+                                    autoFocus
+                                  />
+                                </div>
+                                {isSearchingLineOfficial && <Loader2 className="h-4 w-4 animate-spin mx-auto" />}
+                                {lineOfficialResults.length > 0 && (
+                                  <div className="rounded-lg border divide-y max-h-[150px] overflow-y-auto">
+                                    {lineOfficialResults.map((o) => (
+                                      <div key={o.id}
+                                        className={`flex items-center justify-between p-2 cursor-pointer hover:bg-muted/50 text-xs ${l.official_id === o.id ? 'bg-prats-navy/5' : ''}`}
+                                        onClick={() => {
+                                          updateLine(l._key, 'official_id', o.id)
+                                          updateLine(l._key, 'official_name', o.name)
+                                          setOfficialPopoverFor(null)
+                                          setLineOfficialSearch('')
+                                          setLineOfficialResults([])
+                                        }}>
+                                        <span>{o.name}</span>
+                                        {o.specialty && <span className="text-[10px] text-muted-foreground">{o.specialty}</span>}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                {l.official_id && (
+                                  <div className="flex items-center justify-between rounded-lg border bg-green-50 px-2 py-1.5 text-xs">
+                                    <span className="font-medium truncate">{l.official_name}</span>
+                                    <Button variant="ghost" size="sm" className="h-6 text-[11px] text-destructive shrink-0"
+                                      onClick={() => {
+                                        updateLine(l._key, 'official_id', null)
+                                        updateLine(l._key, 'official_name', null)
+                                      }}>
+                                      Quitar
+                                    </Button>
+                                  </div>
+                                )}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
                         </TableCell>
                         <TableCell>
                           <Button variant="ghost" size="icon" className="h-7 w-7 text-red-600" onClick={() => removeLine(l._key)}>

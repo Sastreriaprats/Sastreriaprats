@@ -784,6 +784,7 @@ const LINE_EDITABLE_FIELDS = [
   'material_cost', 'labor_cost', 'factory_cost',
   'fabric_id', 'fabric_description', 'fabric_meters', 'supplier_id',
   'model_name', 'model_size', 'finishing_notes', 'configuration', 'sort_order',
+  'official_id',
 ] as const
 
 /**
