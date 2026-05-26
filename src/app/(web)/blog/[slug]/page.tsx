@@ -41,7 +41,23 @@ export default async function BlogPostPage({ params }: Props) {
   }
 
   const author = post.profiles as { full_name?: string } | null
-  const body = DOMPurify.sanitize(post.body_es || '')
+
+  // DOMPurify (isomorphic-dompurify) puede fallar en runtime serverless de
+  // Vercel (problema conocido con jsdom). Envolvemos en try/catch para no
+  // devolver 500 si lanza. Fallback: sanitización básica por regex — el HTML
+  // viene del admin autenticado, no de usuarios externos.
+  let body = ''
+  try {
+    body = DOMPurify.sanitize(post.body_es || '')
+  } catch (err) {
+    console.error('[blog/[slug]] DOMPurify falló para slug=' + slug, err)
+    body = (post.body_es || '')
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/\son\w+\s*=\s*"[^"]*"/gi, '')
+      .replace(/\son\w+\s*=\s*'[^']*'/gi, '')
+      .replace(/javascript:/gi, '')
+  }
 
   return (
     <article className="container mx-auto px-4 py-12 sm:py-16">
