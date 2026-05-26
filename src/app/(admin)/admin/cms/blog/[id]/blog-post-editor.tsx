@@ -19,6 +19,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ArrowLeft, Loader2, Save } from 'lucide-react'
 import { toast } from 'sonner'
 
+import { ImageUrlInput } from '@/components/admin/image-url-input'
+import { uploadBlogImage } from '@/lib/blog/upload'
+
 // TipTap (ProseMirror) NO es SSR-safe → dynamic import sin SSR.
 const RichTextEditor = dynamic(
   () => import('@/components/admin/rich-text-editor').then((m) => m.RichTextEditor),
@@ -266,6 +269,7 @@ export function BlogPostEditor({ id }: { id: string }) {
                 <RichTextEditor
                   value={post.body_es}
                   onChange={(html) => updateField('body_es', html)}
+                  onImageUpload={(file) => uploadBlogImage(file, { postKey: post.id || null })}
                   placeholder="Contenido del artículo"
                 />
               </div>
@@ -274,6 +278,7 @@ export function BlogPostEditor({ id }: { id: string }) {
                 <RichTextEditor
                   value={post.body_en}
                   onChange={(html) => updateField('body_en', html)}
+                  onImageUpload={(file) => uploadBlogImage(file, { postKey: post.id || null })}
                   placeholder="Article content"
                 />
               </div>
@@ -304,9 +309,10 @@ export function BlogPostEditor({ id }: { id: string }) {
               </div>
               <div className="space-y-2">
                 <Label>Imagen OG</Label>
-                <Input
+                <ImageUrlInput
                   value={post.og_image_url}
-                  onChange={(e) => updateField('og_image_url', e.target.value)}
+                  onChange={(url) => updateField('og_image_url', url)}
+                  onUpload={(file) => uploadBlogImage(file, { postKey: post.id || null, subfolder: 'og' })}
                   placeholder="URL de la imagen para compartir"
                 />
               </div>
@@ -384,21 +390,12 @@ export function BlogPostEditor({ id }: { id: string }) {
               <CardTitle>Imagen destacada</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label>URL de imagen</Label>
-                <Input
-                  value={post.featured_image_url}
-                  onChange={(e) => updateField('featured_image_url', e.target.value)}
-                  placeholder="https://..."
-                />
-              </div>
-              {post.featured_image_url && (
-                <img
-                  src={post.featured_image_url}
-                  alt="Preview"
-                  className="w-full rounded-md object-cover aspect-video"
-                />
-              )}
+              <ImageUrlInput
+                value={post.featured_image_url}
+                onChange={(url) => updateField('featured_image_url', url)}
+                onUpload={(file) => uploadBlogImage(file, { postKey: post.id || null, subfolder: 'featured' })}
+                placeholder="https://..."
+              />
             </CardContent>
           </Card>
         </div>
