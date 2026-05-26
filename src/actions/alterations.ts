@@ -69,8 +69,25 @@ export const listAlterations = protectedAction<
     if (params.search) {
       const term = normalizeSearchTerm(params.search)
       if (term) {
-        // Búsqueda por número de arreglo (siempre ASCII) o descripción.
-        query = query.or(`alteration_number.ilike.%${term}%,description.ilike.%${term}%`)
+        // Sanitiza caracteres que rompen el parser .or() de PostgREST.
+        const safeTerm = term.replace(/[,()*%:/\\]/g, ' ').trim()
+        if (safeTerm) {
+          // Pre-busca client_ids matcheando contra clients.search_text
+          // (unaccent + lower) — mismo patrón que listOrders.
+          const { data: matchedClients } = await ctx.adminClient
+            .from('clients')
+            .select('id')
+            .ilike('search_text', `%${safeTerm}%`)
+            .limit(500)
+          const clientIds = (matchedClients ?? []).map((r: { id: string }) => r.id)
+          const parts = [
+            `alteration_number.ilike.%${safeTerm}%`,
+            `description.ilike.%${safeTerm}%`,
+            `garment_type.ilike.%${safeTerm}%`,
+          ]
+          if (clientIds.length > 0) parts.push(`client_id.in.(${clientIds.join(',')})`)
+          query = query.or(parts.join(','))
+        }
       }
     }
 

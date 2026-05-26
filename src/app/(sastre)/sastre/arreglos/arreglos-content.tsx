@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { SastreHeader } from '@/app/(sastre)/components/sastre-header'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,7 +14,7 @@ import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import {
   Plus, Search, Loader2, Scissors, ChevronLeft, ChevronRight, FileDown,
 } from 'lucide-react'
-import { formatDate, normalizeSearchTerm } from '@/lib/utils'
+import { formatDate } from '@/lib/utils'
 import { toast } from 'sonner'
 import { useActiveStore } from '@/hooks/use-store'
 import { createClient } from '@/lib/supabase/client'
@@ -48,7 +48,6 @@ const TYPE_LABELS: Record<AlterationType, string> = {
 
 export function ArreglosContent({ sastreName }: { sastreName: string }) {
   const { activeStoreId } = useActiveStore()
-  const [localSearch, setLocalSearch] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
 
   const {
@@ -57,6 +56,8 @@ export function ArreglosContent({ sastreName }: { sastreName: string }) {
     totalPages,
     page,
     setPage,
+    search,
+    setSearch,
     isLoading,
     refresh,
   } = useList(listAlterations, {
@@ -66,21 +67,10 @@ export function ArreglosContent({ sastreName }: { sastreName: string }) {
     defaultFilters: {},
   })
 
-  const visible = useMemo(() => {
-    let result = alterations as AlterationRow[]
-    if (localSearch) {
-      const q = normalizeSearchTerm(localSearch)
-      result = result.filter(a =>
-        normalizeSearchTerm(a.description ?? '').includes(q) ||
-        normalizeSearchTerm(a.clients?.full_name ?? '').includes(q) ||
-        normalizeSearchTerm(a.garment_type ?? '').includes(q) ||
-        normalizeSearchTerm(a.alteration_number ?? '').includes(q) ||
-        normalizeSearchTerm(ALTERATION_STATUS_LABELS[a.status] ?? '').includes(q) ||
-        normalizeSearchTerm(TYPE_LABELS[a.alteration_type] ?? '').includes(q)
-      )
-    }
-    return result
-  }, [alterations, localSearch])
+  // Búsqueda ahora es server-side via params.search del useList.
+  // listAlterations matchea contra alteration_number, description,
+  // garment_type y nombre/teléfono del cliente (vía clients.search_text).
+  const visible = alterations as AlterationRow[]
 
   const handleStatusChange = async (id: string, status: string) => {
     const res = await updateAlterationStatus({ id, status: status as AlterationStatus })
@@ -117,8 +107,8 @@ export function ArreglosContent({ sastreName }: { sastreName: string }) {
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-white/40" />
                 <Input
                   placeholder="Buscar por cliente, número, prenda…"
-                  value={localSearch}
-                  onChange={e => setLocalSearch(e.target.value)}
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
                   className="pl-8 w-72 h-9 bg-white/10 border-[#c9a96e]/30 text-white placeholder:text-white/40"
                 />
               </div>
@@ -139,7 +129,7 @@ export function ArreglosContent({ sastreName }: { sastreName: string }) {
           ) : visible.length === 0 ? (
             <div className="text-center py-16 text-white/50 border border-[#c9a96e]/20 rounded-xl bg-white/5">
               <Scissors className="mx-auto h-10 w-10 mb-3 opacity-30" />
-              <p>No hay arreglos{localSearch ? ` para "${localSearch}"` : ''}</p>
+              <p>No hay arreglos{search ? ` para "${search}"` : ''}</p>
             </div>
           ) : (
             <div className="rounded-xl border border-[#c9a96e]/20 bg-white/5 overflow-hidden">
