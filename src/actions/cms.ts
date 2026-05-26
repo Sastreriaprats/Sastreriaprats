@@ -488,7 +488,7 @@ export const upsertBlogPost = protectedAction<Record<string, unknown>, unknown>(
     auditModule: 'cms',
     auditAction: 'create',
     auditEntity: 'blog_post',
-    revalidate: ['/admin/cms', '/blog'],
+    revalidate: ['/admin/cms', '/blog', '/'],
   },
   async (ctx, input) => {
     const { id, ...postData } = input

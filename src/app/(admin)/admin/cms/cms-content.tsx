@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { listCmsPages, listBlogPosts } from '@/actions/cms'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -62,6 +62,8 @@ type BlogPost = {
 
 export function CmsContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const initialTab = searchParams.get('tab') === 'blog' ? 'blog' : 'pages'
   const [pages, setPages] = useState<CmsPage[]>([])
   const [posts, setPosts] = useState<BlogPost[]>([])
   const [loadingPages, setLoadingPages] = useState(true)
@@ -117,7 +119,7 @@ export function CmsContent() {
         </p>
       </div>
 
-      <Tabs defaultValue="pages">
+      <Tabs defaultValue={initialTab}>
         <TabsList>
           <TabsTrigger value="pages" className="gap-2">
             <FileText className="h-4 w-4" />

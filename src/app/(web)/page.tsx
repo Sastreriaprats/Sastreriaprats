@@ -1,8 +1,9 @@
 import Link from 'next/link'
 import Image from 'next/image'
-import { getHomeContent } from '@/actions/cms'
+import { getHomeContent, getPublicBlogPosts } from '@/actions/cms'
 import { NewsletterForm } from '@/components/web/newsletter-form'
 import { HeroVideo } from '@/components/web/hero-video'
+import { BlogPreview } from '@/components/public/sections/blog-preview'
 import type { Metadata } from 'next'
 
 export const revalidate = 3600
@@ -17,7 +18,10 @@ export const metadata: Metadata = {
 }
 
 export default async function HomePage() {
-  const content = await getHomeContent()
+  const [content, blogPosts] = await Promise.all([
+    getHomeContent(),
+    getPublicBlogPosts(3),
+  ])
 
   const hero = content.hero!
   const categories = content.categories!
@@ -152,6 +156,9 @@ export default async function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* BLOG — últimas noticias */}
+      <BlogPreview posts={blogPosts} />
 
       {/* NEWSLETTER CTA */}
       <section className="bg-prats-navy py-20 md:py-28 px-6">

@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
-  ShoppingBag, Globe, Settings, Package, Mail, ExternalLink, Layout,
+  ShoppingBag, Globe, Settings, Package, Mail, ExternalLink, Layout, BookOpen,
 } from 'lucide-react'
 import { HomeContentEditor } from './home-content-editor'
 import { OnlineOrdersList } from './online-orders-list'
@@ -88,6 +88,18 @@ export function TiendaOnlineContent() {
               <CardContent>
                 <p className="text-sm text-muted-foreground">Plantillas y campañas de email para la tienda.</p>
                 <Button variant="ghost" size="sm" className="mt-2 gap-1">Emails <ExternalLink className="h-3 w-3" /></Button>
+              </CardContent>
+            </Card>
+
+            <Card className="cursor-pointer transition-shadow hover:shadow-md" onClick={() => router.push('/admin/cms?tab=blog')}>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <BookOpen className="h-4 w-4 text-prats-navy" /> Blog
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">Artículos del blog Prats &amp; Co.</p>
+                <Button variant="ghost" size="sm" className="mt-2 gap-1">Gestionar <ExternalLink className="h-3 w-3" /></Button>
               </CardContent>
             </Card>
           </div>
