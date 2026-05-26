@@ -10,12 +10,17 @@ export const revalidate = 600
 export const metadata: Metadata = {
   title: 'Blog',
   description: 'Noticias, consejos y novedades de Sastrería Prats — sastrería de lujo en Madrid.',
+  alternates: {
+    types: {
+      'application/rss+xml': '/feed.xml',
+    },
+  },
 }
 
 export default async function BlogPage() {
-  let posts: any[] = []
+  let posts: Awaited<ReturnType<typeof getPublicBlogPosts>> = []
   try {
-    posts = await getPublicBlogPosts(20) || []
+    posts = (await getPublicBlogPosts(20)) || []
   } catch {
     posts = []
   }
