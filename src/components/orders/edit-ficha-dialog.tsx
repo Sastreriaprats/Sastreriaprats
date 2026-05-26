@@ -17,6 +17,9 @@ import { Loader2, Check, ChevronsUpDown } from 'lucide-react'
 import { toast } from 'sonner'
 import { updateOrderAction } from '@/actions/orders'
 import { listActiveFabricsForFicha } from '@/actions/fabrics'
+import { createClient } from '@/lib/supabase/client'
+
+type OfficialOption = { id: string; name: string; specialty?: string | null }
 
 type Cfg = Record<string, unknown>
 
@@ -496,6 +499,22 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
   const [fabricsStock, setFabricsStock] = useState<Array<{ id: string; fabric_code: string | null; name: string }>>([])
   const [tejidoPopoverOpen, setTejidoPopoverOpen] = useState(false)
 
+  // Selectores buscables para Cortador y Oficial (configuration.cortador /
+  // configuration.oficial en el JSONB de la línea — son strings libres, no FK).
+  // Cortador: officials con specialty ILIKE '%Cortador%'.
+  // Oficial : officials con specialty NOT ILIKE '%Cortador%'.
+  // Permite también texto libre: cualquier texto escrito se preserva en cfg
+  // aunque no matchee a ninguno de la lista.
+  const [cortadorPopoverOpen, setCortadorPopoverOpen] = useState(false)
+  const [cortadorSearch, setCortadorSearch] = useState('')
+  const [cortadorResults, setCortadorResults] = useState<OfficialOption[]>([])
+  const [isSearchingCortador, setIsSearchingCortador] = useState(false)
+
+  const [oficialPopoverOpen, setOficialPopoverOpen] = useState(false)
+  const [oficialSearch, setOficialSearch] = useState('')
+  const [oficialResults, setOficialResults] = useState<OfficialOption[]>([])
+  const [isSearchingOficial, setIsSearchingOficial] = useState(false)
+
   useEffect(() => {
     if (open) {
       setCfg({ ...defaultsFor(type), ...initialCfg })
@@ -511,6 +530,49 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
     }).catch((err) => console.error('[EditFichaDialog] fabrics:', err))
     return () => { cancelled = true }
   }, [open])
+
+  // Búsqueda de cortadores (debounce 300ms cuando hay término; inmediato cuando
+  // está vacío para mostrar la lista por defecto al abrir el Popover).
+  useEffect(() => {
+    if (!cortadorPopoverOpen) return
+    const term = cortadorSearch.trim()
+    const timeout = setTimeout(async () => {
+      setIsSearchingCortador(true)
+      const sb = createClient()
+      let q = sb.from('officials')
+        .select('id, name, specialty')
+        .ilike('specialty', '%Cortador%')
+        .eq('is_active', true)
+        .order('name')
+        .limit(10)
+      if (term) q = q.ilike('name', `%${term}%`)
+      const { data } = await q
+      if (data) setCortadorResults(data as OfficialOption[])
+      setIsSearchingCortador(false)
+    }, term ? 300 : 0)
+    return () => clearTimeout(timeout)
+  }, [cortadorPopoverOpen, cortadorSearch])
+
+  // Búsqueda de oficiales (mismo patrón, excluyendo cortadores).
+  useEffect(() => {
+    if (!oficialPopoverOpen) return
+    const term = oficialSearch.trim()
+    const timeout = setTimeout(async () => {
+      setIsSearchingOficial(true)
+      const sb = createClient()
+      let q = sb.from('officials')
+        .select('id, name, specialty')
+        .not('specialty', 'ilike', '%Cortador%')
+        .eq('is_active', true)
+        .order('name')
+        .limit(10)
+      if (term) q = q.ilike('name', `%${term}%`)
+      const { data } = await q
+      if (data) setOficialResults(data as OfficialOption[])
+      setIsSearchingOficial(false)
+    }, term ? 300 : 0)
+    return () => clearTimeout(timeout)
+  }, [oficialPopoverOpen, oficialSearch])
 
   const set = <T,>(field: string, value: T) => setCfg((prev) => ({ ...prev, [field]: value }))
   const str = (v: unknown) => (v === null || v === undefined ? '' : String(v))
@@ -580,11 +642,135 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div className="space-y-1">
                 <Label>Cortador</Label>
-                <Input value={str(cfg.cortador)} onChange={(e) => set('cortador', e.target.value)} />
+                <Popover
+                  open={cortadorPopoverOpen}
+                  onOpenChange={(open) => {
+                    setCortadorPopoverOpen(open)
+                    if (open) setCortadorSearch(str(cfg.cortador))
+                  }}
+                >
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={cortadorPopoverOpen}
+                      className="w-full justify-between font-normal"
+                    >
+                      <span className="truncate">
+                        {str(cfg.cortador) || <span className="text-muted-foreground">Buscar o escribir cortador...</span>}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="p-0" align="start" style={{ width: 'var(--radix-popover-trigger-width)' }}>
+                    <Command shouldFilter={false}>
+                      <CommandInput
+                        placeholder="Buscar cortador..."
+                        value={cortadorSearch}
+                        onValueChange={(v) => {
+                          setCortadorSearch(v)
+                          // Texto libre: lo escrito se guarda como cfg.cortador
+                          // aunque no matchee a ninguno de la lista.
+                          set('cortador', v)
+                        }}
+                      />
+                      <CommandList>
+                        {isSearchingCortador && <Loader2 className="h-4 w-4 animate-spin mx-auto my-2" />}
+                        <CommandEmpty className="py-3 px-3 text-xs text-muted-foreground">
+                          Sin cortadores con ese texto. Lo escrito se guarda como texto libre.
+                        </CommandEmpty>
+                        <CommandGroup>
+                          {cortadorResults.map((o) => {
+                            const selected = str(cfg.cortador) === o.name
+                            return (
+                              <CommandItem
+                                key={o.id}
+                                value={`${o.name} ${o.specialty ?? ''}`}
+                                onSelect={() => {
+                                  set('cortador', o.name)
+                                  setCortadorSearch(o.name)
+                                  setCortadorPopoverOpen(false)
+                                }}
+                              >
+                                <Check className={`mr-2 h-4 w-4 ${selected ? 'opacity-100' : 'opacity-0'}`} />
+                                <div className="flex items-center justify-between w-full">
+                                  <span>{o.name}</span>
+                                  {o.specialty && <span className="text-xs text-muted-foreground">{o.specialty}</span>}
+                                </div>
+                              </CommandItem>
+                            )
+                          })}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
               <div className="space-y-1">
                 <Label>Oficial</Label>
-                <Input value={str(cfg.oficial)} onChange={(e) => set('oficial', e.target.value)} />
+                <Popover
+                  open={oficialPopoverOpen}
+                  onOpenChange={(open) => {
+                    setOficialPopoverOpen(open)
+                    if (open) setOficialSearch(str(cfg.oficial))
+                  }}
+                >
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={oficialPopoverOpen}
+                      className="w-full justify-between font-normal"
+                    >
+                      <span className="truncate">
+                        {str(cfg.oficial) || <span className="text-muted-foreground">Buscar o escribir oficial...</span>}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="p-0" align="start" style={{ width: 'var(--radix-popover-trigger-width)' }}>
+                    <Command shouldFilter={false}>
+                      <CommandInput
+                        placeholder="Buscar oficial..."
+                        value={oficialSearch}
+                        onValueChange={(v) => {
+                          setOficialSearch(v)
+                          set('oficial', v)
+                        }}
+                      />
+                      <CommandList>
+                        {isSearchingOficial && <Loader2 className="h-4 w-4 animate-spin mx-auto my-2" />}
+                        <CommandEmpty className="py-3 px-3 text-xs text-muted-foreground">
+                          Sin oficiales con ese texto. Lo escrito se guarda como texto libre.
+                        </CommandEmpty>
+                        <CommandGroup>
+                          {oficialResults.map((o) => {
+                            const selected = str(cfg.oficial) === o.name
+                            return (
+                              <CommandItem
+                                key={o.id}
+                                value={`${o.name} ${o.specialty ?? ''}`}
+                                onSelect={() => {
+                                  set('oficial', o.name)
+                                  setOficialSearch(o.name)
+                                  setOficialPopoverOpen(false)
+                                }}
+                              >
+                                <Check className={`mr-2 h-4 w-4 ${selected ? 'opacity-100' : 'opacity-0'}`} />
+                                <div className="flex items-center justify-between w-full">
+                                  <span>{o.name}</span>
+                                  {o.specialty && <span className="text-xs text-muted-foreground">{o.specialty}</span>}
+                                </div>
+                              </CommandItem>
+                            )
+                          })}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
               <div className="space-y-1">
                 <Label>Tejido</Label>
