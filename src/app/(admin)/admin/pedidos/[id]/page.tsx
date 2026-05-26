@@ -31,5 +31,27 @@ export default async function OrderDetailPage(props: { params: Promise<{ id: str
     .single()
 
   if (!order) notFound()
+
+  // Cargar clientMeasurements (mismo patrón que getOrder en actions/orders.ts).
+  // Sin esto, el PDF de Camisería no puede hacer fallback a las medidas vigentes
+  // del cliente cuando line.configuration está vacía.
+  const clientId = order.client_id as string | undefined
+  if (clientId) {
+    const { data: rows } = await admin
+      .from('client_measurements')
+      .select('values')
+      .eq('client_id', clientId)
+      .eq('is_current', true)
+    const merged: Record<string, unknown> = {}
+    for (const r of rows ?? []) {
+      const v = (r as { values?: unknown }).values
+      if (!v || typeof v !== 'object' || Array.isArray(v)) continue
+      for (const [k, val] of Object.entries(v)) {
+        if (val !== null && val !== undefined && val !== '') merged[k] = val
+      }
+    }
+    ;(order as Record<string, unknown>).clientMeasurements = { values: merged }
+  }
+
   return <OrderDetailContent order={order} />
 }
