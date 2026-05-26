@@ -974,10 +974,18 @@ function buildCamiseriaDocDefinition(
   })
 
   // Tabla medidas: una columna por medida (header + valor con fallbacks)
+  const clientMeasValues = (order.clientMeasurements?.values ?? {}) as Record<string, unknown>
   const medidaValues = MEDIDAS_KEYS_CAMISA.map(({ key, fallbacks }) => {
     const candidates = [key, ...fallbacks]
+    // 1) Prioridad: medidas en la propia línea (caso normal)
     for (const k of candidates) {
       const v = cfg[k]
+      if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim()
+    }
+    // 2) Fallback: medidas vigentes del cliente (pedidos creados sin medidas o
+    //    actualizadas después de crear el pedido)
+    for (const k of candidates) {
+      const v = clientMeasValues[k]
       if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim()
     }
     return '—'
