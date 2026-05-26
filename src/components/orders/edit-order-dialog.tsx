@@ -21,7 +21,10 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Loader2, Plus, Trash2, Search, Check, X, Scissors, UserCheck } from 'lucide-react'
+import {
+  Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
+} from '@/components/ui/command'
+import { Loader2, Plus, Trash2, Search, Check, X, Scissors, ChevronsUpDown } from 'lucide-react'
 import { toast } from 'sonner'
 import { listClients, getClientMeasurements } from '@/actions/clients'
 import { updateOrderAction } from '@/actions/orders'
@@ -51,6 +54,16 @@ type EditableLine = {
   finishing_notes?: string | null
   configuration: Record<string, unknown>
   sort_order: number
+  /** Cortador (texto libre o nombre del official con specialty Cortador).
+   *  Vive en configuration.cortador (JSONB) — duplicado en el state local
+   *  por comodidad de edición; el payload re-fusiona con configuration. */
+  cortador?: string
+  /** Oficial (texto libre o nombre del official sin specialty Cortador).
+   *  Vive en configuration.oficial (JSONB). */
+  oficial?: string
+  /** FK durmiente añadida en commit 38199e4. No se usa en producción
+   *  (0 de 332 líneas en BBDD la tienen). Se preserva por si en el futuro
+   *  se decide migrar de JSONB a FK. */
   official_id?: string | null
   official_name?: string | null
   // Local-only
@@ -126,6 +139,8 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
       finishing_notes: l.finishing_notes ?? '',
       configuration: (l.configuration as Record<string, unknown>) ?? {},
       sort_order: l.sort_order ?? idx,
+      cortador: (l.configuration?.cortador as string | undefined) ?? '',
+      oficial: (l.configuration?.oficial as string | undefined) ?? '',
       official_id: l.official_id ?? null,
       official_name: (l.officials?.name as string | undefined) ?? null,
       _key: `existing-${l.id}`,
@@ -144,36 +159,63 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
   const [fabricSelectorFor, setFabricSelectorFor] = useState<string | null>(null)
   const [fabricSearch, setFabricSearch] = useState('')
 
-  // Selector de oficial por línea. Mismo patrón que el wizard CREAR
-  // (create-order-wizard.tsx:1212-1244) adaptado al contexto tabla inline:
-  // `officialPopoverFor` identifica la línea cuyo Popover está abierto;
-  // el search/resultados/loading son globales pero sólo se activan mientras
-  // ese popover esté visible.
-  const [officialPopoverFor, setOfficialPopoverFor] = useState<string | null>(null)
-  const [lineOfficialSearch, setLineOfficialSearch] = useState('')
-  const [lineOfficialResults, setLineOfficialResults] = useState<Array<{ id: string; name: string; specialty?: string | null }>>([])
-  const [isSearchingLineOfficial, setIsSearchingLineOfficial] = useState(false)
+  // Selectores buscables de Cortador y Oficial por línea. Persisten en
+  // configuration.cortador / configuration.oficial (JSONB) — mismo patrón
+  // que edit-ficha-dialog.tsx (commit dd99e31).
+  // `cortadorPopoverFor` / `oficialPopoverFor` identifican qué línea tiene
+  // el popover abierto. Texto libre permitido.
+  type OfficialOption = { id: string; name: string; specialty?: string | null }
+  const [cortadorPopoverFor, setCortadorPopoverFor] = useState<string | null>(null)
+  const [cortadorSearch, setCortadorSearch] = useState('')
+  const [cortadorResults, setCortadorResults] = useState<OfficialOption[]>([])
+  const [isSearchingCortador, setIsSearchingCortador] = useState(false)
 
+  const [oficialPopoverFor, setOficialPopoverFor] = useState<string | null>(null)
+  const [oficialSearch, setOficialSearch] = useState('')
+  const [oficialResults, setOficialResults] = useState<OfficialOption[]>([])
+  const [isSearchingOficial, setIsSearchingOficial] = useState(false)
+
+  // Búsqueda de cortadores (specialty ILIKE '%Cortador%').
   useEffect(() => {
-    if (!officialPopoverFor || lineOfficialSearch.length < 2) {
-      setLineOfficialResults([])
-      setIsSearchingLineOfficial(false)
-      return
-    }
+    if (!cortadorPopoverFor) return
+    const term = cortadorSearch.trim()
     const timeout = setTimeout(async () => {
-      setIsSearchingLineOfficial(true)
+      setIsSearchingCortador(true)
       const sb = createClient()
-      const { data } = await sb
-        .from('officials')
+      let q = sb.from('officials')
         .select('id, name, specialty')
-        .ilike('name', `%${lineOfficialSearch}%`)
+        .ilike('specialty', '%Cortador%')
         .eq('is_active', true)
+        .order('name')
         .limit(10)
-      if (data) setLineOfficialResults(data as Array<{ id: string; name: string; specialty?: string | null }>)
-      setIsSearchingLineOfficial(false)
-    }, 300)
+      if (term) q = q.ilike('name', `%${term}%`)
+      const { data } = await q
+      if (data) setCortadorResults(data as OfficialOption[])
+      setIsSearchingCortador(false)
+    }, term ? 300 : 0)
     return () => clearTimeout(timeout)
-  }, [lineOfficialSearch, officialPopoverFor])
+  }, [cortadorPopoverFor, cortadorSearch])
+
+  // Búsqueda de oficiales (specialty NOT ILIKE '%Cortador%').
+  useEffect(() => {
+    if (!oficialPopoverFor) return
+    const term = oficialSearch.trim()
+    const timeout = setTimeout(async () => {
+      setIsSearchingOficial(true)
+      const sb = createClient()
+      let q = sb.from('officials')
+        .select('id, name, specialty')
+        .not('specialty', 'ilike', '%Cortador%')
+        .eq('is_active', true)
+        .order('name')
+        .limit(10)
+      if (term) q = q.ilike('name', `%${term}%`)
+      const { data } = await q
+      if (data) setOficialResults(data as OfficialOption[])
+      setIsSearchingOficial(false)
+    }, term ? 300 : 0)
+    return () => clearTimeout(timeout)
+  }, [oficialPopoverFor, oficialSearch])
 
   // Medidas del cliente indexadas por garment_type_id (sólo registros actuales).
   // Las usamos para precargar `configuration` al añadir una línea y al cambiar
@@ -352,6 +394,8 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
         finishing_notes: '',
         configuration: { ...preloadMeasurements },
         sort_order: prev.length,
+        cortador: '',
+        oficial: '',
         official_id: null,
         official_name: null,
         _key: `new-${Date.now()}-${Math.random()}`,
@@ -466,7 +510,13 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
         model_name: l.model_name || null,
         model_size: l.model_size || null,
         finishing_notes: l.finishing_notes || null,
-        configuration: l.configuration ?? {},
+        // Fusionamos cortador/oficial dentro del configuration. El JSONB
+        // preserva el resto de campos (medidas, opciones, tejido…).
+        configuration: {
+          ...(l.configuration ?? {}),
+          cortador: l.cortador ?? '',
+          oficial: l.oficial ?? '',
+        },
         sort_order: i,
         official_id: l.official_id || null,
       })),
@@ -650,7 +700,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                       <TableHead className="w-[200px] text-xs whitespace-nowrap">Tejido</TableHead>
                       <TableHead className="w-[90px] text-xs whitespace-nowrap">Metros</TableHead>
                       <TableHead className="w-[150px] text-xs whitespace-nowrap">Notas acabado</TableHead>
-                      <TableHead className="w-[160px] text-xs whitespace-nowrap">Oficial</TableHead>
+                      <TableHead className="w-[200px] text-xs whitespace-nowrap">Cortador / Oficial</TableHead>
                       <TableHead className="w-[40px]" />
                     </TableRow>
                   </TableHeader>
@@ -740,79 +790,140 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                             value={l.finishing_notes ?? ''} onChange={(e) => updateLine(l._key, 'finishing_notes', e.target.value)} />
                         </TableCell>
                         <TableCell>
-                          <Popover
-                            open={officialPopoverFor === l._key}
-                            onOpenChange={(open) => {
-                              if (open) {
-                                setOfficialPopoverFor(l._key)
-                                setLineOfficialSearch('')
-                                setLineOfficialResults([])
-                              } else if (officialPopoverFor === l._key) {
-                                setOfficialPopoverFor(null)
-                                setLineOfficialSearch('')
-                                setLineOfficialResults([])
-                              }
-                            }}
-                          >
-                            <PopoverTrigger asChild>
-                              <Button variant="outline" size="sm" className="h-8 w-full justify-between text-xs font-normal">
-                                {l.official_id && l.official_name ? (
-                                  <span className="flex items-center gap-1 truncate">
-                                    <UserCheck className="h-3 w-3 text-green-600 shrink-0" />
-                                    <span className="truncate">{l.official_name}</span>
-                                  </span>
-                                ) : (
-                                  <span className="text-muted-foreground">Asignar…</span>
-                                )}
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-[280px] p-3" align="start">
-                              <div className="space-y-2">
-                                <Label className="text-xs">Confección por oficial (opcional)</Label>
-                                <div className="relative">
-                                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                                  <Input
-                                    placeholder="Buscar oficial..."
-                                    className="pl-9 h-8 text-xs"
-                                    value={lineOfficialSearch}
-                                    onChange={(e) => setLineOfficialSearch(e.target.value)}
-                                    autoFocus
-                                  />
-                                </div>
-                                {isSearchingLineOfficial && <Loader2 className="h-4 w-4 animate-spin mx-auto" />}
-                                {lineOfficialResults.length > 0 && (
-                                  <div className="rounded-lg border divide-y max-h-[150px] overflow-y-auto">
-                                    {lineOfficialResults.map((o) => (
-                                      <div key={o.id}
-                                        className={`flex items-center justify-between p-2 cursor-pointer hover:bg-muted/50 text-xs ${l.official_id === o.id ? 'bg-prats-navy/5' : ''}`}
-                                        onClick={() => {
-                                          updateLine(l._key, 'official_id', o.id)
-                                          updateLine(l._key, 'official_name', o.name)
-                                          setOfficialPopoverFor(null)
-                                          setLineOfficialSearch('')
-                                          setLineOfficialResults([])
-                                        }}>
-                                        <span>{o.name}</span>
-                                        {o.specialty && <span className="text-[10px] text-muted-foreground">{o.specialty}</span>}
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                                {l.official_id && (
-                                  <div className="flex items-center justify-between rounded-lg border bg-green-50 px-2 py-1.5 text-xs">
-                                    <span className="font-medium truncate">{l.official_name}</span>
-                                    <Button variant="ghost" size="sm" className="h-6 text-[11px] text-destructive shrink-0"
-                                      onClick={() => {
-                                        updateLine(l._key, 'official_id', null)
-                                        updateLine(l._key, 'official_name', null)
-                                      }}>
-                                      Quitar
-                                    </Button>
-                                  </div>
-                                )}
-                              </div>
-                            </PopoverContent>
-                          </Popover>
+                          <div className="space-y-1">
+                            {/* Cortador */}
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] text-muted-foreground w-12 shrink-0">Cort.</span>
+                              <Popover
+                                open={cortadorPopoverFor === l._key}
+                                onOpenChange={(open) => {
+                                  if (open) {
+                                    setCortadorPopoverFor(l._key)
+                                    setCortadorSearch(l.cortador ?? '')
+                                  } else if (cortadorPopoverFor === l._key) {
+                                    setCortadorPopoverFor(null)
+                                    setCortadorSearch('')
+                                    setCortadorResults([])
+                                  }
+                                }}
+                              >
+                                <PopoverTrigger asChild>
+                                  <Button variant="outline" size="sm" className="h-7 flex-1 justify-between text-[11px] font-normal min-w-0">
+                                    <span className="truncate">
+                                      {l.cortador ? l.cortador : <span className="text-muted-foreground">Seleccionar…</span>}
+                                    </span>
+                                    <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-50" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="p-0 w-[240px]" align="start">
+                                  <Command shouldFilter={false}>
+                                    <CommandInput
+                                      placeholder="Buscar cortador..."
+                                      value={cortadorSearch}
+                                      onValueChange={(v) => {
+                                        setCortadorSearch(v)
+                                        updateLine(l._key, 'cortador', v)
+                                      }}
+                                    />
+                                    <CommandList>
+                                      {isSearchingCortador && <Loader2 className="h-3 w-3 animate-spin mx-auto my-2" />}
+                                      <CommandEmpty className="py-2 px-3 text-[11px] text-muted-foreground">
+                                        Sin cortadores. Texto libre se guarda.
+                                      </CommandEmpty>
+                                      <CommandGroup>
+                                        {cortadorResults.map((o) => {
+                                          const selected = l.cortador === o.name
+                                          return (
+                                            <CommandItem
+                                              key={o.id}
+                                              value={`${o.name} ${o.specialty ?? ''}`}
+                                              onSelect={() => {
+                                                updateLine(l._key, 'cortador', o.name)
+                                                setCortadorSearch(o.name)
+                                                setCortadorPopoverFor(null)
+                                              }}
+                                            >
+                                              <Check className={`mr-2 h-3 w-3 ${selected ? 'opacity-100' : 'opacity-0'}`} />
+                                              <div className="flex items-center justify-between w-full text-xs">
+                                                <span>{o.name}</span>
+                                                {o.specialty && <span className="text-[10px] text-muted-foreground">{o.specialty}</span>}
+                                              </div>
+                                            </CommandItem>
+                                          )
+                                        })}
+                                      </CommandGroup>
+                                    </CommandList>
+                                  </Command>
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+                            {/* Oficial */}
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] text-muted-foreground w-12 shrink-0">Ofic.</span>
+                              <Popover
+                                open={oficialPopoverFor === l._key}
+                                onOpenChange={(open) => {
+                                  if (open) {
+                                    setOficialPopoverFor(l._key)
+                                    setOficialSearch(l.oficial ?? '')
+                                  } else if (oficialPopoverFor === l._key) {
+                                    setOficialPopoverFor(null)
+                                    setOficialSearch('')
+                                    setOficialResults([])
+                                  }
+                                }}
+                              >
+                                <PopoverTrigger asChild>
+                                  <Button variant="outline" size="sm" className="h-7 flex-1 justify-between text-[11px] font-normal min-w-0">
+                                    <span className="truncate">
+                                      {l.oficial ? l.oficial : <span className="text-muted-foreground">Seleccionar…</span>}
+                                    </span>
+                                    <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-50" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="p-0 w-[240px]" align="start">
+                                  <Command shouldFilter={false}>
+                                    <CommandInput
+                                      placeholder="Buscar oficial..."
+                                      value={oficialSearch}
+                                      onValueChange={(v) => {
+                                        setOficialSearch(v)
+                                        updateLine(l._key, 'oficial', v)
+                                      }}
+                                    />
+                                    <CommandList>
+                                      {isSearchingOficial && <Loader2 className="h-3 w-3 animate-spin mx-auto my-2" />}
+                                      <CommandEmpty className="py-2 px-3 text-[11px] text-muted-foreground">
+                                        Sin oficiales. Texto libre se guarda.
+                                      </CommandEmpty>
+                                      <CommandGroup>
+                                        {oficialResults.map((o) => {
+                                          const selected = l.oficial === o.name
+                                          return (
+                                            <CommandItem
+                                              key={o.id}
+                                              value={`${o.name} ${o.specialty ?? ''}`}
+                                              onSelect={() => {
+                                                updateLine(l._key, 'oficial', o.name)
+                                                setOficialSearch(o.name)
+                                                setOficialPopoverFor(null)
+                                              }}
+                                            >
+                                              <Check className={`mr-2 h-3 w-3 ${selected ? 'opacity-100' : 'opacity-0'}`} />
+                                              <div className="flex items-center justify-between w-full text-xs">
+                                                <span>{o.name}</span>
+                                                {o.specialty && <span className="text-[10px] text-muted-foreground">{o.specialty}</span>}
+                                              </div>
+                                            </CommandItem>
+                                          )
+                                        })}
+                                      </CommandGroup>
+                                    </CommandList>
+                                  </Command>
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+                          </div>
                         </TableCell>
                         <TableCell>
                           <Button variant="ghost" size="icon" className="h-7 w-7 text-red-600" onClick={() => removeLine(l._key)}>
