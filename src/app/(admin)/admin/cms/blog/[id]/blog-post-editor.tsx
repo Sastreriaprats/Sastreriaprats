@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
 import { getBlogPost, upsertBlogPost } from '@/actions/cms'
 import { Button } from '@/components/ui/button'
@@ -17,6 +18,17 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ArrowLeft, Loader2, Save } from 'lucide-react'
 import { toast } from 'sonner'
+
+// TipTap (ProseMirror) NO es SSR-safe → dynamic import sin SSR.
+const RichTextEditor = dynamic(
+  () => import('@/components/admin/rich-text-editor').then((m) => m.RichTextEditor),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="rounded-md border bg-muted/30" style={{ minHeight: 360 }} />
+    ),
+  },
+)
 
 type BlogPost = {
   id?: string
@@ -251,22 +263,18 @@ export function BlogPostEditor({ id }: { id: string }) {
               </div>
               <div className="space-y-2">
                 <Label>Cuerpo (ES)</Label>
-                <Textarea
+                <RichTextEditor
                   value={post.body_es}
-                  onChange={(e) => updateField('body_es', e.target.value)}
-                  placeholder="Contenido del artículo (Markdown)"
-                  rows={12}
-                  className="font-mono text-sm"
+                  onChange={(html) => updateField('body_es', html)}
+                  placeholder="Contenido del artículo"
                 />
               </div>
               <div className="space-y-2">
                 <Label>Cuerpo (EN)</Label>
-                <Textarea
+                <RichTextEditor
                   value={post.body_en}
-                  onChange={(e) => updateField('body_en', e.target.value)}
-                  placeholder="Article content (Markdown)"
-                  rows={12}
-                  className="font-mono text-sm"
+                  onChange={(html) => updateField('body_en', html)}
+                  placeholder="Article content"
                 />
               </div>
             </CardContent>
