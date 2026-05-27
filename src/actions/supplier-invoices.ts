@@ -515,6 +515,15 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
         await ctx.adminClient.from(TABLE).delete().eq('id', data.id)
         return failure(linkErr.message || 'Error al vincular albaranes', 'INTERNAL')
       }
+
+      // Auto-marcar albaranes vinculados como recibidos.
+      // Solo afecta a los que estén en 'pendiente' — evita enmascarar
+      // incidencias u otros estados intermedios.
+      await ctx.adminClient
+        .from('supplier_delivery_notes')
+        .update({ status: 'recibido' })
+        .in('id', deliveryNoteIds)
+        .eq('status', 'pendiente')
     }
 
     // Generar cuotas de vencimiento. Si el formulario manda cuotas explícitas
@@ -628,6 +637,15 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
       }))
       const { error: insErr } = await ctx.adminClient.from(LINK_TABLE).insert(rows)
       if (insErr) return failure(insErr.message || 'Error al vincular albaranes', 'INTERNAL')
+
+      // Auto-marcar albaranes vinculados como recibidos.
+      // Solo afecta a los que estén en 'pendiente' — evita enmascarar
+      // incidencias u otros estados intermedios.
+      await ctx.adminClient
+        .from('supplier_delivery_notes')
+        .update({ status: 'recibido' })
+        .in('id', deliveryNoteIds)
+        .eq('status', 'pendiente')
     }
 
     // Regenerar cuotas. Si ya existen cuotas pagadas las conservamos porque el
