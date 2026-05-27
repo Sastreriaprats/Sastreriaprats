@@ -17,6 +17,7 @@ import {
   CircleDollarSign,
   Scissors,
   MapPin,
+  UserCheck,
 } from 'lucide-react'
 import { useActiveStore } from '@/hooks/use-store'
 import {
@@ -118,6 +119,10 @@ export function SastreLayoutWithSidebar({ sastreName, isSastrePlus = false, chil
           <Link href="/sastre/pedidos" className={navClass(pathname === '/sastre/pedidos' || pathname.startsWith('/sastre/pedidos'))}>
             <ListOrdered className="h-5 w-5 shrink-0" />
             <span className="text-center leading-tight">Pedidos</span>
+          </Link>
+          <Link href="/sastre/oficiales" className={navClass(pathname === '/sastre/oficiales' || pathname.startsWith('/sastre/oficiales'))}>
+            <UserCheck className="h-5 w-5 shrink-0" />
+            <span className="text-center leading-tight">Oficiales</span>
           </Link>
           {isSastrePlus && (
             <>

@@ -125,3 +125,146 @@ export const getOfficialsLoad = protectedAction<void, OfficialLoad[]>(
     return success(result)
   }
 )
+
+export type OfficialInProgressItem = {
+  line_id: string
+  order_id: string
+  order_number: string
+  order_type: string
+  status: string // 'in_production' | 'in_fitting'
+  client_name: string
+  garment_type: string
+  fabric_name: string | null
+  model_name: string | null
+  estimated_delivery_date: string | null
+  days_in_progress: number
+}
+
+export type OfficialInProgress = {
+  official: { id: string; name: string; specialty: string | null } | null
+  asCortador: OfficialInProgressItem[]
+  asOficial: OfficialInProgressItem[]
+}
+
+/**
+ * Devuelve las prendas en proceso de un oficial concreto, separadas por
+ * rol (cortador / oficial). Misma lógica de "en proceso" que getOfficialsLoad:
+ *  - Artesanal/camiseria: estados in_production, in_fitting
+ *  - Industrial/camiseria_industrial: solo in_production
+ *
+ * Días en proceso: aproximación con `tailoring_orders.updated_at`. Si se
+ * requiere precisión exacta (cuándo entró al estado actual), habría que
+ * consultar `tailoring_order_state_history`. Para el alcance actual basta.
+ */
+export const getOfficialInProgressItems = protectedAction<
+  string,
+  OfficialInProgress
+>(
+  { permission: 'officials.view', auditModule: 'officials' },
+  async (ctx, officialId) => {
+    if (!officialId?.trim()) return failure('officialId requerido', 'VALIDATION')
+
+    // 1. Cargar el oficial
+    const { data: official, error: officialErr } = await ctx.adminClient
+      .from('officials')
+      .select('id, name, specialty')
+      .eq('id', officialId)
+      .maybeSingle()
+    if (officialErr) return failure(officialErr.message)
+    if (!official) return failure('Oficial no encontrado', 'NOT_FOUND')
+
+    const normalizedName = normalizeName((official as { name: string }).name)
+
+    // 2. Líneas en pedidos activos con todos los datos necesarios
+    const { data: linesRows, error: linesErr } = await ctx.adminClient
+      .from('tailoring_order_lines')
+      .select(
+        'id, configuration, model_name, fabric_description, ' +
+          'garment_types(name), ' +
+          'fabrics(name, fabric_code), ' +
+          'tailoring_orders!inner(id, order_number, order_type, status, estimated_delivery_date, updated_at, clients(full_name, first_name, last_name))'
+      )
+      .in('tailoring_orders.status', ['in_production', 'in_fitting'])
+    if (linesErr) return failure(linesErr.message)
+
+    type LineRow = {
+      id: string
+      configuration: { cortador?: string; oficial?: string } | null
+      model_name: string | null
+      fabric_description: string | null
+      garment_types: { name: string } | { name: string }[] | null
+      fabrics: { name: string | null; fabric_code: string | null } | { name: string | null; fabric_code: string | null }[] | null
+      tailoring_orders:
+        | { id: string; order_number: string; order_type: string; status: string; estimated_delivery_date: string | null; updated_at: string; clients: { full_name: string | null; first_name: string | null; last_name: string | null } | { full_name: string | null; first_name: string | null; last_name: string | null }[] | null }
+        | null
+    }
+
+    const lines = (linesRows ?? []) as unknown as LineRow[]
+
+    const asCortador: OfficialInProgressItem[] = []
+    const asOficial: OfficialInProgressItem[] = []
+    const now = Date.now()
+
+    for (const l of lines) {
+      const parent = Array.isArray(l.tailoring_orders) ? l.tailoring_orders[0] : l.tailoring_orders
+      if (!parent) continue
+
+      const isArtesanal = ARTESANAL_TYPES.has(parent.order_type)
+      const isIndustrial = INDUSTRIAL_TYPES.has(parent.order_type)
+      if (isIndustrial && parent.status !== 'in_production') continue
+      if (!isArtesanal && !isIndustrial) continue
+
+      const lineCortador = normalizeName(l.configuration?.cortador)
+      const lineOficial = normalizeName(l.configuration?.oficial)
+      const matchesCortador = lineCortador === normalizedName
+      const matchesOficial = lineOficial === normalizedName
+      if (!matchesCortador && !matchesOficial) continue
+
+      const client = Array.isArray(parent.clients) ? parent.clients[0] : parent.clients
+      const clientName =
+        client?.full_name ||
+        [client?.first_name, client?.last_name].filter(Boolean).join(' ') ||
+        'Cliente'
+
+      const gt = Array.isArray(l.garment_types) ? l.garment_types[0] : l.garment_types
+      const garmentType = gt?.name || 'Prenda'
+
+      const fabric = Array.isArray(l.fabrics) ? l.fabrics[0] : l.fabrics
+      const fabricName = fabric?.name || fabric?.fabric_code || l.fabric_description || null
+
+      const updatedAt = new Date(parent.updated_at).getTime()
+      const daysInProgress = Number.isFinite(updatedAt)
+        ? Math.max(0, Math.floor((now - updatedAt) / (24 * 60 * 60 * 1000)))
+        : 0
+
+      const item: OfficialInProgressItem = {
+        line_id: l.id,
+        order_id: parent.id,
+        order_number: parent.order_number,
+        order_type: parent.order_type,
+        status: parent.status,
+        client_name: clientName,
+        garment_type: garmentType,
+        fabric_name: fabricName,
+        model_name: l.model_name,
+        estimated_delivery_date: parent.estimated_delivery_date,
+        days_in_progress: daysInProgress,
+      }
+
+      // Una misma línea puede asignarle al oficial los dos roles (cortador y
+      // oficial). En ese caso aparece en ambas secciones por diseño.
+      if (matchesCortador) asCortador.push(item)
+      if (matchesOficial) asOficial.push(item)
+    }
+
+    // Ordenar por días en proceso (descendente: lo más antiguo primero)
+    asCortador.sort((a, b) => b.days_in_progress - a.days_in_progress)
+    asOficial.sort((a, b) => b.days_in_progress - a.days_in_progress)
+
+    return success({
+      official: official as { id: string; name: string; specialty: string | null },
+      asCortador,
+      asOficial,
+    })
+  }
+)

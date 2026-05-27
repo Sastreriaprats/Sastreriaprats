@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { getOfficialsLoad, type OfficialLoad } from '@/actions/officials'
 import { Button } from '@/components/ui/button'
@@ -317,12 +318,13 @@ export function OfficialsPageContent() {
                           return <Badge variant="outline" className="text-xs font-normal text-muted-foreground">0</Badge>
                         }
                         return (
-                          <span
-                            className="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-xs font-semibold bg-prats-navy text-white min-w-[2rem]"
+                          <Link
+                            href={`/admin/oficiales/${o.id}`}
+                            className="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-xs font-semibold bg-prats-navy text-white hover:bg-prats-navy/80 transition-colors min-w-[2rem]"
                             title={`${load.asCortador} como cortador · ${load.asOficial} como oficial`}
                           >
                             {load.total}
-                          </span>
+                          </Link>
                         )
                       })()}
                     </TableCell>
