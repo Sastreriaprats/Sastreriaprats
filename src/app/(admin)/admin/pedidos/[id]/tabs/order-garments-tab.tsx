@@ -12,15 +12,7 @@ import { generateFichaForLine, generateFichaForLineCamiseria } from '@/lib/pdf/f
 import { EditFichaDialog } from '@/components/orders/edit-ficha-dialog'
 import { usePermissions } from '@/hooks/use-permissions'
 import { toast } from 'sonner'
-
-type LineGroup = 'sastreria' | 'camiseria' | 'complemento'
-
-function getLineGroup(line: any): LineGroup {
-  const cfg = line?.configuration ?? {}
-  if (cfg.product_name !== undefined) return 'complemento'
-  if (cfg.tipo === 'camiseria' || cfg.puno !== undefined) return 'camiseria'
-  return 'sastreria'
-}
+import { getLineGroup, type LineGroup } from '@/lib/orders/line-groups'
 
 const LOCKED_STATUSES = new Set(['delivered', 'cancelled'])
 
@@ -35,7 +27,7 @@ export function OrderGarmentsTab({ order }: { order: any }) {
   const canEdit = !LOCKED_STATUSES.has(order?.status)
 
   const handleDownload = async (line: any, group: LineGroup, idx: number) => {
-    if (group === 'complemento') return
+    if (group === 'complementos') return
     setPdfLoadingId(line.id)
     try {
       if (group === 'camiseria') await generateFichaForLineCamiseria(order, line, idx)
@@ -52,11 +44,11 @@ export function OrderGarmentsTab({ order }: { order: any }) {
     <div className="space-y-4">
       {lines.map((line: any, idx: number) => {
         const group = getLineGroup(line)
-        const canPrintFicha = group !== 'complemento'
-        const displayName = group === 'complemento'
+        const canPrintFicha = group !== 'complementos'
+        const displayName = group === 'complementos'
           ? (line.configuration?.product_name || 'Complemento')
           : line.garment_types?.name
-        const badgeLabel = group === 'complemento'
+        const badgeLabel = group === 'complementos'
           ? 'Boutique'
           : (line.line_type === 'artesanal' ? 'Artesanal' : 'Industrial')
         return (

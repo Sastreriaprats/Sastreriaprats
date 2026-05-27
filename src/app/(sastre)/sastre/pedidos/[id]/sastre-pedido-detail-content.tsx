@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatCurrency, formatDate, getOrderStatusLabel } from '@/lib/utils'
 import { getStatusesFor } from '@/lib/orders/statuses'
+import { getLineGroup, getLineName, type LineGroup } from '@/lib/orders/line-groups'
 import { PaymentHistory } from '@/components/payments/payment-history'
 import { getOrder, markLineDelivered, updateOrderStatus } from '@/actions/orders'
 import { getAlterationsByOrder, updateAlterationStatus } from '@/actions/alterations'
@@ -20,46 +21,6 @@ import { EditFichaDialog } from '@/components/orders/edit-ficha-dialog'
 import { Plus, Scissors, Loader2, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { useActiveStore } from '@/hooks/use-store'
-
-function slugToPrendaLabel(slug: string): string {
-  if (!slug || typeof slug !== 'string') return '—'
-  return slug
-    .trim()
-    .split('_')
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-    .join(' ')
-}
-
-function capitalizar(s: string | undefined): string {
-  if (s == null || typeof s !== 'string') return ''
-  const t = s.trim()
-  return t ? t.charAt(0).toUpperCase() + t.slice(1).toLowerCase() : ''
-}
-
-type LineGroup = 'sastreria' | 'camiseria' | 'complementos'
-
-function getLineGroup(line: any): LineGroup {
-  const cfg = line?.configuration ?? {}
-  if (cfg.product_name !== undefined) return 'complementos'
-  if (cfg.tipo === 'camiseria' || cfg.puno !== undefined) return 'camiseria'
-  return 'sastreria'
-}
-
-function getLineName(line: any): string {
-  const cfg = line?.configuration ?? {}
-  const group = getLineGroup(line)
-  if (group === 'sastreria') {
-    const prendaLabel = (cfg.prendaLabel as string)?.trim()
-    if (prendaLabel) return prendaLabel
-    return slugToPrendaLabel((cfg.prenda as string) ?? '')
-  }
-  if (group === 'camiseria') {
-    const labelCuello = (cfg.modCuello as string)?.trim() || 'Italiano'
-    const labelPuno = capitalizar(cfg.puno as string)
-    return `Camisa (${labelCuello}, ${labelPuno})`
-  }
-  return (cfg.product_name as string) ?? 'Complemento'
-}
 
 function isLineCamiseria(line: any): boolean {
   const cfg = line?.configuration ?? {}
