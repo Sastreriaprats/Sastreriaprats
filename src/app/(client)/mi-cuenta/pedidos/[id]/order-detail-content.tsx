@@ -5,27 +5,31 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { ArrowLeft, Truck, CheckCircle, Clock, MapPin } from 'lucide-react'
-import { formatDate, formatDateTime, formatCurrency } from '@/lib/utils'
+import { formatDate, formatDateTime, formatCurrency, getOrderStatusLabel, getOrderStatusColor } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 
-const statusLabels: Record<string, string> = {
+// Estados de pedido online. Los de tailoring se delegan a los helpers de @/lib/utils.
+const ONLINE_STATUS_LABELS: Record<string, string> = {
   pending_payment: 'Pendiente pago', paid: 'Pagado', processing: 'Procesando',
-  shipped: 'Enviado', delivered: 'Entregado', cancelled: 'Cancelado',
-  created: 'Creado', fabric_ordered: 'Tejido pedido', fabric_received: 'Tejido recibido',
-  factory_ordered: 'En fábrica', in_production: 'En producción',
-  fitting: 'Prueba', adjustments: 'Ajustes', finished: 'Terminado',
+  shipped: 'Enviado',
 }
 
-const statusColors: Record<string, string> = {
+const ONLINE_STATUS_COLORS: Record<string, string> = {
   pending_payment: 'bg-amber-100 text-amber-700', paid: 'bg-green-100 text-green-700',
   processing: 'bg-blue-100 text-blue-700', shipped: 'bg-purple-100 text-purple-700',
-  delivered: 'bg-green-100 text-green-700', cancelled: 'bg-red-100 text-red-700',
-  created: 'bg-gray-100 text-gray-700', in_production: 'bg-blue-100 text-blue-700',
-  fitting: 'bg-purple-100 text-purple-700', finished: 'bg-green-100 text-green-700',
-  fabric_ordered: 'bg-orange-100 text-orange-700',
+}
+
+function statusLabel(status: string): string {
+  return ONLINE_STATUS_LABELS[status] ?? getOrderStatusLabel(status)
+}
+
+function statusColor(status: string): string {
+  return ONLINE_STATUS_COLORS[status] ?? getOrderStatusColor(status)
 }
 
 const onlineSteps = ['paid', 'processing', 'shipped', 'delivered']
+// Subset destacado del flujo tailoring para el timeline del cliente (no es el
+// pipeline completo del admin — se omiten estados intermedios para no saturar).
 const tailoringSteps = ['created', 'fabric_ordered', 'in_production', 'fitting', 'finished', 'delivered']
 
 export function OrderDetailContent({ order, lines, history }: {
@@ -62,8 +66,8 @@ export function OrderDetailContent({ order, lines, history }: {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-prats-navy font-mono">{order.order_number as string}</h1>
-            <Badge className={statusColors[order.status as string]}>
-              {statusLabels[order.status as string] || (order.status as string)}
+            <Badge className={statusColor(order.status as string)}>
+              {statusLabel(order.status as string)}
             </Badge>
           </div>
           <p className="text-sm text-gray-400 mt-1">
@@ -102,7 +106,7 @@ export function OrderDetailContent({ order, lines, history }: {
                       'text-[10px] mt-2 text-center',
                       isComplete || isCurrent ? 'text-prats-navy font-medium' : 'text-gray-400'
                     )}>
-                      {statusLabels[step]}
+                      {statusLabel(step)}
                     </p>
                   </div>
                 )
@@ -207,8 +211,8 @@ export function OrderDetailContent({ order, lines, history }: {
                         <div className="h-2 w-2 rounded-full bg-prats-navy mt-1.5 flex-shrink-0" />
                         <div>
                           <div className="flex items-center gap-2">
-                            <Badge className={`text-[10px] ${statusColors[h.to_status as string] || ''}`}>
-                              {statusLabels[h.to_status as string] || (h.to_status as string)}
+                            <Badge className={`text-[10px] ${statusColor(h.to_status as string)}`}>
+                              {statusLabel(h.to_status as string)}
                             </Badge>
                             <span className="text-xs text-gray-400">{formatDateTime(h.changed_at as string)}</span>
                           </div>

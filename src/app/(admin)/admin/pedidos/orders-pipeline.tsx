@@ -6,11 +6,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import { Loader2, AlertTriangle } from 'lucide-react'
 import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel, summarizeOrderGarments } from '@/lib/utils'
-
-const pipelineStatuses = [
-  'created', 'fabric_ordered', 'fabric_received', 'factory_ordered',
-  'in_production', 'fitting', 'adjustments', 'finished',
-]
+import { TAILORING_PIPELINE_STATUSES } from '@/lib/orders/statuses'
 
 export function OrdersPipeline({ orders, isLoading, onRefresh }: {
   orders: any[]; isLoading: boolean; onRefresh: () => void
@@ -19,7 +15,7 @@ export function OrdersPipeline({ orders, isLoading, onRefresh }: {
 
   if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>
 
-  const columns = pipelineStatuses.map(status => ({
+  const columns = TAILORING_PIPELINE_STATUSES.map(status => ({
     status,
     label: getOrderStatusLabel(status),
     color: getOrderStatusColor(status),

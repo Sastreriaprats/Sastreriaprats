@@ -51,6 +51,16 @@ export const ALL_VISIBLE_STATUSES: OrderStatus[] = [
   'incident', 'cancelled',
 ]
 
+/**
+ * Orden de las columnas del Kanban del admin (`/admin/pedidos` modo pipeline).
+ * Se excluyen `delivered`, `incident` y `cancelled` porque son estados terminales
+ * que no aportan al flujo de trabajo activo del taller.
+ */
+export const TAILORING_PIPELINE_STATUSES: OrderStatus[] = [
+  'created', 'fabric_ordered', 'fabric_received', 'factory_ordered',
+  'in_production', 'fitting', 'adjustments', 'finished',
+]
+
 export function getStatusesFor(orderType: string | null | undefined): OrderStatus[] {
   if (!orderType) return ORDER_STATUSES_BY_TYPE.artesanal
   return ORDER_STATUSES_BY_TYPE[orderType] ?? ORDER_STATUSES_BY_TYPE.artesanal

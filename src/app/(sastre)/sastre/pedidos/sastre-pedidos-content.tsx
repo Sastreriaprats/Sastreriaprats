@@ -10,30 +10,8 @@ import { Plus, Search, ChevronLeft, ChevronRight, ArrowUpDown } from 'lucide-rea
 import { Skeleton } from '@/components/ui/skeleton'
 import { useList } from '@/hooks/use-list'
 import { listOrders } from '@/actions/orders'
-import { formatCurrency, formatDate, getOrderStatusLabel } from '@/lib/utils'
+import { formatCurrency, formatDate, getOrderStatusLabel, getOrderStatusColorDark } from '@/lib/utils'
 import { SastreHeader } from '../../components/sastre-header'
-
-// ── Badge en tabla ────────────────────────────────────────────────────────────
-const BADGE_CLASSES: Record<string, string> = {
-  created:               'bg-gray-500/20 text-gray-300 border-gray-500/30',
-  in_production:         'bg-blue-500/20 text-blue-300 border-blue-500/30',
-  pending_first_fitting: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
-  fitting:               'bg-purple-500/20 text-purple-300 border-purple-500/30',
-  adjustments:           'bg-orange-500/20 text-orange-300 border-orange-500/30',
-  finished:              'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
-  delivered:             'bg-green-500/20 text-green-300 border-green-500/30',
-  incident:              'bg-red-500/20 text-red-300 border-red-500/30',
-  cancelled:             'bg-red-700/30 text-red-400 border-red-700/40',
-  fabric_ordered:        'bg-blue-500/20 text-blue-300 border-blue-500/30',
-  fabric_received:       'bg-blue-600/20 text-blue-200 border-blue-600/30',
-  factory_ordered:       'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
-  in_workshop:           'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
-  note_sent_factory:     'bg-orange-500/20 text-orange-300 border-orange-500/30',
-}
-
-function getBadgeClass(status: string): string {
-  return BADGE_CLASSES[status] ?? 'bg-gray-500/20 text-gray-300 border-gray-500/30'
-}
 
 export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
   const router = useRouter()
@@ -139,7 +117,7 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
                         </span>
                       </TableCell>
                       <TableCell>
-                        <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${getBadgeClass(o.status)}`}>
+                        <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${getOrderStatusColorDark(o.status)}`}>
                           {getOrderStatusLabel(o.status)}
                         </span>
                       </TableCell>

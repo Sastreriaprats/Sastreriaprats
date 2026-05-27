@@ -5,22 +5,26 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ShoppingBag, Scissors, ArrowRight, Package } from 'lucide-react'
-import { formatDate, formatCurrency } from '@/lib/utils'
+import { formatDate, formatCurrency, getOrderStatusLabel, getOrderStatusColor } from '@/lib/utils'
 
-const statusLabels: Record<string, string> = {
+// Estados de pedido online (no son de sastrería). Los de tailoring se
+// delegan a getOrderStatusLabel / getOrderStatusColor.
+const ONLINE_STATUS_LABELS: Record<string, string> = {
   pending_payment: 'Pendiente pago', paid: 'Pagado', processing: 'Procesando',
-  shipped: 'Enviado', delivered: 'Entregado', cancelled: 'Cancelado',
-  created: 'Creado', in_production: 'En producción', fitting: 'En prueba',
-  finished: 'Terminado', fabric_ordered: 'Tejido pedido',
+  shipped: 'Enviado',
 }
 
-const statusColors: Record<string, string> = {
+const ONLINE_STATUS_COLORS: Record<string, string> = {
   pending_payment: 'bg-amber-100 text-amber-700', paid: 'bg-green-100 text-green-700',
   processing: 'bg-blue-100 text-blue-700', shipped: 'bg-purple-100 text-purple-700',
-  delivered: 'bg-green-100 text-green-700', cancelled: 'bg-red-100 text-red-700',
-  created: 'bg-gray-100 text-gray-700', in_production: 'bg-blue-100 text-blue-700',
-  fitting: 'bg-purple-100 text-purple-700', finished: 'bg-green-100 text-green-700',
-  fabric_ordered: 'bg-orange-100 text-orange-700',
+}
+
+function statusLabel(status: string): string {
+  return ONLINE_STATUS_LABELS[status] ?? getOrderStatusLabel(status)
+}
+
+function statusColor(status: string): string {
+  return ONLINE_STATUS_COLORS[status] ?? getOrderStatusColor(status)
 }
 
 type TailoringLine = {
@@ -138,8 +142,8 @@ export function ClientDashboard({ client, recentOnline, recentTailoring, onlineO
                         }
                       </p>
                       <p className="text-[11px] text-gray-400 font-mono">{order.order_number as string}</p>
-                      <Badge className={`text-[10px] mt-0.5 ${statusColors[order.status as string] || ''}`}>
-                        {statusLabels[order.status as string] || (order.status as string)}
+                      <Badge className={`text-[10px] mt-0.5 ${statusColor(order.status as string)}`}>
+                        {statusLabel(order.status as string)}
                       </Badge>
                     </div>
                   </div>

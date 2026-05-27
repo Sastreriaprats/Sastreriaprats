@@ -5,23 +5,26 @@ import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ShoppingBag, Scissors, Truck } from 'lucide-react'
-import { formatDate, formatCurrency } from '@/lib/utils'
+import { formatDate, formatCurrency, getOrderStatusLabel, getOrderStatusColor } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 
-const statusLabels: Record<string, string> = {
+// Estados de pedido online. Los de tailoring se delegan a los helpers de @/lib/utils.
+const ONLINE_STATUS_LABELS: Record<string, string> = {
   pending_payment: 'Pendiente pago', paid: 'Pagado', processing: 'Procesando',
-  shipped: 'Enviado', delivered: 'Entregado', cancelled: 'Cancelado',
-  created: 'Creado', fabric_ordered: 'Tejido pedido', in_production: 'En producción',
-  fitting: 'En prueba', adjustments: 'Ajustes', finished: 'Terminado',
+  shipped: 'Enviado',
 }
 
-const statusColors: Record<string, string> = {
+const ONLINE_STATUS_COLORS: Record<string, string> = {
   pending_payment: 'bg-amber-100 text-amber-700', paid: 'bg-green-100 text-green-700',
   processing: 'bg-blue-100 text-blue-700', shipped: 'bg-purple-100 text-purple-700',
-  delivered: 'bg-green-100 text-green-700', cancelled: 'bg-red-100 text-red-700',
-  created: 'bg-gray-100 text-gray-700', fabric_ordered: 'bg-orange-100 text-orange-700',
-  in_production: 'bg-blue-100 text-blue-700', fitting: 'bg-purple-100 text-purple-700',
-  adjustments: 'bg-amber-100 text-amber-700', finished: 'bg-green-100 text-green-700',
+}
+
+function statusLabel(status: string): string {
+  return ONLINE_STATUS_LABELS[status] ?? getOrderStatusLabel(status)
+}
+
+function statusColor(status: string): string {
+  return ONLINE_STATUS_COLORS[status] ?? getOrderStatusColor(status)
 }
 
 type TailoringLine = {
@@ -118,8 +121,8 @@ export function OrdersListContent({ onlineOrders, tailoringOrders }: {
                     </p>
                     <p className="text-[11px] text-gray-400 font-mono mt-0.5">{order.order_number as string}</p>
                     <div className="flex items-center gap-2 mt-0.5">
-                      <Badge className={`text-[10px] ${statusColors[order.status as string] || ''}`}>
-                        {statusLabels[order.status as string] || (order.status as string)}
+                      <Badge className={`text-[10px] ${statusColor(order.status as string)}`}>
+                        {statusLabel(order.status as string)}
                       </Badge>
                       <span className="text-xs text-gray-400">{formatDate(order.date)}</span>
                     </div>

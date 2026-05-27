@@ -189,12 +189,12 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
   }
 
   const LINE_STATUS_COLORS: Record<string, string> = {
-    created:     'bg-gray-400',
-    in_workshop: 'bg-blue-400',
-    fitting:     'bg-amber-400',
-    adjustments: 'bg-orange-400',
-    finished:    'bg-green-400',
-    delivered:   'bg-emerald-400',
+    created:       'bg-gray-400',
+    in_production: 'bg-blue-400',
+    fitting:       'bg-amber-400',
+    adjustments:   'bg-orange-400',
+    finished:      'bg-green-400',
+    delivered:     'bg-emerald-400',
   }
 
   const handleLineStatusChange = async (lineId: string, newStatus: string) => {

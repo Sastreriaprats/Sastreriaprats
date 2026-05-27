@@ -9,7 +9,7 @@ import { ALL_VISIBLE_STATUSES, type OrderStatus } from '@/lib/orders/statuses'
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { sendOrderConfirmation, sendTailoringStatusUpdate } from '@/lib/email/transactional'
-import { normalizeSearchTerm } from '@/lib/utils'
+import { normalizeSearchTerm, getOrderStatusLabel } from '@/lib/utils'
 import { checkUserPermission } from '@/actions/auth'
 import { syncOrderLineMeasurementsToClient } from '@/lib/measurements/sync-from-order'
 
@@ -513,12 +513,8 @@ export const changeOrderStatus = protectedAction<any, any>(
     const { data: orderRow } = await ctx.adminClient
       .from('tailoring_orders').select('order_number').eq('id', order_id).single()
     const orderNumber = (orderRow as any)?.order_number ?? order_id
-    const statusEs: Record<string, string> = {
-      created: 'Creado', in_progress: 'En progreso', in_production: 'En producción',
-      ready: 'Listo', delivered: 'Entregado', cancelled: 'Cancelado', pending: 'Pendiente',
-    }
-    const fromEs = fromStatus ? (statusEs[fromStatus] ?? fromStatus) : '—'
-    const toEs = statusEs[new_status] ?? new_status
+    const fromEs = fromStatus ? getOrderStatusLabel(fromStatus) : '—'
+    const toEs = getOrderStatusLabel(new_status)
     return success({
       order_id,
       new_status,
@@ -717,12 +713,8 @@ export const updateOrderStatus = protectedAction<
     const { data: ord } = await ctx.adminClient
       .from('tailoring_orders').select('order_number').eq('id', orderId.trim()).single()
     const orderNumber = (ord as any)?.order_number ?? orderId
-    const statusEs: Record<string, string> = {
-      created: 'Creado', in_progress: 'En progreso', in_production: 'En producción',
-      ready: 'Listo', delivered: 'Entregado', cancelled: 'Cancelado', pending: 'Pendiente',
-    }
-    const fromEs = fromStatus ? (statusEs[fromStatus] ?? fromStatus) : '—'
-    const toEs = statusEs[trimmedStatus] ?? trimmedStatus
+    const fromEs = fromStatus ? getOrderStatusLabel(fromStatus) : '—'
+    const toEs = getOrderStatusLabel(trimmedStatus)
     return success({
       orderId,
       auditEntityId: orderId,
