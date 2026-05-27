@@ -724,8 +724,13 @@ export const deliveryNoteStatusEnum = pgEnum('delivery_note_status', ['borrador'
 export const supplierDeliveryNoteStatusEnum = pgEnum('supplier_delivery_note_status', ['pendiente', 'recibido', 'incidencia'])
 export const tailoringOrderTypeEnum = pgEnum('tailoring_order_type', ['artesanal', 'industrial'])
 export const tailoringOrderStatusEnum = pgEnum('tailoring_order_status', [
-  'created', 'fabric_ordered', 'fabric_received', 'factory_ordered',
-  'in_production', 'fitting', 'adjustments', 'finished',
+  'created', 'fabric_ordered',
+  'fabric_received',
+  'fabric_received_store', 'fabric_received_factory', 'cut',
+  'factory_ordered',
+  'in_production',
+  'in_fitting', 'received_in_store',
+  'fitting', 'adjustments', 'finished',
   'delivered', 'incident', 'cancelled',
   'requested', 'supplier_delivered',
   'in_workshop', 'pending_first_fitting', 'note_sent_factory',
