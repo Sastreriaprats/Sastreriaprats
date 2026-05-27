@@ -15,14 +15,14 @@ export const ORDER_TYPES = {
 } as const
 
 export const TAILORING_ORDER_STATES = [
-  { key: 'created', label: 'Pedido Creado', color: '#94A3B8' },
-  { key: 'fabric_ordered', label: 'Tejido Pedido', color: '#3B82F6' },
-  { key: 'fabric_received', label: 'Tejido Recibido', color: '#8B5CF6' },
-  { key: 'factory_ordered', label: 'Pedido a Fábrica/Oficial', color: '#F59E0B' },
-  { key: 'in_production', label: 'En Confección', color: '#F97316' },
-  { key: 'fitting_1', label: 'Prueba 1', color: '#EC4899' },
-  { key: 'fitting_n', label: 'Prueba Adicional', color: '#EC4899' },
-  { key: 'adjustments', label: 'Ajustes', color: '#A855F7' },
+  { key: 'created', label: 'Creado', color: '#94A3B8' },
+  { key: 'fabric_ordered', label: 'Tejido pedido a fabricante', color: '#3B82F6' },
+  { key: 'fabric_received_store', label: 'Tejido recibido en tienda', color: '#0EA5E9' },
+  { key: 'fabric_received_factory', label: 'Tejido recibido en fábrica', color: '#06B6D4' },
+  { key: 'cut', label: 'Cortado', color: '#EAB308' },
+  { key: 'in_production', label: 'En confección', color: '#F59E0B' },
+  { key: 'in_fitting', label: 'En prueba', color: '#A855F7' },
+  { key: 'received_in_store', label: 'Recibido en tienda', color: '#14B8A6' },
   { key: 'finished', label: 'Terminado', color: '#22C55E' },
   { key: 'delivered', label: 'Entregado', color: '#10B981' },
   { key: 'incident', label: 'Incidencia', color: '#EF4444' },

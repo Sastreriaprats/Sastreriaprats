@@ -107,7 +107,7 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
       // 2) Pedidos sastrería (ordersRows ya viene del Promise.all)
       const ordersList = (ordersRows || []) as { id: string; status: string; estimated_delivery_date: string | null }[]
       const activeOrders = ordersList.length
-      const ordersInProduction = ordersList.filter(o => ['in_production', 'factory_ordered'].includes(o.status)).length
+      const ordersInProduction = ordersList.filter(o => o.status === 'in_production').length
       const ordersPendingDelivery = ordersList.filter(o => o.status === 'finished').length
       const ordersOverdue = ordersList.filter(o => o.estimated_delivery_date != null && o.estimated_delivery_date < today).length
       const deliveriesToday = ordersList.filter(o => o.status === 'finished' && o.estimated_delivery_date === today).length

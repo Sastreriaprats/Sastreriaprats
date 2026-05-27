@@ -31,11 +31,9 @@ import { toast } from 'sonner'
 import { OrdersPipeline } from './orders-pipeline'
 import { ReservationsTab } from '@/app/(admin)/admin/stock/tabs/reservations-tab'
 import { OnlineOrdersList } from '@/app/(admin)/admin/tienda-online/online-orders-list'
+import { ALL_VISIBLE_STATUSES } from '@/lib/orders/statuses'
 
-const orderStatuses = [
-  'created', 'fabric_ordered', 'fabric_received', 'factory_ordered',
-  'in_production', 'fitting', 'adjustments', 'finished', 'delivered', 'incident', 'cancelled',
-]
+const orderStatuses = ALL_VISIBLE_STATUSES
 
 const supplierOrderStatusLabels: Record<string, string> = {
   draft: 'Borrador', sent: 'Enviado', confirmed: 'Confirmado',

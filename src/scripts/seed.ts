@@ -248,7 +248,7 @@ async function seed() {
   if (!existingOrders?.length && mainStore) {
     const { data: clients } = await supabase.from('clients').select('id').limit(5)
     if (clients?.length) {
-      const statuses = ['created', 'fabric_ordered', 'in_production', 'fitting', 'delivered']
+      const statuses = ['created', 'fabric_ordered', 'in_production', 'in_fitting', 'delivered']
       const types: string[] = ['artesanal', 'industrial', 'artesanal', 'industrial', 'artesanal']
       const orders = clients.slice(0, 5).map((c, i) => ({
         order_number: `PRATS-2026-${String(i + 1).padStart(4, '0')}`,

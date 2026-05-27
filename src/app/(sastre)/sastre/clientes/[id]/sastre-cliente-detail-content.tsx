@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Loader2, Pin, Lock, StickyNote, Plus } from 'lucide-react'
-import { formatCurrency, formatDate, getOrderStatusLabel } from '@/lib/utils'
+import { formatCurrency, formatDate, getOrderStatusLabel, getOrderStatusColorDark } from '@/lib/utils'
 import { MedidasPageContent } from '@/app/(sastre)/sastre/medidas/[clientId]/medidas-page-content'
 import { ClientDataTab } from '@/app/(admin)/admin/clientes/[id]/tabs/client-data-tab'
 import { ClientSalesTab } from '@/app/(admin)/admin/clientes/[id]/tabs/client-sales-tab'
@@ -97,18 +97,6 @@ function SastrePedidosTab({ clientId }: { clientId: string }) {
     <div className="text-center py-12 text-white/40 text-sm">No hay pedidos para este cliente.</div>
   )
 
-  const BADGE: Record<string, string> = {
-    created: 'bg-gray-500/20 text-gray-300 border-gray-500/30',
-    in_production: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
-    fitting: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
-    adjustments: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
-    finished: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
-    delivered: 'bg-green-500/20 text-green-300 border-green-500/30',
-    incident: 'bg-red-500/20 text-red-300 border-red-500/30',
-    cancelled: 'bg-red-700/30 text-red-400 border-red-700/40',
-    in_workshop: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
-    pending_first_fitting: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
-  }
 
   return (
     <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">
@@ -135,7 +123,7 @@ function SastrePedidosTab({ clientId }: { clientId: string }) {
                 </span>
               </td>
               <td className="px-4 py-3">
-                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${BADGE[o.status] ?? 'bg-gray-500/20 text-gray-300 border-gray-500/30'}`}>
+                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${getOrderStatusColorDark(o.status)}`}>
                   {getOrderStatusLabel(o.status)}
                 </span>
               </td>

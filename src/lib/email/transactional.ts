@@ -292,10 +292,12 @@ export async function sendTailoringStatusUpdate(order: {
 }) {
   const statusMessages: Record<string, string> = {
     fabric_ordered: 'El tejido de tu pedido ha sido encargado al proveedor.',
-    fabric_received: 'El tejido ha llegado. Pronto empezaremos a confeccionar.',
-    in_production: 'Tu pedido está en producción. Nuestros sastres están trabajando en él.',
-    fitting: 'Tu pedido está listo para la primera prueba. Te contactaremos para programar la cita.',
-    adjustments: 'Estamos realizando los ajustes finales después de la prueba.',
+    fabric_received_store: 'El tejido ha llegado a tienda. Pronto empezaremos a confeccionar.',
+    fabric_received_factory: 'El tejido ha llegado a fábrica. Pronto empezarán a confeccionar.',
+    cut: 'Hemos cortado las piezas de tu pedido.',
+    in_production: 'Tu pedido está en confección. Nuestros sastres están trabajando en él.',
+    in_fitting: 'Tu pedido está listo para la prueba. Te contactaremos para programar la cita.',
+    received_in_store: 'Tu pedido ha llegado a tienda y está listo para los últimos detalles.',
     finished: '¡Tu pedido está terminado! Contacta con nosotros para recogerlo.',
   }
   const msg = order.message || statusMessages[order.new_status] || 'El estado de tu pedido ha sido actualizado.'

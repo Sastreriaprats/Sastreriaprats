@@ -30,7 +30,7 @@ function statusColor(status: string): string {
 const onlineSteps = ['paid', 'processing', 'shipped', 'delivered']
 // Subset destacado del flujo tailoring para el timeline del cliente (no es el
 // pipeline completo del admin — se omiten estados intermedios para no saturar).
-const tailoringSteps = ['created', 'fabric_ordered', 'in_production', 'fitting', 'finished', 'delivered']
+const tailoringSteps = ['created', 'fabric_ordered', 'in_production', 'in_fitting', 'finished', 'delivered']
 
 export function OrderDetailContent({ order, lines, history }: {
   order: Record<string, unknown>

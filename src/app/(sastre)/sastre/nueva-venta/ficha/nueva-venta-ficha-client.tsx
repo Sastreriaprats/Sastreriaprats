@@ -212,9 +212,8 @@ const SLUG_TO_SPECIALTY: Record<string, string> = {
 }
 
 const SITUACION_TRABAJO = [
-  'in_workshop',
-  'pending_first_fitting',
-  'adjustments',
+  'in_production',
+  'in_fitting',
   'finished',
   'delivered',
   'cancelled',
@@ -541,7 +540,7 @@ export function NuevaVentaFichaClient({
   const [ficha, setFicha] = useState({
     numeroTalon: '',
     cortador: '',
-    situacionTrabajo: 'in_workshop',
+    situacionTrabajo: 'in_production',
     fechaProximaVisita: add15WorkingDays(new Date()),
     observaciones: '',
     domicilio: '',
