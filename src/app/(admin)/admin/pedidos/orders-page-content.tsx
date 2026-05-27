@@ -93,13 +93,21 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
     if (tab !== 'supplier') return
     const supabase = createClient()
     setLoadingSupplier(true)
+    // Listado de pedidos a proveedor ACTIVOS (no recibidos ni cancelados),
+    // alineado con el contador del badge del tab. Antes había un embed
+    // `tailoring_orders:tailoring_order_id(order_number)` que PostgREST
+    // rechazaba por falta de FK declarada en BBDD entre supplier_orders y
+    // tailoring_orders — devolvía error y la tabla quedaba vacía aunque hubiera
+    // 10 filas. Como la columna tailoring_order_id está al 100% vacía en
+    // producción, quitar el embed no pierde información (los renders ya tienen
+    // fallback `?? '—'`).
     supabase
       .from('supplier_orders')
       .select(`id, order_number, status, total, order_date,
         estimated_delivery_date, tailoring_order_id,
         suppliers(name),
-        stores:destination_store_id(name),
-        tailoring_orders:tailoring_order_id(order_number)`)
+        stores:destination_store_id(name)`)
+      .not('status', 'in', '(received,cancelled)')
       .order('created_at', { ascending: false })
       .then(({ data, error }) => {
         setLoadingSupplier(false)
