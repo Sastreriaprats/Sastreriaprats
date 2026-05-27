@@ -6,20 +6,25 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetClose, SheetTrigger } from '@/components/ui/sheet'
 import {
-  Bell, Menu, LogOut, User, ChevronRight, PanelLeftClose, PanelLeft, Settings,
-  LayoutDashboard, Users, Scissors, CreditCard, Package, Truck, BookOpen, Calendar, Shirt,
+  Bell, Menu, LogOut, User, ChevronRight, ChevronDown, PanelLeftClose, PanelLeft, Settings,
 } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
 import { logoutAction } from '@/actions/auth'
 import { getDashboardAlerts } from '@/actions/dashboard'
+import { getOverduePaymentsCount } from '@/actions/payments'
 import { NotificationsPanel } from './notifications-panel'
 import { usePermissions } from '@/hooks/use-permissions'
 import { cn } from '@/lib/utils'
+import { ADMIN_NAV_ITEMS } from './admin-nav-items'
+
+const COBROS_LAST_VISIT_KEY = 'cobros_last_visit'
 
 const breadcrumbLabels: Record<string, string> = {
   admin: '', dashboard: 'Dashboard', clientes: 'Clientes', pedidos: 'Pedidos',
@@ -28,42 +33,146 @@ const breadcrumbLabels: Record<string, string> = {
   nuevo: 'Nuevo', devoluciones: 'Devoluciones', auditoria: 'Seguimiento', cobros: 'Cobros pendientes',
 }
 
-const mobileNavItems = [
-  { label: 'Dashboard',    href: '/admin/dashboard',   icon: LayoutDashboard },
-  { label: 'Clientes',    href: '/admin/clientes',     icon: Users,      permission: 'clients.view' },
-  { label: 'Pedidos',     href: '/admin/pedidos',      icon: Scissors,   permission: 'orders.view' },
-  { label: 'TPV',         href: '/pos/caja',           icon: CreditCard, permission: 'pos.access' },
-  { label: 'Productos',   href: '/admin/stock',        icon: Package,    permission: 'products.view' },
-  { label: 'Proveedores', href: '/admin/proveedores',  icon: Truck,      permission: 'suppliers.view' },
-  { label: 'Contabilidad',href: '/admin/contabilidad', icon: BookOpen,   permission: 'accounting.view' },
-  { label: 'Calendario',  href: '/admin/calendario',   icon: Calendar,   permission: 'calendar.view' },
-  { label: 'Configuración',href: '/admin/configuracion',icon: Settings,  permission: 'config.view' },
-]
-
 function MobileSidebar() {
   const pathname = usePathname()
   const { can } = usePermissions()
+  const { hasRole } = useAuth()
+  const isVendedor = hasRole('vendedor_avanzado') || hasRole('vendedor_basico')
+
+  // Filtrado por permisos al nivel raíz. Mismo criterio que el sidebar desktop.
+  const visibleItems = ADMIN_NAV_ITEMS.filter(
+    (item) => !item.permission || can(item.permission)
+  )
+
+  // Si la ruta actual cae bajo un sub-item, expandir su padre al abrir el Sheet.
+  // El componente se desmonta al cerrar el Sheet (Radix no usa forceMount), así
+  // que este estado se reinicializa cada vez que el usuario reabre el menú.
+  const initialExpanded =
+    visibleItems.find((item) =>
+      item.children?.some((c) => pathname === c.href.split('?')[0])
+    )?.href ?? null
+  const [expandedKey, setExpandedKey] = useState<string | null>(initialExpanded)
+  const [overdueCount, setOverdueCount] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    const since =
+      typeof localStorage !== 'undefined'
+        ? localStorage.getItem(COBROS_LAST_VISIT_KEY) ?? undefined
+        : undefined
+    getOverduePaymentsCount({ since })
+      .then((r) => {
+        if (cancelled) return
+        if (r?.success && typeof r.data === 'number') setOverdueCount(r.data)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const toggle = (key: string) =>
+    setExpandedKey((prev) => (prev === key ? null : key))
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-3 px-4 h-16 border-b bg-prats-navy">
-        <Image src="/logo-prats.png" alt="Prats" width={72} height={36} style={{ objectFit: 'contain', height: 36, width: 'auto', filter: 'invert(1) brightness(2)' }} priority />
+        <Image
+          src="/logo-prats.png"
+          alt="Prats"
+          width={72}
+          height={36}
+          style={{ objectFit: 'contain', height: 36, width: 'auto', filter: 'invert(1) brightness(2)' }}
+          priority
+        />
         <p className="text-[10px] text-white/50 tracking-[0.2em] uppercase">Panel de gestión</p>
       </div>
-      <nav className="flex-1 p-2 space-y-0.5">
-        {mobileNavItems.filter(item => !item.permission || can(item.permission)).map(item => {
-          const Icon = item.icon
-          const active = pathname.startsWith(item.href.split('?')[0])
-          return (
-            <Link key={item.href} href={item.href}
-              className={cn(
-                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors',
-                active ? 'bg-prats-navy text-white' : 'text-muted-foreground hover:bg-muted'
-              )}>
-              <Icon className="h-4 w-4" />{item.label}
-            </Link>
-          )
-        })}
-      </nav>
+      <ScrollArea className="flex-1">
+        <nav className="p-2 space-y-0.5">
+          {visibleItems.map((item) => {
+            const Icon = item.icon
+            const isCobros = item.href === '/admin/cobros'
+            const badgeCount = isCobros ? overdueCount : item.badge ?? 0
+            const hrefWithBadge =
+              isCobros && badgeCount > 0 ? '/admin/cobros?vencidos=1' : item.href
+            const active = pathname.startsWith(item.href.split('?')[0])
+
+            const visibleChildren = item.children
+              ? item.children.filter((c) => {
+                  if (c.hideForVendedor && isVendedor) return false
+                  return !c.permission || can(c.permission)
+                })
+              : []
+            const hasChildren = visibleChildren.length > 0
+
+            const rowClass = cn(
+              'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors w-full text-left',
+              active ? 'bg-prats-navy text-white' : 'text-muted-foreground hover:bg-muted'
+            )
+
+            if (!hasChildren) {
+              return (
+                <SheetClose key={item.href} asChild>
+                  <Link href={hrefWithBadge} className={rowClass}>
+                    <Icon className="h-4 w-4 flex-shrink-0" />
+                    <span className="flex-1 truncate">{item.label}</span>
+                    {badgeCount > 0 && (
+                      <Badge variant="destructive" className="h-5 min-w-[20px] px-1 text-[10px]">
+                        {badgeCount}
+                      </Badge>
+                    )}
+                  </Link>
+                </SheetClose>
+              )
+            }
+
+            const isExpanded = expandedKey === item.href
+            return (
+              <div key={item.href}>
+                <button
+                  type="button"
+                  onClick={() => toggle(item.href)}
+                  className={rowClass}
+                  aria-expanded={isExpanded}
+                >
+                  <Icon className="h-4 w-4 flex-shrink-0" />
+                  <span className="flex-1 truncate">{item.label}</span>
+                  <ChevronDown
+                    className={cn(
+                      'h-4 w-4 flex-shrink-0 transition-transform duration-200',
+                      isExpanded && 'rotate-180'
+                    )}
+                  />
+                </button>
+                {isExpanded && (
+                  <div className="ml-7 mt-0.5 space-y-0.5 border-l pl-3">
+                    {visibleChildren.map((child) => {
+                      const ChildIcon = child.icon
+                      const childActive = pathname === child.href.split('?')[0]
+                      return (
+                        <SheetClose key={child.href} asChild>
+                          <Link
+                            href={child.href}
+                            className={cn(
+                              'flex items-center gap-2 text-xs py-1.5 px-2 rounded transition-colors',
+                              childActive
+                                ? 'text-prats-navy font-medium'
+                                : 'text-muted-foreground hover:text-foreground'
+                            )}
+                          >
+                            {ChildIcon ? <ChildIcon className="h-3 w-3" /> : null}
+                            {child.label}
+                          </Link>
+                        </SheetClose>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </nav>
+      </ScrollArea>
     </div>
   )
 }
