@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { getOfficialsLoad, type OfficialLoad } from '@/actions/officials'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -107,6 +108,8 @@ export function OfficialsPageContent() {
   const [form, setForm] = useState(emptyForm)
   const [isSaving, setIsSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
+  // Carga "en proceso" por oficial. Indexada por id para lookup O(1) en la tabla.
+  const [loadById, setLoadById] = useState<Map<string, OfficialLoad>>(new Map())
 
   const fetchOfficials = useCallback(async () => {
     setIsLoading(true)
@@ -126,9 +129,23 @@ export function OfficialsPageContent() {
     }
   }, [supabase])
 
+  // Fetch independiente de la carga "en proceso". No bloquea la tabla: el
+  // badge aparece cuando termina.
+  const fetchLoad = useCallback(async () => {
+    const res = await getOfficialsLoad()
+    if (!res.success) {
+      console.error('[OfficialsPageContent] getOfficialsLoad error:', res.error)
+      return
+    }
+    const map = new Map<string, OfficialLoad>()
+    for (const o of res.data) map.set(o.id, o)
+    setLoadById(map)
+  }, [])
+
   useEffect(() => {
     fetchOfficials()
-  }, [fetchOfficials])
+    fetchLoad()
+  }, [fetchOfficials, fetchLoad])
 
   const openCreate = () => {
     setEditingId(null)
@@ -255,6 +272,7 @@ export function OfficialsPageContent() {
                 <TableHead>Email</TableHead>
                 <TableHead>Especialidad</TableHead>
                 <TableHead>Precio/prenda</TableHead>
+                <TableHead>En proceso</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead className="w-24 text-right">Acciones</TableHead>
               </TableRow>
@@ -262,13 +280,13 @@ export function OfficialsPageContent() {
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="h-32 text-center">
+                  <TableCell colSpan={9} className="h-32 text-center">
                     <Loader2 className="mx-auto h-6 w-6 animate-spin text-prats-navy" />
                   </TableCell>
                 </TableRow>
               ) : officials.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
+                  <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">
                     No hay oficiales. Crea uno con &quot;Nuevo oficial&quot;.
                   </TableCell>
                 </TableRow>
@@ -291,6 +309,23 @@ export function OfficialsPageContent() {
                       ) : '—'}
                     </TableCell>
                     <TableCell className="text-sm">{o.price_per_garment != null ? formatCurrency(o.price_per_garment) : '—'}</TableCell>
+                    <TableCell>
+                      {(() => {
+                        const load = loadById.get(o.id)
+                        if (!load) return <span className="text-xs text-muted-foreground">—</span>
+                        if (load.total === 0) {
+                          return <Badge variant="outline" className="text-xs font-normal text-muted-foreground">0</Badge>
+                        }
+                        return (
+                          <span
+                            className="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-xs font-semibold bg-prats-navy text-white min-w-[2rem]"
+                            title={`${load.asCortador} como cortador · ${load.asOficial} como oficial`}
+                          >
+                            {load.total}
+                          </span>
+                        )
+                      })()}
+                    </TableCell>
                     <TableCell>
                       {canEdit ? (
                         <Switch
