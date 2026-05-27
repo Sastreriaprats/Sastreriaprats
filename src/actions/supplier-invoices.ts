@@ -12,6 +12,7 @@ import {
 const PERMISSION = 'supplier_invoices.manage'
 const TABLE = 'ap_supplier_invoices'
 const LINK_TABLE = 'ap_supplier_invoice_delivery_notes'
+const LINES_TABLE = 'ap_supplier_invoice_lines'
 
 export type ApSupplierInvoiceRow = {
   id: string
@@ -58,6 +59,26 @@ export type ApSupplierInvoiceInput = {
   /** Cuotas explícitas para esta factura. Si viene con datos sustituye al
    * cálculo automático (buildInstallments). */
   installments?: Array<{ amount: number; due_date: string }>
+  /** Líneas con base + IVA por factura. Si llega y tiene datos, se persisten
+   * en ap_supplier_invoice_lines y la cabecera (amount/tax_amount) se
+   * recalcula como Σ de las líneas. Si no llega o está vacío, comportamiento
+   * legacy: se usa amount/tax_amount/tax_rate de cabecera. */
+  lines?: Array<{
+    description?: string | null
+    base: number
+    tax_rate: number
+    sort_order?: number
+  }>
+}
+
+export type ApSupplierInvoiceLineRow = {
+  id: string
+  supplier_invoice_id: string
+  description: string | null
+  base: number
+  tax_rate: number
+  tax_amount: number
+  sort_order: number
 }
 
 export type SupplierOptionForInvoice = {
@@ -376,6 +397,56 @@ export const getSupplierInvoiceDeliveryNoteIds = protectedAction<string, string[
   }
 )
 
+export const getSupplierInvoiceLines = protectedAction<string, ApSupplierInvoiceLineRow[]>(
+  { permission: PERMISSION, auditModule: 'accounting' },
+  async (ctx, invoiceId) => {
+    if (!invoiceId?.trim()) return success([])
+    const { data, error } = await ctx.adminClient
+      .from(LINES_TABLE)
+      .select('id, supplier_invoice_id, description, base, tax_rate, tax_amount, sort_order')
+      .eq('supplier_invoice_id', invoiceId)
+      .order('sort_order', { ascending: true })
+    if (error) return failure(error.message)
+    const list: ApSupplierInvoiceLineRow[] = (data || []).map((r: Record<string, unknown>) => ({
+      id: String(r.id),
+      supplier_invoice_id: String(r.supplier_invoice_id),
+      description: r.description != null ? String(r.description) : null,
+      base: Number(r.base ?? 0),
+      tax_rate: Number(r.tax_rate ?? 0),
+      tax_amount: Number(r.tax_amount ?? 0),
+      sort_order: Number(r.sort_order ?? 0),
+    }))
+    return success(list)
+  }
+)
+
+/**
+ * Normaliza las líneas que vienen del cliente. Si llega un array vacío o
+ * undefined, devuelve null (modo legacy: la cabecera lleva la base/IVA).
+ * Si llega con datos, valida que cada línea sea numéricamente sana.
+ */
+function normalizeInvoiceLines(
+  rawLines: ApSupplierInvoiceInput['lines'],
+): Array<{ description: string | null; base: number; tax_rate: number; tax_amount: number; sort_order: number }> | null {
+  if (!Array.isArray(rawLines) || rawLines.length === 0) return null
+  const out: Array<{ description: string | null; base: number; tax_rate: number; tax_amount: number; sort_order: number }> = []
+  rawLines.forEach((l, idx) => {
+    const base = Number(l?.base)
+    const rate = Number(l?.tax_rate)
+    if (!Number.isFinite(base) || base <= 0) return
+    if (!Number.isFinite(rate) || rate < 0) return
+    const taxAmount = Math.round(base * rate) / 100
+    out.push({
+      description: typeof l?.description === 'string' && l.description.trim() ? l.description.trim() : null,
+      base: Math.round(base * 100) / 100,
+      tax_rate: Math.round(rate * 100) / 100,
+      tax_amount: taxAmount,
+      sort_order: Number.isFinite(l?.sort_order) ? Number(l?.sort_order) : idx,
+    })
+  })
+  return out.length > 0 ? out : null
+}
+
 async function resolveSupplierDefaults(
   adminClient: AdminClient,
   supplierId: string | null | undefined,
@@ -479,6 +550,16 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
       if (errMsg) return failure(errMsg, 'VALIDATION')
     }
 
+    // Si vienen líneas multi-base, las usamos para los agregados de cabecera.
+    // Si no, se mantiene el modo legacy (amount/tax_amount del payload).
+    const lines = normalizeInvoiceLines(input.lines)
+    const headerAmount = lines
+      ? Math.round(lines.reduce((s, l) => s + l.base, 0) * 100) / 100
+      : Number(input.amount)
+    const headerTaxAmount = lines
+      ? Math.round(lines.reduce((s, l) => s + l.tax_amount, 0) * 100) / 100
+      : Number(input.tax_amount ?? 0)
+
     const { data, error } = await ctx.adminClient
       .from(TABLE)
       .insert({
@@ -489,8 +570,8 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
         invoice_number: input.invoice_number.trim(),
         invoice_date: input.invoice_date,
         due_date: dueDate,
-        amount: Number(input.amount),
-        tax_amount: Number(input.tax_amount ?? 0),
+        amount: headerAmount,
+        tax_amount: headerTaxAmount,
         shipping_amount: Number(input.shipping_amount ?? 0),
         retention_rate: Number(input.retention_rate ?? 0),
         retention_amount: Number(input.retention_amount ?? 0),
@@ -504,6 +585,22 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
       .single()
 
     if (error) return failure(error.message)
+
+    if (lines) {
+      const rows = lines.map((l) => ({
+        supplier_invoice_id: String(data.id),
+        description: l.description,
+        base: l.base,
+        tax_rate: l.tax_rate,
+        tax_amount: l.tax_amount,
+        sort_order: l.sort_order,
+      }))
+      const { error: linesErr } = await ctx.adminClient.from(LINES_TABLE).insert(rows)
+      if (linesErr) {
+        await ctx.adminClient.from(TABLE).delete().eq('id', data.id)
+        return failure(linesErr.message || 'Error al guardar las líneas de la factura', 'INTERNAL')
+      }
+    }
 
     if (deliveryNoteIds.length > 0) {
       const rows = deliveryNoteIds.map((noteId) => ({
@@ -599,6 +696,16 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
       if (errMsg) return failure(errMsg, 'VALIDATION')
     }
 
+    // Si vienen líneas multi-base, las usamos para los agregados de cabecera.
+    // Si no, se mantiene el modo legacy (amount/tax_amount del payload).
+    const lines = normalizeInvoiceLines(rest.lines)
+    const headerAmount = lines
+      ? Math.round(lines.reduce((s, l) => s + l.base, 0) * 100) / 100
+      : Number(rest.amount)
+    const headerTaxAmount = lines
+      ? Math.round(lines.reduce((s, l) => s + l.tax_amount, 0) * 100) / 100
+      : Number(rest.tax_amount ?? 0)
+
     const { error } = await ctx.adminClient
       .from(TABLE)
       .update({
@@ -609,8 +716,8 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
         invoice_number: rest.invoice_number.trim(),
         invoice_date: rest.invoice_date,
         due_date: dueDate,
-        amount: Number(rest.amount),
-        tax_amount: Number(rest.tax_amount ?? 0),
+        amount: headerAmount,
+        tax_amount: headerTaxAmount,
         shipping_amount: Number(rest.shipping_amount ?? 0),
         retention_rate: Number(rest.retention_rate ?? 0),
         retention_amount: Number(rest.retention_amount ?? 0),
@@ -623,6 +730,28 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
       .eq('id', id)
 
     if (error) return failure(error.message)
+
+    // Reemplazar las líneas: borrar las existentes e insertar las nuevas.
+    // Si lines === null (modo legacy), se borran sin reinsertar para no
+    // dejar líneas huérfanas si la usuaria simplificó la factura.
+    const { error: delLinesErr } = await ctx.adminClient
+      .from(LINES_TABLE)
+      .delete()
+      .eq('supplier_invoice_id', id)
+    if (delLinesErr) return failure(delLinesErr.message || 'Error al actualizar las líneas de la factura', 'INTERNAL')
+
+    if (lines) {
+      const rows = lines.map((l) => ({
+        supplier_invoice_id: id,
+        description: l.description,
+        base: l.base,
+        tax_rate: l.tax_rate,
+        tax_amount: l.tax_amount,
+        sort_order: l.sort_order,
+      }))
+      const { error: insLinesErr } = await ctx.adminClient.from(LINES_TABLE).insert(rows)
+      if (insLinesErr) return failure(insLinesErr.message || 'Error al guardar las líneas de la factura', 'INTERNAL')
+    }
 
     const { error: delErr } = await ctx.adminClient
       .from(LINK_TABLE)

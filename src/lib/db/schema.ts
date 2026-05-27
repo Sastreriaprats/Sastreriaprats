@@ -1008,6 +1008,17 @@ export const apSupplierInvoiceDeliveryNotes = pgTable('ap_supplier_invoice_deliv
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
+export const apSupplierInvoiceLines = pgTable('ap_supplier_invoice_lines', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  supplierInvoiceId: uuid('supplier_invoice_id').notNull(),
+  description: text('description'),
+  base: decimal('base', { precision: 12, scale: 2 }).notNull(),
+  taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).notNull().default('21'),
+  taxAmount: decimal('tax_amount', { precision: 12, scale: 2 }).notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
 export const supplierDeliveryNoteLines = pgTable('supplier_delivery_note_lines', {
   id: uuid('id').primaryKey().defaultRandom(),
   supplierDeliveryNoteId: uuid('supplier_delivery_note_id').notNull().references(() => supplierDeliveryNotes.id, { onDelete: 'cascade' }),

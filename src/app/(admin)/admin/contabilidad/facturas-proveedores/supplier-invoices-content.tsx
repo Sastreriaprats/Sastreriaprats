@@ -78,6 +78,7 @@ import {
   listSuppliersForInvoice,
   listUnlinkedDeliveryNotesForSupplier,
   getSupplierInvoiceDeliveryNoteIds,
+  getSupplierInvoiceLines,
   listSupplierInvoiceInstallments,
   type ApSupplierInvoiceRow,
   type ApSupplierInvoiceInput,
@@ -224,6 +225,13 @@ export function SupplierInvoicesContent() {
   // automático de buildInstallments en el server action.
   const [splitPayment, setSplitPayment] = useState(false)
   const [installments, setInstallments] = useState<Array<{ amount: string; due_date: string }>>([])
+
+  // Líneas con base + IVA. La factura SIEMPRE tiene al menos 1 línea.
+  // Si la factura solo tiene 1 línea, equivale visualmente al flujo legacy
+  // (un único IVA). Con N líneas, soporta multi-base (ej: género 21% + transporte 0%).
+  const [lines, setLines] = useState<Array<{ description: string; base: string; tax_rate: string }>>([
+    { description: '', base: '', tax_rate: '21' },
+  ])
 
   const selectedSupplier = suppliers.find((s) => s.id === form.supplier_id) || null
 
@@ -414,6 +422,7 @@ export function SupplierInvoicesContent() {
     setAttachmentName(null)
     setSplitPayment(false)
     setInstallments([])
+    setLines([{ description: '', base: '', tax_rate: '21' }])
     setDialogOpen(true)
   }
 
@@ -443,6 +452,23 @@ export function SupplierInvoicesContent() {
     setTotalTouched(true)
     setAttachmentName(deriveFilenameFromUrl(row.attachment_url))
     setDialogOpen(true)
+    // Cargar líneas existentes. Si la factura es legacy (sin filas en
+    // ap_supplier_invoice_lines) sintetizamos 1 línea desde la cabecera para
+    // que la usuaria vea el equivalente a lo que ya tenía.
+    const linesResp = await getSupplierInvoiceLines(row.id)
+    if (linesResp.success && linesResp.data.length > 0) {
+      setLines(linesResp.data.map((l) => ({
+        description: l.description ?? '',
+        base: String(l.base),
+        tax_rate: String(l.tax_rate),
+      })))
+    } else {
+      setLines([{
+        description: '',
+        base: String(row.amount),
+        tax_rate: String(reconstructedTaxRate),
+      }])
+    }
     // Cargar cuotas existentes; si hay más de 1 activamos el editor
     const inst = await listSupplierInvoiceInstallments({ invoice_id: row.id })
     if (inst.success && inst.data.length > 0) {
@@ -483,36 +509,12 @@ export function SupplierInvoicesContent() {
     loadDeliveryNotesForSupplier(supplierId, editingId)
   }
 
-  // Suma de los albaranes marcados con su importe computado
-  const computeDeliveryNotesBase = useCallback(
-    (ids: string[]) =>
-      ids.reduce((sum, id) => {
-        const note = deliveryNotes.find((n) => n.id === id)
-        return sum + (note?.total_amount ?? 0)
-      }, 0),
-    [deliveryNotes],
-  )
-
   const toggleDeliveryNote = (noteId: string) => {
-    setSelectedDeliveryNoteIds((prev) => {
-      const next = prev.includes(noteId) ? prev.filter((id) => id !== noteId) : [...prev, noteId]
-      // Auto-rellenar base y total a partir de los albaranes seleccionados.
-      // El usuario puede ajustar después; al volver a tildar/destildar se
-      // recalcula según el nuevo conjunto.
-      const base = Math.round(computeDeliveryNotesBase(next) * 100) / 100
-      setForm((f) => {
-        const rate = parseFloat(String(f.tax_rate).replace(',', '.')) || 21
-        const shipping = parseFloat(String(f.shipping_amount).replace(',', '.')) || 0
-        const total = Math.round((base * (1 + rate / 100) + shipping) * 100) / 100
-        return {
-          ...f,
-          amount: base > 0 ? String(base) : '',
-          total_amount: total > 0 ? String(total) : '',
-        }
-      })
-      setTotalTouched(true)
-      return next
-    })
+    // La base se sincroniza vía useEffect (solo cuando hay 1 línea).
+    // Con N líneas el usuario gestiona las bases manualmente.
+    setSelectedDeliveryNoteIds((prev) =>
+      prev.includes(noteId) ? prev.filter((id) => id !== noteId) : [...prev, noteId],
+    )
   }
 
   const selectedDeliveryNotesTotal = selectedDeliveryNoteIds.reduce((sum, id) => {
@@ -520,27 +522,43 @@ export function SupplierInvoicesContent() {
     return sum + (note?.total_amount ?? 0)
   }, 0)
 
-  const amountNum = parseFloat(String(form.amount).replace(',', '.')) || 0
-  const taxRateNum = parseFloat(String(form.tax_rate).replace(',', '.')) || 21
+  // Base imponible total e IVA total derivados de las líneas.
+  const linesBase = lines.reduce(
+    (s, l) => s + (parseFloat(String(l.base).replace(',', '.')) || 0),
+    0,
+  )
+  const linesTax = lines.reduce((s, l) => {
+    const b = parseFloat(String(l.base).replace(',', '.')) || 0
+    const r = parseFloat(String(l.tax_rate).replace(',', '.')) || 0
+    return s + (b * r) / 100
+  }, 0)
+  const amountNum = Math.round(linesBase * 100) / 100
+  const taxAmountNum = Math.round(linesTax * 100) / 100
   const shippingNum = parseFloat(String(form.shipping_amount).replace(',', '.')) || 0
   const retentionRateNum = parseFloat(String(form.retention_rate).replace(',', '.')) || 0
   const retentionAmountNum = Math.round((amountNum * retentionRateNum / 100) * 100) / 100
-  const computedTotal = amountNum * (1 + taxRateNum / 100) + shippingNum - retentionAmountNum
-  const totalNum = parseFloat(String(form.total_amount).replace(',', '.')) || computedTotal
+  const computedTotal = amountNum + taxAmountNum + shippingNum - retentionAmountNum
+  const totalNum = totalTouched && form.total_amount.trim() !== ''
+    ? parseFloat(String(form.total_amount).replace(',', '.')) || computedTotal
+    : computedTotal
 
-  // Si hay albaranes seleccionados y el usuario cambia el IVA, IRPF o envío,
-  // recalcular el total automáticamente sobre la base derivada de los albaranes.
+  // Recalcular el total mostrado siempre que cambien los componentes derivados.
+  // Si el usuario tocó manualmente el total (totalTouched), respetamos su valor.
+  useEffect(() => {
+    if (totalTouched) return
+    const total = Math.round(computedTotal * 100) / 100
+    setForm((f) => ({ ...f, total_amount: total > 0 ? String(total) : '' }))
+  }, [computedTotal, totalTouched])
+
+  // Si hay albaranes seleccionados y solo hay 1 línea, auto-rellenar su base
+  // con el total de los albaranes. Con N líneas no tocamos (el usuario gestiona).
   useEffect(() => {
     if (selectedDeliveryNoteIds.length === 0) return
+    if (lines.length !== 1) return
     const base = Math.round(selectedDeliveryNotesTotal * 100) / 100
-    const ret = Math.round((base * retentionRateNum / 100) * 100) / 100
-    const total = Math.round((base * (1 + taxRateNum / 100) + shippingNum - ret) * 100) / 100
-    setForm((f) => ({
-      ...f,
-      amount: base > 0 ? String(base) : f.amount,
-      total_amount: total > 0 ? String(total) : f.total_amount,
-    }))
-  }, [taxRateNum, shippingNum, retentionRateNum, selectedDeliveryNoteIds.length, selectedDeliveryNotesTotal])
+    if (base <= 0) return
+    setLines((prev) => prev.map((l, i) => (i === 0 ? { ...l, base: String(base) } : l)))
+  }, [selectedDeliveryNoteIds.length, selectedDeliveryNotesTotal, lines.length])
 
   const handleSave = async () => {
     if (!form.supplier_id && !form.supplier_name.trim()) {
@@ -561,6 +579,23 @@ export function SupplierInvoicesContent() {
     }
     if (selectedDeliveryNoteIds.length > 0 && !form.supplier_id) {
       toast.error('Selecciona un proveedor registrado para vincular albaranes')
+      return
+    }
+    // Validar líneas: al menos una con base > 0
+    const cleanedLines = lines
+      .map((l, idx) => {
+        const base = parseFloat(String(l.base).replace(',', '.')) || 0
+        const rate = parseFloat(String(l.tax_rate).replace(',', '.'))
+        return {
+          description: l.description.trim() || null,
+          base,
+          tax_rate: Number.isFinite(rate) ? rate : 21,
+          sort_order: idx,
+        }
+      })
+      .filter((l) => l.base > 0)
+    if (cleanedLines.length === 0) {
+      toast.error('Añade al menos una línea con base imponible mayor que 0')
       return
     }
 
@@ -587,7 +622,6 @@ export function SupplierInvoicesContent() {
     }
 
     setSaving(true)
-    const tax_amount = Math.round(amountNum * taxRateNum) / 100
     const payload: ApSupplierInvoiceInput = {
       supplier_id: form.supplier_id || null,
       supplier_name: form.supplier_name.trim(),
@@ -596,7 +630,7 @@ export function SupplierInvoicesContent() {
       invoice_date: form.invoice_date,
       due_date: form.due_date,
       amount: amountNum,
-      tax_amount,
+      tax_amount: taxAmountNum,
       shipping_amount: shippingNum,
       retention_rate: retentionRateNum,
       retention_amount: retentionAmountNum,
@@ -606,6 +640,7 @@ export function SupplierInvoicesContent() {
       attachment_url: form.attachment_url.trim() || null,
       delivery_note_ids: selectedDeliveryNoteIds,
       installments: installmentsPayload,
+      lines: cleanedLines,
     }
 
     if (editingId) {
@@ -1158,54 +1193,102 @@ export function SupplierInvoicesContent() {
                   }))}
                 />
               </div>
-              <div>
-                <Label>Base imponible (€)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={form.amount}
-                  onChange={(e) => {
-                    const v = e.target.value
-                    const amt = parseFloat(v.replace(',', '.')) || 0
-                    const rate = parseFloat(String(form.tax_rate).replace(',', '.')) || 21
-                    const ship = parseFloat(String(form.shipping_amount).replace(',', '.')) || 0
-                    const retRate = parseFloat(String(form.retention_rate).replace(',', '.')) || 0
-                    const ret = Math.round((amt * retRate / 100) * 100) / 100
-                    setForm((f) => ({ ...f, amount: v, total_amount: String(amt * (1 + rate / 100) + ship - ret) }))
-                  }}
-                />
-                <p className="text-xs text-muted-foreground mt-1">Si hay transporte, súmalo aquí.</p>
-              </div>
-              <div>
-                <Label>IVA %</Label>
-                <Select
-                  value={form.tax_rate}
-                  onValueChange={(v) => {
-                    const amt = parseFloat(String(form.amount).replace(',', '.')) || 0
-                    const ship = parseFloat(String(form.shipping_amount).replace(',', '.')) || 0
-                    const retRate = parseFloat(String(form.retention_rate).replace(',', '.')) || 0
-                    const ret = Math.round((amt * retRate / 100) * 100) / 100
-                    setForm((f) => ({ ...f, tax_rate: v, total_amount: String(amt * (1 + parseFloat(v) / 100) + ship - ret) }))
-                  }}
-                >
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {SUPPLIER_INVOICE_TAX_RATES.map((n) => (
-                      <SelectItem key={n} value={String(n)}>{n}%</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="col-span-2 rounded-md border bg-muted/20 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-medium">Bases imponibles</Label>
+                  <span className="text-xs text-muted-foreground">
+                    Base total: {formatCurrency(amountNum)} · IVA total: {formatCurrency(taxAmountNum)}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground -mt-1">
+                  Una línea por tipo de IVA. Ejemplo: género al 21% + transporte exento al 0%.
+                </p>
+                <div className="space-y-2">
+                  {lines.map((l, idx) => {
+                    const lineBase = parseFloat(String(l.base).replace(',', '.')) || 0
+                    const lineRate = parseFloat(String(l.tax_rate).replace(',', '.')) || 0
+                    const lineTax = Math.round((lineBase * lineRate) / 100 * 100) / 100
+                    return (
+                      <div key={idx} className="grid grid-cols-12 gap-2 items-end">
+                        <div className="col-span-4">
+                          {idx === 0 && <Label className="text-xs text-muted-foreground">Descripción</Label>}
+                          <Input
+                            value={l.description}
+                            placeholder="Género / Transporte / …"
+                            onChange={(e) => {
+                              const v = e.target.value
+                              setLines((prev) => prev.map((x, i) => (i === idx ? { ...x, description: v } : x)))
+                            }}
+                          />
+                        </div>
+                        <div className="col-span-3">
+                          {idx === 0 && <Label className="text-xs text-muted-foreground">Base (€)</Label>}
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={l.base}
+                            onChange={(e) => {
+                              const v = e.target.value
+                              setLines((prev) => prev.map((x, i) => (i === idx ? { ...x, base: v } : x)))
+                            }}
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          {idx === 0 && <Label className="text-xs text-muted-foreground">IVA %</Label>}
+                          <Select
+                            value={l.tax_rate}
+                            onValueChange={(v) => {
+                              setLines((prev) => prev.map((x, i) => (i === idx ? { ...x, tax_rate: v } : x)))
+                            }}
+                          >
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {SUPPLIER_INVOICE_TAX_RATES.map((n) => (
+                                <SelectItem key={n} value={String(n)}>{n}%</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="col-span-2">
+                          {idx === 0 && <Label className="text-xs text-muted-foreground">IVA (€)</Label>}
+                          <div className="h-9 flex items-center px-3 rounded-md border bg-muted/40 text-sm tabular-nums">
+                            {formatCurrency(lineTax)}
+                          </div>
+                        </div>
+                        <div className="col-span-1 flex justify-end">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-9 w-9 text-red-600 hover:text-red-700 disabled:opacity-30"
+                            disabled={lines.length <= 1}
+                            onClick={() => setLines((prev) => prev.filter((_, i) => i !== idx))}
+                            title={lines.length <= 1 ? 'Debe quedar al menos una línea' : 'Eliminar línea'}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1"
+                    onClick={() => setLines((prev) => [...prev, { description: '', base: '', tax_rate: '21' }])}
+                  >
+                    <Plus className="h-3 w-3" /> Añadir línea
+                  </Button>
+                </div>
               </div>
               <div>
                 <Label>IRPF %</Label>
                 <Select
                   value={form.retention_rate}
                   onValueChange={(v) => {
-                    const amt = parseFloat(String(form.amount).replace(',', '.')) || 0
-                    const rate = parseFloat(String(form.tax_rate).replace(',', '.')) || 21
-                    const ship = parseFloat(String(form.shipping_amount).replace(',', '.')) || 0
-                    const ret = Math.round((amt * parseFloat(v) / 100) * 100) / 100
-                    setForm((f) => ({ ...f, retention_rate: v, total_amount: String(amt * (1 + rate / 100) + ship - ret) }))
+                    setForm((f) => ({ ...f, retention_rate: v }))
+                    setTotalTouched(false)
                   }}
                 >
                   <SelectTrigger><SelectValue /></SelectTrigger>
