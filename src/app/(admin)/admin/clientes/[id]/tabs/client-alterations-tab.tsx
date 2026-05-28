@@ -39,10 +39,12 @@ export function ClientAlterationsTab({
   clientId,
   clientName,
   clientPhone,
+  basePath = '/admin',
 }: {
   clientId: string
   clientName?: string
   clientPhone?: string | null
+  basePath?: string
 }) {
   const [items, setItems] = useState<AlterationWithRelations[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -239,7 +241,7 @@ export function ClientAlterationsTab({
                   return (
                     <TableRow key={a.id}>
                       <TableCell className="font-mono text-sm">
-                        <Link href={`/admin/arreglos/${a.id}`} className="hover:underline">
+                        <Link href={`${basePath}/arreglos/${a.id}`} className="hover:underline">
                           {a.alteration_number}
                         </Link>
                       </TableCell>
@@ -260,7 +262,7 @@ export function ClientAlterationsTab({
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem asChild>
-                              <Link href={`/admin/arreglos/${a.id}`}>
+                              <Link href={`${basePath}/arreglos/${a.id}`}>
                                 <ExternalLink className="mr-2 h-4 w-4" /> Ver detalle
                               </Link>
                             </DropdownMenuItem>

@@ -219,7 +219,7 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
             <ClientCompaniesTab clientId={client.id} />
           </TabsContent>
           <TabsContent value="arreglos">
-            <ClientAlterationsTab clientId={client.id} clientName={client.full_name} clientPhone={client.phone} />
+            <ClientAlterationsTab clientId={client.id} clientName={client.full_name} clientPhone={client.phone} basePath={basePath} />
           </TabsContent>
           <TabsContent value="citas">
             <ClientAppointmentsTab clientId={client.id} />

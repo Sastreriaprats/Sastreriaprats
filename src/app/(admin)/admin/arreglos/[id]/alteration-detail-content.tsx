@@ -32,7 +32,7 @@ import {
 } from '@/types/alterations'
 import { downloadAlterationPdf, printAlterationPdf } from '@/lib/pdf/alteration-pdf'
 
-export function AlterationDetailContent({ alteration }: { alteration: AlterationWithRelations }) {
+export function AlterationDetailContent({ alteration, basePath = '/admin' }: { alteration: AlterationWithRelations; basePath?: string }) {
   const router = useRouter()
 
   // ── Form state (todos los campos editables) ───────────────────────────────
@@ -133,7 +133,7 @@ export function AlterationDetailContent({ alteration }: { alteration: Alteration
       }
       const clientId = res.data?.client_id ?? alteration.client_id
       toast.success('Arreglo eliminado')
-      router.push(`/admin/clientes/${clientId}?tab=arreglos`)
+      router.push(`${basePath}/clientes/${clientId}?tab=arreglos`)
     } finally {
       setDeleting(false)
     }
@@ -151,7 +151,7 @@ export function AlterationDetailContent({ alteration }: { alteration: Alteration
           <h1 className="text-2xl font-bold tracking-tight font-mono">{alteration.alteration_number}</h1>
           {alteration.clients && (
             <p className="text-sm text-muted-foreground mt-1">
-              <Link href={`/admin/clientes/${alteration.client_id}?tab=arreglos`} className="hover:underline">
+              <Link href={`${basePath}/clientes/${alteration.client_id}?tab=arreglos`} className="hover:underline">
                 {alteration.clients.full_name}
               </Link>
               {' · '}
