@@ -42,6 +42,8 @@ import { formatCurrency, formatDate, cn, normalizeSearchTerm } from '@/lib/utils
 import { formatClientAddress } from '@/lib/clients/format'
 import { downloadExcel, downloadExcelMulti } from '@/lib/excel/export'
 import { toast } from 'sonner'
+import { usePermissions } from '@/hooks/use-permissions'
+import { updateWithdrawal, deleteWithdrawal } from '@/actions/pos'
 import {
   getAccountingSummary, getInvoices, getEstimates,
   getJournalEntries, getVatQuarterly, getVatQuarterlyDetail, getClientsForInvoice, getClientForInvoiceById,
@@ -3412,6 +3414,8 @@ interface PaymentRow {
 
 function CajaSessionsTab() {
   const supabase = useMemo(() => createClient(), [])
+  const { can } = usePermissions()
+  const canManageWithdrawals = can('cash_withdrawals.manage')
   const [vista, setVista] = useState<'list' | 'detail'>('list')
   const [selectedSession, setSelectedSession] = useState<CashSession | null>(null)
   const [sessions, setSessions] = useState<CashSession[]>([])
@@ -3422,6 +3426,11 @@ function CajaSessionsTab() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailTotalCobrosSastreria, setDetailTotalCobrosSastreria] = useState<number>(0)
   const [detailSastreriaByMethod, setDetailSastreriaByMethod] = useState<{ cash: number; card: number; bizum: number; transfer: number }>({ cash: 0, card: 0, bizum: 0, transfer: 0 })
+  // Editar/borrar retiradas de caja (permiso cash_withdrawals.manage)
+  const [wdEdit, setWdEdit] = useState<{ id: string; amount: string; reason: string } | null>(null)
+  const [wdSaving, setWdSaving] = useState(false)
+  const [wdDelete, setWdDelete] = useState<{ id: string; amount: number } | null>(null)
+  const [wdDeleting, setWdDeleting] = useState(false)
 
   const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
 
@@ -3644,6 +3653,40 @@ function CajaSessionsTab() {
       return notes.length > 40 ? notes.slice(0, 40) + '…' : notes
     }
 
+    // Refrescar el detalle tras editar/borrar una retirada: re-lee los totales
+    // de la sesión (el arqueo se recalcula en cliente desde total_withdrawals).
+    const refreshSessionDetail = async () => {
+      const { data: fresh } = await supabase
+        .from('cash_sessions')
+        .select('total_withdrawals, expected_cash, cash_difference, counted_cash')
+        .eq('id', s.id)
+        .single()
+      if (fresh) setSessions((prev) => prev.map((x) => (x.id === s.id ? { ...x, ...fresh } : x)))
+      await loadDetail({ ...s, ...(fresh ?? {}) } as CashSession)
+    }
+
+    const handleWithdrawalSave = async () => {
+      if (!wdEdit) return
+      const amount = parseFloat(wdEdit.amount)
+      if (!amount || amount <= 0) { toast.error('El importe debe ser mayor que 0'); return }
+      if (!wdEdit.reason.trim()) { toast.error('El motivo no puede estar vacío'); return }
+      setWdSaving(true)
+      const r = await updateWithdrawal({ withdrawalId: wdEdit.id, amount, reason: wdEdit.reason.trim() })
+      setWdSaving(false)
+      if (r.success) { toast.success('Retirada actualizada'); setWdEdit(null); await refreshSessionDetail() }
+      else toast.error(r.error)
+    }
+
+    const handleWithdrawalDelete = async () => {
+      if (!wdDelete) return
+      setWdDeleting(true)
+      const r = await deleteWithdrawal({ withdrawalId: wdDelete.id })
+      setWdDeleting(false)
+      setWdDelete(null)
+      if (r.success) { toast.success('Retirada eliminada'); await refreshSessionDetail() }
+      else toast.error(r.error)
+    }
+
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-3">
@@ -3779,6 +3822,24 @@ function CajaSessionsTab() {
                             <span className={`text-sm font-medium tabular-nums shrink-0 ${amountClass}`}>
                               {isCierre ? '—' : isApertura ? (Number(s.opening_amount || 0).toFixed(2) + ' €') : (isRetirada ? '-' : isIncome ? '+' : '') + formatCurrency(amount)}
                             </span>
+                            {ev.type === 'withdrawal' && canManageWithdrawals && (
+                              <div className="flex items-center gap-0.5 shrink-0">
+                                <Button
+                                  variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                  title="Editar retirada"
+                                  onClick={() => setWdEdit({ id: String(d?.id), amount: String(d?.amount ?? ''), reason: String(d?.reason ?? '') })}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-red-600"
+                                  title="Borrar retirada"
+                                  onClick={() => setWdDelete({ id: String(d?.id), amount: Number(d?.amount ?? 0) })}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            )}
                           </div>
                         </div>
                       )
@@ -3824,6 +3885,52 @@ function CajaSessionsTab() {
             </div>
           </div>
         </div>
+
+        {/* Editar retirada de caja */}
+        <Dialog open={!!wdEdit} onOpenChange={(o) => { if (!o) setWdEdit(null) }}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Editar retirada de caja</DialogTitle></DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label>Importe (€)</Label>
+                <Input type="number" step="0.01" value={wdEdit?.amount ?? ''} autoFocus
+                  onChange={(e) => setWdEdit((p) => (p ? { ...p, amount: e.target.value } : p))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Motivo</Label>
+                <Input value={wdEdit?.reason ?? ''}
+                  onChange={(e) => setWdEdit((p) => (p ? { ...p, reason: e.target.value } : p))} />
+              </div>
+              {s.status === 'closed' && (
+                <p className="text-xs text-muted-foreground">Esta sesión está cerrada: se recalculará el efectivo esperado y el descuadre.</p>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setWdEdit(null)} disabled={wdSaving}>Cancelar</Button>
+              <Button onClick={handleWithdrawalSave} disabled={wdSaving}>
+                {wdSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Guardar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Borrar retirada de caja */}
+        <AlertDialog open={!!wdDelete} onOpenChange={(o) => { if (!o) setWdDelete(null) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Borrar esta retirada?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Se eliminará la retirada de {formatCurrency(wdDelete?.amount ?? 0)} y se ajustará el arqueo de la sesión{s.status === 'closed' ? ' (efectivo esperado y descuadre)' : ''}. Esta acción no se puede deshacer.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={wdDeleting}>Cancelar</AlertDialogCancel>
+              <AlertDialogAction onClick={(e) => { e.preventDefault(); handleWithdrawalDelete() }} disabled={wdDeleting} className="bg-red-600 hover:bg-red-700">
+                {wdDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Borrar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     )
   }

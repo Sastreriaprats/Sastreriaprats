@@ -642,6 +642,7 @@ export const cashWithdrawal = protectedAction<{
       notes: `Retirada manual - Sesión ${input.session_id}`,
       created_by: ctx.userId,
       cash_session_id: input.session_id,
+      withdrawal_id: withdrawal.id,
     })
 
     return success(withdrawal)
@@ -1457,6 +1458,61 @@ export const deleteSaleCompletely = protectedAction<
     if (data && data.success === false) {
       return failure(String(data.error || 'No se pudo eliminar la venta'), 'CONFLICT')
     }
+    return success(data)
+  }
+)
+
+// ── Editar/borrar retiradas de caja (cash_withdrawals.manage) ──────────────
+// Ambas reajustan el arqueo de la sesión y el espejo manual_transactions vía
+// RPC atómica. Doble cerrojo: permiso + isFullAdmin.
+async function userIsFullAdmin(ctx: { adminClient: any; userId: string }): Promise<boolean> {
+  const { data: roleRows } = await ctx.adminClient
+    .from('user_roles').select('roles!inner(name)').eq('user_id', ctx.userId)
+  return (roleRows ?? []).some((ur: { roles?: { name?: string } | { name?: string }[] }) => {
+    const r = ur.roles
+    const name = Array.isArray(r) ? r[0]?.name : r?.name
+    return name === 'administrador' || name === 'super_admin'
+  })
+}
+
+export const updateWithdrawal = protectedAction<
+  { withdrawalId: string; amount: number; reason: string },
+  { success?: boolean; message?: string; error?: string }
+>(
+  { permission: 'cash_withdrawals.manage', auditModule: 'pos', auditAction: 'update', auditEntity: 'cash_withdrawal', revalidate: ['/admin/contabilidad'] },
+  async (ctx, { withdrawalId, amount, reason }) => {
+    if (!withdrawalId) return failure('Falta el identificador de la retirada', 'VALIDATION')
+    const cleanAmount = Math.round((Number(amount) || 0) * 100) / 100
+    if (cleanAmount <= 0) return failure('El importe debe ser mayor que 0', 'VALIDATION')
+    const cleanReason = (reason ?? '').trim()
+    if (!cleanReason) return failure('El motivo no puede estar vacío', 'VALIDATION')
+
+    if (!(await userIsFullAdmin(ctx))) return failure('Solo un administrador puede editar retiradas de caja.', 'FORBIDDEN')
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_update_withdrawal', {
+      p_withdrawal_id: withdrawalId, p_amount: cleanAmount, p_reason: cleanReason,
+    })
+    if (error) return failure(error.message)
+    if (data && data.success === false) return failure(String(data.error || 'No se pudo actualizar la retirada'), 'CONFLICT')
+    return success(data)
+  }
+)
+
+export const deleteWithdrawal = protectedAction<
+  { withdrawalId: string },
+  { success?: boolean; message?: string; error?: string }
+>(
+  { permission: 'cash_withdrawals.manage', auditModule: 'pos', auditAction: 'delete', auditEntity: 'cash_withdrawal', revalidate: ['/admin/contabilidad'] },
+  async (ctx, { withdrawalId }) => {
+    if (!withdrawalId) return failure('Falta el identificador de la retirada', 'VALIDATION')
+
+    if (!(await userIsFullAdmin(ctx))) return failure('Solo un administrador puede eliminar retiradas de caja.', 'FORBIDDEN')
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_delete_withdrawal', {
+      p_withdrawal_id: withdrawalId,
+    })
+    if (error) return failure(error.message)
+    if (data && data.success === false) return failure(String(data.error || 'No se pudo eliminar la retirada'), 'CONFLICT')
     return success(data)
   }
 )
