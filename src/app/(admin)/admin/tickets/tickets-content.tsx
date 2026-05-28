@@ -23,10 +23,12 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, FileDown, Receipt, ChevronLeft, ChevronRight, FileText, Gift, Trash2, AlertTriangle } from 'lucide-react'
+import { Loader2, FileDown, Receipt, ChevronLeft, ChevronRight, FileText, Gift, Trash2, AlertTriangle, Pencil, X } from 'lucide-react'
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils'
-import { listTickets, getSaleForTicket, previewSaleDeletion, deleteSaleCompletely } from '@/actions/pos'
+import { listTickets, getSaleForTicket, previewSaleDeletion, deleteSaleCompletely, updateSaleClientNotes } from '@/actions/pos'
+import { listClients } from '@/actions/clients'
 import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
 import { generateTicketPdf } from '@/components/pos/ticket-pdf'
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
@@ -102,6 +104,17 @@ export function TicketsContent() {
   const [selectedWithdrawals, setSelectedWithdrawals] = useState<Set<string>>(new Set())
   const [confirmText, setConfirmText] = useState('')
 
+  // Editar ticket (cliente + notas) — Fase E1
+  const [editRow, setEditRow] = useState<DeleteRow | null>(null)
+  const [editLoading, setEditLoading] = useState(false)
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [editClientId, setEditClientId] = useState<string | null>(null)
+  const [editClientName, setEditClientName] = useState<string>('')
+  const [editNotes, setEditNotes] = useState<string>('')
+  const [clientQuery, setClientQuery] = useState('')
+  const [clientResults, setClientResults] = useState<{ id: string; full_name: string; client_code: string | null }[]>([])
+  const [clientSearching, setClientSearching] = useState(false)
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -128,6 +141,28 @@ export function TicketsContent() {
   useEffect(() => {
     load()
   }, [load])
+
+  // Buscador de cliente para el diálogo de edición (debounced)
+  useEffect(() => {
+    if (!editRow) return
+    const q = clientQuery.trim()
+    if (q.length < 2) { setClientResults([]); return }
+    let cancelled = false
+    setClientSearching(true)
+    const timer = setTimeout(() => {
+      listClients({ search: q, pageSize: 8 })
+        .then((res) => {
+          if (cancelled) return
+          if (res.success) {
+            const payload = res.data as { data?: { id: string; full_name?: string; client_code?: string | null }[] }
+            const rows = Array.isArray(payload?.data) ? payload.data : []
+            setClientResults(rows.map((c) => ({ id: String(c.id), full_name: c.full_name ?? '', client_code: c.client_code ?? null })))
+          }
+        })
+        .finally(() => { if (!cancelled) setClientSearching(false) })
+    }, 300)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [clientQuery, editRow])
 
   const handleDownloadPdf = async (saleId: string) => {
     setDownloadingId(saleId)
@@ -230,6 +265,55 @@ export function TicketsContent() {
       toast.error(e instanceof Error ? e.message : 'Error al eliminar la venta')
     } finally {
       setDeleting(false)
+    }
+  }
+
+  const openEdit = async (row: DeleteRow) => {
+    setEditRow(row)
+    setEditLoading(true)
+    setClientQuery('')
+    setClientResults([])
+    setEditClientId(null)
+    setEditClientName('')
+    setEditNotes('')
+    try {
+      const res = await getSaleForTicket(row.id)
+      if (res.success && res.data) {
+        const d = res.data as { sale: { client_id?: string | null; notes?: string | null }; clientName?: string | null }
+        setEditClientId(d.sale.client_id ?? null)
+        setEditClientName(d.clientName ?? '')
+        setEditNotes(d.sale.notes ?? '')
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al cargar la venta')
+    } finally {
+      setEditLoading(false)
+    }
+  }
+
+  const selectEditClient = (c: { id: string; full_name: string; client_code: string | null }) => {
+    setEditClientId(c.id)
+    setEditClientName(c.full_name + (c.client_code ? ` (${c.client_code})` : ''))
+    setClientQuery('')
+    setClientResults([])
+  }
+
+  const confirmEdit = async () => {
+    if (!editRow) return
+    setSavingEdit(true)
+    try {
+      const res = await updateSaleClientNotes({ saleId: editRow.id, clientId: editClientId, notes: editNotes.trim() || null })
+      if (res.success) {
+        toast.success('Venta actualizada')
+        setEditRow(null)
+        load()
+      } else {
+        toast.error('error' in res ? res.error : 'No se pudo actualizar la venta')
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al actualizar la venta')
+    } finally {
+      setSavingEdit(false)
     }
   }
 
@@ -388,6 +472,17 @@ export function TicketsContent() {
                             {invoiceLoadingId === row.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
                             Factura
                           </Button>
+                          {can('sales.edit') && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="gap-1"
+                              onClick={() => openEdit(row)}
+                            >
+                              <Pencil className="h-3 w-3" />
+                              Editar
+                            </Button>
+                          )}
                           {can('sales.delete') && (
                             <Button
                               variant="outline"
@@ -569,6 +664,81 @@ export function TicketsContent() {
             >
               {deleting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Eliminar definitivamente
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(editRow)} onOpenChange={(v) => { if (!v && !savingEdit) setEditRow(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-4 w-4" /> Editar ticket {editRow?.ticket_number}
+            </DialogTitle>
+            <DialogDescription>
+              Corrige el cliente o las notas de la venta. No afecta a productos, importes ni caja.
+            </DialogDescription>
+          </DialogHeader>
+
+          {editLoading ? (
+            <div className="flex justify-center py-10">
+              <Loader2 className="h-7 w-7 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Cliente */}
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Cliente</label>
+                <div className="flex items-center gap-2 text-sm rounded-md border bg-muted/30 px-3 py-2">
+                  <span className="flex-1 truncate">{editClientName || <span className="text-muted-foreground">Sin cliente (consumidor final)</span>}</span>
+                  {editClientId && (
+                    <Button
+                      type="button" variant="ghost" size="icon" className="h-6 w-6 text-red-600 hover:text-red-700"
+                      title="Quitar cliente"
+                      onClick={() => { setEditClientId(null); setEditClientName('') }}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </div>
+                <Input
+                  placeholder="Buscar otro cliente (nombre o código)…"
+                  value={clientQuery}
+                  onChange={(e) => setClientQuery(e.target.value)}
+                />
+                {clientSearching && <p className="text-xs text-muted-foreground">Buscando…</p>}
+                {clientResults.length > 0 && (
+                  <div className="border rounded-md max-h-40 overflow-y-auto divide-y">
+                    {clientResults.map((c) => (
+                      <button
+                        key={c.id} type="button"
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-muted/50"
+                        onClick={() => selectEditClient(c)}
+                      >
+                        {c.full_name}{c.client_code ? ` (${c.client_code})` : ''}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Notas */}
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Notas</label>
+                <Textarea rows={3} value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="Notas de la venta…" />
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                Si la venta tiene factura, se actualizarán también sus datos de cliente. Una factura enviada a Hacienda no permite cambiar el cliente.
+              </p>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditRow(null)} disabled={savingEdit}>Cancelar</Button>
+            <Button onClick={confirmEdit} disabled={savingEdit || editLoading}>
+              {savingEdit && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Guardar cambios
             </Button>
           </DialogFooter>
         </DialogContent>

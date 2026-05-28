@@ -8,6 +8,7 @@ import {
 import { success, failure } from '@/lib/errors'
 import { createSaleJournalEntry } from '@/actions/accounting-triggers'
 import { normalizeSearchTerm } from '@/lib/utils'
+import { formatClientAddress } from '@/lib/clients/format'
 
 /**
  * Lista de empleados que pueden realizar ventas en una tienda.
@@ -1258,6 +1259,51 @@ export const getVouchersSummaryByClient = protectedAction<{
     }))
 
     return success({ data })
+  }
+)
+
+// ── Editar venta (Fase E1): cliente y notas ────────────────────────────────
+// Solo cliente y notas. NO toca dinero, stock, caja ni asiento. Si la venta
+// tiene factura, sincroniza el snapshot de cliente (atómico vía RPC).
+export const updateSaleClientNotes = protectedAction<
+  { saleId: string; clientId?: string | null; notes?: string | null },
+  { success?: boolean; client_changed?: boolean; invoice_updated?: boolean; error?: string }
+>(
+  { permission: 'sales.edit', auditModule: 'pos', auditAction: 'update', auditEntity: 'sale', revalidate: ['/admin/tickets'] },
+  async (ctx, { saleId, clientId, notes }) => {
+    if (!saleId) return failure('Falta el identificador de la venta', 'VALIDATION')
+
+    // Snapshot del cliente para la factura (consistente con createInvoiceFromSale).
+    let snapshot: Record<string, string | null> | null = null
+    if (clientId) {
+      const { data: c } = await ctx.adminClient
+        .from('clients')
+        .select('full_name, company_name, company_nif, document_number, address, postal_code, city, province, country, email, phone')
+        .eq('id', clientId)
+        .maybeSingle()
+      if (c) {
+        const cc = c as Record<string, string | null>
+        snapshot = {
+          name: cc.full_name || cc.company_name || 'Cliente',
+          nif: cc.company_nif || cc.document_number || null,
+          address: formatClientAddress(cc) || null,
+          email: cc.email || null,
+          phone: cc.phone || null,
+        }
+      }
+    }
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_update_sale_client_notes', {
+      p_sale_id: saleId,
+      p_client_id: clientId ?? null,
+      p_notes: notes ?? null,
+      p_client_snapshot: snapshot,
+    })
+    if (error) return failure(error.message)
+    if (data && data.success === false) {
+      return failure(String(data.error || 'No se pudo actualizar la venta'), 'CONFLICT')
+    }
+    return success(data)
   }
 )
 
