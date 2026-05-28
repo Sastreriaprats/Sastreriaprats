@@ -57,6 +57,7 @@ type DeletionPreview = {
   can_delete?: boolean
   blockers?: string[]
   warnings?: string[]
+  auto_actions?: string[]
   sale?: { total?: number }
   lines?: unknown[]
   stock_to_return?: { quantity?: number }[]
@@ -488,6 +489,16 @@ export function TicketsContent() {
                   {preview.warnings.map((w: string, i: number) => (
                     <p key={i} className="text-amber-800 flex items-start gap-1.5"><AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" /> {w}</p>
                   ))}
+                </div>
+              )}
+
+              {/* Acciones automáticas (informativo) */}
+              {Array.isArray(preview.auto_actions) && preview.auto_actions.length > 0 && (
+                <div className="rounded-md border border-blue-300 bg-blue-50 p-3 space-y-1">
+                  <p className="font-medium text-blue-800">Al eliminar también:</p>
+                  <ul className="list-disc pl-5 text-blue-700">
+                    {preview.auto_actions.map((a: string, i: number) => <li key={i}>{a}</li>)}
+                  </ul>
                 </div>
               )}
 
