@@ -321,6 +321,57 @@ export const hardDeleteClientAction = protectedAction<string, { id: string }>(
   }
 )
 
+// ── Fusión de clientes duplicados (clients.merge + isFullAdmin) ────────────
+async function userIsFullAdmin(ctx: { adminClient: AdminClient; userId: string }): Promise<boolean> {
+  const { data: userRoles } = await ctx.adminClient
+    .from('user_roles').select('roles(name)').eq('user_id', ctx.userId)
+  return (userRoles ?? []).some((ur: { roles?: { name?: string } | { name?: string }[] | null }) => {
+    const r = ur.roles
+    const name = Array.isArray(r) ? r[0]?.name : r?.name
+    return name === 'administrador' || name === 'super_admin'
+  })
+}
+
+export const previewClientMerge = protectedAction<
+  { sourceId: string; targetId: string },
+  {
+    source?: { id: string; full_name: string; email: string | null; phone: string | null } | null
+    target?: { id: string; full_name: string; email: string | null; phone: string | null } | null
+    counts?: Record<string, number>
+    blockers?: string[]
+    warnings?: string[]
+    can_merge?: boolean
+    error?: string
+  }
+>(
+  { permission: 'clients.merge', auditModule: 'clients' },
+  async (ctx, { sourceId, targetId }) => {
+    if (!sourceId || !targetId) return failure('Faltan los identificadores de cliente', 'VALIDATION')
+    const { data, error } = await ctx.adminClient.rpc('rpc_preview_client_merge', { p_source_id: sourceId, p_target_id: targetId })
+    if (error) return failure(error.message)
+    return success(data)
+  }
+)
+
+export const mergeClients = protectedAction<
+  { sourceId: string; targetId: string; fillEmpty?: boolean },
+  { success?: boolean; message?: string; target_id?: string; counts?: Record<string, number>; error?: string }
+>(
+  { permission: 'clients.merge', auditModule: 'clients', auditAction: 'update', auditEntity: 'client', revalidate: ['/admin/clientes'] },
+  async (ctx, { sourceId, targetId, fillEmpty = true }) => {
+    if (!sourceId || !targetId) return failure('Faltan los identificadores de cliente', 'VALIDATION')
+    if (sourceId === targetId) return failure('No se puede fusionar un cliente consigo mismo', 'VALIDATION')
+    if (!(await userIsFullAdmin(ctx))) return failure('Solo un administrador puede fusionar clientes.', 'FORBIDDEN')
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_merge_clients', {
+      p_source_id: sourceId, p_target_id: targetId, p_fill_empty: fillEmpty,
+    })
+    if (error) return failure(error.message)
+    if (data && data.success === false) return failure(String(data.error || 'No se pudo fusionar'), 'CONFLICT')
+    return success(data)
+  }
+)
+
 export const addClientNote = protectedAction<any, any>(
   {
     permission: 'clients.edit',

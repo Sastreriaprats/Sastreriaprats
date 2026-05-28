@@ -12,12 +12,13 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
-  ArrowLeft, Phone, Mail, Trash2,
+  ArrowLeft, Phone, Mail, Trash2, GitMerge,
   Ruler, StickyNote, Scissors, Shirt, ShoppingBag, History, Pencil, CalendarDays, Receipt, Building2, BookmarkCheck,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { usePermissions } from '@/hooks/use-permissions'
 import { hardDeleteClientAction } from '@/actions/clients'
+import { MergeClientDialog } from './merge-client-dialog'
 import { clientSourceLabel } from '@/lib/clients/sources'
 import { getInitials, formatCurrency, formatDate } from '@/lib/utils'
 import { ClientDataTab } from './tabs/client-data-tab'
@@ -82,6 +83,7 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
   const { can, isAdmin } = usePermissions()
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [showMergeDialog, setShowMergeDialog] = useState(false)
 
   const handleHardDelete = async () => {
     setIsDeleting(true)
@@ -124,13 +126,29 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
               </div>
             </div>
           </div>
-          {isAdmin && (
-            <Button variant="destructive" size="sm" className="gap-2" onClick={() => setShowDeleteDialog(true)}>
-              <Trash2 className="h-4 w-4" /> Eliminar cliente
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {can('clients.merge') && (
+              <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowMergeDialog(true)}>
+                <GitMerge className="h-4 w-4" /> Fusionar con…
+              </Button>
+            )}
+            {isAdmin && (
+              <Button variant="destructive" size="sm" className="gap-2" onClick={() => setShowDeleteDialog(true)}>
+                <Trash2 className="h-4 w-4" /> Eliminar cliente
+              </Button>
+            )}
+          </div>
         </div>
       </div>
+
+      {can('clients.merge') && (
+        <MergeClientDialog
+          open={showMergeDialog}
+          onOpenChange={setShowMergeDialog}
+          source={{ id: client.id, full_name: client.full_name }}
+          basePath={basePath}
+        />
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <Card>
