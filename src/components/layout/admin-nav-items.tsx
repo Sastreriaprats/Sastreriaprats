@@ -10,7 +10,7 @@
 import {
   LayoutDashboard, Users, Scissors, Truck, UserCheck,
   CreditCard, BookOpen, Calendar, Settings, Shirt, Database,
-  Store, ShoppingBag, BarChart3, Mail, ScrollText, CircleDollarSign, Receipt, ClipboardList, Tag, FolderTree, CalendarRange,
+  Store, ShoppingBag, BarChart3, Mail, ScrollText, CircleDollarSign, Receipt, ClipboardList, Tag, FolderTree, CalendarRange, Undo2,
 } from 'lucide-react'
 
 export interface AdminNavChild {
@@ -51,6 +51,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
       { label: 'Vales',             href: '/admin/tickets/vales' },
     ],
   },
+  { label: 'Devoluciones', href: '/admin/devoluciones', icon: Undo2, permission: 'returns.view' },
   {
     label: 'Productos y Stock', href: '/admin/stock',    icon: Shirt,        permission: 'products.view',
     children: [
