@@ -429,7 +429,7 @@ export function SastreClienteDetailContent({ client, sastreName, totalSpent, tot
 
           <TabsContent value="arreglos">
             <DarkTab>
-              <ClientAlterationsTab clientId={clientId} />
+              <ClientAlterationsTab clientId={clientId} basePath="/sastre" />
             </DarkTab>
           </TabsContent>
 
