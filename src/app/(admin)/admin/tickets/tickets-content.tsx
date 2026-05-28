@@ -19,13 +19,18 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, FileDown, Receipt, ChevronLeft, ChevronRight, FileText, Gift } from 'lucide-react'
+import { Loader2, FileDown, Receipt, ChevronLeft, ChevronRight, FileText, Gift, Trash2, AlertTriangle } from 'lucide-react'
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils'
-import { listTickets, getSaleForTicket } from '@/actions/pos'
+import { listTickets, getSaleForTicket, previewSaleDeletion, deleteSaleCompletely } from '@/actions/pos'
 import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
 import { generateTicketPdf } from '@/components/pos/ticket-pdf'
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
+import { usePermissions } from '@/hooks/use-permissions'
 import { toast } from 'sonner'
 
 const PAYMENT_LABELS: Record<string, string> = {
@@ -37,6 +42,33 @@ const PAYMENT_LABELS: Record<string, string> = {
   mixed: 'Varios',
 }
 
+const CASH_FIELD_LABELS: Record<string, string> = {
+  total_cash_sales: 'Ventas efectivo',
+  total_card_sales: 'Ventas tarjeta',
+  total_bizum_sales: 'Ventas Bizum',
+  total_transfer_sales: 'Ventas transferencia',
+  total_voucher_sales: 'Ventas vale',
+  total_sales: 'Ventas totales',
+}
+
+type DeleteRow = { id: string; ticket_number: string }
+
+type DeletionPreview = {
+  can_delete?: boolean
+  blockers?: string[]
+  warnings?: string[]
+  sale?: { total?: number }
+  lines?: unknown[]
+  stock_to_return?: { quantity?: number }[]
+  journal_entries_to_delete?: unknown[]
+  invoice?: { invoice_number?: string } | null
+  cash_adjustment?: {
+    session_status?: string
+    adjustments?: { total_field: string; current_value: number; delta: number }[]
+  }
+  withdrawals_in_session?: { id: string; amount: number; reason: string; withdrawn_at: string }[]
+}
+
 const STATUS_BADGE: Record<string, { label: string; className: string } | null> = {
   completed: null,
   partially_returned: { label: 'Dev. parcial', className: 'bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-100' },
@@ -46,6 +78,7 @@ const STATUS_BADGE: Record<string, { label: string; className: string } | null> 
 
 export function TicketsContent() {
   const router = useRouter()
+  const { can } = usePermissions()
   const [data, setData] = useState<any[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -59,6 +92,14 @@ export function TicketsContent() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [invoiceLoadingId, setInvoiceLoadingId] = useState<string | null>(null)
   const [invoiceConfirmRow, setInvoiceConfirmRow] = useState<any | null>(null)
+
+  // Eliminar ticket (borrado físico)
+  const [deleteRow, setDeleteRow] = useState<DeleteRow | null>(null)
+  const [preview, setPreview] = useState<DeletionPreview | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [selectedWithdrawals, setSelectedWithdrawals] = useState<Set<string>>(new Set())
+  const [confirmText, setConfirmText] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -144,6 +185,50 @@ export function TicketsContent() {
     } finally {
       setInvoiceLoadingId(null)
       setInvoiceConfirmRow(null)
+    }
+  }
+
+  const openDelete = async (row: DeleteRow) => {
+    setDeleteRow(row)
+    setPreview(null)
+    setSelectedWithdrawals(new Set())
+    setConfirmText('')
+    setPreviewLoading(true)
+    try {
+      const res = await previewSaleDeletion({ saleId: row.id })
+      if (res.success) setPreview(res.data)
+      else toast.error('error' in res ? res.error : 'Error al cargar el detalle')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al cargar el detalle')
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  const toggleWithdrawal = (id: string) => {
+    setSelectedWithdrawals((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteRow) return
+    setDeleting(true)
+    try {
+      const res = await deleteSaleCompletely({ saleId: deleteRow.id, withdrawalIds: [...selectedWithdrawals] })
+      if (res.success) {
+        toast.success(res.data?.message || 'Venta eliminada por completo')
+        setDeleteRow(null)
+        load()
+      } else {
+        toast.error('error' in res ? res.error : 'No se pudo eliminar la venta')
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al eliminar la venta')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -235,7 +320,7 @@ export function TicketsContent() {
                     <TableHead>Estado</TableHead>
                     <TableHead>Vendedor</TableHead>
                     <TableHead>Tienda</TableHead>
-                    <TableHead className="w-[200px]">PDF / Factura</TableHead>
+                    <TableHead className="w-[280px]">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -302,6 +387,17 @@ export function TicketsContent() {
                             {invoiceLoadingId === row.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
                             Factura
                           </Button>
+                          {can('sales.delete') && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="gap-1 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                              onClick={() => openDelete(row)}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                              Eliminar
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -358,6 +454,114 @@ export function TicketsContent() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={Boolean(deleteRow)} onOpenChange={(v) => { if (!v && !deleting) setDeleteRow(null) }}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-red-700 flex items-center gap-2">
+              <Trash2 className="h-5 w-5" /> Eliminar ticket {deleteRow?.ticket_number}
+            </DialogTitle>
+            <DialogDescription>
+              Borrado físico total e irreversible: venta, líneas, pagos, stock, caja y contabilidad. Revisa el detalle antes de confirmar.
+            </DialogDescription>
+          </DialogHeader>
+
+          {previewLoading ? (
+            <div className="flex justify-center py-10">
+              <Loader2 className="h-7 w-7 animate-spin text-muted-foreground" />
+            </div>
+          ) : preview ? (
+            <div className="space-y-4 text-sm">
+              {/* Bloqueos */}
+              {Array.isArray(preview.blockers) && preview.blockers.length > 0 && (
+                <div className="rounded-md border border-red-300 bg-red-50 p-3 space-y-1">
+                  <p className="font-semibold text-red-800 flex items-center gap-1.5"><AlertTriangle className="h-4 w-4" /> No se puede eliminar:</p>
+                  <ul className="list-disc pl-5 text-red-700">
+                    {preview.blockers.map((b: string, i: number) => <li key={i}>{b}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {/* Avisos */}
+              {Array.isArray(preview.warnings) && preview.warnings.length > 0 && (
+                <div className="rounded-md border border-amber-300 bg-amber-50 p-3 space-y-1">
+                  {preview.warnings.map((w: string, i: number) => (
+                    <p key={i} className="text-amber-800 flex items-start gap-1.5"><AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" /> {w}</p>
+                  ))}
+                </div>
+              )}
+
+              {/* Resumen de lo que se borrará */}
+              <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
+                <div className="flex justify-between"><span className="text-muted-foreground">Total venta</span><span className="font-semibold">{formatCurrency(Number(preview.sale?.total) || 0)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Líneas</span><span>{(preview.lines ?? []).length}</span></div>
+                {Array.isArray(preview.stock_to_return) && preview.stock_to_return.length > 0 && (
+                  <div className="flex justify-between"><span className="text-muted-foreground">Devolver al stock</span><span>{preview.stock_to_return.reduce((s, x) => s + Number(x.quantity || 0), 0)} ud.</span></div>
+                )}
+                {Array.isArray(preview.journal_entries_to_delete) && preview.journal_entries_to_delete.length > 0 && (
+                  <div className="flex justify-between"><span className="text-muted-foreground">Asientos contables</span><span>{preview.journal_entries_to_delete.length}</span></div>
+                )}
+                {preview.invoice && (
+                  <div className="flex justify-between"><span className="text-muted-foreground">Factura</span><span className="font-mono">{preview.invoice.invoice_number}</span></div>
+                )}
+              </div>
+
+              {/* Ajuste de caja */}
+              {(preview.cash_adjustment?.adjustments?.length ?? 0) > 0 && (
+                <div className="rounded-md border p-3 space-y-1">
+                  <p className="font-medium">Ajuste de caja {preview.cash_adjustment?.session_status === 'closed' ? '(sesión cerrada)' : ''}</p>
+                  {preview.cash_adjustment!.adjustments!.map((a, i) => (
+                    <div key={i} className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">{CASH_FIELD_LABELS[a.total_field] ?? a.total_field}</span>
+                      <span className="tabular-nums">{formatCurrency(Number(a.current_value) || 0)} → {formatCurrency((Number(a.current_value) || 0) + (Number(a.delta) || 0))}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Checklist de retiradas de la sesión */}
+              {Array.isArray(preview.withdrawals_in_session) && preview.withdrawals_in_session.length > 0 && (
+                <div className="rounded-md border p-3 space-y-2">
+                  <p className="font-medium">Retiradas de esta sesión de caja</p>
+                  <p className="text-xs text-muted-foreground -mt-1">Marca las que quieras borrar también (por defecto ninguna).</p>
+                  {preview.withdrawals_in_session.map((w) => (
+                    <label key={w.id} className="flex items-center gap-2 cursor-pointer">
+                      <Checkbox checked={selectedWithdrawals.has(w.id)} onCheckedChange={() => toggleWithdrawal(w.id)} />
+                      <span className="flex-1 text-xs">
+                        <span className="font-semibold">{formatCurrency(Number(w.amount) || 0)}</span>
+                        {' · '}{w.reason || 'Sin motivo'}
+                        {' · '}<span className="text-muted-foreground">{formatDateTime(w.withdrawn_at)}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {/* Confirmación anti-clic: escribir el número de ticket */}
+              {preview.can_delete && (
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground">
+                    Para confirmar, escribe el número de ticket <span className="font-mono font-semibold">{deleteRow?.ticket_number}</span>:
+                  </label>
+                  <Input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder={deleteRow?.ticket_number} />
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteRow(null)} disabled={deleting}>Cancelar</Button>
+            <Button
+              variant="destructive"
+              disabled={deleting || !preview?.can_delete || confirmText !== deleteRow?.ticket_number}
+              onClick={confirmDelete}
+            >
+              {deleting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Eliminar definitivamente
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

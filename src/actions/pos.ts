@@ -1260,3 +1260,57 @@ export const getVouchersSummaryByClient = protectedAction<{
     return success({ data })
   }
 )
+
+// ── Borrado físico de ventas (botón "Eliminar ticket") ─────────────────────
+// Preview (solo lectura): calcula qué se borraría + cerrojos. Gated por sales.delete.
+export const previewSaleDeletion = protectedAction<{ saleId: string }, any>(
+  { permission: 'sales.delete', auditModule: 'pos' },
+  async (ctx, { saleId }) => {
+    if (!saleId) return failure('Falta el identificador de la venta', 'VALIDATION')
+    const { data, error } = await ctx.adminClient.rpc('rpc_preview_sale_deletion', { p_sale_id: saleId })
+    if (error) return failure(error.message)
+    if (data?.error) return failure(String(data.error), 'NOT_FOUND')
+    return success(data)
+  }
+)
+
+// Borrado atómico real. Gated por sales.delete + doble cerrojo isFullAdmin
+// (operación destructiva e irreversible).
+export const deleteSaleCompletely = protectedAction<
+  { saleId: string; withdrawalIds?: string[] },
+  any
+>(
+  {
+    permission: 'sales.delete',
+    auditModule: 'pos',
+    auditAction: 'delete',
+    auditEntity: 'sale',
+    revalidate: ['/admin/tickets'],
+  },
+  async (ctx, { saleId, withdrawalIds }) => {
+    if (!saleId) return failure('Falta el identificador de la venta', 'VALIDATION')
+
+    // Doble cerrojo: solo administrador/super_admin puede borrar ventas.
+    const { data: roleRows } = await ctx.adminClient
+      .from('user_roles')
+      .select('roles!inner(name)')
+      .eq('user_id', ctx.userId)
+    const isFullAdmin = (roleRows ?? []).some((ur: any) => {
+      const r = ur.roles
+      const name = Array.isArray(r) ? r[0]?.name : r?.name
+      return name === 'administrador' || name === 'super_admin'
+    })
+    if (!isFullAdmin) return failure('Solo un administrador puede eliminar ventas.', 'FORBIDDEN')
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_delete_sale_completely', {
+      p_sale_id: saleId,
+      p_withdrawal_ids: withdrawalIds ?? [],
+    })
+    if (error) return failure(error.message)
+    // La RPC devuelve { success: bool, error?: text, deleted?: {...} }
+    if (data && data.success === false) {
+      return failure(String(data.error || 'No se pudo eliminar la venta'), 'CONFLICT')
+    }
+    return success(data)
+  }
+)
