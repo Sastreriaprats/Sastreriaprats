@@ -1516,3 +1516,78 @@ export const deleteWithdrawal = protectedAction<
     return success(data)
   }
 )
+
+// ── Corregir/reabrir/borrar sesiones de caja (cash_sessions.manage) ────────
+// Todas atómicas vía RPC. Doble cerrojo: permiso + isFullAdmin.
+export const updateCashSessionClose = protectedAction<
+  { sessionId: string; countedCash: number; closingNotes?: string | null; closingBreakdown?: unknown },
+  { success?: boolean; message?: string; error?: string }
+>(
+  { permission: 'cash_sessions.manage', auditModule: 'pos', auditAction: 'update', auditEntity: 'cash_session', revalidate: ['/admin/contabilidad'] },
+  async (ctx, { sessionId, countedCash, closingNotes, closingBreakdown }) => {
+    if (!sessionId) return failure('Falta el identificador de la sesión', 'VALIDATION')
+    const cleanCounted = Math.round((Number(countedCash) || 0) * 100) / 100
+    if (cleanCounted < 0) return failure('El efectivo contado no puede ser negativo', 'VALIDATION')
+    if (!(await userIsFullAdmin(ctx))) return failure('Solo un administrador puede corregir el arqueo.', 'FORBIDDEN')
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_update_cash_session_close', {
+      p_session_id: sessionId, p_counted_cash: cleanCounted,
+      p_closing_notes: closingNotes ?? null, p_closing_breakdown: closingBreakdown ?? null,
+    })
+    if (error) return failure(error.message)
+    if (data && data.success === false) return failure(String(data.error || 'No se pudo corregir el arqueo'), 'CONFLICT')
+    return success(data)
+  }
+)
+
+export const updateCashSessionOpening = protectedAction<
+  { sessionId: string; openingAmount: number; openingBreakdown?: unknown },
+  { success?: boolean; message?: string; error?: string }
+>(
+  { permission: 'cash_sessions.manage', auditModule: 'pos', auditAction: 'update', auditEntity: 'cash_session', revalidate: ['/admin/contabilidad'] },
+  async (ctx, { sessionId, openingAmount, openingBreakdown }) => {
+    if (!sessionId) return failure('Falta el identificador de la sesión', 'VALIDATION')
+    const cleanOpening = Math.round((Number(openingAmount) || 0) * 100) / 100
+    if (cleanOpening < 0) return failure('El fondo de apertura no puede ser negativo', 'VALIDATION')
+    if (!(await userIsFullAdmin(ctx))) return failure('Solo un administrador puede corregir el fondo de apertura.', 'FORBIDDEN')
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_update_cash_session_opening', {
+      p_session_id: sessionId, p_opening_amount: cleanOpening, p_opening_breakdown: openingBreakdown ?? null,
+    })
+    if (error) return failure(error.message)
+    if (data && data.success === false) return failure(String(data.error || 'No se pudo corregir el fondo'), 'CONFLICT')
+    return success(data)
+  }
+)
+
+export const reopenCashSession = protectedAction<
+  { sessionId: string },
+  { success?: boolean; message?: string; error?: string }
+>(
+  { permission: 'cash_sessions.manage', auditModule: 'pos', auditAction: 'update', auditEntity: 'cash_session', revalidate: ['/admin/contabilidad'] },
+  async (ctx, { sessionId }) => {
+    if (!sessionId) return failure('Falta el identificador de la sesión', 'VALIDATION')
+    if (!(await userIsFullAdmin(ctx))) return failure('Solo un administrador puede reabrir una sesión de caja.', 'FORBIDDEN')
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_reopen_cash_session', { p_session_id: sessionId })
+    if (error) return failure(error.message)
+    if (data && data.success === false) return failure(String(data.error || 'No se pudo reabrir la sesión'), 'CONFLICT')
+    return success(data)
+  }
+)
+
+export const deleteCashSession = protectedAction<
+  { sessionId: string },
+  { success?: boolean; message?: string; error?: string }
+>(
+  { permission: 'cash_sessions.manage', auditModule: 'pos', auditAction: 'delete', auditEntity: 'cash_session', revalidate: ['/admin/contabilidad'] },
+  async (ctx, { sessionId }) => {
+    if (!sessionId) return failure('Falta el identificador de la sesión', 'VALIDATION')
+    if (!(await userIsFullAdmin(ctx))) return failure('Solo un administrador puede borrar una sesión de caja.', 'FORBIDDEN')
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_delete_cash_session', { p_session_id: sessionId })
+    if (error) return failure(error.message)
+    if (data && data.success === false) return failure(String(data.error || 'No se pudo borrar la sesión'), 'CONFLICT')
+    return success(data)
+  }
+)

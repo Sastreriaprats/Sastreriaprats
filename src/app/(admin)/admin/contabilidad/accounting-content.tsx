@@ -43,7 +43,7 @@ import { formatClientAddress } from '@/lib/clients/format'
 import { downloadExcel, downloadExcelMulti } from '@/lib/excel/export'
 import { toast } from 'sonner'
 import { usePermissions } from '@/hooks/use-permissions'
-import { updateWithdrawal, deleteWithdrawal } from '@/actions/pos'
+import { updateWithdrawal, deleteWithdrawal, updateCashSessionClose, updateCashSessionOpening, reopenCashSession, deleteCashSession } from '@/actions/pos'
 import {
   getAccountingSummary, getInvoices, getEstimates,
   getJournalEntries, getVatQuarterly, getVatQuarterlyDetail, getClientsForInvoice, getClientForInvoiceById,
@@ -3416,6 +3416,7 @@ function CajaSessionsTab() {
   const supabase = useMemo(() => createClient(), [])
   const { can } = usePermissions()
   const canManageWithdrawals = can('cash_withdrawals.manage')
+  const canManageSessions = can('cash_sessions.manage')
   const [vista, setVista] = useState<'list' | 'detail'>('list')
   const [selectedSession, setSelectedSession] = useState<CashSession | null>(null)
   const [sessions, setSessions] = useState<CashSession[]>([])
@@ -3431,6 +3432,16 @@ function CajaSessionsTab() {
   const [wdSaving, setWdSaving] = useState(false)
   const [wdDelete, setWdDelete] = useState<{ id: string; amount: number } | null>(null)
   const [wdDeleting, setWdDeleting] = useState(false)
+  // Corregir/reabrir/borrar sesión de caja (permiso cash_sessions.manage)
+  const [arqueoEdit, setArqueoEdit] = useState<
+    { sessionId: string; openingAmount: string; countedCash: string; closingNotes: string
+      origOpening: number; origCounted: number; origNotes: string
+      totalCashSales: number; totalReturns: number; totalWithdrawals: number } | null>(null)
+  const [arqueoSaving, setArqueoSaving] = useState(false)
+  const [reopenTarget, setReopenTarget] = useState<{ sessionId: string; date: string } | null>(null)
+  const [reopening, setReopening] = useState(false)
+  const [delSessionTarget, setDelSessionTarget] = useState<{ sessionId: string; date: string } | null>(null)
+  const [delSessionLoading, setDelSessionLoading] = useState(false)
 
   const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
 
@@ -3653,16 +3664,76 @@ function CajaSessionsTab() {
       return notes.length > 40 ? notes.slice(0, 40) + '…' : notes
     }
 
-    // Refrescar el detalle tras editar/borrar una retirada: re-lee los totales
-    // de la sesión (el arqueo se recalcula en cliente desde total_withdrawals).
+    // Refrescar el detalle tras editar/reabrir: re-lee la sesión (totales, arqueo,
+    // estado) y la mezcla en selectedSession (el arqueo se recalcula en cliente).
     const refreshSessionDetail = async () => {
       const { data: fresh } = await supabase
         .from('cash_sessions')
-        .select('total_withdrawals, expected_cash, cash_difference, counted_cash')
+        .select('total_withdrawals, expected_cash, cash_difference, counted_cash, opening_amount, status, closed_at, closed_by, closing_notes, opening_breakdown, closing_breakdown')
         .eq('id', s.id)
         .single()
       if (fresh) setSessions((prev) => prev.map((x) => (x.id === s.id ? { ...x, ...fresh } : x)))
       await loadDetail({ ...s, ...(fresh ?? {}) } as CashSession)
+    }
+
+    // ── Corregir/reabrir/borrar sesión ──
+    const isEmptySession = s.status === 'closed'
+      && Number(s.total_sales ?? 0) === 0 && Number(s.total_returns ?? 0) === 0 && Number(s.total_withdrawals ?? 0) === 0
+      && !timelineEvents.some((ev) => ev.type === 'withdrawal')
+
+    const handleArqueoSave = async () => {
+      if (!arqueoEdit) return
+      const newOpening = parseFloat(arqueoEdit.openingAmount)
+      const newCounted = parseFloat(arqueoEdit.countedCash)
+      if (isNaN(newOpening) || newOpening < 0) { toast.error('El fondo de apertura no puede ser negativo'); return }
+      if (isNaN(newCounted) || newCounted < 0) { toast.error('El efectivo contado no puede ser negativo'); return }
+      const newExpected = newOpening + arqueoEdit.totalCashSales - arqueoEdit.totalReturns - arqueoEdit.totalWithdrawals
+      const newDiff = newCounted - newExpected
+      if (Math.abs(newDiff) > 5 && !window.confirm(`Esta sesión quedará con un descuadre de ${formatCurrency(newDiff)}. ¿Continuar?`)) return
+
+      const openingChanged = Math.abs(newOpening - arqueoEdit.origOpening) >= 0.01
+      const closeChanged = Math.abs(newCounted - arqueoEdit.origCounted) >= 0.01 || (arqueoEdit.closingNotes.trim() !== (arqueoEdit.origNotes ?? ''))
+      if (!openingChanged && !closeChanged) { toast.info('No hay cambios'); setArqueoEdit(null); return }
+
+      setArqueoSaving(true)
+      try {
+        if (openingChanged) {
+          const r = await updateCashSessionOpening({ sessionId: arqueoEdit.sessionId, openingAmount: newOpening })
+          if (!r.success) { toast.error(r.error); return }
+        }
+        if (closeChanged) {
+          const r = await updateCashSessionClose({ sessionId: arqueoEdit.sessionId, countedCash: newCounted, closingNotes: arqueoEdit.closingNotes.trim() || null })
+          if (!r.success) { toast.error(r.error); return }
+        }
+        toast.success('Arqueo corregido')
+        setArqueoEdit(null)
+        await refreshSessionDetail()
+      } finally {
+        setArqueoSaving(false)
+      }
+    }
+
+    const handleReopen = async () => {
+      if (!reopenTarget) return
+      setReopening(true)
+      const r = await reopenCashSession({ sessionId: reopenTarget.sessionId })
+      setReopening(false)
+      setReopenTarget(null)
+      if (r.success) { toast.success('Sesión reabierta'); await refreshSessionDetail() }
+      else toast.error(r.error)
+    }
+
+    const handleDeleteSession = async () => {
+      if (!delSessionTarget) return
+      setDelSessionLoading(true)
+      const r = await deleteCashSession({ sessionId: delSessionTarget.sessionId })
+      setDelSessionLoading(false)
+      setDelSessionTarget(null)
+      if (r.success) {
+        toast.success('Sesión eliminada')
+        setSessions((prev) => prev.filter((x) => x.id !== s.id))
+        setVista('list'); setSelectedSession(null); setTimelineEvents([])
+      } else toast.error(r.error)
     }
 
     const handleWithdrawalSave = async () => {
@@ -3733,6 +3804,32 @@ function CajaSessionsTab() {
             >
               📄 Descargar arqueo
             </button>
+          )}
+          {canManageSessions && s.status === 'closed' && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setArqueoEdit({
+                sessionId: s.id,
+                openingAmount: String(Number(s.opening_amount ?? 0)),
+                countedCash: String(Number(s.counted_cash ?? 0)),
+                closingNotes: s.closing_notes ?? '',
+                origOpening: Number(s.opening_amount ?? 0),
+                origCounted: Number(s.counted_cash ?? 0),
+                origNotes: s.closing_notes ?? '',
+                totalCashSales: Number(s.total_cash_sales ?? 0),
+                totalReturns: Number(s.total_returns ?? 0),
+                totalWithdrawals: Number(s.total_withdrawals ?? 0),
+              })}>
+                <Pencil className="h-4 w-4 mr-1.5" /> Editar arqueo
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setReopenTarget({ sessionId: s.id, date: dateLong })}>
+                <Lock className="h-4 w-4 mr-1.5" /> Reabrir
+              </Button>
+              {isEmptySession && (
+                <Button variant="outline" size="sm" className="text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => setDelSessionTarget({ sessionId: s.id, date: dateLong })}>
+                  <Trash2 className="h-4 w-4 mr-1.5" /> Borrar sesión
+                </Button>
+              )}
+            </>
           )}
         </div>
 
@@ -3927,6 +4024,87 @@ function CajaSessionsTab() {
               <AlertDialogCancel disabled={wdDeleting}>Cancelar</AlertDialogCancel>
               <AlertDialogAction onClick={(e) => { e.preventDefault(); handleWithdrawalDelete() }} disabled={wdDeleting} className="bg-red-600 hover:bg-red-700">
                 {wdDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Borrar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Editar arqueo (fondo + cierre) */}
+        <Dialog open={!!arqueoEdit} onOpenChange={(o) => { if (!o) setArqueoEdit(null) }}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Editar arqueo de caja</DialogTitle></DialogHeader>
+            {arqueoEdit && (() => {
+              const o = parseFloat(arqueoEdit.openingAmount) || 0
+              const c = parseFloat(arqueoEdit.countedCash) || 0
+              const exp = o + arqueoEdit.totalCashSales - arqueoEdit.totalReturns - arqueoEdit.totalWithdrawals
+              const diff = Math.round((c - exp) * 100) / 100
+              return (
+                <div className="space-y-4 py-2">
+                  <div className="space-y-2">
+                    <Label>Fondo de apertura (€)</Label>
+                    <Input type="number" step="0.01" value={arqueoEdit.openingAmount}
+                      onChange={(e) => setArqueoEdit((p) => (p ? { ...p, openingAmount: e.target.value } : p))} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Efectivo contado (€)</Label>
+                    <Input type="number" step="0.01" value={arqueoEdit.countedCash}
+                      onChange={(e) => setArqueoEdit((p) => (p ? { ...p, countedCash: e.target.value } : p))} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Notas de cierre</Label>
+                    <Textarea rows={2} value={arqueoEdit.closingNotes}
+                      onChange={(e) => setArqueoEdit((p) => (p ? { ...p, closingNotes: e.target.value } : p))} />
+                  </div>
+                  <div className="rounded-md border p-3 text-sm space-y-1 bg-muted/30">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Efectivo esperado (recalculado)</span><span className="tabular-nums">{formatCurrency(exp)}</span></div>
+                    <div className="flex justify-between font-medium"><span className="text-muted-foreground">Descuadre</span><span className={`tabular-nums ${diff === 0 ? 'text-green-600' : 'text-red-600'}`}>{formatCurrency(diff)}</span></div>
+                  </div>
+                  {diff !== 0 && (
+                    <p className="text-xs text-red-600">Esta sesión quedará con un descuadre de {formatCurrency(diff)}.</p>
+                  )}
+                </div>
+              )
+            })()}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setArqueoEdit(null)} disabled={arqueoSaving}>Cancelar</Button>
+              <Button onClick={handleArqueoSave} disabled={arqueoSaving}>
+                {arqueoSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Guardar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Reabrir sesión */}
+        <AlertDialog open={!!reopenTarget} onOpenChange={(o) => { if (!o) setReopenTarget(null) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Reabrir esta sesión de caja?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Vas a reabrir la sesión de {reopenTarget?.date}. Mientras esté abierta, los nuevos pagos y retiradas de esta tienda se atribuirán a esta sesión, no a una nueva. Si la tienda ya tiene otra caja abierta, no se podrá reabrir.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={reopening}>Cancelar</AlertDialogCancel>
+              <AlertDialogAction onClick={(e) => { e.preventDefault(); handleReopen() }} disabled={reopening}>
+                {reopening ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Reabrir
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Borrar sesión */}
+        <AlertDialog open={!!delSessionTarget} onOpenChange={(o) => { if (!o) setDelSessionTarget(null) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Borrar esta sesión de caja?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Vas a borrar la sesión de {delSessionTarget?.date}. Solo se permite si está vacía (sin ventas ni retiradas). Esta acción no se puede deshacer.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={delSessionLoading}>Cancelar</AlertDialogCancel>
+              <AlertDialogAction onClick={(e) => { e.preventDefault(); handleDeleteSession() }} disabled={delSessionLoading} className="bg-red-600 hover:bg-red-700">
+                {delSessionLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Borrar
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
