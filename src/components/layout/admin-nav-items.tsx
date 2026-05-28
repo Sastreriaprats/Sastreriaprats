@@ -65,6 +65,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { label: 'Proveedores',  href: '/admin/proveedores',  icon: Truck,        permission: 'suppliers.view' },
   { label: 'Oficiales',    href: '/admin/oficiales',    icon: UserCheck,    permission: 'officials.view' },
   { label: 'Calendario',   href: '/admin/calendario',   icon: Calendar,     permission: 'calendar.view' },
+  { label: 'Facturas',     href: '/admin/facturas',     icon: Receipt,      permission: 'accounting.manage_invoices' },
   { label: 'Contabilidad', href: '/admin/contabilidad', icon: BookOpen, permission: 'accounting.view',
     children: [
       { label: 'Facturas / Presupuestos / Movimientos', href: '/admin/contabilidad' },

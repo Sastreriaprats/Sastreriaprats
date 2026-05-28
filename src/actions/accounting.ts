@@ -124,7 +124,7 @@ export const getInvoices = protectedAction<
   { search?: string; status?: string; dateFrom?: string; dateTo?: string },
   InvoiceRow[]
 >(
-  { permission: 'accounting.view', auditModule: 'accounting' },
+  { permission: ['accounting.view', 'accounting.manage_invoices'], auditModule: 'accounting' },
   async (ctx, { search, status, dateFrom, dateTo }) => {
     let q = ctx.adminClient
       .from('invoices')
@@ -564,7 +564,7 @@ export type ClientForInvoice = {
 }
 
 export const getClientsForInvoice = protectedAction<{ query?: string } | void, ClientForInvoice[]>(
-  { permission: 'accounting.edit', auditModule: 'accounting' },
+  { permission: ['accounting.edit', 'accounting.manage_invoices'], auditModule: 'accounting' },
   async (ctx, input) => {
     const q = ((input && typeof input === 'object' && 'query' in input ? input.query : '') || '').trim()
     // Sin término o término muy corto → no devolver nada. Evita cargar
@@ -616,7 +616,7 @@ export const getClientsForInvoice = protectedAction<{ query?: string } | void, C
  *  para hidratar el combobox cuando se edita una factura/presupuesto que
  *  ya tiene cliente asignado, sin recargar la lista entera. */
 export const getClientForInvoiceById = protectedAction<string, ClientForInvoice | null>(
-  { permission: 'accounting.edit', auditModule: 'accounting' },
+  { permission: ['accounting.edit', 'accounting.manage_invoices'], auditModule: 'accounting' },
   async (ctx, id) => {
     if (!id) return success(null)
     const { data } = await ctx.adminClient
@@ -658,7 +658,7 @@ export const getProductsForInvoice = protectedAction<
   { search?: string },
   { id: string; name: string; sku: string; base_price: number }[]
 >(
-  { permission: 'accounting.edit', auditModule: 'accounting' },
+  { permission: ['accounting.edit', 'accounting.manage_invoices'], auditModule: 'accounting' },
   async (ctx, { search }) => {
     let q = ctx.adminClient
       .from('products')

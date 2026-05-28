@@ -428,7 +428,7 @@ type InvoiceLine = { description: string; quantity: number; unit_price: number; 
 const PAYMENT_METHOD_PRESETS = ['Efectivo', 'Tarjeta', 'Transferencia', 'Bizum', 'Cheque', 'Mixto'] as const
 const PAYMENT_METHOD_OTHER = 'Otro'
 
-function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEditConsumed: () => void }) {
+export function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEditConsumed: () => void }) {
   const [rows, setRows] = useState<InvoiceRow[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
