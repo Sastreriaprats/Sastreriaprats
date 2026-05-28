@@ -1307,6 +1307,106 @@ export const updateSaleClientNotes = protectedAction<
   }
 )
 
+// ── Editar pagos de una venta (Fase E2): método de pago ────────────────────
+// Redistribuye los importes entre métodos sin cambiar el total. Gated sales.edit.
+export const updateSalePayments = protectedAction<
+  { saleId: string; payments: { payment_method: string; amount: number }[] },
+  { success?: boolean; message?: string; payment_method?: string; cash_delta?: number; error?: string }
+>(
+  { permission: 'sales.edit', auditModule: 'pos', auditAction: 'update', auditEntity: 'sale', revalidate: ['/admin/tickets'] },
+  async (ctx, { saleId, payments }) => {
+    if (!saleId) return failure('Falta el identificador de la venta', 'VALIDATION')
+    if (!Array.isArray(payments) || payments.length === 0) return failure('Indica al menos un pago', 'VALIDATION')
+    const cleaned = payments
+      .map((p) => ({ payment_method: String(p.payment_method), amount: Math.round((Number(p.amount) || 0) * 100) / 100 }))
+      .filter((p) => p.amount > 0)
+    if (cleaned.length === 0) return failure('Los importes deben ser mayores que 0', 'VALIDATION')
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_update_sale_payments', {
+      p_sale_id: saleId,
+      p_payments: cleaned,
+    })
+    if (error) return failure(error.message)
+    if (data && data.success === false) {
+      return failure(String(data.error || 'No se pudieron actualizar los pagos'), 'CONFLICT')
+    }
+    return success(data)
+  }
+)
+
+// ── Editar líneas/precio/descuento de una venta (Fase E3) ──────────────────
+type SaleEditLineInput = {
+  product_variant_id?: string | null
+  description: string
+  sku?: string | null
+  quantity: number
+  unit_price: number
+  discount_percentage?: number
+  tax_rate?: number
+  cost_price?: number | null
+}
+type SaleEditDiscount = { discount_percentage?: number; discount_code?: string | null }
+
+export const previewSaleEdit = protectedAction<
+  { saleId: string; lines: SaleEditLineInput[]; discount?: SaleEditDiscount },
+  {
+    error?: string
+    sale?: { ticket_number?: string; old_total?: number; paid?: number }
+    new_totals?: { subtotal: number; tax_amount: number; total: number }
+    total_delta?: number
+    new_payment_status?: string
+    blockers?: string[]
+    warnings?: string[]
+    auto_actions?: string[]
+    can_edit?: boolean
+  }
+>(
+  { permission: 'sales.edit', auditModule: 'pos' },
+  async (ctx, { saleId, lines, discount }) => {
+    if (!saleId) return failure('Falta el identificador de la venta', 'VALIDATION')
+    const { data, error } = await ctx.adminClient.rpc('rpc_preview_sale_edit', {
+      p_sale_id: saleId, p_new_lines: lines ?? [], p_new_discount: discount ?? {},
+    })
+    if (error) return failure(error.message)
+    if (data?.error) return failure(String(data.error), 'NOT_FOUND')
+    return success(data)
+  }
+)
+
+export const editSaleLines = protectedAction<
+  { saleId: string; lines: SaleEditLineInput[]; discount?: SaleEditDiscount },
+  { success?: boolean; message?: string; new_total?: number; old_total?: number; payment_status?: string; error?: string }
+>(
+  { permission: 'sales.edit', auditModule: 'pos', auditAction: 'update', auditEntity: 'sale', revalidate: ['/admin/tickets'] },
+  async (ctx, { saleId, lines, discount }) => {
+    if (!saleId) return failure('Falta el identificador de la venta', 'VALIDATION')
+    if (!Array.isArray(lines) || lines.length === 0) return failure('La venta debe tener al menos una línea', 'VALIDATION')
+
+    // Doble cerrojo: solo administrador (operación destructiva: toca stock, caja y asiento).
+    const { data: roleRows } = await ctx.adminClient
+      .from('user_roles').select('roles!inner(name)').eq('user_id', ctx.userId)
+    const isFullAdmin = (roleRows ?? []).some((ur: { roles?: { name?: string } | { name?: string }[] }) => {
+      const r = ur.roles
+      const name = Array.isArray(r) ? r[0]?.name : r?.name
+      return name === 'administrador' || name === 'super_admin'
+    })
+    if (!isFullAdmin) return failure('Solo un administrador puede editar las líneas de una venta.', 'FORBIDDEN')
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_edit_sale_lines', {
+      p_sale_id: saleId, p_new_lines: lines, p_new_discount: discount ?? {},
+    })
+    if (error) return failure(error.message)
+    if (data && data.success === false) {
+      return failure(String(data.error || 'No se pudo editar la venta'), 'CONFLICT')
+    }
+    // La RPC borró el asiento viejo; lo regeneramos con los nuevos totales.
+    if (data?.regenerate_journal) {
+      await createSaleJournalEntry(saleId)
+    }
+    return success(data)
+  }
+)
+
 // ── Borrado físico de ventas (botón "Eliminar ticket") ─────────────────────
 // Preview (solo lectura): calcula qué se borraría + cerrojos. Gated por sales.delete.
 export const previewSaleDeletion = protectedAction<{ saleId: string }, any>(
