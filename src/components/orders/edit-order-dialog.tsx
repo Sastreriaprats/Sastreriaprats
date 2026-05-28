@@ -81,6 +81,22 @@ type FabricOpt = {
 }
 
 type GarmentType = { id: string; name: string; code: string | null }
+
+/**
+ * Defaults mínimos de `configuration` para una línea de camisería creada desde
+ * este modal (sin pasar por el formulario completo de camisería). Sin esto, la
+ * ficha PDF de la camisa sale con las casillas estructurales vacías y la línea
+ * no se reconoce como camisería por contenido.
+ *  - `tipo`: lo lee la ficha (ficha-confeccion) y getLineGroup para clasificar.
+ *  - `puno`: 'sencillo' por defecto; getLineGroup también clasifica por su presencia.
+ * No sembramos medidas (cuello, pecho, …): se rellenan luego en "Editar ficha".
+ * Devuelve {} para prendas que no son camisería (sastrería sin cambios).
+ */
+function camiseriaDefaultsForCode(code: string | null | undefined): Record<string, string> {
+  if (code === 'camiseria_industrial') return { tipo: 'camiseria_industrial', puno: 'sencillo' }
+  if (code === 'camisa' || code === 'camiseria') return { tipo: 'camiseria', puno: 'sencillo' }
+  return {}
+}
 type StoreOpt = { id: string; name: string }
 type ClientOpt = { id: string; full_name?: string | null; first_name?: string | null; last_name?: string | null; phone?: string | null; client_code?: string | null }
 
@@ -224,6 +240,10 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
     useState<Record<string, Record<string, unknown>>>({})
   const measurementsRef = useRef<Record<string, Record<string, unknown>>>({})
   useEffect(() => { measurementsRef.current = measurementsByGarmentTypeId }, [measurementsByGarmentTypeId])
+
+  // Ref de tipos de prenda para leer el `code` dentro de updateLine (useCallback []).
+  const garmentTypesRef = useRef<GarmentType[]>([])
+  useEffect(() => { garmentTypesRef.current = garmentTypes }, [garmentTypes])
 
   // Cargar tipos de prenda y tiendas
   useEffect(() => {
@@ -372,7 +392,8 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
 
   // Helpers para líneas
   const addLine = () => {
-    const defaultGarmentId = garmentTypes[0]?.id ?? ''
+    const defaultGarment = garmentTypes[0]
+    const defaultGarmentId = defaultGarment?.id ?? ''
     const preloadMeasurements = measurementsRef.current[defaultGarmentId] ?? {}
     setLines((prev) => [
       ...prev,
@@ -392,7 +413,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
         model_name: '',
         model_size: '',
         finishing_notes: '',
-        configuration: { ...preloadMeasurements },
+        configuration: { ...preloadMeasurements, ...camiseriaDefaultsForCode(defaultGarment?.code) },
         sort_order: prev.length,
         cortador: '',
         oficial: '',
@@ -415,6 +436,13 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
       if (field === 'garment_type_id') {
         const newMeasurements = measurementsRef.current[value as string] ?? {}
         next.configuration = { ...l.configuration, ...newMeasurements }
+        // Solo en líneas NUEVAS (creadas en este modal): si la prenda elegida es
+        // camisería, sembrar los defaults estructurales (tipo/puno) sin pisar lo
+        // que ya hubiera. Las líneas existentes no se tocan (edge case).
+        if (l._key.startsWith('new-')) {
+          const code = garmentTypesRef.current.find((g) => g.id === value)?.code
+          next.configuration = { ...camiseriaDefaultsForCode(code), ...next.configuration }
+        }
       }
       // Al cambiar los metros recalculamos material_cost si hay €/m.
       // Si el cache aún no llegó (precarga async), buscamos el precio en el catálogo.
