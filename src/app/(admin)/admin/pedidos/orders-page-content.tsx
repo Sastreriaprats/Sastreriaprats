@@ -385,9 +385,9 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                       <TableHead>Estado</TableHead>
                       <SortHeader field="order_date">Fecha</SortHeader>
                       <SortHeader field="estimated_delivery_date">Entrega est.</SortHeader>
-                      <TableHead>Total</TableHead>
-                      <TableHead>Pagado</TableHead>
-                      <TableHead>Pendiente</TableHead>
+                      <SortHeader field="total">Total</SortHeader>
+                      <SortHeader field="total_paid">Pagado</SortHeader>
+                      <SortHeader field="total_pending">Pendiente</SortHeader>
                       <TableHead>Tienda</TableHead>
                       <TableHead className="w-10"></TableHead>
                     </TableRow>
