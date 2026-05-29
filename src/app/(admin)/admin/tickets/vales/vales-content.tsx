@@ -590,7 +590,9 @@ export function VouchersContent() {
                         const canReassign = !isCancelled
                         return (
                           <TableRow key={v.id} className={cn(isCancelled && 'opacity-60')}>
-                            <TableCell className="font-mono text-sm">{v.code}</TableCell>
+                            <TableCell className="font-mono text-sm">
+                              <Link href={`/admin/tickets/vales/${v.id}`} className="hover:underline text-prats-navy">{v.code}</Link>
+                            </TableCell>
                             <TableCell className="text-sm text-muted-foreground">{formatDate(v.issued_date)}</TableCell>
                             <TableCell>
                               {v.client_name ? (
