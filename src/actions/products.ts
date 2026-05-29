@@ -836,6 +836,44 @@ export const adjustStock = protectedAction<{
   }
 )
 
+// ── Revertir un ajuste manual de stock (stock_movements.reverse + isFullAdmin) ──
+// Crea un movimiento de contrapartida vía RPC atómica (UPDATE stock_levels +
+// INSERT movement). Solo ajustes manuales; bloquea reversión de reversiones,
+// doble reverso y stock negativo.
+async function userIsFullAdminStock(ctx: { adminClient: AdminClient; userId: string }): Promise<boolean> {
+  const { data: roleRows } = await ctx.adminClient
+    .from('user_roles').select('roles!inner(name)').eq('user_id', ctx.userId)
+  return (roleRows ?? []).some((ur: { roles?: { name?: string } | { name?: string }[] }) => {
+    const r = ur.roles
+    const name = Array.isArray(r) ? r[0]?.name : r?.name
+    return name === 'administrador' || name === 'super_admin'
+  })
+}
+
+export const reverseStockMovement = protectedAction<
+  { movementId: string },
+  { success?: boolean; message?: string; reversal_movement_id?: string; new_stock?: number; error?: string }
+>(
+  {
+    permission: 'stock_movements.reverse',
+    auditModule: 'stock',
+    auditAction: 'update',
+    auditEntity: 'stock',
+    revalidate: ['/admin/stock'],
+  },
+  async (ctx, { movementId }) => {
+    if (!movementId) return failure('Falta el identificador del movimiento', 'VALIDATION')
+    if (!(await userIsFullAdminStock(ctx))) return failure('Solo un administrador puede revertir movimientos de stock.', 'FORBIDDEN')
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_reverse_stock_movement', {
+      p_movement_id: movementId, p_user_id: ctx.userId,
+    })
+    if (error) return failure(error.message)
+    if (data && data.success === false) return failure(String(data.error || 'No se pudo revertir el movimiento'), 'CONFLICT')
+    return success(data)
+  }
+)
+
 /** Traspaso de stock entre almacenes (mueve unidades de un almacén a otro). */
 export const moveStockBetweenWarehouses = protectedAction<
   { variantId: string; fromWarehouseId: string; toWarehouseId: string; quantity: number; reason?: string },
@@ -1908,7 +1946,7 @@ export const listStockMovements = protectedAction<
       .select(
         `
         id, product_variant_id, warehouse_id, movement_type, quantity, stock_before, stock_after,
-        reason, notes, created_by, created_at,
+        reference_type, reason, notes, created_by, created_at,
         product_variants ( variant_sku, products ( name ) ),
         warehouses ( name, code ),
         profiles!created_by ( full_name )
@@ -1923,7 +1961,35 @@ export const listStockMovements = protectedAction<
       console.error('[listStockMovements]', error)
       return failure(error.message || 'Error al cargar movimientos', 'INTERNAL')
     }
-    return success({ data: data ?? [], total: count ?? 0 })
+    const rows = (data ?? []) as Record<string, unknown>[]
+
+    // Enriquecer para la UI de reversión: qué movimientos ya están revertidos
+    // y el stock actual de cada variante+almacén (para preview y cerrojo negativo).
+    const ids = rows.map((m) => String(m.id))
+    const revertedSet = new Set<string>()
+    if (ids.length) {
+      const { data: revs } = await ctx.adminClient
+        .from('stock_movements').select('reference_id')
+        .eq('reference_type', 'reversal').in('reference_id', ids)
+      for (const r of revs ?? []) if (r.reference_id) revertedSet.add(String(r.reference_id))
+    }
+    const pairKey = (v: string, w: string) => `${v}|${w}`
+    const stockByPair = new Map<string, number>()
+    const variantIds = [...new Set(rows.map((m) => String(m.product_variant_id)).filter(Boolean))]
+    if (variantIds.length) {
+      const { data: levels } = await ctx.adminClient
+        .from('stock_levels').select('product_variant_id, warehouse_id, quantity').in('product_variant_id', variantIds)
+      for (const l of levels ?? []) stockByPair.set(pairKey(String(l.product_variant_id), String(l.warehouse_id)), Number(l.quantity))
+    }
+    const enriched = rows.map((m) => ({
+      ...m,
+      reverted: revertedSet.has(String(m.id)),
+      current_stock: stockByPair.has(pairKey(String(m.product_variant_id), String(m.warehouse_id)))
+        ? stockByPair.get(pairKey(String(m.product_variant_id), String(m.warehouse_id)))
+        : null,
+    }))
+
+    return success({ data: enriched, total: count ?? 0 })
   }
 )
 

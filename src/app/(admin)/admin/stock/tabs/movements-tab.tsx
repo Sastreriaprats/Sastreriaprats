@@ -5,9 +5,15 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Loader2, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, Minus } from 'lucide-react'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Loader2, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, Minus, Undo2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { formatDateTime } from '@/lib/utils'
-import { listStockMovements } from '@/actions/products'
+import { usePermissions } from '@/hooks/use-permissions'
+import { listStockMovements, reverseStockMovement } from '@/actions/products'
 
 const PAGE_SIZE = 30
 
@@ -21,11 +27,15 @@ const movementTypeLabels: Record<string, string> = {
 }
 
 export function MovementsTab() {
+  const { can } = usePermissions()
+  const canReverse = can('stock_movements.reverse')
   const [movements, setMovements] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [page, setPage] = useState(0)
   const [total, setTotal] = useState(0)
   const [typeFilter, setTypeFilter] = useState('all')
+  const [revTarget, setRevTarget] = useState<any | null>(null)
+  const [reversing, setReversing] = useState(false)
 
   const fetchMovements = useCallback(async () => {
     setIsLoading(true)
@@ -55,6 +65,23 @@ export function MovementsTab() {
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
 
+  const isReversible = (m: any) =>
+    canReverse && (m.movement_type === 'adjustment_positive' || m.movement_type === 'adjustment_negative')
+    && m.reference_type !== 'reversal' && !m.reverted
+  const revDelta = revTarget ? -revTarget.quantity : 0
+  const revResulting = revTarget && revTarget.current_stock != null ? revTarget.current_stock + revDelta : null
+  const revNegative = revResulting != null && revResulting < 0
+
+  const doReverse = async () => {
+    if (!revTarget) return
+    setReversing(true)
+    const r = await reverseStockMovement({ movementId: revTarget.id })
+    setReversing(false)
+    setRevTarget(null)
+    if (r.success) { toast.success('Movimiento revertido'); fetchMovements() }
+    else toast.error(r.error)
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -74,13 +101,14 @@ export function MovementsTab() {
               <TableHead>Fecha</TableHead><TableHead>Tipo</TableHead><TableHead>Producto</TableHead>
               <TableHead>Almacén</TableHead><TableHead>Cantidad</TableHead><TableHead>Stock ant.</TableHead>
               <TableHead>Stock post.</TableHead><TableHead>Motivo</TableHead><TableHead>Usuario</TableHead>
+              <TableHead className="text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
-              <TableRow><TableCell colSpan={9} className="h-32 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin" /></TableCell></TableRow>
+              <TableRow><TableCell colSpan={10} className="h-32 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin" /></TableCell></TableRow>
             ) : movements.length === 0 ? (
-              <TableRow><TableCell colSpan={9} className="h-32 text-center text-muted-foreground">Sin movimientos</TableCell></TableRow>
+              <TableRow><TableCell colSpan={10} className="h-32 text-center text-muted-foreground">Sin movimientos</TableCell></TableRow>
             ) : movements.map((m: any) => {
               const isPositive = m.quantity > 0
               const Icon = isPositive ? ArrowUp : m.quantity < 0 ? ArrowDown : Minus
@@ -102,12 +130,48 @@ export function MovementsTab() {
                   <TableCell className="text-sm font-medium">{m.stock_after}</TableCell>
                   <TableCell className="text-sm max-w-[200px] truncate">{m.reason || m.notes || '-'}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{m.profiles?.full_name}</TableCell>
+                  <TableCell className="text-right">
+                    {isReversible(m) ? (
+                      <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={() => setRevTarget(m)}>
+                        <Undo2 className="h-3.5 w-3.5" /> Revertir
+                      </Button>
+                    ) : m.reference_type === 'reversal' ? (
+                      <span className="text-xs text-muted-foreground">reversión</span>
+                    ) : m.reverted ? (
+                      <span className="text-xs text-muted-foreground">revertido</span>
+                    ) : null}
+                  </TableCell>
                 </TableRow>
               )
             })}
           </TableBody>
         </Table>
       </div>
+
+      <AlertDialog open={!!revTarget} onOpenChange={(o) => { if (!o) setRevTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Revertir este ajuste de stock?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>Se creará un movimiento de contrapartida de <span className="font-semibold">{revDelta > 0 ? '+' : ''}{revDelta} uds</span> en <span className="font-semibold">{revTarget?.warehouses?.name}</span> para <span className="font-semibold">{revTarget?.product_variants?.products?.name}</span>.</p>
+                {revTarget?.current_stock != null ? (
+                  <p>Stock actual: <span className="font-semibold tabular-nums">{revTarget.current_stock}</span> → resultante: <span className={`font-semibold tabular-nums ${revNegative ? 'text-red-600' : ''}`}>{revResulting}</span></p>
+                ) : (
+                  <p className="text-muted-foreground">No se pudo leer el stock actual.</p>
+                )}
+                {revNegative && <p className="text-red-600 font-medium">El stock quedaría negativo. Probablemente las unidades ya se movieron; haz un ajuste manual con el motivo concreto.</p>}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={reversing}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); doReverse() }} disabled={reversing || revNegative}>
+              {reversing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Revertir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{total} movimientos</p>
