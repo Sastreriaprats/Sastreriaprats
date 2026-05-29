@@ -65,6 +65,7 @@ const SPECIALTIES = [
   'Camisería Industrial',
   'Gabardina',
   'Cortador',
+  'Composturas',
 ]
 
 const PAYMENT_TERMS_OPTIONS = [
