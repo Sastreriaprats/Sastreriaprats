@@ -130,22 +130,8 @@ export const deleteOrderPayment = protectedAction<{ payment_id: string; tailorin
         return failure(rpcError.message)
       }
 
-      // total_pending no lo gestiona la RPC (no es contable, sólo UI).
-      // Lo recalculamos aquí a partir de los pagos restantes.
-      const { data: order } = await ctx.adminClient
-        .from('tailoring_orders')
-        .select('total, total_paid')
-        .eq('id', tailoring_order_id)
-        .single()
-
-      if (order) {
-        const totalPending = Math.max(0, Number(order.total) - Number(order.total_paid))
-        await ctx.adminClient
-          .from('tailoring_orders')
-          .update({ total_pending: totalPending })
-          .eq('id', tailoring_order_id)
-      }
-
+      // total_paid lo recalcula la propia RPC (UPDATE explícito) y total_pending
+      // es columna generada (total - total_paid): no se tocan aquí.
       revalidatePath(`/sastre/pedidos/${tailoring_order_id}`)
 
       return success(undefined)
