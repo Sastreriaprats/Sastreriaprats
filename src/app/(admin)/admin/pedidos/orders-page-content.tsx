@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import {
   Plus, Search, MoreHorizontal, Eye, Trash2, ChevronLeft, ChevronRight,
-  LayoutList, Kanban, ArrowUpDown, AlertTriangle, SlidersHorizontal, X, Loader2,
+  LayoutList, Kanban, ArrowUpDown, AlertTriangle, SlidersHorizontal, X, Loader2, Download,
 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useList } from '@/hooks/use-list'
@@ -32,6 +32,7 @@ import { OrdersPipeline } from './orders-pipeline'
 import { ReservationsTab } from '@/app/(admin)/admin/stock/tabs/reservations-tab'
 import { OnlineOrdersList } from '@/app/(admin)/admin/tienda-online/online-orders-list'
 import { ALL_VISIBLE_STATUSES } from '@/lib/orders/statuses'
+import { downloadExcel } from '@/lib/excel/export'
 
 const orderStatuses = ALL_VISIBLE_STATUSES
 
@@ -71,6 +72,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
   const [loadingSupplier, setLoadingSupplier] = useState(false)
   const [orderToDelete, setOrderToDelete] = useState<{ id: string; order_number: string } | null>(null)
   const [deletingOrder, setDeletingOrder] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   // Contadores para badges de los tabs
   const [supplierActiveCount, setSupplierActiveCount] = useState<number | null>(null)
@@ -140,8 +142,8 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
 
   const {
     data: orders, total, totalPages, page, setPage,
-    search, setSearch, sortBy, toggleSort,
-    setFilters, isLoading, refresh, pageSize,
+    search, setSearch, sortBy, sortOrder, toggleSort,
+    filters, setFilters, isLoading, refresh, pageSize,
     statusCounts: statusCountsFromApi, totalAll,
   } = useList(listOrders, {
     pageSize: 25,
@@ -182,6 +184,47 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
     setSubTypeFilter('all')
     setFilters({})
     router.replace('/admin/pedidos', { scroll: false })
+  }
+
+  // Exporta a Excel todos los pedidos de sastrería que cumplen los filtros
+  // activos (búsqueda, subtipo, estado), no solo la página visible. Para ello
+  // se vuelve a llamar a listOrders con los mismos filtros pero sin paginar.
+  const handleExportExcel = async () => {
+    setExporting(true)
+    try {
+      const res = await listOrders({ page: 1, pageSize: 100000, search, sortBy, sortOrder, filters })
+      if (!res.success) {
+        toast.error(res.error ?? 'No se pudieron exportar los pedidos')
+        return
+      }
+      const list = (res.data.data ?? []) as any[]
+      if (list.length === 0) {
+        toast.error('No hay pedidos para exportar con los filtros aplicados')
+        return
+      }
+      const data = list.map((o) => ({
+        'Nº pedido': o.order_number ?? '',
+        'Cliente': o.clients?.full_name ?? '',
+        'Teléfono': o.clients?.phone ?? '',
+        'Email': o.clients?.email ?? '',
+        'Fecha pedido': formatDate(o.order_date || o.created_at),
+        'Entrega estimada': formatDate(o.estimated_delivery_date),
+        'Tipo': o.order_type === 'artesanal' ? 'Artesanal' : 'Industrial',
+        'Estado': getOrderStatusLabel(o.status),
+        'Encargo': summarizeOrderGarments(o.tailoring_order_lines),
+        'Total': Number(o.total) || 0,
+        'Pagado': Number(o.total_paid) || 0,
+        'Pendiente': Number(o.total_pending) || 0,
+        'Tienda': o.stores?.name ?? '',
+      }))
+      const today = new Date().toISOString().slice(0, 10)
+      await downloadExcel(data, `pedidos-${today}`, 'Pedidos')
+    } catch (err) {
+      console.error('[handleExportExcel]', err)
+      toast.error('Error al exportar los pedidos')
+    } finally {
+      setExporting(false)
+    }
   }
 
   const SortHeader = ({ field, children }: { field: string; children: React.ReactNode }) => (
@@ -248,6 +291,12 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                 <Kanban className="h-4 w-4" />
               </Button>
             </div>
+          )}
+          {tab === 'tailoring' && (
+            <Button variant="outline" onClick={handleExportExcel} disabled={exporting} className="gap-2">
+              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Exportar a Excel
+            </Button>
           )}
           {tab === 'tailoring' && can('orders.create') && (
             <Button onClick={() => router.push('/admin/pedidos/nuevo')} className="gap-2 bg-prats-navy hover:bg-prats-navy-light">
