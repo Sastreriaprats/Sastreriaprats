@@ -1,6 +1,6 @@
 'use server'
 
-import { protectedAction } from '@/lib/server/action-wrapper'
+import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { normalizeSearchTerm } from '@/lib/utils'
 import { generateInvoicePdf } from '@/lib/pdf/invoice-pdf'
@@ -239,6 +239,8 @@ export type JournalEntryRow = {
   status: string
   total_debit: number
   total_credit: number
+  reference_type: string | null
+  is_period_closed: boolean
   lines?: { account_code: string; name?: string; debit: number; credit: number; description: string | null }[]
 }
 
@@ -252,7 +254,7 @@ export const getJournalEntries = protectedAction<
     let q = ctx.adminClient
       .from('journal_entries')
       .select(`
-        id, entry_number, fiscal_year, fiscal_month, entry_date, description, entry_type, status, total_debit, total_credit
+        id, entry_number, fiscal_year, fiscal_month, entry_date, description, entry_type, status, total_debit, total_credit, reference_type, is_period_closed
       `)
       .eq('fiscal_year', y)
       .order('entry_date', { ascending: false })
@@ -286,10 +288,172 @@ export const getJournalEntries = protectedAction<
         status: String(e.status ?? 'draft'),
         total_debit: Number(e.total_debit ?? 0),
         total_credit: Number(e.total_credit ?? 0),
+        reference_type: (e.reference_type as string) ?? null,
+        is_period_closed: Boolean(e.is_period_closed),
         lines: lineList,
       })
     }
     return success(withLines)
+  }
+)
+
+// ── Asientos manuales (journal_entries.manage + isFullAdmin) ────────────────
+async function userIsFullAdmin(ctx: { adminClient: AdminClient; userId: string }): Promise<boolean> {
+  const { data: roleRows } = await ctx.adminClient
+    .from('user_roles').select('roles!inner(name)').eq('user_id', ctx.userId)
+  return (roleRows ?? []).some((ur: { roles?: { name?: string } | { name?: string }[] }) => {
+    const r = ur.roles
+    const name = Array.isArray(r) ? r[0]?.name : r?.name
+    return name === 'administrador' || name === 'super_admin'
+  })
+}
+
+export type ChartAccountOption = { account_code: string; name: string; account_type: string }
+
+export const listChartOfAccountsDetail = protectedAction<void, ChartAccountOption[]>(
+  { permission: 'accounting.view', auditModule: 'accounting' },
+  async (ctx) => {
+    const { data, error } = await ctx.adminClient
+      .from('chart_of_accounts')
+      .select('account_code, name, account_type')
+      .eq('is_detail', true).eq('is_active', true)
+      .order('account_code')
+    if (error) return failure(error.message)
+    return success((data ?? []).map((c: Record<string, unknown>) => ({
+      account_code: String(c.account_code), name: String(c.name), account_type: String(c.account_type),
+    })))
+  }
+)
+
+type JournalLineInput = { account_code: string; debit: number; credit: number; description?: string | null }
+
+// Espejo de la validación de la RPC (defensa en profundidad + feedback rápido).
+function validateLinesClientMirror(lines: JournalLineInput[]): string | null {
+  if (!Array.isArray(lines) || lines.length < 2) return 'El asiento debe tener al menos 2 líneas.'
+  let d = 0, c = 0
+  for (const l of lines) {
+    if (!l.account_code) return 'Todas las líneas deben tener una cuenta.'
+    const deb = Number(l.debit) || 0, cre = Number(l.credit) || 0
+    if (deb < 0 || cre < 0) return 'Los importes no pueden ser negativos.'
+    if ((deb > 0 && cre > 0) || (deb === 0 && cre === 0)) return 'Cada línea debe tener importe solo en Debe o solo en Haber.'
+    d += deb; c += cre
+  }
+  if (Math.round((d - c) * 100) !== 0) return 'El asiento no cuadra (Debe ≠ Haber).'
+  if (d <= 0) return 'El importe del asiento debe ser mayor que 0.'
+  return null
+}
+
+function normalizeLines(lines: JournalLineInput[]): JournalLineInput[] {
+  return lines.map((l) => ({
+    account_code: String(l.account_code),
+    debit: Math.round((Number(l.debit) || 0) * 100) / 100,
+    credit: Math.round((Number(l.credit) || 0) * 100) / 100,
+    description: (l.description ?? '').trim() || null,
+  }))
+}
+
+export const createManualJournalEntry = protectedAction<
+  { date: string; description: string; lines: JournalLineInput[] },
+  { success?: boolean; message?: string; entry_id?: string; entry_number?: number; error?: string }
+>(
+  { permission: 'journal_entries.manage', auditModule: 'accounting', auditAction: 'create', auditEntity: 'journal_entry', revalidate: ['/admin/contabilidad'] },
+  async (ctx, { date, description, lines }) => {
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return failure('Fecha inválida', 'VALIDATION')
+    if (!description?.trim()) return failure('La descripción es obligatoria', 'VALIDATION')
+    const clean = normalizeLines(lines || [])
+    const err = validateLinesClientMirror(clean)
+    if (err) return failure(err, 'VALIDATION')
+    if (!(await userIsFullAdmin(ctx))) return failure('Solo un administrador puede crear asientos manuales.', 'FORBIDDEN')
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_create_manual_journal_entry', {
+      p_date: date, p_description: description.trim(), p_lines: clean, p_user_id: ctx.userId,
+    })
+    if (error) return failure(error.message)
+    if (data && data.success === false) return failure(String(data.error || 'No se pudo crear el asiento'), 'CONFLICT')
+    return success({ ...data, auditDescription: `Asiento manual #${data?.entry_number} creado` } as any)
+  }
+)
+
+export const updateManualJournalEntry = protectedAction<
+  { id: string; date: string; description: string; lines: JournalLineInput[] },
+  { success?: boolean; message?: string; error?: string }
+>(
+  { permission: 'journal_entries.manage', auditModule: 'accounting', auditAction: 'update', auditEntity: 'journal_entry', revalidate: ['/admin/contabilidad'] },
+  async (ctx, { id, date, description, lines }) => {
+    if (!id) return failure('Falta el identificador del asiento', 'VALIDATION')
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return failure('Fecha inválida', 'VALIDATION')
+    if (!description?.trim()) return failure('La descripción es obligatoria', 'VALIDATION')
+    const clean = normalizeLines(lines || [])
+    const err = validateLinesClientMirror(clean)
+    if (err) return failure(err, 'VALIDATION')
+    if (!(await userIsFullAdmin(ctx))) return failure('Solo un administrador puede editar asientos manuales.', 'FORBIDDEN')
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_update_manual_journal_entry', {
+      p_id: id, p_date: date, p_description: description.trim(), p_lines: clean, p_user_id: ctx.userId,
+    })
+    if (error) return failure(error.message)
+    if (data && data.success === false) return failure(String(data.error || 'No se pudo actualizar el asiento'), 'CONFLICT')
+    return success(data)
+  }
+)
+
+export const deleteJournalEntry = protectedAction<
+  { id: string },
+  { success?: boolean; message?: string; error?: string }
+>(
+  { permission: 'journal_entries.manage', auditModule: 'accounting', auditAction: 'delete', auditEntity: 'journal_entry', revalidate: ['/admin/contabilidad'] },
+  async (ctx, { id }) => {
+    if (!id) return failure('Falta el identificador del asiento', 'VALIDATION')
+    if (!(await userIsFullAdmin(ctx))) return failure('Solo un administrador puede anular asientos.', 'FORBIDDEN')
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_delete_journal_entry', { p_id: id })
+    if (error) return failure(error.message)
+    if (data && data.success === false) return failure(String(data.error || 'No se pudo anular el asiento'), 'CONFLICT')
+    return success(data)
+  }
+)
+
+export type ManualJournalEntry = {
+  id: string; entry_number: number; entry_date: string; description: string
+  entry_type: string; reference_type: string | null; is_period_closed: boolean
+  editable: boolean
+  lines: { account_code: string; account_name: string | null; debit: number; credit: number; description: string | null }[]
+}
+
+export const getManualJournalEntry = protectedAction<string, ManualJournalEntry>(
+  { permission: 'accounting.view', auditModule: 'accounting' },
+  async (ctx, id) => {
+    if (!id) return failure('Falta el identificador', 'VALIDATION')
+    const { data: e, error } = await ctx.adminClient
+      .from('journal_entries')
+      .select('id, entry_number, entry_date, description, entry_type, reference_type, is_period_closed')
+      .eq('id', id).maybeSingle()
+    if (error) return failure(error.message)
+    if (!e) return failure('Asiento no encontrado', 'NOT_FOUND')
+
+    const { data: lines } = await ctx.adminClient
+      .from('journal_entry_lines')
+      .select('account_code, debit, credit, description')
+      .eq('journal_entry_id', id).order('sort_order')
+
+    // nombres de cuenta
+    const codes = [...new Set((lines ?? []).map((l: Record<string, unknown>) => String(l.account_code)))]
+    const nameByCode = new Map<string, string>()
+    if (codes.length) {
+      const { data: accs } = await ctx.adminClient.from('chart_of_accounts').select('account_code, name').in('account_code', codes)
+      for (const a of accs ?? []) nameByCode.set(String(a.account_code), String(a.name))
+    }
+    const er = e as Record<string, unknown>
+    return success({
+      id: String(er.id), entry_number: Number(er.entry_number), entry_date: String(er.entry_date),
+      description: String(er.description ?? ''), entry_type: String(er.entry_type), reference_type: (er.reference_type as string) ?? null,
+      is_period_closed: Boolean(er.is_period_closed),
+      editable: er.entry_type === 'manual' && er.reference_type == null && !er.is_period_closed,
+      lines: (lines ?? []).map((l: Record<string, unknown>) => ({
+        account_code: String(l.account_code), account_name: nameByCode.get(String(l.account_code)) ?? null,
+        debit: Number(l.debit ?? 0), credit: Number(l.credit ?? 0), description: (l.description as string) ?? null,
+      })),
+    })
   }
 )
 

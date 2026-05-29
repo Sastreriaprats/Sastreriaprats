@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, Fragment } from 'react'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -52,7 +53,7 @@ import {
   getProductsForInvoice, listTailoringOrdersForInvoice, getTailoringOrderLinesForInvoice,
   createInvoiceAction, updateInvoiceAction, getInvoiceStatusAction, issueInvoiceAction, deleteInvoiceAction, cancelInvoiceAction,
   createEstimateAction, updateEstimateAction, updateEstimateFullAction, getEstimateDetail, sendEstimateAction, acceptEstimateAction, rejectEstimateAction, convertEstimateToInvoiceAction,
-  getInvoiceLinesAction, updateJournalEntryDescriptionAction,
+  getInvoiceLinesAction, updateJournalEntryDescriptionAction, deleteJournalEntry,
   generateInvoicePdfAction, generateEstimatePdfAction,
   type InvoiceRow, type EstimateRow, type JournalEntryRow, type VatQuarterRow,
   type ManualTransaction, type AccountingMovementRow, type AccountingSummary,
@@ -2422,6 +2423,8 @@ function EstimatesTab() {
 // ─── Tab: Asientos ───────────────────────────────────────────────────────────
 
 function JournalTab() {
+  const { can } = usePermissions()
+  const canManageEntries = can('journal_entries.manage')
   const [rows, setRows] = useState<JournalEntryRow[]>([])
   const [loading, setLoading] = useState(true)
   const [year, setYear] = useState(new Date().getFullYear())
@@ -2508,6 +2511,11 @@ function JournalTab() {
         <Button type="button" size="sm" variant="outline" className="h-9" onClick={setLastMonth}>Mes pasado</Button>
         <Button type="button" size="sm" variant="ghost" className="h-9 text-muted-foreground" onClick={setAllMonths}>Todo el año</Button>
         <div className="flex-1" />
+        {canManageEntries && (
+          <Button asChild size="sm" className="h-9">
+            <Link href="/admin/contabilidad/asientos/nuevo"><Plus className="h-4 w-4 mr-2" /> Nuevo asiento</Link>
+          </Button>
+        )}
         <Button variant="outline" size="sm" className="h-9" onClick={handleExportExcel}>
           <Download className="h-4 w-4 mr-2" /> Descargar Excel
         </Button>
@@ -2533,9 +2541,23 @@ function JournalTab() {
 function JournalEntryRow({ entry: e, expanded, onToggle, onRefresh }: {
   entry: JournalEntryRow; expanded: boolean; onToggle: () => void; onRefresh: () => void
 }) {
+  const { can } = usePermissions()
+  const canManage = can('journal_entries.manage')
+  const isManualEditable = e.entry_type === 'manual' && !e.reference_type && !e.is_period_closed
   const [editing, setEditing] = useState(false)
   const [desc, setDesc] = useState(e.description)
   const [saving, setSaving] = useState(false)
+  const [delOpen, setDelOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  const doDelete = async () => {
+    setDeleting(true)
+    const r = await deleteJournalEntry({ id: e.id })
+    setDeleting(false)
+    setDelOpen(false)
+    if (r.success) { toast.success('Asiento anulado'); onRefresh() }
+    else toast.error(!r.success && 'error' in r ? r.error : 'Error')
+  }
 
   const statusCls = e.status === 'posted' ? 'bg-green-100 text-green-700' : e.status === 'cancelled' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'
   const statusLbl = e.status === 'posted' ? 'Contabilizado' : e.status === 'cancelled' ? 'Cancelado' : 'Borrador'
@@ -2584,7 +2606,31 @@ function JournalEntryRow({ entry: e, expanded, onToggle, onRefresh }: {
             <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
           </Button>
         )}
+        {canManage && isManualEditable && !editing && (
+          <>
+            <Button asChild size="icon" variant="ghost" className="h-7 w-7 flex-shrink-0" title="Editar asiento">
+              <Link href={`/admin/contabilidad/asientos/${e.id}/editar`}><BookOpen className="h-3.5 w-3.5 text-muted-foreground" /></Link>
+            </Button>
+            <Button size="icon" variant="ghost" className="h-7 w-7 flex-shrink-0 text-red-600 hover:text-red-700" title="Anular asiento" onClick={() => setDelOpen(true)}>
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </>
+        )}
       </div>
+      <AlertDialog open={delOpen} onOpenChange={(o) => { if (!o) setDelOpen(false) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Anular este asiento?</AlertDialogTitle>
+            <AlertDialogDescription>Vas a anular el asiento #{e.entry_number} del {formatDate(e.entry_date)} ({formatCurrency(e.total_debit)}). Esta acción es irreversible.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={(ev) => { ev.preventDefault(); doDelete() }} disabled={deleting} className="bg-red-600 hover:bg-red-700">
+              {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Anular
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {expanded && e.lines && e.lines.length > 0 && (
         <div className="border-t bg-muted/30">
           <Table>
