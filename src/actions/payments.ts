@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { protectedAction } from '@/lib/server/action-wrapper'
+import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { serializeForServerAction } from '@/lib/server/serialize'
 
@@ -31,6 +31,13 @@ export interface AddOrderPaymentInput {
   notes?: string
   next_payment_date?: string
   storeId?: string
+}
+
+export interface UpdateOrderPaymentInput {
+  payment_id: string
+  tailoring_order_id: string
+  amount: number
+  method: PaymentMethod
 }
 
 export interface AddSalePaymentInput {
@@ -110,10 +117,10 @@ export const deleteOrderPayment = protectedAction<{ payment_id: string; tailorin
   { permission: 'orders.edit', auditAction: 'delete', auditModule: 'orders' },
   async (ctx, { payment_id, tailoring_order_id }) => {
     try {
-      // Delegar en rpc_remove_order_payment (mig 150): revierte
+      // Delegar en rpc_remove_order_payment (mig 150 + 191): revierte
       // manual_transactions + cash_sessions.total_*_sales y borra la fila
-      // en una transacción. Bloquea el borrado si el pago vivía en una
-      // sesión de caja ya cerrada (no se puede tocar caja cerrada).
+      // en una transacción. Si el pago vivía en una sesión cerrada, recalcula
+      // el arqueo (expected_cash/cash_difference) — ya no se bloquea.
       const { error: rpcError } = await ctx.adminClient.rpc('rpc_remove_order_payment', {
         p_payment_id: payment_id,
       })
@@ -146,6 +153,52 @@ export const deleteOrderPayment = protectedAction<{ payment_id: string; tailorin
       console.error('[deleteOrderPayment] unexpected:', e)
       return failure('Error al eliminar pago')
     }
+  }
+)
+
+// ── Editar cobro de pedido (orders.edit + isFullAdmin) ──────────────────────
+// Delega en rpc_update_tailoring_payment (mig 191): ajusta los totales de la
+// sesión por el delta (mismo método o cambio de método), recalcula el arqueo si
+// la sesión está cerrada y reemplaza el espejo en manual_transactions. Alcance
+// v1: solo importe + método (no fecha, no mover de sesión ni de pedido).
+async function userIsFullAdmin(ctx: { adminClient: AdminClient; userId: string }): Promise<boolean> {
+  const { data: roleRows } = await ctx.adminClient
+    .from('user_roles').select('roles!inner(name)').eq('user_id', ctx.userId)
+  return (roleRows ?? []).some((ur: { roles?: { name?: string } | { name?: string }[] }) => {
+    const r = ur.roles
+    const name = Array.isArray(r) ? r[0]?.name : r?.name
+    return name === 'administrador' || name === 'super_admin'
+  })
+}
+
+export const updateOrderPayment = protectedAction<UpdateOrderPaymentInput, void>(
+  { permission: 'orders.edit', auditAction: 'update', auditModule: 'orders' },
+  async (ctx, { payment_id, tailoring_order_id, amount, method }) => {
+    if (!payment_id) return failure('Falta el identificador del cobro', 'VALIDATION')
+    if (!(Number(amount) > 0)) return failure('El importe debe ser mayor que 0', 'VALIDATION')
+    const validMethods: PaymentMethod[] = ['cash', 'card', 'transfer', 'check', 'bizum']
+    if (!validMethods.includes(method)) return failure('Método de pago no válido', 'VALIDATION')
+    if (!(await userIsFullAdmin(ctx))) return failure('Solo un administrador puede editar un cobro.', 'FORBIDDEN')
+
+    const { data: result, error: rpcError } = await ctx.adminClient.rpc('rpc_update_tailoring_payment', {
+      p_payment_id: payment_id,
+      p_amount: amount,
+      p_method: method,
+      p_user_id: ctx.userId,
+    })
+
+    if (rpcError) {
+      console.error('[updateOrderPayment]', rpcError)
+      return failure(rpcError.message)
+    }
+    if (result && result.success === false) {
+      return failure(String(result.error || 'No se pudo actualizar el cobro'), 'CONFLICT')
+    }
+
+    // total_paid lo recalcula la propia RPC (UPDATE explícito) y total_pending
+    // es columna generada (total - total_paid): no se tocan aquí.
+    revalidatePath(`/sastre/pedidos/${tailoring_order_id}`)
+    return success(undefined)
   }
 )
 

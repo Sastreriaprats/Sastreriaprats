@@ -16,13 +16,14 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
-  Plus, Loader2, CreditCard, Banknote, ArrowRightLeft, FileText, Trash2, CalendarClock,
+  Plus, Loader2, CreditCard, Banknote, ArrowRightLeft, FileText, Trash2, CalendarClock, Pencil,
 } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { toast } from 'sonner'
 import { useActiveStore } from '@/hooks/use-store'
+import { usePermissions } from '@/hooks/use-permissions'
 import {
-  getOrderPayments, addOrderPayment, deleteOrderPayment,
+  getOrderPayments, addOrderPayment, deleteOrderPayment, updateOrderPayment,
   getSalePayments, addSalePayment,
   type OrderPayment, type PaymentMethod,
 } from '@/actions/payments'
@@ -69,6 +70,10 @@ export function PaymentHistory({
   entityType, entityId, total, onPaymentAdded, readonly = false, variant = 'default',
 }: PaymentHistoryProps) {
   const { activeStoreId } = useActiveStore()
+  const { can, isSuperAdmin } = usePermissions()
+  // Editar cobro: solo admin pleno (administrador/super_admin) con orders.edit,
+  // igual que el cerrojo del server (updateOrderPayment → orders.edit + isFullAdmin).
+  const canEditPayment = entityType === 'tailoring_order' && !readonly && can('orders.edit') && isSuperAdmin
   const [payments, setPayments] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -76,6 +81,12 @@ export function PaymentHistory({
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [cashSessionOpen, setCashSessionOpen] = useState<boolean | null>(null)
+
+  // Editar cobro
+  const [editTarget, setEditTarget] = useState<any | null>(null)
+  const [editAmount, setEditAmount] = useState('')
+  const [editMethod, setEditMethod] = useState<PaymentMethod>('cash')
+  const [isEditing, setIsEditing] = useState(false)
 
   // Form state
   const [formDate, setFormDate] = useState(today())
@@ -175,6 +186,43 @@ export function PaymentHistory({
       toast.error('Error inesperado al guardar')
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  function openEdit(p: any) {
+    setEditTarget(p)
+    setEditAmount(String(p.amount))
+    setEditMethod((p.payment_method as PaymentMethod) ?? 'cash')
+  }
+
+  async function handleEditSave() {
+    if (!editTarget) return
+    const amount = parseFloat(editAmount)
+    if (!editAmount || isNaN(amount) || amount <= 0) {
+      toast.error('Introduce un importe válido')
+      return
+    }
+    setIsEditing(true)
+    try {
+      const result = await updateOrderPayment({
+        payment_id: editTarget.id,
+        tailoring_order_id: entityId,
+        amount,
+        method: editMethod,
+      })
+      if (result.success) {
+        toast.success('Cobro actualizado')
+        setEditTarget(null)
+        await loadPayments()
+        onPaymentAdded?.()
+      } else {
+        toast.error(result.error ?? 'Error al actualizar el cobro')
+      }
+    } catch (e) {
+      console.error('[PaymentHistory] edit:', e)
+      toast.error('Error inesperado al actualizar')
+    } finally {
+      setIsEditing(false)
     }
   }
 
@@ -278,7 +326,7 @@ export function PaymentHistory({
                 <TableHead className={variant === 'sastre' ? 'text-xs text-white/50' : 'text-xs'}>Referencia</TableHead>
                 <TableHead className={variant === 'sastre' ? 'text-xs text-white/50' : 'text-xs'}>Próximo pago</TableHead>
                 {entityType === 'tailoring_order' && !readonly && (
-                  <TableHead className="w-10" />
+                  <TableHead className={canEditPayment ? 'w-20' : 'w-10'} />
                 )}
               </TableRow>
             </TableHeader>
@@ -327,18 +375,32 @@ export function PaymentHistory({
                   </TableCell>
                   {entityType === 'tailoring_order' && !readonly && (
                     <TableCell className={variant === 'sastre' ? 'py-3 px-4' : ''}>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-destructive hover:text-destructive"
-                        disabled={deletingId === p.id}
-                        onClick={() => setDeleteTargetId(p.id)}
-                      >
-                        {deletingId === p.id
-                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          : <Trash2 className="h-3.5 w-3.5" />
-                        }
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        {canEditPayment && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className={`h-7 w-7 ${variant === 'sastre' ? 'text-white/60 hover:text-white' : ''}`}
+                            disabled={deletingId === p.id}
+                            onClick={() => openEdit(p)}
+                            title="Editar cobro"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive"
+                          disabled={deletingId === p.id}
+                          onClick={() => setDeleteTargetId(p.id)}
+                        >
+                          {deletingId === p.id
+                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            : <Trash2 className="h-3.5 w-3.5" />
+                          }
+                        </Button>
+                      </div>
                     </TableCell>
                   )}
                 </TableRow>
@@ -480,7 +542,8 @@ export function PaymentHistory({
           <AlertDialogHeader>
             <AlertDialogTitle>¿Eliminar pago?</AlertDialogTitle>
             <AlertDialogDescription>
-              Se eliminará este pago del pedido. Esta acción no se puede deshacer.
+              Se eliminará este pago y se revertirán sus efectos en caja (totales y, si la
+              sesión está cerrada, el arqueo). Esta acción no se puede deshacer.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -495,6 +558,74 @@ export function PaymentHistory({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Dialog: editar cobro (importe + método) */}
+      <Dialog open={!!editTarget} onOpenChange={(open) => { if (!open) setEditTarget(null) }}>
+        <DialogContent className={`max-w-md ${variant === 'sastre' ? 'bg-[#0d1629] border border-white/20 text-white' : ''}`}>
+          <DialogHeader>
+            <DialogTitle className={variant === 'sastre' ? 'text-white' : ''}>Editar cobro</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label className={variant === 'sastre' ? 'text-white/80' : ''}>Método de pago</Label>
+              <Select value={editMethod} onValueChange={(v) => setEditMethod(v as PaymentMethod)}>
+                <SelectTrigger className={variant === 'sastre' ? 'bg-white/[0.07] border-white/20 text-white' : ''}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className={variant === 'sastre' ? 'bg-[#0d1629] border border-white/20 text-white' : ''}>
+                  {(Object.entries(METHOD_LABELS) as [PaymentMethod, string][]).map(([k, v]) => (
+                    <SelectItem key={k} value={k} className={variant === 'sastre' ? 'text-white focus:bg-white/10 focus:text-white' : ''}>
+                      <span className="flex items-center gap-2">
+                        {METHOD_ICONS[k]}
+                        {v}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-amount" className={variant === 'sastre' ? 'text-white/80' : ''}>Importe</Label>
+              <Input
+                id="edit-amount"
+                type="number"
+                min="0.01"
+                step="0.01"
+                placeholder="0,00"
+                value={editAmount}
+                onChange={(e) => setEditAmount(e.target.value)}
+                className={variant === 'sastre' ? 'bg-white/[0.07] border-white/20 text-white placeholder:text-white/30' : ''}
+              />
+            </div>
+
+            <p className={`text-[11px] ${variant === 'sastre' ? 'text-white/40' : 'text-muted-foreground'}`}>
+              Solo se editan importe y método. Si el cobro pertenece a una caja ya cerrada,
+              se ajustarán sus totales y se recalculará el arqueo automáticamente.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant={variant === 'sastre' ? undefined : 'outline'}
+              className={variant === 'sastre' ? 'bg-white/[0.06] border border-white/15 text-white/70 hover:bg-white/10 hover:text-white' : undefined}
+              onClick={() => setEditTarget(null)}
+              disabled={isEditing}
+            >
+              Cancelar
+            </Button>
+            <Button
+              className={variant === 'sastre' ? 'bg-[#c9a96e] text-[#0a1020] font-semibold hover:bg-[#c9a96e]/90' : undefined}
+              onClick={handleEditSave}
+              disabled={isEditing}
+            >
+              {isEditing && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Guardar cambios
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
