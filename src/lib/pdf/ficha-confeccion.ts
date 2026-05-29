@@ -652,7 +652,7 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
 
   // ─── LÍNEA DE CORTE ─────────────────────────────────────────────────────
   content.push({
-    text: '- - - - - - - ✂  CORTAR POR AQUÍ  ✂ - - - - - - -',
+    text: '- - - - - - -  CORTAR POR AQUÍ  - - - - - - -',
     alignment: 'center',
     margin: [0, 8, 0, 8],
     color: '#888888',
@@ -1006,9 +1006,13 @@ function buildCamiseriaDocDefinition(
     layout: tableLayoutBorders,
   })
 
-  // Checkbox helper
-  const ch = (label: string, checked: boolean) =>
-    (checked ? '☑ ' : '☐ ') + label
+  // Checkbox helper: ● = marcada (en negrita), ○ = sin marcar. Se usan ●/○ en vez
+  // de ☑/☐ porque la fuente Roboto de pdfmake no incluye esos glifos (saldrían
+  // como una caja indistinguible entre marcada y no marcada).
+  const ch = (label: string, checked: boolean) => ({
+    text: (checked ? '● ' : '○ ') + label,
+    bold: checked,
+  })
 
   // Lectura tolerante: las características pueden venir en camelCase (dialog de
   // edición, wizard del sastre) o en snake_case con string 'true' (wizard admin
@@ -1037,19 +1041,19 @@ function buildCamiseriaDocDefinition(
     ch('HOMBRO CAÍDO', boolKey('hombroCaido', 'hombro_caido')),
     ch('DERECHO', boolKey('derecho')),
     ch('IZQUIERDO', boolKey('izquierdo')),
-  ].map((t) => ({ text: t, fontSize: fs8 }))
+  ].map((c) => ({ ...c, fontSize: fs8 }))
   const col2 = [
     ch('HOMBROS ALTOS', boolKey('hombrosAltos', 'hombros_altos')),
     ch('HOMBROS BAJOS', boolKey('hombrosBajos', 'hombros_bajos')),
     ch('ERGUIDO', boolKey('erguido')),
     ch('CARGADO', boolKey('cargado')),
-  ].map((t) => ({ text: t, fontSize: fs8 }))
+  ].map((c) => ({ ...c, fontSize: fs8 }))
   const col3 = [
     ch('ESPALDA LISA', boolKey('espaldaLisa', 'espalda_lisa')),
     ch('ESP. PLIEGUES', boolKey('espPliegues', 'esp_pliegues')),
     ch('ESP. TABLÓN CENTR.', boolKey('espTablonCentr', 'esp_tablon_centr')),
     ch('ESP. PINZAS', boolKey('espPinzas', 'esp_pinzas')),
-  ].map((t) => ({ text: t, fontSize: fs8 }))
+  ].map((c) => ({ ...c, fontSize: fs8 }))
   // Puño: el dialog guarda `cfg.puno = 'sencillo'|...`; el wizard admin guarda
   // los booleanos `cfg.puno_sencillo = 'true'` etc.
   const PUNO_OPTIONS = ['sencillo', 'gemelo', 'mixto', 'mosquetero', 'otro'] as const
@@ -1059,9 +1063,10 @@ function buildCamiseriaDocDefinition(
     for (const p of PUNO_OPTIONS) if (boolKey(`puno_${p}`)) return p
     return ''
   })()
-  const punoLines = PUNO_OPTIONS.map((p) =>
-    punoVal === p ? `● PUÑO ${PUNO_LABELS[p] ?? p}` : `○ PUÑO ${PUNO_LABELS[p] ?? p}`
-  )
+  const punoLines = PUNO_OPTIONS.map((p) => ({
+    text: (punoVal === p ? '● PUÑO ' : '○ PUÑO ') + (PUNO_LABELS[p] ?? p),
+    bold: punoVal === p,
+  }))
   const inicialesSituacionLabel: Record<string, string> = {
     puno_derecho: 'puño dch.',
     puno_izquierdo: 'puño izq.',
@@ -1087,15 +1092,16 @@ function buildCamiseriaDocDefinition(
   const col4 = [
     {
       text: inicialesChecked
-        ? `☑ INICIALES: ${inicialesTexto || '—'}`
-        : '☐ INICIALES',
+        ? `● INICIALES: ${inicialesTexto || '—'}`
+        : '○ INICIALES',
+      bold: inicialesChecked,
       fontSize: fs8,
     },
     ...(inicialesExtras.length
       ? [{ text: `   (${inicialesExtras.join(' · ')})`, fontSize: fs8 }]
       : []),
     { text: `MOD. CUELLO: ${modCuello}`, fontSize: fs8 },
-    ...punoLines.map((t) => ({ text: t, fontSize: fs8 })),
+    ...punoLines.map((c) => ({ ...c, fontSize: fs8 })),
   ]
   const maxRows = Math.max(col1.length, col2.length, col3.length, col4.length)
   const pad = (arr: Content[], n: number) => [...arr, ...Array(Math.max(0, n - arr.length)).fill({ text: ' ' })]
@@ -1195,7 +1201,7 @@ export async function generateFichaForLineCamiseria(
     content: [
       ...contentTop,
       {
-        text: '- - - ✂ CORTAR POR AQUÍ ✂ - - -',
+        text: '- - - - - - -  CORTAR POR AQUÍ  - - - - - - -',
         alignment: 'center',
         margin: [0, 8, 0, 8],
         color: '#888888',
