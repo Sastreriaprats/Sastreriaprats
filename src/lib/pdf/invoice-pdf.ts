@@ -21,6 +21,7 @@ type InvoiceRecord = {
   id: string
   status: string
   invoice_number: string | null
+  invoice_series: string | null
   client_name: string
   client_nif: string | null
   client_address: string | null
@@ -39,6 +40,9 @@ type InvoiceRecord = {
   irpf_amount: number
   total: number
   notes: string | null
+  is_rectifying: boolean
+  rectifies_invoice_id: string | null
+  rectification_reason: string | null
 }
 
 /**
@@ -50,11 +54,12 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
 
   const { data: inv, error: invError } = await admin
     .from('invoices')
-    .select(`id, status, invoice_number, client_name, client_nif, client_address,
+    .select(`id, status, invoice_number, invoice_series, client_name, client_nif, client_address,
       client_email, client_phone, payment_method,
       company_name, company_nif, company_address,
       invoice_date, due_date, subtotal, tax_rate, tax_amount,
-      irpf_rate, irpf_amount, total, notes`)
+      irpf_rate, irpf_amount, total, notes,
+      is_rectifying, rectifies_invoice_id, rectification_reason`)
     .eq('id', invoiceId)
     .single()
 
@@ -67,14 +72,79 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
     .order('sort_order', { ascending: true })
 
   const invoice = inv as unknown as InvoiceRecord
-  const lines = (rawLines || []) as unknown as PdfLine[]
   const isDraft = invoice.status === 'draft'
+  const isRectifying = invoice.is_rectifying === true
   const displayNumber =
     isDraft && (!invoice.invoice_number || !String(invoice.invoice_number).trim())
       ? 'BORRADOR'
       : invoice.invoice_number ?? ''
+  const docTitle = isDraft ? 'BORRADOR' : isRectifying ? 'FACTURA RECTIFICATIVA' : 'FACTURA'
+
+  // Para rectificativas: cargar referencia a la factura original (nº + fecha)
+  // para el bloque "Rectifica a F2026-XXXX (fecha) — Motivo: ...".
+  let originalRef: { number: string; date: string } | null = null
+  if (isRectifying && invoice.rectifies_invoice_id) {
+    const { data: orig } = await admin
+      .from('invoices')
+      .select('invoice_number, invoice_date')
+      .eq('id', invoice.rectifies_invoice_id)
+      .single()
+    if (orig) {
+      originalRef = {
+        number: String((orig as { invoice_number?: string }).invoice_number ?? '—'),
+        date: String((orig as { invoice_date?: string }).invoice_date ?? ''),
+      }
+    }
+  }
+
+  // Anotar líneas con cantidad decimal en rectificativas: "(rectif. parcial)".
+  // Las líneas con cantidad entera muestran "-1 ud × 50 €" naturalmente.
+  const lines = (rawLines || []).map((l) => {
+    const li = l as Record<string, unknown>
+    if (isRectifying) {
+      const q = Number(li.quantity ?? 0)
+      const hasDecimals = q !== Math.trunc(q)
+      if (hasDecimals) {
+        return { ...li, description: `${String(li.description ?? '')} (rectif. parcial)` }
+      }
+    }
+    return li
+  }) as unknown as PdfLine[]
 
   const logoData = await getLogoBase64Processed()
+
+  const formatDateES = (s: string | null | undefined): string => {
+    if (!s) return '—'
+    const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/)
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : String(s)
+  }
+
+  const referenceBlock: Content | null = isRectifying ? {
+    table: {
+      widths: ['*'],
+      body: [[{
+        stack: [
+          { text: 'FACTURA RECTIFICATIVA', fontSize: 10, bold: true, color: '#6b21a8' },
+          {
+            text: originalRef
+              ? `Rectifica a ${originalRef.number} (${formatDateES(originalRef.date)})`
+              : 'Rectifica a factura previa',
+            fontSize: 9, margin: [0, 3, 0, 0] as [number, number, number, number],
+          },
+          ...(invoice.rectification_reason
+            ? [{ text: `Motivo: ${invoice.rectification_reason}`, fontSize: 9, italics: true, margin: [0, 2, 0, 0] as [number, number, number, number] }]
+            : []),
+        ],
+        fillColor: '#faf5ff',
+        margin: [10, 8, 10, 8] as [number, number, number, number],
+      }]],
+    },
+    layout: {
+      hLineWidth: () => 0.5, vLineWidth: () => 0.5,
+      hLineColor: () => '#d8b4fe', vLineColor: () => '#d8b4fe',
+    },
+    margin: [0, 0, 0, 10] as [number, number, number, number],
+  } : null
 
   const paymentBlock = buildSectionBox('CONDICIONES DE PAGO', [
     { text: 'Forma de pago:', margin: [8, 6, 8, 2] as [number, number, number, number], fontSize: 9, bold: true },
@@ -87,6 +157,7 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
   ])
 
   const bodyContent: Content[] = [
+    ...(referenceBlock ? [referenceBlock] : []),
     ...buildInfoSection({
       clientName: invoice.client_name,
       clientNif: invoice.client_nif,
@@ -129,7 +200,7 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
   }
 
   const content: Content[] = [
-    buildHeader(isDraft ? 'BORRADOR' : 'FACTURA', displayNumber, logoData),
+    buildHeader(docTitle, displayNumber, logoData),
     {
       stack: bodyContent,
       margin: [40, 16, 40, 0] as [number, number, number, number],

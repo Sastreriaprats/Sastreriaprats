@@ -118,6 +118,8 @@ export type InvoiceRow = {
   pdf_url: string | null
   sent_to_client: boolean
   verifactu_sent: boolean
+  is_rectifying: boolean
+  invoice_series: string
 }
 
 export const getInvoices = protectedAction<
@@ -128,7 +130,7 @@ export const getInvoices = protectedAction<
   async (ctx, { search, status, dateFrom, dateTo }) => {
     let q = ctx.adminClient
       .from('invoices')
-      .select('id, invoice_number, client_id, client_name, client_nif, client_address, client_email, client_phone, payment_method, invoice_date, due_date, total, tax_rate, irpf_rate, notes, status, pdf_url, sent_to_client, verifactu_sent')
+      .select('id, invoice_number, invoice_series, client_id, client_name, client_nif, client_address, client_email, client_phone, payment_method, invoice_date, due_date, total, tax_rate, irpf_rate, notes, status, pdf_url, sent_to_client, verifactu_sent, is_rectifying')
       .eq('invoice_type', 'issued')
       .order('invoice_date', { ascending: false })
 
@@ -158,6 +160,8 @@ export const getInvoices = protectedAction<
       pdf_url: (r.pdf_url as string) ?? null,
       sent_to_client: Boolean(r.sent_to_client),
       verifactu_sent: Boolean(r.verifactu_sent),
+      is_rectifying: Boolean(r.is_rectifying),
+      invoice_series: String(r.invoice_series ?? 'F'),
     })))
   }
 )
@@ -1972,6 +1976,75 @@ export const cancelInvoiceAction = protectedAction<
       auditDescription: `Factura ${(inv as { invoice_number: string }).invoice_number} anulada: ${trimmedReason}`,
       auditOldData: { status, notes: (inv as { notes: string | null }).notes },
       auditNewData: { status: 'cancelled', notes: newNotes },
+    } as any)
+  }
+)
+
+// ── Emitir factura rectificativa (abono total o parcial) ──────────────────────
+// Delega en rpc_create_credit_note (mig 192). Doble cerrojo: permiso
+// invoices.credit_note + isFullAdmin. La RPC valida por LÍNEA, asigna serie
+// 'R' con retry, crea el asiento contrapartida (708/477/430 + 473 si IRPF) y
+// marca la original 'rectified' solo si todas sus líneas quedan al 100%.
+export interface CreateCreditNoteInput {
+  invoiceId: string
+  reason: string
+  lines: { original_line_id: string; qty_to_rectify: number }[]
+}
+export interface CreateCreditNoteOutput {
+  credit_note_id: string
+  credit_note_number: string
+  is_full: boolean
+  subtotal: number
+  tax_amount: number
+  irpf_amount: number
+  total: number
+  original_status: string
+}
+
+export const createCreditNote = protectedAction<CreateCreditNoteInput, CreateCreditNoteOutput>(
+  { permission: 'invoices.credit_note', auditAction: 'create', auditModule: 'accounting', auditEntity: 'invoice' },
+  async (ctx, { invoiceId, reason, lines }) => {
+    if (!invoiceId) return failure('Falta el identificador de la factura', 'VALIDATION')
+    if (!reason || reason.trim().length < 10) {
+      return failure('El motivo es obligatorio (mínimo 10 caracteres)', 'VALIDATION')
+    }
+    if (!Array.isArray(lines) || lines.length === 0) {
+      return failure('Debe rectificarse al menos una línea', 'VALIDATION')
+    }
+    const cleaned = lines
+      .filter(l => l && l.original_line_id && Number(l.qty_to_rectify) > 0)
+      .map(l => ({ original_line_id: l.original_line_id, qty_to_rectify: Number(l.qty_to_rectify) }))
+    if (cleaned.length === 0) {
+      return failure('Debe rectificarse al menos una línea con cantidad mayor que 0', 'VALIDATION')
+    }
+    if (!(await userIsFullAdmin(ctx))) {
+      return failure('Solo un administrador puede emitir facturas rectificativas.', 'FORBIDDEN')
+    }
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_create_credit_note', {
+      p_invoice_id: invoiceId,
+      p_lines: cleaned,
+      p_reason: reason.trim(),
+      p_user_id: ctx.userId,
+    })
+    if (error) {
+      console.error('[createCreditNote]', error)
+      return failure(error.message)
+    }
+    if (data && data.success === false) {
+      return failure(String(data.error || 'No se pudo emitir la rectificativa'), 'CONFLICT')
+    }
+
+    return success({
+      credit_note_id: String(data.credit_note_id),
+      credit_note_number: String(data.credit_note_number),
+      is_full: Boolean(data.is_full),
+      subtotal: Number(data.subtotal ?? 0),
+      tax_amount: Number(data.tax_amount ?? 0),
+      irpf_amount: Number(data.irpf_amount ?? 0),
+      total: Number(data.total ?? 0),
+      original_status: String(data.original_status ?? ''),
+      auditDescription: `Rectificativa ${data.credit_note_number} emitida (${data.is_full ? 'total' : 'parcial'}, ${Number(data.total ?? 0).toFixed(2)} €): ${reason.trim()}`,
     } as any)
   }
 )

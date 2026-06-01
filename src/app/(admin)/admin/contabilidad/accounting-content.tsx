@@ -31,7 +31,7 @@ import {
   Send, CheckCircle, FileOutput, Trash2, RefreshCw, ArrowUpCircle, Download,
   Receipt, ExternalLink, Package, ClipboardList, Pencil, Calendar, XCircle, Store,
   Check, ChevronsUpDown, Building2, User, MoreHorizontal, Ban,
-  FileSpreadsheet, AlertTriangle, Lock,
+  FileSpreadsheet, AlertTriangle, Lock, FileMinus,
 } from 'lucide-react'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -51,7 +51,7 @@ import {
   getManualTransactions, createManualTransaction, deleteManualTransaction, updateManualTransaction,
   getAccountingMovements,
   getProductsForInvoice, listTailoringOrdersForInvoice, getTailoringOrderLinesForInvoice,
-  createInvoiceAction, updateInvoiceAction, getInvoiceStatusAction, issueInvoiceAction, deleteInvoiceAction, cancelInvoiceAction,
+  createInvoiceAction, updateInvoiceAction, getInvoiceStatusAction, issueInvoiceAction, deleteInvoiceAction, cancelInvoiceAction, createCreditNote,
   createEstimateAction, updateEstimateAction, updateEstimateFullAction, getEstimateDetail, sendEstimateAction, acceptEstimateAction, rejectEstimateAction, convertEstimateToInvoiceAction,
   getInvoiceLinesAction, updateJournalEntryDescriptionAction, deleteJournalEntry,
   generateInvoicePdfAction, generateEstimatePdfAction,
@@ -1014,6 +1014,7 @@ export function InvoicesTab({ editId, onEditConsumed }: { editId: string | null;
 
 function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { inv: InvoiceRow; onRefresh: () => void; autoOpenEditId?: string | null; onEditConsumed?: () => void }) {
   const supabase = useMemo(() => createClient(), [])
+  const { can, isSuperAdmin } = usePermissions()
   const [loadingPdf, setLoadingPdf] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [conceptOnly, setConceptOnly] = useState(false)
@@ -1025,6 +1026,91 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
   const s = INVOICE_STATUS[inv.status] ?? INVOICE_STATUS.draft
   const canDelete = inv.status === 'draft' || (inv.status === 'cancelled' && !inv.verifactu_sent)
   const canCancel = ['issued', 'paid', 'partially_paid', 'overdue'].includes(inv.status)
+  const canCreditNote =
+    can('invoices.credit_note') && isSuperAdmin &&
+    ['issued', 'paid', 'partially_paid', 'overdue'].includes(inv.status) &&
+    !inv.is_rectifying
+
+  // ── Estado del diálogo de rectificativa (abono total/parcial) ──
+  const [creditNoteOpen, setCreditNoteOpen] = useState(false)
+  const [creditNoteLoading, setCreditNoteLoading] = useState(false)
+  const [creditNoteSaving, setCreditNoteSaving] = useState(false)
+  const [creditNoteReason, setCreditNoteReason] = useState('')
+  const [creditNoteLines, setCreditNoteLines] = useState<Array<{
+    id: string; description: string; quantity_orig: number; qty_already: number;
+    qty_max: number; qty_to_rectify: number; unit_price: number;
+    discount_percentage: number; tax_rate: number
+  }>>([])
+  const [hasPartialRect, setHasPartialRect] = useState(false)
+
+  // Cargar líneas originales + cantidades ya rectificadas al abrir el diálogo.
+  useEffect(() => {
+    if (!creditNoteOpen) return
+    let cancelled = false
+    setCreditNoteLoading(true)
+    setCreditNoteReason('')
+    ;(async () => {
+      const { data: orig } = await supabase
+        .from('invoice_lines')
+        .select('id, description, quantity, unit_price, discount_percentage, tax_rate, sort_order')
+        .eq('invoice_id', inv.id)
+        .order('sort_order', { ascending: true })
+      if (cancelled) return
+      const origRows = (orig ?? []) as Array<Record<string, unknown>>
+      const lineIds = origRows.map(l => String(l.id))
+      const alreadyByLine = new Map<string, number>()
+      if (lineIds.length > 0) {
+        const { data: rect } = await supabase
+          .from('invoice_lines')
+          .select('rectifies_line_id, quantity, invoices!inner(is_rectifying, status)')
+          .in('rectifies_line_id', lineIds)
+        for (const r of (rect ?? []) as Array<Record<string, unknown>>) {
+          const i = r.invoices as { is_rectifying?: boolean; status?: string } | null
+          if (!i?.is_rectifying || i?.status === 'cancelled') continue
+          const k = String(r.rectifies_line_id)
+          const q = Math.abs(Number(r.quantity ?? 0))
+          alreadyByLine.set(k, (alreadyByLine.get(k) ?? 0) + q)
+        }
+      }
+      if (cancelled) return
+      setCreditNoteLines(origRows.map((l) => {
+        const already = alreadyByLine.get(String(l.id)) ?? 0
+        const qmax = Number(l.quantity) - already
+        return {
+          id: String(l.id),
+          description: String(l.description ?? ''),
+          quantity_orig: Number(l.quantity ?? 0),
+          qty_already: already,
+          qty_max: qmax,
+          qty_to_rectify: 0,
+          unit_price: Number(l.unit_price ?? 0),
+          discount_percentage: Number(l.discount_percentage ?? 0),
+          tax_rate: Number(l.tax_rate ?? 0),
+        }
+      }))
+      setCreditNoteLoading(false)
+    })()
+    return () => { cancelled = true }
+  }, [creditNoteOpen, inv.id, supabase])
+
+  // Detectar si la factura tiene rectificaciones parciales (para el badge).
+  useEffect(() => {
+    if (inv.is_rectifying || inv.status === 'rectified' || inv.status === 'cancelled' || inv.status === 'draft') {
+      setHasPartialRect(false)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      const { count } = await supabase
+        .from('invoices')
+        .select('id', { count: 'exact', head: true })
+        .eq('rectifies_invoice_id', inv.id)
+        .eq('is_rectifying', true)
+        .neq('status', 'cancelled')
+      if (!cancelled) setHasPartialRect((count ?? 0) > 0)
+    })()
+    return () => { cancelled = true }
+  }, [inv.id, inv.is_rectifying, inv.status, supabase])
   // Edición plena: estados activos + sin enviar a Hacienda. cancelled
   // y rectified quedan fuera (rastro fiscal). verifactu_sent bloquea
   // todo cambio — solo rectificativa.
@@ -1278,7 +1364,17 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
         <TableCell>{inv.client_name}</TableCell>
         <TableCell className="text-muted-foreground">{formatDate(inv.invoice_date)}</TableCell>
         <TableCell className="text-right font-semibold">{formatCurrency(inv.total)}</TableCell>
-        <TableCell><span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${s.className}`}>{s.label}</span></TableCell>
+        <TableCell>
+          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${s.className}`}>{s.label}</span>
+          {hasPartialRect && (
+            <span
+              className="ml-1 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200"
+              title="Tiene rectificaciones parciales"
+            >
+              Parcial rect.
+            </span>
+          )}
+        </TableCell>
         <TableCell>
           <div className="flex flex-wrap gap-1.5 items-center">
             <Button size="sm" variant="outline" className="h-8 gap-1.5 text-blue-700 border-blue-200 hover:bg-blue-50" onClick={openPdf} disabled={loadingPdf}>
@@ -1311,7 +1407,7 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                 <CheckCircle className="h-3.5 w-3.5 text-green-600" />
               </Button>
             )}
-            {(canDelete || canCancel) && (
+            {(canDelete || canCancel || canCreditNote) && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button size="icon" variant="ghost" className="h-8 w-8" title="Más acciones">
@@ -1335,6 +1431,17 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                         className="text-amber-700 focus:text-amber-800 focus:bg-amber-50"
                       >
                         <Ban className="mr-2 h-4 w-4" /> Anular factura
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                  {canCreditNote && (
+                    <>
+                      {(canDelete || canCancel) && <DropdownMenuSeparator />}
+                      <DropdownMenuItem
+                        onClick={() => setCreditNoteOpen(true)}
+                        className="text-purple-700 focus:text-purple-800 focus:bg-purple-50"
+                      >
+                        <FileMinus className="mr-2 h-4 w-4" /> Factura rectificativa
                       </DropdownMenuItem>
                     </>
                   )}
@@ -1733,6 +1840,148 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Diálogo: factura rectificativa (abono total o parcial) */}
+      <Dialog open={creditNoteOpen} onOpenChange={(o) => { if (!creditNoteSaving) setCreditNoteOpen(o) }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Factura rectificativa · <span className="font-mono">{inv.invoice_number}</span></DialogTitle>
+          </DialogHeader>
+          <ScrollArea className="flex-1 pr-1">
+            <div className="space-y-4 p-1">
+              <div className="rounded-md border p-3 text-sm bg-muted/30 grid grid-cols-2 gap-2">
+                <div><span className="text-muted-foreground">Cliente:</span> <span className="font-medium">{inv.client_name}</span></div>
+                <div><span className="text-muted-foreground">Fecha original:</span> {formatDate(inv.invoice_date)}</div>
+                <div className="col-span-2"><span className="text-muted-foreground">Total original:</span> <span className="font-semibold">{formatCurrency(inv.total)}</span></div>
+              </div>
+
+              {creditNoteLoading ? (
+                <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+              ) : creditNoteLines.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-6 text-center">Esta factura no tiene líneas para rectificar.</p>
+              ) : (
+                <>
+                  <div className="flex justify-between items-center">
+                    <Label className="text-sm font-semibold">Selecciona qué rectificar</Label>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={creditNoteLines.every(l => l.qty_max <= 0)}
+                      onClick={() => setCreditNoteLines(prev => prev.map(l => ({ ...l, qty_to_rectify: l.qty_max })))}
+                    >
+                      Rectificar todo
+                    </Button>
+                  </div>
+
+                  <div className="overflow-x-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Descripción</TableHead>
+                          <TableHead className="text-center w-20">Orig.</TableHead>
+                          <TableHead className="text-center w-24">Ya rectif.</TableHead>
+                          <TableHead className="text-center w-28">A rectificar</TableHead>
+                          <TableHead className="text-right w-28">Importe rect.</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {creditNoteLines.map((l, i) => {
+                          const lineBase = l.qty_to_rectify * l.unit_price * (1 - l.discount_percentage / 100)
+                          const lineTotal = lineBase * (1 + l.tax_rate / 100)
+                          return (
+                            <TableRow key={l.id}>
+                              <TableCell className="text-sm">{l.description}</TableCell>
+                              <TableCell className="text-center text-sm tabular-nums">{l.quantity_orig}</TableCell>
+                              <TableCell className="text-center text-sm tabular-nums text-muted-foreground">{l.qty_already || '—'}</TableCell>
+                              <TableCell>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  max={l.qty_max}
+                                  step="0.01"
+                                  value={l.qty_to_rectify || ''}
+                                  onChange={(e) => {
+                                    const raw = Number(e.target.value || 0)
+                                    const v = Math.max(0, Math.min(l.qty_max, raw))
+                                    setCreditNoteLines(prev => prev.map((p, idx) => idx === i ? { ...p, qty_to_rectify: v } : p))
+                                  }}
+                                  disabled={l.qty_max <= 0}
+                                  className="h-8 text-sm text-center"
+                                />
+                              </TableCell>
+                              <TableCell className="text-right text-sm tabular-nums">
+                                {l.qty_to_rectify > 0 ? <span className="text-red-700">−{formatCurrency(lineTotal)}</span> : '—'}
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  {(() => {
+                    const sub = creditNoteLines.reduce((s, l) => s + l.qty_to_rectify * l.unit_price * (1 - l.discount_percentage / 100), 0)
+                    const tax = creditNoteLines.reduce((s, l) => s + l.qty_to_rectify * l.unit_price * (1 - l.discount_percentage / 100) * (l.tax_rate / 100), 0)
+                    const irpf = inv.irpf_rate > 0 ? sub * inv.irpf_rate / 100 : 0
+                    const total = sub + tax - irpf
+                    return (
+                      <div className="flex justify-end">
+                        <div className="w-72 space-y-1 text-sm">
+                          <div className="flex justify-between"><span className="text-muted-foreground">Subtotal rectif.</span><span className="tabular-nums text-red-700">−{formatCurrency(sub)}</span></div>
+                          <div className="flex justify-between"><span className="text-muted-foreground">IVA</span><span className="tabular-nums text-red-700">−{formatCurrency(tax)}</span></div>
+                          {irpf > 0 && (
+                            <div className="flex justify-between"><span className="text-muted-foreground">IRPF ({inv.irpf_rate}%)</span><span className="tabular-nums">+{formatCurrency(irpf)}</span></div>
+                          )}
+                          <div className="flex justify-between font-bold text-base border-t pt-1"><span>Total rectif.</span><span className="tabular-nums text-red-700">−{formatCurrency(total)}</span></div>
+                        </div>
+                      </div>
+                    )
+                  })()}
+
+                  <div className="space-y-1">
+                    <Label className="text-sm font-medium">
+                      Motivo de la rectificativa (obligatorio, mínimo 10 caracteres)
+                    </Label>
+                    <Textarea
+                      value={creditNoteReason}
+                      onChange={(e) => setCreditNoteReason(e.target.value)}
+                      rows={2}
+                      placeholder="Ej: el cliente devolvió la camisa por talla incorrecta"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          </ScrollArea>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreditNoteOpen(false)} disabled={creditNoteSaving}>Cancelar</Button>
+            <Button
+              onClick={async () => {
+                const linesToSend = creditNoteLines
+                  .filter(l => l.qty_to_rectify > 0)
+                  .map(l => ({ original_line_id: l.id, qty_to_rectify: l.qty_to_rectify }))
+                if (linesToSend.length === 0) { toast.error('Debe rectificarse al menos una línea'); return }
+                if (creditNoteReason.trim().length < 10) { toast.error('El motivo es obligatorio (mínimo 10 caracteres)'); return }
+                setCreditNoteSaving(true)
+                const r = await createCreditNote({ invoiceId: inv.id, reason: creditNoteReason.trim(), lines: linesToSend })
+                setCreditNoteSaving(false)
+                if (!r.success) {
+                  toast.error('error' in r ? r.error : 'Error al emitir rectificativa')
+                  return
+                }
+                toast.success(`Rectificativa ${r.data.credit_note_number} emitida (${r.data.is_full ? 'total' : 'parcial'})`)
+                setCreditNoteOpen(false)
+                onRefresh()
+              }}
+              disabled={creditNoteSaving || creditNoteLoading || creditNoteLines.length === 0}
+              className="bg-purple-700 hover:bg-purple-800 text-white"
+            >
+              {creditNoteSaving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <FileMinus className="h-4 w-4 mr-1" />}
+              Emitir rectificativa
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
