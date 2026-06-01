@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { AdminLayoutClient } from '@/components/layout/admin-layout-client'
 import { Toaster } from '@/components/ui/sonner'
 import { InstallPrompt } from '@/components/pwa/install-prompt'
+import { SwUpdateBanner } from '@/components/pwa/sw-update-banner'
 
 export const dynamic = 'force-dynamic'
 
@@ -63,6 +64,7 @@ export default async function AdminLayout({
       <AdminLayoutClient>{children}</AdminLayoutClient>
       <Toaster richColors position="top-right" />
       <InstallPrompt />
+      <SwUpdateBanner />
     </>
   )
 }

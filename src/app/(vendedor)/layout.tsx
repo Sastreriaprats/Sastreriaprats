@@ -5,6 +5,7 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { Toaster } from '@/components/ui/sonner'
 import { StoreGate } from '@/components/store-gate'
+import { SwUpdateBanner } from '@/components/pwa/sw-update-banner'
 
 export const dynamic = 'force-dynamic'
 
@@ -57,6 +58,7 @@ export default async function VendedorLayout({
         {children}
       </StoreGate>
       <Toaster richColors position="top-right" />
+      <SwUpdateBanner />
     </>
   )
 }

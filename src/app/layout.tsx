@@ -3,7 +3,7 @@ import { Inter, Playfair_Display } from 'next/font/google'
 import { Toaster } from '@/components/ui/sonner'
 import { AuthProvider } from '@/components/providers/auth-provider'
 import { QueryProvider } from '@/components/providers/query-provider'
-import { ServiceWorkerRegister } from '@/components/pwa/sw-register'
+import { SwUpdateProvider } from '@/components/pwa/sw-update-provider'
 import { OnlineStatus } from '@/components/pwa/online-status'
 import { PwaInstallProvider } from '@/components/pwa/install-provider'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
@@ -176,12 +176,13 @@ export default async function RootLayout({
         <QueryProvider>
           <AuthProvider initialSession={session} initialProfile={profile}>
             <PwaInstallProvider>
-              {children}
+              <SwUpdateProvider>
+                {children}
+              </SwUpdateProvider>
             </PwaInstallProvider>
           </AuthProvider>
         </QueryProvider>
         <Toaster richColors position="top-right" />
-        <ServiceWorkerRegister />
         <OnlineStatus />
       </body>
     </html>

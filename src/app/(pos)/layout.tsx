@@ -4,6 +4,7 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { getServerProfile } from '@/actions/auth'
 import { AuthProvider } from '@/components/providers/auth-provider'
 import { StoreGate } from '@/components/store-gate'
+import { SwUpdateBanner } from '@/components/pwa/sw-update-banner'
 
 export const metadata: Metadata = {
   robots: { index: false, follow: false, nocache: true },
@@ -31,6 +32,7 @@ export default async function PosLayout({ children }: { children: React.ReactNod
           </div>
         </div>
       </StoreGate>
+      <SwUpdateBanner />
     </AuthProvider>
   )
 }

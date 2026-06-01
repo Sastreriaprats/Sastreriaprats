@@ -106,7 +106,7 @@ export const BRAND = {
  */
 export const NEWSLETTER_POPUP = {
   enabled: true,
-  delaySeconds: 8,
+  delaySeconds: 2.5,
   imageUrl: '/images/logo-prats-hd.webp', // Imagen lateral (logo o foto)
   title: 'Únete a la familia Prats',
   subtitle: 'Sé el primero en conocer nuestras nuevas colecciones, eventos exclusivos y consejos de estilo.',

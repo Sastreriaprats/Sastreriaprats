@@ -6,6 +6,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { SastreSessionGate } from '@/app/(sastre)/components/sastre-session-gate'
 import { StoreGate } from '@/components/store-gate'
 import { InstallPrompt } from '@/components/pwa/install-prompt'
+import { SwUpdateBanner } from '@/components/pwa/sw-update-banner'
 
 export const dynamic = 'force-dynamic'
 
@@ -52,6 +53,7 @@ export default async function SastreLayout({
       </StoreGate>
       <Toaster richColors position="top-center" />
       <InstallPrompt />
+      <SwUpdateBanner />
     </div>
   )
 }
