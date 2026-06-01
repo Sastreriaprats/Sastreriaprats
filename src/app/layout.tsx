@@ -5,7 +5,7 @@ import { AuthProvider } from '@/components/providers/auth-provider'
 import { QueryProvider } from '@/components/providers/query-provider'
 import { ServiceWorkerRegister } from '@/components/pwa/sw-register'
 import { OnlineStatus } from '@/components/pwa/online-status'
-import { InstallPrompt } from '@/components/pwa/install-prompt'
+import { PwaInstallProvider } from '@/components/pwa/install-provider'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import type { UserWithRoles } from '@/lib/types/auth'
@@ -175,13 +175,14 @@ export default async function RootLayout({
       <body className={`${inter.variable} ${playfair.variable} font-sans antialiased`}>
         <QueryProvider>
           <AuthProvider initialSession={session} initialProfile={profile}>
-            {children}
+            <PwaInstallProvider>
+              {children}
+            </PwaInstallProvider>
           </AuthProvider>
         </QueryProvider>
         <Toaster richColors position="top-right" />
         <ServiceWorkerRegister />
         <OnlineStatus />
-        <InstallPrompt />
       </body>
     </html>
   )

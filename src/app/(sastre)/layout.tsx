@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { Toaster } from '@/components/ui/sonner'
 import { SastreSessionGate } from '@/app/(sastre)/components/sastre-session-gate'
 import { StoreGate } from '@/components/store-gate'
+import { InstallPrompt } from '@/components/pwa/install-prompt'
 
 export const dynamic = 'force-dynamic'
 
@@ -50,6 +51,7 @@ export default async function SastreLayout({
         </SastreSessionGate>
       </StoreGate>
       <Toaster richColors position="top-center" />
+      <InstallPrompt />
     </div>
   )
 }

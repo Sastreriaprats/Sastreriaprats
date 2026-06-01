@@ -13,8 +13,9 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Sheet, SheetContent, SheetClose, SheetTrigger } from '@/components/ui/sheet'
 import {
-  Bell, Menu, LogOut, User, ChevronRight, ChevronDown, PanelLeftClose, PanelLeft, Settings,
+  Bell, Menu, LogOut, User, ChevronRight, ChevronDown, PanelLeftClose, PanelLeft, Settings, Download,
 } from 'lucide-react'
+import { usePwaInstall } from '@/components/pwa/install-provider'
 import { useAuth } from '@/components/providers/auth-provider'
 import { logoutAction } from '@/actions/auth'
 import { getDashboardAlerts } from '@/actions/dashboard'
@@ -192,6 +193,7 @@ export function AdminHeader({
   const [alertsCount, setAlertsCount] = useState(0)
   const [mounted, setMounted] = useState(false)
   const supabase = useMemo(() => createClient(), [])
+  const { canInstall, triggerInstall } = usePwaInstall()
 
   useEffect(() => {
     setMounted(true)
@@ -302,6 +304,11 @@ export function AdminHeader({
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => router.push('/admin/perfil')}><User className="mr-2 h-4 w-4" /> Mi perfil</DropdownMenuItem>
             <DropdownMenuItem onClick={() => router.push('/admin/configuracion')}><Settings className="mr-2 h-4 w-4" /> Configuración</DropdownMenuItem>
+            {canInstall && (
+              <DropdownMenuItem onClick={() => { triggerInstall() }}>
+                <Download className="mr-2 h-4 w-4" /> Instalar app
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={handleLogout} className="text-destructive"><LogOut className="mr-2 h-4 w-4" /> Cerrar sesión</DropdownMenuItem>
           </DropdownMenuContent>

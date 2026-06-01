@@ -3,11 +3,12 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { useState, useEffect, useMemo } from 'react'
-import { ShoppingBag, Menu, Search, ChevronLeft, ChevronRight, ChevronDown, Facebook, Instagram, Linkedin, Mail } from 'lucide-react'
+import { ShoppingBag, Menu, Search, ChevronLeft, ChevronRight, ChevronDown, Facebook, Instagram, Linkedin, Mail, Download } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { SOCIAL_LINKS } from '@/lib/constants'
 import type { WebCategory } from '@/actions/cms'
+import { usePwaInstall } from '@/components/pwa/install-provider'
 
 type NavChild = {
   label: string
@@ -204,6 +205,7 @@ export function WebHeader({ announcementText, categories = [] }: { announcementT
   const [cartCount, setCartCount] = useState(0)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const navItems = useMemo(() => buildNavItems(categories), [categories])
+  const { canInstall, triggerInstall } = usePwaInstall()
 
   useEffect(() => {
     supabase.auth.getSession()
@@ -303,6 +305,17 @@ export function WebHeader({ announcementText, categories = [] }: { announcementT
                     >
                       {isLoggedIn ? 'Mi cuenta' : 'Entrar'}
                     </Link>
+
+                    {/* Instalar app — solo si el navegador admite PWA y aún no está instalada */}
+                    {canInstall && (
+                      <button
+                        type="button"
+                        onClick={async () => { await triggerInstall(); setIsOpen(false) }}
+                        className="flex items-center gap-2 py-3.5 text-[17px] tracking-wide text-gray-900 hover:text-black transition-colors focus-visible:ring-2 focus-visible:ring-prats-gold focus-visible:outline-none w-full text-left"
+                      >
+                        <Download className="h-4 w-4" /> Instalar app
+                      </button>
+                    )}
                   </nav>
 
                   {/* Selector moneda */}

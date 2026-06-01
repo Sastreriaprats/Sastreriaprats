@@ -1,57 +1,40 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+// Banner automático "Instalar Prats". Aparece solo donde se monte explícitamente
+// (admin/sastre). Reutiliza el evento `beforeinstallprompt` ya capturado por
+// PwaInstallProvider. Respeta dismiss de 7 días (localStorage).
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Download, X, Smartphone } from 'lucide-react'
+import { usePwaInstall } from './install-provider'
 
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
-}
+const DISMISS_KEY = 'pwa_install_dismissed'
+const DISMISS_TTL_MS = 7 * 86400000
 
 export function InstallPrompt() {
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null)
-  const [showBanner, setShowBanner] = useState(false)
-  const [isInstalled, setIsInstalled] = useState(false)
+  const { canInstall, isInstalled, triggerInstall } = usePwaInstall()
+  const [hidden, setHidden] = useState(true) // empieza oculto hasta comprobar dismiss
 
   useEffect(() => {
-    if (window.matchMedia('(display-mode: standalone)').matches) {
-      setIsInstalled(true)
-      return
-    }
-
-    const dismissed = localStorage.getItem('pwa_install_dismissed')
-    if (dismissed && Date.now() - parseInt(dismissed) < 7 * 86400000) return
-
-    const handler = (e: Event) => {
-      e.preventDefault()
-      setDeferredPrompt(e as BeforeInstallPromptEvent)
-      setShowBanner(true)
-    }
-
-    window.addEventListener('beforeinstallprompt', handler)
-    window.addEventListener('appinstalled', () => {
-      setIsInstalled(true)
-      setShowBanner(false)
-    })
-
-    return () => window.removeEventListener('beforeinstallprompt', handler)
+    if (typeof window === 'undefined') return
+    const dismissed = localStorage.getItem(DISMISS_KEY)
+    if (dismissed && Date.now() - parseInt(dismissed) < DISMISS_TTL_MS) return
+    setHidden(false)
   }, [])
 
   const handleInstall = async () => {
-    if (!deferredPrompt) return
-    await deferredPrompt.prompt()
-    const { outcome } = await deferredPrompt.userChoice
-    if (outcome === 'accepted') setShowBanner(false)
-    setDeferredPrompt(null)
+    const outcome = await triggerInstall()
+    if (outcome === 'accepted') setHidden(true)
   }
 
   const handleDismiss = () => {
-    setShowBanner(false)
-    localStorage.setItem('pwa_install_dismissed', Date.now().toString())
+    setHidden(true)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(DISMISS_KEY, Date.now().toString())
+    }
   }
 
-  if (!showBanner || isInstalled) return null
+  if (hidden || !canInstall || isInstalled) return null
 
   return (
     <div className="fixed bottom-4 left-4 right-4 md:left-auto md:right-4 md:w-96 z-50 animate-in slide-in-from-bottom-4">
