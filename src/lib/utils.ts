@@ -179,8 +179,10 @@ export function summarizeOrderGarments(
   for (const l of sorted) {
     const cfg = l.configuration ?? {}
     const rawLabel = String(cfg.prendaLabel ?? '').trim()
-    // "Americana — Traje 1" → "Americana"
-    const label = rawLabel ? rawLabel.split('—')[0]!.trim() : ''
+    // Mostramos prendaLabel completo: "Americana — Traje", "Pantalón — Chaqué".
+    // El subtipo tras el "—" da el contexto que el listado necesita para
+    // identificar a qué traje pertenece cada pieza.
+    const label = rawLabel
     const name = label || l.garment_types?.name || ''
     if (name && !names.includes(name)) names.push(name)
   }
