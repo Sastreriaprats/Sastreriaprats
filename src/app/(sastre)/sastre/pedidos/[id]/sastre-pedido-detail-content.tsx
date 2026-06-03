@@ -500,6 +500,8 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
             total={Number(order.total)}
             variant="sastre"
             onPaymentAdded={refreshOrder}
+            entityStoreId={order.store_id ?? null}
+            entityStoreName={order.stores?.name ?? null}
           />
         </CardContent>
       </Card>

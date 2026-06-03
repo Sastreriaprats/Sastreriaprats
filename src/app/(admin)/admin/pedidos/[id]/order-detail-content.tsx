@@ -126,6 +126,8 @@ export function OrderDetailContent({ order }: { order: any }) {
                 entityType="tailoring_order"
                 entityId={order.id}
                 total={order.total ?? 0}
+                entityStoreId={order.store_id ?? null}
+                entityStoreName={order.stores?.name ?? null}
               />
               <OrderPaymentsTab order={order} />
             </div>

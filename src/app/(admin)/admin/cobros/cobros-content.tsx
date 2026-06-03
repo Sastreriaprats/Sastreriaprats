@@ -380,6 +380,8 @@ export function CobrosContent({ basePath = '/admin' }: { basePath?: string }) {
               entityType={selectedRow.entity_type}
               entityId={selectedRow.id}
               total={selectedRow.total}
+              entityStoreId={selectedRow.store_id ?? null}
+              entityStoreName={selectedRow.store_name ?? null}
               onPaymentAdded={() => {
                 load()
               }}

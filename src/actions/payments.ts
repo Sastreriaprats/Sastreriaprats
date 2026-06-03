@@ -353,6 +353,7 @@ export interface PendingPaymentRow {
   next_payment_date: string | null
   created_at: string
   days_since_creation: number
+  store_id: string | null
   store_name: string | null
 }
 
@@ -381,7 +382,7 @@ export const getPendingPayments = protectedAction<
       if (type === 'all' || type === 'orders') {
         let query = ctx.adminClient
           .from('tailoring_orders')
-          .select('id, order_number, total, total_paid, total_pending, created_at, client_id, clients(id, full_name), stores(name)')
+          .select('id, order_number, total, total_paid, total_pending, created_at, client_id, clients(id, full_name), stores(id, name)')
           .gt('total_pending', 0)
           .not('status', 'in', '("delivered","cancelled")')
           .order('created_at', { ascending: false })
@@ -427,6 +428,7 @@ export const getPendingPayments = protectedAction<
               next_payment_date: lastPay?.next_payment_date ?? null,
               created_at: o.created_at,
               days_since_creation: days,
+              store_id: store?.id ?? null,
               store_name: store?.name ?? null,
             })
           }
@@ -436,7 +438,7 @@ export const getPendingPayments = protectedAction<
       if (type === 'all' || type === 'sales') {
         let query = ctx.adminClient
           .from('sales')
-          .select('id, ticket_number, total, amount_paid, payment_status, created_at, client_id, clients(id, full_name), stores(name)')
+          .select('id, ticket_number, total, amount_paid, payment_status, created_at, client_id, clients(id, full_name), stores(id, name)')
           .in('payment_status', ['pending', 'partial'])
           .order('created_at', { ascending: false })
           .limit(500)
@@ -482,6 +484,7 @@ export const getPendingPayments = protectedAction<
               next_payment_date: lastSalePay?.next_payment_date ?? null,
               created_at: s.created_at,
               days_since_creation: days,
+              store_id: store?.id ?? null,
               store_name: store?.name ?? null,
             })
           }
@@ -512,7 +515,7 @@ export const getClientPendingDebt = protectedAction<
 
       const { data: orders } = await ctx.adminClient
         .from('tailoring_orders')
-        .select('id, order_number, total, total_paid, total_pending, created_at, client_id, clients(id, full_name), stores(name)')
+        .select('id, order_number, total, total_paid, total_pending, created_at, client_id, clients(id, full_name), stores(id, name)')
         .eq('client_id', client_id)
         .gt('total_pending', 0)
         .not('status', 'in', '("delivered","cancelled")')
@@ -544,13 +547,14 @@ export const getClientPendingDebt = protectedAction<
           next_payment_date: lastPay?.next_payment_date ?? null,
           created_at: o.created_at,
           days_since_creation: days,
+          store_id: store?.id ?? null,
           store_name: store?.name ?? null,
         })
       }
 
       const { data: sales } = await ctx.adminClient
         .from('sales')
-        .select('id, ticket_number, total, amount_paid, payment_status, created_at, client_id, clients(id, full_name), stores(name)')
+        .select('id, ticket_number, total, amount_paid, payment_status, created_at, client_id, clients(id, full_name), stores(id, name)')
         .eq('client_id', client_id)
         .in('payment_status', ['pending', 'partial'])
         .order('created_at', { ascending: false })
@@ -585,6 +589,7 @@ export const getClientPendingDebt = protectedAction<
           next_payment_date: lastSalePay?.next_payment_date ?? null,
           created_at: s.created_at,
           days_since_creation: days,
+          store_id: store?.id ?? null,
           store_name: store?.name ?? null,
         })
       }
