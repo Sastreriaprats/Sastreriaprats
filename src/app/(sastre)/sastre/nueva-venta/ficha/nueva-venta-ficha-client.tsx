@@ -93,6 +93,7 @@ const PRENDAS_DISPONIBLES = [
   { slug: 'abrigo', label: 'Abrigo' },
   { slug: 'gabardina', label: 'Gabardina' },
   { slug: 'frac', label: 'Frac' },
+  { slug: 'levita', label: 'Levita' },
 ]
 
 // Campos de "Configuración técnica" que ahora viven en
