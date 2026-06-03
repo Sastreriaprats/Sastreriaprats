@@ -54,8 +54,14 @@ export const listAlterations = protectedAction<
       .from('alterations')
       .select(SELECT_ALTERATIONS, { count: 'exact' })
 
+    // Acepta filtros tanto a nivel top-level (callers existentes: ficha cliente)
+    // como dentro de `filters` (useList del listado global de admin).
+    const storeId = params.storeId ?? params.filters?.store_id
+    const from = params.from ?? params.filters?.from
+    const to = params.to ?? params.filters?.to
+
     if (params.clientId) query = query.eq('client_id', params.clientId)
-    if (params.storeId) query = query.eq('store_id', params.storeId)
+    if (storeId) query = query.eq('store_id', storeId)
 
     const status = params.filters?.status ?? params.status
     if (status && status !== 'all') query = query.eq('status', status)
@@ -63,8 +69,8 @@ export const listAlterations = protectedAction<
     const altType = params.filters?.alteration_type ?? params.alterationType ?? params.alteration_type
     if (altType && altType !== 'all') query = query.eq('alteration_type', altType)
 
-    if (params.from) query = query.gte('alteration_date', params.from)
-    if (params.to) query = query.lte('alteration_date', params.to)
+    if (from) query = query.gte('alteration_date', from)
+    if (to) query = query.lte('alteration_date', to)
 
     if (params.search) {
       const term = normalizeSearchTerm(params.search)
@@ -103,7 +109,7 @@ export const listAlterations = protectedAction<
     // Status counts (sin filtros de status para que el sidebar pueda mostrar todo)
     let countsQuery = ctx.adminClient.from('alterations').select('status')
     if (params.clientId) countsQuery = countsQuery.eq('client_id', params.clientId)
-    if (params.storeId) countsQuery = countsQuery.eq('store_id', params.storeId)
+    if (storeId) countsQuery = countsQuery.eq('store_id', storeId)
     const { data: countsRaw } = await countsQuery
     const statusCounts: Record<string, number> = {}
     for (const row of countsRaw || []) {

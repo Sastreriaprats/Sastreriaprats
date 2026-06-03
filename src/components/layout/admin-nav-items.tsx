@@ -10,7 +10,7 @@
 import {
   LayoutDashboard, Users, Scissors, Truck, UserCheck,
   CreditCard, BookOpen, Calendar, Settings, Shirt, Database,
-  Store, ShoppingBag, BarChart3, Mail, ScrollText, CircleDollarSign, Receipt, ClipboardList, Tag, FolderTree, CalendarRange, Undo2,
+  Store, ShoppingBag, BarChart3, Mail, ScrollText, CircleDollarSign, Receipt, ClipboardList, Tag, FolderTree, CalendarRange, Undo2, Ruler,
 } from 'lucide-react'
 
 export interface AdminNavChild {
@@ -43,6 +43,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
       { label: 'Nuevo pedido',      href: '/admin/pedidos/nuevo', permission: 'orders.create' },
     ],
   },
+  { label: 'Arreglos',     href: '/admin/arreglos',     icon: Ruler,        permission: 'clients.view' },
   { label: 'TPV / Caja',   href: '/pos/caja',           icon: CreditCard,   permission: 'pos.access' },
   {
     label: 'Tickets',      href: '/admin/tickets',      icon: Receipt,       permission: 'pos.access',
@@ -102,8 +103,8 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
       { label: 'Categorías',        href: '/admin/configuracion/categorias',  permission: 'products.view', icon: FolderTree },
       { label: 'Temporadas',        href: '/admin/configuracion/temporadas',  permission: 'products.view', icon: CalendarRange },
       { label: 'Impresora',         href: '/admin/configuracion/impresora' },
+      { label: 'Migración',         href: '/admin/migracion',                 permission: 'config.view',   icon: Database },
     ],
   },
-  { label: 'Migración',    href: '/admin/migracion',    icon: Database,     permission: 'migration.access' },
   { label: 'Seguimiento',   href: '/admin/auditoria',    icon: ScrollText,   permission: 'audit.view' },
 ]
