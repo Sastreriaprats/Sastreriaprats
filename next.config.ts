@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { legacyShopifyRedirects } from "./src/lib/seo/legacy-redirects";
 
 const nextConfig: NextConfig = {
   turbopack: {
@@ -60,6 +61,8 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       { source: '/admin', destination: '/admin/dashboard', permanent: false },
+      // Redirecciones 301 de las URLs antiguas de Shopify (ver src/lib/seo/legacy-redirects.ts)
+      ...legacyShopifyRedirects,
     ]
   },
 };
