@@ -358,7 +358,7 @@ export function CreateOrderWizard({
     const t = setTimeout(async () => {
       setIsSearchingOfficial(true)
       const { data } = await supabase.from('officials')
-        .select('id, name, phone, email, specialty, price_per_garment')
+        .select('id, name, phone, email, specialty')
         .or(`name.ilike.%${officialSearch}%,email.ilike.%${officialSearch}%,phone.ilike.%${officialSearch}%`)
         .eq('is_active', true).limit(10)
       if (data) setOfficialResults(data)

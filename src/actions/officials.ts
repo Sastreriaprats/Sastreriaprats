@@ -2,6 +2,7 @@
 
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
+import { SPECIALTIES } from '@/lib/officials/specialties'
 
 export type OfficialLoad = {
   id: string
@@ -266,5 +267,57 @@ export const getOfficialInProgressItems = protectedAction<
       asCortador,
       asOficial,
     })
+  }
+)
+
+export type OfficialSpecialtyPrice = {
+  id: string
+  official_id: string
+  specialty: string
+  price: number
+}
+
+/**
+ * Reemplaza el set completo de precios por especialidad de un oficial.
+ *
+ * Recibe un objeto { especialidad: precio }, p.ej. { Americana: 50, Chaqué: 80 }.
+ * La atomicidad (borrar+insertar) la garantiza la RPC
+ * `upsert_official_specialty_prices`. Aquí se validan en servidor:
+ *   - que cada especialidad esté en el catálogo SPECIALTIES,
+ *   - que cada precio sea un número finito >= 0.
+ *
+ * Gated por `officials.edit` (no se crea permiso nuevo).
+ */
+export const upsertOfficialPrices = protectedAction<
+  { officialId: string; prices: Record<string, number> },
+  OfficialSpecialtyPrice[]
+>(
+  { permission: 'officials.edit', auditModule: 'officials' },
+  async (ctx, { officialId, prices }) => {
+    if (!officialId?.trim()) return failure('officialId requerido', 'VALIDATION')
+    if (prices == null || typeof prices !== 'object') {
+      return failure('prices inválido', 'VALIDATION')
+    }
+
+    const allowed = new Set<string>(SPECIALTIES)
+    const clean: Record<string, number> = {}
+    for (const [specialty, raw] of Object.entries(prices)) {
+      if (!allowed.has(specialty)) {
+        return failure(`Especialidad no válida: ${specialty}`, 'VALIDATION')
+      }
+      const price = Number(raw)
+      if (!Number.isFinite(price) || price < 0) {
+        return failure(`Precio inválido para «${specialty}»`, 'VALIDATION')
+      }
+      clean[specialty] = price
+    }
+
+    const { data, error } = await ctx.adminClient.rpc('upsert_official_specialty_prices', {
+      p_official_id: officialId,
+      p_prices: clean,
+    })
+    if (error) return failure(error.message)
+
+    return success((data ?? []) as OfficialSpecialtyPrice[])
   }
 )

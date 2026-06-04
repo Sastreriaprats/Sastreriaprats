@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
-import { getOfficialsLoad, type OfficialLoad } from '@/actions/officials'
+import { getOfficialsLoad, upsertOfficialPrices, type OfficialLoad } from '@/actions/officials'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -47,26 +47,17 @@ import {
 } from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
 import { usePermissions } from '@/hooks/use-permissions'
-import { formatCurrency } from '@/lib/utils'
+import { SPECIALTIES } from '@/lib/officials/specialties'
 
-const SPECIALTIES = [
-  'Americana',
-  'Chaqué',
-  'Abrigo',
-  'Frac',
-  'Chaleco',
-  'Pantalón',
-  'Teba',
-  'Camisería',
-  'Americana Industrial',
-  'Pantalón Industrial',
-  'Chaqué Industrial',
-  'Chaleco Industrial',
-  'Camisería Industrial',
-  'Gabardina',
-  'Cortador',
-  'Composturas',
-]
+// Formato de la columna "Precios" de la tabla (sin decimales innecesarios):
+//   sin precios -> "—" · 1 o varios iguales -> "50 €" · varios distintos -> "42–145 €"
+function formatPriceRange(prices: number[]): string {
+  if (!prices.length) return '—'
+  const min = Math.min(...prices)
+  const max = Math.max(...prices)
+  const fmt = (n: number) => new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 }).format(n)
+  return min === max ? `${fmt(min)} €` : `${fmt(min)}–${fmt(max)} €`
+}
 
 const PAYMENT_TERMS_OPTIONS = [
   { value: 'immediate', label: 'Al contado' },
@@ -84,7 +75,10 @@ const emptyForm = {
   phone: '',
   email: '',
   specialty: [] as string[],
-  price_per_garment: '',
+  // Precio por especialidad: clave = especialidad, valor = precio como string
+  // (lo que escribe el usuario en el input). Solo se guardan las especialidades
+  // seleccionadas con precio no vacío.
+  specialtyPrices: {} as Record<string, string>,
   address: '',
   city: '',
   postal_code: '',
@@ -112,16 +106,31 @@ export function OfficialsPageContent() {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
   // Carga "en proceso" por oficial. Indexada por id para lookup O(1) en la tabla.
   const [loadById, setLoadById] = useState<Map<string, OfficialLoad>>(new Map())
+  // Precios por especialidad indexados por official_id, para la columna "Precios".
+  const [pricesByOfficial, setPricesByOfficial] = useState<Map<string, number[]>>(new Map())
 
   const fetchOfficials = useCallback(async () => {
     setIsLoading(true)
     try {
       const { data, error } = await supabase
         .from('officials')
-        .select('id, name, legal_name, nif_cif, phone, email, specialty, price_per_garment, address, city, postal_code, province, country, bank_iban, payment_terms, internal_notes, is_active')
+        .select('id, name, legal_name, nif_cif, phone, email, specialty, address, city, postal_code, province, country, bank_iban, payment_terms, internal_notes, is_active')
         .order('name', { ascending: true })
       if (error) throw error
       setOfficials(data ?? [])
+
+      // Precios por especialidad para la columna "Precios" (agrupados por oficial).
+      const { data: priceRows, error: priceErr } = await supabase
+        .from('official_specialty_prices')
+        .select('official_id, price')
+      if (priceErr) throw priceErr
+      const map = new Map<string, number[]>()
+      for (const r of priceRows ?? []) {
+        const arr = map.get(r.official_id) ?? []
+        arr.push(Number(r.price))
+        map.set(r.official_id, arr)
+      }
+      setPricesByOfficial(map)
     } catch (err: any) {
       console.error('[OfficialsPageContent] fetchOfficials error:', err)
       toast.error(err?.message ?? 'Error al cargar los oficiales')
@@ -155,8 +164,18 @@ export function OfficialsPageContent() {
     setDialogOpen(true)
   }
 
-  const openEdit = (o: any) => {
+  const openEdit = async (o: any) => {
     setEditingId(o.id)
+    // Cargar los precios por especialidad existentes del oficial.
+    const { data: priceRows } = await supabase
+      .from('official_specialty_prices')
+      .select('specialty, price')
+      .eq('official_id', o.id)
+    const specialtyPrices: Record<string, string> = {}
+    for (const r of priceRows ?? []) {
+      const canonical = SPECIALTIES.find((sp) => sp.toLowerCase() === String(r.specialty).toLowerCase())
+      if (canonical) specialtyPrices[canonical] = String(r.price)
+    }
     setForm({
       name: o.name ?? '',
       legal_name: o.legal_name ?? '',
@@ -168,7 +187,7 @@ export function OfficialsPageContent() {
             SPECIALTIES.find(sp => sp.toLowerCase() === s.toLowerCase()) || ''
           ).filter(Boolean)
         : [],
-      price_per_garment: o.price_per_garment != null ? String(o.price_per_garment) : '',
+      specialtyPrices,
       address: o.address ?? '',
       city: o.city ?? '',
       postal_code: o.postal_code ?? '',
@@ -195,7 +214,6 @@ export function OfficialsPageContent() {
       phone: form.phone.trim() || null,
       email: form.email.trim() || null,
       specialty: form.specialty.length > 0 ? form.specialty.join(', ') : null,
-      price_per_garment: form.price_per_garment ? parseFloat(form.price_per_garment) : null,
       address: form.address.trim() || null,
       city: form.city.trim() || null,
       postal_code: form.postal_code.trim() || null,
@@ -206,24 +224,35 @@ export function OfficialsPageContent() {
       internal_notes: form.internal_notes.trim() || null,
       is_active: form.is_active,
     }
+
+    // Precios a guardar: solo especialidades SELECCIONADAS con precio no vacío.
+    // (Desmarcar una especialidad descarta su precio: no entra aquí y la RPC,
+    // que reemplaza el set completo, la elimina.)
+    const prices: Record<string, number> = {}
+    for (const sp of form.specialty) {
+      const raw = form.specialtyPrices[sp]
+      if (raw != null && String(raw).trim() !== '') {
+        const n = parseFloat(raw)
+        if (Number.isFinite(n)) prices[sp] = n
+      }
+    }
+
     if (editingId) {
       const { error } = await supabase.from('officials').update(payload).eq('id', editingId)
-      if (error) {
-        toast.error(error.message)
-      } else {
-        toast.success('Oficial actualizado')
-        setDialogOpen(false)
-        fetchOfficials()
-      }
+      if (error) { toast.error(error.message); setIsSaving(false); return }
+      const priceRes = await upsertOfficialPrices({ officialId: editingId, prices })
+      if (!priceRes.success) { toast.error(priceRes.error); setIsSaving(false); return }
+      toast.success('Oficial actualizado')
+      setDialogOpen(false)
+      fetchOfficials()
     } else {
-      const { error } = await supabase.from('officials').insert(payload)
-      if (error) {
-        toast.error(error.message)
-      } else {
-        toast.success('Oficial creado')
-        setDialogOpen(false)
-        fetchOfficials()
-      }
+      const { data: created, error } = await supabase.from('officials').insert(payload).select('id').single()
+      if (error) { toast.error(error.message); setIsSaving(false); return }
+      const priceRes = await upsertOfficialPrices({ officialId: created.id, prices })
+      if (!priceRes.success) { toast.error(priceRes.error); setIsSaving(false); return }
+      toast.success('Oficial creado')
+      setDialogOpen(false)
+      fetchOfficials()
     }
     setIsSaving(false)
   }
@@ -273,7 +302,7 @@ export function OfficialsPageContent() {
                 <TableHead>Teléfono</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Especialidad</TableHead>
-                <TableHead>Precio/prenda</TableHead>
+                <TableHead>Precios</TableHead>
                 <TableHead>En proceso</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead className="w-24 text-right">Acciones</TableHead>
@@ -310,7 +339,7 @@ export function OfficialsPageContent() {
                         </div>
                       ) : '—'}
                     </TableCell>
-                    <TableCell className="text-sm">{o.price_per_garment != null ? formatCurrency(o.price_per_garment) : '—'}</TableCell>
+                    <TableCell className="text-sm">{formatPriceRange(pricesByOfficial.get(o.id) ?? [])}</TableCell>
                     <TableCell>
                       {(() => {
                         const load = loadById.get(o.id)
@@ -397,12 +426,14 @@ export function OfficialsPageContent() {
                     <Checkbox
                       checked={form.specialty.includes(sp)}
                       onCheckedChange={() =>
-                        setForm((f) => ({
-                          ...f,
-                          specialty: f.specialty.includes(sp)
-                            ? f.specialty.filter((s) => s !== sp)
-                            : [...f.specialty, sp],
-                        }))
+                        setForm((f) => {
+                          if (f.specialty.includes(sp)) {
+                            // Desmarcar: quitar la especialidad y descartar su precio del estado.
+                            const { [sp]: _removed, ...rest } = f.specialtyPrices
+                            return { ...f, specialty: f.specialty.filter((s) => s !== sp), specialtyPrices: rest }
+                          }
+                          return { ...f, specialty: [...f.specialty, sp] }
+                        })
                       }
                     />
                     {sp}
@@ -410,9 +441,35 @@ export function OfficialsPageContent() {
                 ))}
               </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="price_per_garment">Precio por prenda (€)</Label>
-              <Input id="price_per_garment" type="number" step="0.01" value={form.price_per_garment} onChange={(e) => setForm((f) => ({ ...f, price_per_garment: e.target.value }))} />
+            <div className="space-y-2 sm:col-span-2">
+              <Label>Precio por especialidad (€)</Label>
+              {form.specialty.length === 0 ? (
+                <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                  Selecciona primero las especialidades para fijar sus precios.
+                </p>
+              ) : (
+                <div className="space-y-2 rounded-md border p-3">
+                  {form.specialty.map((sp) => (
+                    <div key={sp} className="flex items-center gap-3">
+                      <span className="flex-1 text-sm">{sp}</span>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        className="w-32"
+                        placeholder="€"
+                        value={form.specialtyPrices[sp] ?? ''}
+                        onChange={(e) =>
+                          setForm((f) => ({
+                            ...f,
+                            specialtyPrices: { ...f.specialtyPrices, [sp]: e.target.value },
+                          }))
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="address">Dirección</Label>
