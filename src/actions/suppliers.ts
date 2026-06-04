@@ -410,6 +410,95 @@ async function pickWarehouseForReceipt(adminClient: AdminClient, order: any, ove
   return (fallbackWarehouse?.id as string | undefined) ?? null
 }
 
+/**
+ * Aplica una variación (delta con signo) al stock de una variante de producto en
+ * un almacén y registra el movimiento como ajuste (adjustment_positive/negative).
+ * Se usa para CORREGIR recepciones (subir/bajar lo recibido) o revertir el stock
+ * de una línea eliminada. No bloquea stock negativo: es una corrección de inventario.
+ */
+async function adjustProductStockDelta(
+  adminClient: AdminClient,
+  params: {
+    variantId: string
+    warehouseId: string
+    delta: number
+    reason: string
+    orderId: string
+    storeId: string | null
+    userId: string | null
+  }
+): Promise<{ ok: boolean; error?: string }> {
+  const deltaInt = Math.round(params.delta)
+  if (deltaInt === 0) return { ok: true }
+  const now = new Date().toISOString()
+  const { data: currentLevel } = await adminClient
+    .from('stock_levels')
+    .select('id, quantity')
+    .eq('product_variant_id', params.variantId)
+    .eq('warehouse_id', params.warehouseId)
+    .maybeSingle()
+  const stockBefore = toNumber((currentLevel as any)?.quantity)
+  const stockAfter = stockBefore + deltaInt
+  if (currentLevel?.id) {
+    const { error } = await adminClient
+      .from('stock_levels')
+      .update({ quantity: stockAfter, updated_at: now, last_movement_at: now })
+      .eq('id', currentLevel.id)
+    if (error) return { ok: false, error: error.message }
+  } else {
+    const { error } = await adminClient
+      .from('stock_levels')
+      .insert({
+        product_variant_id: params.variantId,
+        warehouse_id: params.warehouseId,
+        quantity: stockAfter,
+        reserved: 0,
+        updated_at: now,
+        last_movement_at: now,
+      })
+    if (error) return { ok: false, error: error.message }
+  }
+  const { error: movErr } = await adminClient
+    .from('stock_movements')
+    .insert({
+      product_variant_id: params.variantId,
+      warehouse_id: params.warehouseId,
+      movement_type: deltaInt > 0 ? 'adjustment_positive' : 'adjustment_negative',
+      quantity: deltaInt,
+      stock_before: stockBefore,
+      stock_after: stockAfter,
+      reason: params.reason,
+      reference_type: 'supplier_order',
+      reference_id: params.orderId,
+      created_by: params.userId,
+      store_id: params.storeId,
+    })
+  if (movErr) return { ok: false, error: movErr.message }
+  return { ok: true }
+}
+
+/** Aplica una variación (delta con signo, en metros) al stock de un tejido. */
+async function adjustFabricStockDelta(
+  adminClient: AdminClient,
+  fabricId: string,
+  delta: number
+): Promise<{ ok: boolean; error?: string; warning?: boolean }> {
+  if (delta === 0) return { ok: true }
+  const { data: fabricRow } = await adminClient
+    .from('fabrics')
+    .select('id, stock_meters')
+    .eq('id', fabricId)
+    .single()
+  if (!fabricRow?.id) return { ok: false, warning: true }
+  const newStock = toNumber((fabricRow as any).stock_meters) + delta
+  const { error } = await adminClient
+    .from('fabrics')
+    .update({ stock_meters: String(newStock.toFixed(2)) })
+    .eq('id', fabricId)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
 /** Lista de almacenes activos con la tienda a la que pertenecen. Se usa en
  *  el diálogo de recepción de pedidos de proveedor para permitir que el
  *  usuario elija el almacén destino. */
@@ -908,6 +997,314 @@ export const receiveSupplierOrderLines = protectedAction<
     if (allFullyReceived) createPurchaseJournalEntry(orderId).catch(() => {})
 
     return success({ status: newStatus, stock_warnings: stockWarnings })
+  }
+)
+
+export type EditSupplierOrderLineInput = {
+  id?: string | null
+  type: 'fabric' | 'product' | 'custom'
+  fabric_id?: string | null
+  product_id?: string | null
+  product_variant_id?: string | null
+  description: string
+  reference?: string | null
+  quantity: number
+  unit?: string | null
+  unit_price: number
+  quantity_received: number
+}
+
+/**
+ * Edita un pedido a proveedor YA grabado: corrige cantidades pedidas, precios,
+ * cantidad recibida (subiendo o bajando, con ajuste automático de stock) y permite
+ * añadir o eliminar líneas. `quantity_received` es el valor TOTAL deseado de cada
+ * línea (no incremental): la acción calcula el delta contra lo recibido previamente
+ * y ajusta el stock del almacén destino. El estado del pedido se recalcula solo.
+ */
+export const updateSupplierOrderLinesAction = protectedAction<
+  { orderId: string; lines: EditSupplierOrderLineInput[]; deletedLineIds?: string[] },
+  { status: string; total: number; stock_warnings?: number }
+>(
+  {
+    permission: 'suppliers.create_order',
+    auditModule: 'suppliers',
+    auditAction: 'update',
+    auditEntity: 'supplier_order',
+    revalidate: ['/admin/proveedores'],
+  },
+  async (ctx, { orderId, lines: inputLines, deletedLineIds }) => {
+    if (!orderId?.trim()) return failure('Pedido obligatorio', 'VALIDATION')
+
+    const { data: order, error: orderErr } = await ctx.adminClient
+      .from('supplier_orders')
+      .select('id, order_number, status, supplier_id, destination_store_id, destination_warehouse_id, actual_delivery_date')
+      .eq('id', orderId)
+      .single()
+    if (orderErr || !order) return failure('Pedido no encontrado', 'NOT_FOUND')
+
+    const prevStatus = (order as any).status as string
+    if (prevStatus === 'cancelled') {
+      return failure('No se puede editar un pedido cancelado', 'VALIDATION')
+    }
+
+    // Líneas actuales en BD: fuente de verdad de lo ya recibido y de la variante.
+    const { data: dbLines, error: dbLinesErr } = await ctx.adminClient
+      .from('supplier_order_lines')
+      .select('id, fabric_id, product_id, product_variant_id, quantity, quantity_received')
+      .eq('supplier_order_id', orderId)
+    if (dbLinesErr) return failure(dbLinesErr.message || 'Error al cargar líneas', 'INTERNAL')
+    const dbLineById = new Map((dbLines || []).map((l: any) => [l.id, l]))
+
+    // Normalizar y validar la entrada antes de tocar nada.
+    const cleaned = (inputLines || []).map((l) => ({
+      id: l.id?.trim() || null,
+      type: l.type,
+      fabric_id: l.fabric_id?.trim() || null,
+      product_id: l.product_id?.trim() || null,
+      product_variant_id: l.product_variant_id?.trim() || null,
+      description: String(l.description || '').trim(),
+      reference: l.reference?.trim() || null,
+      quantity: Number(l.quantity),
+      unit: (l.unit || (l.type === 'fabric' ? 'metros' : 'unidades')).trim(),
+      unit_price: Number(l.unit_price) >= 0 ? Number(l.unit_price) : 0,
+      quantity_received: Number(l.quantity_received),
+    }))
+
+    for (const l of cleaned) {
+      if (!l.description) return failure('Todas las líneas deben tener descripción', 'VALIDATION')
+      if (!Number.isFinite(l.quantity) || l.quantity <= 0) {
+        return failure(`Cantidad pedida no válida en "${l.description}"`, 'VALIDATION')
+      }
+      if (!Number.isFinite(l.quantity_received) || l.quantity_received < 0) {
+        return failure(`Cantidad recibida no válida en "${l.description}"`, 'VALIDATION')
+      }
+      if (l.id && !dbLineById.has(l.id)) {
+        return failure('Una de las líneas no pertenece al pedido', 'VALIDATION')
+      }
+    }
+
+    const deletedIds = (deletedLineIds || []).filter((id) => id?.trim() && dbLineById.has(id))
+
+    // ¿Hace falta tocar stock de algún producto? Si sí, necesitamos almacén destino.
+    const needsWarehouse =
+      cleaned.some((l) => {
+        if (l.type !== 'product' || !l.product_variant_id) return false
+        const prev = l.id ? toNumber((dbLineById.get(l.id) as any).quantity_received) : 0
+        return Math.round(l.quantity_received - prev) !== 0
+      }) ||
+      deletedIds.some((id) => {
+        const db = dbLineById.get(id) as any
+        return db.product_id && db.product_variant_id && toNumber(db.quantity_received) > 0
+      })
+
+    let warehouseId: string | null = null
+    if (needsWarehouse) {
+      warehouseId = await pickWarehouseForReceipt(ctx.adminClient, order, null)
+      if (!warehouseId) return failure('No hay almacén activo para ajustar el stock', 'CONFLICT')
+    }
+
+    // Validación previa: subir lo recibido de un producto exige variante asignada.
+    for (const l of cleaned) {
+      if (l.type !== 'product') continue
+      const prev = l.id ? toNumber((dbLineById.get(l.id) as any).quantity_received) : 0
+      const delta = Math.round(l.quantity_received - prev)
+      if (delta > 0 && !l.product_variant_id) {
+        return failure(
+          `La línea "${l.description}" no tiene talla/variante asignada. Selecciona la talla antes de aumentar lo recibido.`,
+          'VALIDATION'
+        )
+      }
+    }
+
+    const storeId = (order as any).destination_store_id || null
+    const userId = ctx.userId !== 'system' ? ctx.userId : null
+    const orderNumber = (order as any).order_number
+    const now = new Date().toISOString()
+    let stockWarnings = 0
+
+    // 1) Líneas existentes: ajuste de stock por delta + actualización de campos.
+    for (const l of cleaned) {
+      if (!l.id) continue
+      const db = dbLineById.get(l.id) as any
+      const prevReceived = toNumber(db.quantity_received)
+      const delta = l.quantity_received - prevReceived
+
+      if (delta !== 0) {
+        if (l.type === 'fabric' && l.fabric_id) {
+          const r = await adjustFabricStockDelta(ctx.adminClient, l.fabric_id, delta)
+          if (r.warning) stockWarnings += 1
+          else if (!r.ok) return failure(r.error || 'Error al ajustar stock de tejido', 'INTERNAL')
+        } else if (l.type === 'product' && l.product_variant_id && warehouseId) {
+          const r = await adjustProductStockDelta(ctx.adminClient, {
+            variantId: l.product_variant_id,
+            warehouseId,
+            delta,
+            reason: `Corrección recepción ${orderNumber}`,
+            orderId,
+            storeId,
+            userId,
+          })
+          if (!r.ok) return failure(r.error || 'Error al ajustar stock', 'INTERNAL')
+          if (delta > 0) {
+            try {
+              await ctx.adminClient.rpc('fn_activate_pending_reservations', {
+                p_product_variant_id: l.product_variant_id,
+                p_warehouse_id: warehouseId,
+                p_user_id: userId,
+              })
+            } catch (e) {
+              console.error('[updateSupplierOrderLinesAction] fn_activate_pending_reservations:', e)
+            }
+          }
+        } else if (delta > 0) {
+          // Producto/línea sin referencia de stock: no podemos sumar.
+          stockWarnings += 1
+        }
+      }
+
+      const { error: updErr } = await ctx.adminClient
+        .from('supplier_order_lines')
+        .update({
+          fabric_id: l.fabric_id,
+          product_id: l.product_id,
+          product_variant_id: l.product_variant_id,
+          description: l.description,
+          reference: l.reference,
+          quantity: l.quantity,
+          unit: l.unit,
+          unit_price: l.unit_price,
+          total_price: l.quantity * l.unit_price,
+          quantity_received: String(l.quantity_received.toFixed(2)),
+          is_fully_received: l.quantity_received >= l.quantity,
+          ...(delta !== 0 ? { received_at: now, received_by: userId } : {}),
+        })
+        .eq('id', l.id)
+      if (updErr) return failure(updErr.message || 'Error al actualizar línea', 'INTERNAL')
+    }
+
+    // 2) Líneas nuevas: insertar y, si traen recibido > 0, sumar stock.
+    const newLines = cleaned.filter((l) => !l.id)
+    if (newLines.length > 0) {
+      const { data: maxRow } = await ctx.adminClient
+        .from('supplier_order_lines')
+        .select('sort_order')
+        .eq('supplier_order_id', orderId)
+        .order('sort_order', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      let nextSort = toNumber((maxRow as any)?.sort_order) + 1
+
+      for (const l of newLines) {
+        const { error: insErr } = await ctx.adminClient
+          .from('supplier_order_lines')
+          .insert({
+            supplier_order_id: orderId,
+            fabric_id: l.fabric_id,
+            product_id: l.product_id,
+            product_variant_id: l.product_variant_id,
+            description: l.description,
+            reference: l.reference,
+            quantity: l.quantity,
+            unit: l.unit,
+            unit_price: l.unit_price,
+            total_price: l.quantity * l.unit_price,
+            quantity_received: String(l.quantity_received.toFixed(2)),
+            is_fully_received: l.quantity_received >= l.quantity,
+            sort_order: nextSort,
+            ...(l.quantity_received > 0 ? { received_at: now, received_by: userId } : {}),
+          })
+        if (insErr) return failure(insErr.message || 'Error al añadir línea', 'INTERNAL')
+        nextSort += 1
+
+        if (l.quantity_received > 0) {
+          if (l.type === 'fabric' && l.fabric_id) {
+            const r = await adjustFabricStockDelta(ctx.adminClient, l.fabric_id, l.quantity_received)
+            if (r.warning) stockWarnings += 1
+            else if (!r.ok) return failure(r.error || 'Error al ajustar stock de tejido', 'INTERNAL')
+          } else if (l.type === 'product' && l.product_variant_id && warehouseId) {
+            const r = await adjustProductStockDelta(ctx.adminClient, {
+              variantId: l.product_variant_id,
+              warehouseId,
+              delta: l.quantity_received,
+              reason: `Corrección recepción ${orderNumber}`,
+              orderId,
+              storeId,
+              userId,
+            })
+            if (!r.ok) return failure(r.error || 'Error al ajustar stock', 'INTERNAL')
+          } else {
+            stockWarnings += 1
+          }
+        }
+      }
+    }
+
+    // 3) Líneas eliminadas: revertir su stock recibido antes de borrar.
+    for (const id of deletedIds) {
+      const db = dbLineById.get(id) as any
+      const prevReceived = toNumber(db.quantity_received)
+      if (prevReceived > 0) {
+        if (db.fabric_id) {
+          const r = await adjustFabricStockDelta(ctx.adminClient, db.fabric_id, -prevReceived)
+          if (r.warning) stockWarnings += 1
+          else if (!r.ok) return failure(r.error || 'Error al revertir stock de tejido', 'INTERNAL')
+        } else if (db.product_id && db.product_variant_id && warehouseId) {
+          const r = await adjustProductStockDelta(ctx.adminClient, {
+            variantId: db.product_variant_id,
+            warehouseId,
+            delta: -prevReceived,
+            reason: `Reversión línea eliminada ${orderNumber}`,
+            orderId,
+            storeId,
+            userId,
+          })
+          if (!r.ok) return failure(r.error || 'Error al revertir stock', 'INTERNAL')
+        }
+      }
+      const { error: delErr } = await ctx.adminClient
+        .from('supplier_order_lines')
+        .delete()
+        .eq('id', id)
+      if (delErr) return failure(delErr.message || 'Error al eliminar línea', 'INTERNAL')
+    }
+
+    // 4) Recalcular total del pedido y estado a partir de las líneas resultantes.
+    const { data: linesAfter } = await ctx.adminClient
+      .from('supplier_order_lines')
+      .select('quantity, quantity_received')
+      .eq('supplier_order_id', orderId)
+    const rows = linesAfter || []
+    const total = cleaned.reduce((s, l) => s + l.quantity * l.unit_price, 0)
+    const anyReceived = rows.some((l: any) => toNumber(l.quantity_received) > 0)
+    const allFully = rows.length > 0 && rows.every((l: any) => toNumber(l.quantity_received) >= toNumber(l.quantity))
+
+    let newStatus = prevStatus
+    if (anyReceived && allFully) newStatus = 'received'
+    else if (anyReceived) newStatus = 'partially_received'
+    else if (prevStatus === 'received' || prevStatus === 'partially_received') newStatus = 'confirmed'
+
+    const becameReceived = newStatus === 'received' && prevStatus !== 'received'
+
+    const { error: orderUpdErr } = await ctx.adminClient
+      .from('supplier_orders')
+      .update({
+        subtotal: total,
+        tax_amount: 0,
+        total,
+        status: newStatus,
+        ...(becameReceived
+          ? { stock_updated_at: now, actual_delivery_date: (order as any).actual_delivery_date || now.slice(0, 10) }
+          : {}),
+      })
+      .eq('id', orderId)
+    if (orderUpdErr) return failure(orderUpdErr.message || 'Error al actualizar el pedido', 'INTERNAL')
+
+    // Asiento de compra: solo en la transición a "recibido" (la función NO es
+    // idempotente; re-llamarla duplicaría el asiento). Si el pedido ya estaba
+    // recibido, no se toca contabilidad: revisar la factura del proveedor a mano.
+    if (becameReceived) createPurchaseJournalEntry(orderId).catch(() => {})
+
+    return success({ status: newStatus, total, stock_warnings: stockWarnings })
   }
 )
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
@@ -31,19 +31,24 @@ import {
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { ArrowLeft, Loader2, Truck, FileText, Trash2, AlertTriangle, Check } from 'lucide-react'
+import { ArrowLeft, Loader2, Truck, FileText, Trash2, AlertTriangle, Check, Pencil, Plus, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import {
   updateSupplierOrderStatusAction,
   getSupplierOrderLines,
   receiveSupplierOrderLines,
+  updateSupplierOrderLinesAction,
+  searchSupplierProducts,
+  searchSupplierFabrics,
   markSupplierInvoicePaid,
   deleteSupplierOrderAction,
   listActiveWarehouses,
   type SupplierOrderLineForReceipt,
   type ReceiveSupplierOrderLineInput,
+  type EditSupplierOrderLineInput,
 } from '@/actions/suppliers'
+import { getProductVariantsById } from '@/actions/products'
 
 type WarehouseOption = {
   id: string
@@ -95,6 +100,24 @@ type LineType = {
   is_fully_received: boolean
 }
 
+type VariantOption = { id: string; size: string | null; color: string | null }
+
+type EditLineState = {
+  key: string
+  id: string | null
+  type: 'fabric' | 'product' | 'custom'
+  fabric_id: string | null
+  product_id: string | null
+  product_variant_id: string | null
+  description: string
+  reference: string
+  quantity: string
+  unit: string
+  unit_price: string
+  quantity_received: string
+  prevReceived: number
+}
+
 type DeliveryNoteType = {
   id: string
   supplier_reference: string | null
@@ -135,6 +158,164 @@ export function PedidoDetailContent({
   // Incident dialog
   const [incidentLineId, setIncidentLineId] = useState<string | null>(null)
   const [incidentText, setIncidentText] = useState('')
+
+  // Edición de líneas del pedido
+  const [editOpen, setEditOpen] = useState(false)
+  const [editSubmitting, setEditSubmitting] = useState(false)
+  const [editLines, setEditLines] = useState<EditLineState[]>([])
+  const [deletedLineIds, setDeletedLineIds] = useState<string[]>([])
+  const [variantsByProduct, setVariantsByProduct] = useState<Record<string, VariantOption[]>>({})
+  const [addSearchType, setAddSearchType] = useState<'product' | 'fabric' | null>(null)
+  const [addSearchQuery, setAddSearchQuery] = useState('')
+  const [addSearchResults, setAddSearchResults] = useState<any[]>([])
+  const [addSearching, setAddSearching] = useState(false)
+  const addSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const editKeyCounter = useRef(0)
+
+  // Búsqueda (debounce) de productos/tejidos para añadir líneas en la edición.
+  useEffect(() => {
+    if (!addSearchType) return
+    if (addSearchTimer.current) clearTimeout(addSearchTimer.current)
+    addSearchTimer.current = setTimeout(async () => {
+      setAddSearching(true)
+      const res = addSearchType === 'product'
+        ? await searchSupplierProducts({ supplierId: supplier.id, query: addSearchQuery })
+        : await searchSupplierFabrics({ supplierId: supplier.id, query: addSearchQuery })
+      setAddSearching(false)
+      setAddSearchResults(res.success && res.data ? res.data : [])
+    }, 250)
+    return () => { if (addSearchTimer.current) clearTimeout(addSearchTimer.current) }
+  }, [addSearchType, addSearchQuery, supplier.id])
+
+  function makeKey() {
+    return `edit-${editKeyCounter.current++}`
+  }
+
+  function openEditDialog() {
+    const initial: EditLineState[] = (order.lines || []).map((l: LineType) => ({
+      key: makeKey(),
+      id: l.id,
+      type: (l.fabric_id ? 'fabric' : l.product_id ? 'product' : 'custom') as EditLineState['type'],
+      fabric_id: l.fabric_id,
+      product_id: l.product_id,
+      product_variant_id: l.product_variant_id ?? null,
+      description: l.description || '',
+      reference: l.reference || '',
+      quantity: String(l.quantity ?? ''),
+      unit: l.unit || (l.fabric_id ? 'metros' : 'unidades'),
+      unit_price: l.unit_price != null ? String(l.unit_price) : '',
+      quantity_received: String(l.quantity_received ?? 0),
+      prevReceived: Number(l.quantity_received ?? 0),
+    }))
+    setEditLines(initial)
+    setDeletedLineIds([])
+    setAddSearchType(null)
+    setAddSearchQuery('')
+    setAddSearchResults([])
+    setEditOpen(true)
+    // Cargar variantes de cada producto presente para poder cambiar la talla.
+    const productIds = Array.from(new Set(initial.filter((l) => l.product_id).map((l) => l.product_id as string)))
+    productIds.forEach((pid) => { void loadVariants(pid) })
+  }
+
+  async function loadVariants(productId: string) {
+    if (variantsByProduct[productId]) return variantsByProduct[productId]
+    const res = await getProductVariantsById(productId)
+    if (res.success && res.data) {
+      setVariantsByProduct((prev) => ({ ...prev, [productId]: res.data }))
+      return res.data
+    }
+    return []
+  }
+
+  function updateEditLine(key: string, upd: Partial<EditLineState>) {
+    setEditLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...upd } : l)))
+  }
+
+  function removeEditLine(key: string) {
+    setEditLines((prev) => {
+      const target = prev.find((l) => l.key === key)
+      if (target?.id) setDeletedLineIds((ids) => [...ids, target.id as string])
+      return prev.filter((l) => l.key !== key)
+    })
+  }
+
+  function addCustomLine() {
+    setEditLines((prev) => [...prev, {
+      key: makeKey(), id: null, type: 'custom',
+      fabric_id: null, product_id: null, product_variant_id: null,
+      description: '', reference: '', quantity: '1', unit: 'unidades', unit_price: '', quantity_received: '0', prevReceived: 0,
+    }])
+  }
+
+  async function addProductLine(p: { id: string; name: string; sku: string; cost_price: number | null }) {
+    const variants = await loadVariants(p.id)
+    setEditLines((prev) => [...prev, {
+      key: makeKey(), id: null, type: 'product',
+      fabric_id: null, product_id: p.id,
+      product_variant_id: variants.length === 1 ? variants[0].id : null,
+      description: p.name, reference: p.sku || '', quantity: '1', unit: 'unidades',
+      unit_price: p.cost_price != null ? String(p.cost_price) : '', quantity_received: '0', prevReceived: 0,
+    }])
+    setAddSearchType(null)
+    setAddSearchQuery('')
+    setAddSearchResults([])
+  }
+
+  function addFabricLine(f: { id: string; name: string; fabric_code: string | null; unit: string | null }) {
+    setEditLines((prev) => [...prev, {
+      key: makeKey(), id: null, type: 'fabric',
+      fabric_id: f.id, product_id: null, product_variant_id: null,
+      description: f.name, reference: f.fabric_code || '', quantity: '1', unit: f.unit || 'metros',
+      unit_price: '', quantity_received: '0', prevReceived: 0,
+    }])
+    setAddSearchType(null)
+    setAddSearchQuery('')
+    setAddSearchResults([])
+  }
+
+  async function submitEdit() {
+    // Validación de cliente: cantidad pedida > 0 y recibido >= 0.
+    for (const l of editLines) {
+      if (!l.description.trim()) { toast.error('Todas las líneas deben tener descripción'); return }
+      const qty = Number(l.quantity)
+      if (!Number.isFinite(qty) || qty <= 0) { toast.error(`Cantidad pedida no válida en "${l.description}"`); return }
+      const recv = Number(l.quantity_received)
+      if (!Number.isFinite(recv) || recv < 0) { toast.error(`Cantidad recibida no válida en "${l.description}"`); return }
+      if (l.type === 'product' && recv > l.prevReceived && !l.product_variant_id) {
+        toast.error(`Selecciona la talla de "${l.description}" antes de aumentar lo recibido`); return
+      }
+    }
+    setEditSubmitting(true)
+    const payload: EditSupplierOrderLineInput[] = editLines.map((l) => ({
+      id: l.id,
+      type: l.type,
+      fabric_id: l.fabric_id,
+      product_id: l.product_id,
+      product_variant_id: l.product_variant_id,
+      description: l.description.trim(),
+      reference: l.reference.trim() || null,
+      quantity: Number(l.quantity),
+      unit: l.unit,
+      unit_price: Number(l.unit_price) || 0,
+      quantity_received: Number(l.quantity_received),
+    }))
+    const res = await updateSupplierOrderLinesAction({ orderId: order.id, lines: payload, deletedLineIds })
+    setEditSubmitting(false)
+    if (res.success && res.data) {
+      setCurrentStatus(res.data.status)
+      setEditOpen(false)
+      const warnings = Number(res.data.stock_warnings || 0)
+      if (warnings > 0) {
+        toast.warning('Pedido actualizado. Algunas líneas no ajustaron stock (sin variante/tejido asociado).')
+      } else {
+        toast.success('Pedido actualizado correctamente.')
+      }
+      router.refresh()
+    } else {
+      toast.error((res as any)?.error || 'Error al actualizar el pedido')
+    }
+  }
 
   async function handleDelete() {
     setDeleting(true)
@@ -317,6 +498,17 @@ export function PedidoDetailContent({
               onClick={openReceptionDialog}
             >
               <Truck className="h-4 w-4 mr-2" /> Registrar recepción
+            </Button>
+          )}
+
+          {currentStatus !== 'cancelled' && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={loading !== null}
+              onClick={openEditDialog}
+            >
+              <Pencil className="h-4 w-4 mr-2" /> Editar pedido
             </Button>
           )}
 
@@ -700,6 +892,196 @@ export function PedidoDetailContent({
             <Button onClick={submitReception} disabled={receptionSubmitting || receptionLinesLoading}>
               {receptionSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Confirmar recepción
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIÁLOGO EDITAR PEDIDO */}
+      <Dialog open={editOpen} onOpenChange={(o) => { if (!editSubmitting) setEditOpen(o) }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-5 w-5" /> Editar pedido
+              <span className="font-mono text-muted-foreground font-normal text-sm">{order.order_number}</span>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="flex items-start gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+            <p>
+              Cambiar la <strong>cantidad recibida</strong> ajusta el stock del almacén destino del pedido
+              (suma o resta la diferencia). Si el pedido ya está facturado, revisa la factura/contabilidad a mano.
+            </p>
+          </div>
+
+          <div className="rounded-md border overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="min-w-[180px]">Descripción</TableHead>
+                  <TableHead>Ref.</TableHead>
+                  <TableHead className="min-w-[120px]">Talla</TableHead>
+                  <TableHead className="text-right w-20">Pedido</TableHead>
+                  <TableHead className="w-24">Unidad</TableHead>
+                  <TableHead className="text-right w-24">Precio</TableHead>
+                  <TableHead className="text-right w-24">Recibido</TableHead>
+                  <TableHead className="w-8"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {editLines.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center text-muted-foreground py-6">
+                      Sin líneas. Añade una abajo.
+                    </TableCell>
+                  </TableRow>
+                ) : editLines.map((l) => {
+                  const variants = l.product_id ? (variantsByProduct[l.product_id] || []) : []
+                  return (
+                    <TableRow key={l.key}>
+                      <TableCell>
+                        <Input
+                          value={l.description}
+                          onChange={(e) => updateEditLine(l.key, { description: e.target.value })}
+                          className="h-8 text-sm"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={l.reference}
+                          onChange={(e) => updateEditLine(l.key, { reference: e.target.value })}
+                          className="h-8 text-sm w-24 font-mono"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        {l.type === 'product' ? (
+                          <Select
+                            value={l.product_variant_id || ''}
+                            onValueChange={(v) => updateEditLine(l.key, { product_variant_id: v })}
+                          >
+                            <SelectTrigger className="h-8 text-sm">
+                              <SelectValue placeholder="Talla…" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {variants.map((v) => (
+                                <SelectItem key={v.id} value={v.id}>
+                                  {[v.size, v.color].filter(Boolean).join(' / ') || v.id.slice(0, 6)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Input
+                          type="number" min={0} step="any"
+                          value={l.quantity}
+                          onChange={(e) => updateEditLine(l.key, { quantity: e.target.value })}
+                          className="h-8 text-sm text-right w-16"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={l.unit}
+                          onChange={(e) => updateEditLine(l.key, { unit: e.target.value })}
+                          className="h-8 text-sm w-20"
+                        />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Input
+                          type="number" min={0} step="any"
+                          value={l.unit_price}
+                          onChange={(e) => updateEditLine(l.key, { unit_price: e.target.value })}
+                          className="h-8 text-sm text-right w-20"
+                        />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Input
+                          type="number" min={0} step="any"
+                          value={l.quantity_received}
+                          onChange={(e) => updateEditLine(l.key, { quantity_received: e.target.value })}
+                          className="h-8 text-sm text-right w-16"
+                        />
+                        {l.prevReceived > 0 && (
+                          <div className="text-[10px] text-muted-foreground mt-0.5">antes: {l.prevReceived}</div>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost" size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => removeEditLine(l.key)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Añadir líneas */}
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-muted-foreground">Añadir línea:</span>
+              <Button variant="outline" size="sm" onClick={() => { setAddSearchType('product'); setAddSearchQuery(''); setAddSearchResults([]) }}>
+                <Plus className="h-3.5 w-3.5 mr-1" /> Producto
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => { setAddSearchType('fabric'); setAddSearchQuery(''); setAddSearchResults([]) }}>
+                <Plus className="h-3.5 w-3.5 mr-1" /> Tejido
+              </Button>
+              <Button variant="outline" size="sm" onClick={addCustomLine}>
+                <Plus className="h-3.5 w-3.5 mr-1" /> Libre
+              </Button>
+              <div className="ml-auto text-sm">
+                Total: <span className="font-bold">{formatCurrency(editLines.reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.unit_price) || 0), 0))}</span>
+              </div>
+            </div>
+
+            {addSearchType && (
+              <div className="rounded-md border p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <Search className="h-4 w-4 text-muted-foreground" />
+                  <Input
+                    autoFocus
+                    placeholder={addSearchType === 'product' ? 'Buscar producto por nombre o SKU…' : 'Buscar tejido por nombre…'}
+                    value={addSearchQuery}
+                    onChange={(e) => setAddSearchQuery(e.target.value)}
+                    className="h-8 text-sm"
+                  />
+                  <Button variant="ghost" size="sm" onClick={() => setAddSearchType(null)}>Cerrar</Button>
+                </div>
+                <div className="max-h-48 overflow-y-auto divide-y">
+                  {addSearching ? (
+                    <div className="py-4 text-center"><Loader2 className="h-4 w-4 animate-spin inline-block text-muted-foreground" /></div>
+                  ) : addSearchResults.length === 0 ? (
+                    <p className="py-3 text-sm text-muted-foreground text-center">Sin resultados</p>
+                  ) : addSearchResults.map((r: any) => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      className="w-full text-left px-2 py-1.5 text-sm hover:bg-muted/50 flex items-center justify-between"
+                      onClick={() => addSearchType === 'product' ? addProductLine(r) : addFabricLine(r)}
+                    >
+                      <span>{r.name}</span>
+                      <span className="font-mono text-xs text-muted-foreground">{addSearchType === 'product' ? r.sku : r.fabric_code}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)} disabled={editSubmitting}>Cancelar</Button>
+            <Button onClick={submitEdit} disabled={editSubmitting}>
+              {editSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Guardar cambios
             </Button>
           </DialogFooter>
         </DialogContent>
