@@ -70,6 +70,11 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
   const supabase = createClient()
   const { data: garmentTypesData, isLoading: garmentTypesLoading } = useGarmentTypes()
   const fieldRefsMap = useRef<Record<string, HTMLElement | null>>({})
+  // Snapshots (por código, sin prefijo) de lo último cargado/guardado para cada
+  // registro. Permiten que handleSave detecte qué tab cambió y guarde TODOS los
+  // registros tocados (body + camisería), no solo el de la pestaña activa.
+  const loadedBodyRef = useRef<Record<string, string>>({})
+  const loadedCamisaRef = useRef<Record<string, string>>({})
 
   const [garmentGroups, setGarmentGroups] = useState<GarmentGroup[]>([])
   const [activeTabIndex, setActiveTabIndex] = useState(0)
@@ -100,6 +105,15 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
         return [k, Number.isNaN(num) ? v : num]
       })
     ) as Record<string, string | number>
+  }, [])
+
+  // 1.b stringifyValues: convierte un registro a {clave: string} (sin tocar
+  //     prefijos). Se usa para los snapshots de comparación de handleSave.
+  const stringifyValues = useCallback((raw: Record<string, any> | null | undefined): Record<string, string> => {
+    if (!raw || typeof raw !== 'object') return {}
+    const out: Record<string, string> = {}
+    for (const [k, v] of Object.entries(raw)) out[k] = v == null ? '' : String(v)
+    return out
   }, [])
 
   // 2. applyHistoryToValues: solo aplica claves del tipo de prenda del registro, sin borrar el resto
@@ -133,14 +147,16 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
       if (result.success && result.data && result.data.length > 0) {
         const current = result.data.find((m: any) => m.is_current) ?? result.data[0]
         setValues((prev) => ({ ...prev, ...normalizeValues(current.values) }))
+        loadedBodyRef.current = stringifyValues(current.values)
         setBodyHistorial(result.data)
         setSelectedHistoryId(current.id)
       } else {
+        loadedBodyRef.current = {}
         setBodyHistorial([])
         setSelectedHistoryId(null)
       }
     },
-    [clientId, normalizeValues]
+    [clientId, normalizeValues, stringifyValues]
   )
 
   const loadCamiseriaMeasurements = useCallback(
@@ -152,6 +168,7 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
         const prefixed: Record<string, string | number> = {}
         for (const [k, v] of Object.entries(raw)) prefixed[valueKey('camiseria', k)] = v
         setValues((prev) => ({ ...prev, ...prefixed }))
+        loadedCamisaRef.current = stringifyValues(current.values)
         setCamisaHistorial(result.data)
         setSelectedHistoryId(current.id)
       } else {
@@ -160,11 +177,12 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
           Object.keys(next).filter((k) => k.startsWith('camiseria_')).forEach((k) => delete next[k])
           return next
         })
+        loadedCamisaRef.current = {}
         setCamisaHistorial([])
         setSelectedHistoryId(null)
       }
     },
-    [clientId, normalizeValues]
+    [clientId, normalizeValues, stringifyValues]
   )
 
   // Carga inicial: garment groups (campos) desde Supabase (solo los no ocultos por hideTabs)
@@ -228,9 +246,11 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
       if (result?.success && result?.data?.length > 0) {
         const current = result.data.find((m: any) => m.is_current) ?? result.data[0]
         setValues((prev) => ({ ...prev, ...normalizeValues(current.values) }))
+        loadedBodyRef.current = stringifyValues(current.values)
         setBodyHistorial(result.data)
         setSelectedHistoryId((id) => id ?? current.id)
       } else {
+        loadedBodyRef.current = {}
         setBodyHistorial([])
       }
     })
@@ -242,14 +262,16 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
             const prefixed: Record<string, string | number> = {}
             for (const [k, v] of Object.entries(raw)) prefixed[valueKey('camiseria', k)] = v
             setValues((prev) => ({ ...prev, ...prefixed }))
+            loadedCamisaRef.current = stringifyValues(current.values)
             setCamisaHistorial(result.data)
           } else {
+            loadedCamisaRef.current = {}
             setCamisaHistorial([])
           }
         })
       : Promise.resolve()
     Promise.all([bodyPromise, camisaPromise]).finally(() => setHistoryLoading(false))
-  }, [clientId, bodyGarmentTypeId, camisaGarmentTypeId, normalizeValues])
+  }, [clientId, bodyGarmentTypeId, camisaGarmentTypeId, normalizeValues, stringifyValues])
 
   useEffect(() => {
     if (currentGroup?.name === 'Camisería') loadCamiseriaMeasurements(currentGroup.id)
@@ -265,58 +287,83 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
     setIsSaving(true)
     onSavingChange?.(true)
     try {
-      if (currentGroup?.name === 'Camisería') {
-        const camiseriaValues: Record<string, string> = {}
-        for (const f of currentGroup.fields) {
-          camiseriaValues[f.code] = String(values[valueKey('camiseria', f.code)] ?? '')
+      const activeIsCamisa = currentGroup?.name === 'Camisería'
+      const camisaGroup = garmentGroups.find((g) => g.name === 'Camisería')
+
+      // ── Registro body: todas las claves de prenda en estado (americana_,
+      //    pantalon_, chaleco_, frac_, abrigo_, levita_).
+      const bodyPayload: Record<string, string> = {}
+      for (const [k, v] of Object.entries(values)) {
+        if (
+          (k.startsWith('americana_') || k.startsWith('pantalon_') || k.startsWith('chaleco_') ||
+           k.startsWith('frac_') || k.startsWith('abrigo_') || k.startsWith('levita_')) &&
+          v !== '' && v !== null && v !== undefined
+        ) {
+          bodyPayload[k] = String(v)
         }
-        // Talla no está en measurement_fields; la guardamos manualmente.
+      }
+      const bodyChanged = JSON.stringify(bodyPayload) !== JSON.stringify(loadedBodyRef.current)
+
+      // ── Registro camisería: esta pantalla solo edita las medidas físicas y
+      //    la talla. El resto de claves del registro (características, puño,
+      //    iniciales…, normalmente fijadas desde la ficha del pedido) se
+      //    PRESERVAN para no borrarlas al guardar desde aquí.
+      let camisaSavePayload: Record<string, string> | null = null
+      let camisaChanged = false
+      if (camisaGroup) {
+        const editableCodes = camisaGroup.fields
+          .filter((f) => f.field_group === 'medidas' && (f.field_type === 'number' || f.field_type === 'decimal'))
+          .map((f) => f.code)
+        const edited: Record<string, string> = {}
+        for (const code of editableCodes) edited[code] = String(values[valueKey('camiseria', code)] ?? '')
         const tallaVal = values[valueKey('camiseria', 'talla')]
-        if (tallaVal !== undefined && tallaVal !== '') {
-          camiseriaValues.talla = String(tallaVal)
-        }
+        edited.talla = tallaVal !== undefined ? String(tallaVal) : String(loadedCamisaRef.current.talla ?? '')
+        camisaChanged = [...editableCodes, 'talla'].some(
+          (code) => String(edited[code] ?? '') !== String(loadedCamisaRef.current[code] ?? '')
+        )
+        camisaSavePayload = { ...loadedCamisaRef.current, ...edited }
+      }
+
+      // Guardamos SIEMPRE el registro de la pestaña activa y, además,
+      // CUALQUIER otro registro que el usuario haya modificado en esta
+      // sesión. Antes solo se guardaba el tab activo, por lo que las medidas
+      // de camisería se perdían si el sastre cambiaba de pestaña antes de
+      // guardar (el resto de prendas comparten el registro body y por eso sí
+      // se conservaban).
+      const shouldSaveCamisa = camisaGroup != null && camisaSavePayload != null && (activeIsCamisa || camisaChanged)
+      const shouldSaveBody = activeIsCamisa ? bodyChanged : true
+
+      if (shouldSaveCamisa && camisaGroup && camisaSavePayload) {
         const result = await saveBodyMeasurements({
           client_id: clientId,
-          garment_type_id: currentGroup.id,
-          values: camiseriaValues,
+          garment_type_id: camisaGroup.id,
+          values: camisaSavePayload,
         })
         if (!result.success) {
           toast.error((result as { error?: string }).error ?? 'Error al guardar')
           return false
         }
-        toast.success('Medidas de camisería guardadas')
-        await loadCamiseriaMeasurements(currentGroup.id)
-        return true
-      } else {
-        // Guardar todas las claves body del estado (americana_, pantalon_, chaleco_, frac_, abrigo_, levita_)
-        const fullValues: Record<string, string> = {}
-        for (const [k, v] of Object.entries(values)) {
-          if (
-            k.startsWith('americana_') ||
-            k.startsWith('pantalon_') ||
-            k.startsWith('chaleco_') ||
-            k.startsWith('frac_') ||
-            k.startsWith('abrigo_') ||
-            k.startsWith('levita_')
-          ) {
-            if (v !== '' && v !== null && v !== undefined) {
-              fullValues[k] = String(v)
-            }
-          }
-        }
+      }
+      if (shouldSaveBody) {
         const result = await saveBodyMeasurements({
           client_id: clientId,
           garment_type_id: bodyGarmentTypeId,
-          values: fullValues,
+          values: bodyPayload,
         })
         if (!result.success) {
           toast.error((result as { error?: string }).error ?? 'Error al guardar')
           return false
         }
-        toast.success('Medidas guardadas correctamente')
-        await loadMeasurements(bodyGarmentTypeId)
-        return true
       }
+
+      if (!shouldSaveBody && !shouldSaveCamisa) return true // sin cambios
+
+      toast.success(
+        activeIsCamisa && !shouldSaveBody ? 'Medidas de camisería guardadas' : 'Medidas guardadas correctamente'
+      )
+      if (shouldSaveCamisa && camisaGroup) await loadCamiseriaMeasurements(camisaGroup.id)
+      if (shouldSaveBody) await loadMeasurements(bodyGarmentTypeId)
+      return true
     } finally {
       setIsSaving(false)
       onSavingChange?.(false)
