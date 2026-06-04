@@ -23,6 +23,8 @@ export interface Alteration {
   official_id: string | null
   official_name: string | null
   description: string | null
+  cost_price: number | null
+  sale_price: number | null
   alteration_date: string
   workshop_sent_date: string | null
   client_delivery_date: string | null
@@ -54,6 +56,8 @@ export interface CreateAlterationInput {
   garment_type?: string | null
   official_id?: string | null
   description?: string | null
+  cost_price?: number | null
+  sale_price?: number | null
   alteration_date?: string
   notes?: string | null
   store_id?: string | null
@@ -68,6 +72,8 @@ export interface UpdateAlterationInput {
   garment_type?: string | null
   official_id?: string | null
   description?: string | null
+  cost_price?: number | null
+  sale_price?: number | null
   alteration_date?: string
   workshop_sent_date?: string | null
   client_delivery_date?: string | null

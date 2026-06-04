@@ -20,10 +20,11 @@ import {
 } from '@/components/ui/dropdown-menu'
 import {
   Search, ChevronLeft, ChevronRight, Plus, Loader2, Shirt, MoreHorizontal,
-  ExternalLink, FileDown, Printer,
+  ExternalLink, FileDown, Printer, Download,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDate } from '@/lib/utils'
+import { downloadExcel } from '@/lib/excel/export'
 import { useList } from '@/hooks/use-list'
 import { useActiveStore } from '@/hooks/use-store'
 import {
@@ -62,6 +63,7 @@ export function ArreglosListContent() {
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   const {
     data: alterations, total, totalPages, page, setPage,
@@ -97,6 +99,56 @@ export function ArreglosListContent() {
     catch (err) { toast.error(err instanceof Error ? err.message : 'Error al imprimir') }
   }
 
+  const handleExportExcel = async () => {
+    setExporting(true)
+    try {
+      // Trae TODOS los arreglos que cumplen los filtros actuales (no solo la página).
+      const res = await listAlterations({
+        search,
+        filters,
+        page: 1,
+        pageSize: 10000,
+        sortBy: 'alteration_date',
+        sortOrder: 'desc',
+      })
+      if (!res.success || !res.data) {
+        toast.error('error' in res ? res.error : 'No se pudieron exportar los arreglos')
+        return
+      }
+      const rows = res.data.data
+      if (rows.length === 0) {
+        toast.error('No hay arreglos para exportar con los filtros aplicados')
+        return
+      }
+      const data = rows.map((a) => ({
+        'Nº': a.alteration_number,
+        'Fecha': a.alteration_date ?? '',
+        'Cliente': a.clients?.full_name ?? '',
+        'Teléfono': a.phone ?? '',
+        'Tipo': TYPE_LABELS[a.alteration_type] ?? a.alteration_type,
+        'Prenda': a.garment_type ?? '',
+        'Arreglos': a.description ?? '',
+        'Oficial': a.official_name || a.official?.name || '',
+        'Estado': ALTERATION_STATUS_LABELS[a.status] ?? a.status,
+        'Precio coste (€)': Number(a.cost_price ?? 0),
+        'Precio venta (€)': Number(a.sale_price ?? 0),
+        'Fecha estimada': a.estimated_completion ?? '',
+        'Envío taller': a.workshop_sent_date ?? '',
+        'Entrega cliente': a.client_delivery_date ?? '',
+        'Pedido vinculado': a.tailoring_orders?.order_number ?? '',
+        'Tienda': a.stores?.name ?? '',
+      }))
+      const today = new Date().toISOString().slice(0, 10)
+      await downloadExcel(data, `arreglos-${today}`, 'Arreglos')
+      toast.success('Arreglos exportados a Excel')
+    } catch (err) {
+      console.error('[ArreglosList] export', err)
+      toast.error('Error al exportar los arreglos')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -104,9 +156,15 @@ export function ArreglosListContent() {
           <h1 className="text-2xl font-bold tracking-tight">Arreglos</h1>
           <p className="text-muted-foreground">{total} arreglos</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)} className="gap-1">
-          <Plus className="h-4 w-4" /> Nuevo arreglo
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={handleExportExcel} disabled={exporting || isLoading} className="gap-1">
+            {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            Exportar a Excel
+          </Button>
+          <Button onClick={() => setCreateOpen(true)} className="gap-1">
+            <Plus className="h-4 w-4" /> Nuevo arreglo
+          </Button>
+        </div>
       </div>
 
       {/* Filtros */}
@@ -302,6 +360,8 @@ function NewAlterationDialog({
   const [alterationDate, setAlterationDate] = useState(new Date().toISOString().split('T')[0])
   const [estimated, setEstimated] = useState('')
   const [officialId, setOfficialId] = useState('')
+  const [costPrice, setCostPrice] = useState('')
+  const [salePrice, setSalePrice] = useState('')
   const [notes, setNotes] = useState('')
 
   useEffect(() => {
@@ -362,7 +422,7 @@ function NewAlterationDialog({
     setOrders([]); setOrderId('')
     setPhone(''); setGarmentType(''); setDescription('')
     setAlterationDate(new Date().toISOString().split('T')[0])
-    setEstimated(''); setOfficialId(''); setNotes('')
+    setEstimated(''); setOfficialId(''); setCostPrice(''); setSalePrice(''); setNotes('')
   }
 
   function selectClient(c: { id: string; full_name: string; phone: string | null }) {
@@ -383,6 +443,8 @@ function NewAlterationDialog({
         garment_type: garmentType.trim() || null,
         official_id: officialId || null,
         description: description.trim(),
+        cost_price: costPrice.trim() === '' ? null : Number(costPrice.replace(',', '.')),
+        sale_price: salePrice.trim() === '' ? null : Number(salePrice.replace(',', '.')),
         alteration_date: alterationDate,
         notes: notes.trim() || null,
         store_id: activeStoreId || null,
@@ -500,6 +562,19 @@ function NewAlterationDialog({
         <div className="space-y-1">
           <Label>Arreglos *</Label>
           <Textarea rows={4} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Describe los arreglos a realizar…" />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label>Precio de coste (€)</Label>
+            <Input type="number" min="0" step="0.01" inputMode="decimal" value={costPrice}
+              onChange={(e) => setCostPrice(e.target.value)} placeholder="0,00" />
+          </div>
+          <div className="space-y-1">
+            <Label>Precio de venta (€)</Label>
+            <Input type="number" min="0" step="0.01" inputMode="decimal" value={salePrice}
+              onChange={(e) => setSalePrice(e.target.value)} placeholder="0,00" />
+          </div>
         </div>
 
         <div className="grid grid-cols-3 gap-3">

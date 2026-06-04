@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
+import * as XLSX from 'xlsx'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { checkUserPermission } from '@/actions/auth'
 
 type AnyRec = Record<string, unknown>
+type Row = (string | number)[]
 
 const TAB_TITLES: Record<string, string> = {
   sales: 'VENTAS',
@@ -34,193 +36,198 @@ export async function POST(request: NextRequest) {
   const activeTab: string = typeof tab === 'string' && TAB_TITLES[tab] ? tab : 'sales'
   const tabTitle = TAB_TITLES[activeTab]
 
-  const lines: string[] = []
-  lines.push('INFORME SASTRERÍA PRATS')
-  lines.push(`Sección,${csv(tabTitle)}`)
-  lines.push(`Periodo,${csv(start)},a,${csv(end)}`)
-  if (storeFilterName) lines.push(`Tienda,${csv(storeFilterName)}`)
-  if (channelLabel) lines.push(`Canal,${csv(channelLabel)}`)
-  if (taxLabel) lines.push(`Importes,${csv(taxLabel)}`)
-  lines.push(`Generado,${csv(new Date().toLocaleString('es-ES'))}`)
-  lines.push('')
+  const rows: Row[] = []
+  rows.push(['INFORME SASTRERÍA PRATS'])
+  rows.push(['Sección', tabTitle])
+  rows.push(['Periodo', String(start ?? ''), 'a', String(end ?? '')])
+  if (storeFilterName) rows.push(['Tienda', String(storeFilterName)])
+  if (channelLabel) rows.push(['Canal', String(channelLabel)])
+  if (taxLabel) rows.push(['Importes', String(taxLabel)])
+  rows.push(['Generado', new Date().toLocaleString('es-ES')])
+  rows.push([])
 
   switch (activeTab) {
-    case 'sales': sectionSales(lines, salesData, compareData); break
-    case 'products': sectionProducts(lines, topProducts); break
-    case 'tailors': sectionTailors(lines, tailorData); break
-    case 'clients': sectionClients(lines, clientsData); break
-    case 'stores': sectionStores(lines, storeData); break
-    case 'employees': sectionEmployees(lines, employeeData); break
-    case 'time': sectionTime(lines, timePatternData); break
-    case 'expenses': sectionExpenses(lines, expensesData, expensesComparison); break
+    case 'sales': sectionSales(rows, salesData, compareData); break
+    case 'products': sectionProducts(rows, topProducts); break
+    case 'tailors': sectionTailors(rows, tailorData); break
+    case 'clients': sectionClients(rows, clientsData); break
+    case 'stores': sectionStores(rows, storeData); break
+    case 'employees': sectionEmployees(rows, employeeData); break
+    case 'time': sectionTime(rows, timePatternData); break
+    case 'expenses': sectionExpenses(rows, expensesData, expensesComparison); break
   }
 
-  const csvBody = '﻿' + lines.join('\r\n')
-  return new NextResponse(csvBody, {
+  const ws = XLSX.utils.aoa_to_sheet(rows)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, tabTitle.slice(0, 31))
+  const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer
+
+  return new NextResponse(new Uint8Array(buf), {
     headers: {
-      'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="informe-prats-${activeTab}-${start}-${end}.csv"`,
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="informe-prats-${activeTab}-${start}-${end}.xlsx"`,
     },
   })
 }
 
-function csv(v: unknown): string {
-  if (v === null || v === undefined) return ''
-  const s = String(v)
-  if (/[",\r\n;]/.test(s)) return `"${s.replace(/"/g, '""')}"`
-  return s
-}
-
-function num(n: unknown): string {
-  return String(Number(n) || 0)
+function num(n: unknown): number {
+  return Number(n) || 0
 }
 
 // ─── Section builders ────────────────────────────────────────────────────────
 
-function sectionSales(lines: string[], salesData: AnyRec | null, compareData: AnyRec | null) {
-  if (!salesData) { lines.push('Sin datos para el periodo seleccionado'); return }
+function sectionSales(rows: Row[], salesData: AnyRec | null, compareData: AnyRec | null) {
+  if (!salesData) { rows.push(['Sin datos para el periodo seleccionado']); return }
   const t = (salesData.totals as AnyRec) || {}
   const chart = (salesData.chartData as AnyRec[]) || []
   const changes = (compareData?.changes as AnyRec) || null
 
-  lines.push('RESUMEN')
-  lines.push(`Facturación total,${num(t.total)}`)
-  lines.push(`TPV / Boutique,${num(t.pos)}`)
-  lines.push(`Online,${num(t.online)}`)
-  lines.push(`Sastrería,${num(t.tailoring)}`)
-  lines.push(`Tickets,${num(t.ticketCount)}`)
-  lines.push(`Ticket medio,${num(t.avgTicket)}`)
+  rows.push(['RESUMEN'])
+  rows.push(['Facturación total', num(t.total)])
+  rows.push(['TPV / Boutique', num(t.pos)])
+  rows.push(['Online', num(t.online)])
+  rows.push(['Sastrería', num(t.tailoring)])
+  rows.push(['Tickets', num(t.ticketCount)])
+  rows.push(['Ticket medio', num(t.avgTicket)])
   if (changes) {
-    lines.push(`Variación facturación %,${(Number(changes.revenue) || 0).toFixed(2)}`)
-    lines.push(`Variación nuevos clientes %,${(Number(changes.newClients) || 0).toFixed(2)}`)
-    lines.push(`Variación pedidos %,${(Number(changes.ordersCount) || 0).toFixed(2)}`)
+    rows.push(['Variación facturación %', Number((Number(changes.revenue) || 0).toFixed(2))])
+    rows.push(['Variación nuevos clientes %', Number((Number(changes.newClients) || 0).toFixed(2))])
+    rows.push(['Variación pedidos %', Number((Number(changes.ordersCount) || 0).toFixed(2))])
   }
-  lines.push('')
+  rows.push([])
 
-  lines.push('EVOLUCIÓN DE VENTAS')
-  lines.push('Fecha,TPV,Online,Sastrería,Total')
+  rows.push(['EVOLUCIÓN DE VENTAS'])
+  rows.push(['Fecha', 'TPV', 'Online', 'Sastrería', 'Total'])
   for (const d of chart) {
-    lines.push(`${csv(d.date)},${num(d.pos)},${num(d.online)},${num(d.tailoring)},${num(d.total)}`)
+    rows.push([String(d.date ?? ''), num(d.pos), num(d.online), num(d.tailoring), num(d.total)])
   }
 }
 
-function sectionProducts(lines: string[], items: AnyRec[] | null) {
-  if (!items?.length) { lines.push('Sin datos para el periodo seleccionado'); return }
-  lines.push('TOP PRODUCTOS')
-  lines.push('#,Producto,SKU,Unidades,Facturación')
+function sectionProducts(rows: Row[], items: AnyRec[] | null) {
+  if (!items?.length) { rows.push(['Sin datos para el periodo seleccionado']); return }
+  rows.push(['TOP PRODUCTOS'])
+  rows.push(['#', 'Producto', 'SKU', 'Unidades', 'Facturación'])
   items.forEach((p, i) => {
-    lines.push(`${i + 1},${csv(p.name)},${csv(p.sku)},${num(p.units)},${num(p.revenue)}`)
+    rows.push([i + 1, String(p.name ?? ''), String(p.sku ?? ''), num(p.units), num(p.revenue)])
   })
 }
 
-function sectionTailors(lines: string[], items: AnyRec[] | null) {
-  if (!items?.length) { lines.push('Sin datos para el periodo seleccionado'); return }
-  lines.push('RENDIMIENTO SASTRES')
-  lines.push('Sastre,Pedidos,Completados,% Completado,Pruebas,Ticket medio,Facturación')
+function sectionTailors(rows: Row[], items: AnyRec[] | null) {
+  if (!items?.length) { rows.push(['Sin datos para el periodo seleccionado']); return }
+  rows.push(['RENDIMIENTO SASTRES'])
+  rows.push(['Sastre', 'Pedidos', 'Completados', '% Completado', 'Pruebas', 'Ticket medio', 'Facturación'])
   for (const t of items) {
-    lines.push(`${csv(t.name)},${num(t.orders)},${num(t.completed)},${(Number(t.completionRate) || 0).toFixed(2)},${num(t.fittings)},${(Number(t.avgOrderValue) || 0).toFixed(2)},${num(t.revenue)}`)
+    rows.push([
+      String(t.name ?? ''), num(t.orders), num(t.completed),
+      Number((Number(t.completionRate) || 0).toFixed(2)), num(t.fittings),
+      Number((Number(t.avgOrderValue) || 0).toFixed(2)), num(t.revenue),
+    ])
   }
 }
 
-function sectionClients(lines: string[], data: AnyRec | null) {
-  if (!data) { lines.push('Sin datos para el periodo seleccionado'); return }
+function sectionClients(rows: Row[], data: AnyRec | null) {
+  if (!data) { rows.push(['Sin datos para el periodo seleccionado']); return }
   const sources = (data.sources as Record<string, number>) || {}
   const topClients = (data.topClients as AnyRec[]) || []
 
-  lines.push('RESUMEN CLIENTES')
-  lines.push(`Nuevos clientes,${num(data.newClients)}`)
-  lines.push(`Total clientes,${num(data.totalClients)}`)
-  lines.push(`Clientes con compras,${num(data.clientsWithPurchases)}`)
-  lines.push('')
+  rows.push(['RESUMEN CLIENTES'])
+  rows.push(['Nuevos clientes', num(data.newClients)])
+  rows.push(['Total clientes', num(data.totalClients)])
+  rows.push(['Clientes con compras', num(data.clientsWithPurchases)])
+  rows.push([])
 
   if (Object.keys(sources).length) {
-    lines.push('ORIGEN DE CLIENTES')
-    lines.push('Origen,Clientes')
+    rows.push(['ORIGEN DE CLIENTES'])
+    rows.push(['Origen', 'Clientes'])
     for (const [k, v] of Object.entries(sources)) {
-      lines.push(`${csv(k)},${num(v)}`)
+      rows.push([String(k), num(v)])
     }
-    lines.push('')
+    rows.push([])
   }
 
   if (topClients.length) {
-    lines.push('TOP CLIENTES POR FACTURACIÓN')
-    lines.push('#,Cliente,Facturación')
+    rows.push(['TOP CLIENTES POR FACTURACIÓN'])
+    rows.push(['#', 'Cliente', 'Facturación'])
     topClients.forEach((c, i) => {
-      lines.push(`${i + 1},${csv(c.full_name)},${num(c.total_revenue)}`)
+      rows.push([i + 1, String(c.full_name ?? ''), num(c.total_revenue)])
     })
   }
 }
 
-function sectionStores(lines: string[], items: AnyRec[] | null) {
-  if (!items?.length) { lines.push('Sin datos para el periodo seleccionado'); return }
-  lines.push('FACTURACIÓN POR TIENDA')
-  lines.push('Tienda,TPV,Sastrería,Total')
+function sectionStores(rows: Row[], items: AnyRec[] | null) {
+  if (!items?.length) { rows.push(['Sin datos para el periodo seleccionado']); return }
+  rows.push(['FACTURACIÓN POR TIENDA'])
+  rows.push(['Tienda', 'TPV', 'Sastrería', 'Total'])
   for (const s of items) {
-    lines.push(`${csv(s.store_name)},${num(s.pos)},${num(s.tailoring)},${num(s.total)}`)
+    rows.push([String(s.store_name ?? ''), num(s.pos), num(s.tailoring), num(s.total)])
   }
   const sum = (k: string) => items.reduce((acc, d) => acc + (Number(d[k]) || 0), 0)
-  lines.push(`TOTAL,${sum('pos')},${sum('tailoring')},${sum('total')}`)
+  rows.push(['TOTAL', sum('pos'), sum('tailoring'), sum('total')])
 }
 
-function sectionEmployees(lines: string[], items: AnyRec[] | null) {
-  if (!items?.length) { lines.push('Sin datos para el periodo seleccionado'); return }
-  lines.push('VENTAS POR EMPLEADO')
-  lines.push('Empleado,Ventas TPV,Total TPV,Cobros Sastrería,Total Sastrería,Pedidos sastre,Fact. sastre,Total')
+function sectionEmployees(rows: Row[], items: AnyRec[] | null) {
+  if (!items?.length) { rows.push(['Sin datos para el periodo seleccionado']); return }
+  rows.push(['VENTAS POR EMPLEADO'])
+  rows.push(['Empleado', 'Ventas TPV', 'Total TPV', 'Cobros Sastrería', 'Total Sastrería', 'Pedidos sastre', 'Fact. sastre', 'Total'])
   for (const e of items) {
-    lines.push(`${csv(e.employee_name)},${num(e.pos_ops)},${num(e.pos_total)},${num(e.tailoring_ops)},${num(e.tailoring_total)},${num(e.tailor_orders_count)},${num(e.tailor_orders_revenue)},${num(e.total)}`)
+    rows.push([
+      String(e.employee_name ?? ''), num(e.pos_ops), num(e.pos_total),
+      num(e.tailoring_ops), num(e.tailoring_total), num(e.tailor_orders_count),
+      num(e.tailor_orders_revenue), num(e.total),
+    ])
   }
   const sum = (k: string) => items.reduce((acc, d) => acc + (Number(d[k]) || 0), 0)
-  lines.push(`TOTAL,${sum('pos_ops')},${sum('pos_total')},${sum('tailoring_ops')},${sum('tailoring_total')},${sum('tailor_orders_count')},${sum('tailor_orders_revenue')},${sum('total')}`)
+  rows.push(['TOTAL', sum('pos_ops'), sum('pos_total'), sum('tailoring_ops'), sum('tailoring_total'), sum('tailor_orders_count'), sum('tailor_orders_revenue'), sum('total')])
 }
 
-function sectionTime(lines: string[], data: AnyRec | null) {
-  if (!data) { lines.push('Sin datos para el periodo seleccionado'); return }
+function sectionTime(rows: Row[], data: AnyRec | null) {
+  if (!data) { rows.push(['Sin datos para el periodo seleccionado']); return }
   const byHour = (data.byHour as AnyRec[]) || []
   const byDay = (data.byDayOfWeek as AnyRec[]) || []
 
-  lines.push('VENTAS POR HORA')
-  lines.push('Hora,Operaciones,Total')
+  rows.push(['VENTAS POR HORA'])
+  rows.push(['Hora', 'Operaciones', 'Total'])
   for (const h of byHour) {
-    lines.push(`${num(h.hour)},${num(h.count)},${num(h.total)}`)
+    rows.push([num(h.hour), num(h.count), num(h.total)])
   }
-  lines.push('')
+  rows.push([])
 
-  lines.push('VENTAS POR DÍA DE LA SEMANA')
-  lines.push('Día,Operaciones,Total')
+  rows.push(['VENTAS POR DÍA DE LA SEMANA'])
+  rows.push(['Día', 'Operaciones', 'Total'])
   for (const d of byDay) {
-    lines.push(`${csv(d.label)},${num(d.count)},${num(d.total)}`)
+    rows.push([String(d.label ?? ''), num(d.count), num(d.total)])
   }
 }
 
-function sectionExpenses(lines: string[], data: AnyRec | null, comparison: AnyRec | null) {
-  if (!data) { lines.push('Sin datos para el periodo seleccionado'); return }
+function sectionExpenses(rows: Row[], data: AnyRec | null, comparison: AnyRec | null) {
+  if (!data) { rows.push(['Sin datos para el periodo seleccionado']); return }
   const byCat = (data.byCategory as AnyRec[]) || []
   const recent = (data.recentExpenses as AnyRec[]) || []
 
-  lines.push('RESUMEN GASTOS')
-  lines.push(`Total gastos,${num(data.grandTotal)}`)
-  lines.push(`Movimientos,${byCat.reduce((s, c) => s + (Number(c.count) || 0), 0)}`)
+  rows.push(['RESUMEN GASTOS'])
+  rows.push(['Total gastos', num(data.grandTotal)])
+  rows.push(['Movimientos', byCat.reduce((s, c) => s + (Number(c.count) || 0), 0)])
   if (comparison) {
-    lines.push(`Periodo anterior,${num(comparison.previous)}`)
-    lines.push(`Variación %,${(Number(comparison.change) || 0).toFixed(2)}`)
+    rows.push(['Periodo anterior', num(comparison.previous)])
+    rows.push(['Variación %', Number((Number(comparison.change) || 0).toFixed(2))])
   }
-  lines.push('')
+  rows.push([])
 
   if (byCat.length) {
-    lines.push('POR CATEGORÍA')
-    lines.push('Categoría,Movimientos,Total')
+    rows.push(['POR CATEGORÍA'])
+    rows.push(['Categoría', 'Movimientos', 'Total'])
     for (const c of byCat) {
-      lines.push(`${csv(c.category)},${num(c.count)},${num(c.total)}`)
+      rows.push([String(c.category ?? ''), num(c.count), num(c.total)])
     }
-    lines.push(`TOTAL,${byCat.reduce((s, c) => s + (Number(c.count) || 0), 0)},${num(data.grandTotal)}`)
-    lines.push('')
+    rows.push(['TOTAL', byCat.reduce((s, c) => s + (Number(c.count) || 0), 0), num(data.grandTotal)])
+    rows.push([])
   }
 
   if (recent.length) {
-    lines.push('ÚLTIMOS MOVIMIENTOS')
-    lines.push('Fecha,Categoría,Descripción,Importe')
+    rows.push(['ÚLTIMOS MOVIMIENTOS'])
+    rows.push(['Fecha', 'Categoría', 'Descripción', 'Importe'])
     for (const t of recent) {
-      lines.push(`${csv(t.date)},${csv(t.category)},${csv(t.description)},${num(t.total)}`)
+      rows.push([String(t.date ?? ''), String(t.category ?? ''), String(t.description ?? ''), num(t.total)])
     }
   }
 }

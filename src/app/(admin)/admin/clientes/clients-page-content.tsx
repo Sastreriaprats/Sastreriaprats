@@ -19,14 +19,17 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Plus, Search, MoreHorizontal, Eye, Pencil, UserX, Trash2, Download, ChevronLeft, ChevronRight, ArrowUpDown } from 'lucide-react'
+import { Plus, Search, MoreHorizontal, Eye, Pencil, UserX, Trash2, Download, ChevronLeft, ChevronRight, ArrowUpDown, Loader2 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from 'sonner'
 import { useList } from '@/hooks/use-list'
 import { usePermissions } from '@/hooks/use-permissions'
 import { listClients, deleteClientAction, hardDeleteClientAction } from '@/actions/clients'
 import { getInitials, formatCurrency, formatDate } from '@/lib/utils'
+import { downloadExcel } from '@/lib/excel/export'
 import { CreateClientDialog } from './create-client-dialog'
+
+const CATEGORY_LABELS: Record<string, string> = { standard: 'Estándar', vip: 'VIP' }
 
 const categoryColors: Record<string, string> = {
   standard: 'bg-gray-100 text-gray-700',
@@ -41,6 +44,7 @@ export function ClientsPageContent({ basePath = '/admin' }: { basePath?: string 
   const [isDeleting, setIsDeleting] = useState(false)
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [exporting, setExporting] = useState(false)
 
   const {
     data: clients, total, totalPages, page, setPage,
@@ -83,6 +87,50 @@ export function ClientsPageContent({ basePath = '/admin' }: { basePath?: string 
     setDeleteTarget(null)
     if (result.success) { toast.success('Cliente eliminado permanentemente'); refresh() }
     else toast.error(result.error)
+  }
+
+  const handleExportExcel = async () => {
+    setExporting(true)
+    try {
+      // Trae TODOS los clientes que cumplen los filtros actuales (no solo la página).
+      const res = await listClients({
+        search,
+        filters,
+        page: 1,
+        pageSize: 10000,
+        sortBy: sortBy || 'full_name',
+        sortOrder: sortOrder || 'asc',
+      })
+      if (!res.success || !res.data) {
+        toast.error('error' in res ? res.error : 'No se pudieron exportar los clientes')
+        return
+      }
+      const rows = (res.data.data as any[]) ?? []
+      if (rows.length === 0) {
+        toast.error('No hay clientes para exportar con los filtros aplicados')
+        return
+      }
+      const data = rows.map((c) => ({
+        'Código': c.client_code ?? '',
+        'Nombre': c.full_name ?? '',
+        'Email': c.email ?? '',
+        'Teléfono': c.phone ?? '',
+        'Categoría': CATEGORY_LABELS[c.category] ?? c.category ?? '',
+        'Total gastado (€)': Number(c.total_spent ?? 0),
+        'Pendiente (€)': Number(c.total_pending ?? 0),
+        'Nº compras': Number(c.purchase_count ?? 0),
+        'Alta': c.created_at ? formatDate(c.created_at) : '',
+        'Estado': c.is_active ? 'Activo' : 'Inactivo',
+      }))
+      const today = new Date().toISOString().slice(0, 10)
+      await downloadExcel(data, `clientes-${today}`, 'Clientes')
+      toast.success('Clientes exportados a Excel')
+    } catch (err) {
+      console.error('[ClientsPage] export', err)
+      toast.error('Error al exportar los clientes')
+    } finally {
+      setExporting(false)
+    }
   }
 
   const SortableHeader = ({ field, children }: { field: string; children: React.ReactNode }) => (
@@ -131,8 +179,8 @@ export function ClientsPageContent({ basePath = '/admin' }: { basePath?: string 
           </SelectContent>
         </Select>
         {can('clients.export') && (
-          <Button variant="outline" size="sm" className="gap-1">
-            <Download className="h-4 w-4" /> Exportar
+          <Button variant="outline" size="sm" className="gap-1" onClick={handleExportExcel} disabled={exporting || isLoading}>
+            {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Exportar a Excel
           </Button>
         )}
       </div>

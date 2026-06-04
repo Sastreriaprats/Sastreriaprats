@@ -478,6 +478,9 @@ export const alterations = pgTable('alterations', {
   officialName: text('official_name'),
   description: text('description'),
   amount: decimal('amount', { precision: 10, scale: 2 }).default('0.00').notNull(),
+  // Precios del arreglo (mig. 195): coste (taller/oficial) y venta (cliente).
+  costPrice: decimal('cost_price', { precision: 10, scale: 2 }).default('0.00').notNull(),
+  salePrice: decimal('sale_price', { precision: 10, scale: 2 }).default('0.00').notNull(),
   alterationDate: date('alteration_date').defaultNow().notNull(),
   workshopSentDate: date('workshop_sent_date'),
   clientDeliveryDate: date('client_delivery_date'),

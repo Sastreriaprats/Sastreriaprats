@@ -52,7 +52,7 @@ export function StockDashboard() {
       a.href = url
       const dispo = res.headers.get('Content-Disposition') || ''
       const match = dispo.match(/filename="([^"]+)"/)
-      a.download = match ? match[1] : `inventario-prats-${new Date().toISOString().slice(0, 10)}.csv`
+      a.download = match ? match[1] : `inventario-prats-${new Date().toISOString().slice(0, 10)}.xlsx`
       document.body.appendChild(a)
       a.click()
       a.remove()
@@ -147,7 +147,7 @@ export function StockDashboard() {
             onClick={handleExportInventory}
             disabled={isExporting}
             className="gap-2"
-            title="Descargar CSV del inventario por variante y almacén"
+            title="Descargar Excel del inventario por variante y almacén"
           >
             {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             Descargar inventario

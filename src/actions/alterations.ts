@@ -20,6 +20,7 @@ import type {
 const SELECT_ALTERATIONS = `
   id, alteration_number, client_id, phone, garment_type,
   official_id, official_name, description,
+  cost_price, sale_price,
   alteration_date, workshop_sent_date, client_delivery_date,
   status, notes,
   store_id, created_by, created_at, updated_at,
@@ -191,6 +192,8 @@ export const createAlteration = protectedAction<
         official_id: input.official_id ?? null,
         official_name: officialName,
         description: input.description ?? null,
+        cost_price: input.cost_price ?? 0,
+        sale_price: input.sale_price ?? 0,
         alteration_date: input.alteration_date ?? new Date().toISOString().split('T')[0],
         notes: input.notes ?? null,
         store_id: input.store_id ?? null,
@@ -243,6 +246,8 @@ export const updateAlteration = protectedAction<
     if (data.phone !== undefined) updates.phone = data.phone
     if (data.garment_type !== undefined) updates.garment_type = data.garment_type
     if (data.description !== undefined) updates.description = data.description
+    if (data.cost_price !== undefined) updates.cost_price = data.cost_price
+    if (data.sale_price !== undefined) updates.sale_price = data.sale_price
     if (data.alteration_date !== undefined) updates.alteration_date = data.alteration_date
     if (data.workshop_sent_date !== undefined) updates.workshop_sent_date = data.workshop_sent_date
     if (data.client_delivery_date !== undefined) updates.client_delivery_date = data.client_delivery_date

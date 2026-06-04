@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
+import * as XLSX from 'xlsx'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { checkUserPermission } from '@/actions/auth'
 
 /**
- * Exporta el inventario completo a CSV: una fila por (variante × almacén con stock).
+ * Exporta el inventario completo a Excel (.xlsx): una fila por (variante × almacén con stock).
  * Incluye: producto, talla, color, proveedor, almacén, tienda, stock, precios.
  * Pensado para hacer inventarios físicos por tienda/talla/proveedor.
  */
@@ -61,7 +62,7 @@ export async function GET() {
   }
 
   if (products.length === 0) {
-    return csvResponse(['Sin productos'], 'inventario-vacio')
+    return xlsxResponse([['Sin productos']], 'inventario-vacio')
   }
 
   const productIds = products.map(p => p.id)
@@ -115,7 +116,7 @@ export async function GET() {
     'Stock', 'Reservado', 'Stock mín.',
   ]
 
-  const lines: string[] = [header.map(csvEscape).join(',')]
+  const rows: (string | number)[][] = [header]
 
   for (const sr of stockRows) {
     const v = variantsById.get(sr.product_variant_id)
@@ -126,7 +127,7 @@ export async function GET() {
     const pvp = v.price_override != null ? Number(v.price_override) : Number(p.price_with_tax ?? 0)
     const coste = v.cost_price_override != null ? Number(v.cost_price_override) : (p.cost_price != null ? Number(p.cost_price) : null)
 
-    const row = [
+    rows.push([
       p.sku, v.variant_sku, v.barcode ?? '', p.name,
       p.product_type ?? '',
       p.category_id ? (categoriesById.get(p.category_id) ?? '') : '',
@@ -134,37 +135,30 @@ export async function GET() {
       v.size ?? '', v.color ?? (p as any).color ?? '',
       p.supplier_id ? (suppliersById.get(p.supplier_id) ?? '') : '',
       p.supplier_reference ?? '',
-      formatNum(pvp), coste != null ? formatNum(coste) : '', p.tax_rate != null ? String(p.tax_rate) : '',
+      round2(pvp), coste != null ? round2(coste) : '', p.tax_rate != null ? Number(p.tax_rate) : '',
       w?.storeName ?? '', w?.name ?? '', w?.code ?? '',
       sr.quantity ?? 0, sr.reserved ?? 0, sr.min_stock ?? '',
-    ]
-    lines.push(row.map(csvEscape).join(','))
+    ])
   }
 
   const today = new Date().toISOString().slice(0, 10)
-  return csvResponse(lines, `inventario-prats-${today}`)
+  return xlsxResponse(rows, `inventario-prats-${today}`)
 }
 
-function csvEscape(val: unknown): string {
-  if (val === null || val === undefined) return ''
-  const s = String(val)
-  if (s.includes('"') || s.includes(',') || s.includes('\n') || s.includes(';')) {
-    return '"' + s.replace(/"/g, '""') + '"'
-  }
-  return s
-}
-
-function formatNum(n: number): string {
+function round2(n: number): number | string {
   if (Number.isNaN(n)) return ''
-  return n.toFixed(2).replace('.', ',')
+  return Math.round(n * 100) / 100
 }
 
-function csvResponse(lines: string[], filename: string) {
-  const csv = '\uFEFF' + lines.join('\r\n')
-  return new NextResponse(csv, {
+function xlsxResponse(rows: (string | number)[][], filename: string) {
+  const ws = XLSX.utils.aoa_to_sheet(rows)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Inventario')
+  const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer
+  return new NextResponse(new Uint8Array(buf), {
     headers: {
-      'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${filename}.csv"`,
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}.xlsx"`,
     },
   })
 }

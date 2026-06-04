@@ -40,6 +40,8 @@ export function AlterationDetailContent({ alteration, basePath = '/admin' }: { a
   const [garmentType, setGarmentType] = useState(alteration.garment_type ?? '')
   const [officialId, setOfficialId] = useState(alteration.official_id ?? '')
   const [description, setDescription] = useState(alteration.description ?? '')
+  const [costPrice, setCostPrice] = useState(alteration.cost_price != null ? String(alteration.cost_price) : '')
+  const [salePrice, setSalePrice] = useState(alteration.sale_price != null ? String(alteration.sale_price) : '')
   const [alterationDate, setAlterationDate] = useState(alteration.alteration_date ?? '')
   const [workshopSent, setWorkshopSent] = useState(alteration.workshop_sent_date ?? '')
   const [clientDelivery, setClientDelivery] = useState(alteration.client_delivery_date ?? '')
@@ -88,6 +90,8 @@ export function AlterationDetailContent({ alteration, basePath = '/admin' }: { a
           garment_type: garmentType.trim() || null,
           official_id: officialId || null,
           description: description.trim() || null,
+          cost_price: costPrice.trim() === '' ? 0 : Number(costPrice.replace(',', '.')),
+          sale_price: salePrice.trim() === '' ? 0 : Number(salePrice.replace(',', '.')),
           alteration_date: alterationDate || undefined,
           workshop_sent_date: workshopSent || null,
           client_delivery_date: clientDelivery || null,
@@ -214,6 +218,19 @@ export function AlterationDetailContent({ alteration, basePath = '/admin' }: { a
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Describe los arreglos…"
               />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Precio de coste (€)</Label>
+                <Input type="number" min="0" step="0.01" inputMode="decimal" value={costPrice}
+                  onChange={(e) => setCostPrice(e.target.value)} placeholder="0,00" />
+              </div>
+              <div className="space-y-1">
+                <Label>Precio de venta (€)</Label>
+                <Input type="number" min="0" step="0.01" inputMode="decimal" value={salePrice}
+                  onChange={(e) => setSalePrice(e.target.value)} placeholder="0,00" />
+              </div>
             </div>
 
             <div className="space-y-1">
