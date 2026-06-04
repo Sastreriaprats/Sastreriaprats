@@ -32,7 +32,7 @@ import { getClientMeasurements } from '@/actions/clients'
 import { listSuppliers, createSupplierOrderAction } from '@/actions/suppliers'
 import { listFabricsBySupplier } from '@/actions/fabrics'
 import { formatCurrency } from '@/lib/utils'
-import { generateCamiseriaFichaPdf } from '@/lib/camiseria-ficha-pdf'
+import { generateFichaForLineCamiseria } from '@/lib/pdf/ficha-confeccion'
 
 type OrderType = 'artesanal' | 'industrial' | 'proveedor' | 'oficial' | 'camiseria' | 'camiseria_industrial'
 
@@ -215,7 +215,7 @@ export function CreateOrderWizard({
 
   /** Al entrar en paso 3 (Ficha camisería), precargar medidas del cliente desde su ficha (solo una vez por cliente; las ediciones son solo para este pedido) */
   useEffect(() => {
-    if (orderType !== 'camiseria' || step !== 3 || !selectedClient?.id || !garmentTypes.length) return
+    if (!isCamiseriaType(orderType) || step !== 3 || !selectedClient?.id || !garmentTypes.length) return
     const camiseriaType = garmentTypes.find((g: any) => g.name === 'Camisería')
     if (!camiseriaType) return
     if (camiseriaDefaultsLoadedForClientId.current === selectedClient.id) return
@@ -447,11 +447,18 @@ export function CreateOrderWizard({
     const taxRate = (lineForm.tax_rate ?? 21) / 100
     const priceSinIva = Math.round((pvpConIva / (1 + taxRate)) * 100) / 100
     const currentGarmentId = lineForm.garment_type_id
+    // Para líneas de Camisería, el documento oficial lee precio/obs desde la
+    // configuración: los guardamos aquí para que coincidan creación y descarga.
+    let configuration: Record<string, any> = lineForm.configuration || {}
+    if (garment.name === 'Camisería') {
+      configuration = { ...configuration, precio: pvpConIva }
+      if ((lineForm.finishing_notes || '').trim()) configuration.obs = lineForm.finishing_notes!.trim()
+    }
     setLines(prev => [...prev, {
       garment_type_id: lineForm.garment_type_id!,
       garment_name: garment.name,
       line_type: (lineForm.line_type as 'artesanal' | 'industrial') || 'artesanal',
-      configuration: lineForm.configuration || {},
+      configuration,
       fabric_id: lineForm.fabric_id || null,
       fabric_description: lineForm.fabric_description || '',
       fabric_meters: lineForm.fabric_meters || 0,
@@ -577,10 +584,17 @@ export function CreateOrderWizard({
         const taxRate = 21 / 100
         const priceSinIva = Math.round((pvpConIva / (1 + taxRate)) * 100) / 100
         const observaciones = [camiseriaObservaciones, camiseriaEntregado ? `Entregado a cuenta: ${camiseriaEntregado}` : ''].filter(Boolean).join('\n') || null
+        const entregadoNum = Number(camiseriaEntregado) || 0
+        // El documento oficial (ficha pdfmake) lee precio/obs/entregado desde la
+        // configuración de la línea. Los guardamos aquí para que aparezcan tanto
+        // en la ficha que se imprime al crear como en la que se descarga después.
+        const camiseriaLineConfig: Record<string, unknown> = { ...camiseriaConfig, precio: pvpConIva }
+        if (camiseriaObservaciones.trim()) camiseriaLineConfig.obs = camiseriaObservaciones.trim()
+        if (entregadoNum > 0) camiseriaLineConfig.entregado = entregadoNum
         return [{
           garment_type_id: camiseriaType.id,
           line_type: 'artesanal' as const,
-          configuration: camiseriaConfig,
+          configuration: camiseriaLineConfig,
           fabric_id: null,
           fabric_description: '',
           fabric_meters: null,
@@ -695,6 +709,35 @@ export function CreateOrderWizard({
     const payload = buildOrderPayload()
     if (!payload) return
     submitOrder(payload)
+  }
+
+  /** Imprime la ficha de camisería usando EL MISMO generador que el documento
+   *  oficial que se descarga después desde el pedido (talón pdfmake). Así el
+   *  documento que sale al crear y el que se baja luego son idénticos.
+   *  El `order`/`line` se sintetizan con los mismos datos que se persisten:
+   *  la `configuration` es exactamente la que se guardará en la línea, por lo
+   *  que las medidas, características, puño y tejido coinciden 1:1. El número
+   *  de pedido aún no existe (se asigna al guardar), así que se muestra como
+   *  "NUEVO" hasta entonces. */
+  const printCamiseriaFicha = (
+    config: Record<string, string>,
+    opts: { precio?: number; obs?: string; entregado?: number } = {},
+  ) => {
+    const cfg: Record<string, unknown> = { ...config }
+    if (opts.precio != null) cfg.precio = opts.precio
+    if (opts.obs?.trim()) cfg.obs = opts.obs.trim()
+    if (opts.entregado && opts.entregado > 0) cfg.entregado = opts.entregado
+    const syntheticOrder = {
+      id: 'nuevo',
+      order_number: 'NUEVO',
+      total: 0,
+      total_paid: 0,
+      estimated_delivery_date: estimatedDelivery || null,
+      clients: selectedClient
+        ? { full_name: selectedClient.full_name, phone: selectedClient.phone, email: selectedClient.email }
+        : null,
+    }
+    return generateFichaForLineCamiseria(syntheticOrder as any, { configuration: cfg }, 0)
   }
 
   const totalSteps = orderType ? getTotalSteps(orderType) : 0
@@ -962,7 +1005,7 @@ export function CreateOrderWizard({
               <Textarea value={camiseriaObservaciones} onChange={(e) => setCamiseriaObservaciones(e.target.value)} rows={2} />
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => generateCamiseriaFichaPdf({ clientName: selectedClient?.full_name ?? 'Cliente', values: camiseriaConfig, prefix: '', precio: camiseriaPvpConIva ? `${camiseriaPvpConIva} €` : undefined, entregado: camiseriaEntregado || undefined, observaciones: camiseriaObservaciones || undefined })}>
+              <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => printCamiseriaFicha(camiseriaConfig, { precio: camiseriaPvpConIva || undefined, obs: camiseriaObservaciones, entregado: Number(camiseriaEntregado) || 0 })}>
                 <Printer className="h-4 w-4" /> Imprimir ficha
               </Button>
             </div>
@@ -1125,13 +1168,7 @@ export function CreateOrderWizard({
                       variant="outline"
                       size="sm"
                       className="gap-2"
-                      onClick={() => generateCamiseriaFichaPdf({
-                        clientName: selectedClient?.full_name ?? 'Cliente',
-                        values: lineForm.configuration || {},
-                        prefix: '',
-                        precio: lineFormPvpConIva ? `${lineFormPvpConIva} €` : undefined,
-                        observaciones: lineForm.finishing_notes || undefined,
-                      })}
+                      onClick={() => printCamiseriaFicha((lineForm.configuration || {}) as Record<string, string>, { precio: lineFormPvpConIva || undefined, obs: lineForm.finishing_notes })}
                     >
                       <Printer className="h-4 w-4" />
                       Imprimir ficha

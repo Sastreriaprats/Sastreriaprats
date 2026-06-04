@@ -1,0 +1,5311 @@
+{
+  "products": [
+    {
+      "slug": "panuelo-el-viejo-y-el-nuevo-ano-tu-1081",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gabardina-cheviot-beige-reversible-124",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pan-valores-magritte-1505",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "pan-little-bigger-thomas-1504",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "corbata-ciervo-verde-1425",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-celeste-flores-azules-y-marrones-1560",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "guayabera-lino-negro",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-a-medida-serie-400000-1471",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pijama-rayas-celeste-blanco-1208",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-cocodrilo-miel-tu-1101",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-cocodrilo-azul-tu-1102",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirante-albert-thurston-25714-1452",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-cocodrilo-burdeos-tu-1104",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-cocodrilo-marron-tu-1100",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gorra-azul-capelli-455",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-a-medida-tomas-mason-1472",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-redondo-nacar-1303",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "mocasin-selby-ante-marron-c-j-11",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cordones-oxford-dorset-2-piel-negro-c-j-7",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-cocodrilo-negro-tu-1103",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "sahariana-beige-lino-34",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "gabardina-cashmere-camel-reversible-123",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "jersey-lambswool-marino-219",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "tirante-albert-thurston-plain-369-black-1429",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "americana-lana-cuadro-gales-gris-carnet-1687",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "foulard-lino-seda-calabrese-1144-tu-1144",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-algodon-tinta-cenidor-39",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "pantalon-algodon-albero-pinza-cenidor-37",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "pantalon-cargo-mmx-marino-1249",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-buttons-d361-6-months-98co-2ea-254",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-zip-ss-5-bolsillos-gris-85co-10pl-5ea-283",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-azul-y-marron-460",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-elastico-celeste-anderson-s-1084",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-trenzado-marron-cuero-anderson-s-1088",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-648-648",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-rojs-color-blanca-1512",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-647-647",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-649-649",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-lino-verde-azul-ocre-1517",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-641-641",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "teba-prats-lino-marron",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "corbata-naranja-motivos-azul-1508",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-seda-lino-navy-turqu-1518",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "bufanda-cashmere-30x190-beige-tu-945",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polera-prats-color-gris-1428",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-cuello-vista-textura-blanca-1418",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "gemelo-circulo-azul-1302",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-van-gogh-tu-1080",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "calcetin-algodon-fantasia-puntos-azules-sobre-verde-461",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-lana-merino-beige-gris-140-gran-sasso-75",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-palmeras-fondo-mostaza-1682",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "bufanda-cashmere-30x190-verde-tu-946",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pijama-rayas-granate-1209",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirante-albert-thurston-23925-1461",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pajarita-naranja-azul-452",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pajarita-puntos-blanco-y-marino-453",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pajarita-verde-y-naranja-454",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "americana-lana-verde-bolsillo-de-fuelle-93",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "jersey-cuello-alto-de-cremallera-verde-cremll-vickers-1271",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-cuello-vista-celeste-textura-1419",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "neceser-calabrese-448-448",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-palmeras-rojas-444",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1207-tu-1207",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-buttons-d361-3-months-94co-5pl-1ea-252",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-cuadrado-diagonal-verde-y-azul-330",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calzoncillo-flores-acuarela-426",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pajarita-cachemires-marron-450",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-oxford-petroleo-button-down-209",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisas-cuadros-finos-amarillo-azul-button-down-207",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisas-cuadros-anchos-amarillo-azul-button-down-208",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-oxford-verde-oliva-button-down-212",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "americana-teba-verde-90lana-10cashmere-938",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "americana-cuadros-azul-marron-80lana-20cashm-759",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "teba-prats-principe-gales-con-cuadro-ventana-734",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "jersey-lambswool-azulon-220",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "corbata-marinella-588-588",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-cottoncash-fantasia-rayas-burdeos-gris-y-marron-tu-481",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-franela-gris-claro-pinza-cenidor-1376",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-oxford-rayas-rosa-blanco-button-down-211",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-botones-en-cuello-caldero-342-gran-sasso-937",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-vaquero-algodon-azul-pinza-cenidor-1374",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-oxford-rayas-azul-blanco-button-down-210",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-franela-gris-medio-pinza-cinturon-55",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-villela-cuadros-azul-rojo-182",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-estampada-flores-azules-1413",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-pana-crudo-cenidor-2-pliegues-48",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "leonardo-wool-franela-navy-blue-257",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-wool-franela-antracita-256",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-589-589",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-732-tu-732",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-prats-943-tu-943",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-prats-736-tu-736",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-algodon-beige-pinza-cenidor-42",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-cuello-vuelto-lana-merino-marron-gran-sasso-779",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "botonadura-smoking-redonda-nacar-351",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "pantalon-pana-azul-meyer-1191",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-franela-cuadros-verde-azul-1228",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-585-585",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-d460-25i27-1377",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-lana-merino-marino-598-gran-sasso-76",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-cashmere-beige-030-gran-sasso-81",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-franela-azul-marino-pinza-cenidor-57",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "jersey-pico-cashmere-gris-072-sasso-77",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-cuello-vuelto-lana-merino-negro-099-gran-sasso-82",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-lana-merino-azul-grisaceo-576-gran-sasso-73",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-cashmere-verde-456-gran-sasso-78",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-cashmere-azul-520-gran-sasso-80",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-lana-merino-caldero-gran-sasso-74",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-cashmere-marino-598-gran-sasso-79",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "chaleco-punto-verde-drakes-237",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-m-c-pique-verde-claro-gran-sasso-742",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-740-tu-740",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-seda-calabrese-8025062-var-005-1358",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-586-586",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "chaleco-punto-celeste-drakes-236",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-lambswool-caldero-221",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "jersey-lambswool-granate-223",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "jersey-lambswool-verde-228",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "jersey-lambswool-tostado-227",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "chaleco-punto-beige-drakes-235",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-cuello-vuelto-lana-merino-verde-464-gran-sasso-780",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cardigan-grueso-gris-botones-en-cuello-gran-sasso-776",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cardigan-azul-petroleo-botones-1386",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-cremallera-gris-perla-1391",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-cuello-vuelto-lana-merino-fucsia-285-gran-sasso-834",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-cuello-vuelto-lana-merino-burdeos-gran-sasso-835",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-cuello-vuelto-lana-gris-98-gran-sasso-836",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-botones-en-cuello-frambuesa-gran-sasso-838",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-cremallera-cashmere-verde-423-gran-sasso-839",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-polo-botones-azul-moteado-gran-sasso-840",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cardigan-cashmere-verde-428-gran-sasso-842",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-738-tu-738",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "teba-prats-lana-marron-735",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "pantalon-pana-verde-cenidor-2-pliegues-51",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "jersey-cuello-vuelto-lana-merino-azul-marino-gran-sasso-837",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "teba-clasica-azulon-punto-cashwool-25",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-cuello-vuelto-8s-y-vs-crudo-843",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-cuello-vuelto-lana-merino-beige-gris-140-gran-sasso-848",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-fucsia-285-gran-sasso-855",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cardigan-azul-marino-598-gran-sasso-860",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-azul-claro-538-gran-sasso-865",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-azul-597-gran-sasso-870",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-lana-merino-gris-perla-71-gran-sasso-849",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-cremallera-cashmere-caldero-368-gran-sasso-856",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cardigan-marron-154-gran-sasso-861",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-cremallera-cashmere-azul-596-gran-sasso-866",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-lana-merino-naranja-371-gran-sasso-898",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-582-582",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-lana-de-doble-faz-calabrese-2025030-var-002-1341",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-la-calabrese-7925067-var-001-1352",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-cuello-vuelto-lana-merino-gris-perla-71-gran-sasso-850",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-verde-499-gran-sasso-857",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-cashmere-verde-414-gran-sasso-862",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-polo-botones-azul-597-gran-sasso-867",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-calavera-gris-845",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-lambswool-azul-moteado-918",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "cardigan-cremallera-granulado-verde-466-gran-sasso-935",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "chaleco-lana-merino-azul-marino-gran-sasso-851",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-cashmere-burdeos-293-gran-sasso-858",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-cashmere-azulon-560-gran-sasso-863",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cardigan-azul-595-gran-sasso-868",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "chaleco-merino-beige-gris-140-gran-sasso-847",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-cashmere-gris-marengo-098-gran-sasso-859",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-azulon-545-gran-sasso-864",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cardigan-cashmere-azul-589-gran-sasso-869",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cardigan-cremallera-azul-579-gran-sasso-936",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbanda-mario-topo-azu-1383",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-prats-1371-1371",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-lana-roja-1396",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-wo-y-se-80244-v-6-1401",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-lana-80423-v-3-1406",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cazadora-tweed-de-cuadros-811",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cazadora-bomber-lana-cuadros-1393",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirante-albert-thurston-26864-1458",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-lana-y-seda-80211v-5-1399",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-lana-80422-v-3-1404",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-lana-80461-v-4-1409",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-ciervo-vinotinto-1424",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "abrigo-lana-valstar-1394",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-estampada-bacteria-verde-1395",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-wo-y-se-80213-v-1-1400",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-lana-80488-v-4-1405",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-pato-fondo-vinotinto-1420",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cazadora-alcochada-franela-azul-1390",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-franela-gris-perla-pinza-cenidor-56",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "tirante-albert-thurston-23863-1449",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirante-albert-thurston-26042-1454",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirante-albert-thurston-23153-1459",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirante-albert-thurston-24151122-1462",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirante-albert-thurson-23155-1460",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirante-albert-thurson-2451287-1463",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirante-albert-thurston-391-1436",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirante-albert-thurston-green-red-1441",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirante-albert-thurston-22961-1446",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirante-albert-thurston-25521-1451",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirante-albert-thurston-26718-1456",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "sahariana-marron-seersucker-algodon-30",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "teba-clasica-azulon-esterilla-lana-13",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "teba-clasica-tinta-esterilla-lana-15",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "compostura",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "americana-lana-lino-seda-granate-bolsillo-parche-1173",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "neceser-rojo-con-raya-blanca-1525",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "neceser-marino-con-raya-blanc-1530",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulards-25001-1535",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-26016-1540",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-31014-1545",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-verde-rayas-naranjas-1555",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-palmeras-verde-borde-azul-1575",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-fondo-marino-flores-rojas-1680",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-lino-seda-raya-marron-1520",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-fondo-marino-flor-blanca-1507",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-cuadro-azul-celeste-1235",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-rayas-tonos-azules-1550",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "varios-power-shop",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "neceser-amarillo-con-raya-blanca-1527",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulards-004-1532",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-26016-1537",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-28015-1542",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-marron-azul-1547",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-marino-raya-gris-1552",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-beige-cuadros-marron-1557",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-rosa-flores-azules-1562",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-azul-flores-azules-y-beige-1567",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-cebra-pavo-real-fondo-marino-1572",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-pajaro-colores-azules-1577",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-pajaro-colores-amarillos-1678",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-jaguar-turquesa-y-naranja-1683",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "americana-cashmere-gales-1277",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "foulards-325-1533",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-23125-1538",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-28025-1543",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-azul-celeste-1548",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-azul-marino-rayas-azules-1553",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-crudo-flores-1558",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camiseta-seda-naranja-1498",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-26012-1539",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-29011-1544",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-rayas-tonos-verdes-1549",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-las-senoritas-de-avignon-tu-1082",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "corbata-fondo-verde-flor-blanca-1506",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-amarillo-y-turquesa-1554",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-beige-flores-marrones-1559",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-flores-rojas-y-verde-fondo-blanco-1564",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-cachemires-rojos-fondo-azul-1569",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-palmeras-borde-rojo-1574",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-naranja-amebas-1679",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-verde-y-azul-1684",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "americana-lana-lino-seda-naranja-bolsillo-inclinado-1176",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "teba-clasica-verde-punto-cashwool-28",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "foulards-005-1531",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-flor-verde-fondo-azul-1511",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-lino-roja-1516",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-lino-seda-raya-roja-1521",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "neceser-rojo-1526",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "teba-clasica-beige-punto-cashwool-26",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "teba-prats-beige-punto-cashwool-24",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "sobrecamisa-franela-verde-892",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-lambswool-fucsia-222",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "sobrecamisa-franela-azul-medio-187",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "americana-lana-gales-gris-rojo-101",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "americana-tweed-pata-de-gallo-98",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "americana-franela-gris-pata-de-gallo-99",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "americana-franela-verde-bolsillo-de-parche-100",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "americana-lana-sarga-azul-917",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "americana-cuadros-ascot-916",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "americana-franela-beige-bolsillo-de-parche-95",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "americana-esterilla-azulon-solapa-de-pico-87",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "teba-clasica-verde-esterilla-lana-16",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "panuelo-a-bigger-splash-david-hockney-357",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "americana-lana-azul-pata-de-gallo-102",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "sahariana-azulon-lino-32",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-sueno-dali-tu-1078",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "americana-cashmere-azul-1278",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "americana-lana-lino-seda-negra-bolsillo-inclinado-1175",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "americana-lana-130-s-cuadro-verde-azul-bol-incl-cer-ext-1174",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "americana-lana-lino-seda-cuadro-granate-bolsillo-inclinado-cerillera-exterior-1172",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "americana-lana-lino-seda-azul-bolsillo-de-parche-1166",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "americana-prats-glent-993",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "panuelo-samurai-371",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "americana-seersucker-blanca-raya-azul-bolsillo-parche-carnet-1689",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "jersey-lambswool-marron-224",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "gabardina-rev-lana-marino-1411",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "gabardina-rev-lana-beige-cuadros-1410",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "pantalon-denim-verde-cenidor-1392",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "jersey-lana-azul-cuello-perkins-1311",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "panuelo-niza-368",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "tarjeta-regalo",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-prats-710-tu-710",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camiseta-beige-rayas-gran-sasso",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calzoncillo-fil-a-fil-celeste-983",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "gemelo-barras-intercambiables-352",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-cuadrado-diagonal-roja-y-azul-345",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camiseta-raya-azul-marino-gran-sasso",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "americana-lana-gales-vbc-bolsillo-de-parche-1281",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "gemelo-detalle-grietas-323",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-cuadrado-nacar-y-onix-325",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-rectangulo-negro-327",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-cilindro-plateado-328",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-sonrisa-espiga-verde-1210",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cordones-hardwick-piel-marron-c-j-9",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-seda-50x180-930-personality-930",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-la-japonesa-monet-tu-1083",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-fantasia-puntos-verde-sobre-naranja-462",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1206-tu-1206",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-lino-seda-calabrese-1139-tu-1139",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-c154-sand-87co-9pl-4ea-288",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisas-m-c-piloto-172",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polera-punto-chocolate-192",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-algodon-fil-a-fil-rosa-puno-gemelo-153",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisas-m-l-piloto-173",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-algodon-rayas-azules-button-down-177",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "americana-tecnica-azul-marino-1180",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "sahariana-marino-seersucker-algodon-29",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "pantalon-tecnico-marino-cenidor-plano-1187",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "guayabera-lino-blanco-199",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "polera-punto-khaki-193",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-algodon-cuadros-finos-azul-755",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-cordone-689-689",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-cordone-694-694",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-cordone-699-699",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-cordone-695-695",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-cordone-691-691",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-cordone-696-696",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-cordone-747-cl-141-747",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polera-punto-tinta-753",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisas-cuadros-anchos-rosa-azul-button-down-756",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-algodon-mil-rayas-celeste-puno-sencillo-154",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-algodon-raya-candela-celeste-puno-gemelo-159",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-algodon-rayas-azul-negro-178",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-cordone-764-764",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-algodon-pique-azulon-gran-sasso-775",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-oxford-celeste-sonrisa-824",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-franela-azulon-sonrisa-895",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-gris-1240",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "americana-denim-verde-cruzada-solapa-de-pico-1280",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "guayabera-lino-beige-200",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-cordone-965-965",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-sonrisa-azul-1226",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-sport-vickers-blanco-1221",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-sonrisa-verde-algodon-1227",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-harvard-cuadros-beige-verde-1217",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-c-boton-jfp-amarillo-1222",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-oxford-vickers-rosa-1238",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-sonrisa-cuadro-azul-1239",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-algodon-meyer-gris-1254",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-slim-d315-denim-grey-superstretch-88co-8pol-4ea-956",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-denim-blu-seta-73ly-19co-6se-2ea-251",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-zip-ss-g154-sahara-87co-9pl-4e-262",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-zip-ss-d515-2-years-87co-20eme-3ea-258",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-zip-ss-g154-s24-salvia-87co-9pl-4e-263",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-soft-denim-blu-2-years-94co-5pl-1ea-269",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-zip-ss-d306-6-months-87co-9pl-4ea-259",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-zip-ss-g124-steel-85co-10pl-5ea-264",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-zip-ss-d515-12-months-87co-10eme-3ea-261",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-g154-military-87co-9pl-4e-266",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-denim-grey-confort-18-months-98co-2ea-273",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-denim-superelax-12-months-87co-9pl-4ea-280",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-g125-steel-87co-9pl-4ea-290",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-tecnico-silver-85pa-15ea-295",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "guayabera-lino-khaki-198",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "leonardo-buttons-d375-12-months-92co-6pl-2ea-255",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-zip-ss-d515-6-months-87co-10eme-3ea-260",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-g154-blu-navy-87co-9pl-4e-265",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-soft-denim-blu-18-months-94co-5pl-1ea-272",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-slim-gabardina-stretch-china-rose-87-co-9pl-4ea-279",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-zip-ss-blue-navy-85co-10pl-5ea-284",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-g125-sea-foam-87co-9pl-4ea-289",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-tecnico-dry-0299-military-71pa-29ea-294",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "michelangelo-slim-5-bolsillos-268",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-denim-black-95co-4pl-1es-275",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "1980-d433-destroyed-sky-98co-2ea-281",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-g125-white-87co-9pl-4ea-286",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-tecnico-0253-sand-71pa-29ea-291",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-pantalon-pana-old-enzyme-gs365-sea-foam-1319",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-pantalon-vv008-military-0299-1324",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-zip-ss-d316-18-months-88co-8pl-4ea-278",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-tecnico-dry-0558-dark-blue-71pa-29ea-293",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-pantalon-champagne-v008-1320",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-zip-ss-aloe-85co-10pl-5ea-282",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-g125-gabardina-supetretch-tint-old-military-0299-287",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-bull-blanco-98co-2ea-713",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-g125-aloe-85-co-10-5pl-45-ea-746",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-chino-marino-mmx-791",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "teba-clasica-marino-punto-cashwool-27",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "cordones-oxford-connaught-dorset-piel-negro-c-j-6",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-cargo-pana-amerigo-off-white-1316",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-pantalon-seal-i267-old-v008-1321",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-pantalon-pana-coffee-1317",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-pantalon-pana-v005-champagne-0250-1322",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-tecnico-beige-cenidor-plano-760",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-pantalon-sand-0253-gs365-1323",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-chino-beige-claro-mmx-790",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-tecnico-t018-dry-0558-dark-blu-85pa-15ea-886",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-chino-verde-con-seda-meyer-902",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pan-mey-mar-canmarino-907",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-chino-albero-meyer-912",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-g154-gabardina-ss-sap-green-0334-87co-9pl-4e-957",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-g125-blu-navy-85co-105pl-45e-962",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "mmx-phoenix-2-7090-18-967",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-g125-old-i243-marsala-882",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-g125-old-0790-carbon-85co-105pl-45ea-887",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-chino-tokyo-meyer-908",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-chino-fucsia-meyer-913",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-buttons-d214-6-months-98co-2ea-958",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-chino-azul-marino-meyer-909",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-chino-coral-meyer-914",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "mocasin-grantham-piel-marron-brandy-c-j-8",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-buttons-v008-0558-dark-blue-59co-31-md-8pl-2pu-883",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-g125-old-0399-coffee-85co-105pl-45ea-888",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-buttons-v008-0300-wood-59co-31-md-8pl-2pu-884",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-g125-old-0999-black-85co-105pl-45ea-889",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-chino-pistacho-meyer-900",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-chino-azulon-meyer-905",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-chino-beige-canvas-meyer-910",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-tecnico-t018-dry-0299-military-85pa-15ea-885",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-chino-verde-meyer-901",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-chino-azulon-con-vivos-meyer-906",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-chino-beige-sarga-meyer-911",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-g125-old-0299-military-85co-105pl-45ea-995",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-g154-gabardina-zircon-blue-0411-87co-9pl-4e-1001",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-g125-old-0785-steel-85co-105pl-45ea-996",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-prototipo-lana-gris-marengo-plano-cinturon-992",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-dbcc-sky-used-98co-2ea-1185",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-zip-ss-g125-0785-steel-85co-10pl-5ea-1181",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-lana-gris-cinturon-vp-1276",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pan-chino-cen-jfp-verde-1244",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-dbcc-bleach-used-98co-2ea-1184",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pan-chino-meyer-teja-1245",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cordones-westfield-ante-tabaco-c-j-12",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-algodon-meyer-khaki-1250",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pan-chino-meyer-azul-marino-1246",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pan-chino-jfp-caldero-1251",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-chino-meyer-chocolate-1256",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pan-chino-cen-jfp-tostado-1261",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pan-chino-meyer-verde-1266",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-algodon-beige-luvit-vp-1274",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pan-chino-meyer-verde-oliva-1259",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pan-chino-meyer-vino-1264",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "mmx-vaquero-azul-1269",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pan-chino-meyer-excl-azul-1252",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pan-chino-meyer-granate-1257",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pan-chino-meyer-verde-1262",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pan-chino-meyer-bonn-mostaza-1258",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pan-chi-mey21tinta-1263",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pan-chino-meyer-bonn-tinta-1265-1265",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-cashmere-calabrese-7025064-var-001-1339",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-modal-cashmere-calabrese-7025069-var-001-1344",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-seda-calabrese-8025060-var-016-1349",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-lana-calabrese-7925067-var-004-1354",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-lana-calabrese-7925072-var-011-1359",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-tornillo-rojo-308",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-nudo-azulon-298",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cazadora-caqui-soldier-valstar-1315",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-lana-de-doble-faz-calabrese-2025035-var-005-1325",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-lana-de-doble-faz-calabrese-2025024-var-015-1330",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-lana-de-doble-faz-calabrese-2025022-var-002-1335",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-lana-de-doble-faz-calabrese-2025031-var-002-1340",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-lana-de-doble-faz-calabrese-2025035-var-015-1345",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-seda-calabrese-8025055-var-011-1350",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-lana-calabrese-7925065-var-001-1355",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "colonia-floris-honey-oud-1360",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-redondo-negro-y-plateado-detalle-borde-320",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-redondo-negro-y-plateado-321",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-ovalado-negro-y-plateado-322",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-cuadrado-interior-verde-318",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-redondo-ajedrez-324",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-ovalado-rayas-diagonales-326",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-cuadrado-tejido-pata-de-gallo-azul-329",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-ovalado-cristal-de-murano-flores-amarillas-y-negras-337",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-610-610",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-ovalado-cristal-de-murano-blanco-y-negro-332",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-grutescos-azul-oro-362",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-isla-de-san-michelle-guardi-367",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-rojo-raya-blanca-simonot-godard-377",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-rayas-amarillas-azules-y-verdes-simonot-godard-382",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-samurai-ii-372",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-verde-pistacho-y-blanco-simonot-godard-387",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-fucsia-y-verde-calabrese-392",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "colonia-floris-71-72-404",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-pajaros-fondo-azul-calabrese-397",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calzador-liebre-402",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "colonia-floris-elite-407",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "neceser-calabrese-412-412",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-trenzado-ante-camel-prats-417",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-cocodrilo-negro-simonnot-godard-tu-422",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-elefantes-morados-sobre-amarillo-438",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-motivos-verdes-443",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-rendondo-cristal-de-murano-flores-rojas-y-blancas-333",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-fantasia-puntos-verde-sobre-rojo-463",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-fantasia-monos-hamacas-468",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "botonadura-smoking-dorada-y-marron-348",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "barra-intercambiable-azul-lapislazuli-353",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-grutescos-azul-marino-363",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-azul-raya-blanca-simonot-godard-378",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-rosa-cuadros-simonot-godard-383",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-azul-celeste-detalle-raya-blanca-simonot-godard-388",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-cachemires-marrones-calabrese-393",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-san-jorge-373",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-campo-de-trigo-con-cipreses-van-gogh-358",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-lino-marino-cenidor-plano-47",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "panuelo-flor-estampada-lino-calabrese-398",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calzador-calavera-403",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "colonia-floris-jf-408",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-reversible-negro-marron-anderson-s-413",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-flores-fondo-azul-y-rojo-439",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-rendondo-cristal-de-murano-flores-blancas-334",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "neceser-calabrese-449-449",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gorra-marron-capelli-459",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-hilo-azulon-464",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-fantasia-peces-469",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-semecirculo-rayas-azules-344",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "barra-intercambiable-verde-malaquita-354",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-marron-raya-espiga-azul-simonot-godard-379",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-rosa-vivo-blanco-simonot-godard-384",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-rosa-salmon-detalle-raya-blanca-simonot-godard-389",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-tucanes-sobre-fondo-azul-calabrese-394",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-piel-marron-anderson-s-414",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-trenzado-ante-burdeos-prats-419",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-trenzado-tejido-tonos-verdes-prats-418",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-vidriera-palau-374",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-dama-nouveau-359",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-harmonia-microcosmica-364",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-saint-tropez-369",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "pantalon-lino-khaki-cenidor-plano-46",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "foulard-foulard-flores-fucsias-sobre-verde-440",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-palmeras-verdes-445",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-raya-azul-y-marino-470",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "botonadura-smoking-cuadrada-negra-350",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "barra-intercambiable-negra-onix-355",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-harmonia-microcosmica-verde-365",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-seda-blanca-375",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-amarillo-rayas-azules-rojas-y-verde-simonot-godard-380",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-azul-vivo-blanco-simonot-godard-385",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-seda-blanca-ascot-390",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-camaleon-amarilo-calabrese-395",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "bufanda-lana-amarillo-ascot-400",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "colonia-floris-bergamotto-405",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "colonia-floris-neroli-voyage-410",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-ante-marron-anderson-s-415",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-lana-motivos-naranjas-y-marron-441",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-sol-rojo-446",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-rendondo-cristal-de-murano-flores-negras-y-rojas-336",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pajarita-gales-azul-451",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calzoncillo-hojas-multicolor-425",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-piel-marron-prats-420",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-eneas-y-latino-360",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-ola-de-hokusai-370",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-seersucker-raya-verde-algodon-cenidor-pinza-44",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "pantalon-seersucker-raya-beige-algodon-cenidor-pinza-43",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "calcetin-algodon-hilo-negro-466",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-raya-azulon-y-marino-471",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "barra-intercambiable-marron-cuarzo-356",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-harmonia-microcosmica-marino-366",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-tonos-marrones-simonot-godart-381",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-tres-azules-raya-borde-simonot-godard-386",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-leopardo-y-cocodrilo-ascot-391",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-elefantes-azules-calabrese-396",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calzador-madera-401",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "colonia-floris-cefiro-406",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "colonia-floris-vert-fougere-411",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-ante-gris-anderson-s-416",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-motivos-amarillos-y-azules-442",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "neceser-calabrese-447-447",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-merino-marino-493",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "paraguas-rayas-granate-gris-y-negro-498",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calzoncillo-angelitos-427",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-tachuelas-cuero-marron-anderson-s-421",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-algodon-blanco-376",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "americana-smoking-azul-terciopelo-97",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-ascot-jacquard-503-503",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-hilo-verde-467",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-raya-fucsia-y-azul-472",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-lana-algodon-raya-gris-y-marino-473",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-raya-verde-y-amarilla-478",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-ascot-jacquard-508-508",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-ascot-lana-513-513",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-ascot-seda-estampada-518-518",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-jacquard-523-523",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-jacquard-528-528",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "americana-lana-lino-beige-bolsillo-parche-reda-1688",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "americana-pana-topo-bolsillo-de-parche-96",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "teba-prats-verde-oscuro-esterilla-lana-20",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "teba-clasica-beige-esterilla-lana-14",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-533-533",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-seeersucker-raya-marino-algodon-cenidor-pinza-1524",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "teba-prats-cheviot-lana-marron-1306",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "americana-tecnica-verde-1416",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "americana-lana-lino-beige-solapa-de-pico-88",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "teba-prats-verde-seersucker-algodon-23",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "teba-prats-marino-esterilla-lana-18",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "pantalon-pana-azul-cenidor-2-pliegues-1304",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "panuelo-grutescos-azul-naranja-361",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-algodon-mil-rayas-rosa-puno-sencillo-156",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-algodon-oxford-blanca-button-down-166",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "jersey-lambswool-verde-cesped-225",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-algodon-cordone-lisa-verde-1412",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-algodon-pincollar-raya-negra-puno-gemelo-160",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "americana-lana-marino-solapa-de-pico-86",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-algodon-fil-a-fil-azul-puno-gemelo-150",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-algodon-mil-rayas-celeste-puno-gemelo-155",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-538-538",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-543-543",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-548-548",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-553-553",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-lino-cuello-vista-rayas-anchas-azul-blanco-167",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "polera-punto-marino-190",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-franela-pata-de-gallo-pinza-cenidor-53",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-algodon-fil-a-fil-celeste-puno-gemelo-152",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-denim-button-down-171",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-algodon-cuadro-multicolor-175",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "jersey-lambswool-petroleo-226",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "guayabera-lino-marino-197",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-lino-cuello-vista-verde-168",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-lino-azul-rayas-blancas-button-down-206",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polera-punto-azul-celeste-194",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "pantalon-pana-topo-cenidor-plano-52",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "polera-punto-beige-189",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-cordone-693-693",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "guayabera-lino-rosa-196",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-oxford-blanca-raya-fina-azul-marino-878",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-lino-cuello-vista-blanco-button-down-960",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-algodon-oxford-rosa-button-down-164",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-algodon-rayas-multicolor-174",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "camisa-jfp-rayas-amarillas-1223",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-algodon-pique-verde-gran-sasso-771",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-algodon-pique-blanco-gran-sasso-774",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-cordone-3161t-1229",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-cargo-tecnico-verde-cenidor-plano-45",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "pantalon-algodon-khaki-cenidor-40",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "pantalon-algodon-blanco-cenidor-36",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "pantalon-franela-marron-pinza-cenidor-1375",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "pantalon-algodon-beige-cenidor-41",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "pantalon-lana-gris-marengo-plano-cinturon-62",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "pantalon-algodon-marino-cenidor-38",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "pantalon-tencel-beige-71",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-veranoo-marino-2-pinzas-cenidor-66",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "chino-luis-slim-0785-steel-g125-old-83",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-lana-gris-pinza-cinturon-58",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "leonardo-zip-ss-denim-azul-87co-9pl-4ea-285",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-lino-verde-antiguo-cenidor-903",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-tecnico-0500-sea-foam-71pa-29ea-292",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-cargo-tecnico-verde-claro-cenidor-plano-1186",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "pantalon-chino-verde-veranoo-mmx-899",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-chino-gris-meyer-904",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "leonardo-gs365-0001-white-88co-7pes-1182",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pan-chino-meyer-gris-1243",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pan-chino-p-gallo-lupus-meyer-1248",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "luis-slim-g125-old-0253-sand-85co-10-5pl-4-5ea-1183",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-m-c-azulon-prats-204",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-m-c-rosa-prats-203",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-algodon-gris-carnet-vp-1275",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-tencel-khaki-70",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-veranoo-gris-plano-cinturon-65",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "corbata-jacquard-calabrese-558-558",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-personality-563-563",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-prats-568-568",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-boliani-573-573",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-boliani-578-578",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-583-583",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-593-tu-593",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-598-tu-598",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-604-604",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-raya-marron-y-marino-474",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-raya-verde-y-azul-479",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-submarinistas-484",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-m-c-rojo-prats-202",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-m-c-pique-naranja-gran-sasso-141",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-m-c-punto-fino-sin-boton-khaki-gran-sasso-146",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-m-c-pique-fucsia-gran-sasso-140",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-m-c-punto-fino-caldero-gran-sasso-145",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-m-c-pique-rosa-gran-sasso-142",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-naranja-prats-232",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-m-c-pique-marino-gran-sasso-143",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-lana-gris-marengo-cuello-perkins-1310",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "jersey-smoking-2-botones-delantero-color-tostado-lana-1313",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-lana-beige-cuello-perkins-1309",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "jersey-verde-lana-de-puntos-1312",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-pana-caldero-cenidor-2-pliegues-50",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "jersey-pico-marino-prats-233",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-m-c-pique-celeste-gran-sasso-139",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-m-c-pique-verde-gran-sasso-144",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-verde-prats-234",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-m-c-blanco-prats-201",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-coral-prats-231",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-m-c-marino-prats-205",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cardigan-cuello-marinero-verde-gran-sasso-777",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-cuello-vuelto-8s-crudo-844",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-lana-algodon-raya-azul-y-marino-489",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-lana-negro-494",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "paraguas-rayas-marron-beige-y-negro-499",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-ascot-jacquard-504-504",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-ascot-jacquard-509-509",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-ascot-lana-514-514",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-ascot-seda-estampada-519-519",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-jacquard-524-524",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-529-529",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-celeste-prats-229",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-534-azul-534",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-539-539",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-544-544",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-549-549",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-crochet-calabrese-554-554",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-boliani-559-559",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-prats-564-564",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-prats-569-569",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-584-584",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-594-tu-594",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-599-tu-599",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-m-c-pata-de-gallo-tostado-gran-sasso-897",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-605-605",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-raya-ocre-y-azulon-475",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-rayas-amarillo-verde-y-azul-tu-480",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cardigan-grueso-blanco-de-8s-y-botones-en-cuello-gran-sasso-854",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-pico-lana-merino-verde-437-gran-sasso-896",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-lana-algodon-azul-y-marino-485",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-lana-algodon-raya-marron-y-gris-490",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-merino-verde-495",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "paraguas-rayas-verde-morado-y-marino-500",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-ascot-jacquard-505-505",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-ascot-jacquard-510-510",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-ascot-lana-515-515",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-ascot-seda-estampada-520-520",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-jacquard-525-525",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-530-530",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-535-535",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-540-540",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-545-gris-545",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-550-550",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-lana-calabrese-555-555",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-boliani-560-560",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-prats-570-570",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-rayas-cuello-marino-005-gran-sasso-1063",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-rosa-220-gran-sasso-1064",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camiseta-seda-azul-marino-597-gran-sasso-1062",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-fantasia-marino-gran-sasso-1231",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-cordone-algodon-marron-1236",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-m-c-pique-azul-celeste-gran-sasso-1171",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pantalon-pana-marron-cenidor-2-pliegues-49",
+      "active": true,
+      "web": true
+    },
+    {
+      "slug": "polo-vilebrequin-amarillo-1232",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-pique-vickers-fucsia-1233",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "polo-pique-vickers-marino-1234",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-personality-575-575",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-580-580",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-590-590",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-595-tu-595",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-601-tu-601",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-606-606",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-raya-roja-y-azul-476",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-lana-algodon-azul-y-marron-486",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jerseys-azul-rombos-1387",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-cremallera-celeste-1388",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-cuello-marinero-moteado-beige-1272",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-cremallera-rojo-1389",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "jersey-amarillo-cremll-vickers-1270",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-cottoncash-fantasia-rayas-naranja-beige-y-marron-491",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-merino-fantasia-marino-puntos-grises-496",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "paraguas-topos-501",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-ascot-jacquard-506-506",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-ascot-jacquard-511-511",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-ascot-seda-estampada-516-516",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-ascot-seda-estampada-521-521",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-jacquard-526-526",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-531-531",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-536-536",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-541-541",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-546-546",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-551-551",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-lana-calabrese-556-556",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-boliani-561-561",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-581-581",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-596-tu-596",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-602-tu-602",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-607-607",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-raya-roja-y-marino-477",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-rayas-gris-azul-beige-y-marron-tu-482",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-lana-algodon-azul-y-rojo-487",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-merino-azulon-492",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "paraguas-cuadros-rojos-y-amarillos-497",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "paraguas-verde-topos-rojos-502",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-ascot-jacquard-507-507",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-ascot-jacquard-512-512",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-ascot-seda-estampada-517-517",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-jacquard-522-522",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-jacquard-527-527",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-532-532",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-537-537",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-542-542",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-547-547",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-552-552",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-lana-calabrese-557-557",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-personality-562-562",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-azul-con-punto-blanco-567",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-boliani-572-572",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-personality-577-577",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-grenadine-marino-661",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-grenadine-azulon-666",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-587-587",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-592-592",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-597-tu-597",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-603-603",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-608-608",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-611-611",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-616-616",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-621-621",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-626-626",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-636-636",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-646-646",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-651-651",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-656-656",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-7-pliegues-negro-tu-671",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-calabrese-676-tu-676",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-calabrese-681-tu-681",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-702-702",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-707-simonnot-godard-tu-707",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-712-tu-712",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-717-tu-717",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-722-tu-722",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-727-tu-727",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-631-631",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-7-pliegues-marron-tu-672",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-737-tu-737",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-612-612",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-617-617",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-622-622",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-627-627",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-632-632",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-637-637",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-642-642",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-652-652",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-lambswool-negro-657",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-calabrese-677-tu-677",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-calabrese-682-tu-682",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-703-calabrese-tu-703",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-708-tu-708",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-718-tu-718",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-723-tu-723",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-728-tu-728",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-733-tu-733",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-613-613",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-618-618",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-623-623",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-628-cuero-azul-628",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-638-638",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-643-643",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-curvas-azul-y-rojo-653",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-lambswool-marino-658",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-7-pliegues-marino-tu-668",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-calabrese-678-tu-678",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-calabrese-683-tu-683",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-704-ascot-tu-704",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-714-tu-714",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-719-tu-719",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-724-tu-724",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-729-tu-729",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-730-tu-730",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-grenadine-negra-700",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-calabrese-tu-739",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-614-614",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-619-619",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-624-624",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-629-629",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-634-634",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-639-639",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-644-644",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-elefantes-azules-sobre-verde-654",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-lambswool-azulon-659",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-calabrese-679-tu-679",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-calabrese-684-tu-684",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-705-calabrese-tu-705",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-715-tu-715",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-720-tu-720",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-725-tu-725",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-620-620",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-625-625",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-630-630",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-635-635",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-640-cuero-negro-640",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-645-645",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-650-650",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-655-655",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-calabrese-675-tu-675",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-calabrese-680-tu-680",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-701-701",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-batalla-de-terheide-tu-706",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-prats-711-tu-711",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-716-tu-716",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-721-tu-721",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-726-tu-726",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-731-tu-731",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-798-tu-798",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-boliani-803-tu-803",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-808-tu-808",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-814-tu-814",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-820-tu-820",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-lana-de-doble-faz-calabrese-2025030-var-016-1327",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-lana-de-doble-faz-calabrese-2025024-var-001-1332",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-modal-cashmere-calabrese-7025072-var-015-1337",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-lana-de-doble-faz-calabrese-2025021-var-006-1342",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-seda-calabrese-8025057-var-003-1347",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-seda-calabrese-8025058-var-011-1357",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-albert-thurston-766-tu-766",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-cocodrilo-marron-simonnot-godard-tu-783",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-fantasia-puntos-azules-sobre-azul-tu-793",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-boliani-804-tu-804",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-816-tu-816",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-821-tu-821",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-cashmere-calabrese-7025066-var-021-1328",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-lana-de-doble-faz-calabrese-2025018-var-016-1333",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-lana-de-doble-faz-calabrese-2025036-var-002-1338",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-lana-de-doble-faz-calabrese-2025031-var-005-1343",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-lana-calabrese-7925068-var-011-1348",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-lana-calabrese-7925065-var-015-1353",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cazadora-ante-azul-valstar-761",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "aceite-afeitar-floris-tu-833",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cazadora-ante-verde-valstar-768",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "camisa-oxford-burdeos-sonrisa-823",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "foulard-lana-de-doble-faz-calabrese-972-tu-972",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-marinella-977-tu-977",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-marinella-982-tu-982",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-ovalado-cristal-de-murano-multicolor-tu-1006",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calzador-giraffa-tu-1011",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calzador-toro-tu-1016",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-prats-1021-tu-1021",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1036-tu-1036",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1041-tu-1041",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1047-tu-1047",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1052-tu-1052",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1057-tu-1057",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-1068-1068",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-1073-1073",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-trenzado-burdeos-cuero-anderson-s-1089",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-zapatillas-deporte-1099",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-marinella-973-tu-973",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "pajarita-negra-grande-nudo-hecho-tu-1031",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-marinella-978-tu-978",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-1007-tu-1007",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calzador-zebra-tu-1012",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calzador-cane-cocker-tu-1017",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-lino-blanco-tu-1027",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-1032-calabrese-tu-1032",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1037-tu-1037",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1042-tu-1042",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1048-tu-1048",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1053-tu-1053",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-marinella-1059-tu-1059",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-1069-1069",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-1074-1074",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cordones-overton-connaught-dorset-piel-negra-c-j-1105",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-haboutay-1111-tu-1111",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-marinella-974-tu-974",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-marinella-979-tu-979",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-estampada-998-tu-998",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-1003-tu-1003",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "paraguas-niagara-7079-8-tu-1008",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calzador-cavallo-tu-1013",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-prats-1023-tu-1023",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-1033-ascot-tu-1033",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-algodon-celeste-tu-1028",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-la-japonesa-monet-1079",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1038-tu-1038",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1043-tu-1043",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1049-tu-1049",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1054-tu-1054",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-marinella-1060-tu-1060",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "sneaker-prats-glent-1065",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-1075-1075",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-cuadro-blanco-borde-plateado-tu-1091",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-trenzado-marino-cuero-anderson-s-1096",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-haboutay-1112-tu-1112",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-marinella-975-tu-975",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-marinella-980-tu-980",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-topo-con-canale-turquesa-986",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-blanco-vivo-rosa-simonot-godard-tu-999",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "gemelo-1004-tu-1004",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "paraguas-negro-raso-6278-1-tu-1009",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calzador-germano-tu-1014",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-prats-1019-tu-1019",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-1034-calabrese-tu-1034",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1039-tu-1039",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1044-tu-1044",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1050-tu-1050",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1055-tu-1055",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-1071-1071",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-1076-1076",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-trenzado-verde-cuero-anderson-s-1087",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calcetin-algodon-negro-y-azul-1092",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-1070-1070",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-personality-1097-tu-1097",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-calabrese-seda-haboutay-1113-tu-1113",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-marinella-976-tu-976",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-marinella-981-tu-981",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "cinturon-elastico-beige-anderson-s-989",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "tirantes-prats-994-tu-994",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "panuelo-1000-calabrese-tu-1000",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "calzador-tucano-tu-1010",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1035-tu-1035",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1040-tu-1040",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1045-tu-1045",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1051-tu-1051",
+      "active": true,
+      "web": false
+    },
+    {
+      "slug": "corbata-marinella-1056-tu-1056",
+      "active": true,
+      "web": false
+    }
+  ],
+  "categories": [
+    {
+      "slug": "corbata",
+      "name": "Corbata",
+      "web": false
+    },
+    {
+      "slug": "tejido-tweed",
+      "name": "Tweed",
+      "web": false
+    },
+    {
+      "slug": "chaque",
+      "name": "Chaqué",
+      "web": false
+    },
+    {
+      "slug": "gemelos",
+      "name": "Gemelos",
+      "web": false
+    },
+    {
+      "slug": "cinturon",
+      "name": "Cinturón",
+      "web": false
+    },
+    {
+      "slug": "panuelo",
+      "name": "Pañuelo",
+      "web": false
+    },
+    {
+      "slug": "pajarita",
+      "name": "Pajarita",
+      "web": false
+    },
+    {
+      "slug": "camisa-vestir",
+      "name": "Camisa Vestir",
+      "web": true
+    },
+    {
+      "slug": "camisa-sport",
+      "name": "Camisa Sport",
+      "web": true
+    },
+    {
+      "slug": "smoking",
+      "name": "Smoking",
+      "web": true
+    },
+    {
+      "slug": "accesorios",
+      "name": "Accesorios",
+      "web": true
+    },
+    {
+      "slug": "pantalon",
+      "name": "Pantalones",
+      "web": false
+    },
+    {
+      "slug": "americana",
+      "name": "Americana",
+      "web": false
+    },
+    {
+      "slug": "camisa",
+      "name": "Camisa",
+      "web": false
+    },
+    {
+      "slug": "pantalon-vestir",
+      "name": "Pantalón Vestir",
+      "web": false
+    },
+    {
+      "slug": "pantalon-chino",
+      "name": "Pantalón Chino",
+      "web": false
+    },
+    {
+      "slug": "tejido-lana-virgen",
+      "name": "Lana virgen",
+      "web": false
+    },
+    {
+      "slug": "tejido-cachemira",
+      "name": "Cachemira",
+      "web": false
+    },
+    {
+      "slug": "tejido-algodon-100",
+      "name": "Algodón 100%",
+      "web": false
+    },
+    {
+      "slug": "tejido-lino-100",
+      "name": "Lino 100%",
+      "web": false
+    },
+    {
+      "slug": "tejido-seda",
+      "name": "Seda",
+      "web": false
+    },
+    {
+      "slug": "abrigo",
+      "name": "Abrigo",
+      "web": false
+    },
+    {
+      "slug": "punto",
+      "name": "Punto",
+      "web": false
+    },
+    {
+      "slug": "chaleco",
+      "name": "Chaleco",
+      "web": false
+    },
+    {
+      "slug": "ceremonia",
+      "name": "Ceremonia",
+      "web": false
+    },
+    {
+      "slug": "pantalones-lana",
+      "name": "Lana",
+      "web": false
+    },
+    {
+      "slug": "pantalones-algodon",
+      "name": "Algodón",
+      "web": false
+    },
+    {
+      "slug": "jersey",
+      "name": "Jersey",
+      "web": false
+    },
+    {
+      "slug": "tejido-otro",
+      "name": "Otro tejido",
+      "web": false
+    },
+    {
+      "slug": "ropa-interior-hogar",
+      "name": "Ropa Interior y Hogar",
+      "web": false
+    },
+    {
+      "slug": "traje-de-bano",
+      "name": "Traje de Baño",
+      "web": false
+    },
+    {
+      "slug": "varios",
+      "name": "Varios",
+      "web": false
+    },
+    {
+      "slug": "zapato",
+      "name": "Zapato",
+      "web": false
+    },
+    {
+      "slug": "servicio-arreglos",
+      "name": "Arreglos y ajustes",
+      "web": false
+    },
+    {
+      "slug": "trajes",
+      "name": "Trajes",
+      "web": true
+    },
+    {
+      "slug": "americanas-tebas",
+      "name": "Americanas | Tebas",
+      "web": true
+    },
+    {
+      "slug": "pantalones",
+      "name": "Pantalones",
+      "web": true
+    },
+    {
+      "slug": "camisas-poleras",
+      "name": "Camisas y Poleras",
+      "web": true
+    },
+    {
+      "slug": "prenda-exterior",
+      "name": "Prenda Exterior",
+      "web": true
+    },
+    {
+      "slug": "homewear",
+      "name": "Homewear",
+      "web": true
+    },
+    {
+      "slug": "servicio-otro",
+      "name": "Otro servicio",
+      "web": false
+    },
+    {
+      "slug": "tejido-mezcla-lana",
+      "name": "Mezcla lana",
+      "web": false
+    },
+    {
+      "slug": "tejido-viscosa",
+      "name": "Viscosa",
+      "web": false
+    },
+    {
+      "slug": "nueva-coleccion",
+      "name": "Nueva Colección",
+      "web": false
+    },
+    {
+      "slug": "panuelos",
+      "name": "Pañuelos",
+      "web": true
+    },
+    {
+      "slug": "smoking-accesorios",
+      "name": "Smoking",
+      "web": true
+    },
+    {
+      "slug": "tejido-terciopelo",
+      "name": "Terciopelo",
+      "web": false
+    },
+    {
+      "slug": "batas",
+      "name": "Batas",
+      "web": false
+    },
+    {
+      "slug": "pijamas",
+      "name": "Pijamas",
+      "web": false
+    },
+    {
+      "slug": "americanas",
+      "name": "Americanas",
+      "web": true
+    },
+    {
+      "slug": "corbatas",
+      "name": "Corbatas",
+      "web": false
+    },
+    {
+      "slug": "abrigos-anoraks",
+      "name": "Abrigos y Anoraks",
+      "web": true
+    },
+    {
+      "slug": "cazadoras",
+      "name": "Cazadoras",
+      "web": true
+    },
+    {
+      "slug": "gabardinas",
+      "name": "Gabardinas",
+      "web": true
+    },
+    {
+      "slug": "saharianas",
+      "name": "Saharianas",
+      "web": true
+    },
+    {
+      "slug": "tebas",
+      "name": "Tebas",
+      "web": true
+    },
+    {
+      "slug": "camisas",
+      "name": "Camisas",
+      "web": true
+    },
+    {
+      "slug": "sobrecamisas",
+      "name": "Sobrecamisas",
+      "web": true
+    },
+    {
+      "slug": "poleras",
+      "name": "Poleras",
+      "web": true
+    },
+    {
+      "slug": "complemento",
+      "name": "Complemento",
+      "web": true
+    },
+    {
+      "slug": "servicio-sastreria",
+      "name": "Servicio sastrería",
+      "web": false
+    }
+  ]
+}
