@@ -30,7 +30,7 @@ import { listClients, getClientMeasurements } from '@/actions/clients'
 import { updateOrderAction } from '@/actions/orders'
 import { listFabrics } from '@/actions/fabrics'
 import { createClient } from '@/lib/supabase/client'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, fuzzyFilterSort } from '@/lib/utils'
 import { usePermissions } from '@/hooks/use-permissions'
 
 type EditableLine = {
@@ -183,55 +183,57 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
   type OfficialOption = { id: string; name: string; specialty?: string | null }
   const [cortadorPopoverFor, setCortadorPopoverFor] = useState<string | null>(null)
   const [cortadorSearch, setCortadorSearch] = useState('')
-  const [cortadorResults, setCortadorResults] = useState<OfficialOption[]>([])
+  const [cortadorAll, setCortadorAll] = useState<OfficialOption[]>([])
   const [isSearchingCortador, setIsSearchingCortador] = useState(false)
 
   const [oficialPopoverFor, setOficialPopoverFor] = useState<string | null>(null)
   const [oficialSearch, setOficialSearch] = useState('')
-  const [oficialResults, setOficialResults] = useState<OfficialOption[]>([])
+  const [oficialAll, setOficialAll] = useState<OfficialOption[]>([])
   const [isSearchingOficial, setIsSearchingOficial] = useState(false)
 
-  // Búsqueda de cortadores (specialty ILIKE '%Cortador%').
+  // Cargamos TODOS los cortadores activos (specialty ILIKE '%Cortador%') una sola
+  // vez al abrir el popover. El filtrado por término se hace en cliente con
+  // fuzzyFilterSort → instantáneo, tolerante a erratas y sin acentos.
   useEffect(() => {
-    if (!cortadorPopoverFor) return
-    const term = cortadorSearch.trim()
-    const timeout = setTimeout(async () => {
-      setIsSearchingCortador(true)
-      const sb = createClient()
-      let q = sb.from('officials')
-        .select('id, name, specialty')
-        .ilike('specialty', '%Cortador%')
-        .eq('is_active', true)
-        .order('name')
-        .limit(10)
-      if (term) q = q.ilike('name', `%${term}%`)
-      const { data } = await q
-      if (data) setCortadorResults(data as OfficialOption[])
-      setIsSearchingCortador(false)
-    }, term ? 300 : 0)
-    return () => clearTimeout(timeout)
-  }, [cortadorPopoverFor, cortadorSearch])
+    if (!cortadorPopoverFor || cortadorAll.length > 0) return
+    setIsSearchingCortador(true)
+    const sb = createClient()
+    sb.from('officials')
+      .select('id, name, specialty')
+      .ilike('specialty', '%Cortador%')
+      .eq('is_active', true)
+      .order('name')
+      .then(({ data }) => {
+        if (data) setCortadorAll(data as OfficialOption[])
+        setIsSearchingCortador(false)
+      })
+  }, [cortadorPopoverFor, cortadorAll.length])
 
-  // Búsqueda de oficiales (specialty NOT ILIKE '%Cortador%').
+  // Ídem oficiales (specialty NOT ILIKE '%Cortador%').
   useEffect(() => {
-    if (!oficialPopoverFor) return
-    const term = oficialSearch.trim()
-    const timeout = setTimeout(async () => {
-      setIsSearchingOficial(true)
-      const sb = createClient()
-      let q = sb.from('officials')
-        .select('id, name, specialty')
-        .not('specialty', 'ilike', '%Cortador%')
-        .eq('is_active', true)
-        .order('name')
-        .limit(10)
-      if (term) q = q.ilike('name', `%${term}%`)
-      const { data } = await q
-      if (data) setOficialResults(data as OfficialOption[])
-      setIsSearchingOficial(false)
-    }, term ? 300 : 0)
-    return () => clearTimeout(timeout)
-  }, [oficialPopoverFor, oficialSearch])
+    if (!oficialPopoverFor || oficialAll.length > 0) return
+    setIsSearchingOficial(true)
+    const sb = createClient()
+    sb.from('officials')
+      .select('id, name, specialty')
+      .not('specialty', 'ilike', '%Cortador%')
+      .eq('is_active', true)
+      .order('name')
+      .then(({ data }) => {
+        if (data) setOficialAll(data as OfficialOption[])
+        setIsSearchingOficial(false)
+      })
+  }, [oficialPopoverFor, oficialAll.length])
+
+  // Resultados filtrados/rankeados en cliente por el término escrito.
+  const cortadorResults = useMemo(
+    () => fuzzyFilterSort(cortadorAll, cortadorSearch, (o) => `${o.name} ${o.specialty ?? ''}`),
+    [cortadorAll, cortadorSearch],
+  )
+  const oficialResults = useMemo(
+    () => fuzzyFilterSort(oficialAll, oficialSearch, (o) => `${o.name} ${o.specialty ?? ''}`),
+    [oficialAll, oficialSearch],
+  )
 
   // Medidas del cliente indexadas por garment_type_id (sólo registros actuales).
   // Las usamos para precargar `configuration` al añadir una línea y al cambiar
@@ -831,7 +833,6 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                                   } else if (cortadorPopoverFor === l._key) {
                                     setCortadorPopoverFor(null)
                                     setCortadorSearch('')
-                                    setCortadorResults([])
                                   }
                                 }}
                               >
@@ -897,7 +898,6 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                                   } else if (oficialPopoverFor === l._key) {
                                     setOficialPopoverFor(null)
                                     setOficialSearch('')
-                                    setOficialResults([])
                                   }
                                 }}
                               >

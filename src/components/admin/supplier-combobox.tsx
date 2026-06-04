@@ -12,7 +12,7 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command'
-import { cn } from '@/lib/utils'
+import { cn, fuzzyScore } from '@/lib/utils'
 
 export type SupplierOption = {
   id: string
@@ -72,7 +72,7 @@ export function SupplierCombobox({
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[320px] p-0" align="start">
-        <Command>
+        <Command filter={(itemValue, search) => fuzzyScore(itemValue, search)}>
           <CommandInput placeholder="Buscar por nombre, NIF o código…" />
           <CommandList>
             <CommandEmpty>Sin resultados</CommandEmpty>

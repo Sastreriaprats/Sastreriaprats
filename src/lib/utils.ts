@@ -15,6 +15,72 @@ export function normalizeSearchTerm(s: string): string {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
 }
 
+/**
+ * Puntúa cuánto coincide `needle` dentro de `haystack` para buscadores en cliente
+ * (comboboxes cmdk, listas pequeñas). Devuelve 0 = sin coincidencia (cmdk lo
+ * oculta); >0 = mejor cuanto mayor.
+ *
+ * Características (equivalentes "inteligentes" de los buscadores de servidor):
+ *  - Insensible a acentos y mayúsculas (`normalizeSearchTerm`).
+ *  - Multipalabra: cada token del needle debe coincidir (AND); si uno falla → 0.
+ *    Así "jose 12" exige ambos, y el orden no importa.
+ *  - Tolerante: por token, primero substring (score alto, con bonus si está al
+ *    inicio / inicio de palabra) y, si no, subsecuencia ordenada de caracteres
+ *    (score bajo) → encuentra "jrg" en "jorge" o erratas por letras omitidas.
+ *  - needle vacío → 1 (mostrar todo).
+ */
+export function fuzzyScore(haystack: string, needle: string): number {
+  const h = normalizeSearchTerm(haystack)
+  const n = normalizeSearchTerm(needle)
+  if (!n) return 1
+  if (!h) return 0
+
+  const tokens = n.split(/\s+/).filter(Boolean)
+  let total = 0
+  for (const token of tokens) {
+    const s = scoreToken(h, token)
+    if (s === 0) return 0 // AND entre tokens: si uno no aparece, descartamos
+    total += s
+  }
+  return total / tokens.length
+}
+
+function scoreToken(haystack: string, token: string): number {
+  const idx = haystack.indexOf(token)
+  if (idx !== -1) {
+    // Substring exacto: muy buena señal. Bonus por estar al principio o al
+    // inicio de una palabra (lo que un usuario espera ver primero).
+    let score = 1
+    if (idx === 0) score += 0.5
+    else if (haystack[idx - 1] === ' ') score += 0.3
+    return score
+  }
+  // Subsecuencia ordenada (tolera letras intercaladas/omitidas): señal débil.
+  let hi = 0
+  let matched = 0
+  for (let ti = 0; ti < token.length; ti++) {
+    const found = haystack.indexOf(token[ti], hi)
+    if (found === -1) return 0
+    hi = found + 1
+    matched++
+  }
+  return (matched / token.length) * 0.4
+}
+
+/**
+ * Filtra y ordena `items` por relevancia respecto a `needle` usando `fuzzyScore`
+ * sobre el texto que devuelve `key`. Pensado para listas pequeñas en cliente
+ * (oficiales, etc.). needle vacío → devuelve todo en su orden original.
+ */
+export function fuzzyFilterSort<T>(items: T[], needle: string, key: (t: T) => string): T[] {
+  if (!needle.trim()) return items
+  return items
+    .map((item) => ({ item, score: fuzzyScore(key(item), needle) }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((x) => x.item)
+}
+
 export function formatCurrency(amount: number | null | undefined): string {
   if (amount === null || amount === undefined) return '-'
   return new Intl.NumberFormat('es-ES', {

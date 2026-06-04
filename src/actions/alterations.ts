@@ -3,6 +3,7 @@
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
+import { resolveClientIdsForSearch } from '@/lib/server/query-helpers'
 import { normalizeSearchTerm } from '@/lib/utils'
 import type {
   AlterationStatus,
@@ -79,14 +80,9 @@ export const listAlterations = protectedAction<
         // Sanitiza caracteres que rompen el parser .or() de PostgREST.
         const safeTerm = term.replace(/[,()*%:/\\]/g, ' ').trim()
         if (safeTerm) {
-          // Pre-busca client_ids matcheando contra clients.search_text
-          // (unaccent + lower) — mismo patrón que listOrders.
-          const { data: matchedClients } = await ctx.adminClient
-            .from('clients')
-            .select('id')
-            .ilike('search_text', `%${safeTerm}%`)
-            .limit(500)
-          const clientIds = (matchedClients ?? []).map((r: { id: string }) => r.id)
+          // Pre-busca client_ids contra clients.search_text (substring) y, si no
+          // hay match, fallback difuso — mismo patrón que listOrders.
+          const clientIds = await resolveClientIdsForSearch(ctx.adminClient, safeTerm)
           const parts = [
             `alteration_number.ilike.%${safeTerm}%`,
             `description.ilike.%${safeTerm}%`,

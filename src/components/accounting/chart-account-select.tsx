@@ -5,7 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Button } from '@/components/ui/button'
 import { Check, ChevronsUpDown } from 'lucide-react'
-import { cn, normalizeSearchTerm } from '@/lib/utils'
+import { cn, fuzzyScore, normalizeSearchTerm } from '@/lib/utils'
 
 export type ChartAccountOption = { account_code: string; name: string; account_type?: string }
 
@@ -30,7 +30,7 @@ export function ChartAccountSelect({ value, accounts, onChange, placeholder = 'C
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-        <Command filter={(itemValue, search) => itemValue.includes(normalizeSearchTerm(search)) ? 1 : 0}>
+        <Command filter={(itemValue, search) => fuzzyScore(itemValue, search)}>
           <CommandInput placeholder="Buscar por código o nombre…" />
           <CommandList>
             <CommandEmpty>Sin cuentas</CommandEmpty>
