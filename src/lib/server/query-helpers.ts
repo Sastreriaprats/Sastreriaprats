@@ -49,6 +49,14 @@ export async function queryList<T>(
         query = query.lte(key, value.slice(2))
       } else if (typeof value === 'string' && value.startsWith('!=')) {
         query = query.neq(key, value.slice(2))
+      } else if (typeof value === 'object') {
+        // Rango sobre la misma columna: { gte?, lte?, gt?, lt? }. Útil para
+        // filtrar por fechas (desde/hasta) sin necesitar dos claves distintas.
+        const r = value as Record<string, unknown>
+        if (r.gte !== undefined && r.gte !== '') query = query.gte(key, r.gte)
+        if (r.lte !== undefined && r.lte !== '') query = query.lte(key, r.lte)
+        if (r.gt !== undefined && r.gt !== '') query = query.gt(key, r.gt)
+        if (r.lt !== undefined && r.lt !== '') query = query.lt(key, r.lt)
       } else {
         query = query.eq(key, value)
       }

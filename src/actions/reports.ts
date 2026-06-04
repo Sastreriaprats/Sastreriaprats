@@ -465,7 +465,7 @@ export const getSalesByEmployee = protectedAction<
   { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel; tax_mode?: TaxMode },
   {
     employee_id: string; employee_name: string
-    pos_ops: number; pos_total: number
+    pos_ops: number; pos_total: number; boutique_total: number
     tailoring_ops: number; tailoring_total: number
     tailor_orders_count: number; tailor_orders_revenue: number
     total: number
@@ -480,7 +480,7 @@ export const getSalesByEmployee = protectedAction<
 
     let saleLinesQ = ctx.adminClient
       .from('sale_lines')
-      .select('sale_id, line_total, tax_rate, sales!inner(salesperson_id, status, store_id, created_at)')
+      .select('sale_id, line_total, tax_rate, sales!inner(salesperson_id, status, store_id, created_at, sale_type)')
       .gte('sales.created_at', start_date)
       .lte('sales.created_at', end_date + 'T23:59:59')
       .eq('sales.status', 'completed')
@@ -509,7 +509,7 @@ export const getSalesByEmployee = protectedAction<
 
     const employees: Record<string, {
       name: string
-      saleIds: Set<string>; pos_total: number
+      saleIds: Set<string>; pos_total: number; boutique_total: number
       tailoring_ops: number; tailoring_total: number
       tailor_orders_count: number; tailor_orders_revenue: number
     }> = {}
@@ -517,7 +517,7 @@ export const getSalesByEmployee = protectedAction<
     const ensure = (id: string) => {
       if (!employees[id]) employees[id] = {
         name: id, saleIds: new Set(),
-        pos_total: 0, tailoring_ops: 0, tailoring_total: 0,
+        pos_total: 0, boutique_total: 0, tailoring_ops: 0, tailoring_total: 0,
         tailor_orders_count: 0, tailor_orders_revenue: 0,
       }
       return employees[id]
@@ -529,7 +529,11 @@ export const getSalesByEmployee = protectedAction<
       const e = ensure(empId)
       if (line.sale_id) e.saleIds.add(String(line.sale_id))
       const lt = (line.line_total as number) || 0
-      e.pos_total += net ? lineNet(lt, (line as any).tax_rate) : lt
+      const amount = net ? lineNet(lt, (line as any).tax_rate) : lt
+      e.pos_total += amount
+      // Boutique = ventas de producto de tienda (sale_type 'boutique'), separadas
+      // del resto de operaciones del TPV (sastrería cobrada en caja, etc.).
+      if ((sale?.sale_type ?? '') === 'boutique') e.boutique_total += amount
     }
 
     for (const payment of paymentsRes.data || []) {
@@ -564,6 +568,7 @@ export const getSalesByEmployee = protectedAction<
         employee_name: d.name,
         pos_ops: d.saleIds.size,
         pos_total: d.pos_total,
+        boutique_total: d.boutique_total,
         tailoring_ops: d.tailoring_ops,
         tailoring_total: d.tailoring_total,
         tailor_orders_count: d.tailor_orders_count,

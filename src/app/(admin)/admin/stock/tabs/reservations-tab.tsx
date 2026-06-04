@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Loader2, Plus, ChevronLeft, ChevronRight, X, Check, Pencil, Bookmark, Clock, Printer, Euro, Banknote, CreditCard, Smartphone, ArrowRightLeft, Eye } from 'lucide-react'
@@ -541,6 +541,20 @@ export function ReservationsTab() {
               )
             })}
           </TableBody>
+          {!loading && reservations.length > 0 && (
+            <TableFooter>
+              <TableRow>
+                <TableCell colSpan={5} className="text-right font-medium">
+                  Totales (página actual · {reservations.length} reservas)
+                </TableCell>
+                <TableCell className="text-right text-xs whitespace-nowrap">
+                  <div className="font-bold tabular-nums">{formatCurrency(reservations.reduce((s, r) => s + Number(r.total || 0), 0))}</div>
+                  <div className="text-emerald-700 tabular-nums">+{formatCurrency(reservations.reduce((s, r) => s + Number(r.total_paid || 0), 0))}</div>
+                </TableCell>
+                <TableCell colSpan={3} />
+              </TableRow>
+            </TableFooter>
+          )}
         </Table>
       </div>
 

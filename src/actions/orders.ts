@@ -83,6 +83,12 @@ export const listOrders = protectedAction<ListParams & { status?: string }, List
         .not('status', 'in', '("delivered","cancelled")')
       if (searchOr) query = query.or(searchOr)
       if (params.filters?.order_type) query = query.eq('order_type', params.filters.order_type)
+      const overdueDateRange = params.filters?.order_date
+      if (overdueDateRange && typeof overdueDateRange === 'object') {
+        const r = overdueDateRange as Record<string, unknown>
+        if (r.gte !== undefined && r.gte !== '') query = query.gte('order_date', r.gte)
+        if (r.lte !== undefined && r.lte !== '') query = query.lte('order_date', r.lte)
+      }
       if (params.storeId) query = query.eq('store_id', params.storeId)
       query = query.order(params.sortBy || 'order_date', { ascending: params.sortOrder === 'asc' })
       const page = params.page || 1
@@ -119,6 +125,13 @@ export const listOrders = protectedAction<ListParams & { status?: string }, List
       else if (typeof value === 'string' && value.startsWith('>=')) statusQuery = statusQuery.gte(key, value.slice(2))
       else if (typeof value === 'string' && value.startsWith('<=')) statusQuery = statusQuery.lte(key, value.slice(2))
       else if (typeof value === 'string' && value.startsWith('!=')) statusQuery = statusQuery.neq(key, value.slice(2))
+      else if (typeof value === 'object') {
+        const r = value as Record<string, unknown>
+        if (r.gte !== undefined && r.gte !== '') statusQuery = statusQuery.gte(key, r.gte)
+        if (r.lte !== undefined && r.lte !== '') statusQuery = statusQuery.lte(key, r.lte)
+        if (r.gt !== undefined && r.gt !== '') statusQuery = statusQuery.gt(key, r.gt)
+        if (r.lt !== undefined && r.lt !== '') statusQuery = statusQuery.lt(key, r.lt)
+      }
       else statusQuery = statusQuery.eq(key, value)
     }
     if (searchOr) statusQuery = statusQuery.or(searchOr)
@@ -138,7 +151,58 @@ export const listOrders = protectedAction<ListParams & { status?: string }, List
 
     const totalAll = (statusData || []).length
 
-    return success({ ...result, statusCounts, totalAll })
+    // Sumatorios del conjunto filtrado COMPLETO (no solo la página visible), para
+    // pintar la fila de totales del listado. Se replican exactamente las mismas
+    // condiciones que la consulta de datos, sin paginar (tope de seguridad 100k).
+    let sumsQuery = ctx.adminClient
+      .from('tailoring_orders')
+      .select('total, total_paid, total_pending')
+    if (isOverdue) {
+      sumsQuery = sumsQuery
+        .lt('estimated_delivery_date', today)
+        .not('status', 'in', '("delivered","cancelled")')
+      if (params.filters?.order_type) sumsQuery = sumsQuery.eq('order_type', params.filters.order_type)
+      const dr = params.filters?.order_date
+      if (dr && typeof dr === 'object') {
+        const r = dr as Record<string, unknown>
+        if (r.gte !== undefined && r.gte !== '') sumsQuery = sumsQuery.gte('order_date', r.gte)
+        if (r.lte !== undefined && r.lte !== '') sumsQuery = sumsQuery.lte('order_date', r.lte)
+      }
+    } else {
+      for (const [key, value] of Object.entries(filters)) {
+        if (value === undefined || value === null || value === '') continue
+        if (Array.isArray(value)) sumsQuery = sumsQuery.in(key, value)
+        else if (typeof value === 'boolean') sumsQuery = sumsQuery.eq(key, value)
+        else if (typeof value === 'string' && value.startsWith('>=')) sumsQuery = sumsQuery.gte(key, value.slice(2))
+        else if (typeof value === 'string' && value.startsWith('<=')) sumsQuery = sumsQuery.lte(key, value.slice(2))
+        else if (typeof value === 'string' && value.startsWith('!=')) sumsQuery = sumsQuery.neq(key, value.slice(2))
+        else if (typeof value === 'object') {
+          const r = value as Record<string, unknown>
+          if (r.gte !== undefined && r.gte !== '') sumsQuery = sumsQuery.gte(key, r.gte)
+          if (r.lte !== undefined && r.lte !== '') sumsQuery = sumsQuery.lte(key, r.lte)
+          if (r.gt !== undefined && r.gt !== '') sumsQuery = sumsQuery.gt(key, r.gt)
+          if (r.lt !== undefined && r.lt !== '') sumsQuery = sumsQuery.lt(key, r.lt)
+        }
+        else sumsQuery = sumsQuery.eq(key, value)
+      }
+    }
+    if (searchOr) sumsQuery = sumsQuery.or(searchOr)
+    if (params.storeId) sumsQuery = sumsQuery.eq('store_id', params.storeId)
+    const { data: sumsData } = await sumsQuery.range(0, 99999)
+    const aggregates = (sumsData || []).reduce(
+      (
+        acc: { total: number; total_paid: number; total_pending: number },
+        r: { total: number | string | null; total_paid: number | string | null; total_pending: number | string | null },
+      ) => {
+        acc.total += Number(r.total) || 0
+        acc.total_paid += Number(r.total_paid) || 0
+        acc.total_pending += Number(r.total_pending) || 0
+        return acc
+      },
+      { total: 0, total_paid: 0, total_pending: 0 },
+    )
+
+    return success({ ...result, statusCounts, totalAll, aggregates })
   }
 )
 

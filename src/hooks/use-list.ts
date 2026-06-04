@@ -64,6 +64,8 @@ export function useList<T>(
   const [isLoading, setIsLoading] = useState(true)
   const [statusCounts, setStatusCounts] = useState<Record<string, number> | undefined>(undefined)
   const [totalAll, setTotalAll] = useState<number | undefined>(undefined)
+  // Sumatorios del conjunto filtrado completo, si la acción los devuelve.
+  const [aggregates, setAggregates] = useState<Record<string, number> | undefined>(undefined)
 
   const updateUrl = useCallback((params: Record<string, string | null>) => {
     if (!sync) return
@@ -121,6 +123,9 @@ export function useList<T>(
         }
         if ('totalAll' in result.data && result.data.totalAll != null) {
           setTotalAll(result.data.totalAll as number)
+        }
+        if ('aggregates' in result.data && result.data.aggregates != null) {
+          setAggregates(result.data.aggregates as Record<string, number>)
         }
       } else {
         toast.error(result.error)
@@ -184,6 +189,6 @@ export function useList<T>(
     data, total, totalPages, page, setPage,
     search, setSearch, sortBy, sortOrder, toggleSort,
     filters, setFilters, isLoading, refresh, pageSize,
-    statusCounts, totalAll,
+    statusCounts, totalAll, aggregates,
   }
 }

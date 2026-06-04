@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter,
 } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
@@ -140,11 +140,15 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
       .then(({ count }) => setOnlineActiveCount(count ?? 0))
   }, [])
 
+  // Rango de fechas (sobre order_date) para el tab Sastrería.
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+
   const {
     data: orders, total, totalPages, page, setPage,
     search, setSearch, sortBy, sortOrder, toggleSort,
     filters, setFilters, isLoading, refresh, pageSize,
-    statusCounts: statusCountsFromApi, totalAll,
+    statusCounts: statusCountsFromApi, totalAll, aggregates,
   } = useList(listOrders, {
     pageSize: 25,
     defaultSort: 'order_date',
@@ -178,10 +182,28 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
     setFilters(prev => ({ ...prev, order_type: v !== 'all' ? v : undefined }))
   }
 
-  const hasActiveFilters = statusFilter !== 'all' || subTypeFilter !== 'all'
+  // Aplica el rango de fechas al filtro `order_date` (objeto { gte, lte }) que
+  // listOrders/queryList saben interpretar. Vacío en ambos extremos → se quita.
+  const applyDateRange = (from: string, to: string) => {
+    setDateFrom(from)
+    setDateTo(to)
+    setFilters(prev => {
+      const next = { ...prev }
+      if (from || to) {
+        next.order_date = { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) }
+      } else {
+        delete next.order_date
+      }
+      return next
+    })
+  }
+
+  const hasActiveFilters = statusFilter !== 'all' || subTypeFilter !== 'all' || !!dateFrom || !!dateTo
   const clearAllFilters = () => {
     setStatusFilter('all')
     setSubTypeFilter('all')
+    setDateFrom('')
+    setDateTo('')
     setFilters({})
     router.replace('/admin/pedidos', { scroll: false })
   }
@@ -345,6 +367,34 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                   onChange={(e) => setSearch(e.target.value)}
                 />
               </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-muted-foreground">Desde:</span>
+                <Input
+                  type="date"
+                  className="h-8 text-sm w-[150px]"
+                  value={dateFrom}
+                  max={dateTo || undefined}
+                  onChange={(e) => applyDateRange(e.target.value, dateTo)}
+                />
+                <span className="text-xs text-muted-foreground">Hasta:</span>
+                <Input
+                  type="date"
+                  className="h-8 text-sm w-[150px]"
+                  value={dateTo}
+                  min={dateFrom || undefined}
+                  onChange={(e) => applyDateRange(dateFrom, e.target.value)}
+                />
+                {(dateFrom || dateTo) && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => applyDateRange('', '')}
+                  >
+                    <X className="h-3 w-3" />
+                  </Button>
+                )}
+              </div>
             </div>
 
             {/* Subtipo (Artesanal / Industrial) como pills */}
@@ -413,6 +463,12 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                   <Badge variant="secondary" className="text-xs gap-1 pr-1">
                     {subTypeFilter === 'artesanal' ? 'Artesanal' : 'Industrial'}
                     <button type="button" onClick={() => applySubType('all')} className="ml-0.5 hover:text-foreground"><X className="h-3 w-3" /></button>
+                  </Badge>
+                )}
+                {(dateFrom || dateTo) && (
+                  <Badge variant="secondary" className="text-xs gap-1 pr-1">
+                    {dateFrom ? formatDate(dateFrom) : '…'} – {dateTo ? formatDate(dateTo) : '…'}
+                    <button type="button" onClick={() => applyDateRange('', '')} className="ml-0.5 hover:text-foreground"><X className="h-3 w-3" /></button>
                   </Badge>
                 )}
               </div>
@@ -520,6 +576,19 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                       )
                     })}
                   </TableBody>
+                  {!isLoading && orders.length > 0 && aggregates && (
+                    <TableFooter>
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-right font-medium">
+                          Totales{total > orders.length ? ` (${total} pedidos del filtro)` : ''}
+                        </TableCell>
+                        <TableCell className="font-bold tabular-nums">{formatCurrency(aggregates.total)}</TableCell>
+                        <TableCell className="font-bold tabular-nums">{formatCurrency(aggregates.total_paid)}</TableCell>
+                        <TableCell className="font-bold tabular-nums text-amber-600">{formatCurrency(aggregates.total_pending)}</TableCell>
+                        <TableCell colSpan={2} />
+                      </TableRow>
+                    </TableFooter>
+                  )}
                 </Table>
               </div>
 
@@ -624,6 +693,19 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                   </TableRow>
                 ))}
               </TableBody>
+              {!loadingSupplier && filteredSupplierOrders.length > 0 && (
+                <TableFooter>
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-right font-medium">
+                      Total ({filteredSupplierOrders.length} pedidos)
+                    </TableCell>
+                    <TableCell className="font-bold tabular-nums">
+                      {formatCurrency(filteredSupplierOrders.reduce((s: number, so: any) => s + (Number(so.total) || 0), 0))}
+                    </TableCell>
+                    <TableCell colSpan={3} />
+                  </TableRow>
+                </TableFooter>
+              )}
             </Table>
           </div>
         </TabsContent>

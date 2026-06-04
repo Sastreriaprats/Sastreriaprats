@@ -64,7 +64,7 @@ type StoreItem = { store_id: string; store_name: string; pos: number; tailoring:
 
 type EmployeeItem = {
   employee_id: string; employee_name: string
-  pos_ops: number; pos_total: number
+  pos_ops: number; pos_total: number; boutique_total: number
   tailoring_ops: number; tailoring_total: number
   tailor_orders_count: number; tailor_orders_revenue: number
   total: number
@@ -260,7 +260,7 @@ export function ReportsContent() {
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = `informe-prats-${activeTab}-${dateRange.start}-${dateRange.end}.csv`
+        a.download = `informe-prats-${activeTab}-${dateRange.start}-${dateRange.end}.xlsx`
         a.click()
         URL.revokeObjectURL(url)
         toast.success('Excel descargado')
@@ -600,6 +600,7 @@ function EmployeeTab({ data }: { data: EmployeeItem[] }) {
   if (!data.length) return <p className="text-center text-muted-foreground py-12">Sin datos para el periodo seleccionado</p>
 
   const hasTpv = data.some(e => e.pos_ops > 0 || e.pos_total > 0)
+  const hasBoutique = data.some(e => e.boutique_total > 0)
   const hasTailoring = data.some(e => e.tailoring_ops > 0 || e.tailoring_total > 0)
   const hasTailorOrders = data.some(e => e.tailor_orders_count > 0 || e.tailor_orders_revenue > 0)
 
@@ -614,6 +615,7 @@ function EmployeeTab({ data }: { data: EmployeeItem[] }) {
                 <TableHead>Empleado</TableHead>
                 {hasTpv && <TableHead className="text-right">Ventas TPV</TableHead>}
                 {hasTpv && <TableHead className="text-right">Total TPV</TableHead>}
+                {hasBoutique && <TableHead className="text-right">Boutique</TableHead>}
                 {hasTailoring && <TableHead className="text-right">Cobros Sast.</TableHead>}
                 {hasTailoring && <TableHead className="text-right">Total Sast.</TableHead>}
                 {hasTailorOrders && <TableHead className="text-right">Pedidos sastre</TableHead>}
@@ -627,6 +629,7 @@ function EmployeeTab({ data }: { data: EmployeeItem[] }) {
                   <TableCell className="font-medium">{e.employee_name}</TableCell>
                   {hasTpv && <TableCell className="text-right text-muted-foreground">{e.pos_ops}</TableCell>}
                   {hasTpv && <TableCell className="text-right">{formatCurrency(e.pos_total)}</TableCell>}
+                  {hasBoutique && <TableCell className="text-right">{formatCurrency(e.boutique_total)}</TableCell>}
                   {hasTailoring && <TableCell className="text-right text-muted-foreground">{e.tailoring_ops}</TableCell>}
                   {hasTailoring && <TableCell className="text-right">{formatCurrency(e.tailoring_total)}</TableCell>}
                   {hasTailorOrders && <TableCell className="text-right text-muted-foreground">{e.tailor_orders_count}</TableCell>}
@@ -639,6 +642,7 @@ function EmployeeTab({ data }: { data: EmployeeItem[] }) {
                   <TableCell>TOTAL</TableCell>
                   {hasTpv && <TableCell className="text-right">{data.reduce((s, e) => s + e.pos_ops, 0)}</TableCell>}
                   {hasTpv && <TableCell className="text-right">{formatCurrency(data.reduce((s, e) => s + e.pos_total, 0))}</TableCell>}
+                  {hasBoutique && <TableCell className="text-right">{formatCurrency(data.reduce((s, e) => s + e.boutique_total, 0))}</TableCell>}
                   {hasTailoring && <TableCell className="text-right">{data.reduce((s, e) => s + e.tailoring_ops, 0)}</TableCell>}
                   {hasTailoring && <TableCell className="text-right">{formatCurrency(data.reduce((s, e) => s + e.tailoring_total, 0))}</TableCell>}
                   {hasTailorOrders && <TableCell className="text-right">{data.reduce((s, e) => s + e.tailor_orders_count, 0)}</TableCell>}
@@ -650,6 +654,12 @@ function EmployeeTab({ data }: { data: EmployeeItem[] }) {
           </Table>
           <div className="text-[11px] text-muted-foreground mt-3 space-y-1">
             <p>Esta tabla muestra el dinero que <strong>pasó por las manos</strong> de cada empleado en el periodo.</p>
+            {hasBoutique && (
+              <p>
+                <strong>Boutique</strong>: parte del <strong>Total TPV</strong> que corresponde a venta de
+                producto de tienda (no incluye cobros de sastrería hechos en caja).
+              </p>
+            )}
             {hasTailoring && (
               <p>
                 <strong>Cobros Sast.</strong>: pagos de sastrería registrados por este empleado en su POS, incluso
