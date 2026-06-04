@@ -298,6 +298,8 @@ export function ProductDetailContent({
               <TableBody>
                 {variants.map((v: any) => {
                   const variantTotal = v.stock_levels?.reduce((s: number, sl: any) => s + (sl.quantity || 0), 0) || 0
+                  const variantReserved = v.stock_levels?.reduce((s: number, sl: any) => s + (sl.reserved || 0), 0) || 0
+                  const variantAvailable = Math.max(0, variantTotal - variantReserved)
                   return (
                     <TableRow key={v.id} className={!v.is_active ? 'opacity-50' : ''}>
                       <TableCell className="font-mono text-sm">{v.variant_sku}</TableCell>
@@ -313,14 +315,31 @@ export function ProductDetailContent({
                       {warehousesToShow.map(w => {
                         const sl = v.stock_levels?.find((s: any) => s.warehouse_id === w.id)
                         const qty = sl?.quantity || 0
+                        const reserved = sl?.reserved || 0
+                        const available = Math.max(0, qty - reserved)
                         return (
                           <TableCell key={w.id} className="text-center">
-                            <span className={`font-medium ${qty <= 0 ? 'text-red-600' : qty <= 2 ? 'text-amber-600' : ''}`}>{qty}</span>
-                            {sl?.reserved > 0 && <span className="text-xs text-muted-foreground ml-1">({sl.reserved} res.)</span>}
+                            {reserved > 0 ? (
+                              <div className="flex flex-col items-center leading-tight">
+                                <span className={`font-medium ${available <= 0 ? 'text-red-600' : available <= 2 ? 'text-amber-600' : ''}`}>{qty}</span>
+                                <span className="text-[10px] font-medium text-amber-600 whitespace-nowrap">{reserved} reserv. · {available} disp.</span>
+                              </div>
+                            ) : (
+                              <span className={`font-medium ${qty <= 0 ? 'text-red-600' : qty <= 2 ? 'text-amber-600' : ''}`}>{qty}</span>
+                            )}
                           </TableCell>
                         )
                       })}
-                      <TableCell className="text-center font-bold">{variantTotal}</TableCell>
+                      <TableCell className="text-center font-bold">
+                        {variantReserved > 0 ? (
+                          <div className="flex flex-col items-center leading-tight">
+                            <span className={variantAvailable <= 0 ? 'text-red-600' : ''}>{variantTotal}</span>
+                            <span className="text-[10px] font-medium text-amber-600 whitespace-nowrap">{variantReserved} reserv. · {variantAvailable} disp.</span>
+                          </div>
+                        ) : (
+                          variantTotal
+                        )}
+                      </TableCell>
                       {can('products.delete') && (
                         <TableCell>
                           <Button

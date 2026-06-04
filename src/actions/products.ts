@@ -355,7 +355,7 @@ export const listProducts = protectedAction<ListParams, ListResult<any>>(
       product_categories!products_category_id_fkey(name),
       product_variants(
         id,
-        stock_levels(quantity, warehouse_id, warehouses(id, name, code, is_active))
+        stock_levels(quantity, reserved, warehouse_id, warehouses(id, name, code, is_active))
       )
     `)
     return success(result)

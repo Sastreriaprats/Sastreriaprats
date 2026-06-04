@@ -12,10 +12,11 @@ interface PdfDocDefinition {
   pageOrientation?: string
   pageMargins?: number
   content: Content[]
+  defaultStyle?: { fontSize?: number }
   footer?: (currentPage: number, pageCount: number, pageSize: unknown) => Content
 }
 
-const MARGIN_PT = 15 * (72 / 25.4) // 15mm en pt (~42.52)
+const MARGIN_PT = 12 * (72 / 25.4) // 12mm en pt (~34.02) — margen reducido para que la ficha entre en 1 página
 const BORDER_COLOR = '#cccccc'
 const LABEL_FILL = '#f0f0f0'
 const LABEL_COLOR = '#555555'
@@ -433,8 +434,8 @@ const tableLayoutBordersPadded = {
   vLineWidth: () => 0.5,
   hLineColor: () => BORDER_COLOR,
   vLineColor: () => BORDER_COLOR,
-  paddingTop: () => 6,
-  paddingBottom: () => 6,
+  paddingTop: () => 3,
+  paddingBottom: () => 3,
   paddingLeft: () => 4,
   paddingRight: () => 4,
 }
@@ -654,7 +655,7 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
   content.push({
     text: '- - - - - - -  CORTAR POR AQUÍ  - - - - - - -',
     alignment: 'center',
-    margin: [0, 8, 0, 8],
+    margin: [0, 4, 0, 4],
     color: '#888888',
     fontSize: 9,
   })
@@ -787,6 +788,10 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
     pageSize: 'A4',
     pageOrientation: 'portrait',
     pageMargins: MARGIN_PT,
+    // Fuente base compacta (9pt). La ficha duplica todo su contenido en el
+    // talón inferior; con la fuente por defecto de pdfmake (12pt) el conjunto
+    // se desbordaba a una 2ª página con un trozo suelto. A 9pt entra en 1 hoja.
+    defaultStyle: { fontSize: 9 },
     content,
     footer: () => ({
       text: 'SASTRERÍA PRATS',
@@ -911,7 +916,13 @@ function buildCamiseriaDocDefinition(
   const email = String(client?.email ?? '—').trim()
   const fechaCompromiso = formatDate(order.estimated_delivery_date ?? cfg.fechaCompromiso)
   const orderNum = String(order.order_number ?? order.id ?? '—')
-  const totalPaid = Number(order.total_paid ?? 0)
+  // El "entregado a cuenta" puede venir guardado en la propia línea (pedidos de
+  // camisería creados desde el asistente, que no registran un pago contable) o,
+  // si no, del pago real registrado en el pedido.
+  const cfgEntregado = cfg.entregado
+  const totalPaid = cfgEntregado != null && String(cfgEntregado).trim() !== ''
+    ? Number(cfgEntregado)
+    : Number(order.total_paid ?? 0)
 
   const fs7 = 7 + fontSizeDelta
   const fs9 = 9 + fontSizeDelta

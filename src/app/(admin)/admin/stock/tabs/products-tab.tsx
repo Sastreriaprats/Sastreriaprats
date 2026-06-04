@@ -44,8 +44,8 @@ const productTypeBadgeColors: Record<string, string> = {
   boutique: '', tailoring_fabric: 'bg-amber-100 text-amber-800', accessory: 'bg-blue-100 text-blue-800', service: 'bg-purple-100 text-purple-800', alteration: 'bg-sky-100 text-sky-800',
 }
 
-function getProductStockSummary(product: any): { total: number; warehouses: { name: string; qty: number }[] } {
-  const warehouseMap = new Map<string, { name: string; qty: number }>()
+function getProductStockSummary(product: any): { total: number; reserved: number; warehouses: { name: string; qty: number; reserved: number }[] } {
+  const warehouseMap = new Map<string, { name: string; qty: number; reserved: number }>()
   for (const variant of product.product_variants || []) {
     for (const sl of variant.stock_levels || []) {
       if (sl.warehouses?.is_active === false) continue
@@ -54,14 +54,16 @@ function getProductStockSummary(product: any): { total: number; warehouses: { na
       const existing = warehouseMap.get(wId)
       if (existing) {
         existing.qty += sl.quantity || 0
+        existing.reserved += sl.reserved || 0
       } else {
-        warehouseMap.set(wId, { name: wName, qty: sl.quantity || 0 })
+        warehouseMap.set(wId, { name: wName, qty: sl.quantity || 0, reserved: sl.reserved || 0 })
       }
     }
   }
   const warehouses = Array.from(warehouseMap.values()).sort((a, b) => a.name.localeCompare(b.name, 'es'))
   const total = warehouses.reduce((s, w) => s + w.qty, 0)
-  return { total, warehouses }
+  const reserved = warehouses.reduce((s, w) => s + w.reserved, 0)
+  return { total, reserved, warehouses }
 }
 
 type StockFilterValue = 'all' | 'out' | 'low' | 'in'
@@ -453,7 +455,8 @@ export function ProductsTab() {
               <TableRow><TableCell colSpan={13} className="h-40 text-center text-muted-foreground">{hasActiveFilters ? 'No hay productos con los filtros aplicados.' : 'No hay productos'}</TableCell></TableRow>
             ) : displayedProducts.map((p: any) => {
               const isFabric = p.product_type === 'tailoring_fabric'
-              const { total: stockTotal, warehouses } = getProductStockSummary(p)
+              const { total: stockTotal, reserved: stockReserved, warehouses } = getProductStockSummary(p)
+              const stockAvailable = Math.max(0, stockTotal - stockReserved)
               const isSelected = selectedIds.has(p.id)
               return (
                 <TableRow
@@ -500,17 +503,30 @@ export function ProductsTab() {
                       <span className="text-xs text-red-500">Sin stock</span>
                     ) : (
                       <div className="space-y-0.5">
-                        {warehouses.map((w) => (
-                          <div key={w.name} className="flex items-center gap-1 text-xs">
-                            <span className={`font-semibold ${w.qty <= 0 ? 'text-red-600' : ''}`}>
-                              {isFabric ? `${w.qty} m` : w.qty}
-                            </span>
-                            <span className="text-muted-foreground">· {w.name}</span>
-                          </div>
-                        ))}
+                        {warehouses.map((w) => {
+                          const wAvail = Math.max(0, w.qty - w.reserved)
+                          return (
+                            <div key={w.name} className="flex items-center gap-1 text-xs">
+                              <span className={`font-semibold ${w.reserved > 0 ? (wAvail <= 0 ? 'text-red-600' : 'text-amber-600') : (w.qty <= 0 ? 'text-red-600' : '')}`}>
+                                {isFabric ? `${w.qty} m` : w.qty}
+                              </span>
+                              <span className="text-muted-foreground">· {w.name}</span>
+                              {w.reserved > 0 && (
+                                <span className="text-[10px] font-medium text-amber-600 whitespace-nowrap">
+                                  ({w.reserved}{isFabric ? ' m' : ''} reserv. · {isFabric ? `${wAvail} m` : wAvail} disp.)
+                                </span>
+                              )}
+                            </div>
+                          )
+                        })}
                         {warehouses.length > 1 && (
                           <div className="text-xs font-bold border-t pt-0.5">
                             Total: {isFabric ? `${stockTotal} m` : stockTotal}
+                            {stockReserved > 0 && (
+                              <span className="ml-1 text-[10px] font-medium text-amber-600 whitespace-nowrap">
+                                ({stockReserved}{isFabric ? ' m' : ''} reserv. · {isFabric ? `${stockAvailable} m` : stockAvailable} disp.)
+                              </span>
+                            )}
                           </div>
                         )}
                       </div>
