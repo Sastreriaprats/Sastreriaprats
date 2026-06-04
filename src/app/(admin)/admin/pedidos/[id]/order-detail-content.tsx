@@ -5,13 +5,16 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import Link from 'next/link'
 import {
   ArrowLeft, User, Phone, Shirt, History,
-  Calendar, CreditCard, AlertTriangle, ExternalLink,
+  Calendar, CreditCard, AlertTriangle, ExternalLink, Check, Loader2, X,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { usePermissions } from '@/hooks/use-permissions'
+import { updateOrderPaymentDate } from '@/actions/orders'
 import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
 import { OrderGarmentsTab } from './tabs/order-garments-tab'
 import { OrderHistoryTab } from './tabs/order-history-tab'
@@ -28,6 +31,27 @@ export function OrderDetailContent({ order }: { order: any }) {
   const canViewCosts = can('orders.view_costs')
   const [showStatusDialog, setShowStatusDialog] = useState(false)
   const [showEditDialog, setShowEditDialog] = useState(false)
+
+  // Fecha de pago editable manualmente.
+  const [paymentDate, setPaymentDate] = useState<string | null>(order.payment_date ?? null)
+  const [editingPaymentDate, setEditingPaymentDate] = useState(false)
+  const [paymentDateDraft, setPaymentDateDraft] = useState('')
+  const [savingPaymentDate, setSavingPaymentDate] = useState(false)
+  const toDateInput = (d: string | null | undefined): string => (d ? String(d).slice(0, 10) : '')
+
+  async function savePaymentDate() {
+    setSavingPaymentDate(true)
+    const res = await updateOrderPaymentDate({ orderId: order.id, payment_date: paymentDateDraft || null })
+    setSavingPaymentDate(false)
+    if (res.success) {
+      setPaymentDate(paymentDateDraft || null)
+      setEditingPaymentDate(false)
+      toast.success('Fecha de pago actualizada')
+      router.refresh()
+    } else {
+      toast.error((res as { error?: string })?.error || 'Error al actualizar la fecha de pago')
+    }
+  }
 
   const isOverdue = order.estimated_delivery_date && new Date(order.estimated_delivery_date) < new Date() && !['delivered', 'cancelled'].includes(order.status)
   const totalCost = (order.total_material_cost || 0) + (order.total_labor_cost || 0) + (order.total_factory_cost || 0)
@@ -52,6 +76,38 @@ export function OrderDetailContent({ order }: { order: any }) {
             {order.clients?.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{order.clients.phone}</span>}
             <span>Tienda: {order.stores?.name}</span>
             <span>Fecha: {formatDate(order.order_date || order.created_at)}</span>
+            {editingPaymentDate ? (
+              <span className="flex items-center gap-1">
+                Pago:
+                <Input
+                  type="date"
+                  value={paymentDateDraft}
+                  onChange={(e) => setPaymentDateDraft(e.target.value)}
+                  className="h-7 w-[150px] text-sm"
+                  disabled={savingPaymentDate}
+                />
+                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={savePaymentDate} disabled={savingPaymentDate}>
+                  {savingPaymentDate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                </Button>
+                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingPaymentDate(false)} disabled={savingPaymentDate}>
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </span>
+            ) : (
+              <span className="flex items-center gap-1">
+                Pago: {paymentDate ? formatDate(paymentDate) : '—'}
+                {can('orders.edit') && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-6 w-6"
+                    onClick={() => { setPaymentDateDraft(toDateInput(paymentDate)); setEditingPaymentDate(true) }}
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                )}
+              </span>
+            )}
             {order.supplier_order_id && (
               <Link
                 href={`/admin/proveedores/pedidos/${order.supplier_order_id}`}

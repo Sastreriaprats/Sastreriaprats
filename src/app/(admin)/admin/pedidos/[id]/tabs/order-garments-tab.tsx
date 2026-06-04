@@ -122,6 +122,9 @@ export function OrderGarmentsTab({ order }: { order: any }) {
                 'escote', 'metros', 'picado34', 'forroDesc',
                 'bolsilloTipo', 'cerrilleraExterior', 'primerBoton',
                 'ojalesAbiertos', 'ojalesCerrados', 'medidaHombro', 'sinHombreras',
+                // Sastrería - forro elegido (stock/catálogo) + características por prenda.
+                // Estas claves se guardan al crear el pedido pero antes no se mostraban.
+                'forroStockNombre', 'forroCatalogo', 'forroMetros', 'caracteristicasPrenda',
                 // Sastrería - pantalón
                 'pretinaTamano', 'pretinaCorrida', 'pretina2Botones',
                 'pretinaReforzada', 'pretinaReforzadaDelante',
@@ -159,10 +162,30 @@ export function OrderGarmentsTab({ order }: { order: any }) {
                 pecho: 'Pecho',
                 talle: 'Talle',
               }
+              // Etiquetas legibles para claves camelCase (el fallback genérico
+              // `key.replace(/_/g,' ')` dejaría "forroStockNombre" tal cual).
+              const KEY_LABELS: Record<string, string> = {
+                forro: 'Tipo de forro',
+                forroStockNombre: 'Forro',
+                forroCatalogo: 'Forro (catálogo)',
+                forroMetros: 'Metros forro',
+                caracteristicasPrenda: 'Características',
+              }
+              const FORRO_TIPO_LABEL: Record<string, string> = {
+                sin_forro: 'Sin forro',
+                medio: 'Medio forro',
+                completo: 'Forro completo',
+              }
+              const labelFor = (key: string): string =>
+                KEY_LABELS[key] ?? key.replace(/_/g, ' ')
               const formatValue = (key: string, val: unknown): string => {
                 if ((key === 'inicialesSituacion' || key === 'iniciales_situacion') && typeof val === 'string') {
                   return INICIALES_SITUACION_LABEL[val] ?? val
                 }
+                if (key === 'forro' && typeof val === 'string') {
+                  return FORRO_TIPO_LABEL[val] ?? val
+                }
+                if (key === 'forroMetros') return `${val} m`
                 return String(val)
               }
               return (
@@ -174,7 +197,7 @@ export function OrderGarmentsTab({ order }: { order: any }) {
                       {entries.map(([key, val]) => (
                         <span key={key} className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-xs">
                           <span className="text-muted-foreground capitalize">
-                            {key.replace(/_/g, ' ')}:
+                            {labelFor(key)}:
                           </span>
                           <span className="font-medium">{formatValue(key, val)}</span>
                         </span>

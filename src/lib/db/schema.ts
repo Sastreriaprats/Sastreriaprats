@@ -1082,6 +1082,7 @@ export const tailoringOrders = pgTable('tailoring_orders', {
   orderDate: date('order_date').defaultNow().notNull(),
   estimatedDeliveryDate: date('estimated_delivery_date'),
   actualDeliveryDate: date('actual_delivery_date'),
+  paymentDate: date('payment_date'),
   deliveryMethod: text('delivery_method').default('store'),
   deliveryAddress: text('delivery_address'),
   deliveryCity: text('delivery_city'),

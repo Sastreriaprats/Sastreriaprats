@@ -43,6 +43,7 @@ import {
   searchSupplierFabrics,
   markSupplierInvoicePaid,
   deleteSupplierOrderAction,
+  updateSupplierOrderFinanceAction,
   listActiveWarehouses,
   type SupplierOrderLineForReceipt,
   type ReceiveSupplierOrderLineInput,
@@ -171,6 +172,34 @@ export function PedidoDetailContent({
   const [addSearching, setAddSearching] = useState(false)
   const addSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const editKeyCounter = useRef(0)
+
+  // Edición manual de la fecha de pago (payment_due_date).
+  const [paymentDueDate, setPaymentDueDate] = useState<string | null>(order.payment_due_date ?? null)
+  const [editingPaymentDate, setEditingPaymentDate] = useState(false)
+  const [paymentDateDraft, setPaymentDateDraft] = useState('')
+  const [savingPaymentDate, setSavingPaymentDate] = useState(false)
+
+  // Normaliza una fecha (ISO o 'YYYY-MM-DD') al formato del <input type="date">.
+  const toDateInput = (d: string | null | undefined): string => (d ? String(d).slice(0, 10) : '')
+
+  async function savePaymentDate() {
+    setSavingPaymentDate(true)
+    const res = await updateSupplierOrderFinanceAction({
+      supplierOrderId: order.id,
+      total: Number(order.total) || 0,
+      payment_due_date: paymentDateDraft || null,
+      notes: order.internal_notes ?? null,
+    })
+    setSavingPaymentDate(false)
+    if (res.success) {
+      setPaymentDueDate(paymentDateDraft || null)
+      setEditingPaymentDate(false)
+      toast.success('Fecha de pago actualizada')
+      router.refresh()
+    } else {
+      toast.error((res as { error?: string })?.error || 'Error al actualizar la fecha de pago')
+    }
+  }
 
   // Búsqueda (debounce) de productos/tejidos para añadir líneas en la edición.
   useEffect(() => {
@@ -577,16 +606,15 @@ export function PedidoDetailContent({
             <CardTitle className="text-base">Pago y notas</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
-            {Array.isArray(order.payment_schedule) && order.payment_schedule.length > 0 ? (
+            {/* Plazos de pago (solo lectura) cuando hay más de uno. */}
+            {Array.isArray(order.payment_schedule) && order.payment_schedule.length > 1 && (
               <div className="space-y-1">
-                <span className="text-muted-foreground">{order.payment_schedule.length > 1 ? 'Plazos de pago' : 'Fecha de pago'}</span>
+                <span className="text-muted-foreground">Plazos de pago</span>
                 <ul className="space-y-1">
                   {order.payment_schedule.map((p: any, idx: number) => (
                     <li key={p.id || idx} className="flex items-center justify-between text-sm">
                       <span>
-                        {order.payment_schedule.length > 1 && (
-                          <span className="text-xs text-muted-foreground mr-2">Plazo {idx + 1}</span>
-                        )}
+                        <span className="text-xs text-muted-foreground mr-2">Plazo {idx + 1}</span>
                         {formatDate(p.due_date)}
                       </span>
                       <span className="flex items-center gap-2">
@@ -599,12 +627,41 @@ export function PedidoDetailContent({
                   ))}
                 </ul>
               </div>
-            ) : order.payment_due_date ? (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Fecha pago</span>
-                <span>{formatDate(order.payment_due_date)}</span>
-              </div>
-            ) : null}
+            )}
+
+            {/* Fecha de pago editable manualmente. */}
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-muted-foreground">Fecha pago</span>
+              {editingPaymentDate ? (
+                <span className="flex items-center gap-1">
+                  <Input
+                    type="date"
+                    value={paymentDateDraft}
+                    onChange={(e) => setPaymentDateDraft(e.target.value)}
+                    className="h-7 w-[150px] text-sm"
+                    disabled={savingPaymentDate}
+                  />
+                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={savePaymentDate} disabled={savingPaymentDate}>
+                    {savingPaymentDate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                  </Button>
+                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingPaymentDate(false)} disabled={savingPaymentDate}>
+                    <span className="text-sm">✕</span>
+                  </Button>
+                </span>
+              ) : (
+                <span className="flex items-center gap-1">
+                  <span>{paymentDueDate ? formatDate(paymentDueDate) : '—'}</span>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7"
+                    onClick={() => { setPaymentDateDraft(toDateInput(paymentDueDate)); setEditingPaymentDate(true) }}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                </span>
+              )}
+            </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Estado factura</span>
               <Badge

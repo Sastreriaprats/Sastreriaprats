@@ -104,7 +104,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
     supabase
       .from('supplier_orders')
       .select(`id, order_number, status, total, order_date,
-        estimated_delivery_date, tailoring_order_id,
+        estimated_delivery_date, payment_due_date, tailoring_order_id,
         suppliers(name),
         stores:destination_store_id(name)`)
       .not('status', 'in', '(received,cancelled)')
@@ -490,6 +490,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                       <TableHead>Estado</TableHead>
                       <SortHeader field="order_date">Fecha</SortHeader>
                       <SortHeader field="estimated_delivery_date">Entrega est.</SortHeader>
+                      <SortHeader field="payment_date">Fecha pago</SortHeader>
                       <SortHeader field="total">Total</SortHeader>
                       <SortHeader field="total_paid">Pagado</SortHeader>
                       <SortHeader field="total_pending">Pendiente</SortHeader>
@@ -508,6 +509,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                           <TableCell><Skeleton className="h-5 w-22 rounded-full" /></TableCell>
                           <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                           <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                          <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                           <TableCell><Skeleton className="h-4 w-16" /></TableCell>
                           <TableCell><Skeleton className="h-4 w-16" /></TableCell>
                           <TableCell><Skeleton className="h-4 w-16" /></TableCell>
@@ -517,7 +519,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                       ))
                     ) : orders.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={12} className="h-40 text-center text-muted-foreground">
+                        <TableCell colSpan={13} className="h-40 text-center text-muted-foreground">
                           {hasActiveFilters ? 'No hay pedidos con los filtros aplicados.' : 'No hay pedidos'}
                         </TableCell>
                       </TableRow>
@@ -545,6 +547,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                           <TableCell><Badge className={`text-xs ${getOrderStatusColor(order.status)}`}>{getOrderStatusLabel(order.status)}</Badge></TableCell>
                           <TableCell className="text-sm">{formatDate(order.order_date || order.created_at)}</TableCell>
                           <TableCell className={`text-sm ${isOverdue ? 'text-red-600 font-medium' : ''}`}>{formatDate(order.estimated_delivery_date)}</TableCell>
+                          <TableCell className="text-sm">{order.payment_date ? formatDate(order.payment_date) : '—'}</TableCell>
                           <TableCell className="font-medium">{formatCurrency(order.total)}</TableCell>
                           <TableCell>{formatCurrency(order.total_paid)}</TableCell>
                           <TableCell>
@@ -579,7 +582,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                   {!isLoading && orders.length > 0 && aggregates && (
                     <TableFooter>
                       <TableRow>
-                        <TableCell colSpan={7} className="text-right font-medium">
+                        <TableCell colSpan={8} className="text-right font-medium">
                           Totales{total > orders.length ? ` (${total} pedidos del filtro)` : ''}
                         </TableCell>
                         <TableCell className="font-bold tabular-nums">{formatCurrency(aggregates.total)}</TableCell>
@@ -631,6 +634,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                   <TableHead>Estado</TableHead>
                   <TableHead>Fecha</TableHead>
                   <TableHead>Entrega est.</TableHead>
+                  <TableHead>Fecha pago</TableHead>
                   <TableHead>Total</TableHead>
                   <TableHead>Pedido sastrería</TableHead>
                   <TableHead>Tienda</TableHead>
@@ -646,6 +650,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                       <TableCell><Skeleton className="h-5 w-20 rounded-full" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-16" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-16" /></TableCell>
@@ -654,7 +659,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                   ))
                 ) : filteredSupplierOrders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="h-40 text-center text-muted-foreground">
+                    <TableCell colSpan={10} className="h-40 text-center text-muted-foreground">
                       {search.trim() ? 'Sin resultados' : 'No hay pedidos a proveedor'}
                     </TableCell>
                   </TableRow>
@@ -673,6 +678,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                     </TableCell>
                     <TableCell className="text-sm">{formatDate(so.order_date)}</TableCell>
                     <TableCell className="text-sm">{formatDate(so.estimated_delivery_date)}</TableCell>
+                    <TableCell className="text-sm">{so.payment_due_date ? formatDate(so.payment_due_date) : '—'}</TableCell>
                     <TableCell className="font-medium">{formatCurrency(so.total)}</TableCell>
                     <TableCell className="text-sm font-mono">
                       {so.tailoring_orders?.order_number ?? '—'}
@@ -696,7 +702,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
               {!loadingSupplier && filteredSupplierOrders.length > 0 && (
                 <TableFooter>
                   <TableRow>
-                    <TableCell colSpan={5} className="text-right font-medium">
+                    <TableCell colSpan={6} className="text-right font-medium">
                       Total ({filteredSupplierOrders.length} pedidos)
                     </TableCell>
                     <TableCell className="font-bold tabular-nums">

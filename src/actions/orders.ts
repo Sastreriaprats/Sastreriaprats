@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
-import { queryList, queryById, getNextNumber } from '@/lib/server/query-helpers'
+import { queryList, queryById, getNextNumber, resolveClientIdsForSearch } from '@/lib/server/query-helpers'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createTailoringOrderSchema, tailoringOrderLineSchema, changeOrderStatusSchema } from '@/lib/validations/orders'
 import { ALL_VISIBLE_STATUSES, type OrderStatus } from '@/lib/orders/statuses'
@@ -15,7 +15,7 @@ import { syncOrderLineMeasurementsToClient } from '@/lib/measurements/sync-from-
 
 const SELECT_ORDERS = `
   id, order_number, order_type, status, order_date,
-  estimated_delivery_date, total, total_paid, total_pending,
+  estimated_delivery_date, payment_date, total, total_paid, total_pending,
   created_at,
   clients ( id, full_name, phone, email, category ),
   stores ( name, code ),
@@ -61,12 +61,8 @@ export const listOrders = protectedAction<ListParams & { status?: string }, List
     const safeSearch = normalizedSearch.replace(/[,()*%:/\\]/g, ' ').trim()
     let searchOr: string | undefined
     if (safeSearch) {
-      const { data: matchedClients } = await ctx.adminClient
-        .from('clients')
-        .select('id')
-        .ilike('search_text', `%${safeSearch}%`)
-        .limit(500)
-      const clientIds = (matchedClients ?? []).map((r: { id: string }) => r.id)
+      // Substring sobre clients.search_text y, si no hay match, fallback difuso.
+      const clientIds = await resolveClientIdsForSearch(ctx.adminClient, safeSearch)
       // order_number es ASCII (PIN-2026-0053) — basta con un ilike directo.
       const parts = [`order_number.ilike.%${safeSearch}%`]
       if (clientIds.length > 0) parts.push(`client_id.in.(${clientIds.join(',')})`)
@@ -242,7 +238,7 @@ export const getOrder = protectedAction<string, any>(
     // Query base sin joins para evitar 400 por tablas/FKs problemáticas
     const { data: orderBase, error: baseError } = await admin
       .from('tailoring_orders')
-      .select('id, order_number, total, total_paid, total_pending, client_id, status, order_type, order_date, estimated_delivery_date, subtotal, discount_amount, tax_amount, store_id, internal_notes, client_notes, created_at, updated_at, created_by')
+      .select('id, order_number, total, total_paid, total_pending, client_id, status, order_type, order_date, estimated_delivery_date, payment_date, subtotal, discount_amount, tax_amount, store_id, internal_notes, client_notes, created_at, updated_at, created_by')
       .eq('id', orderId)
       .single()
 
@@ -1740,6 +1736,41 @@ export const searchComplementProducts = protectedAction<
         }
       })
     return success(result)
+  }
+)
+
+/**
+ * Actualiza la fecha de pago (payment_date) de un pedido de sastrería.
+ * Es un dato editable manualmente; se permite incluso en pedidos entregados
+ * (el cobro puede registrarse después de la entrega), por eso no reutiliza
+ * updateOrderAction (que bloquea estados delivered/cancelled).
+ */
+export const updateOrderPaymentDate = protectedAction<
+  { orderId: string; payment_date: string | null },
+  { id: string }
+>(
+  {
+    permission: 'orders.edit',
+    auditModule: 'orders',
+    auditAction: 'update',
+    auditEntity: 'tailoring_order',
+    revalidate: ['/admin/pedidos'],
+  },
+  async (ctx, { orderId, payment_date }) => {
+    if (!orderId?.trim()) return failure('orderId requerido', 'VALIDATION')
+    const paymentDate = payment_date?.trim() || null
+    if (paymentDate) {
+      const d = new Date(paymentDate)
+      if (isNaN(d.getTime())) return failure('Fecha de pago no válida', 'VALIDATION')
+    }
+    const { data, error } = await ctx.adminClient
+      .from('tailoring_orders')
+      .update({ payment_date: paymentDate })
+      .eq('id', orderId)
+      .select('id')
+      .single()
+    if (error || !data) return failure(error?.message || 'Pedido no encontrado', 'NOT_FOUND')
+    return success({ id: data.id })
   }
 )
 

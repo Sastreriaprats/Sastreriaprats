@@ -144,16 +144,20 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
             { text: dateStr, fontSize: FONT_BODY, alignment: 'right' },
           ],
           [
-            {
-              text: data.clientName ? `Cliente: ${truncate(data.clientName, 22)}` : 'Cliente: —',
-              fontSize: FONT_SMALL,
-            },
+            { text: '', fontSize: FONT_SMALL },
             { text: timeStr, fontSize: FONT_SMALL, alignment: 'right' },
           ],
         ],
       },
       layout: 'noBorders',
       margin: [0, 0, 0, 2] as [number, number, number, number],
+    },
+    {
+      // Nombre completo del cliente (sin truncar): a ancho completo para que
+      // pueda envolver en varias líneas sin chocar con la hora.
+      text: data.clientName ? `Cliente: ${data.clientName}` : 'Cliente: —',
+      fontSize: FONT_SMALL,
+      margin: [0, 0, 0, 1] as [number, number, number, number],
     },
     ...(data.clientCode
       ? [

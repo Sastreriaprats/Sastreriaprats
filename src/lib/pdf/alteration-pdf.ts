@@ -1,27 +1,12 @@
 'use client'
 
 /**
- * PDF de la "Hoja de arreglos" de Sastrería Prats (A4 horizontal).
+ * Ticket de la "Hoja de arreglos" de Sastrería Prats (80mm, impresora de tickets).
  *
- * Reproduce el diseño físico:
- *   ┌──────────┐         Prats (logo manuscrito)         ┌──────────┐
- *   │  Nº arr  │       HOJA DE ARREGLOS (tracking)       │  Fecha   │
- *   └──────────┘                                          └──────────┘
- *
- *   CLIENTE ______________________________________________________
- *   TELÉFONO _______________     IMPORTE __________________________
- *   TIPO DE PRENDA _______________________________________________
- *   OFICIAL ______________________________________________________
- *   ARREGLOS _____________________________________________________
- *            _____________________________________________________
- *            _____________________________________________________
- *            _____________________________________________________
- *
- *   FECHA DE ENVÍO TALLER ________   FECHA DE ENTREGA CLIENTE _____
- *
- *   ┌──CONFORME CLIENTE──┐ ┌──OBSERVACIONES──┐ ┌──FIRMA CLIENTE──┐
- *   │                    │ │                 │ │                 │
- *   └────────────────────┘ └─────────────────┘ └─────────────────┘
+ * Antes era una hoja A4 horizontal con cajas para firma. Ahora se imprime en la
+ * misma impresora térmica de 80mm que los tickets de caja, adaptado al ancho del
+ * rollo. Se conservan los datos clave: nº de arreglo, fecha, cliente, teléfono,
+ * tipo de prenda, oficial, descripción de los arreglos y fechas de taller/entrega.
  */
 
 import type { Content, TDocumentDefinitions } from 'pdfmake/interfaces'
@@ -29,97 +14,42 @@ import { COMPANY, getLogoBase64Client } from './pdf-company'
 import type { AlterationWithRelations } from '@/types/alterations'
 import { getAlteration } from '@/actions/alterations'
 
-// A4 horizontal: 842 x 595 pt
-const PAGE_W = 842
-const PAGE_H = 595
-const MARGIN = 35
-const CONTENT_W = PAGE_W - 2 * MARGIN // 742 pt
+// Ancho del rollo térmico (idéntico al ticket de caja): 80mm.
+const W_MM = 80
+const W_PT = Math.round(W_MM * 2.83465)
+const H_PT = 841
+const MARGIN_PT = 14
+const LINE_W = W_PT - 2 * MARGIN_PT
 
-const BORDER = '#000000'
-const GRAY_LABEL = '#333333'
+const FONT_BODY = 9
+const FONT_SMALL = 7
+const FONT_HEAD = 11
 
 function formatDateSlashes(date: string | null | undefined): string {
   if (!date) return ''
-  // date viene como 'YYYY-MM-DD' o ISO; cogemos solo la parte de fecha
   const d = new Date(date)
   if (Number.isNaN(d.getTime())) return ''
   const day = String(d.getDate()).padStart(2, '0')
   const month = String(d.getMonth() + 1).padStart(2, '0')
   const year = d.getFullYear()
-  return `${day} / ${month} / ${year}`
+  return `${day}/${month}/${year}`
 }
 
-interface BoxCanvas {
-  type: 'rect'
-  x: number
-  y: number
-  w: number
-  h: number
-  r: number
-  lineWidth: number
-  lineColor: string
-  color?: string
-}
-
-/** Caja rectangular redondeada (solo borde). */
-function roundedBox(x: number, y: number, w: number, h: number, r = 12): BoxCanvas {
-  return { type: 'rect', x, y, w, h, r, lineWidth: 0.75, lineColor: BORDER }
-}
-
-/**
- * Línea con label en mayúsculas (bold) seguida de la línea continua hasta el final.
- * El valor va encima de la línea, alineado.
- */
-function fieldLine(label: string, value: string, opts?: { width?: number }): Content {
-  const totalWidth = opts?.width ?? CONTENT_W
+function hr(marginBottom = 6): Content {
   return {
-    stack: [
-      {
-        columns: [
-          { text: label, bold: true, fontSize: 9, width: 'auto', characterSpacing: 0.6 },
-          {
-            text: value,
-            fontSize: 11,
-            margin: [10, -2, 0, 0] as [number, number, number, number],
-            width: '*',
-          },
-        ],
-      },
-      {
-        canvas: [{ type: 'line', x1: 0, y1: 0, x2: totalWidth, y2: 0, lineWidth: 0.6, lineColor: BORDER }],
-        margin: [0, 2, 0, 0] as [number, number, number, number],
-      },
-    ] as Content[],
-    margin: [0, 0, 0, 8] as [number, number, number, number],
+    canvas: [{ type: 'line', x1: 0, y1: 0, x2: LINE_W, y2: 0, lineWidth: 0.5 }],
+    margin: [0, 0, 0, marginBottom] as [number, number, number, number],
   }
 }
 
-/** Línea con label y línea continua, sin valor (para que el cliente firme/anote a mano). */
-function emptyLine(label?: string, totalWidth: number = CONTENT_W): Content {
-  return {
-    stack: [
-      label
-        ? { text: label, bold: true, fontSize: 9, characterSpacing: 0.6 }
-        : { text: ' ', fontSize: 11 },
-      {
-        canvas: [{ type: 'line', x1: 0, y1: 0, x2: totalWidth, y2: 0, lineWidth: 0.6, lineColor: BORDER }],
-        margin: [0, 2, 0, 0] as [number, number, number, number],
-      },
-    ] as Content[],
-    margin: [0, 0, 0, 8] as [number, number, number, number],
-  }
-}
-
-/** Dos columnas 50/50 con label/value. */
-function twoColumns(left: { label: string; value: string }, right: { label: string; value: string }): Content {
-  const colW = (CONTENT_W - 20) / 2
+/** Fila "Etiqueta: valor" a ancho completo (el valor envuelve si es largo). */
+function field(label: string, value: string): Content {
   return {
     columns: [
-      { width: colW, stack: [fieldLine(left.label, left.value, { width: colW })] },
-      { width: 20, text: '' },
-      { width: colW, stack: [fieldLine(right.label, right.value, { width: colW })] },
+      { text: label, fontSize: FONT_SMALL, bold: true, width: 'auto' },
+      { text: value || '—', fontSize: FONT_SMALL, width: '*', margin: [4, 0, 0, 0] as [number, number, number, number] },
     ],
-    columnGap: 0,
+    margin: [0, 0, 0, 2] as [number, number, number, number],
   }
 }
 
@@ -130,200 +60,72 @@ export function buildAlterationDocDefinition(
   const clientName = alteration.clients?.full_name || ''
   const phone = alteration.phone || alteration.clients?.phone || ''
   const officialName = alteration.official_name || alteration.official?.name || ''
-  const description = alteration.description || ''
+  const description = (alteration.description || '').trim()
 
-  // ── HEADER ────────────────────────────────────────────────────────
-  // Tres columnas: caja nº arreglo · logo+título · caja fecha
-  const headerBoxW = 200
-  const headerBoxH = 55
-  const centerW = CONTENT_W - 2 * headerBoxW - 20 // espaciado entre cajas
+  const content: Content[] = [
+    ...(logoBase64
+      ? [{ image: logoBase64, width: 160, alignment: 'center', margin: [0, 0, 0, 6] as [number, number, number, number] } as Content]
+      : []),
+    { text: 'HOJA DE ARREGLOS', fontSize: FONT_HEAD, bold: true, alignment: 'center', characterSpacing: 1, margin: [0, 0, 0, 4] as [number, number, number, number] },
+    hr(8),
 
-  const header: Content = {
-    columns: [
-      // Caja izquierda con número
-      {
-        width: headerBoxW,
-        stack: [
-          {
-            canvas: [roundedBox(0, 0, headerBoxW, headerBoxH, 20)],
-          },
-          {
-            text: alteration.alteration_number || '',
-            fontSize: 14,
-            bold: true,
-            alignment: 'center',
-            // Centrado vertical: bajamos hasta la mitad de la caja (55pt → -38)
-            absolutePosition: undefined,
-            margin: [0, -38, 0, 0] as [number, number, number, number],
-          },
-        ],
-      },
-      { width: 10, text: '' },
-      // Centro: logo + título
-      {
-        width: centerW,
-        stack: [
-          ...(logoBase64
-            ? [{
-                image: logoBase64,
-                width: 120,
-                alignment: 'center' as const,
-              } as Content]
-            : [{ text: 'Prats', fontSize: 28, italics: true, alignment: 'center' } as Content]),
-          {
-            text: 'HOJA DE ARREGLOS',
-            fontSize: 14,
-            bold: true,
-            color: GRAY_LABEL,
-            alignment: 'center',
-            characterSpacing: 4,
-            margin: [0, 6, 0, 0] as [number, number, number, number],
-          },
-        ],
-      },
-      { width: 10, text: '' },
-      // Caja derecha con fecha
-      {
-        width: headerBoxW,
-        stack: [
-          {
-            text: 'FECHA DE ARREGLO',
-            bold: true,
-            fontSize: 9,
-            characterSpacing: 0.6,
-            alignment: 'center',
-            margin: [0, 0, 0, 4] as [number, number, number, number],
-          },
-          {
-            canvas: [roundedBox(0, 0, headerBoxW, headerBoxH - 14, 20)],
-          },
-          {
-            text: formatDateSlashes(alteration.alteration_date),
-            fontSize: 12,
-            alignment: 'center',
-            // Centrado en la caja interior (55-14=41pt → -30)
-            margin: [0, -30, 0, 0] as [number, number, number, number],
-          },
-        ],
-      },
-    ],
-    margin: [0, 0, 0, 18] as [number, number, number, number],
-  }
+    // Cabecera: nº de arreglo + fecha
+    {
+      columns: [
+        { text: alteration.alteration_number || '', fontSize: FONT_BODY, bold: true, width: '*' },
+        { text: formatDateSlashes(alteration.alteration_date), fontSize: FONT_BODY, alignment: 'right', width: 'auto' },
+      ],
+      margin: [0, 0, 0, 6] as [number, number, number, number],
+    },
+    hr(6),
 
-  // ── CUERPO ────────────────────────────────────────────────────────
-  // Partimos description en líneas para rellenar 4 filas (1 label + 3 continuación)
-  const descLines = splitDescriptionLines(description, 4)
+    field('Cliente:', clientName),
+    field('Teléfono:', phone),
+    field('Prenda:', alteration.garment_type || ''),
+    field('Oficial:', officialName),
 
-  const body: Content[] = [
-    fieldLine('CLIENTE', clientName),
-    twoColumns(
-      { label: 'TELÉFONO', value: phone },
-      // IMPORTE: la label se mantiene fiel al diseño original de la ficha de Prats.
-      // El cobro se gestiona por caja, no por el módulo de arreglos: el valor sale
-      // siempre vacío y queda como línea con underline para rellenar a mano si hace falta.
-      { label: 'IMPORTE', value: '' },
-    ),
-    { text: '', margin: [0, 0, 0, 8] as [number, number, number, number] },
-    fieldLine('TIPO DE PRENDA', alteration.garment_type || ''),
-    fieldLine('OFICIAL', officialName),
-    fieldLine('ARREGLOS', descLines[0] ?? ''),
-    emptyLine(undefined, CONTENT_W),
-    emptyLine(undefined, CONTENT_W),
-    emptyLine(undefined, CONTENT_W),
+    hr(6),
+    { text: 'ARREGLOS', fontSize: FONT_SMALL, bold: true, characterSpacing: 0.6, margin: [0, 0, 0, 2] as [number, number, number, number] },
+    {
+      text: description || '—',
+      fontSize: FONT_BODY,
+      margin: [0, 0, 0, 6] as [number, number, number, number],
+    },
+    hr(6),
+
+    field('Envío taller:', formatDateSlashes(alteration.workshop_sent_date)),
+    field('Entrega cliente:', formatDateSlashes(alteration.client_delivery_date)),
   ]
 
-  // Sobrescribimos las 3 líneas de continuación con los textos extra (si los hay)
-  // (mantenemos la firma de emptyLine pero con valor cuando exista)
-  if (descLines[1] || descLines[2] || descLines[3]) {
-    // Reemplazamos las 3 últimas entradas vacías con líneas con valor
-    const last3 = [descLines[1], descLines[2], descLines[3]].map((val) => ({
-      stack: [
-        { text: val ?? '', fontSize: 11, margin: [10, 0, 0, 0] as [number, number, number, number] },
-        {
-          canvas: [{ type: 'line' as const, x1: 0, y1: 0, x2: CONTENT_W, y2: 0, lineWidth: 0.6, lineColor: BORDER }],
-          margin: [0, 2, 0, 0] as [number, number, number, number],
-        },
+  // Importe: línea para rellenar a mano (el cobro se gestiona por caja).
+  content.push(
+    hr(6),
+    {
+      columns: [
+        { text: 'Importe:', fontSize: FONT_SMALL, bold: true, width: 'auto' },
+        { text: '', fontSize: FONT_SMALL, width: '*' },
       ],
-      margin: [0, 0, 0, 8] as [number, number, number, number],
-    }))
-    body.splice(body.length - 3, 3, ...last3)
-  }
+      margin: [0, 0, 0, 10] as [number, number, number, number],
+    },
+  )
 
-  // Fechas envío/entrega
-  const halfW = (CONTENT_W - 20) / 2
-  body.push({
-    columns: [
-      { width: halfW, stack: [fieldLine('FECHA DE ENVÍO TALLER', formatDateSlashes(alteration.workshop_sent_date), { width: halfW })] },
-      { width: 20, text: '' },
-      { width: halfW, stack: [fieldLine('FECHA DE ENTREGA CLIENTE', formatDateSlashes(alteration.client_delivery_date), { width: halfW })] },
-    ],
-  })
-
-  // ── FOOTER: 3 cajas para firma a mano ──────────────────────────
-  const footerBoxH = 70
-  const footerGap = 15
-  const footerBoxW = (CONTENT_W - 2 * footerGap) / 3
-
-  const footerBox = (label: string) => ({
-    width: footerBoxW,
-    stack: [
-      { canvas: [roundedBox(0, 0, footerBoxW, footerBoxH, 12)] },
-      {
-        text: label,
-        bold: true,
-        fontSize: 9,
-        characterSpacing: 0.6,
-        // Sube el label hasta cerca del borde superior de la caja (70-6=64)
-        margin: [10, -64, 0, 0] as [number, number, number, number],
-      },
-    ] as Content[],
-  })
-
-  const footer: Content = {
-    columns: [
-      footerBox('CONFORME CLIENTE'),
-      { width: footerGap, text: '' },
-      footerBox('OBSERVACIONES'),
-      { width: footerGap, text: '' },
-      footerBox('FIRMA CLIENTE'),
-    ],
-    margin: [0, 14, 0, 0] as [number, number, number, number],
-  }
+  // Pie con datos de la empresa
+  content.push(
+    hr(6),
+    { text: COMPANY.name, fontSize: 6, color: '#999', alignment: 'center', margin: [0, 0, 0, 1] as [number, number, number, number] },
+    { text: `${COMPANY.nif} · ${COMPANY.address}`, fontSize: 6, color: '#999', alignment: 'center', margin: [0, 0, 0, 1] as [number, number, number, number] },
+    { text: `${COMPANY.postalCode} - ${COMPANY.city} · ${COMPANY.country}`, fontSize: 6, color: '#999', alignment: 'center' },
+  )
 
   return {
-    pageSize: { width: PAGE_W, height: PAGE_H },
-    pageOrientation: 'landscape',
-    pageMargins: [MARGIN, MARGIN, MARGIN, MARGIN] as [number, number, number, number],
+    pageSize: { width: W_PT, height: H_PT },
+    pageMargins: [MARGIN_PT, MARGIN_PT, MARGIN_PT, MARGIN_PT] as [number, number, number, number],
     info: {
       title: `Hoja de arreglos ${alteration.alteration_number}`,
       author: COMPANY.name,
     },
-    defaultStyle: { fontSize: 10 },
-    content: [header, ...body, footer],
+    content,
   }
-}
-
-/** Reparte el texto en hasta `maxLines` cortando por palabras de ~95 chars cada una. */
-function splitDescriptionLines(text: string, maxLines: number): string[] {
-  const lines: string[] = []
-  const remaining = (text || '').replace(/\s+/g, ' ').trim()
-  if (!remaining) return Array(maxLines).fill('')
-  const charsPerLine = 95
-  let rest = remaining
-  while (rest.length > 0 && lines.length < maxLines) {
-    if (rest.length <= charsPerLine) {
-      lines.push(rest)
-      rest = ''
-    } else {
-      // Cortar por espacio cercano a charsPerLine
-      let cut = rest.lastIndexOf(' ', charsPerLine)
-      if (cut <= 0) cut = charsPerLine
-      lines.push(rest.slice(0, cut).trim())
-      rest = rest.slice(cut).trim()
-    }
-  }
-  while (lines.length < maxLines) lines.push('')
-  return lines
 }
 
 async function loadPdfMake() {
@@ -339,7 +141,7 @@ async function loadPdfMake() {
   return pm
 }
 
-/** Genera el PDF en el navegador y lo descarga. */
+/** Genera el ticket en el navegador y lo descarga. */
 export async function downloadAlterationPdf(id: string): Promise<void> {
   const res = await getAlteration({ id })
   if (!res.success || !res.data) {
@@ -355,7 +157,11 @@ export async function downloadAlterationPdf(id: string): Promise<void> {
   pdf.download(`arreglo-${alteration.alteration_number}.pdf`)
 }
 
-/** Genera el PDF y abre la pantalla de impresión. */
+/**
+ * Genera el ticket y lanza el diálogo de impresión.
+ * Usa un iframe oculto (igual que el ticket de caja) para imprimir directo en la
+ * impresora térmica sin abrir pestaña ni depender del bloqueador de popups.
+ */
 export async function printAlterationPdf(id: string): Promise<void> {
   const res = await getAlteration({ id })
   if (!res.success || !res.data) {
@@ -368,24 +174,66 @@ export async function printAlterationPdf(id: string): Promise<void> {
 
   const pdfMake = await loadPdfMake()
   const pdf = pdfMake.createPdf(docDef) as { getBlob: (cb: (blob: Blob) => void) => void }
+  const fileName = `arreglo-${alteration.alteration_number}.pdf`
 
   await new Promise<void>((resolve) => {
     pdf.getBlob((blob: Blob) => {
       const url = URL.createObjectURL(blob)
-      const w = window.open(url, '_blank')
-      if (!w) {
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `arreglo-${alteration.alteration_number}.pdf`
-        a.click()
-        setTimeout(() => URL.revokeObjectURL(url), 2000)
-        resolve()
-        return
+
+      const iframe = document.createElement('iframe')
+      iframe.style.position = 'fixed'
+      iframe.style.top = '-9999px'
+      iframe.style.left = '-9999px'
+      iframe.style.width = '0'
+      iframe.style.height = '0'
+      iframe.style.border = 'none'
+      iframe.src = url
+
+      let cleaned = false
+      const cleanup = () => {
+        if (cleaned) return
+        cleaned = true
+        try { iframe.remove() } catch {}
+        try { URL.revokeObjectURL(url) } catch {}
       }
-      const trigger = () => { try { w.focus(); w.print() } catch { /* ignore */ } }
-      try { w.addEventListener('load', () => setTimeout(trigger, 500)) } catch { /* ignore */ }
-      setTimeout(trigger, 1500)
-      setTimeout(() => { try { URL.revokeObjectURL(url) } catch { /* ignore */ } }, 60000)
+
+      const fallbackToWindowOpen = () => {
+        cleanup()
+        const tabUrl = URL.createObjectURL(blob)
+        const printWindow = window.open(tabUrl, '_blank')
+        if (!printWindow) {
+          const a = document.createElement('a')
+          a.href = tabUrl
+          a.download = fileName
+          a.click()
+          setTimeout(() => { try { URL.revokeObjectURL(tabUrl) } catch {} }, 2000)
+          return
+        }
+        const onLoad = () => setTimeout(() => {
+          try { printWindow.focus(); printWindow.print() } catch {}
+        }, 500)
+        try { printWindow.addEventListener('load', onLoad) } catch {}
+        setTimeout(() => { try { URL.revokeObjectURL(tabUrl) } catch {} }, 60000)
+      }
+
+      let triggered = false
+      const triggerPrint = () => {
+        if (triggered) return
+        triggered = true
+        const cw = iframe.contentWindow
+        if (!cw) { fallbackToWindowOpen(); return }
+        try { cw.addEventListener('afterprint', cleanup, { once: true }) } catch {}
+        try { cw.focus(); cw.print() } catch {
+          try { window.print() } catch { fallbackToWindowOpen() }
+        }
+      }
+
+      iframe.addEventListener('load', () => setTimeout(triggerPrint, 300))
+      iframe.addEventListener('error', fallbackToWindowOpen)
+      setTimeout(() => { if (!triggered) fallbackToWindowOpen() }, 5000)
+      setTimeout(cleanup, 60000)
+
+      document.body.appendChild(iframe)
       resolve()
     })
   })
