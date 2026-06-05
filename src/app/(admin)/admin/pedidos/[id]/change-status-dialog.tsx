@@ -9,10 +9,12 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Loader2, ArrowRight } from 'lucide-react'
+import { toast } from 'sonner'
 import { useAction } from '@/hooks/use-action'
 import { changeOrderStatus } from '@/actions/orders'
 import { getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
 import { getStatusesFor } from '@/lib/orders/statuses'
+import { statusChangeToast } from '@/lib/orders/status-toast'
 
 export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus, lines, orderType = 'artesanal' }: {
   open: boolean; onOpenChange: (open: boolean) => void
@@ -29,8 +31,14 @@ export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus,
 
 
   const { execute, isLoading } = useAction(changeOrderStatus, {
-    successMessage: 'Estado actualizado',
-    onSuccess: () => { onOpenChange(false); router.refresh() },
+    onSuccess: (data: any) => {
+      // Cambio por línea individual (no "Todo el pedido"): sin propagación.
+      const isSingleLine = !!lineId && lineId !== 'all'
+      if (isSingleLine) toast.success('Estado actualizado')
+      else statusChangeToast(data?.ahead_lines_count ?? 0)
+      onOpenChange(false)
+      router.refresh()
+    },
   })
 
   return (

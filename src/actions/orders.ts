@@ -5,7 +5,7 @@ import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { queryList, queryById, getNextNumber, resolveClientIdsForSearch } from '@/lib/server/query-helpers'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createTailoringOrderSchema, tailoringOrderLineSchema, changeOrderStatusSchema } from '@/lib/validations/orders'
-import { ALL_VISIBLE_STATUSES, type OrderStatus } from '@/lib/orders/statuses'
+import { ALL_VISIBLE_STATUSES, classifyLinesForForwardPropagation, type OrderStatus } from '@/lib/orders/statuses'
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { sendOrderConfirmation, sendTailoringStatusUpdate } from '@/lib/email/transactional'
@@ -490,6 +490,8 @@ export const changeOrderStatus = protectedAction<any, any>(
     const { order_id, line_id, new_status, notes } = parsed.data
 
     let fromStatus: string | null = null
+    let changedLinesCount = 0
+    let aheadLinesCount = 0
     if (line_id) {
       const { data: line } = await ctx.adminClient
         .from('tailoring_order_lines').select('status').eq('id', line_id).single()
@@ -510,7 +512,7 @@ export const changeOrderStatus = protectedAction<any, any>(
       })
     } else {
       const { data: order } = await ctx.adminClient
-        .from('tailoring_orders').select('status').eq('id', order_id).single()
+        .from('tailoring_orders').select('status, order_type').eq('id', order_id).single()
       if (!order) return failure('Pedido no encontrado')
       fromStatus = (order as any).status ?? null
 
@@ -527,8 +529,20 @@ export const changeOrderStatus = protectedAction<any, any>(
         })
         .eq('id', order_id)
 
-      await ctx.adminClient
-        .from('tailoring_order_lines').update({ status: new_status }).eq('tailoring_order_id', order_id).eq('status', 'created')
+      // Propagación FORWARD-ONLY a las líneas: solo avanzan las rezagadas;
+      // las que ya estén más adelantadas se respetan (no se hacen retroceder).
+      // Sustituye la cascada antigua que solo tocaba líneas en 'created'.
+      const { data: lineRows } = await ctx.adminClient
+        .from('tailoring_order_lines').select('id, status').eq('tailoring_order_id', order_id)
+      const prop = classifyLinesForForwardPropagation(
+        new_status, (order as any).order_type, (lineRows ?? []) as { id: string; status: string }[],
+      )
+      if (prop.toUpdate.length > 0) {
+        await ctx.adminClient
+          .from('tailoring_order_lines').update({ status: new_status }).in('id', prop.toUpdate)
+      }
+      changedLinesCount = prop.toUpdate.length
+      aheadLinesCount = prop.aheadCount
       fromStatus = fromStatus ?? (order as any).status ?? null
 
       // Reponer stock de tejido si entramos en cancelled desde otro estado.
@@ -578,6 +592,8 @@ export const changeOrderStatus = protectedAction<any, any>(
     return success({
       order_id,
       new_status,
+      changed_lines_count: changedLinesCount,
+      ahead_lines_count: aheadLinesCount,
       auditEntityId: order_id,
       auditDescription: `Pedido ${orderNumber}: ${fromEs} → ${toEs}${line_id ? ' (línea)' : ''}`,
       auditOldData: { estado: fromStatus },
@@ -683,6 +699,8 @@ export const updateOrderStatus = protectedAction<
     }
 
     let fromStatus: string | null = null
+    let changedLinesCount = 0
+    let aheadLinesCount = 0
     if (lineId?.trim()) {
       const { data: prevLine } = await ctx.adminClient
         .from('tailoring_order_lines')
@@ -700,7 +718,7 @@ export const updateOrderStatus = protectedAction<
     } else {
       const { data: prevOrder } = await ctx.adminClient
         .from('tailoring_orders')
-        .select('status')
+        .select('status, order_type')
         .eq('id', orderId.trim())
         .single()
       fromStatus = (prevOrder as any)?.status ?? null
@@ -720,12 +738,23 @@ export const updateOrderStatus = protectedAction<
 
       if (error) return failure(error.message, 'INTERNAL')
 
-      // Cascada a líneas en 'created' (réplica de changeOrderStatus admin).
-      await ctx.adminClient
+      // Propagación FORWARD-ONLY a líneas (réplica de changeOrderStatus admin):
+      // solo avanzan las rezagadas; las más adelantadas se respetan.
+      const { data: lineRows } = await ctx.adminClient
         .from('tailoring_order_lines')
-        .update({ status: trimmedStatus })
+        .select('id, status')
         .eq('tailoring_order_id', orderId.trim())
-        .eq('status', 'created')
+      const prop = classifyLinesForForwardPropagation(
+        trimmedStatus, (prevOrder as any)?.order_type, (lineRows ?? []) as { id: string; status: string }[],
+      )
+      if (prop.toUpdate.length > 0) {
+        await ctx.adminClient
+          .from('tailoring_order_lines')
+          .update({ status: trimmedStatus })
+          .in('id', prop.toUpdate)
+      }
+      changedLinesCount = prop.toUpdate.length
+      aheadLinesCount = prop.aheadCount
 
       // Reponer stock de tejido al cancelar (idempotente).
       if (trimmedStatus === 'cancelled' && fromStatus !== 'cancelled') {
@@ -777,6 +806,8 @@ export const updateOrderStatus = protectedAction<
     const toEs = getOrderStatusLabel(trimmedStatus)
     return success({
       orderId,
+      changed_lines_count: changedLinesCount,
+      ahead_lines_count: aheadLinesCount,
       auditEntityId: orderId,
       auditDescription: `Pedido ${orderNumber}: ${fromEs} → ${toEs}${lineId ? ' (línea)' : ''}`,
       auditOldData: { estado: fromStatus },

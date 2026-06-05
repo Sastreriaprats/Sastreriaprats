@@ -16,6 +16,7 @@ import { generateFichaForLine, generateFichaForLineCamiseria } from '@/lib/pdf/f
 import { generateTicketComplemento } from '@/lib/pdf/ticket-boutique'
 import { generateTailoringOrderTicketPdf } from '@/lib/pdf/tailoring-order-ticket'
 import { NewAlterationDialog } from '@/app/(sastre)/sastre/arreglos/arreglos-content'
+import { statusChangeToast } from '@/lib/orders/status-toast'
 import { EditOrderDialog } from '@/components/orders/edit-order-dialog'
 import { EditFichaDialog } from '@/components/orders/edit-ficha-dialog'
 import { Plus, Scissors, Loader2, Pencil } from 'lucide-react'
@@ -146,7 +147,10 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
   const handleStatusChange = async (newStatus: string) => {
     if (!order?.id || newStatus === order.status) return
     const res = await updateOrderStatus({ orderId: order.id, newStatus })
-    if (res?.success) await refreshOrder()
+    if (res?.success) {
+      statusChangeToast((res.data as { ahead_lines_count?: number })?.ahead_lines_count ?? 0)
+      await refreshOrder()
+    }
   }
 
   const LINE_STATUS_COLORS: Record<string, string> = {

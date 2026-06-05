@@ -72,3 +72,63 @@ export function getStatusesFor(orderType: string | null | undefined): OrderStatu
   if (!orderType) return ORDER_STATUSES_BY_TYPE.artesanal
   return ORDER_STATUSES_BY_TYPE[orderType] ?? ORDER_STATUSES_BY_TYPE.artesanal
 }
+
+/** Estados transversales/terminales que NO participan en el orden lineal del pipeline. */
+const NON_PIPELINE_STATUSES: OrderStatus[] = ['incident', 'cancelled']
+
+/**
+ * Índice (rank) de un estado dentro del pipeline de su order_type.
+ * Devuelve -1 si el estado no pertenece a ese pipeline.
+ */
+export function getStatusIndex(status: string, orderType: string | null | undefined): number {
+  return getStatusesFor(orderType).indexOf(status as OrderStatus)
+}
+
+export interface ForwardPropagation {
+  /** IDs de líneas que deben avanzar al estado destino (estaban por detrás). */
+  toUpdate: string[]
+  /** Nº de líneas que se dejan intactas por estar MÁS adelantadas que el destino. */
+  aheadCount: number
+}
+
+/**
+ * Regla "forward-only" para propagar el estado general del pedido a sus líneas.
+ * El estado general lo conduce el personal; las líneas solo se arrastran hacia
+ * adelante, nunca se hacen retroceder.
+ *
+ *  - destino `incident`  → transversal: NO se toca ninguna línea.
+ *  - destino `cancelled` → se cancelan todas las líneas que no estén ya
+ *                          `delivered` (ni `cancelled`).
+ *  - resto               → solo avanzan las líneas estrictamente por detrás
+ *                          (índice < índice destino en el pipeline del tipo).
+ *                          Las líneas en `incident`/`cancelled` nunca se tocan,
+ *                          y las de estado ajeno al pipeline se dejan como están.
+ */
+export function classifyLinesForForwardPropagation(
+  targetStatus: string,
+  orderType: string | null | undefined,
+  lines: { id: string; status: string }[],
+): ForwardPropagation {
+  if (targetStatus === 'incident') return { toUpdate: [], aheadCount: 0 }
+
+  if (targetStatus === 'cancelled') {
+    const toUpdate = lines
+      .filter((l) => l.status !== 'delivered' && l.status !== 'cancelled')
+      .map((l) => l.id)
+    return { toUpdate, aheadCount: 0 }
+  }
+
+  const idxTarget = getStatusIndex(targetStatus, orderType)
+  if (idxTarget < 0) return { toUpdate: [], aheadCount: 0 }
+
+  const toUpdate: string[] = []
+  let aheadCount = 0
+  for (const l of lines) {
+    if (NON_PIPELINE_STATUSES.includes(l.status as OrderStatus)) continue // transversales: intactas
+    const idxLine = getStatusIndex(l.status, orderType)
+    if (idxLine < 0) continue            // estado ajeno al pipeline del tipo: no tocar
+    if (idxLine < idxTarget) toUpdate.push(l.id)
+    else if (idxLine > idxTarget) aheadCount++
+  }
+  return { toUpdate, aheadCount }
+}
