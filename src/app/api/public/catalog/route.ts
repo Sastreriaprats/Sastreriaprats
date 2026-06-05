@@ -78,7 +78,7 @@ export async function GET(request: NextRequest) {
   let query = admin
     .from('products')
     .select(`
-      id, name, web_slug, description, base_price, price_with_tax, tax_rate, cost_price, brand, collection, season,
+      id, name, web_slug, description, base_price, price_with_tax, tax_rate, brand, collection, season,
       material, main_image_url, is_visible_web, product_type, images,
       category_id, product_categories!products_category_id_fkey(name, slug),
       product_variants(id, variant_sku, size, color, color_hex, barcode, price_override, is_active,
