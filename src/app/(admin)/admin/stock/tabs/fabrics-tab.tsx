@@ -18,7 +18,7 @@ import { Search, Loader2, Plus, MoreHorizontal, Eye, Pencil, PowerOff, SlidersHo
 import { usePermissions } from '@/hooks/use-permissions'
 import { listFabrics, updateFabricAction } from '@/actions/fabrics'
 import { listSuppliers } from '@/actions/suppliers'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatDate } from '@/lib/utils'
 import { toast } from 'sonner'
 import { EditFabricDialog, type FabricRow } from '@/components/admin/edit-fabric-dialog'
 import { AdjustFabricStockDialog } from '@/components/admin/adjust-fabric-stock-dialog'
@@ -31,6 +31,9 @@ export const FabricsTab = forwardRef<{ openNewFabricDialog: () => void }>(functi
   const [search, setSearch] = useState('')
   const [supplierId, setSupplierId] = useState('all')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('active')
+  /** Filtro por fecha de alta (created_at). Formato 'YYYY-MM-DD' o '' = sin filtro. */
+  const [createdFrom, setCreatedFrom] = useState('')
+  const [createdTo, setCreatedTo] = useState('')
   const [fabrics, setFabrics] = useState<any[]>([])
   const [suppliers, setSuppliers] = useState<{ id: string; name: string; nif_cif?: string | null; supplier_code?: string | null }[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -65,12 +68,14 @@ export const FabricsTab = forwardRef<{ openNewFabricDialog: () => void }>(functi
         limit: 200,
         supplierId: supplierId !== 'all' ? supplierId : undefined,
         isActive,
+        createdFrom: createdFrom || undefined,
+        createdTo: createdTo || undefined,
       })
       if (res.success && res.data) setFabrics(res.data.data)
       setIsLoading(false)
     }, 250)
     return () => clearTimeout(handler)
-  }, [search, supplierId, statusFilter, refreshTrigger])
+  }, [search, supplierId, statusFilter, createdFrom, createdTo, refreshTrigger])
 
   async function toggleActive(fabric: any) {
     setTogglingId(fabric.id)
@@ -120,6 +125,38 @@ export const FabricsTab = forwardRef<{ openNewFabricDialog: () => void }>(functi
           </SelectContent>
         </Select>
 
+        {/* Filtro por fecha de alta */}
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-muted-foreground whitespace-nowrap">Alta desde</span>
+          <Input
+            type="date"
+            value={createdFrom}
+            max={createdTo || undefined}
+            onChange={(e) => setCreatedFrom(e.target.value)}
+            className="h-8 w-[140px] text-sm"
+            aria-label="Fecha de alta desde"
+          />
+          <span className="text-xs text-muted-foreground">hasta</span>
+          <Input
+            type="date"
+            value={createdTo}
+            min={createdFrom || undefined}
+            onChange={(e) => setCreatedTo(e.target.value)}
+            className="h-8 w-[140px] text-sm"
+            aria-label="Fecha de alta hasta"
+          />
+          {(createdFrom || createdTo) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-xs text-muted-foreground"
+              onClick={() => { setCreatedFrom(''); setCreatedTo('') }}
+            >
+              Limpiar
+            </Button>
+          )}
+        </div>
+
         {can('products.create') && (
           <Button
             size="sm"
@@ -141,6 +178,7 @@ export const FabricsTab = forwardRef<{ openNewFabricDialog: () => void }>(functi
               <TableHead>Proveedor</TableHead>
               <TableHead className="text-right">€/metro</TableHead>
               <TableHead className="text-right">Stock</TableHead>
+              <TableHead>Fecha de alta</TableHead>
               <TableHead>Estado</TableHead>
               <TableHead className="w-10"></TableHead>
             </TableRow>
@@ -148,14 +186,14 @@ export const FabricsTab = forwardRef<{ openNewFabricDialog: () => void }>(functi
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={7} className="h-32 text-center">
+                <TableCell colSpan={8} className="h-32 text-center">
                   <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                 </TableCell>
               </TableRow>
             ) : fabrics.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
-                  {search || supplierId !== 'all' || statusFilter !== 'all'
+                <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
+                  {search || supplierId !== 'all' || statusFilter !== 'all' || createdFrom || createdTo
                     ? 'No hay tejidos con los filtros aplicados.'
                     : 'No hay tejidos registrados.'}
                 </TableCell>
@@ -182,6 +220,9 @@ export const FabricsTab = forwardRef<{ openNewFabricDialog: () => void }>(functi
                       {stockLow && (
                         <span className="block text-xs text-red-400">mín {minStock} m</span>
                       )}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                      {formatDate(f.created_at)}
                     </TableCell>
                     <TableCell>
                       {f.is_active

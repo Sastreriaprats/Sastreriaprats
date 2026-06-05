@@ -53,7 +53,7 @@ export async function generateFabricCode(adminClient: ReturnType<typeof createAd
 
 /** Lista tejidos con búsqueda y filtros (usa cliente admin para evitar RLS). */
 export const listFabrics = protectedAction<
-  { search?: string; limit?: number; supplierId?: string; isActive?: boolean },
+  { search?: string; limit?: number; supplierId?: string; isActive?: boolean; createdFrom?: string; createdTo?: string },
   { data: any[] }
 >(
   { permission: 'stock.view', auditModule: 'stock' },
@@ -68,6 +68,14 @@ export const listFabrics = protectedAction<
     }
     if (params.supplierId?.trim()) {
       query = query.eq('supplier_id', params.supplierId.trim())
+    }
+    // Filtro por fecha de alta (created_at). El input es una fecha 'YYYY-MM-DD';
+    // para "hasta" incluimos el día completo hasta las 23:59:59.999.
+    if (params.createdFrom?.trim()) {
+      query = query.gte('created_at', `${params.createdFrom.trim()}T00:00:00.000`)
+    }
+    if (params.createdTo?.trim()) {
+      query = query.lte('created_at', `${params.createdTo.trim()}T23:59:59.999`)
     }
     if (params.search?.trim()) {
       const normalized = normalizeSearchTerm(params.search)
