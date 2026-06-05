@@ -355,13 +355,20 @@ export function ReservationsTab() {
 
   const handlePrintTicket = async (r: Reservation, mode: 'print' | 'download') => {
     setPrintingId(r.id)
+    // Red de seguridad: si por cualquier bug futuro la generación no terminara,
+    // forzar el reset del spinner a los 12s para que no quede eterno.
+    const safety = setTimeout(() => setPrintingId(null), 12000)
     try {
       if (mode === 'print') {
         await printReservationPdf(buildReservationTicketData(r))
       } else {
         await generateReservationPdf(buildReservationTicketData(r), 'download')
       }
+    } catch (err) {
+      console.error('Error generando el ticket de reserva:', err)
+      toast.error('No se pudo generar el ticket, intenta de nuevo.')
     } finally {
+      clearTimeout(safety)
       setPrintingId(null)
     }
   }

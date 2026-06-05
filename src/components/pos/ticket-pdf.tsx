@@ -14,6 +14,40 @@ const FONT_BODY = 9
 const FONT_SMALL = 7
 const FONT_HEAD = 10
 
+/**
+ * Genera el Blob del PDF con un timeout defensivo. pdfMake.getBlob() puede no
+ * invocar nunca su callback ante un edge interno (fuentes/vfs), lo que dejaría
+ * la promesa de impresión colgada para siempre y el spinner eterno. Si en
+ * `timeoutMs` no hay blob, rechazamos para que el flujo llamante muestre error
+ * y resetee su estado.
+ */
+function getPdfBlobWithTimeout(
+  pdf: { getBlob: (cb: (blob: Blob) => void) => void },
+  timeoutMs = 8000,
+): Promise<Blob> {
+  return new Promise<Blob>((resolve, reject) => {
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      reject(new Error('Tiempo de espera agotado generando PDF'))
+    }, timeoutMs)
+    try {
+      pdf.getBlob((blob: Blob) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(blob)
+      })
+    } catch (err) {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      reject(err instanceof Error ? err : new Error(String(err)))
+    }
+  })
+}
+
 export interface TicketLinePayload {
   description: string
   quantity: number
@@ -373,8 +407,8 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
   const pdf = pdfMake.createPdf(docDef as Parameters<typeof pdfMake.createPdf>[0])
 
   if (mode === 'print') {
+    const blob = await getPdfBlobWithTimeout(pdf)
     await new Promise<void>((resolve) => {
-      (pdf as any).getBlob((blob: Blob) => {
         const fileName = `${giftMode ? 'ticket-regalo' : 'ticket'}-${data.sale.ticket_number}.pdf`
         const url = URL.createObjectURL(blob)
 
@@ -474,7 +508,6 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
 
         document.body.appendChild(iframe)
         resolve()
-      })
     })
   } else {
     const fileName = `${giftMode ? 'ticket-regalo' : 'ticket'}-${data.sale.ticket_number}.pdf`
@@ -773,8 +806,8 @@ export async function generateReservationPdf(
   const pdf = pdfMake.createPdf(docDef as Parameters<typeof pdfMake.createPdf>[0])
 
   if (mode === 'print') {
+    const blob = await getPdfBlobWithTimeout(pdf)
     await new Promise<void>((resolve) => {
-      (pdf as any).getBlob((blob: Blob) => {
         const fileName = `reserva-${data.reservation_number}.pdf`
         const url = URL.createObjectURL(blob)
 
@@ -874,7 +907,6 @@ export async function generateReservationPdf(
 
         document.body.appendChild(iframe)
         resolve()
-      })
     })
   } else {
     const fileName = `reserva-${data.reservation_number}.pdf`

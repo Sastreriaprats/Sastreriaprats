@@ -63,10 +63,24 @@ export function getStorePdfData(storeName: string | null | undefined): { address
   return STORE_PDF_CONFIGS.pinzon
 }
 
-/** En cliente (browser): carga el logo desde /images/logo-prats-crop.png y devuelve data URL base64. */
+/**
+ * En cliente (browser): carga el logo desde /images/logo-prats-crop.png y
+ * devuelve data URL base64.
+ *
+ * Timeout defensivo de 3s: si el fetch del logo se queda "pending" (red/SW
+ * estancado), abortamos y devolvemos null para que el PDF se genere SIN logo
+ * en lugar de dejar colgada la generación (y el spinner de impresión eterno).
+ */
 export async function getLogoBase64Client(): Promise<string | null> {
   try {
-    const res = await fetch('/images/logo-prats-crop.png')
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 3000)
+    let res: Response
+    try {
+      res = await fetch('/images/logo-prats-crop.png', { signal: controller.signal })
+    } finally {
+      clearTimeout(timer)
+    }
     if (!res.ok) return null
     const blob = await res.blob()
     return new Promise((resolve) => {
@@ -75,7 +89,8 @@ export async function getLogoBase64Client(): Promise<string | null> {
       reader.onerror = () => resolve(null)
       reader.readAsDataURL(blob)
     })
-  } catch {
+  } catch (err) {
+    console.warn('[getLogoBase64Client] no se pudo cargar el logo del PDF (se generará sin logo):', err)
     return null
   }
 }
