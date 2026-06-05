@@ -17,6 +17,9 @@ export async function GET() {
   const hasPerm = await checkUserPermission(user.id, 'products.view')
   if (!hasPerm) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
+  // El coste es información sensible: solo se exporta con 'products.view_costs'.
+  const canViewCosts = await checkUserPermission(user.id, 'products.view_costs')
+
   const admin = createAdminClient()
 
   const [warehousesRes, categoriesRes, suppliersRes] = await Promise.all([
@@ -111,7 +114,7 @@ export async function GET() {
     'SKU producto', 'SKU variante', 'Código barras', 'Producto',
     'Tipo', 'Categoría', 'Marca', 'Colección', 'Temporada',
     'Talla', 'Color', 'Proveedor', 'Ref. proveedor',
-    'PVP (c/IVA)', 'Coste', 'IVA %',
+    'PVP (c/IVA)', ...(canViewCosts ? ['Coste'] : []), 'IVA %',
     'Tienda', 'Almacén', 'Código almacén',
     'Stock', 'Reservado', 'Stock mín.',
   ]
@@ -135,7 +138,7 @@ export async function GET() {
       v.size ?? '', v.color ?? (p as any).color ?? '',
       p.supplier_id ? (suppliersById.get(p.supplier_id) ?? '') : '',
       p.supplier_reference ?? '',
-      round2(pvp), coste != null ? round2(coste) : '', p.tax_rate != null ? Number(p.tax_rate) : '',
+      round2(pvp), ...(canViewCosts ? [coste != null ? round2(coste) : ''] : []), p.tax_rate != null ? Number(p.tax_rate) : '',
       w?.storeName ?? '', w?.name ?? '', w?.code ?? '',
       sr.quantity ?? 0, sr.reserved ?? 0, sr.min_stock ?? '',
     ])

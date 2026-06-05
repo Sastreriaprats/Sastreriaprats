@@ -358,6 +358,15 @@ export const listProducts = protectedAction<ListParams, ListResult<any>>(
         stock_levels(quantity, reserved, warehouse_id, warehouses(id, name, code, is_active))
       )
     `)
+    // Defense-in-depth: ocultar el coste a quien no tenga 'products.view_costs'.
+    // Esta lista alimenta la pantalla de stock que también ven los vendedores;
+    // el gateo en UI no basta porque la action es invocable directamente.
+    const canViewCosts = await checkUserPermission(ctx.userId, 'products.view_costs')
+    if (!canViewCosts && Array.isArray(result.data)) {
+      for (const row of result.data as Record<string, unknown>[]) {
+        row.cost_price = null
+      }
+    }
     return success(result)
   }
 )

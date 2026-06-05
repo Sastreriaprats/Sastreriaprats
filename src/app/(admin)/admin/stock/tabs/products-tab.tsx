@@ -76,6 +76,8 @@ export function ProductsTab() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const { can } = usePermissions()
+  // El precio de coste es información sensible: solo visible con permiso.
+  const canViewCosts = can('products.view_costs')
 
   // Opciones dinámicas de los selects
   const [collectionOptions, setCollectionOptions] = useState<string[]>([])
@@ -425,7 +427,7 @@ export function ProductsTab() {
               <TableHead>Categoría</TableHead>
               <TableHead>Marca</TableHead>
               <SortHeader field="price_with_tax">PVP</SortHeader>
-              <SortHeader field="cost_price">Coste</SortHeader>
+              {canViewCosts && <SortHeader field="cost_price">Coste</SortHeader>}
               <TableHead>Proveedor</TableHead>
               <TableHead>Stock / Almacén</TableHead>
               <TableHead>Web</TableHead>
@@ -443,7 +445,7 @@ export function ProductsTab() {
                   <TableCell><Skeleton className="h-5 w-20 rounded-full" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-16" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-14" /></TableCell>
+                  {canViewCosts && <TableCell><Skeleton className="h-4 w-14" /></TableCell>}
                   <TableCell><Skeleton className="h-4 w-14" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-16" /></TableCell>
@@ -452,7 +454,7 @@ export function ProductsTab() {
                 </TableRow>
               ))
             ) : displayedProducts.length === 0 ? (
-              <TableRow><TableCell colSpan={13} className="h-40 text-center text-muted-foreground">{hasActiveFilters ? 'No hay productos con los filtros aplicados.' : 'No hay productos'}</TableCell></TableRow>
+              <TableRow><TableCell colSpan={canViewCosts ? 13 : 12} className="h-40 text-center text-muted-foreground">{hasActiveFilters ? 'No hay productos con los filtros aplicados.' : 'No hay productos'}</TableCell></TableRow>
             ) : displayedProducts.map((p: any) => {
               const isFabric = p.product_type === 'tailoring_fabric'
               const { total: stockTotal, reserved: stockReserved, warehouses } = getProductStockSummary(p)
@@ -496,7 +498,7 @@ export function ProductsTab() {
                   <TableCell className="text-sm">{p.product_categories?.name || '-'}</TableCell>
                   <TableCell className="text-sm">{p.brand || '-'}</TableCell>
                   <TableCell className="font-medium">{formatCurrency(p.price_with_tax)}{isFabric ? <span className="text-xs text-muted-foreground">/m</span> : null}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{p.cost_price ? formatCurrency(p.cost_price) : '-'}</TableCell>
+                  {canViewCosts && <TableCell className="text-sm text-muted-foreground">{p.cost_price ? formatCurrency(p.cost_price) : '-'}</TableCell>}
                   <TableCell className="text-sm">{p.suppliers?.name || '-'}</TableCell>
                   <TableCell>
                     {warehouses.length === 0 ? (
