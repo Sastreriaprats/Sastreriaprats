@@ -283,6 +283,27 @@ export function ReservationsTab() {
       })
       if (!res.success) { toast.error(res.error || 'No se pudo registrar el pago'); return }
       toast.success(`Pago registrado (${formatCurrency(amount)})`)
+      // Imprimir el ticket automáticamente reflejando el cobro recién hecho.
+      // paymentTarget está obsoleto (no incluye este pago todavía), así que
+      // construimos una copia con el pago añadido y total_paid actualizado.
+      const nowIso = new Date().toISOString()
+      const chargedReservation: Reservation = {
+        ...paymentTarget,
+        total_paid: Number(paymentTarget.total_paid) + amount,
+        payments: [
+          ...(paymentTarget.payments ?? []),
+          {
+            id: 'pending', payment_date: nowIso, payment_method: paymentMethod,
+            amount, reference: paymentReference || null, notes: null, created_at: nowIso,
+          },
+        ],
+      }
+      try {
+        await printReservationPdf(buildReservationTicketData(chargedReservation))
+      } catch (printErr) {
+        console.error('Error imprimiendo ticket de reserva tras cobro:', printErr)
+        toast.error('Pago registrado, pero no se pudo abrir el ticket para imprimir.')
+      }
       setPaymentTarget(null)
       fetchData()
     } catch (err) {
@@ -510,7 +531,7 @@ export function ReservationsTab() {
                         variant="outline"
                         className="gap-1"
                         disabled={printingId === r.id}
-                        title="Reimprimir ticket"
+                        title="Imprimir ticket"
                         onClick={() => handlePrintTicket(r, 'print')}
                       >
                         {printingId === r.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Printer className="h-3 w-3" />}
