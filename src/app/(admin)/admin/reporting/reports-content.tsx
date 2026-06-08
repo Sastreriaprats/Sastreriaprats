@@ -13,10 +13,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   TrendingUp, TrendingDown, DollarSign, Users, ShoppingBag, Scissors,
   BarChart3, FileSpreadsheet, FileText, Loader2, Store, UserCog, Clock, Wallet,
-  Flame, Star, Receipt,
+  Flame, Star, Receipt, Layers,
 } from 'lucide-react'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts'
 import { useAuth } from '@/components/providers/auth-provider'
-import { getSalesReport, getComparePeriods, getTopProducts, getTailorPerformance, getClientsAnalytics, getClientsAdvancedAnalytics, getSalesByStore, getSalesByEmployee, getSalesByTimePattern, getExpensesReport, getExpensesComparison, type ReportChannel, type TaxMode, type ClientsAdvancedAnalytics } from '@/actions/reports'
+import { getSalesReport, getComparePeriods, getTopProducts, getTailorPerformance, getClientsAnalytics, getClientsAdvancedAnalytics, getSalesByStore, getSalesByEmployee, getSalesByTimePattern, getExpensesReport, getExpensesComparison, getTailoringByCategory, type ReportChannel, type TaxMode, type ClientsAdvancedAnalytics, type TailoringCategoryRow } from '@/actions/reports'
 import { getStoresList } from '@/actions/config'
 import { SalesChart } from './charts/sales-chart'
 import { TopProductsChart } from './charts/top-products-chart'
@@ -100,6 +101,7 @@ export function ReportsContent() {
   const [storeData, setStoreData] = useState<StoreItem[]>([])
   const [employeeData, setEmployeeData] = useState<EmployeeItem[]>([])
   const [timePatternData, setTimePatternData] = useState<TimePatternData | null>(null)
+  const [tailoringByCat, setTailoringByCat] = useState<{ breakdown: TailoringCategoryRow[]; total: { amount: number; garments: number } } | null>(null)
   const [expensesData, setExpensesData] = useState<ExpensesData | null>(null)
   const [expensesComparison, setExpensesComparison] = useState<ExpensesComparison | null>(null)
   const [isExporting, setIsExporting] = useState(false)
@@ -135,7 +137,7 @@ export function ReportsContent() {
       const prevStartStr = prevStart.toISOString().split('T')[0]
       const prevEndStr = prevEnd.toISOString().split('T')[0]
 
-      const [salesRes, compareRes, productsRes, tailorRes, clientsRes, clientsAdvRes, storeRes, employeeRes, timeRes, expensesRes, expCompRes] = await Promise.all([
+      const [salesRes, compareRes, productsRes, tailorRes, clientsRes, clientsAdvRes, storeRes, employeeRes, timeRes, expensesRes, expCompRes, tailoringCatRes] = await Promise.all([
         getSalesReport({ start_date: start, end_date: end, store_id: storeId, channel, group_by: groupBy, tax_mode }),
         getComparePeriods({
           current_start: start, current_end: end,
@@ -151,6 +153,7 @@ export function ReportsContent() {
         getSalesByTimePattern({ start_date: start, end_date: end, store_id: storeId, channel, tax_mode }),
         getExpensesReport({ start_date: start, end_date: end, tax_mode }),
         getExpensesComparison({ current_start: start, current_end: end, previous_start: prevStartStr, previous_end: prevEndStr, tax_mode }),
+        getTailoringByCategory({ start_date: start, end_date: end, store_id: storeId }),
       ])
 
       if (salesRes.success) setSalesData(salesRes.data)
@@ -164,6 +167,7 @@ export function ReportsContent() {
       if (timeRes.success) setTimePatternData(timeRes.data)
       if (expensesRes.success) setExpensesData(expensesRes.data)
       if (expCompRes.success) setExpensesComparison(expCompRes.data)
+      if (tailoringCatRes.success) setTailoringByCat(tailoringCatRes.data)
     } catch (err) {
       console.error('[ReportsContent fetchAll]', err)
       toast.error('Error al cargar los informes')
@@ -419,6 +423,7 @@ export function ReportsContent() {
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList>
               <TabsTrigger value="sales" className="gap-1"><BarChart3 className="h-4 w-4" /> Ventas</TabsTrigger>
+              <TabsTrigger value="bytype" className="gap-1"><Layers className="h-4 w-4" /> Ventas por tipo</TabsTrigger>
               <TabsTrigger value="products" className="gap-1"><ShoppingBag className="h-4 w-4" /> Productos</TabsTrigger>
               <TabsTrigger value="tailors" className="gap-1"><Scissors className="h-4 w-4" /> Sastres</TabsTrigger>
               <TabsTrigger value="clients" className="gap-1"><Users className="h-4 w-4" /> Clientes</TabsTrigger>
@@ -430,6 +435,7 @@ export function ReportsContent() {
 
             <div className="mt-6">
               <TabsContent value="sales"><VentasTab salesData={salesData} timePatternData={timePatternData} /></TabsContent>
+              <TabsContent value="bytype"><TailoringByTypeTab data={tailoringByCat} /></TabsContent>
               <TabsContent value="products">
                 <Input
                   placeholder="Filtrar por producto o SKU..."
@@ -510,6 +516,106 @@ function VentasTab({ salesData, timePatternData }: { salesData: SalesData | null
         </div>
       )}
       <SalesChart data={chartData} />
+    </div>
+  )
+}
+
+// ─── Tab: Ventas por tipo (Sastrería/Camisería × Artesanal/Industrial) ───────
+
+const CATEGORY_COLORS: Record<string, string> = {
+  sastreria_artesanal: '#1e3a5f',   // navy
+  sastreria_industrial: '#3b82f6',  // azul
+  camiseria_artesanal: '#d97706',   // ámbar
+  camiseria_industrial: '#f97316',  // naranja
+}
+const CATEGORY_SHORT: Record<string, string> = {
+  sastreria_artesanal: 'Sast. Artesanal',
+  sastreria_industrial: 'Sast. Industrial',
+  camiseria_artesanal: 'Cam. Artesanal',
+  camiseria_industrial: 'Cam. Industrial',
+}
+
+function TailoringByTypeTab({ data }: { data: { breakdown: TailoringCategoryRow[]; total: { amount: number; garments: number } } | null }) {
+  if (!data || data.total.garments === 0) {
+    return <p className="text-center text-muted-foreground py-12">Sin ventas de sastrería/camisería para el periodo seleccionado</p>
+  }
+
+  const chartData = data.breakdown.map((b) => ({
+    key: b.category,
+    name: CATEGORY_SHORT[b.category] ?? b.label,
+    importe: Math.round(b.amount * 100) / 100,
+    prendas: b.garments,
+  }))
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Facturación por tipo de confección</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Importe facturado (suma de líneas, IVA incl.) por cada combinación. Pedidos no cancelados, según fecha del pedido.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="h-72 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="name" fontSize={12} tickLine={false} />
+                <YAxis fontSize={11} tickFormatter={(v: number) => `${Math.round(v / 1000)}k`} width={42} />
+                <Tooltip
+                  formatter={(value, _name, item) => [
+                    `${formatCurrency(Number(value ?? 0))} · ${(item?.payload as { prendas?: number })?.prendas ?? 0} prendas`,
+                    'Facturado',
+                  ]}
+                  labelFormatter={(label) => String(label)}
+                />
+                <Bar dataKey="importe" radius={[4, 4, 0, 0]}>
+                  {chartData.map((d) => (
+                    <Cell key={d.key} fill={CATEGORY_COLORS[d.key] ?? '#64748b'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="pt-4">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Tipo</TableHead>
+                <TableHead className="text-right">Facturado</TableHead>
+                <TableHead className="text-right">Prendas</TableHead>
+                <TableHead className="text-right">% sobre total</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.breakdown.map((b) => (
+                <TableRow key={b.category}>
+                  <TableCell className="flex items-center gap-2 font-medium">
+                    <span className="inline-block h-3 w-3 rounded-sm" style={{ backgroundColor: CATEGORY_COLORS[b.category] }} />
+                    {b.label}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{formatCurrency(b.amount)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{b.garments}</TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {data.total.amount > 0 ? `${((b.amount / data.total.amount) * 100).toFixed(1)}%` : '—'}
+                  </TableCell>
+                </TableRow>
+              ))}
+              <TableRow className="border-t-2 font-bold">
+                <TableCell>Total</TableCell>
+                <TableCell className="text-right tabular-nums">{formatCurrency(data.total.amount)}</TableCell>
+                <TableCell className="text-right tabular-nums">{data.total.garments}</TableCell>
+                <TableCell className="text-right tabular-nums">100%</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
     </div>
   )
 }

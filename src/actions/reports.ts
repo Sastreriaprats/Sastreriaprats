@@ -126,6 +126,75 @@ export const getSalesReport = protectedAction<
   }
 )
 
+export type TailoringCategoryKey =
+  | 'sastreria_artesanal' | 'sastreria_industrial'
+  | 'camiseria_artesanal' | 'camiseria_industrial'
+
+export type TailoringCategoryRow = { category: TailoringCategoryKey; label: string; amount: number; garments: number }
+
+const TAILORING_CATEGORY_LABELS: Record<TailoringCategoryKey, string> = {
+  sastreria_artesanal: 'Sastrería Artesanal',
+  sastreria_industrial: 'Sastrería Industrial',
+  camiseria_artesanal: 'Camisería Artesanal',
+  camiseria_industrial: 'Camisería Industrial',
+}
+
+/**
+ * Desglose de ventas (facturado) por las 4 combinaciones que cruza el negocio:
+ *   Sastrería/Camisería  ×  Artesanal/Industrial.
+ *
+ * Se calcula a nivel de LÍNEA (una prenda puede ser camisería dentro de un
+ * pedido artesanal): eje sastrería/camisería = `garment_types.category`;
+ * eje artesanal/industrial = `tailoring_order_lines.line_type` (con fallback al
+ * `order_type` del pedido por si alguna línea no lo tuviera). Importe = suma de
+ * `line_total`; prendas = nº de líneas. Excluye pedidos y líneas canceladas.
+ * Filtra por `order_date` del pedido y, opcionalmente, por tienda.
+ */
+export const getTailoringByCategory = protectedAction<
+  { start_date: string; end_date: string; store_id?: string },
+  { breakdown: TailoringCategoryRow[]; total: { amount: number; garments: number } }
+>(
+  { permission: 'reports.view', auditModule: 'reports' },
+  async (ctx, { start_date, end_date, store_id }) => {
+    let query = ctx.adminClient
+      .from('tailoring_order_lines')
+      .select('line_type, line_total, status, garment_types(category), tailoring_orders!inner(order_date, store_id, status, order_type)')
+      .neq('status', 'cancelled')
+      .neq('tailoring_orders.status', 'cancelled')
+      .gte('tailoring_orders.order_date', start_date)
+      .lte('tailoring_orders.order_date', end_date)
+    if (store_id) query = query.eq('tailoring_orders.store_id', store_id)
+
+    const { data, error } = await query.limit(20000)
+    if (error) return failure(error.message)
+
+    const buckets: Record<TailoringCategoryKey, { amount: number; garments: number }> = {
+      sastreria_artesanal: { amount: 0, garments: 0 },
+      sastreria_industrial: { amount: 0, garments: 0 },
+      camiseria_artesanal: { amount: 0, garments: 0 },
+      camiseria_industrial: { amount: 0, garments: 0 },
+    }
+
+    for (const row of (data ?? []) as any[]) {
+      const gt = Array.isArray(row.garment_types) ? row.garment_types[0] : row.garment_types
+      const order = Array.isArray(row.tailoring_orders) ? row.tailoring_orders[0] : row.tailoring_orders
+      const isCamiseria = gt?.category === 'camiseria'
+      const ai = row.line_type || order?.order_type
+      const isIndustrial = ai === 'industrial'
+      const key: TailoringCategoryKey = `${isCamiseria ? 'camiseria' : 'sastreria'}_${isIndustrial ? 'industrial' : 'artesanal'}`
+      buckets[key].amount += Number(row.line_total ?? 0)
+      buckets[key].garments += 1
+    }
+
+    const orderKeys: TailoringCategoryKey[] = ['sastreria_artesanal', 'sastreria_industrial', 'camiseria_artesanal', 'camiseria_industrial']
+    const breakdown = orderKeys.map((k) => ({
+      category: k, label: TAILORING_CATEGORY_LABELS[k], amount: buckets[k].amount, garments: buckets[k].garments,
+    }))
+    const total = breakdown.reduce((acc, b) => ({ amount: acc.amount + b.amount, garments: acc.garments + b.garments }), { amount: 0, garments: 0 })
+    return success({ breakdown, total })
+  }
+)
+
 export const getComparePeriods = protectedAction<
   { current_start: string; current_end: string; previous_start: string; previous_end: string; store_id?: string; channel?: ReportChannel; tax_mode?: TaxMode },
   {
