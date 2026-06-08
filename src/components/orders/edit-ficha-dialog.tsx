@@ -13,10 +13,13 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from '@/components/ui/command'
-import { Loader2, Check, ChevronsUpDown } from 'lucide-react'
+import { Loader2, Check, ChevronsUpDown, Trash2, ImagePlus } from 'lucide-react'
 import { toast } from 'sonner'
+import { useRouter } from 'next/navigation'
 import { updateOrderAction } from '@/actions/orders'
 import { listActiveFabricsForFicha } from '@/actions/fabrics'
+import { addOrderLinePhoto, removeOrderLinePhoto, getOrderLinePhotoUrls } from '@/actions/order-line-photos'
+import { usePermissions } from '@/hooks/use-permissions'
 import { createClient } from '@/lib/supabase/client'
 
 type OfficialOption = { id: string; name: string; specialty?: string | null }
@@ -515,6 +518,60 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
   const [oficialResults, setOficialResults] = useState<OfficialOption[]>([])
   const [isSearchingOficial, setIsSearchingOficial] = useState(false)
 
+  // ── Fotos de la prenda (bucket privado, máx 2) ──────────────────────────────
+  // Independientes del submit: se suben/borran al instante con sus acciones.
+  const router = useRouter()
+  const { can } = usePermissions()
+  const canEditPhotos = can('orders.edit')
+  const lineId: string | null = line?.id ?? null
+  const [photos, setPhotos] = useState<{ path: string; url: string }[]>([])
+  const [photosLoading, setPhotosLoading] = useState(false)
+  const [photoBusy, setPhotoBusy] = useState(false)
+
+  const refreshPhotos = async () => {
+    if (!lineId) return
+    const res = await getOrderLinePhotoUrls(lineId)
+    if (res.success) setPhotos(res.data)
+  }
+  const handleAddPhoto = async (file: File) => {
+    if (!lineId) return
+    setPhotoBusy(true)
+    try {
+      const fd = new FormData()
+      fd.set('lineId', lineId)
+      fd.set('file', file)
+      const res = await addOrderLinePhoto(fd)
+      if (!res.success) { toast.error(res.error || 'No se pudo subir la foto'); return }
+      await refreshPhotos()
+      router.refresh()
+    } finally {
+      setPhotoBusy(false)
+    }
+  }
+  const handleRemovePhoto = async (path: string) => {
+    if (!lineId) return
+    setPhotoBusy(true)
+    try {
+      const res = await removeOrderLinePhoto({ lineId, path })
+      if (!res.success) { toast.error(res.error || 'No se pudo borrar la foto'); return }
+      await refreshPhotos()
+      router.refresh()
+    } finally {
+      setPhotoBusy(false)
+    }
+  }
+
+  // Cargar las fotos ya subidas (signed URLs) al abrir el dialog.
+  useEffect(() => {
+    if (!open || !lineId) { setPhotos([]); return }
+    let cancelled = false
+    setPhotosLoading(true)
+    getOrderLinePhotoUrls(lineId)
+      .then((res) => { if (!cancelled && res.success) setPhotos(res.data) })
+      .finally(() => { if (!cancelled) setPhotosLoading(false) })
+    return () => { cancelled = true }
+  }, [open, lineId])
+
   useEffect(() => {
     if (open) {
       setCfg({ ...defaultsFor(type), ...initialCfg })
@@ -842,6 +899,55 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
               <Label>Observaciones (comunes)</Label>
               <Textarea rows={2} value={str(cfg.observaciones)} onChange={(e) => set('observaciones', e.target.value)} />
             </div>
+          </section>
+
+          {/* Fotos de la prenda (hasta 2, bucket privado). Independiente del submit. */}
+          <section className="space-y-2">
+            <Label>Fotos de la prenda</Label>
+            <p className="text-xs text-muted-foreground">
+              Hasta 2 fotos (tejido, detalles, resultado). JPG/PNG/WEBP, máx. 5 MB.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              {photos.map((ph) => (
+                <div key={ph.path} className="relative rounded-md border bg-muted/30 overflow-hidden">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={ph.url} alt="Foto de la prenda" className="w-full h-40 object-cover bg-white" />
+                  {canEditPhotos && (
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="icon"
+                      className="absolute top-1 right-1 h-7 w-7"
+                      disabled={photoBusy}
+                      onClick={() => handleRemovePhoto(ph.path)}
+                      title="Eliminar foto"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+              {canEditPhotos && photos.length < 2 && (
+                <label
+                  className={`flex flex-col items-center justify-center h-40 rounded-md border border-dashed cursor-pointer text-xs text-muted-foreground hover:bg-muted/40 ${photoBusy ? 'opacity-50 pointer-events-none' : ''}`}
+                >
+                  {photoBusy
+                    ? <Loader2 className="h-5 w-5 animate-spin" />
+                    : <><ImagePlus className="h-5 w-5 mb-1" /><span>Subir foto</span></>}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    disabled={photoBusy}
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleAddPhoto(f); e.target.value = '' }}
+                  />
+                </label>
+              )}
+            </div>
+            {photosLoading && <p className="text-xs text-muted-foreground">Cargando fotos…</p>}
+            {!canEditPhotos && photos.length === 0 && !photosLoading && (
+              <p className="text-xs text-muted-foreground">Sin fotos.</p>
+            )}
           </section>
 
           {/* Sección específica por tipo */}

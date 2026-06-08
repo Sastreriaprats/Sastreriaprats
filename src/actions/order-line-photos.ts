@@ -150,3 +150,36 @@ export const getOrderLinePhotoUrls = protectedAction<string, { path: string; url
     return success(out)
   }
 )
+
+/**
+ * Versión batch de getOrderLinePhotoUrls: para una lista de líneas devuelve un
+ * map lineId -> signed URLs. Una sola query a BD (.in) + firmas en paralelo,
+ * para evitar N+1 al pintar miniaturas en el detalle de un pedido (varias
+ * prendas). Solo lectura -> orders.view.
+ */
+export const getOrderLinePhotosBatch = protectedAction<string[], Record<string, { path: string; url: string }[]>>(
+  { permission: 'orders.view', auditModule: 'orders' },
+  async (ctx, lineIds) => {
+    const ids = Array.isArray(lineIds)
+      ? Array.from(new Set(lineIds.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim())))
+      : []
+    if (ids.length === 0) return success({})
+
+    const { data: lines, error } = await ctx.adminClient
+      .from('tailoring_order_lines').select('id, photos').in('id', ids)
+    if (error) return failure(error.message)
+
+    const result: Record<string, { path: string; url: string }[]> = {}
+    await Promise.all((lines ?? []).map(async (line) => {
+      const id = (line as { id: string }).id
+      const paths = readPhotos(line)
+      const urls: { path: string; url: string }[] = []
+      await Promise.all(paths.map(async (p) => {
+        const { data } = await ctx.adminClient.storage.from(BUCKET).createSignedUrl(p, SIGNED_URL_TTL)
+        if (data?.signedUrl) urls.push({ path: p, url: data.signedUrl })
+      }))
+      result[id] = urls
+    }))
+    return success(result)
+  }
+)
