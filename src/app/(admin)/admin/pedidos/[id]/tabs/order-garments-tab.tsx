@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -10,6 +10,8 @@ import { Printer, Pencil, Loader2 } from 'lucide-react'
 import { formatCurrency, getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
 import { generateFichaForLine, generateFichaForLineCamiseria } from '@/lib/pdf/ficha-confeccion'
 import { EditFichaDialog } from '@/components/orders/edit-ficha-dialog'
+import { LinePhotosViewer } from '@/components/orders/line-photos-viewer'
+import { getOrderLinePhotosBatch } from '@/actions/order-line-photos'
 import { usePermissions } from '@/hooks/use-permissions'
 import { toast } from 'sonner'
 import { getLineGroup, type LineGroup } from '@/lib/orders/line-groups'
@@ -23,6 +25,18 @@ export function OrderGarmentsTab({ order }: { order: any }) {
   const lines = order.tailoring_order_lines || []
   const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null)
   const [editingLine, setEditingLine] = useState<any | null>(null)
+
+  // Fotos por prenda (signed URLs) — 1 sola llamada batch, no N+1.
+  const lineIdsKey = lines.map((l: { id: string }) => l.id).filter(Boolean).join(',')
+  const photosSig = lines.map((l: { id: string; photos?: string[] }) => (l.photos || []).join('+')).join('|')
+  const [photosByLine, setPhotosByLine] = useState<Record<string, { path: string; url: string }[]>>({})
+  useEffect(() => {
+    const ids = lineIdsKey ? lineIdsKey.split(',') : []
+    if (ids.length === 0) { setPhotosByLine({}); return }
+    let cancelled = false
+    getOrderLinePhotosBatch(ids).then((res) => { if (!cancelled && res.success) setPhotosByLine(res.data) })
+    return () => { cancelled = true }
+  }, [lineIdsKey, photosSig])
 
   const canEdit = !LOCKED_STATUSES.has(order?.status)
 
@@ -210,6 +224,13 @@ export function OrderGarmentsTab({ order }: { order: any }) {
 
             {line.finishing_notes && (
               <div className="p-2 bg-muted rounded text-sm italic">&quot;{line.finishing_notes}&quot;</div>
+            )}
+
+            {photosByLine[line.id]?.length > 0 && (
+              <div className="space-y-1">
+                <span className="text-muted-foreground block text-xs">Fotos</span>
+                <LinePhotosViewer urls={photosByLine[line.id]} />
+              </div>
             )}
 
             <Separator />

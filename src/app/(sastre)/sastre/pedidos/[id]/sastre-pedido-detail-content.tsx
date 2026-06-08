@@ -19,6 +19,8 @@ import { NewAlterationDialog } from '@/app/(sastre)/sastre/arreglos/arreglos-con
 import { statusChangeToast } from '@/lib/orders/status-toast'
 import { EditOrderDialog } from '@/components/orders/edit-order-dialog'
 import { EditFichaDialog } from '@/components/orders/edit-ficha-dialog'
+import { LinePhotosViewer } from '@/components/orders/line-photos-viewer'
+import { getOrderLinePhotosBatch } from '@/actions/order-line-photos'
 import { Plus, Scissors, Loader2, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { useActiveStore } from '@/hooks/use-store'
@@ -79,6 +81,19 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
   }
 
   const lines: any[] = order?.tailoring_order_lines ?? []
+
+  // Fotos por prenda (signed URLs) — 1 sola llamada batch, no N+1.
+  const lineIdsKey = lines.map((l: { id: string }) => l.id).filter(Boolean).join(',')
+  const photosSig = lines.map((l: { id: string; photos?: string[] }) => (l.photos || []).join('+')).join('|')
+  const [photosByLine, setPhotosByLine] = useState<Record<string, { path: string; url: string }[]>>({})
+  useEffect(() => {
+    const ids = lineIdsKey ? lineIdsKey.split(',') : []
+    if (ids.length === 0) { setPhotosByLine({}); return }
+    let cancelled = false
+    getOrderLinePhotosBatch(ids).then((res) => { if (!cancelled && res.success) setPhotosByLine(res.data) })
+    return () => { cancelled = true }
+  }, [lineIdsKey, photosSig])
+
   const hasCamiseriaLines = lines.some((l: any) => isLineCamiseria(l))
   const visibleLines = hasCamiseriaLines
     ? lines.filter(
@@ -254,10 +269,8 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
               <>
                 <p className="text-xs font-semibold text-[#c9a96e] uppercase tracking-[0.15em] mb-3 mt-5">Sastrería</p>
                 {sastreriaLines.map((line: any) => (
-                  <div
-                    key={line.id}
-                    className="flex items-center justify-between py-3 border-b border-white/[0.06] last:border-b-0"
-                  >
+                  <div key={line.id} className="border-b border-white/[0.06] last:border-b-0">
+                  <div className="flex items-center justify-between py-3">
                     <span className="mr-2" aria-hidden>👕</span>
                     <span className="text-white flex-1 min-w-0">{getLineName(line)}</span>
                     <span className={`w-2 h-2 rounded-full shrink-0 ml-2 ${LINE_STATUS_COLORS[line.status] || 'bg-gray-400'}`} />
@@ -307,6 +320,10 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
                       </button>
                     )}
                   </div>
+                    {photosByLine[line.id]?.length > 0 && (
+                      <LinePhotosViewer urls={photosByLine[line.id]} className="pl-7 pb-3" />
+                    )}
+                  </div>
                 ))}
               </>
             )}
@@ -317,10 +334,8 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
                 {camiseriaLines.map((line: any) => {
                   const lineIndex = lines.indexOf(line)
                   return (
-                    <div
-                      key={line.id}
-                      className="flex items-center justify-between py-3 border-b border-white/[0.06] last:border-b-0"
-                    >
+                    <div key={line.id} className="border-b border-white/[0.06] last:border-b-0">
+                    <div className="flex items-center justify-between py-3">
                       <span className="mr-2" aria-hidden>👕</span>
                       <span className="text-white flex-1 min-w-0">{getLineName(line)}</span>
                       <span
@@ -357,6 +372,10 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
                           <Pencil className="h-3 w-3" />
                           Editar ficha
                         </button>
+                      )}
+                    </div>
+                      {photosByLine[line.id]?.length > 0 && (
+                        <LinePhotosViewer urls={photosByLine[line.id]} className="pl-7 pb-3" />
                       )}
                     </div>
                   )
