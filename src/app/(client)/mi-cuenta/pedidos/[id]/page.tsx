@@ -34,7 +34,7 @@ export default async function OrderDetailPage({
       .from('tailoring_orders')
       .select(`
         *,
-        tailoring_order_lines(*, garment_types(name)),
+        tailoring_order_lines(id, sort_order, unit_price, line_total, garment_types(name)),
         tailoring_order_state_history(*, profiles!tailoring_order_state_history_changed_by_fkey(full_name)),
         tailoring_fittings(*)
       `)
