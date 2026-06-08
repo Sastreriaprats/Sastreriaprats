@@ -231,7 +231,9 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
     const unitPriceWithTax = line.unit_price
     const lineTotalWithTax = line.line_total
       ?? (line.unit_price * line.quantity * (1 - (line.discount_percentage || 0) / 100))
-    const desc = truncate(line.description, 32)
+    // Descripción completa: la columna '*' de la tabla hace word-wrap a varias
+    // líneas en pdfmake, así que NO truncamos (Mónica necesita ver el nombre entero).
+    const desc = line.description
     const hasDiscount = (line.discount_percentage || 0) > 0
     const discountAmountWithTax = line.unit_price * line.quantity * (line.discount_percentage || 0) / 100
 
@@ -658,7 +660,7 @@ export async function generateReservationPdf(
           const bits = [ln.size ? `T.${ln.size}` : null, ln.color].filter(Boolean).join(' · ')
           const rows: any[] = [
             [
-              { text: truncate(ln.description, 32), fontSize: FONT_BODY },
+              { text: ln.description, fontSize: FONT_BODY },
               { text: fmt(ln.line_total), fontSize: FONT_BODY, alignment: 'right' },
             ],
             [
