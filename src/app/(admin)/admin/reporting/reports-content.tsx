@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Input } from '@/components/ui/input'
 import { DatePickerPopover } from '@/components/ui/date-picker-popover'
@@ -435,7 +436,7 @@ export function ReportsContent() {
 
             <div className="mt-6">
               <TabsContent value="sales"><VentasTab salesData={salesData} timePatternData={timePatternData} /></TabsContent>
-              <TabsContent value="bytype"><TailoringByTypeTab data={tailoringByCat} /></TabsContent>
+              <TabsContent value="bytype"><TailoringByTypeTab data={tailoringByCat} storeName={activeStoreName} /></TabsContent>
               <TabsContent value="products">
                 <Input
                   placeholder="Filtrar por producto o SKU..."
@@ -535,9 +536,21 @@ const CATEGORY_SHORT: Record<string, string> = {
   camiseria_industrial: 'Cam. Industrial',
 }
 
-function TailoringByTypeTab({ data }: { data: { breakdown: TailoringCategoryRow[]; total: { amount: number; garments: number } } | null }) {
+function TailoringByTypeTab({ data, storeName }: { data: { breakdown: TailoringCategoryRow[]; total: { amount: number; garments: number } } | null; storeName: string }) {
+  const storeBadge = (
+    <Badge className="bg-prats-navy text-white gap-1 shrink-0">
+      <Store className="h-3 w-3" />
+      {storeName === 'Todas las tiendas' ? 'Todas las tiendas' : `Tienda: ${storeName}`}
+    </Badge>
+  )
+
   if (!data || data.total.garments === 0) {
-    return <p className="text-center text-muted-foreground py-12">Sin ventas de sastrería/camisería para el periodo seleccionado</p>
+    return (
+      <div className="space-y-4">
+        <div className="flex justify-end">{storeBadge}</div>
+        <p className="text-center text-muted-foreground py-12">Sin ventas de sastrería/camisería para el periodo seleccionado</p>
+      </div>
+    )
   }
 
   const chartData = data.breakdown.map((b) => ({
@@ -551,9 +564,12 @@ function TailoringByTypeTab({ data }: { data: { breakdown: TailoringCategoryRow[
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Facturación por tipo de confección</CardTitle>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <CardTitle className="text-base">Facturación por tipo de confección</CardTitle>
+            {storeBadge}
+          </div>
           <p className="text-xs text-muted-foreground">
-            Importe facturado (suma de líneas, IVA incl.) por cada combinación. Pedidos no cancelados, según fecha del pedido.
+            Importe neto (sin IVA) por combinación · pedidos no cancelados · por fecha de creación
           </p>
         </CardHeader>
         <CardContent>
