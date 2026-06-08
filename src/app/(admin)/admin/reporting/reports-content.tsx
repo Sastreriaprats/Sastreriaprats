@@ -928,7 +928,7 @@ function ExpensesTab({ data, comparison }: { data: ExpensesData | null; comparis
       <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
         <Wallet className="h-12 w-12 opacity-30" />
         <p className="text-base font-medium">Sin gastos registrados en el periodo</p>
-        <p className="text-sm">Los movimientos de tipo "gasto" aparecerán aquí</p>
+        <p className="text-sm">Los movimientos de tipo «gasto» aparecerán aquí</p>
       </div>
     )
   }
