@@ -294,10 +294,26 @@ export const createSale = protectedAction<{
     // Fire-and-forget: asiento contable
     createSaleJournalEntry(result.id).catch(() => {})
 
+    // Nombre del vendedor desde la venta YA GUARDADA (salesperson_id aplicado por
+    // la RPC, incluido el fallback al usuario). Robusto e independiente del estado
+    // de la UI, así el ticket SIEMPRE muestra el vendedor.
+    let salesperson_name: string | null = null
+    {
+      const { data: srow } = await ctx.adminClient
+        .from('sales')
+        .select('profiles!sales_salesperson_id_fkey(full_name)')
+        .eq('id', result.id)
+        .maybeSingle()
+      const prof = srow ? (srow as { profiles?: { full_name?: string } | { full_name?: string }[] | null }).profiles : null
+      const p = Array.isArray(prof) ? prof[0] : prof
+      salesperson_name = p?.full_name ?? null
+    }
+
     const auditDescription = `Venta #${result.ticket_number} · Cliente: ${result.client_name} · Total: ${Number(result.total).toFixed(2)}€`
 
     return success({
       ...result,
+      salesperson_name,
       residualVouchers,
       auditDescription,
     })
@@ -438,6 +454,7 @@ export const getSaleForTicket = protectedAction<string, {
   clientName: string | null
   clientCode: string | null
   storeName: string | null
+  salespersonName: string | null
 } | null>(
   { permission: 'pos.access', auditModule: 'pos' },
   async (ctx, saleId) => {
@@ -446,7 +463,8 @@ export const getSaleForTicket = protectedAction<string, {
       .select(`
         id, ticket_number, created_at, client_id, subtotal, discount_amount, discount_percentage,
         tax_amount, total, payment_method, is_tax_free, status,
-        stores(name)
+        stores(name),
+        profiles!sales_salesperson_id_fkey(full_name)
       `)
       .eq('id', saleId)
       .single()
@@ -476,6 +494,8 @@ export const getSaleForTicket = protectedAction<string, {
     }
 
     const storeName = (sale.stores as { name?: string } | null)?.name ?? null
+    const salesProfile = (sale as { profiles?: { full_name?: string } | { full_name?: string }[] | null }).profiles
+    const salespersonName = (Array.isArray(salesProfile) ? salesProfile[0] : salesProfile)?.full_name ?? null
 
     return success({
       sale,
@@ -484,6 +504,7 @@ export const getSaleForTicket = protectedAction<string, {
       clientName,
       clientCode,
       storeName,
+      salespersonName,
     })
   }
 )

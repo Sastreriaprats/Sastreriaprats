@@ -239,7 +239,7 @@ export function TicketsContent() {
     try {
       const result = await getSaleForTicket(saleId)
       if (result.success && result.data) {
-        const { sale, lines, payments, clientName, clientCode, storeName } = result.data
+        const { sale, lines, payments, clientName, clientCode, storeName, salespersonName } = result.data
         const storeConfig = getStorePdfData(storeName)
         await generateTicketPdf({
           sale: {
@@ -264,6 +264,7 @@ export function TicketsContent() {
           payments,
           clientName,
           clientCode,
+          attendedBy: salespersonName ?? null,
           storeAddress: storeConfig.address,
           storeSubtitle: storeConfig.subtitle ?? null,
           storePhones: storeConfig.phones,
