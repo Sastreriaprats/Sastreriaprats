@@ -384,7 +384,9 @@ export const getPendingPayments = protectedAction<
           .from('tailoring_orders')
           .select('id, order_number, total, total_paid, total_pending, created_at, client_id, clients(id, full_name), stores(id, name)')
           .gt('total_pending', 0)
-          .not('status', 'in', '("delivered","cancelled")')
+          // Solo se excluyen los cancelados. Un pedido 'delivered' (entregado)
+          // puede tener saldo pendiente: entregar la prenda no implica cobrarla.
+          .neq('status', 'cancelled')
           .order('created_at', { ascending: false })
           .limit(500)
 
@@ -518,7 +520,9 @@ export const getClientPendingDebt = protectedAction<
         .select('id, order_number, total, total_paid, total_pending, created_at, client_id, clients(id, full_name), stores(id, name)')
         .eq('client_id', client_id)
         .gt('total_pending', 0)
-        .not('status', 'in', '("delivered","cancelled")')
+        // Igual que en getPendingPayments: un pedido entregado puede seguir
+        // debiendo dinero; solo se excluyen los cancelados.
+        .neq('status', 'cancelled')
         .order('created_at', { ascending: false })
         .limit(50)
 
