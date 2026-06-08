@@ -146,9 +146,13 @@ const TAILORING_CATEGORY_LABELS: Record<TailoringCategoryKey, string> = {
  * Se calcula a nivel de LÍNEA (una prenda puede ser camisería dentro de un
  * pedido artesanal): eje sastrería/camisería = `garment_types.category`;
  * eje artesanal/industrial = `tailoring_order_lines.line_type` (con fallback al
- * `order_type` del pedido por si alguna línea no lo tuviera). Importe = suma de
- * `line_total`; prendas = nº de líneas. Excluye pedidos y líneas canceladas.
- * Filtra por `order_date` del pedido y, opcionalmente, por tienda.
+ * `order_type` del pedido por si alguna línea no lo tuviera). Importe = NETO por
+ * línea (`line_total / (1 + tax_rate/100)`; `line_total` es bruto/con IVA),
+ * prendas = nº de líneas. Excluye pedidos y líneas canceladas.
+ *
+ * Filtra por `created_at` del pedido (mismo criterio que getSalesByStore, para
+ * que el tab "Ventas por tipo" cuadre con la columna Sastrería de "Por tienda")
+ * y, opcionalmente, por tienda.
  */
 export const getTailoringByCategory = protectedAction<
   { start_date: string; end_date: string; store_id?: string },
@@ -158,11 +162,11 @@ export const getTailoringByCategory = protectedAction<
   async (ctx, { start_date, end_date, store_id }) => {
     let query = ctx.adminClient
       .from('tailoring_order_lines')
-      .select('line_type, line_total, status, garment_types(category), tailoring_orders!inner(order_date, store_id, status, order_type)')
+      .select('line_type, line_total, tax_rate, status, garment_types(category), tailoring_orders!inner(created_at, store_id, status, order_type)')
       .neq('status', 'cancelled')
       .neq('tailoring_orders.status', 'cancelled')
-      .gte('tailoring_orders.order_date', start_date)
-      .lte('tailoring_orders.order_date', end_date)
+      .gte('tailoring_orders.created_at', start_date)
+      .lte('tailoring_orders.created_at', end_date + 'T23:59:59')
     if (store_id) query = query.eq('tailoring_orders.store_id', store_id)
 
     const { data, error } = await query.limit(20000)
@@ -182,13 +186,16 @@ export const getTailoringByCategory = protectedAction<
       const ai = row.line_type || order?.order_type
       const isIndustrial = ai === 'industrial'
       const key: TailoringCategoryKey = `${isCamiseria ? 'camiseria' : 'sastreria'}_${isIndustrial ? 'industrial' : 'artesanal'}`
-      buckets[key].amount += Number(row.line_total ?? 0)
+      // Importe NETO (sin IVA): line_total es bruto, lo dividimos por (1 + IVA).
+      // Se acumula en crudo y se redondea solo al final, por bucket.
+      const tr = Number(row.tax_rate ?? 21)
+      buckets[key].amount += Number(row.line_total ?? 0) / (1 + tr / 100)
       buckets[key].garments += 1
     }
 
     const orderKeys: TailoringCategoryKey[] = ['sastreria_artesanal', 'sastreria_industrial', 'camiseria_artesanal', 'camiseria_industrial']
     const breakdown = orderKeys.map((k) => ({
-      category: k, label: TAILORING_CATEGORY_LABELS[k], amount: buckets[k].amount, garments: buckets[k].garments,
+      category: k, label: TAILORING_CATEGORY_LABELS[k], amount: Math.round(buckets[k].amount * 100) / 100, garments: buckets[k].garments,
     }))
     const total = breakdown.reduce((acc, b) => ({ amount: acc.amount + b.amount, garments: acc.garments + b.garments }), { amount: 0, garments: 0 })
     return success({ breakdown, total })
