@@ -62,7 +62,9 @@ import {
   ChevronsUpDown,
   Package,
   X,
+  Undo2,
 } from 'lucide-react'
+import { CreditNoteDialog } from './credit-note-dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { downloadExcel } from '@/lib/excel/export'
 import { toast } from 'sonner'
@@ -191,6 +193,7 @@ export function SupplierInvoicesContent() {
   const [paidMap, setPaidMap] = useState<Record<string, number>>({})
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<ApSupplierInvoiceRow | null>(null)
+  const [creditNoteTarget, setCreditNoteTarget] = useState<ApSupplierInvoiceRow | null>(null)
 
   const [form, setForm] = useState({
     supplier_id: '',
@@ -928,7 +931,12 @@ export function SupplierInvoicesContent() {
                         <span className="text-xs text-muted-foreground block">{row.supplier_cif}</span>
                       )}
                     </TableCell>
-                    <TableCell className="font-mono text-sm">{row.invoice_number}</TableCell>
+                    <TableCell className="font-mono text-sm">
+                      {row.invoice_number}
+                      {row.is_rectifying && (
+                        <span className="ml-2 inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-100 text-rose-700 align-middle">Abono</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{formatDate(row.invoice_date)}</TableCell>
                     <TableCell className="text-muted-foreground">{formatDate(row.due_date)}</TableCell>
                     <TableCell className="text-right font-semibold tabular-nums">{formatCurrency(row.total_amount)}</TableCell>
@@ -980,6 +988,17 @@ export function SupplierInvoicesContent() {
                         >
                           <CreditCard className="h-3.5 w-3.5" />
                         </Button>
+                        {!row.is_rectifying && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 text-rose-600"
+                            onClick={() => setCreditNoteTarget(row)}
+                            title="Registrar abono (rectificativa recibida)"
+                          >
+                            <Undo2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                         {isAdmin && (
                           <Button
                             size="sm"
@@ -1558,6 +1577,13 @@ export function SupplierInvoicesContent() {
         onOpenChange={(open) => { setPaymentDialogOpen(open); if (!open) setPaymentInvoice(null) }}
         invoice={paymentInvoice}
         onChanged={() => { loadList(); loadKpis() }}
+      />
+
+      <CreditNoteDialog
+        invoice={creditNoteTarget}
+        open={!!creditNoteTarget}
+        onOpenChange={(open) => { if (!open) setCreditNoteTarget(null) }}
+        onCreated={() => { loadList(); loadKpis() }}
       />
 
       {/* Modal Importar CSV */}

@@ -36,6 +36,9 @@ export type ApSupplierInvoiceRow = {
   notes: string | null
   attachment_url: string | null
   created_at: string
+  is_rectifying?: boolean
+  rectifies_invoice_id?: string | null
+  rectification_reason?: string | null
 }
 
 export type ApSupplierInvoiceInput = {
@@ -69,6 +72,11 @@ export type ApSupplierInvoiceInput = {
     tax_rate: number
     sort_order?: number
   }>
+  /** Abono/rectificativa recibida: si true, los importes son negativos y se
+   * exige rectifies_invoice_id + rectification_reason (mín. 10 caracteres). */
+  is_rectifying?: boolean
+  rectifies_invoice_id?: string | null
+  rectification_reason?: string | null
 }
 
 export type ApSupplierInvoiceLineRow = {
@@ -541,7 +549,21 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
     if (new Date(dueDate) < new Date(input.invoice_date)) {
       return failure('La fecha de vencimiento no puede ser anterior a la fecha de factura')
     }
-    if (Number(input.total_amount) <= 0) return failure('El total debe ser mayor que 0')
+    // Abono (rectificativa recibida): importes negativos + validaciones propias.
+    // Factura normal: importe estrictamente positivo (comportamiento previo).
+    if (input.is_rectifying) {
+      if (!input.rectifies_invoice_id?.trim()) return failure('Falta la factura que rectifica el abono', 'VALIDATION')
+      if (!input.rectification_reason || input.rectification_reason.trim().length < 10) {
+        return failure('Indica el motivo del abono (mínimo 10 caracteres)', 'VALIDATION')
+      }
+      if (Number(input.total_amount) >= 0) return failure('El total de un abono debe ser negativo', 'VALIDATION')
+      const { data: orig } = await ctx.adminClient
+        .from(TABLE).select('id, is_rectifying').eq('id', input.rectifies_invoice_id.trim()).maybeSingle()
+      if (!orig) return failure('La factura original del abono no existe', 'NOT_FOUND')
+      if ((orig as { is_rectifying?: boolean }).is_rectifying) return failure('No se puede rectificar un abono', 'VALIDATION')
+    } else if (Number(input.total_amount) <= 0) {
+      return failure('El total debe ser mayor que 0')
+    }
 
     const deliveryNoteIds = Array.from(new Set((input.delivery_note_ids || []).map((s) => String(s).trim()).filter(Boolean)))
     if (deliveryNoteIds.length > 0) {
@@ -579,6 +601,9 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
         payment_method: input.payment_method?.trim() || supplierDefaults?.payment_method || null,
         notes: input.notes?.trim() || null,
         attachment_url: input.attachment_url?.trim() || null,
+        is_rectifying: input.is_rectifying === true,
+        rectifies_invoice_id: input.is_rectifying ? (input.rectifies_invoice_id?.trim() || null) : null,
+        rectification_reason: input.is_rectifying ? (input.rectification_reason?.trim() || null) : null,
         created_by: ctx.userId,
       })
       .select('id')
@@ -627,18 +652,22 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
     // (editor de plazos), las usamos directamente; si no, buildInstallments.
     const explicitInstallments = (input.installments ?? [])
       .filter((it) => Number(it.amount) > 0 && it.due_date)
-    const installments = explicitInstallments.length > 0
-      ? explicitInstallments.map((it, idx) => ({
-          due_date: String(it.due_date),
-          amount: Math.round(Number(it.amount) * 100) / 100,
-          sort_order: idx,
-        }))
-      : buildInstallments(
-          input.invoice_date,
-          dueDate,
-          Number(input.total_amount),
-          supplierDefaults,
-        )
+    // Un abono (importe negativo) no tiene calendario de pago propio: reduce la
+    // deuda con el proveedor. No generamos cuotas de vencimiento.
+    const installments = input.is_rectifying
+      ? []
+      : explicitInstallments.length > 0
+        ? explicitInstallments.map((it, idx) => ({
+            due_date: String(it.due_date),
+            amount: Math.round(Number(it.amount) * 100) / 100,
+            sort_order: idx,
+          }))
+        : buildInstallments(
+            input.invoice_date,
+            dueDate,
+            Number(input.total_amount),
+            supplierDefaults,
+          )
     const schedErr = await replaceInvoiceInstallments(ctx.adminClient, String(data.id), installments)
     if (schedErr) {
       console.error('[createSupplierInvoiceAction] cuotas:', schedErr)
@@ -662,12 +691,13 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
     // Bloqueo: una factura ya pagada no puede modificarse desde aquí.
     const { data: current } = await ctx.adminClient
       .from(TABLE)
-      .select('status')
+      .select('status, is_rectifying')
       .eq('id', id)
       .maybeSingle()
     if ((current as { status?: string } | null)?.status === 'pagada') {
       return failure('La factura está pagada y no puede editarse', 'VALIDATION')
     }
+    const isRectifying = (current as { is_rectifying?: boolean } | null)?.is_rectifying === true || rest.is_rectifying === true
 
     const supplierDefaults = await resolveSupplierDefaults(ctx.adminClient, rest.supplier_id)
 
@@ -687,7 +717,11 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
     if (new Date(dueDate) < new Date(rest.invoice_date)) {
       return failure('La fecha de vencimiento no puede ser anterior a la fecha de factura')
     }
-    if (Number(rest.total_amount) <= 0) return failure('El total debe ser mayor que 0')
+    if (isRectifying) {
+      if (Number(rest.total_amount) >= 0) return failure('El total de un abono debe ser negativo', 'VALIDATION')
+    } else if (Number(rest.total_amount) <= 0) {
+      return failure('El total debe ser mayor que 0')
+    }
 
     const deliveryNoteIds = Array.from(new Set((rest.delivery_note_ids || []).map((s) => String(s).trim()).filter(Boolean)))
     if (deliveryNoteIds.length > 0) {
