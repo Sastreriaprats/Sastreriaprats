@@ -607,6 +607,28 @@ export async function generateReservationPdf(
 
   const logoBase64 = await getLogoBase64Client()
 
+  // Filas de la tabla de líneas. pdfmake revienta si una tabla tiene body: [],
+  // así que si la reserva no tiene líneas activas usamos una fila placeholder.
+  const reservationLineRows = (data.lines ?? []).flatMap<any>((ln) => {
+    const bits = [ln.size ? `T.${ln.size}` : null, ln.color].filter(Boolean).join(' · ')
+    const rows: any[] = [
+      [
+        { text: ln.description, fontSize: FONT_BODY },
+        { text: fmt(ln.line_total), fontSize: FONT_BODY, alignment: 'right' },
+      ],
+      [
+        { text: `${ln.quantity} x ${fmt(ln.unit_price)}`, fontSize: FONT_SMALL, color: '#555', colSpan: 2 },
+        {},
+      ],
+    ]
+    if (bits) rows.push([{ text: bits, fontSize: FONT_SMALL, color: '#555', colSpan: 2 }, {}])
+    if (ln.sku) rows.push([{ text: `Ref: ${ln.sku}`, fontSize: FONT_SMALL, color: '#555', colSpan: 2 }, {}])
+    return rows
+  })
+  const reservationTableBody = reservationLineRows.length > 0
+    ? reservationLineRows
+    : [[{ text: 'Sin líneas', fontSize: FONT_SMALL, color: '#777', colSpan: 2 }, {}]]
+
   const content: Content[] = [
     ...(logoBase64
       ? [
@@ -656,22 +678,7 @@ export async function generateReservationPdf(
     {
       table: {
         widths: ['*', 50],
-        body: (data.lines ?? []).flatMap<any>((ln) => {
-          const bits = [ln.size ? `T.${ln.size}` : null, ln.color].filter(Boolean).join(' · ')
-          const rows: any[] = [
-            [
-              { text: ln.description, fontSize: FONT_BODY },
-              { text: fmt(ln.line_total), fontSize: FONT_BODY, alignment: 'right' },
-            ],
-            [
-              { text: `${ln.quantity} x ${fmt(ln.unit_price)}`, fontSize: FONT_SMALL, color: '#555', colSpan: 2 },
-              {},
-            ],
-          ]
-          if (bits) rows.push([{ text: bits, fontSize: FONT_SMALL, color: '#555', colSpan: 2 }, {}])
-          if (ln.sku) rows.push([{ text: `Ref: ${ln.sku}`, fontSize: FONT_SMALL, color: '#555', colSpan: 2 }, {}])
-          return rows
-        }),
+        body: reservationTableBody,
       },
       layout: 'noBorders',
       margin: [0, 0, 0, 8] as [number, number, number, number],
