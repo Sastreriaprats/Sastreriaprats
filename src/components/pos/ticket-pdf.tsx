@@ -78,24 +78,60 @@ function emitVfsDiag(diag: PrintDiag | undefined, vfs: Record<string, string> | 
   diag?.('vfs', { keys: vfs ? Object.keys(vfs).length : 0 })
 }
 
+/** Envuelve una promesa con timeout (rechaza si no resuelve en `ms`). */
+function promiseWithTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout')), ms)
+    p.then(
+      (v) => { clearTimeout(timer); resolve(v) },
+      (e) => { clearTimeout(timer); reject(e instanceof Error ? e : new Error(String(e))) },
+    )
+  })
+}
+
 /**
- * DIAGNÓSTICO (no imprime nada): si getBlob del doc CON logo se colgó, reintenta
- * UNA vez EN MEMORIA con el doc SIN logo y mide. El blob se descarta — el usuario
- * nunca ve un ticket sin logo. Permite distinguir culpable logo vs fuentes/VFS:
- *   getblob_retry_no_logo: 'success'  -> sin logo SÍ genera  -> culpable = logo
- *   getblob_retry_no_logo: 'hang'     -> sin logo también cuelga -> culpable = fuentes/VFS
+ * DIAGNÓSTICO (no imprime nada, todo se descarta): cuando getBlob del doc CON logo
+ * se cuelga, mide dos cosas EN MEMORIA con el doc SIN logo:
+ *
+ *  1) getblob_retry_no_logo — ¿se cuelga también sin la imagen?
+ *       'success' -> sin logo SÍ genera        -> culpable = logo
+ *       'hang'    -> sin logo también cuelga    -> culpable = fuentes/VFS o core
+ *
+ *  2) getbuffer_probe — ¿la primitiva getBuffer (promesa) resuelve donde
+ *     getBlob(callback) cuelga? Discrimina shim vs core:
+ *       'success' -> el cuelgue es el shim callback de getBlob -> fix barato (getBuffer→Blob)
+ *       'hang'    -> es el core de layout/fuentes de pdfmake 0.3.6 -> fix estructural
+ *
+ * El usuario nunca ve un ticket sin logo: estos PDFs solo alimentan la telemetría.
  */
-async function diagnoseNoLogoGetBlob(
-  makePdf: () => { getBlob: (cb: (b: Blob) => void) => void },
+/** Subconjunto del PDF de pdfmake que necesita el diagnóstico (getBlob + getBuffer). */
+type DiagPdf = {
+  getBlob: (cb: (b: Blob) => void) => void
+  getBuffer: () => Promise<unknown>
+}
+
+async function diagnoseGetBlobHang(
+  makePdf: () => DiagPdf,
   diag: PrintDiag | undefined,
 ): Promise<void> {
   if (!diag) return
+
+  // 1) ¿se cuelga también sin logo? (logo vs core)
   const t0 = nowMs()
   try {
     await getPdfBlobWithTimeout(makePdf(), 8000) // blob descartado: solo medimos
     diag('getblob_retry_no_logo', { result: 'success', ms: Math.round(nowMs() - t0) })
   } catch {
     diag('getblob_retry_no_logo', { result: 'hang', ms: Math.round(nowMs() - t0) })
+  }
+
+  // 2) ¿getBuffer (promesa) resuelve donde getBlob(callback) cuelga? (shim vs core)
+  const t1 = nowMs()
+  try {
+    await promiseWithTimeout(Promise.resolve(makePdf().getBuffer()), 8000) // buffer descartado
+    diag('getbuffer_probe', { result: 'success', ms: Math.round(nowMs() - t1) })
+  } catch {
+    diag('getbuffer_probe', { result: 'hang', ms: Math.round(nowMs() - t1) })
   }
 }
 
@@ -590,8 +626,8 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
     try {
       await printPdfDoc(pdf, fileName, diag)
     } catch (genErr) {
-      await diagnoseNoLogoGetBlob(
-        () => pdfMake.createPdf(docDefNoLogo as Parameters<typeof pdfMake.createPdf>[0]),
+      await diagnoseGetBlobHang(
+        () => pdfMake.createPdf(docDefNoLogo as Parameters<typeof pdfMake.createPdf>[0]) as unknown as DiagPdf,
         diag,
       )
       throw genErr
@@ -910,10 +946,10 @@ export async function generateReservationPdf(
     try {
       await printPdfDoc(pdf, fileName, diag)
     } catch (genErr) {
-      // getBlob del doc CON logo se colgó: reintento sin logo en memoria (invisible)
-      // para aislar logo vs fuentes, luego re-lanzamos el error original.
-      await diagnoseNoLogoGetBlob(
-        () => pdfMake.createPdf(docDefNoLogo as Parameters<typeof pdfMake.createPdf>[0]),
+      // getBlob del doc CON logo se colgó: diagnóstico en memoria (invisible) para
+      // aislar logo vs fuentes y discriminar getBlob-shim vs core; re-lanzamos el error.
+      await diagnoseGetBlobHang(
+        () => pdfMake.createPdf(docDefNoLogo as Parameters<typeof pdfMake.createPdf>[0]) as unknown as DiagPdf,
         diag,
       )
       throw genErr

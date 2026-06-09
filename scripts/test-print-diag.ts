@@ -49,20 +49,22 @@ const r2 = createPrintReporter(
 )
 r2.diag('vfs', { keys: 6 })
 r2.diag('logo', { loaded: true, mime: 'image/png', bytes: 5000, ms: 40 })
-r2.diag('getblob_retry_no_logo', { result: 'success', ms: 380 })
+r2.diag('getblob_retry_no_logo', { result: 'hang', ms: 8015 })
+r2.diag('getbuffer_probe', { result: 'success', ms: 420 })
 r2.reportError(new Error('Tiempo de espera agotado generando PDF'))
 
 check('reportError registra 1 vez', errCalls.length === 1)
 check('reportError pasa el Error real', errCalls[0]?.error instanceof Error)
 check('reportError adjunta vfs', (errCalls[0]?.context?.vfs as { keys?: number })?.keys === 6)
 check('reportError adjunta logo', (errCalls[0]?.context?.logo as { bytes?: number })?.bytes === 5000)
-check('reportError adjunta el reintento sin logo', (errCalls[0]?.context?.getblob_retry_no_logo as { result?: string })?.result === 'success')
+check('reportError adjunta el reintento sin logo', (errCalls[0]?.context?.getblob_retry_no_logo as { result?: string })?.result === 'hang')
+check('reportError adjunta el probe de getBuffer', (errCalls[0]?.context?.getbuffer_probe as { result?: string })?.result === 'success')
 check('reportError conserva contexto base', errCalls[0]?.context?.reservation_number === 'RSV-2026-0026')
 
 // --- C) sanity del set de ramas degradadas ---
 check('set NO incluye print:iframe', !DEGRADED_PRINT_STAGES.has('print:iframe'))
 check('set NO incluye blob-ready', !DEGRADED_PRINT_STAGES.has('blob-ready'))
-check('set NO incluye vfs ni logo ni retry', !DEGRADED_PRINT_STAGES.has('vfs') && !DEGRADED_PRINT_STAGES.has('logo') && !DEGRADED_PRINT_STAGES.has('getblob_retry_no_logo'))
+check('set NO incluye vfs/logo/retry/getbuffer_probe', !DEGRADED_PRINT_STAGES.has('vfs') && !DEGRADED_PRINT_STAGES.has('logo') && !DEGRADED_PRINT_STAGES.has('getblob_retry_no_logo') && !DEGRADED_PRINT_STAGES.has('getbuffer_probe'))
 check('set incluye print:window-open', DEGRADED_PRINT_STAGES.has('print:window-open'))
 check('set incluye print:download-popup-blocked', DEGRADED_PRINT_STAGES.has('print:download-popup-blocked'))
 
