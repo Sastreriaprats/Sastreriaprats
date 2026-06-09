@@ -24,6 +24,7 @@ import {
 import { ReservationFormDialog } from '@/components/reservations/reservation-form-dialog'
 import { generateReservationPdf, printReservationPdf, type ReservationTicketData } from '@/components/pos/ticket-pdf'
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
+import { makePrintDiag, reportClientError } from '@/lib/client-telemetry'
 import type { ReservationPaymentMethod } from '@/lib/validations/reservations'
 
 const PAGE_SIZE = 20
@@ -298,9 +299,19 @@ export function ReservationsTab() {
           },
         ],
       }
+      const autoPrintCtx = {
+        call: 'auto_after_charge',
+        reservation_number: chargedReservation.reservation_number,
+        reservation_id: chargedReservation.id,
+        lines: (chargedReservation.lines || []).filter((ln) => ln.status !== 'cancelled').length,
+      }
       try {
-        await printReservationPdf(buildReservationTicketData(chargedReservation))
+        await printReservationPdf(
+          buildReservationTicketData(chargedReservation),
+          makePrintDiag('reservation_ticket_print', autoPrintCtx),
+        )
       } catch (printErr) {
+        reportClientError('reservation_ticket_print', printErr, autoPrintCtx)
         console.error('Error imprimiendo ticket de reserva tras cobro:', printErr)
         toast.error('Pago registrado, pero no se pudo abrir el ticket para imprimir.')
       }
@@ -358,13 +369,24 @@ export function ReservationsTab() {
     // Red de seguridad: si por cualquier bug futuro la generación no terminara,
     // forzar el reset del spinner a los 12s para que no quede eterno.
     const safety = setTimeout(() => setPrintingId(null), 12000)
+    const printCtx = {
+      call: 'manual',
+      mode,
+      reservation_number: r.reservation_number,
+      reservation_id: r.id,
+      lines: (r.lines || []).filter((ln) => ln.status !== 'cancelled').length,
+    }
     try {
       if (mode === 'print') {
-        await printReservationPdf(buildReservationTicketData(r))
+        await printReservationPdf(
+          buildReservationTicketData(r),
+          makePrintDiag('reservation_ticket_print', printCtx),
+        )
       } else {
         await generateReservationPdf(buildReservationTicketData(r), 'download')
       }
     } catch (err) {
+      reportClientError('reservation_ticket_print', err, printCtx)
       console.error('Error generando el ticket de reserva:', err)
       toast.error('No se pudo generar el ticket, intenta de nuevo.')
     } finally {

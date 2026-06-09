@@ -48,6 +48,133 @@ function getPdfBlobWithTimeout(
   })
 }
 
+/**
+ * Callback de diagnóstico de impresión. Emite la RAMA que se ejecuta (para
+ * telemetría): qué camino tomó la impresión y si cayó a un fallback degradado.
+ * No cambia el comportamiento; si no se pasa, no hace nada.
+ */
+export type PrintDiag = (stage: string, detail?: Record<string, unknown>) => void
+
+/**
+ * Imprime un PDF ya generado vía iframe oculto (camino normal) con fallbacks a
+ * window.open y descarga. Compartido por ticket de venta y de reserva para no
+ * duplicar (ni que diverjan). Emite eventos `diag` en cada rama:
+ *   blob-ready · print:iframe · print:window-fallback · print:window-open ·
+ *   print:download · print:download-popup-blocked · iframe-error · iframe-load-timeout
+ */
+async function printPdfDoc(
+  pdf: { getBlob: (cb: (blob: Blob) => void) => void },
+  fileName: string,
+  diag?: PrintDiag,
+): Promise<void> {
+  const blob = await getPdfBlobWithTimeout(pdf)
+  diag?.('blob-ready', { size: blob.size })
+  await new Promise<void>((resolve) => {
+    const url = URL.createObjectURL(blob)
+    const iframe = document.createElement('iframe')
+    iframe.style.position = 'fixed'
+    iframe.style.top = '-9999px'
+    iframe.style.left = '-9999px'
+    iframe.style.width = '0'
+    iframe.style.height = '0'
+    iframe.style.border = 'none'
+    iframe.src = url
+
+    let cleaned = false
+    const cleanup = () => {
+      if (cleaned) return
+      cleaned = true
+      try { iframe.remove() } catch {}
+      try { URL.revokeObjectURL(url) } catch {}
+    }
+
+    const fallbackToDownload = () => {
+      diag?.('print:download')
+      cleanup()
+      const dlUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = dlUrl
+      a.download = fileName
+      a.click()
+      setTimeout(() => { try { URL.revokeObjectURL(dlUrl) } catch {} }, 2000)
+    }
+
+    const fallbackToWindowOpen = () => {
+      cleanup()
+      const tabUrl = URL.createObjectURL(blob)
+      const printWindow = window.open(tabUrl, '_blank')
+      if (!printWindow) {
+        diag?.('print:download-popup-blocked')
+        const a = document.createElement('a')
+        a.href = tabUrl
+        a.download = fileName
+        a.click()
+        setTimeout(() => { try { URL.revokeObjectURL(tabUrl) } catch {} }, 2000)
+        return
+      }
+      diag?.('print:window-open')
+      const onLoad = () => setTimeout(() => {
+        try { printWindow.focus(); printWindow.print() } catch {}
+      }, 500)
+      try { printWindow.addEventListener('load', onLoad) } catch {}
+      setTimeout(() => { try { URL.revokeObjectURL(tabUrl) } catch {} }, 60000)
+    }
+
+    let triggered = false
+    const triggerPrint = () => {
+      if (triggered) return
+      triggered = true
+      const cw = iframe.contentWindow
+      if (!cw) {
+        fallbackToWindowOpen()
+        return
+      }
+      try {
+        cw.addEventListener('afterprint', cleanup, { once: true })
+      } catch { /* algunos navegadores restringen acceso cross-origin */ }
+      try {
+        cw.focus()
+        cw.print()
+        diag?.('print:iframe')
+      } catch {
+        // Fallback 1: print del documento principal
+        try {
+          window.print()
+          diag?.('print:window-fallback')
+        } catch {
+          // Fallback 2: descarga
+          fallbackToDownload()
+        }
+      }
+    }
+
+    iframe.addEventListener('load', () => {
+      // Esperar a que el visor PDF renderice antes de llamar print()
+      setTimeout(triggerPrint, 300)
+    })
+
+    iframe.addEventListener('error', () => {
+      // El navegador no puede cargar el PDF en el iframe (algunos Firefox/Safari)
+      diag?.('iframe-error')
+      fallbackToWindowOpen()
+    })
+
+    // Si en 5s no se disparó el load, asumir que el iframe no puede renderizar el PDF
+    setTimeout(() => {
+      if (!triggered) {
+        diag?.('iframe-load-timeout')
+        fallbackToWindowOpen()
+      }
+    }, 5000)
+
+    // Limpieza máxima por si afterprint nunca se dispara
+    setTimeout(cleanup, 60000)
+
+    document.body.appendChild(iframe)
+    resolve()
+  })
+}
+
 export interface TicketLinePayload {
   description: string
   quantity: number
@@ -112,7 +239,7 @@ function truncate(str: string, max: number): string {
   return str.slice(0, max - 1) + '…'
 }
 
-export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 'print' = 'download'): Promise<void> {
+export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 'print' = 'download', diag?: PrintDiag): Promise<void> {
   const pdfMake = (await import('pdfmake/build/pdfmake')).default
   const vfsModule = await import('pdfmake/build/vfs_fonts')
   const vfs = (vfsModule as { default?: Record<string, string> }).default
@@ -408,123 +535,22 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
 
   const pdf = pdfMake.createPdf(docDef as Parameters<typeof pdfMake.createPdf>[0])
 
+  const fileName = `${giftMode ? 'ticket-regalo' : 'ticket'}-${data.sale.ticket_number}.pdf`
   if (mode === 'print') {
-    const blob = await getPdfBlobWithTimeout(pdf)
-    await new Promise<void>((resolve) => {
-        const fileName = `${giftMode ? 'ticket-regalo' : 'ticket'}-${data.sale.ticket_number}.pdf`
-        const url = URL.createObjectURL(blob)
-
-        // iframe oculto: dispara el diálogo de impresión sin abrir pestaña ni
-        // depender del popup blocker. Cubre el caso de Chrome con kiosk-printing
-        // para imprimir sin diálogo.
-        const iframe = document.createElement('iframe')
-        iframe.style.position = 'fixed'
-        iframe.style.top = '-9999px'
-        iframe.style.left = '-9999px'
-        iframe.style.width = '0'
-        iframe.style.height = '0'
-        iframe.style.border = 'none'
-        iframe.src = url
-
-        let cleaned = false
-        const cleanup = () => {
-          if (cleaned) return
-          cleaned = true
-          try { iframe.remove() } catch {}
-          try { URL.revokeObjectURL(url) } catch {}
-        }
-
-        const fallbackToDownload = () => {
-          cleanup()
-          const dlUrl = URL.createObjectURL(blob)
-          const a = document.createElement('a')
-          a.href = dlUrl
-          a.download = fileName
-          a.click()
-          setTimeout(() => { try { URL.revokeObjectURL(dlUrl) } catch {} }, 2000)
-        }
-
-        const fallbackToWindowOpen = () => {
-          cleanup()
-          const tabUrl = URL.createObjectURL(blob)
-          const printWindow = window.open(tabUrl, '_blank')
-          if (!printWindow) {
-            // Popups bloqueados: caer a descarga
-            const a = document.createElement('a')
-            a.href = tabUrl
-            a.download = fileName
-            a.click()
-            setTimeout(() => { try { URL.revokeObjectURL(tabUrl) } catch {} }, 2000)
-            return
-          }
-          const onLoad = () => setTimeout(() => {
-            try { printWindow.focus(); printWindow.print() } catch {}
-          }, 500)
-          try { printWindow.addEventListener('load', onLoad) } catch {}
-          setTimeout(() => { try { URL.revokeObjectURL(tabUrl) } catch {} }, 60000)
-        }
-
-        let triggered = false
-        const triggerPrint = () => {
-          if (triggered) return
-          triggered = true
-          const cw = iframe.contentWindow
-          if (!cw) {
-            fallbackToWindowOpen()
-            return
-          }
-          try {
-            cw.addEventListener('afterprint', cleanup, { once: true })
-          } catch { /* algunos navegadores restringen acceso cross-origin */ }
-          try {
-            cw.focus()
-            cw.print()
-          } catch {
-            // Fallback 1: print del documento principal
-            try {
-              window.print()
-            } catch {
-              // Fallback 2: descarga
-              fallbackToDownload()
-            }
-          }
-        }
-
-        iframe.addEventListener('load', () => {
-          // Esperar a que el visor PDF renderice antes de llamar print()
-          setTimeout(triggerPrint, 300)
-        })
-
-        iframe.addEventListener('error', () => {
-          // El navegador no puede cargar el PDF en el iframe (algunos Firefox/Safari)
-          fallbackToWindowOpen()
-        })
-
-        // Si en 5s no se disparó el load, asumir que el iframe no puede renderizar el PDF
-        setTimeout(() => {
-          if (!triggered) fallbackToWindowOpen()
-        }, 5000)
-
-        // Limpieza máxima por si afterprint nunca se dispara
-        setTimeout(cleanup, 60000)
-
-        document.body.appendChild(iframe)
-        resolve()
-    })
+    await printPdfDoc(pdf, fileName, diag)
   } else {
-    const fileName = `${giftMode ? 'ticket-regalo' : 'ticket'}-${data.sale.ticket_number}.pdf`
     await (pdf as { download: (name: string) => void }).download(fileName)
   }
 }
 
 /** Genera el ticket PDF y abre el diálogo de impresión del navegador */
-export async function printTicketPdf(data: TicketPdfData): Promise<void> {
-  return generateTicketPdf(data, 'print')
+export async function printTicketPdf(data: TicketPdfData, diag?: PrintDiag): Promise<void> {
+  return generateTicketPdf(data, 'print', diag)
 }
 
 /** Imprime un ticket regalo (sin precios) */
-export async function printGiftTicketPdf(data: TicketPdfData): Promise<void> {
-  return generateTicketPdf({ ...data, giftMode: true }, 'print')
+export async function printGiftTicketPdf(data: TicketPdfData, diag?: PrintDiag): Promise<void> {
+  return generateTicketPdf({ ...data, giftMode: true }, 'print', diag)
 }
 
 // ============================================================
@@ -584,6 +610,7 @@ const RESERVATION_STATUS_LABELS: Record<string, string> = {
 export async function generateReservationPdf(
   data: ReservationTicketData,
   mode: 'download' | 'print' = 'download',
+  diag?: PrintDiag,
 ): Promise<void> {
   const pdfMake = (await import('pdfmake/build/pdfmake')).default
   const vfsModule = await import('pdfmake/build/vfs_fonts')
@@ -814,115 +841,14 @@ export async function generateReservationPdf(
 
   const pdf = pdfMake.createPdf(docDef as Parameters<typeof pdfMake.createPdf>[0])
 
+  const fileName = `reserva-${data.reservation_number}.pdf`
   if (mode === 'print') {
-    const blob = await getPdfBlobWithTimeout(pdf)
-    await new Promise<void>((resolve) => {
-        const fileName = `reserva-${data.reservation_number}.pdf`
-        const url = URL.createObjectURL(blob)
-
-        // iframe oculto: dispara el diálogo de impresión sin abrir pestaña ni
-        // depender del popup blocker. Cubre el caso de Chrome con kiosk-printing
-        // para imprimir sin diálogo.
-        const iframe = document.createElement('iframe')
-        iframe.style.position = 'fixed'
-        iframe.style.top = '-9999px'
-        iframe.style.left = '-9999px'
-        iframe.style.width = '0'
-        iframe.style.height = '0'
-        iframe.style.border = 'none'
-        iframe.src = url
-
-        let cleaned = false
-        const cleanup = () => {
-          if (cleaned) return
-          cleaned = true
-          try { iframe.remove() } catch {}
-          try { URL.revokeObjectURL(url) } catch {}
-        }
-
-        const fallbackToDownload = () => {
-          cleanup()
-          const dlUrl = URL.createObjectURL(blob)
-          const a = document.createElement('a')
-          a.href = dlUrl
-          a.download = fileName
-          a.click()
-          setTimeout(() => { try { URL.revokeObjectURL(dlUrl) } catch {} }, 2000)
-        }
-
-        const fallbackToWindowOpen = () => {
-          cleanup()
-          const tabUrl = URL.createObjectURL(blob)
-          const printWindow = window.open(tabUrl, '_blank')
-          if (!printWindow) {
-            // Popups bloqueados: caer a descarga
-            const a = document.createElement('a')
-            a.href = tabUrl
-            a.download = fileName
-            a.click()
-            setTimeout(() => { try { URL.revokeObjectURL(tabUrl) } catch {} }, 2000)
-            return
-          }
-          const onLoad = () => setTimeout(() => {
-            try { printWindow.focus(); printWindow.print() } catch {}
-          }, 500)
-          try { printWindow.addEventListener('load', onLoad) } catch {}
-          setTimeout(() => { try { URL.revokeObjectURL(tabUrl) } catch {} }, 60000)
-        }
-
-        let triggered = false
-        const triggerPrint = () => {
-          if (triggered) return
-          triggered = true
-          const cw = iframe.contentWindow
-          if (!cw) {
-            fallbackToWindowOpen()
-            return
-          }
-          try {
-            cw.addEventListener('afterprint', cleanup, { once: true })
-          } catch { /* algunos navegadores restringen acceso cross-origin */ }
-          try {
-            cw.focus()
-            cw.print()
-          } catch {
-            // Fallback 1: print del documento principal
-            try {
-              window.print()
-            } catch {
-              // Fallback 2: descarga
-              fallbackToDownload()
-            }
-          }
-        }
-
-        iframe.addEventListener('load', () => {
-          // Esperar a que el visor PDF renderice antes de llamar print()
-          setTimeout(triggerPrint, 300)
-        })
-
-        iframe.addEventListener('error', () => {
-          // El navegador no puede cargar el PDF en el iframe (algunos Firefox/Safari)
-          fallbackToWindowOpen()
-        })
-
-        // Si en 5s no se disparó el load, asumir que el iframe no puede renderizar el PDF
-        setTimeout(() => {
-          if (!triggered) fallbackToWindowOpen()
-        }, 5000)
-
-        // Limpieza máxima por si afterprint nunca se dispara
-        setTimeout(cleanup, 60000)
-
-        document.body.appendChild(iframe)
-        resolve()
-    })
+    await printPdfDoc(pdf, fileName, diag)
   } else {
-    const fileName = `reserva-${data.reservation_number}.pdf`
     await (pdf as { download: (name: string) => void }).download(fileName)
   }
 }
 
-export async function printReservationPdf(data: ReservationTicketData): Promise<void> {
-  return generateReservationPdf(data, 'print')
+export async function printReservationPdf(data: ReservationTicketData, diag?: PrintDiag): Promise<void> {
+  return generateReservationPdf(data, 'print', diag)
 }
