@@ -55,6 +55,50 @@ function getPdfBlobWithTimeout(
  */
 export type PrintDiag = (stage: string, detail?: Record<string, unknown>) => void
 
+/** Reloj monotónico del navegador (no usa Date.now). */
+function nowMs(): number {
+  return typeof performance !== 'undefined' && performance.now ? performance.now() : 0
+}
+
+/** Emite el diag del logo: si cargó, su mime, tamaño en bytes y cuánto tardó. */
+function emitLogoDiag(diag: PrintDiag | undefined, logoBase64: string | null, ms: number): void {
+  if (!diag) return
+  if (!logoBase64) {
+    diag('logo', { loaded: false, ms: Math.round(ms) })
+    return
+  }
+  const m = /^data:([^;]+);base64,(.*)$/.exec(logoBase64)
+  const mime = m?.[1] ?? 'unknown'
+  const bytes = Math.floor(((m?.[2]?.length ?? 0) * 3) / 4)
+  diag('logo', { loaded: true, mime, bytes, ms: Math.round(ms) })
+}
+
+/** Emite el nº de fuentes registradas en el VFS de ESTE runtime (0 = no registradas). */
+function emitVfsDiag(diag: PrintDiag | undefined, vfs: Record<string, string> | undefined): void {
+  diag?.('vfs', { keys: vfs ? Object.keys(vfs).length : 0 })
+}
+
+/**
+ * DIAGNÓSTICO (no imprime nada): si getBlob del doc CON logo se colgó, reintenta
+ * UNA vez EN MEMORIA con el doc SIN logo y mide. El blob se descarta — el usuario
+ * nunca ve un ticket sin logo. Permite distinguir culpable logo vs fuentes/VFS:
+ *   getblob_retry_no_logo: 'success'  -> sin logo SÍ genera  -> culpable = logo
+ *   getblob_retry_no_logo: 'hang'     -> sin logo también cuelga -> culpable = fuentes/VFS
+ */
+async function diagnoseNoLogoGetBlob(
+  makePdf: () => { getBlob: (cb: (b: Blob) => void) => void },
+  diag: PrintDiag | undefined,
+): Promise<void> {
+  if (!diag) return
+  const t0 = nowMs()
+  try {
+    await getPdfBlobWithTimeout(makePdf(), 8000) // blob descartado: solo medimos
+    diag('getblob_retry_no_logo', { result: 'success', ms: Math.round(nowMs() - t0) })
+  } catch {
+    diag('getblob_retry_no_logo', { result: 'hang', ms: Math.round(nowMs() - t0) })
+  }
+}
+
 /**
  * Imprime un PDF ya generado vía iframe oculto (camino normal) con fallbacks a
  * window.open y descarga. Compartido por ticket de venta y de reserva para no
@@ -246,6 +290,7 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
   if (typeof pdfMake.addVirtualFileSystem === 'function' && vfs) {
     pdfMake.addVirtualFileSystem(vfs)
   }
+  emitVfsDiag(diag, vfs)
 
   const storeAddress = data.storeAddress ?? STORE_DEFAULT.address
   const storeSubtitle = data.storeSubtitle ?? null
@@ -265,7 +310,9 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
   const tax = data.sale.tax_amount ?? 0
   const totalArticles = data.lines.reduce((acc, l) => acc + (l.quantity || 1), 0)
   const giftMode = data.giftMode === true
+  const logoT0 = nowMs()
   const logoBase64 = await getLogoBase64Client()
+  emitLogoDiag(diag, logoBase64, nowMs() - logoT0)
 
   const content: Content[] = [
     ...(logoBase64
@@ -532,12 +579,23 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
     pageMargins: [MARGIN_PT, MARGIN_PT, MARGIN_PT, MARGIN_PT],
     content,
   }
+  // Variante sin logo (content[0] si existe) — SOLO diagnóstico en memoria si la
+  // generación con logo se cuelga. No se imprime.
+  const docDefNoLogo = { ...docDef, content: logoBase64 ? content.slice(1) : content }
 
   const pdf = pdfMake.createPdf(docDef as Parameters<typeof pdfMake.createPdf>[0])
 
   const fileName = `${giftMode ? 'ticket-regalo' : 'ticket'}-${data.sale.ticket_number}.pdf`
   if (mode === 'print') {
-    await printPdfDoc(pdf, fileName, diag)
+    try {
+      await printPdfDoc(pdf, fileName, diag)
+    } catch (genErr) {
+      await diagnoseNoLogoGetBlob(
+        () => pdfMake.createPdf(docDefNoLogo as Parameters<typeof pdfMake.createPdf>[0]),
+        diag,
+      )
+      throw genErr
+    }
   } else {
     await (pdf as { download: (name: string) => void }).download(fileName)
   }
@@ -618,6 +676,7 @@ export async function generateReservationPdf(
   if (typeof pdfMake.addVirtualFileSystem === 'function' && vfs) {
     pdfMake.addVirtualFileSystem(vfs)
   }
+  emitVfsDiag(diag, vfs)
 
   const storeAddress = data.storeAddress ?? STORE_DEFAULT.address
   const storeSubtitle = data.storeSubtitle ?? null
@@ -632,7 +691,9 @@ export async function generateReservationPdf(
 
   const pending = Math.max(0, Number(data.total) - Number(data.total_paid))
 
+  const logoT0 = nowMs()
   const logoBase64 = await getLogoBase64Client()
+  emitLogoDiag(diag, logoBase64, nowMs() - logoT0)
 
   // Filas de la tabla de líneas. pdfmake revienta si una tabla tiene body: [],
   // así que si la reserva no tiene líneas activas usamos una fila placeholder.
@@ -838,12 +899,25 @@ export async function generateReservationPdf(
     pageMargins: [MARGIN_PT, MARGIN_PT, MARGIN_PT, MARGIN_PT],
     content,
   }
+  // Variante sin logo (el logo, si existe, es content[0]) — SOLO para el
+  // diagnóstico en memoria si la generación con logo se cuelga. No se imprime.
+  const docDefNoLogo = { ...docDef, content: logoBase64 ? content.slice(1) : content }
 
   const pdf = pdfMake.createPdf(docDef as Parameters<typeof pdfMake.createPdf>[0])
 
   const fileName = `reserva-${data.reservation_number}.pdf`
   if (mode === 'print') {
-    await printPdfDoc(pdf, fileName, diag)
+    try {
+      await printPdfDoc(pdf, fileName, diag)
+    } catch (genErr) {
+      // getBlob del doc CON logo se colgó: reintento sin logo en memoria (invisible)
+      // para aislar logo vs fuentes, luego re-lanzamos el error original.
+      await diagnoseNoLogoGetBlob(
+        () => pdfMake.createPdf(docDefNoLogo as Parameters<typeof pdfMake.createPdf>[0]),
+        diag,
+      )
+      throw genErr
+    }
   } else {
     await (pdf as { download: (name: string) => void }).download(fileName)
   }

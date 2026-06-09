@@ -39,7 +39,7 @@ import { listClients } from '@/actions/clients'
 import { CreateClientDialog } from '@/app/(admin)/admin/clientes/create-client-dialog'
 import { formatCurrency } from '@/lib/utils'
 import { generateTicketPdf, printTicketPdf, printGiftTicketPdf } from '@/components/pos/ticket-pdf'
-import { makePrintDiag, reportClientError } from '@/lib/client-telemetry'
+import { createPrintReporter } from '@/lib/client-telemetry'
 import { printGiftCardPdf, downloadGiftCardPdf } from '@/components/pos/gift-card-pdf'
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
 import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
@@ -1029,15 +1029,15 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const handlePrintTicket = async () => {
     const data = buildTicketPdfData()
     if (!data) return
-    const printCtx = {
+    const reporter = createPrintReporter('sale_ticket_print', {
       call: 'pos_sale',
       ticket_number: data.sale.ticket_number,
       lines: data.lines.length,
-    }
+    })
     try {
-      await printTicketPdf(data, makePrintDiag('sale_ticket_print', printCtx))
+      await printTicketPdf(data, reporter.diag)
     } catch (err) {
-      reportClientError('sale_ticket_print', err, printCtx)
+      reporter.reportError(err)
       console.error('Error imprimiendo ticket de venta:', err)
     }
   }

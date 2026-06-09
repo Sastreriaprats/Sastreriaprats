@@ -58,21 +58,33 @@ export const DEGRADED_PRINT_STAGES = new Set<string>([
 ])
 
 /**
- * Construye un callback `PrintDiag` para pasar a printTicketPdf/printReservationPdf.
- * Registra automáticamente las ramas degradadas (sin excepción) en client_error_log.
- * El error real (getBlob que se cuelga, throw) NO pasa por aquí: lo captura el
- * try/catch del call-site, que llama a reportClientError directamente.
+ * Crea el par { diag, reportError } para instrumentar una impresión.
  *
- * `report` es inyectable solo para test; en producción usa el sumidero real.
+ * - `diag` se pasa a printTicketPdf/printReservationPdf. Acumula TODOS los eventos
+ *   (logo, vfs, getblob_retry_no_logo, ramas de impresión…) en un objeto interno.
+ *   Las ramas DEGRADADAS (sin excepción) se registran al vuelo, ya con todo el
+ *   contexto acumulado hasta ese punto.
+ * - `reportError(err)` lo llama el `catch` del call-site: registra el error real
+ *   (p.ej. el timeout de getBlob) ADJUNTANDO todos los eventos de diagnóstico
+ *   acumulados — así el log del fallo lleva logo/vfs/reintento sin logo.
+ *
+ * Ninguna de las dos rompe nunca el flujo (reportClientError es fire-and-forget).
+ * `report` es inyectable solo para test.
  */
-export function makePrintDiag(
+export function createPrintReporter(
   source: string,
   context: Record<string, unknown> = {},
   report: ClientErrorReporter = reportClientError,
-): PrintDiag {
-  return (stage, detail) => {
+): { diag: PrintDiag; reportError: (error: unknown) => void } {
+  const collected: Record<string, unknown> = {}
+  const diag: PrintDiag = (stage, detail) => {
+    collected[stage] = detail === undefined ? true : detail
     if (DEGRADED_PRINT_STAGES.has(stage)) {
-      report(source, `print degradado: ${stage}`, { ...context, stage, detail })
+      report(source, `print degradado: ${stage}`, { ...context, ...collected })
     }
   }
+  const reportError = (error: unknown) => {
+    report(source, error, { ...context, ...collected })
+  }
+  return { diag, reportError }
 }

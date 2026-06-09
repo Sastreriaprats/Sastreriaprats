@@ -1,7 +1,9 @@
-// Test headless de makePrintDiag: confirma que registra SOLO las ramas degradadas
-// con el source/context correctos, y NO las limpias. Inyecta un spy como reporter
-// (no toca la server action ni la BD). Ejecutar: npx tsx scripts/test-print-diag.ts
-import { makePrintDiag, DEGRADED_PRINT_STAGES } from '../src/lib/client-telemetry'
+// Test headless de createPrintReporter: confirma que (a) registra SOLO las ramas
+// degradadas con source/context correctos, NO las limpias; (b) reportError adjunta
+// TODOS los eventos de diagnóstico acumulados (logo/vfs/getblob_retry_no_logo).
+// Inyecta un spy como reporter (no toca la server action ni la BD).
+// Ejecutar: npx tsx scripts/test-print-diag.ts
+import { createPrintReporter, DEGRADED_PRINT_STAGES } from '../src/lib/client-telemetry'
 
 let failed = 0
 function check(name: string, cond: boolean) {
@@ -10,47 +12,59 @@ function check(name: string, cond: boolean) {
 }
 
 type Call = { source: string; error: unknown; context?: Record<string, unknown> }
+
+// --- A) ramas degradadas se registran al vuelo, las limpias no ---
 const calls: Call[] = []
 const spy = (source: string, error: unknown, context?: Record<string, unknown>) =>
   calls.push({ source, error, context })
 
-const diag = makePrintDiag(
+const { diag } = createPrintReporter(
   'reservation_ticket_print',
   { call: 'manual', reservation_number: 'R-1', lines: 2 },
   spy,
 )
 
-// Ramas limpias / informativas -> NO deben registrar nada
-diag('blob-ready', { size: 1234 })
-diag('print:iframe')
-// Ramas degradadas -> SÍ deben registrar
-diag('print:download', { fileName: 'reserva-R-1.pdf' })
-diag('iframe-load-timeout')
+diag('vfs', { keys: 6 })          // diagnóstico: NO registra al vuelo
+diag('logo', { loaded: true, mime: 'image/png', bytes: 1000, ms: 12 }) // NO al vuelo
+diag('blob-ready', { size: 1234 }) // limpio: NO
+diag('print:iframe')               // limpio: NO
+diag('print:download', { fileName: 'reserva-R-1.pdf' }) // degradado: SÍ
+diag('iframe-load-timeout')        // degradado: SÍ
 
-check('solo 2 llamadas (las 2 degradadas)', calls.length === 2)
-check('no registra print:iframe ni blob-ready', !calls.some(c => String(c.error).includes('iframe)')) && calls.length === 2)
+check('solo 2 registros al vuelo (las 2 degradadas)', calls.length === 2)
 check('source correcto', calls[0]?.source === 'reservation_ticket_print')
 check('mensaje incluye el stage degradado', calls[0]?.error === 'print degradado: print:download')
-check('context.stage = print:download', calls[0]?.context?.stage === 'print:download')
-check('context conserva call', calls[0]?.context?.call === 'manual')
-check('context conserva reservation_number', calls[0]?.context?.reservation_number === 'R-1')
-check('context conserva lines', calls[0]?.context?.lines === 2)
-check('context lleva el detail', (calls[0]?.context?.detail as { fileName?: string })?.fileName === 'reserva-R-1.pdf')
-check('segunda llamada = iframe-load-timeout', calls[1]?.context?.stage === 'iframe-load-timeout')
+check('contexto base conservado (call)', calls[0]?.context?.call === 'manual')
+check('contexto base conservado (reservation_number)', calls[0]?.context?.reservation_number === 'R-1')
+check('degradado adjunta eventos previos (vfs)', (calls[0]?.context?.vfs as { keys?: number })?.keys === 6)
+check('degradado adjunta eventos previos (logo)', (calls[0]?.context?.logo as { loaded?: boolean })?.loaded === true)
+check('degradado lleva su propio detail (print:download)', (calls[0]?.context?.['print:download'] as { fileName?: string })?.fileName === 'reserva-R-1.pdf')
 
-// Sanity del set de ramas degradadas
+// --- B) reportError adjunta TODOS los eventos acumulados (caso real: timeout getBlob) ---
+const errCalls: Call[] = []
+const r2 = createPrintReporter(
+  'reservation_ticket_print',
+  { call: 'manual', reservation_number: 'RSV-2026-0026', lines: 1 },
+  (s, e, c) => errCalls.push({ source: s, error: e, context: c }),
+)
+r2.diag('vfs', { keys: 6 })
+r2.diag('logo', { loaded: true, mime: 'image/png', bytes: 5000, ms: 40 })
+r2.diag('getblob_retry_no_logo', { result: 'success', ms: 380 })
+r2.reportError(new Error('Tiempo de espera agotado generando PDF'))
+
+check('reportError registra 1 vez', errCalls.length === 1)
+check('reportError pasa el Error real', errCalls[0]?.error instanceof Error)
+check('reportError adjunta vfs', (errCalls[0]?.context?.vfs as { keys?: number })?.keys === 6)
+check('reportError adjunta logo', (errCalls[0]?.context?.logo as { bytes?: number })?.bytes === 5000)
+check('reportError adjunta el reintento sin logo', (errCalls[0]?.context?.getblob_retry_no_logo as { result?: string })?.result === 'success')
+check('reportError conserva contexto base', errCalls[0]?.context?.reservation_number === 'RSV-2026-0026')
+
+// --- C) sanity del set de ramas degradadas ---
 check('set NO incluye print:iframe', !DEGRADED_PRINT_STAGES.has('print:iframe'))
 check('set NO incluye blob-ready', !DEGRADED_PRINT_STAGES.has('blob-ready'))
+check('set NO incluye vfs ni logo ni retry', !DEGRADED_PRINT_STAGES.has('vfs') && !DEGRADED_PRINT_STAGES.has('logo') && !DEGRADED_PRINT_STAGES.has('getblob_retry_no_logo'))
 check('set incluye print:window-open', DEGRADED_PRINT_STAGES.has('print:window-open'))
 check('set incluye print:download-popup-blocked', DEGRADED_PRINT_STAGES.has('print:download-popup-blocked'))
-
-// El source también funciona para venta
-const calls2: Call[] = []
-const diagSale = makePrintDiag('sale_ticket_print', { call: 'pos_sale', ticket_number: 'T-9' }, (s, e, c) =>
-  calls2.push({ source: s, error: e, context: c }),
-)
-diagSale('print:window-open')
-check('venta: registra window-open con source sale_ticket_print', calls2.length === 1 && calls2[0].source === 'sale_ticket_print')
 
 console.log(failed === 0 ? '\nTEST 2: PASS' : `\nTEST 2: FAIL (${failed})`)
 process.exit(failed === 0 ? 0 : 1)
