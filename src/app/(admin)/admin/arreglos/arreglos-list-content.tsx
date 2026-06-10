@@ -53,7 +53,7 @@ const TYPE_BADGE: Record<AlterationType, string> = {
   external: 'bg-amber-100 text-amber-700 border-amber-200',
 }
 
-export function ArreglosListContent() {
+export function ArreglosListContent({ basePath = '/admin' }: { basePath?: string }) {
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
   const [stores, setStores] = useState<{ id: string; name: string }[]>([])
@@ -252,10 +252,10 @@ export function ArreglosListContent() {
                   <TableRow
                     key={a.id}
                     className="cursor-pointer"
-                    onClick={() => router.push(`/admin/arreglos/${a.id}`)}
+                    onClick={() => router.push(`${basePath}/arreglos/${a.id}`)}
                   >
                     <TableCell className="font-mono text-xs">
-                      <Link href={`/admin/arreglos/${a.id}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>
+                      <Link href={`${basePath}/arreglos/${a.id}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>
                         {a.alteration_number}
                       </Link>
                     </TableCell>
@@ -289,7 +289,7 @@ export function ArreglosListContent() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem asChild>
-                            <Link href={`/admin/arreglos/${a.id}`}>
+                            <Link href={`${basePath}/arreglos/${a.id}`}>
                               <ExternalLink className="mr-2 h-4 w-4" /> Ver detalle
                             </Link>
                           </DropdownMenuItem>

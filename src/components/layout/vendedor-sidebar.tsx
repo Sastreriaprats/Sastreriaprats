@@ -6,13 +6,14 @@ import { usePathname } from 'next/navigation'
 import { useAuth } from '@/components/providers/auth-provider'
 import { usePermissions } from '@/hooks/use-permissions'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { LayoutDashboard, Users, Package, CircleDollarSign, ShoppingCart, Tag, ClipboardList, Scissors } from 'lucide-react'
+import { LayoutDashboard, Users, Package, CircleDollarSign, ShoppingCart, Tag, ClipboardList, Scissors, Ruler } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
   { label: 'Dashboard', href: '/vendedor', icon: LayoutDashboard },
   { label: 'Clientes', href: '/vendedor/clientes', icon: Users },
   { label: 'Pedidos', href: '/admin/pedidos', icon: Scissors, permission: 'orders.view' as const },
+  { label: 'Arreglos', href: '/vendedor/arreglos', icon: Ruler, permission: 'clients.view' as const },
   { label: 'Productos y Stock', href: '/vendedor/stock', icon: Package },
   { label: 'Cobros', href: '/vendedor/cobros', icon: CircleDollarSign },
   { label: 'Caja TPV', href: '/vendedor/caja', icon: ShoppingCart },
