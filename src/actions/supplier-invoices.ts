@@ -39,6 +39,7 @@ export type ApSupplierInvoiceRow = {
   is_rectifying?: boolean
   rectifies_invoice_id?: string | null
   rectification_reason?: string | null
+  is_proforma?: boolean
 }
 
 export type ApSupplierInvoiceInput = {

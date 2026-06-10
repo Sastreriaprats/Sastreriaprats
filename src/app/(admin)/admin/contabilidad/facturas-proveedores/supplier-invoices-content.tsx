@@ -194,6 +194,10 @@ export function SupplierInvoicesContent() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<ApSupplierInvoiceRow | null>(null)
   const [creditNoteTarget, setCreditNoteTarget] = useState<ApSupplierInvoiceRow | null>(null)
+  // Proforma: si la fila en edición es un abono, el flag proforma se deshabilita
+  // (son excluyentes). `hideProformas` oculta las proformas de la lista (off por defecto).
+  const [editingIsRectifying, setEditingIsRectifying] = useState(false)
+  const [hideProformas, setHideProformas] = useState(false)
 
   const [form, setForm] = useState({
     supplier_id: '',
@@ -210,6 +214,7 @@ export function SupplierInvoicesContent() {
     payment_method: '',
     notes: '',
     attachment_url: '',
+    is_proforma: false,
   })
 
   const [suppliers, setSuppliers] = useState<SupplierOptionForInvoice[]>([])
@@ -403,6 +408,7 @@ export function SupplierInvoicesContent() {
 
   const openCreate = () => {
     setEditingId(null)
+    setEditingIsRectifying(false)
     setForm({
       supplier_id: '',
       supplier_name: '',
@@ -418,6 +424,7 @@ export function SupplierInvoicesContent() {
       payment_method: '',
       notes: '',
       attachment_url: '',
+      is_proforma: false,
     })
     setSelectedDeliveryNoteIds([])
     setDeliveryNotes([])
@@ -431,6 +438,7 @@ export function SupplierInvoicesContent() {
 
   const openEdit = async (row: ApSupplierInvoiceRow) => {
     setEditingId(row.id)
+    setEditingIsRectifying(row.is_rectifying === true)
     // Reconstruir el IVA % real a partir de los importes guardados (los datos
     // de la factura solo guardan los importes, no el porcentaje).
     const reconstructedTaxRate = row.amount > 0
@@ -451,6 +459,7 @@ export function SupplierInvoicesContent() {
       payment_method: row.payment_method || '',
       notes: row.notes || '',
       attachment_url: row.attachment_url || '',
+      is_proforma: row.is_proforma === true,
     })
     setTotalTouched(true)
     setAttachmentName(deriveFilenameFromUrl(row.attachment_url))
@@ -644,6 +653,7 @@ export function SupplierInvoicesContent() {
       delivery_note_ids: selectedDeliveryNoteIds,
       installments: installmentsPayload,
       lines: cleanedLines,
+      is_proforma: form.is_proforma,
     }
 
     if (editingId) {
@@ -759,6 +769,9 @@ export function SupplierInvoicesContent() {
     return isOverdue && row.status === 'pendiente' ? STATUS_BADGE.vencida : s
   }
 
+  // Las proformas se ven por defecto; el toggle "ocultar proformas" las filtra (cliente).
+  const visibleRows = hideProformas ? rows.filter((r) => r.is_proforma !== true) : rows
+
   return (
     <div className="space-y-6 p-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -873,6 +886,13 @@ export function SupplierInvoicesContent() {
           value={dateTo}
           onChange={(date) => setDateTo(date)}
         />
+        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+          <Checkbox
+            checked={hideProformas}
+            onCheckedChange={(checked) => setHideProformas(checked === true)}
+          />
+          Ocultar proformas
+        </label>
         <Button
           variant="secondary"
           size="sm"
@@ -882,6 +902,7 @@ export function SupplierInvoicesContent() {
             setSupplierSearch('')
             setStatusFilter('all')
             setPaymentMethodFilter('all')
+            setHideProformas(false)
           }}
         >
           Limpiar
@@ -894,7 +915,7 @@ export function SupplierInvoicesContent() {
           <div className="flex justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
-        ) : rows.length === 0 ? (
+        ) : visibleRows.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
             <FileText className="mx-auto h-12 w-12 mb-4 opacity-30" />
             <p>No hay facturas con los filtros indicados.</p>
@@ -916,7 +937,7 @@ export function SupplierInvoicesContent() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((row) => {
+              {visibleRows.map((row) => {
                 const badge = displayStatus(row)
                 const paid = paidMap[row.id] ?? 0
                 const pending = Math.max(0, Math.round((row.total_amount - paid) * 100) / 100)
@@ -952,9 +973,15 @@ export function SupplierInvoicesContent() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${badge.className}`}>
-                        {badge.label}
-                      </span>
+                      {row.is_proforma ? (
+                        <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
+                          Proforma
+                        </span>
+                      ) : (
+                        <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${badge.className}`}>
+                          {badge.label}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1">
@@ -1211,6 +1238,27 @@ export function SupplierInvoicesContent() {
                     due_date: computeDueFromSupplier(date, selectedSupplier),
                   }))}
                 />
+              </div>
+              <div className="col-span-2 rounded-md border border-amber-200 bg-amber-50/50 p-3">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <Checkbox
+                    checked={form.is_proforma}
+                    disabled={editingIsRectifying}
+                    onCheckedChange={(checked) => setForm((f) => ({ ...f, is_proforma: checked === true }))}
+                    className="mt-0.5"
+                  />
+                  <div className="space-y-0.5">
+                    <span className="text-sm font-medium">Es proforma (sin validez fiscal)</span>
+                    <p className="text-xs text-muted-foreground">
+                      {editingId
+                        ? 'Desmarcar la convierte en la factura definitiva: empezará a contar para IVA y deuda, y se generarán sus cuotas de pago.'
+                        : 'Una proforma no cuenta para IVA ni contabilidad, ni genera vencimientos, hasta que la conviertas en factura real.'}
+                    </p>
+                    {editingIsRectifying && (
+                      <p className="text-xs text-rose-600">No disponible: esta factura es un abono.</p>
+                    )}
+                  </div>
+                </label>
               </div>
               <div className="col-span-2 rounded-md border bg-muted/20 p-3 space-y-2">
                 <div className="flex items-center justify-between">
