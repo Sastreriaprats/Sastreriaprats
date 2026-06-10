@@ -13,6 +13,35 @@ const lineNet = (lineTotal: number, taxRate: number | null | undefined) => {
   return lineTotal / (1 + r / 100)
 }
 
+// ── Agrupación temporal en hora de Madrid ───────────────────────────────────
+// Los timestamps (created_at) se guardan en UTC. Agrupar con getHours()/getDay()/
+// toISOString() depende de la TZ del PROCESO (UTC en Vercel) -> una venta de las
+// 10:00 Madrid (08:00 UTC en verano) caía en la barra de las 8h, y una venta de
+// madrugada podía caer en el día/mes equivocado. Estos helpers usan timeZone
+// 'Europe/Madrid' EXPLÍCITO, así que no dependen de la TZ del proceso.
+const MADRID_TZ = 'Europe/Madrid'
+const _madridDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: MADRID_TZ, year: 'numeric', month: '2-digit', day: '2-digit' })
+const _madridHourFmt = new Intl.DateTimeFormat('en-GB', { timeZone: MADRID_TZ, hour: '2-digit', hourCycle: 'h23' })
+
+/** Fecha YYYY-MM-DD del instante, en hora de Madrid. */
+const madridDateKey = (iso: string): string => _madridDateFmt.format(new Date(iso))
+/** Mes YYYY-MM del instante, en Madrid. */
+const madridMonthKey = (iso: string): string => madridDateKey(iso).slice(0, 7)
+/** Hora 0-23 en Madrid. */
+const madridHour = (iso: string): number => Number(_madridHourFmt.format(new Date(iso)))
+/** Día de la semana en Madrid: 0=Lunes … 6=Domingo. */
+const madridDow = (iso: string): number => {
+  const [y, m, d] = madridDateKey(iso).split('-').map(Number)
+  return (new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay() + 6) % 7
+}
+/** Lunes (YYYY-MM-DD) de la semana del instante, en Madrid. */
+const madridWeekKey = (iso: string): string => {
+  const [y, m, d] = madridDateKey(iso).split('-').map(Number)
+  const anchor = new Date(Date.UTC(y, m - 1, d, 12))
+  anchor.setUTCDate(anchor.getUTCDate() - ((anchor.getUTCDay() + 6) % 7))
+  return anchor.toISOString().split('T')[0]
+}
+
 export const getSalesReport = protectedAction<
   { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel; group_by?: 'day' | 'week' | 'month'; tax_mode?: TaxMode },
   {
@@ -81,14 +110,10 @@ export const getSalesReport = protectedAction<
           ? (item[nestedDate] as Record<string, unknown>)?.created_at as string
           : item.created_at as string
         if (!rawDate) continue
-        const date = new Date(rawDate)
         let key: string
-        if (group_by === 'month') key = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`
-        else if (group_by === 'week') {
-          const d = new Date(date)
-          d.setDate(d.getDate() - d.getDay() + 1)
-          key = d.toISOString().split('T')[0]
-        } else key = date.toISOString().split('T')[0]
+        if (group_by === 'month') key = madridMonthKey(rawDate)
+        else if (group_by === 'week') key = madridWeekKey(rawDate)
+        else key = madridDateKey(rawDate)
         groups[key] = (groups[key] || 0) + valueOf(item, valueField)
       }
       return groups
@@ -780,9 +805,8 @@ export const getSalesByTimePattern = protectedAction<
     const dayMap = Array.from({ length: 7 }, (_, i) => ({ day: i, label: DAY_LABELS[i], total: 0, count: 0 }))
 
     const accumulate = (dateStr: string, amount: number) => {
-      const d = new Date(dateStr)
-      const hour = d.getHours()
-      const dow = (d.getDay() + 6) % 7 // 0=Mon...6=Sun
+      const hour = madridHour(dateStr) // hora en Madrid, no en la TZ del proceso
+      const dow = madridDow(dateStr)   // 0=Lun…6=Dom, en Madrid
       hourMap[hour].total += amount
       hourMap[hour].count += 1
       dayMap[dow].total += amount
@@ -1085,12 +1109,13 @@ export const getUserSalesSummary = protectedAction<
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     )
 
-    // Periodos
-    const now = new Date()
-    const year = now.getFullYear()
-    const month = now.getMonth() // 0-based
-    const monthStart = new Date(year, month, 1).getTime()
-    const yearStart = new Date(year, 0, 1).getTime()
+    // Periodos (en hora de Madrid, no en la TZ del proceso): comparamos por la
+    // clave de mes/año de Madrid en vez de límites de timestamp en TZ local.
+    const nowDateKey = madridDateKey(new Date().toISOString())
+    const nowYear = nowDateKey.slice(0, 4)
+    const nowMonthKey = nowDateKey.slice(0, 7)
+    const currentYearNum = Number(nowYear)
+    const currentMonthNum = Number(nowMonthKey.slice(5, 7)) - 1 // 0-based
 
     let mtdTotal = 0, mtdCount = 0
     let ytdTotal = 0, ytdCount = 0
@@ -1100,15 +1125,15 @@ export const getUserSalesSummary = protectedAction<
     for (const s of sales) {
       const amount = s.lines_total_for_user
       allTotal += amount
-      const t = new Date(s.created_at).getTime()
-      if (t >= yearStart) { ytdTotal += amount; ytdCount += 1 }
-      if (t >= monthStart) { mtdTotal += amount; mtdCount += 1 }
+      const mk = madridMonthKey(s.created_at) // YYYY-MM en Madrid
+      if (mk.slice(0, 4) === nowYear) { ytdTotal += amount; ytdCount += 1 }
+      if (mk === nowMonthKey) { mtdTotal += amount; mtdCount += 1 }
 
-      const d = new Date(s.created_at)
-      const key = `${d.getFullYear()}-${d.getMonth()}`
+      const [y, mo] = mk.split('-').map(Number)
+      const key = `${y}-${mo - 1}` // formato existente: month 0-based
       const bm = byMonth.get(key)
       if (bm) { bm.total += amount; bm.sales_count += 1 }
-      else byMonth.set(key, { year: d.getFullYear(), month: d.getMonth(), total: amount, sales_count: 1 })
+      else byMonth.set(key, { year: y, month: mo - 1, total: amount, sales_count: 1 })
     }
 
     // Nombres de tienda y cliente para las ventas recientes
@@ -1141,7 +1166,7 @@ export const getUserSalesSummary = protectedAction<
       mtd: { total: Math.round(mtdTotal * 100) / 100, sales_count: mtdCount },
       ytd: { total: Math.round(ytdTotal * 100) / 100, sales_count: ytdCount },
       all_time: { total: Math.round(allTotal * 100) / 100, sales_count: sales.length },
-      current_month: { year, month, label: `${monthLabels[month]} ${year}` },
+      current_month: { year: currentYearNum, month: currentMonthNum, label: `${monthLabels[currentMonthNum]} ${currentYearNum}` },
       recent_sales: recent.map((s) => ({
         sale_id: s.sale_id,
         ticket_number: s.ticket_number,
