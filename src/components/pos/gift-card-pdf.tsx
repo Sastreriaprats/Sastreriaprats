@@ -200,43 +200,42 @@ export async function generateGiftCardPdf(data: GiftCardPdfData, mode: 'download
     // disparar print desde ahí. El método de iframe oculto que se usaba antes
     // funciona en algunos navegadores pero Chrome/Edge bloquean el diálogo
     // de impresión cuando el iframe es invisible y el contenido es PDF.
-    await new Promise<void>((resolve) => {
-      (pdf as any).getBlob((blob: Blob) => {
-        const url = URL.createObjectURL(blob)
-        const printWindow = window.open(url, '_blank')
+    //
+    // getBuffer() en vez de getBlob(callback): el callback de pdfmake 0.3.6 se
+    // cuelga en algunos navegadores (Chrome 148, confirmado por telemetría en el
+    // ticket de reserva). getBuffer resuelve donde getBlob no.
+    const buf = await (pdf as { getBuffer: () => Promise<unknown> }).getBuffer()
+    const blob = new Blob([buf as BlobPart], { type: 'application/pdf' })
+    const url = URL.createObjectURL(blob)
+    const printWindow = window.open(url, '_blank')
 
-        if (!printWindow) {
-          // Pop-ups bloqueados: caer a descarga
-          const a = document.createElement('a')
-          a.href = url
-          a.download = fileName
-          a.click()
-          setTimeout(() => URL.revokeObjectURL(url), 2000)
-          resolve()
-          return
+    if (!printWindow) {
+      // Pop-ups bloqueados: caer a descarga
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 2000)
+    } else {
+      let printed = false
+      const triggerPrint = () => {
+        if (printed) return
+        printed = true
+        try {
+          printWindow.focus()
+          printWindow.print()
+        } catch {
+          // Si falla el print el usuario ya tiene el PDF abierto y puede
+          // imprimir manualmente.
         }
+      }
 
-        let printed = false
-        const triggerPrint = () => {
-          if (printed) return
-          printed = true
-          try {
-            printWindow.focus()
-            printWindow.print()
-          } catch {
-            // Si falla el print el usuario ya tiene el PDF abierto y puede
-            // imprimir manualmente.
-          }
-        }
+      const onLoad = () => setTimeout(triggerPrint, 500)
+      try { printWindow.addEventListener('load', onLoad) } catch { /* cross-origin */ }
+      setTimeout(triggerPrint, 1500)
 
-        const onLoad = () => setTimeout(triggerPrint, 500)
-        try { printWindow.addEventListener('load', onLoad) } catch { /* cross-origin */ }
-        setTimeout(triggerPrint, 1500)
-
-        setTimeout(() => { try { URL.revokeObjectURL(url) } catch {} }, 60000)
-        resolve()
-      })
-    })
+      setTimeout(() => { try { URL.revokeObjectURL(url) } catch {} }, 60000)
+    }
   } else {
     await (pdf as { download: (name: string) => void }).download(fileName)
   }

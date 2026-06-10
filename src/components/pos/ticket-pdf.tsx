@@ -48,6 +48,42 @@ function getPdfBlobWithTimeout(
   })
 }
 
+/** Doc de pdfmake del que solo necesitamos getBuffer (promesa). */
+type PdfBufferDoc = { getBuffer: () => Promise<unknown> }
+
+/**
+ * Genera el Blob del PDF vía getBuffer() (promesa) con timeout defensivo.
+ *
+ * Este es el camino de impresión. El callback getBlob() de pdfmake 0.3.6 se cuelga
+ * en algunos navegadores (confirmado por telemetría: Chrome 148, getBlob hang 8s vs
+ * getBuffer success 23ms — getbuffer_probe). getBuffer() es la misma primitiva que
+ * usan invoice/estimate en servidor y resuelve donde getBlob no.
+ */
+function getPdfBlobViaBuffer(pdf: PdfBufferDoc, timeoutMs = 8000): Promise<Blob> {
+  return new Promise<Blob>((resolve, reject) => {
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      reject(new Error('Tiempo de espera agotado generando PDF'))
+    }, timeoutMs)
+    Promise.resolve()
+      .then(() => pdf.getBuffer())
+      .then((buf) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(new Blob([buf as BlobPart], { type: 'application/pdf' }))
+      })
+      .catch((err) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        reject(err instanceof Error ? err : new Error(String(err)))
+      })
+  })
+}
+
 /**
  * Callback de diagnóstico de impresión. Emite la RAMA que se ejecuta (para
  * telemetría): qué camino tomó la impresión y si cayó a un fallback degradado.
@@ -143,11 +179,11 @@ async function diagnoseGetBlobHang(
  *   print:download · print:download-popup-blocked · iframe-error · iframe-load-timeout
  */
 async function printPdfDoc(
-  pdf: { getBlob: (cb: (blob: Blob) => void) => void },
+  pdf: PdfBufferDoc,
   fileName: string,
   diag?: PrintDiag,
 ): Promise<void> {
-  const blob = await getPdfBlobWithTimeout(pdf)
+  const blob = await getPdfBlobViaBuffer(pdf)
   diag?.('blob-ready', { size: blob.size })
   await new Promise<void>((resolve) => {
     const url = URL.createObjectURL(blob)
@@ -624,7 +660,7 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
   const fileName = `${giftMode ? 'ticket-regalo' : 'ticket'}-${data.sale.ticket_number}.pdf`
   if (mode === 'print') {
     try {
-      await printPdfDoc(pdf, fileName, diag)
+      await printPdfDoc(pdf as unknown as PdfBufferDoc, fileName, diag)
     } catch (genErr) {
       await diagnoseGetBlobHang(
         () => pdfMake.createPdf(docDefNoLogo as Parameters<typeof pdfMake.createPdf>[0]) as unknown as DiagPdf,
@@ -944,7 +980,7 @@ export async function generateReservationPdf(
   const fileName = `reserva-${data.reservation_number}.pdf`
   if (mode === 'print') {
     try {
-      await printPdfDoc(pdf, fileName, diag)
+      await printPdfDoc(pdf as unknown as PdfBufferDoc, fileName, diag)
     } catch (genErr) {
       // getBlob del doc CON logo se colgó: diagnóstico en memoria (invisible) para
       // aislar logo vs fuentes y discriminar getBlob-shim vs core; re-lanzamos el error.

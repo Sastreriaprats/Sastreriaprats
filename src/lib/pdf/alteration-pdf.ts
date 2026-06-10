@@ -173,11 +173,15 @@ export async function printAlterationPdf(id: string): Promise<void> {
   const docDef = buildAlterationDocDefinition(alteration, logo)
 
   const pdfMake = await loadPdfMake()
-  const pdf = pdfMake.createPdf(docDef) as { getBlob: (cb: (blob: Blob) => void) => void }
+  const pdf = pdfMake.createPdf(docDef) as { getBuffer: () => Promise<unknown> }
   const fileName = `arreglo-${alteration.alteration_number}.pdf`
 
-  await new Promise<void>((resolve) => {
-    pdf.getBlob((blob: Blob) => {
+  // getBuffer() en vez de getBlob(callback): el callback de pdfmake 0.3.6 se cuelga
+  // en algunos navegadores (Chrome 148, confirmado por telemetría). getBuffer resuelve
+  // donde getBlob no.
+  const buf = await pdf.getBuffer()
+  {
+      const blob = new Blob([buf as BlobPart], { type: 'application/pdf' })
       const url = URL.createObjectURL(blob)
 
       const iframe = document.createElement('iframe')
@@ -234,7 +238,5 @@ export async function printAlterationPdf(id: string): Promise<void> {
       setTimeout(cleanup, 60000)
 
       document.body.appendChild(iframe)
-      resolve()
-    })
-  })
+  }
 }

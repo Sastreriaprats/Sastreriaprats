@@ -211,34 +211,33 @@ export async function generateVoucherPdf(
   const fileName = `vale-${data.code}.pdf`
 
   if (mode === 'print') {
-    await new Promise<void>((resolve) => {
-      ;(pdf as any).getBlob((blob: Blob) => {
-        const url = URL.createObjectURL(blob)
-        const printWindow = window.open(url, '_blank')
-        if (!printWindow) {
-          const a = document.createElement('a')
-          a.href = url
-          a.download = fileName
-          a.click()
-          setTimeout(() => URL.revokeObjectURL(url), 2000)
-          resolve()
-          return
-        }
-        let printed = false
-        const triggerPrint = () => {
-          if (printed) return
-          printed = true
-          try {
-            printWindow.focus()
-            printWindow.print()
-          } catch { /* ignore */ }
-        }
-        try { printWindow.addEventListener('load', () => setTimeout(triggerPrint, 500)) } catch { /* cross-origin */ }
-        setTimeout(triggerPrint, 1500)
-        setTimeout(() => { try { URL.revokeObjectURL(url) } catch {} }, 60000)
-        resolve()
-      })
-    })
+    // getBuffer() en vez de getBlob(callback): el callback de pdfmake 0.3.6 se cuelga
+    // en algunos navegadores (Chrome 148, confirmado por telemetría en el ticket de
+    // reserva). getBuffer resuelve donde getBlob no.
+    const buf = await (pdf as { getBuffer: () => Promise<unknown> }).getBuffer()
+    const blob = new Blob([buf as BlobPart], { type: 'application/pdf' })
+    const url = URL.createObjectURL(blob)
+    const printWindow = window.open(url, '_blank')
+    if (!printWindow) {
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 2000)
+    } else {
+      let printed = false
+      const triggerPrint = () => {
+        if (printed) return
+        printed = true
+        try {
+          printWindow.focus()
+          printWindow.print()
+        } catch { /* ignore */ }
+      }
+      try { printWindow.addEventListener('load', () => setTimeout(triggerPrint, 500)) } catch { /* cross-origin */ }
+      setTimeout(triggerPrint, 1500)
+      setTimeout(() => { try { URL.revokeObjectURL(url) } catch {} }, 60000)
+    }
   } else {
     await (pdf as { download: (name: string) => void }).download(fileName)
   }

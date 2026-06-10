@@ -171,22 +171,22 @@ export async function generateReturnTicketPdf(data: ReturnTicketData, mode: 'dow
   const fileBase = `devolucion-${data.voucher_code ?? data.original_ticket_number ?? 'ticket'}`
 
   if (mode === 'print') {
-    await new Promise<void>((resolve) => {
-      (pdf as any).getBlob((blob: Blob) => {
-        const url = URL.createObjectURL(blob)
-        const win = window.open(url, '_blank')
-        if (win) {
-          win.addEventListener('load', () => { win.print() })
-          setTimeout(() => { try { win.print() } catch {} }, 500)
-        } else {
-          const a = document.createElement('a')
-          a.href = url
-          a.download = `${fileBase}.pdf`
-          a.click()
-        }
-        resolve()
-      })
-    })
+    // getBuffer() en vez de getBlob(callback): el callback de pdfmake 0.3.6 se cuelga
+    // en algunos navegadores (Chrome 148, confirmado por telemetría). getBuffer
+    // resuelve donde getBlob no.
+    const buf = await (pdf as { getBuffer: () => Promise<unknown> }).getBuffer()
+    const blob = new Blob([buf as BlobPart], { type: 'application/pdf' })
+    const url = URL.createObjectURL(blob)
+    const win = window.open(url, '_blank')
+    if (win) {
+      win.addEventListener('load', () => { win.print() })
+      setTimeout(() => { try { win.print() } catch {} }, 500)
+    } else {
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${fileBase}.pdf`
+      a.click()
+    }
   } else {
     await (pdf as { download: (name: string) => void }).download(`${fileBase}.pdf`)
   }
