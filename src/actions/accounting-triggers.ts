@@ -306,3 +306,108 @@ export async function createInvoiceJournalEntry(invoiceId: string): Promise<{ ok
     return { ok: false, error: msg }
   }
 }
+
+/**
+ * Crea el asiento INVERSO (contrapartida) de una factura al ANULARLA: espeja las
+ * líneas del asiento original con Debe/Haber intercambiados, con fecha de la
+ * cancelación. Así la cuenta 700 (Ventas) y el resto netean a cero sin borrar el
+ * asiento posted original. Mismo principio que la contrapartida de las
+ * rectificativas (mig 192), no se borra un asiento contabilizado, se contrarresta.
+ *
+ * Idempotente: si ya existe el inverso (entry_type='invoice_cancellation' para esta
+ * factura) no crea otro. `skipped` = no había asiento que revertir (o ya revertido).
+ */
+export async function reverseInvoiceJournalEntry(invoiceId: string): Promise<{ ok: boolean; error?: string; skipped?: boolean }> {
+  try {
+    const admin = createAdminClient()
+    const db: AnyClient = admin
+
+    const { data: inv, error: invErr } = await admin
+      .from('invoices')
+      .select('id, invoice_number, journal_entry_id')
+      .eq('id', invoiceId)
+      .single()
+    if (invErr || !inv) return { ok: false, error: 'Factura no encontrada' }
+
+    const journalEntryId = (inv as { journal_entry_id?: string | null }).journal_entry_id ?? null
+    if (!journalEntryId) return { ok: true, skipped: true } // sin asiento que revertir
+
+    const { data: orig } = await admin
+      .from('journal_entries')
+      .select('id, status, entry_type')
+      .eq('id', journalEntryId)
+      .single()
+    if (!orig) return { ok: true, skipped: true }
+    if ((orig as { status?: string }).status !== 'posted') return { ok: true, skipped: true } // ya no cuenta
+
+    // Idempotencia: ¿ya existe el inverso de esta factura?
+    const { data: existingRev } = await admin
+      .from('journal_entries')
+      .select('id')
+      .eq('reference_id', invoiceId)
+      .eq('entry_type', 'invoice_cancellation')
+      .limit(1)
+      .maybeSingle()
+    if (existingRev) return { ok: true, skipped: true }
+
+    const { data: origLines } = await admin
+      .from('journal_entry_lines')
+      .select('account_code, debit, credit, description, sort_order')
+      .eq('journal_entry_id', journalEntryId)
+      .order('sort_order', { ascending: true })
+    const lines = (origLines ?? []) as { account_code: string; debit: number | string | null; credit: number | string | null; description: string | null; sort_order: number }[]
+    if (lines.length === 0) return { ok: true, skipped: true }
+
+    const date = new Date().toISOString().split('T')[0]
+    const fiscalYear = new Date(date).getFullYear()
+    const fiscalMonth = new Date(date).getMonth() + 1
+    const entryNumber = await getNextEntryNumber(db, fiscalYear)
+
+    // Líneas espejo: Debe <-> Haber
+    const swapped = lines.map((l, idx) => ({
+      account_code: l.account_code,
+      debit: Number(l.credit ?? 0),
+      credit: Number(l.debit ?? 0),
+      description: l.description ?? null,
+      sort_order: idx,
+    }))
+    const totalDebit = swapped.reduce((s, l) => s + l.debit, 0)
+    const totalCredit = swapped.reduce((s, l) => s + l.credit, 0)
+
+    const { data: entry, error: entryErr } = await db
+      .from('journal_entries')
+      .insert({
+        entry_number: entryNumber,
+        fiscal_year: fiscalYear,
+        fiscal_month: fiscalMonth,
+        entry_date: date,
+        description: `Anulación factura ${(inv as { invoice_number?: string }).invoice_number ?? invoiceId.slice(0, 8)}`,
+        entry_type: 'invoice_cancellation',
+        reference_type: 'invoice',
+        reference_id: invoiceId,
+        status: 'posted',
+        total_debit: totalDebit,
+        total_credit: totalCredit,
+      })
+      .select('id')
+      .single()
+    if (entryErr || !entry) return { ok: false, error: entryErr?.message ?? 'Error al crear asiento inverso' }
+
+    const { error: linesErr } = await db.from('journal_entry_lines').insert(
+      swapped.map((l) => ({
+        journal_entry_id: entry.id,
+        account_code: l.account_code,
+        debit: l.debit,
+        credit: l.credit,
+        description: l.description,
+        sort_order: l.sort_order,
+      }))
+    )
+    if (linesErr) return { ok: false, error: linesErr.message }
+
+    return { ok: true }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Error desconocido'
+    return { ok: false, error: msg }
+  }
+}

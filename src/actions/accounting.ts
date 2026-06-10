@@ -6,7 +6,7 @@ import { normalizeSearchTerm } from '@/lib/utils'
 import { generateInvoicePdf } from '@/lib/pdf/invoice-pdf'
 import { generateEstimatePdf } from '@/lib/pdf/estimate-pdf'
 import { sendEstimateEmail } from '@/lib/email/transactional'
-import { createInvoiceJournalEntry } from '@/actions/accounting-triggers'
+import { createInvoiceJournalEntry, reverseInvoiceJournalEntry } from '@/actions/accounting-triggers'
 import { formatClientAddress } from '@/lib/clients/format'
 
 export type AccountingSummary = {
@@ -1963,6 +1963,14 @@ export const cancelInvoiceAction = protectedAction<
     const prevNotes = ((inv as { notes: string | null }).notes ?? '').trimEnd()
     const newLine = `[${stamp}] Anulada: ${trimmedReason}`
     const newNotes = prevNotes ? `${prevNotes}\n${newLine}` : newLine
+
+    // Revertir el asiento contable (contrapartida espejo) ANTES de marcar la
+    // anulación, para que la cuenta 700 y el resto neteen a cero. Idempotente: si
+    // falla, no marcamos la factura como anulada (reintentable sin doble inverso).
+    const reversal = await reverseInvoiceJournalEntry(invoiceId)
+    if (!reversal.ok) {
+      return failure(`No se pudo revertir el asiento contable de la factura: ${reversal.error ?? 'error desconocido'}`)
+    }
 
     const { error } = await ctx.adminClient
       .from('invoices')
