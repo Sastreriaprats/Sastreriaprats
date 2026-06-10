@@ -733,20 +733,11 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
       },
       layout: tableLayoutBordersPadded,
     },
-    {
-      table: {
-        widths: ['25%', '25%', '25%', '25%'],
-        body: [
-          [
-            cellStack('Precio:', `${total.toFixed(2)} €`),
-            cellStack('Entrega:', `${totalPaid.toFixed(2)} €`),
-            cellStack('Pendiente:', `${totalPending.toFixed(2)} €`),
-            cellStack('Fecha cobro:', formatDate(ficha.fechaCobro)),
-          ],
-        ],
-      },
-      layout: tableLayoutBorders,
-    },
+    // ⚠️ NO añadir aquí el bloque de precios (Precio/Entrega/Pendiente/Fecha
+    // cobro). El talón INFERIOR es la copia de taller del oficial y NUNCA debe
+    // mostrar importes. El precio solo va en la ficha SUPERIOR. Esto ya se
+    // eliminó una vez (commit e2b8e26) y reapareció por error en un rework de
+    // layout (commit c99db419); si vuelve a colarse, quítalo de nuevo.
   ]
 
   content.push({
