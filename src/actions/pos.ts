@@ -615,7 +615,7 @@ export const listTickets = protectedAction<{
 )
 
 export const cashWithdrawal = protectedAction<{
-  session_id: string; amount: number; reason: string
+  session_id: string; amount: number; reason: string; withdrawal_type?: 'gasto' | 'extraccion'
 }, any>(
   {
     permission: 'pos.sell',
@@ -625,6 +625,9 @@ export const cashWithdrawal = protectedAction<{
     revalidate: ['/pos'],
   },
   async (ctx, input) => {
+    // 'gasto' = compra pagada con efectivo (cuenta como gasto). 'extraccion' =
+    // sacar/entregar dinero (NO es gasto). Por defecto 'extraccion' (conservador).
+    const withdrawalType = input.withdrawal_type === 'gasto' ? 'gasto' : 'extraccion'
     const { data: withdrawal, error } = await ctx.adminClient
       .from('cash_withdrawals')
       .insert({
@@ -632,6 +635,7 @@ export const cashWithdrawal = protectedAction<{
         amount: input.amount,
         reason: input.reason,
         withdrawn_by: ctx.userId,
+        withdrawal_type: withdrawalType,
       })
       .select()
       .single()

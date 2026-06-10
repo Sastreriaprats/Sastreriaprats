@@ -2363,10 +2363,11 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
 function WithdrawalDialog({ open, onOpenChange, sessionId }: { open: boolean; onOpenChange: (v: boolean) => void; sessionId: string }) {
   const [amount, setAmount] = useState('')
   const [reason, setReason] = useState('')
+  const [withdrawalType, setWithdrawalType] = useState<'gasto' | 'extraccion'>('extraccion')
 
   const { execute, isLoading } = useAction(cashWithdrawal, {
     successMessage: 'Retirada registrada',
-    onSuccess: () => { onOpenChange(false); setAmount(''); setReason('') },
+    onSuccess: () => { onOpenChange(false); setAmount(''); setReason(''); setWithdrawalType('extraccion') },
   })
 
   return (
@@ -2374,6 +2375,21 @@ function WithdrawalDialog({ open, onOpenChange, sessionId }: { open: boolean; on
       <DialogContent>
         <DialogHeader><DialogTitle>Retirada de efectivo</DialogTitle></DialogHeader>
         <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Tipo *</label>
+            <div className="flex gap-2">
+              <Button type="button" variant={withdrawalType === 'gasto' ? 'default' : 'outline'} className="flex-1" onClick={() => setWithdrawalType('gasto')}>
+                Gasto / compra
+              </Button>
+              <Button type="button" variant={withdrawalType === 'extraccion' ? 'default' : 'outline'} className="flex-1" onClick={() => setWithdrawalType('extraccion')}>
+                Extracción de efectivo
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              <strong>Gasto/compra</strong>: pagaste algo con el efectivo de caja (Mercadona, material…) → cuenta como gasto.
+              {' '}<strong>Extracción</strong>: sacaste o entregaste dinero (a alguien, al banco…) → NO es gasto.
+            </p>
+          </div>
           <div className="space-y-2">
             <label className="text-sm font-medium">Importe (&euro;)</label>
             <Input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="text-lg h-12 text-center font-mono" autoFocus />
@@ -2385,7 +2401,7 @@ function WithdrawalDialog({ open, onOpenChange, sessionId }: { open: boolean; on
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button onClick={() => execute({ session_id: sessionId, amount: parseFloat(amount) || 0, reason })}
+          <Button onClick={() => execute({ session_id: sessionId, amount: parseFloat(amount) || 0, reason, withdrawal_type: withdrawalType })}
             disabled={isLoading || !amount || !reason} className="bg-prats-navy hover:bg-prats-navy-light">
             {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Registrar retirada
           </Button>

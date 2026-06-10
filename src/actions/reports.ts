@@ -844,16 +844,25 @@ export const getExpensesReport = protectedAction<
     const net = tax_mode === 'without_tax'
     const { data } = await ctx.adminClient
       .from('manual_transactions')
-      .select('category, amount, total, description, date')
+      .select('category, amount, total, description, date, withdrawal_id')
       .eq('type', 'expense')
       .gte('date', start_date)
       .lte('date', end_date)
       .order('date', { ascending: false })
 
+    // Excluir retiradas de efectivo de tipo 'extraccion' (sacar/entregar dinero):
+    // no son gasto. Su espejo en manual_transactions se conserva (ledger de caja),
+    // pero no debe contar en el informe de gastos. Las de tipo 'gasto' (compras
+    // pagadas con caja) sí cuentan.
+    const { data: extr } = await ctx.adminClient
+      .from('cash_withdrawals').select('id').eq('withdrawal_type', 'extraccion')
+    const extractionIds = new Set((extr ?? []).map((r: any) => r.id as string))
+    const expenses = (data || []).filter((tx: any) => !tx.withdrawal_id || !extractionIds.has(tx.withdrawal_id))
+
     const valueOf = (tx: any) => net ? (Number(tx.amount) || 0) : (Number(tx.total) || 0)
 
     const categories: Record<string, { count: number; total: number }> = {}
-    for (const tx of data || []) {
+    for (const tx of expenses) {
       const cat = (tx.category as string) || 'Sin categoría'
       if (!categories[cat]) categories[cat] = { count: 0, total: 0 }
       categories[cat].count += 1
@@ -864,7 +873,7 @@ export const getExpensesReport = protectedAction<
       .map(([category, d]) => ({ category, ...d }))
       .sort((a, b) => b.total - a.total)
 
-    const recentExpenses = (data || []).slice(0, 5).map(tx => ({
+    const recentExpenses = expenses.slice(0, 5).map(tx => ({
       description: (tx.description as string) || '',
       category: (tx.category as string) || 'Sin categoría',
       total: valueOf(tx),
@@ -883,13 +892,19 @@ export const getExpensesComparison = protectedAction<
   async (ctx, { current_start, current_end, previous_start, previous_end, tax_mode = 'with_tax' }) => {
     const net = tax_mode === 'without_tax'
     const cols = net ? 'amount' : 'total'
+    // Excluir retiradas 'extraccion' (no son gasto) — igual que getExpensesReport.
+    const { data: extr } = await ctx.adminClient
+      .from('cash_withdrawals').select('id').eq('withdrawal_type', 'extraccion')
+    const extractionIds = new Set((extr ?? []).map((r: any) => r.id as string))
     const [currentRes, previousRes] = await Promise.all([
       ctx.adminClient.from('manual_transactions')
-        .select(cols).eq('type', 'expense').gte('date', current_start).lte('date', current_end),
+        .select(`${cols}, withdrawal_id`).eq('type', 'expense').gte('date', current_start).lte('date', current_end),
       ctx.adminClient.from('manual_transactions')
-        .select(cols).eq('type', 'expense').gte('date', previous_start).lte('date', previous_end),
+        .select(`${cols}, withdrawal_id`).eq('type', 'expense').gte('date', previous_start).lte('date', previous_end),
     ])
-    const sumField = (rows: any[] | null) => (rows || []).reduce((s, t) => s + (Number(net ? t.amount : t.total) || 0), 0)
+    const sumField = (rows: any[] | null) => (rows || [])
+      .filter((t: any) => !t.withdrawal_id || !extractionIds.has(t.withdrawal_id))
+      .reduce((s, t) => s + (Number(net ? t.amount : t.total) || 0), 0)
     const current = sumField(currentRes.data as any[])
     const previous = sumField(previousRes.data as any[])
     const change = previous === 0 ? (current > 0 ? 100 : 0) : ((current - previous) / previous) * 100
