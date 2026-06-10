@@ -14,40 +14,6 @@ const FONT_BODY = 9
 const FONT_SMALL = 7
 const FONT_HEAD = 10
 
-/**
- * Genera el Blob del PDF con un timeout defensivo. pdfMake.getBlob() puede no
- * invocar nunca su callback ante un edge interno (fuentes/vfs), lo que dejaría
- * la promesa de impresión colgada para siempre y el spinner eterno. Si en
- * `timeoutMs` no hay blob, rechazamos para que el flujo llamante muestre error
- * y resetee su estado.
- */
-function getPdfBlobWithTimeout(
-  pdf: { getBlob: (cb: (blob: Blob) => void) => void },
-  timeoutMs = 8000,
-): Promise<Blob> {
-  return new Promise<Blob>((resolve, reject) => {
-    let settled = false
-    const timer = setTimeout(() => {
-      if (settled) return
-      settled = true
-      reject(new Error('Tiempo de espera agotado generando PDF'))
-    }, timeoutMs)
-    try {
-      pdf.getBlob((blob: Blob) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        resolve(blob)
-      })
-    } catch (err) {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      reject(err instanceof Error ? err : new Error(String(err)))
-    }
-  })
-}
-
 /** Doc de pdfmake del que solo necesitamos getBuffer (promesa). */
 type PdfBufferDoc = { getBuffer: () => Promise<unknown> }
 
@@ -112,63 +78,6 @@ function emitLogoDiag(diag: PrintDiag | undefined, logoBase64: string | null, ms
 /** Emite el nº de fuentes registradas en el VFS de ESTE runtime (0 = no registradas). */
 function emitVfsDiag(diag: PrintDiag | undefined, vfs: Record<string, string> | undefined): void {
   diag?.('vfs', { keys: vfs ? Object.keys(vfs).length : 0 })
-}
-
-/** Envuelve una promesa con timeout (rechaza si no resuelve en `ms`). */
-function promiseWithTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('timeout')), ms)
-    p.then(
-      (v) => { clearTimeout(timer); resolve(v) },
-      (e) => { clearTimeout(timer); reject(e instanceof Error ? e : new Error(String(e))) },
-    )
-  })
-}
-
-/**
- * DIAGNÓSTICO (no imprime nada, todo se descarta): cuando getBlob del doc CON logo
- * se cuelga, mide dos cosas EN MEMORIA con el doc SIN logo:
- *
- *  1) getblob_retry_no_logo — ¿se cuelga también sin la imagen?
- *       'success' -> sin logo SÍ genera        -> culpable = logo
- *       'hang'    -> sin logo también cuelga    -> culpable = fuentes/VFS o core
- *
- *  2) getbuffer_probe — ¿la primitiva getBuffer (promesa) resuelve donde
- *     getBlob(callback) cuelga? Discrimina shim vs core:
- *       'success' -> el cuelgue es el shim callback de getBlob -> fix barato (getBuffer→Blob)
- *       'hang'    -> es el core de layout/fuentes de pdfmake 0.3.6 -> fix estructural
- *
- * El usuario nunca ve un ticket sin logo: estos PDFs solo alimentan la telemetría.
- */
-/** Subconjunto del PDF de pdfmake que necesita el diagnóstico (getBlob + getBuffer). */
-type DiagPdf = {
-  getBlob: (cb: (b: Blob) => void) => void
-  getBuffer: () => Promise<unknown>
-}
-
-async function diagnoseGetBlobHang(
-  makePdf: () => DiagPdf,
-  diag: PrintDiag | undefined,
-): Promise<void> {
-  if (!diag) return
-
-  // 1) ¿se cuelga también sin logo? (logo vs core)
-  const t0 = nowMs()
-  try {
-    await getPdfBlobWithTimeout(makePdf(), 8000) // blob descartado: solo medimos
-    diag('getblob_retry_no_logo', { result: 'success', ms: Math.round(nowMs() - t0) })
-  } catch {
-    diag('getblob_retry_no_logo', { result: 'hang', ms: Math.round(nowMs() - t0) })
-  }
-
-  // 2) ¿getBuffer (promesa) resuelve donde getBlob(callback) cuelga? (shim vs core)
-  const t1 = nowMs()
-  try {
-    await promiseWithTimeout(Promise.resolve(makePdf().getBuffer()), 8000) // buffer descartado
-    diag('getbuffer_probe', { result: 'success', ms: Math.round(nowMs() - t1) })
-  } catch {
-    diag('getbuffer_probe', { result: 'hang', ms: Math.round(nowMs() - t1) })
-  }
 }
 
 /**
@@ -651,23 +560,12 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
     pageMargins: [MARGIN_PT, MARGIN_PT, MARGIN_PT, MARGIN_PT],
     content,
   }
-  // Variante sin logo (content[0] si existe) — SOLO diagnóstico en memoria si la
-  // generación con logo se cuelga. No se imprime.
-  const docDefNoLogo = { ...docDef, content: logoBase64 ? content.slice(1) : content }
 
   const pdf = pdfMake.createPdf(docDef as Parameters<typeof pdfMake.createPdf>[0])
 
   const fileName = `${giftMode ? 'ticket-regalo' : 'ticket'}-${data.sale.ticket_number}.pdf`
   if (mode === 'print') {
-    try {
-      await printPdfDoc(pdf as unknown as PdfBufferDoc, fileName, diag)
-    } catch (genErr) {
-      await diagnoseGetBlobHang(
-        () => pdfMake.createPdf(docDefNoLogo as Parameters<typeof pdfMake.createPdf>[0]) as unknown as DiagPdf,
-        diag,
-      )
-      throw genErr
-    }
+    await printPdfDoc(pdf as unknown as PdfBufferDoc, fileName, diag)
   } else {
     await (pdf as { download: (name: string) => void }).download(fileName)
   }
@@ -971,25 +869,12 @@ export async function generateReservationPdf(
     pageMargins: [MARGIN_PT, MARGIN_PT, MARGIN_PT, MARGIN_PT],
     content,
   }
-  // Variante sin logo (el logo, si existe, es content[0]) — SOLO para el
-  // diagnóstico en memoria si la generación con logo se cuelga. No se imprime.
-  const docDefNoLogo = { ...docDef, content: logoBase64 ? content.slice(1) : content }
 
   const pdf = pdfMake.createPdf(docDef as Parameters<typeof pdfMake.createPdf>[0])
 
   const fileName = `reserva-${data.reservation_number}.pdf`
   if (mode === 'print') {
-    try {
-      await printPdfDoc(pdf as unknown as PdfBufferDoc, fileName, diag)
-    } catch (genErr) {
-      // getBlob del doc CON logo se colgó: diagnóstico en memoria (invisible) para
-      // aislar logo vs fuentes y discriminar getBlob-shim vs core; re-lanzamos el error.
-      await diagnoseGetBlobHang(
-        () => pdfMake.createPdf(docDefNoLogo as Parameters<typeof pdfMake.createPdf>[0]) as unknown as DiagPdf,
-        diag,
-      )
-      throw genErr
-    }
+    await printPdfDoc(pdf as unknown as PdfBufferDoc, fileName, diag)
   } else {
     await (pdf as { download: (name: string) => void }).download(fileName)
   }
