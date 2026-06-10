@@ -28,6 +28,8 @@ export const createSupplierSchema = z.object({
     days: z.number().min(0).optional(),
   })).optional().nullable().default([]),
   default_tax_rate: z.number().min(0).max(100).default(21),
+  // Tipo de gasto del proveedor (para el desglose del informe de gastos).
+  expense_type: z.enum(['general', 'alquiler', 'compras']).default('general'),
 })
 
 export const updateSupplierSchema = createSupplierSchema.partial()

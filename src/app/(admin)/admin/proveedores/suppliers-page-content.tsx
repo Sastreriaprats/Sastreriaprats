@@ -95,6 +95,7 @@ const emptyForm = {
   province: '',
   country: 'España',
   supplier_types: [] as string[],
+  expense_type: 'general' as 'general' | 'alquiler' | 'compras',
   payment_terms: '',
   payment_days: 30,
   payment_method: '',
@@ -174,6 +175,7 @@ export function SuppliersPageContent() {
         province: full.province ?? '',
         country: full.country ?? 'España',
         supplier_types: Array.isArray(full.supplier_types) ? full.supplier_types : [],
+        expense_type: (['general', 'alquiler', 'compras'].includes(full.expense_type) ? full.expense_type : 'general') as 'general' | 'alquiler' | 'compras',
         payment_terms: full.payment_terms ?? '',
         payment_days: typeof full.payment_days === 'number' ? full.payment_days : 30,
         payment_method: full.payment_method ?? '',
@@ -209,6 +211,7 @@ export function SuppliersPageContent() {
       province: form.province?.trim() || null,
       country: form.country?.trim() || 'España',
       supplier_types: form.supplier_types,
+      expense_type: form.expense_type,
       payment_terms: (form.payment_terms || 'net_30') as 'immediate' | 'net_15' | 'net_30' | 'net_60' | 'net_90' | 'custom',
       payment_method: form.payment_method || null,
       payment_days: form.payment_terms === 'custom'
@@ -449,6 +452,21 @@ export function SuppliersPageContent() {
                   </div>
                 ))}
               </div>
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label>Tipo de gasto</Label>
+              <Select
+                value={form.expense_type}
+                onValueChange={(v) => setForm((f) => ({ ...f, expense_type: v as 'general' | 'alquiler' | 'compras' }))}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="general">General</SelectItem>
+                  <SelectItem value="alquiler">Alquiler</SelectItem>
+                  <SelectItem value="compras">Compras</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Para el desglose de la categoría &quot;proveedores&quot; en el informe de gastos.</p>
             </div>
             <div className="space-y-2">
               <Label>Condiciones de pago</Label>
