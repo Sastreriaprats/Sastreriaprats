@@ -37,6 +37,7 @@ export async function GET(request: NextRequest) {
   const { data: apInvoicesDue } = await admin
     .from('ap_supplier_invoices')
     .select('id, supplier_name, total_amount, due_date')
+    .eq('is_proforma', false) // las proformas no generan avisos de vencimiento
     .in('status', ['pendiente', 'vencida'])
     .gte('due_date', today)
     .lte('due_date', in7)

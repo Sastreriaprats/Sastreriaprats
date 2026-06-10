@@ -114,6 +114,7 @@ async function computeSupplierTotals(
   const { data: byId } = await adminClient
     .from('ap_supplier_invoices')
     .select('supplier_id, supplier_cif, status, total_amount')
+    .eq('is_proforma', false) // las proformas no son deuda con el proveedor
     .in('supplier_id', supplierIds)
   for (const r of (byId || []) as any[]) {
     if (r.supplier_id) addRow(String(r.supplier_id), r)
@@ -124,6 +125,7 @@ async function computeSupplierTotals(
     const { data: byCif } = await adminClient
       .from('ap_supplier_invoices')
       .select('supplier_id, supplier_cif, status, total_amount')
+      .eq('is_proforma', false) // las proformas no son deuda con el proveedor
       .is('supplier_id', null)
       .in('supplier_cif', cifs)
     for (const r of (byCif || []) as any[]) {
@@ -236,6 +238,7 @@ export const deleteSupplierAction = protectedAction<string, { deleted: boolean }
       .from('ap_supplier_invoices')
       .select('id', { count: 'exact', head: true })
       .eq('supplier_id', supplierId.trim())
+      .eq('is_proforma', false) // una proforma (no fiscal) no bloquea el borrado del proveedor
     if ((invoicesCount ?? 0) > 0) {
       return failure('No se puede eliminar: el proveedor tiene facturas asociadas', 'CONFLICT')
     }

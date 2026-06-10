@@ -492,7 +492,7 @@ export const getVatQuarterly = protectedAction<
     // factura, independientemente del estado de pago.
     const [salesRes, purchasesRes] = await Promise.all([
       ctx.adminClient.from('sales').select('total, total_returned, subtotal, tax_amount, created_at').gte('created_at', yearStart).lte('created_at', yearEnd).in('status', ['completed', 'partially_returned']),
-      ctx.adminClient.from('ap_supplier_invoices').select('amount, tax_amount, invoice_date').gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`),
+      ctx.adminClient.from('ap_supplier_invoices').select('amount, tax_amount, invoice_date').eq('is_proforma', false).gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`),
     ])
     const sales = (salesRes.data || []) as Array<{ total?: number; total_returned?: number; subtotal?: number; tax_amount?: number; created_at?: string }>
     const purchases = (purchasesRes.data || []) as Array<{ amount?: number; tax_amount?: number; invoice_date?: string }>
@@ -627,6 +627,7 @@ export const getVatQuarterlyDetail = protectedAction<
       ctx.adminClient
         .from('ap_supplier_invoices')
         .select('invoice_number, invoice_date, supplier_name, supplier_cif, amount, tax_amount, total_amount, retention_amount, status, payment_date')
+        .eq('is_proforma', false) // las proformas no entran en el libro de facturas recibidas
         .gte('invoice_date', yearStart)
         .lte('invoice_date', yearEnd)
         .order('invoice_date', { ascending: true }),

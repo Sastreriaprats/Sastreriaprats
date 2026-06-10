@@ -77,6 +77,10 @@ export type ApSupplierInvoiceInput = {
   is_rectifying?: boolean
   rectifies_invoice_id?: string | null
   rectification_reason?: string | null
+  /** Proforma de proveedor: documento SIN validez fiscal/contable. No cuenta para
+   * IVA soportado, libro de recibidas, deuda/pagos ni asientos, y no genera cuotas
+   * de vencimiento. Al llegar la factura real se edita la fila y se quita el flag. */
+  is_proforma?: boolean
 }
 
 export type ApSupplierInvoiceLineRow = {
@@ -150,7 +154,8 @@ export const getSupplierInvoicesKpis = protectedAction<void, SupplierInvoicesKpi
     const [{ data: all }, { data: schedAll }] = await Promise.all([
       ctx.adminClient
         .from(TABLE)
-        .select('total_amount, status, due_date, payment_date'),
+        .select('total_amount, status, due_date, payment_date')
+        .eq('is_proforma', false), // las proformas no son deuda
       ctx.adminClient
         .from('supplier_order_payment_schedule')
         .select('amount, is_paid, due_date, paid_at'),
@@ -537,6 +542,10 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
 
     if (!supplierName) return failure('El proveedor es obligatorio')
     if (!input.invoice_number?.trim()) return failure('El número de factura es obligatorio')
+    // Proforma y abono son excluyentes: una fila no puede ser ambas cosas.
+    if (input.is_proforma && input.is_rectifying) {
+      return failure('Una factura no puede ser proforma y abono a la vez', 'VALIDATION')
+    }
 
     const dueDate = input.due_date?.trim()
       ? input.due_date
@@ -604,6 +613,7 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
         is_rectifying: input.is_rectifying === true,
         rectifies_invoice_id: input.is_rectifying ? (input.rectifies_invoice_id?.trim() || null) : null,
         rectification_reason: input.is_rectifying ? (input.rectification_reason?.trim() || null) : null,
+        is_proforma: input.is_proforma === true,
         created_by: ctx.userId,
       })
       .select('id')
@@ -653,8 +663,9 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
     const explicitInstallments = (input.installments ?? [])
       .filter((it) => Number(it.amount) > 0 && it.due_date)
     // Un abono (importe negativo) no tiene calendario de pago propio: reduce la
-    // deuda con el proveedor. No generamos cuotas de vencimiento.
-    const installments = input.is_rectifying
+    // deuda con el proveedor. Una proforma tampoco genera cuotas (no es pagadera
+    // hasta que llega la factura real). No generamos cuotas de vencimiento.
+    const installments = input.is_rectifying || input.is_proforma
       ? []
       : explicitInstallments.length > 0
         ? explicitInstallments.map((it, idx) => ({
@@ -698,6 +709,9 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
       return failure('La factura está pagada y no puede editarse', 'VALIDATION')
     }
     const isRectifying = (current as { is_rectifying?: boolean } | null)?.is_rectifying === true || rest.is_rectifying === true
+    if (rest.is_proforma && isRectifying) {
+      return failure('Una factura no puede ser proforma y abono a la vez', 'VALIDATION')
+    }
 
     const supplierDefaults = await resolveSupplierDefaults(ctx.adminClient, rest.supplier_id)
 
@@ -759,6 +773,7 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
         payment_method: rest.payment_method?.trim() || supplierDefaults?.payment_method || null,
         notes: rest.notes?.trim() || null,
         attachment_url: rest.attachment_url?.trim() || null,
+        is_proforma: rest.is_proforma === true,
         updated_at: new Date().toISOString(),
       })
       .eq('id', id)
@@ -821,7 +836,11 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
     if (!hasPaid) {
       const explicitInstallments = (rest.installments ?? [])
         .filter((it) => Number(it.amount) > 0 && it.due_date)
-      const installments = explicitInstallments.length > 0
+      // Una proforma no genera cuotas. Al convertirla en factura real (quitar el
+      // flag) este mismo update sí las generará.
+      const installments = rest.is_proforma
+        ? []
+        : explicitInstallments.length > 0
         ? explicitInstallments.map((it, idx) => ({
             due_date: String(it.due_date),
             amount: Math.round(Number(it.amount) * 100) / 100,
@@ -1023,6 +1042,7 @@ export const getSupplierInvoicesForCalendar = protectedAction<
       ctx.adminClient
         .from(TABLE)
         .select('id, due_date, supplier_name, invoice_number, total_amount, status')
+        .eq('is_proforma', false) // las proformas no entran en el calendario de pagos
         .gte('due_date', start)
         .lte('due_date', end)
         .order('due_date'),

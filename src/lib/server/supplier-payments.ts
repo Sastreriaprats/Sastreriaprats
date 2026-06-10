@@ -117,6 +117,7 @@ export async function recalculatePendingInvoicesForSupplier(
     .from('ap_supplier_invoices')
     .select('id, invoice_date, total_amount, status')
     .eq('supplier_id', supplierId)
+    .eq('is_proforma', false) // las proformas no generan cuotas de vencimiento
     .in('status', ['pendiente', 'vencida', 'parcial'])
   if (invErr || !invoices || invoices.length === 0) {
     return { updated: 0, skippedHasPaid: 0 }

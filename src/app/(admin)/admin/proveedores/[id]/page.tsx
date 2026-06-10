@@ -41,17 +41,20 @@ export default async function SupplierDetailPage(props: { params: Promise<{ id: 
       ? admin
           .from('ap_supplier_invoices')
           .select('id, supplier_order_id, status, due_date, payment_date, total_amount')
+          .eq('is_proforma', false) // las proformas no cuentan como factura del pedido
           .in('supplier_order_id', orderIds)
           .order('created_at', { ascending: false })
       : Promise.resolve({ data: [] as any[], error: null }),
     admin
       .from('ap_supplier_invoices')
       .select('status, total_amount')
+      .eq('is_proforma', false) // las proformas no son deuda con el proveedor
       .eq('supplier_id', params.id),
     supplierCif
       ? admin
           .from('ap_supplier_invoices')
           .select('status, total_amount')
+          .eq('is_proforma', false) // las proformas no son deuda con el proveedor
           .is('supplier_id', null)
           .eq('supplier_cif', supplierCif)
       : Promise.resolve({ data: [] as any[], error: null }),
