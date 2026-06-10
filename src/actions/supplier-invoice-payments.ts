@@ -138,6 +138,9 @@ export const registerSupplierInvoicePayment = protectedAction<
         total: amount,
         notes: `Método: ${SUPPLIER_PAYMENT_METHOD_LABEL[paymentMethod] ?? paymentMethod}${input.reference ? ` · Ref: ${input.reference}` : ''}`,
         created_by: ctx.userId,
+        // Enlace estructural con la factura pagada (para el desglose del informe de
+        // gastos por tipo de proveedor y por factura, sin depender del texto).
+        ap_supplier_invoice_id: input.supplier_invoice_id,
       }
       const { data: mt, error: mtErr } = await ctx.adminClient
         .from('manual_transactions')

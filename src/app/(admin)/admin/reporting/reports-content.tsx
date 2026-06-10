@@ -83,6 +83,13 @@ type ExpensesData = {
   byCategory: { category: string; count: number; total: number }[]
   grandTotal: number
   recentExpenses: { description: string; category: string; total: number; date: string }[]
+  providersBreakdown: {
+    type: string
+    label: string
+    total: number
+    count: number
+    invoices: { invoice_number: string; supplier_name: string; total: number; count: number }[]
+  }[]
 }
 
 type ExpensesComparison = { current: number; previous: number; change: number }
@@ -1018,6 +1025,48 @@ function ExpensesTab({ data, comparison }: { data: ExpensesData | null; comparis
           </CardContent>
         </Card>
       </div>
+
+      {data.providersBreakdown && data.providersBreakdown.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Proveedores — desglose por tipo y factura</CardTitle></CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {data.providersBreakdown.map((t) => (
+                <details key={t.type} className="rounded-lg border" open>
+                  <summary className="flex items-center justify-between px-3 py-2 cursor-pointer select-none font-medium">
+                    <span>{t.label} <span className="text-xs text-muted-foreground font-normal">({t.invoices.length} {t.invoices.length === 1 ? 'factura' : 'facturas'})</span></span>
+                    <span className="text-red-600 font-bold">{formatCurrency(t.total)}</span>
+                  </summary>
+                  <div className="border-t">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Nº factura</TableHead>
+                          <TableHead>Proveedor</TableHead>
+                          <TableHead className="text-right">Importe</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {t.invoices.map((inv, i) => (
+                          <TableRow key={i}>
+                            <TableCell className="font-mono text-xs">{inv.invoice_number}</TableCell>
+                            <TableCell className="text-sm">{inv.supplier_name}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(inv.total)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </details>
+              ))}
+              <div className="flex justify-between px-3 py-2 font-bold border-t">
+                <span>TOTAL proveedores</span>
+                <span className="text-red-700">{formatCurrency(data.providersBreakdown.reduce((s, t) => s + t.total, 0))}</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {data.recentExpenses && data.recentExpenses.length > 0 && (
         <Card>
