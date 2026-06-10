@@ -314,7 +314,7 @@ export async function createInvoiceJournalEntry(invoiceId: string): Promise<{ ok
  * asiento posted original. Mismo principio que la contrapartida de las
  * rectificativas (mig 192), no se borra un asiento contabilizado, se contrarresta.
  *
- * Idempotente: si ya existe el inverso (entry_type='invoice_cancellation' para esta
+ * Idempotente: si ya existe el inverso (asiento "Anulación factura …" para esta
  * factura) no crea otro. `skipped` = no había asiento que revertir (o ya revertido).
  */
 export async function reverseInvoiceJournalEntry(invoiceId: string): Promise<{ ok: boolean; error?: string; skipped?: boolean }> {
@@ -340,12 +340,14 @@ export async function reverseInvoiceJournalEntry(invoiceId: string): Promise<{ o
     if (!orig) return { ok: true, skipped: true }
     if ((orig as { status?: string }).status !== 'posted') return { ok: true, skipped: true } // ya no cuenta
 
-    // Idempotencia: ¿ya existe el inverso de esta factura?
+    // Idempotencia: ¿ya existe el inverso de esta factura? (lo marca la descripción
+    // "Anulación factura …"; el entry_type debe ser uno permitido por el CHECK
+    // journal_entries_entry_type_check, que NO admite valores nuevos.)
     const { data: existingRev } = await admin
       .from('journal_entries')
       .select('id')
       .eq('reference_id', invoiceId)
-      .eq('entry_type', 'invoice_cancellation')
+      .ilike('description', 'Anulación factura%')
       .limit(1)
       .maybeSingle()
     if (existingRev) return { ok: true, skipped: true }
@@ -382,7 +384,9 @@ export async function reverseInvoiceJournalEntry(invoiceId: string): Promise<{ o
         fiscal_month: fiscalMonth,
         entry_date: date,
         description: `Anulación factura ${(inv as { invoice_number?: string }).invoice_number ?? invoiceId.slice(0, 8)}`,
-        entry_type: 'invoice_cancellation',
+        // entry_type debe ser uno permitido por el CHECK (sale/purchase/manual);
+        // el inverso es de contexto venta, igual que el asiento original.
+        entry_type: 'sale',
         reference_type: 'invoice',
         reference_id: invoiceId,
         status: 'posted',
