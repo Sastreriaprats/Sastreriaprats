@@ -566,7 +566,11 @@ export function InvoicesTab({ editId, onEditConsumed }: { editId: string | null;
 
   const handleSave = async () => {
     if (!form.client_name) { toast.error('Indica el cliente'); return }
-    if (lines.some(l => !l.description)) { toast.error('Todas las líneas necesitan descripción'); return }
+    // Ignorar las filas en blanco residuales (la inicial y las del botón "+"):
+    // solo se validan y persisten las líneas con descripción. Mismo criterio que
+    // el diálogo de presupuesto.
+    const validLines = lines.filter(l => l.description.trim() !== '')
+    if (validLines.length === 0) { toast.error('Añade al menos una línea con descripción'); return }
     setSaving(true)
     try {
       const result = await createInvoiceAction({
@@ -586,7 +590,7 @@ export function InvoicesTab({ editId, onEditConsumed }: { editId: string | null;
         irpf_amount: irpfAmount,
         total,
         notes: form.notes || null,
-        lines: lines.map(l => {
+        lines: validLines.map(l => {
           const dto = l.discount_percentage ?? 0
           const lineSubtotal = l.quantity * l.unit_price * (1 - dto / 100)
           return {
@@ -717,7 +721,7 @@ export function InvoicesTab({ editId, onEditConsumed }: { editId: string | null;
           <DialogHeader>
             <DialogTitle>Nueva factura</DialogTitle>
           </DialogHeader>
-          <ScrollArea className="flex-1 pr-1">
+          <ScrollArea className="flex-1 min-h-0 pr-1">
             <div className="space-y-4 p-1">
               {/* Client */}
               {(() => {
@@ -1462,7 +1466,7 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                 : <>Editar factura {inv.invoice_number} (borrador)</>}
             </DialogTitle>
           </DialogHeader>
-          <ScrollArea className="flex-1 pr-1">
+          <ScrollArea className="flex-1 min-h-0 pr-1">
             <div className="space-y-4 p-1">
               {!conceptOnly && inv.status !== 'draft' && (
                 <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 flex items-start gap-2">
@@ -1847,7 +1851,7 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
           <DialogHeader>
             <DialogTitle>Factura rectificativa · <span className="font-mono">{inv.invoice_number}</span></DialogTitle>
           </DialogHeader>
-          <ScrollArea className="flex-1 pr-1">
+          <ScrollArea className="flex-1 min-h-0 pr-1">
             <div className="space-y-4 p-1">
               <div className="rounded-md border p-3 text-sm bg-muted/30 grid grid-cols-2 gap-2">
                 <div><span className="text-muted-foreground">Cliente:</span> <span className="font-medium">{inv.client_name}</span></div>
@@ -2479,7 +2483,7 @@ function EstimatesTab() {
       <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm() }}>
         <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
           <DialogHeader><DialogTitle>{editingId ? `Editar presupuesto ${editingNumber}` : 'Nuevo presupuesto'}</DialogTitle></DialogHeader>
-          <ScrollArea className="flex-1 pr-1">
+          <ScrollArea className="flex-1 min-h-0 pr-1">
             <div className="space-y-4 p-1">
               {(() => {
                 const hasCompanies = !!selectedClient && selectedClient.companies.length > 0
