@@ -2,6 +2,7 @@
 
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
+import { BOUTIQUE_SALE_TYPE, GIFT_CARD_SALE_TYPE, accumulateByStore } from '@/lib/reports/dimensions'
 
 export type ReportChannel = 'all' | 'boutique' | 'tailoring'
 export type TaxMode = 'with_tax' | 'without_tax'
@@ -507,7 +508,7 @@ export const getTailorPerformance = protectedAction<
 
 export const getSalesByStore = protectedAction<
   { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel; tax_mode?: TaxMode },
-  { store_id: string; store_name: string; pos: number; tailoring: number; total: number }[]
+  { store_id: string; store_name: string; pos: number; gift_cards: number; tailoring: number; total: number }[]
 >(
   { permission: 'reports.view', auditModule: 'reports' },
   async (ctx, { start_date, end_date, store_id, channel = 'all', tax_mode = 'with_tax' }) => {
@@ -515,12 +516,18 @@ export const getSalesByStore = protectedAction<
     const wantTailoring = channel === 'all' || channel === 'tailoring'
     const net = tax_mode === 'without_tax'
 
+    // Ventas de tienda (canal Boutique): traemos boutique + gift_card en una sola
+    // query y las separamos por sale_type. "Boutique" = venta de producto puro
+    // (BOUTIQUE_SALE_TYPE); "Tarjetas regalo" = venta de saldo (GIFT_CARD_SALE_TYPE),
+    // columna propia para no mezclar pero sin que el ingreso desaparezca de la vista.
+    // La sastrería va aparte (tailoring_orders), nunca en `sales`.
     let saleLinesQ = ctx.adminClient
       .from('sale_lines')
-      .select('line_total, tax_rate, sales!inner(store_id, stores(name), status, created_at)')
+      .select('line_total, tax_rate, sales!inner(store_id, stores(name), status, created_at, sale_type)')
       .gte('sales.created_at', start_date)
       .lte('sales.created_at', end_date + 'T23:59:59')
       .eq('sales.status', 'completed')
+      .in('sales.sale_type', [BOUTIQUE_SALE_TYPE, GIFT_CARD_SALE_TYPE])
     if (store_id) saleLinesQ = saleLinesQ.eq('sales.store_id', store_id)
 
     let tailoringQ = ctx.adminClient
@@ -536,27 +543,42 @@ export const getSalesByStore = protectedAction<
       wantTailoring ? tailoringQ : Promise.resolve({ data: [] as any[] }),
     ])
 
-    const stores: Record<string, { store_name: string; pos: number; tailoring: number }> = {}
-
-    for (const line of saleLinesRes.data || []) {
-      const sale = line.sales as any
-      const storeId = sale?.store_id || 'unknown'
-      const storeName = (sale?.stores as any)?.name || 'Sin tienda'
-      if (!stores[storeId]) stores[storeId] = { store_name: storeName, pos: 0, tailoring: 0 }
+    // Dimensión TIENDA vía el helper común accumulateByStore (cimiento de nº4).
+    // Separamos las líneas de `sales` por sale_type antes de acumular.
+    const saleLines = (saleLinesRes.data || []) as any[]
+    const lineValue = (line: any) => {
       const lt = (line.line_total as number) || 0
-      stores[storeId].pos += net ? lineNet(lt, (line as any).tax_rate) : lt
+      return net ? lineNet(lt, line.tax_rate) : lt
     }
+    const pickStore = (line: any, value: number) => ({
+      storeId: line.sales?.store_id,
+      storeName: line.sales?.stores?.name,
+      value,
+    })
+    const posByStore = accumulateByStore(
+      saleLines.filter((l) => l.sales?.sale_type === BOUTIQUE_SALE_TYPE),
+      (line) => pickStore(line, lineValue(line)),
+    )
+    const giftByStore = accumulateByStore(
+      saleLines.filter((l) => l.sales?.sale_type === GIFT_CARD_SALE_TYPE),
+      (line) => pickStore(line, lineValue(line)),
+    )
+    const tailoringByStore = accumulateByStore(tailoringRes.data || [], (order: any) => ({
+      storeId: order.store_id,
+      storeName: order.stores?.name,
+      value: net ? (Number(order.subtotal) || 0) : (Number(order.total) || 0),
+    }))
 
-    for (const order of tailoringRes.data || []) {
-      const storeId = (order.store_id as string) || 'unknown'
-      const storeName = (order.stores as any)?.name || 'Sin tienda'
-      if (!stores[storeId]) stores[storeId] = { store_name: storeName, pos: 0, tailoring: 0 }
-      stores[storeId].tailoring += net ? (Number((order as any).subtotal) || 0) : (Number(order.total) || 0)
-    }
-
+    const storeIds = new Set([...Object.keys(posByStore), ...Object.keys(giftByStore), ...Object.keys(tailoringByStore)])
     return success(
-      Object.entries(stores)
-        .map(([store_id, d]) => ({ store_id, ...d, total: d.pos + d.tailoring }))
+      [...storeIds]
+        .map((store_id) => {
+          const pos = posByStore[store_id]?.total || 0
+          const gift_cards = giftByStore[store_id]?.total || 0
+          const tailoring = tailoringByStore[store_id]?.total || 0
+          const store_name = posByStore[store_id]?.store_name || giftByStore[store_id]?.store_name || tailoringByStore[store_id]?.store_name || 'Sin tienda'
+          return { store_id, store_name, pos, gift_cards, tailoring, total: pos + gift_cards + tailoring }
+        })
         .sort((a, b) => b.total - a.total)
     )
   }

@@ -62,7 +62,7 @@ type ClientsData = {
   clientsWithPurchases: number
 }
 
-type StoreItem = { store_id: string; store_name: string; pos: number; tailoring: number; total: number }
+type StoreItem = { store_id: string; store_name: string; pos: number; gift_cards: number; tailoring: number; total: number }
 
 type EmployeeItem = {
   employee_id: string; employee_name: string
@@ -659,6 +659,7 @@ function StoreTab({ data }: { data: StoreItem[] }) {
           <div className="space-y-4">
             {data.map((s) => {
               const posW = maxTotal > 0 ? (s.pos / maxTotal) * 100 : 0
+              const giftW = maxTotal > 0 ? (s.gift_cards / maxTotal) * 100 : 0
               const tailW = maxTotal > 0 ? (s.tailoring / maxTotal) * 100 : 0
               return (
                 <div key={s.store_id}>
@@ -668,7 +669,10 @@ function StoreTab({ data }: { data: StoreItem[] }) {
                   </div>
                   <div className="flex h-4 rounded-full overflow-hidden bg-gray-100">
                     {posW > 0 && (
-                      <div className="bg-prats-navy transition-all" style={{ width: `${posW}%` }} title={`TPV: ${formatCurrency(s.pos)}`} />
+                      <div className="bg-prats-navy transition-all" style={{ width: `${posW}%` }} title={`Boutique: ${formatCurrency(s.pos)}`} />
+                    )}
+                    {giftW > 0 && (
+                      <div className="bg-amber-400 transition-all" style={{ width: `${giftW}%` }} title={`Tarjetas regalo: ${formatCurrency(s.gift_cards)}`} />
                     )}
                     {tailW > 0 && (
                       <div className="bg-purple-400 transition-all" style={{ width: `${tailW}%` }} title={`Sastrería: ${formatCurrency(s.tailoring)}`} />
@@ -679,7 +683,8 @@ function StoreTab({ data }: { data: StoreItem[] }) {
             })}
           </div>
           <div className="flex justify-center gap-6 mt-6 text-xs">
-            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-prats-navy" />TPV</span>
+            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-prats-navy" />Boutique</span>
+            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-amber-400" />Tarjetas regalo</span>
             <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-purple-400" />Sastrería</span>
           </div>
         </CardContent>
@@ -693,7 +698,8 @@ function StoreTab({ data }: { data: StoreItem[] }) {
             <TableHeader>
               <TableRow>
                 <TableHead>Tienda</TableHead>
-                <TableHead className="text-right">TPV</TableHead>
+                <TableHead className="text-right">Boutique</TableHead>
+                <TableHead className="text-right">Tarjetas regalo</TableHead>
                 <TableHead className="text-right">Sastrería</TableHead>
                 <TableHead className="text-right">Total</TableHead>
               </TableRow>
@@ -703,6 +709,7 @@ function StoreTab({ data }: { data: StoreItem[] }) {
                 <TableRow key={s.store_id}>
                   <TableCell className="font-medium">{s.store_name}</TableCell>
                   <TableCell className="text-right">{formatCurrency(s.pos)}</TableCell>
+                  <TableCell className="text-right">{formatCurrency(s.gift_cards)}</TableCell>
                   <TableCell className="text-right">{formatCurrency(s.tailoring)}</TableCell>
                   <TableCell className="text-right font-bold">{formatCurrency(s.total)}</TableCell>
                 </TableRow>
@@ -711,6 +718,7 @@ function StoreTab({ data }: { data: StoreItem[] }) {
                 <TableRow className="bg-muted/50 font-bold">
                   <TableCell>TOTAL</TableCell>
                   <TableCell className="text-right">{formatCurrency(data.reduce((s, d) => s + d.pos, 0))}</TableCell>
+                  <TableCell className="text-right">{formatCurrency(data.reduce((s, d) => s + d.gift_cards, 0))}</TableCell>
                   <TableCell className="text-right">{formatCurrency(data.reduce((s, d) => s + d.tailoring, 0))}</TableCell>
                   <TableCell className="text-right">{formatCurrency(data.reduce((s, d) => s + d.total, 0))}</TableCell>
                 </TableRow>
