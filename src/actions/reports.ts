@@ -190,14 +190,24 @@ export type TailoringCategoryKey =
   | 'sastreria_artesanal' | 'sastreria_industrial'
   | 'camiseria_artesanal' | 'camiseria_industrial'
 
-export type TailoringCategoryRow = { category: TailoringCategoryKey; label: string; amount: number; garments: number }
+// Las 4 categorías de confección + Boutique + Tarjetas regalo. El tab "Ventas por
+// tipo" muestra las 6 para que el total cuadre con el de ventas del negocio (antes
+// faltaba la boutique). Boutique/Tarjetas usan la MISMA definición que dimensions.ts.
+export type SalesByTypeKey = TailoringCategoryKey | 'boutique' | 'gift_cards'
 
-const TAILORING_CATEGORY_LABELS: Record<TailoringCategoryKey, string> = {
+export type TailoringCategoryRow = { category: SalesByTypeKey; label: string; amount: number; garments: number }
+
+const SALES_BY_TYPE_LABELS: Record<SalesByTypeKey, string> = {
   sastreria_artesanal: 'Sastrería Artesanal',
   sastreria_industrial: 'Sastrería Industrial',
   camiseria_artesanal: 'Camisería Artesanal',
   camiseria_industrial: 'Camisería Industrial',
+  boutique: 'Boutique',
+  gift_cards: 'Tarjetas regalo',
 }
+const SALES_BY_TYPE_ORDER: SalesByTypeKey[] = [
+  'sastreria_artesanal', 'sastreria_industrial', 'camiseria_artesanal', 'camiseria_industrial', 'boutique', 'gift_cards',
+]
 
 /**
  * Desglose de ventas (facturado) por las 4 combinaciones que cruza el negocio:
@@ -216,49 +226,96 @@ const TAILORING_CATEGORY_LABELS: Record<TailoringCategoryKey, string> = {
  */
 export const getTailoringByCategory = protectedAction<
   { start_date: string; end_date: string; store_id?: string },
-  { breakdown: TailoringCategoryRow[]; total: { amount: number; garments: number } }
+  {
+    breakdown: TailoringCategoryRow[]
+    total: { amount: number; garments: number }
+    // Desglose por tienda (dimensión nº4): las 6 categorías por tienda. Solo cuando
+    // no se filtra una tienda concreta (store_id undefined = "Todas").
+    byStore?: { store_id: string; store_name: string; total: number; amounts: { category: SalesByTypeKey; amount: number }[] }[]
+  }
 >(
   { permission: 'reports.view', auditModule: 'reports' },
   async (ctx, { start_date, end_date, store_id }) => {
+    // 1) Líneas de CONFECCIÓN (4 categorías) — de tailoring_order_lines, por
+    //    created_at del pedido. + stores(name) para el desglose por tienda.
     let query = ctx.adminClient
       .from('tailoring_order_lines')
-      .select('line_type, line_total, tax_rate, status, garment_types(category), tailoring_orders!inner(created_at, store_id, status, order_type)')
+      .select('line_type, line_total, tax_rate, status, garment_types(category), tailoring_orders!inner(created_at, store_id, status, order_type, stores(name))')
       .neq('status', 'cancelled')
       .neq('tailoring_orders.status', 'cancelled')
       .gte('tailoring_orders.created_at', start_date)
       .lte('tailoring_orders.created_at', end_date + 'T23:59:59')
     if (store_id) query = query.eq('tailoring_orders.store_id', store_id)
 
-    const { data, error } = await query.limit(20000)
-    if (error) return failure(error.message)
+    // 2) Líneas de BOUTIQUE + TARJETAS REGALO — de sale_lines, misma definición que
+    //    dimensions.ts, neto, mismo rango (sales.created_at) y filtro de tienda.
+    let salesQ = ctx.adminClient
+      .from('sale_lines')
+      .select('quantity, line_total, tax_rate, sales!inner(store_id, stores(name), status, created_at, sale_type)')
+      .eq('sales.status', 'completed')
+      .in('sales.sale_type', [BOUTIQUE_SALE_TYPE, GIFT_CARD_SALE_TYPE])
+      .gte('sales.created_at', start_date)
+      .lte('sales.created_at', end_date + 'T23:59:59')
+    if (store_id) salesQ = salesQ.eq('sales.store_id', store_id)
 
-    const buckets: Record<TailoringCategoryKey, { amount: number; garments: number }> = {
-      sastreria_artesanal: { amount: 0, garments: 0 },
-      sastreria_industrial: { amount: 0, garments: 0 },
-      camiseria_artesanal: { amount: 0, garments: 0 },
-      camiseria_industrial: { amount: 0, garments: 0 },
-    }
+    const [{ data, error }, { data: slData, error: slError }] = await Promise.all([query.limit(20000), salesQ.limit(20000)])
+    if (error) return failure(error.message)
+    if (slError) return failure(slError.message)
+
+    // Clasificamos CADA línea a (categoría, tienda, importe neto, prendas) en una
+    // lista única. De ahí salen tanto los totales globales como el desglose por
+    // tienda (este último reusando accumulateByStore, una pasada por categoría).
+    type Tagged = { category: SalesByTypeKey; storeId: string | null | undefined; storeName: string | null | undefined; value: number; garments: number }
+    const tagged: Tagged[] = []
 
     for (const row of (data ?? []) as any[]) {
       const gt = Array.isArray(row.garment_types) ? row.garment_types[0] : row.garment_types
       const order = Array.isArray(row.tailoring_orders) ? row.tailoring_orders[0] : row.tailoring_orders
       const isCamiseria = gt?.category === 'camiseria'
-      const ai = row.line_type || order?.order_type
-      const isIndustrial = ai === 'industrial'
-      const key: TailoringCategoryKey = `${isCamiseria ? 'camiseria' : 'sastreria'}_${isIndustrial ? 'industrial' : 'artesanal'}`
-      // Importe NETO (sin IVA): line_total es bruto, lo dividimos por (1 + IVA).
-      // Se acumula en crudo y se redondea solo al final, por bucket.
-      const tr = Number(row.tax_rate ?? 21)
-      buckets[key].amount += Number(row.line_total ?? 0) / (1 + tr / 100)
-      buckets[key].garments += 1
+      const isIndustrial = (row.line_type || order?.order_type) === 'industrial'
+      const category: SalesByTypeKey = `${isCamiseria ? 'camiseria' : 'sastreria'}_${isIndustrial ? 'industrial' : 'artesanal'}`
+      const tr = Number(row.tax_rate ?? DEFAULT_TAX_RATE)
+      tagged.push({ category, storeId: order?.store_id, storeName: order?.stores?.name, value: Number(row.line_total ?? 0) / (1 + tr / 100), garments: 1 })
     }
 
-    const orderKeys: TailoringCategoryKey[] = ['sastreria_artesanal', 'sastreria_industrial', 'camiseria_artesanal', 'camiseria_industrial']
-    const breakdown = orderKeys.map((k) => ({
-      category: k, label: TAILORING_CATEGORY_LABELS[k], amount: Math.round(buckets[k].amount * 100) / 100, garments: buckets[k].garments,
+    for (const row of (slData ?? []) as any[]) {
+      const sale = row.sales
+      const category: SalesByTypeKey = sale?.sale_type === GIFT_CARD_SALE_TYPE ? 'gift_cards' : 'boutique'
+      const tr = Number(row.tax_rate ?? DEFAULT_TAX_RATE)
+      tagged.push({ category, storeId: sale?.store_id, storeName: sale?.stores?.name, value: Number(row.line_total ?? 0) / (1 + tr / 100), garments: Number(row.quantity ?? 1) })
+    }
+
+    // Totales globales por categoría (las 6 filas del informe).
+    const buckets: Record<SalesByTypeKey, { amount: number; garments: number }> = {
+      sastreria_artesanal: { amount: 0, garments: 0 }, sastreria_industrial: { amount: 0, garments: 0 },
+      camiseria_artesanal: { amount: 0, garments: 0 }, camiseria_industrial: { amount: 0, garments: 0 },
+      boutique: { amount: 0, garments: 0 }, gift_cards: { amount: 0, garments: 0 },
+    }
+    for (const t of tagged) { buckets[t.category].amount += t.value; buckets[t.category].garments += t.garments }
+
+    const breakdown = SALES_BY_TYPE_ORDER.map((k) => ({
+      category: k, label: SALES_BY_TYPE_LABELS[k], amount: Math.round(buckets[k].amount * 100) / 100, garments: buckets[k].garments,
     }))
     const total = breakdown.reduce((acc, b) => ({ amount: acc.amount + b.amount, garments: acc.garments + b.garments }), { amount: 0, garments: 0 })
-    return success({ breakdown, total })
+
+    // Desglose por tienda (solo en "Todas"): una pasada de accumulateByStore por
+    // categoría sobre la lista ya clasificada; cada tienda obtiene sus 6 importes.
+    let byStore: { store_id: string; store_name: string; total: number; amounts: { category: SalesByTypeKey; amount: number }[] }[] | undefined
+    if (!store_id) {
+      const perCat = SALES_BY_TYPE_ORDER.map((k) => ({
+        category: k,
+        byStore: accumulateByStore(tagged.filter((t) => t.category === k), (t) => ({ storeId: t.storeId, storeName: t.storeName, value: t.value })),
+      }))
+      const ids = new Set<string>()
+      for (const pc of perCat) Object.keys(pc.byStore).forEach((id) => ids.add(id))
+      byStore = [...ids].map((id) => {
+        const amounts = perCat.map((pc) => ({ category: pc.category, amount: Math.round((pc.byStore[id]?.total || 0) * 100) / 100 }))
+        const store_name = perCat.find((pc) => pc.byStore[id])?.byStore[id]?.store_name || 'Sin tienda'
+        return { store_id: id, store_name, total: amounts.reduce((s, a) => s + a.amount, 0), amounts }
+      }).sort((a, b) => b.total - a.total)
+    }
+
+    return success({ breakdown, total, byStore })
   }
 )
 

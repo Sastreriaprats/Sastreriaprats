@@ -42,6 +42,12 @@ type SalesData = {
   byStore?: { store_id: string; store_name: string; boutique: number; gift_cards: number; online: number; tailoring: number; total: number }[]
 }
 
+type TailoringByCatData = {
+  breakdown: TailoringCategoryRow[]
+  total: { amount: number; garments: number }
+  byStore?: { store_id: string; store_name: string; total: number; amounts: { category: string; amount: number }[] }[]
+}
+
 type CompareData = {
   current: { revenue: number; newClients: number; ordersCount: number }
   previous: { revenue: number; newClients: number; ordersCount: number }
@@ -110,7 +116,7 @@ export function ReportsContent() {
   const [storeData, setStoreData] = useState<StoreItem[]>([])
   const [employeeData, setEmployeeData] = useState<EmployeeItem[]>([])
   const [timePatternData, setTimePatternData] = useState<TimePatternData | null>(null)
-  const [tailoringByCat, setTailoringByCat] = useState<{ breakdown: TailoringCategoryRow[]; total: { amount: number; garments: number } } | null>(null)
+  const [tailoringByCat, setTailoringByCat] = useState<TailoringByCatData | null>(null)
   const [expensesData, setExpensesData] = useState<ExpensesData | null>(null)
   const [expensesComparison, setExpensesComparison] = useState<ExpensesComparison | null>(null)
   const [isExporting, setIsExporting] = useState(false)
@@ -223,6 +229,19 @@ export function ReportsContent() {
           { key: 'tailoring', label: 'Sastrería', value: s.tailoring, color: SALES_STORE_COLORS.tailoring },
         ],
       }))
+    : null
+
+  const tailoringStoreBreakdown: StoreBreakdownRow[] | null = showStoreBreakdown && tailoringByCat?.byStore
+    ? (() => {
+        const labelOf = new Map<string, string>(tailoringByCat.breakdown.map(b => [b.category as string, b.label]))
+        return tailoringByCat.byStore.map(s => ({
+          store_id: s.store_id, store_name: s.store_name, total: s.total,
+          metrics: s.amounts.map(a => ({
+            key: a.category, label: labelOf.get(a.category) || a.category,
+            value: a.amount, color: CATEGORY_COLORS[a.category] || '#64748b',
+          })),
+        }))
+      })()
     : null
 
   const channelLabel = channelFilter === 'boutique'
@@ -476,7 +495,7 @@ export function ReportsContent() {
 
             <div className="mt-6">
               <TabsContent value="sales"><VentasTab salesData={salesData} timePatternData={timePatternData} storeBreakdown={salesStoreBreakdown} /></TabsContent>
-              <TabsContent value="bytype"><TailoringByTypeTab data={tailoringByCat} storeName={activeStoreName} /></TabsContent>
+              <TabsContent value="bytype"><TailoringByTypeTab data={tailoringByCat} storeName={activeStoreName} storeBreakdown={tailoringStoreBreakdown} /></TabsContent>
               <TabsContent value="products">
                 <Input
                   placeholder="Filtrar por producto o SKU..."
@@ -644,15 +663,19 @@ const CATEGORY_COLORS: Record<string, string> = {
   sastreria_industrial: '#3b82f6',  // azul
   camiseria_artesanal: '#d97706',   // ámbar
   camiseria_industrial: '#f97316',  // naranja
+  boutique: '#10b981',              // esmeralda
+  gift_cards: '#ec4899',            // rosa
 }
 const CATEGORY_SHORT: Record<string, string> = {
   sastreria_artesanal: 'Sast. Artesanal',
   sastreria_industrial: 'Sast. Industrial',
   camiseria_artesanal: 'Cam. Artesanal',
   camiseria_industrial: 'Cam. Industrial',
+  boutique: 'Boutique',
+  gift_cards: 'Tarjetas',
 }
 
-function TailoringByTypeTab({ data, storeName }: { data: { breakdown: TailoringCategoryRow[]; total: { amount: number; garments: number } } | null; storeName: string }) {
+function TailoringByTypeTab({ data, storeName, storeBreakdown }: { data: TailoringByCatData | null; storeName: string; storeBreakdown: StoreBreakdownRow[] | null }) {
   const storeBadge = (
     <Badge className="bg-prats-navy text-white gap-1 shrink-0">
       <Store className="h-3 w-3" />
@@ -664,7 +687,7 @@ function TailoringByTypeTab({ data, storeName }: { data: { breakdown: TailoringC
     return (
       <div className="space-y-4">
         <div className="flex justify-end">{storeBadge}</div>
-        <p className="text-center text-muted-foreground py-12">Sin ventas de sastrería/camisería para el periodo seleccionado</p>
+        <p className="text-center text-muted-foreground py-12">Sin ventas para el periodo seleccionado</p>
       </div>
     )
   }
@@ -678,14 +701,15 @@ function TailoringByTypeTab({ data, storeName }: { data: { breakdown: TailoringC
 
   return (
     <div className="space-y-6">
+      {storeBreakdown && <StoreBreakdown rows={storeBreakdown} title="Ventas por tipo y tienda" />}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <CardTitle className="text-base">Facturación por tipo de confección</CardTitle>
+            <CardTitle className="text-base">Facturación por tipo</CardTitle>
             {storeBadge}
           </div>
           <p className="text-xs text-muted-foreground">
-            Importe neto (sin IVA) por combinación · pedidos no cancelados · por fecha de creación
+            Importe neto (sin IVA) · 4 categorías de confección + Boutique + Tarjetas regalo · por fecha de creación
           </p>
         </CardHeader>
         <CardContent>
