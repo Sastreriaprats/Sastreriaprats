@@ -2,7 +2,7 @@
 
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
-import { BOUTIQUE_SALE_TYPE, GIFT_CARD_SALE_TYPE, accumulateByStore } from '@/lib/reports/dimensions'
+import { BOUTIQUE_SALE_TYPE, GIFT_CARD_SALE_TYPE, accumulateByStore, EXCLUDED_TAILOR_CREATOR_ID } from '@/lib/reports/dimensions'
 
 export type ReportChannel = 'all' | 'boutique' | 'tailoring'
 export type TaxMode = 'with_tax' | 'without_tax'
@@ -92,6 +92,7 @@ export const getSalesReport = protectedAction<
       let tailoringQuery = ctx.adminClient
         .from('tailoring_orders')
         .select('subtotal, total, created_at, status, store_id, stores(name)')
+        .neq('created_by', EXCLUDED_TAILOR_CREATOR_ID)
         .gte('created_at', start_date)
         .lte('created_at', end_date + 'T23:59:59')
         .not('status', 'eq', 'cancelled')
@@ -243,6 +244,7 @@ export const getTailoringByCategory = protectedAction<
       .select('line_type, line_total, tax_rate, status, garment_types(category), tailoring_orders!inner(created_at, store_id, status, order_type, stores(name))')
       .neq('status', 'cancelled')
       .neq('tailoring_orders.status', 'cancelled')
+      .neq('tailoring_orders.created_by', EXCLUDED_TAILOR_CREATOR_ID)
       .gte('tailoring_orders.created_at', start_date)
       .lte('tailoring_orders.created_at', end_date + 'T23:59:59')
     if (store_id) query = query.eq('tailoring_orders.store_id', store_id)
@@ -345,6 +347,7 @@ export const getComparePeriods = protectedAction<
 
     let tailoringQ = ctx.adminClient.from('tailoring_orders')
       .select('subtotal, total, created_at, store_id')
+      .neq('created_by', EXCLUDED_TAILOR_CREATOR_ID)
       .gte('created_at', minStart).lte('created_at', rangeEnd)
       .not('status', 'eq', 'cancelled')
     if (store_id) tailoringQ = tailoringQ.eq('store_id', store_id)
@@ -527,6 +530,7 @@ export const getTailorPerformance = protectedAction<
     let q = ctx.adminClient
       .from('tailoring_orders')
       .select('id, subtotal, total, total_paid, status, created_by, store_id, profiles!tailoring_orders_created_by_fkey(full_name), tailoring_fittings(count)')
+      .neq('created_by', EXCLUDED_TAILOR_CREATOR_ID)
       .gte('created_at', start_date)
       .lte('created_at', end_date + 'T23:59:59')
       .not('status', 'eq', 'cancelled')
@@ -575,6 +579,7 @@ export const getTailorPerformance = protectedAction<
     let paymentsQ = ctx.adminClient
       .from('tailoring_order_payments')
       .select('amount, tailoring_orders!inner(created_by, store_id)')
+      .neq('tailoring_orders.created_by', EXCLUDED_TAILOR_CREATOR_ID)
       .gte('created_at', start_date)
       .lte('created_at', end_date + 'T23:59:59')
     if (store_id) paymentsQ = paymentsQ.eq('tailoring_orders.store_id', store_id)
@@ -656,6 +661,7 @@ export const getSalesByStore = protectedAction<
     let tailoringQ = ctx.adminClient
       .from('tailoring_orders')
       .select('subtotal, total, store_id, stores(name)')
+      .neq('created_by', EXCLUDED_TAILOR_CREATOR_ID)
       .gte('created_at', start_date)
       .lte('created_at', end_date + 'T23:59:59')
       .not('status', 'eq', 'cancelled')
@@ -740,7 +746,8 @@ export const getSalesByEmployee = protectedAction<
 
     let paymentsQ = ctx.adminClient
       .from('tailoring_order_payments')
-      .select('amount, created_by, created_at, tailoring_orders!inner(store_id, stores(name))')
+      .select('amount, created_by, created_at, tailoring_orders!inner(created_by, store_id, stores(name))')
+      .neq('tailoring_orders.created_by', EXCLUDED_TAILOR_CREATOR_ID)
       .gte('created_at', start_date)
       .lte('created_at', end_date + 'T23:59:59')
     if (store_id) paymentsQ = paymentsQ.eq('tailoring_orders.store_id', store_id)
@@ -748,6 +755,7 @@ export const getSalesByEmployee = protectedAction<
     let tailoringOrdersQ = ctx.adminClient
       .from('tailoring_orders')
       .select('subtotal, total, created_by, status, store_id, created_at')
+      .neq('created_by', EXCLUDED_TAILOR_CREATOR_ID)
       .gte('created_at', start_date)
       .lte('created_at', end_date + 'T23:59:59')
       .not('status', 'eq', 'cancelled')
@@ -969,7 +977,8 @@ export const getSalesByTimePattern = protectedAction<
 
     let paymentsQ = ctx.adminClient
       .from('tailoring_order_payments')
-      .select('amount, created_at, tailoring_orders!inner(store_id, stores(name))')
+      .select('amount, created_at, tailoring_orders!inner(created_by, store_id, stores(name))')
+      .neq('tailoring_orders.created_by', EXCLUDED_TAILOR_CREATOR_ID)
       .gte('created_at', start_date)
       .lte('created_at', end_date + 'T23:59:59')
     if (store_id) paymentsQ = paymentsQ.eq('tailoring_orders.store_id', store_id)
