@@ -5,7 +5,7 @@ import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { queryList, queryById, getNextNumber, resolveClientIdsForSearch } from '@/lib/server/query-helpers'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createTailoringOrderSchema, tailoringOrderLineSchema, changeOrderStatusSchema } from '@/lib/validations/orders'
-import { ALL_VISIBLE_STATUSES, classifyLinesForForwardPropagation, type OrderStatus } from '@/lib/orders/statuses'
+import { ALL_VISIBLE_STATUSES, classifyLinesForForwardPropagation, deriveOrderStatusFromLines, type OrderStatus } from '@/lib/orders/statuses'
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { sendOrderConfirmation, sendTailoringStatusUpdate } from '@/lib/email/transactional'
@@ -475,6 +475,70 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
   }
 )
 
+/**
+ * Recalcula el estado del PEDIDO a partir del de sus prendas (regla derivada,
+ * `deriveOrderStatusFromLines`) y lo persiste SOLO si cambió. Registra la
+ * transición en el historial con `note` (por defecto "Automático…") e incluye los
+ * efectos de los estados terminales: `delivered` → fecha de entrega + email al
+ * cliente; `cancelled` (todas las prendas canceladas) → repone stock de tejido.
+ * No reactiva pedidos ya `cancelled`. Lo usan las dos acciones (admin y sastre).
+ */
+async function recalcOrderStatusFromLines(
+  admin: AdminClient,
+  orderId: string,
+  ctx: { userId: string | null; userName: string | null },
+  note = 'Automático (derivado de prendas)',
+): Promise<string | null> {
+  const { data: order } = await admin
+    .from('tailoring_orders').select('status, order_type').eq('id', orderId).single()
+  if (!order) return null
+  const fromStatus = (order as any).status as string
+  // 'cancelled' es terminal: no se reactiva por derivación.
+  if (fromStatus === 'cancelled') return fromStatus
+  const { data: lines } = await admin
+    .from('tailoring_order_lines').select('status').eq('tailoring_order_id', orderId)
+  const derived = deriveOrderStatusFromLines((order as any).order_type, (lines ?? []).map((l: any) => l.status))
+  if (!derived || derived === fromStatus) return fromStatus
+
+  await admin.from('tailoring_orders').update({
+    status: derived,
+    ...(derived === 'delivered' ? { actual_delivery_date: new Date().toISOString().split('T')[0] } : {}),
+  }).eq('id', orderId)
+
+  // Todas las prendas canceladas → repone stock de tejido (coherente con el
+  // cancelar manual; revertFabricStockForOrder es idempotente).
+  if (derived === 'cancelled') {
+    await revertFabricStockForOrder(admin, orderId, ctx.userId)
+  }
+
+  await admin.from('tailoring_order_state_history').insert({
+    tailoring_order_id: orderId,
+    from_status: fromStatus,
+    to_status: derived,
+    notes: note,
+    changed_by: ctx.userId,
+    changed_by_name: ctx.userName,
+  })
+
+  if (derived === 'delivered') {
+    const { data: ow } = await admin
+      .from('tailoring_orders')
+      .select('order_number, clients(email, full_name, first_name, last_name)')
+      .eq('id', orderId).single()
+    const client = (ow as { clients?: { email?: string; full_name?: string; first_name?: string; last_name?: string } | null } | null)?.clients
+    if (client?.email) {
+      const clientName = client.full_name || [client.first_name, client.last_name].filter(Boolean).join(' ') || 'Cliente'
+      try {
+        await sendTailoringStatusUpdate({
+          client_name: clientName, client_email: client.email,
+          order_number: (ow as { order_number: string }).order_number, new_status: 'delivered',
+        })
+      } catch (e) { console.error('[recalcOrderStatusFromLines] email:', e) }
+    }
+  }
+  return derived
+}
+
 export const changeOrderStatus = protectedAction<any, any>(
   {
     permission: 'orders.edit',
@@ -510,6 +574,9 @@ export const changeOrderStatus = protectedAction<any, any>(
         changed_by: ctx.userId,
         changed_by_name: ctx.userName,
       })
+
+      // El estado del PEDIDO se DERIVA del mínimo de sus prendas (regla Ismael).
+      await recalcOrderStatusFromLines(ctx.adminClient, order_id, ctx)
     } else {
       const { data: order } = await ctx.adminClient
         .from('tailoring_orders').select('status, order_type').eq('id', order_id).single()
@@ -521,66 +588,42 @@ export const changeOrderStatus = protectedAction<any, any>(
         return failure('No se puede reactivar un pedido cancelado. Crea un pedido nuevo si es necesario.', 'VALIDATION')
       }
 
-      await ctx.adminClient
-        .from('tailoring_orders')
-        .update({
-          status: new_status,
-          ...(new_status === 'delivered' ? { actual_delivery_date: new Date().toISOString().split('T')[0] } : {}),
-        })
-        .eq('id', order_id)
-
-      // Propagación FORWARD-ONLY a las líneas: solo avanzan las rezagadas;
-      // las que ya estén más adelantadas se respetan (no se hacen retroceder).
-      // Sustituye la cascada antigua que solo tocaba líneas en 'created'.
       const { data: lineRows } = await ctx.adminClient
         .from('tailoring_order_lines').select('id, status').eq('tailoring_order_id', order_id)
-      const prop = classifyLinesForForwardPropagation(
-        new_status, (order as any).order_type, (lineRows ?? []) as { id: string; status: string }[],
-      )
-      if (prop.toUpdate.length > 0) {
+      const lines = (lineRows ?? []) as { id: string; status: string }[]
+
+      if (new_status === 'cancelled' || new_status === 'incident') {
+        // Acciones MANUALES a nivel pedido (no derivables del mínimo de prendas).
         await ctx.adminClient
-          .from('tailoring_order_lines').update({ status: new_status }).in('id', prop.toUpdate)
-      }
-      changedLinesCount = prop.toUpdate.length
-      aheadLinesCount = prop.aheadCount
-      fromStatus = fromStatus ?? (order as any).status ?? null
-
-      // Reponer stock de tejido si entramos en cancelled desde otro estado.
-      // revertFabricStockForOrder es idempotente (no doble reposición).
-      if (new_status === 'cancelled' && fromStatus !== 'cancelled') {
-        await revertFabricStockForOrder(ctx.adminClient, order_id, ctx.userId)
-      }
-
-      await ctx.adminClient.from('tailoring_order_state_history').insert({
-        tailoring_order_id: order_id,
-        from_status: order.status,
-        to_status: new_status,
-        notes,
-        changed_by: ctx.userId,
-        changed_by_name: ctx.userName,
-      })
-
-      const { data: orderWithClient } = await ctx.adminClient
-        .from('tailoring_orders')
-        .select('order_number, clients(email, full_name, first_name, last_name)')
-        .eq('id', order_id)
-        .single()
-      const client = (orderWithClient as { clients?: { email?: string; full_name?: string; first_name?: string; last_name?: string } | null } | null)?.clients
-      const clientEmail = client?.email
-      if (clientEmail && new_status === 'delivered') {
-        const clientName = client?.full_name || [client?.first_name, client?.last_name].filter(Boolean).join(' ') || 'Cliente'
-        try {
-          await sendTailoringStatusUpdate({
-            client_name: clientName,
-            client_email: clientEmail,
-            order_number: (orderWithClient as { order_number: string }).order_number,
-            new_status,
-            message: notes ?? undefined,
-          })
-        } catch (e) {
-          console.error('[changeOrderStatus] sendTailoringStatusUpdate:', e)
+          .from('tailoring_orders').update({ status: new_status }).eq('id', order_id)
+        const prop = classifyLinesForForwardPropagation(new_status, (order as any).order_type, lines)
+        if (prop.toUpdate.length > 0) {
+          await ctx.adminClient
+            .from('tailoring_order_lines').update({ status: new_status }).in('id', prop.toUpdate)
         }
+        changedLinesCount = prop.toUpdate.length
+        aheadLinesCount = prop.aheadCount
+        if (new_status === 'cancelled' && fromStatus !== 'cancelled') {
+          await revertFabricStockForOrder(ctx.adminClient, order_id, ctx.userId)
+        }
+        await ctx.adminClient.from('tailoring_order_state_history').insert({
+          tailoring_order_id: order_id, from_status: order.status, to_status: new_status,
+          notes, changed_by: ctx.userId, changed_by_name: ctx.userName,
+        })
+      } else {
+        // Botón "Cambiar estado" reconvertido a "avanzar TODAS las prendas a X":
+        // propagación forward y, a partir de ahí, el estado del pedido se DERIVA
+        // del mínimo de las prendas (no se fija a mano).
+        const prop = classifyLinesForForwardPropagation(new_status, (order as any).order_type, lines)
+        if (prop.toUpdate.length > 0) {
+          await ctx.adminClient
+            .from('tailoring_order_lines').update({ status: new_status }).in('id', prop.toUpdate)
+        }
+        changedLinesCount = prop.toUpdate.length
+        aheadLinesCount = prop.aheadCount
+        await recalcOrderStatusFromLines(ctx.adminClient, order_id, ctx, 'Avanzar prendas (derivado)')
       }
+      fromStatus = fromStatus ?? (order as any).status ?? null
     }
 
     // Resolver número de pedido para descripción legible
@@ -703,24 +746,26 @@ export const updateOrderStatus = protectedAction<
     let aheadLinesCount = 0
     if (lineId?.trim()) {
       const { data: prevLine } = await ctx.adminClient
-        .from('tailoring_order_lines')
-        .select('status')
-        .eq('id', lineId.trim())
-        .single()
+        .from('tailoring_order_lines').select('status').eq('id', lineId.trim()).single()
       fromStatus = (prevLine as any)?.status ?? null
       const { error } = await ctx.adminClient
         .from('tailoring_order_lines')
         .update({ status: trimmedStatus })
         .eq('id', lineId.trim())
         .eq('tailoring_order_id', orderId.trim())
-
       if (error) return failure(error.message, 'INTERNAL')
+
+      // Historial de la transición de la prenda.
+      await ctx.adminClient.from('tailoring_order_state_history').insert({
+        tailoring_order_id: orderId.trim(), tailoring_order_line_id: lineId.trim(),
+        from_status: fromStatus, to_status: trimmedStatus,
+        changed_by: ctx.userId, changed_by_name: ctx.userName,
+      })
+      // El estado del PEDIDO se DERIVA del mínimo de sus prendas (regla Ismael).
+      await recalcOrderStatusFromLines(ctx.adminClient, orderId.trim(), ctx)
     } else {
       const { data: prevOrder } = await ctx.adminClient
-        .from('tailoring_orders')
-        .select('status, order_type')
-        .eq('id', orderId.trim())
-        .single()
+        .from('tailoring_orders').select('status, order_type').eq('id', orderId.trim()).single()
       fromStatus = (prevOrder as any)?.status ?? null
 
       // 'cancelled' es estado TERMINAL: no se puede reactivar.
@@ -728,73 +773,40 @@ export const updateOrderStatus = protectedAction<
         return failure('No se puede reactivar un pedido cancelado. Crea un pedido nuevo si es necesario.', 'VALIDATION')
       }
 
-      const { error } = await ctx.adminClient
-        .from('tailoring_orders')
-        .update({
-          status: trimmedStatus,
-          ...(trimmedStatus === 'delivered' ? { actual_delivery_date: new Date().toISOString().split('T')[0] } : {}),
-        })
-        .eq('id', orderId.trim())
-
-      if (error) return failure(error.message, 'INTERNAL')
-
-      // Propagación FORWARD-ONLY a líneas (réplica de changeOrderStatus admin):
-      // solo avanzan las rezagadas; las más adelantadas se respetan.
       const { data: lineRows } = await ctx.adminClient
-        .from('tailoring_order_lines')
-        .select('id, status')
-        .eq('tailoring_order_id', orderId.trim())
-      const prop = classifyLinesForForwardPropagation(
-        trimmedStatus, (prevOrder as any)?.order_type, (lineRows ?? []) as { id: string; status: string }[],
-      )
-      if (prop.toUpdate.length > 0) {
-        await ctx.adminClient
-          .from('tailoring_order_lines')
-          .update({ status: trimmedStatus })
-          .in('id', prop.toUpdate)
-      }
-      changedLinesCount = prop.toUpdate.length
-      aheadLinesCount = prop.aheadCount
+        .from('tailoring_order_lines').select('id, status').eq('tailoring_order_id', orderId.trim())
+      const lines = (lineRows ?? []) as { id: string; status: string }[]
 
-      // Reponer stock de tejido al cancelar (idempotente).
-      if (trimmedStatus === 'cancelled' && fromStatus !== 'cancelled') {
-        await revertFabricStockForOrder(ctx.adminClient, orderId.trim(), ctx.userId)
-      }
-    }
-
-    // Historial de la transición — antes la action sastre no lo escribía,
-    // por eso los cambios desde /sastre/pedidos no aparecían en el tab Historial.
-    await ctx.adminClient.from('tailoring_order_state_history').insert({
-      tailoring_order_id: orderId.trim(),
-      tailoring_order_line_id: lineId?.trim() || null,
-      from_status: fromStatus,
-      to_status: trimmedStatus,
-      changed_by: ctx.userId,
-      changed_by_name: ctx.userName,
-    })
-
-    // Email al cliente cuando se marca entregado (réplica de changeOrderStatus admin).
-    // Solo en cambio de pedido completo, no de línea individual.
-    if (!lineId?.trim() && trimmedStatus === 'delivered') {
-      const { data: orderWithClient } = await ctx.adminClient
-        .from('tailoring_orders')
-        .select('order_number, clients(email, full_name, first_name, last_name)')
-        .eq('id', orderId.trim())
-        .single()
-      const client = (orderWithClient as { clients?: { email?: string; full_name?: string; first_name?: string; last_name?: string } | null } | null)?.clients
-      const clientEmail = client?.email
-      if (clientEmail) {
-        const clientName = client?.full_name || [client?.first_name, client?.last_name].filter(Boolean).join(' ') || 'Cliente'
-        try {
-          await sendTailoringStatusUpdate({
-            client_name: clientName,
-            client_email: clientEmail,
-            order_number: (orderWithClient as { order_number: string }).order_number,
-            new_status: trimmedStatus,
-          })
-        } catch (e) {
-          console.error('[updateOrderStatus] sendTailoringStatusUpdate:', e)
+      if (trimmedStatus === 'cancelled' || trimmedStatus === 'incident') {
+        // Acciones MANUALES a nivel pedido (no derivables del mínimo).
+        const { error } = await ctx.adminClient
+          .from('tailoring_orders').update({ status: trimmedStatus }).eq('id', orderId.trim())
+        if (error) return failure(error.message, 'INTERNAL')
+        const prop = classifyLinesForForwardPropagation(trimmedStatus, (prevOrder as any)?.order_type, lines)
+        if (prop.toUpdate.length > 0) {
+          await ctx.adminClient
+            .from('tailoring_order_lines').update({ status: trimmedStatus }).in('id', prop.toUpdate)
         }
+        changedLinesCount = prop.toUpdate.length
+        aheadLinesCount = prop.aheadCount
+        if (trimmedStatus === 'cancelled' && fromStatus !== 'cancelled') {
+          await revertFabricStockForOrder(ctx.adminClient, orderId.trim(), ctx.userId)
+        }
+        await ctx.adminClient.from('tailoring_order_state_history').insert({
+          tailoring_order_id: orderId.trim(), tailoring_order_line_id: null,
+          from_status: fromStatus, to_status: trimmedStatus,
+          changed_by: ctx.userId, changed_by_name: ctx.userName,
+        })
+      } else {
+        // "Avanzar todas las prendas a X" + derivar el estado del pedido.
+        const prop = classifyLinesForForwardPropagation(trimmedStatus, (prevOrder as any)?.order_type, lines)
+        if (prop.toUpdate.length > 0) {
+          await ctx.adminClient
+            .from('tailoring_order_lines').update({ status: trimmedStatus }).in('id', prop.toUpdate)
+        }
+        changedLinesCount = prop.toUpdate.length
+        aheadLinesCount = prop.aheadCount
+        await recalcOrderStatusFromLines(ctx.adminClient, orderId.trim(), ctx, 'Avanzar prendas (derivado)')
       }
     }
 

@@ -84,6 +84,39 @@ export function getStatusIndex(status: string, orderType: string | null | undefi
   return getStatusesFor(orderType).indexOf(status as OrderStatus)
 }
 
+/**
+ * Estado DERIVADO del pedido a partir del de sus prendas (regla Ismael, jun 2026):
+ * el pedido sigue al estado MENOS avanzado de sus prendas vivas.
+ *
+ *  - Alguna prenda `incident`        → 'incident' (una incidencia se ve a nivel
+ *                                      pedido; gana sobre el mínimo normal).
+ *  - Se IGNORAN las prendas `cancelled`. Si TODAS están canceladas → 'cancelled'.
+ *  - Resto                           → la prenda con MENOR `getStatusIndex` dentro
+ *                                      del pipeline del `orderType`.
+ *  - Sin prendas                     → null (no se deriva; el pedido conserva su
+ *                                      estado actual; lo decide quien llama).
+ *
+ * NO contempla `cancelled`/`incident` a nivel pedido como acción manual: eso lo
+ * gestiona la acción (set directo). Aquí solo se deriva del estado de las prendas.
+ */
+export function deriveOrderStatusFromLines(
+  orderType: string | null | undefined,
+  lineStatuses: string[],
+): OrderStatus | null {
+  if (lineStatuses.length === 0) return null
+  if (lineStatuses.includes('incident')) return 'incident'
+  const live = lineStatuses.filter((s) => s !== 'cancelled')
+  if (live.length === 0) return 'cancelled'
+  let best: string | null = null
+  let bestIdx = Infinity
+  for (const s of live) {
+    const i = getStatusIndex(s, orderType)
+    if (i < 0) continue // estado ajeno al pipeline del tipo: no participa en el mínimo
+    if (i < bestIdx) { bestIdx = i; best = s }
+  }
+  return (best ?? live[0]) as OrderStatus
+}
+
 export interface ForwardPropagation {
   /** IDs de líneas que deben avanzar al estado destino (estaban por detrás). */
   toUpdate: string[]

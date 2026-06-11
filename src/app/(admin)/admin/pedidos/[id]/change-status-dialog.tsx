@@ -44,7 +44,7 @@ export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus,
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader><DialogTitle>Cambiar estado del pedido</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Avanzar estado de las prendas</DialogTitle></DialogHeader>
         <div className="space-y-4 py-4">
           <div className="flex items-center gap-3 p-3 rounded-lg bg-muted">
             <Badge className={`${getOrderStatusColor(currentStatus)}`}>{getOrderStatusLabel(currentStatus)}</Badge>
@@ -66,15 +66,18 @@ export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus,
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-[11px] text-muted-foreground">
+              El estado del pedido se calcula solo: sigue al de la prenda <strong>menos avanzada</strong>. No llega a un estado hasta que todas las prendas lo alcanzan.
+            </p>
           </div>
 
           {lines.length > 1 && (
             <div className="space-y-2">
               <Label>Aplicar a</Label>
               <Select value={lineId} onValueChange={setLineId}>
-                <SelectTrigger><SelectValue placeholder="Todo el pedido" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Todas las prendas" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todo el pedido</SelectItem>
+                  <SelectItem value="all">Todas las prendas</SelectItem>
                   {lines.map((l: any, i: number) => (
                     <SelectItem key={l.id} value={l.id}>
                       Prenda #{i + 1}: {l.garment_types?.name}
