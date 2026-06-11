@@ -61,7 +61,8 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
       const [
         salesRes,
         ordersRes,
-        clientsRes,
+        clientsTotalRes,
+        clientsNewRes,
         cashRes,
         stockRes,
         supplierRes,
@@ -69,7 +70,8 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
       ] = await Promise.all([
         admin.from('sales').select('total, created_at').gte('created_at', `${lastMonthStart}T00:00:00`).lte('created_at', todayEnd).eq('status', 'completed'),
         admin.from('tailoring_orders').select('id, status, estimated_delivery_date').not('status', 'in', '("delivered","cancelled")'),
-        admin.from('clients').select('id, created_at').eq('is_active', true),
+        admin.from('clients').select('id', { count: 'exact', head: true }).eq('is_active', true),
+        admin.from('clients').select('id', { count: 'exact', head: true }).eq('is_active', true).gte('created_at', `${monthStart}T00:00:00`),
         admin.from('cash_sessions').select('total_sales').eq('status', 'open').limit(1).maybeSingle(),
         admin.from('stock_levels').select('id', { count: 'exact', head: true }).not('min_stock', 'is', null).lte('available', 0),
         admin.from('supplier_due_dates').select('amount, due_date').eq('is_paid', false),
@@ -78,7 +80,6 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
 
       const salesRows = salesRes.data
       const ordersRows = ordersRes.data
-      const clientsRows = clientsRes.data
       const cashRow = cashRes.data
       const lowStockCount = stockRes.count
       const supplierRows = supplierRes.data
@@ -112,10 +113,9 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
       const ordersOverdue = ordersList.filter(o => o.estimated_delivery_date != null && o.estimated_delivery_date < today).length
       const deliveriesToday = ordersList.filter(o => o.status === 'finished' && o.estimated_delivery_date === today).length
 
-      // 3) Clientes (clientsRows ya viene del Promise.all)
-      const clientsList = clientsRows || []
-      const clientsTotal = clientsList.length
-      const clientsNewThisMonth = clientsList.filter((c: { created_at?: string }) => (c.created_at || '').slice(0, 10) >= monthStart).length
+      // 3) Clientes (conteos exactos vía count, no limitados a 1000 filas)
+      const clientsTotal = clientsTotalRes.count ?? 0
+      const clientsNewThisMonth = clientsNewRes.count ?? 0
 
       // 4) Sesión de caja abierta (ya en cashRow)
       const supplierList = (supplierRows || []) as { amount?: number; due_date?: string }[]
