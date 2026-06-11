@@ -31,14 +31,6 @@ export const BOUTIQUE_SALE_TYPE = 'boutique' as const
  */
 export const GIFT_CARD_SALE_TYPE = 'gift_card' as const
 
-// Cuenta EXCLUIDA de los informes de sastrería (nº7, decisión de negocio).
-// `sastreplus@` ("Pablo y Álvaro") tiene pedidos y cobros REALES en caja, pero no
-// debe figurar en los informes. Los datos NO se borran (las cajas siguen como
-// están); solo se filtran al LEER, por `tailoring_orders.created_by`. Reversible:
-// quitar el id de aquí restaura su aparición. Como no se toca la caja real, los
-// totales de informe pueden no cuadrar con caja (aceptado a propósito).
-export const EXCLUDED_TAILOR_CREATOR_ID = 'acd66f6a-dcb8-4265-b20c-12c8c4c1bc84'
-
 /** Bucket acumulado por tienda. */
 export type StoreBucket = { store_name: string; total: number }
 
