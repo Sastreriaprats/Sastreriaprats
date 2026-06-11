@@ -50,7 +50,7 @@ export function SalesChart({ data }: { data: ChartItem[] }) {
                     </div>
                     <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-10 bg-white border rounded-lg shadow-lg p-2 text-xs w-36">
                       <p className="font-medium mb-1">{d.date}</p>
-                      <p className="flex justify-between"><span className="text-prats-navy">TPV:</span>{formatCurrency(d.pos)}</p>
+                      <p className="flex justify-between"><span className="text-prats-navy">Boutique + Tarjetas:</span>{formatCurrency(d.pos)}</p>
                       <p className="flex justify-between"><span className="text-blue-500">Online:</span>{formatCurrency(d.online)}</p>
                       <p className="flex justify-between"><span className="text-purple-500">Sastrería:</span>{formatCurrency(d.tailoring)}</p>
                       <p className="flex justify-between font-bold border-t mt-1 pt-1"><span>Total:</span>{formatCurrency(d.total)}</p>
@@ -77,7 +77,7 @@ export function SalesChart({ data }: { data: ChartItem[] }) {
         </div>
 
         <div className="flex justify-center gap-6 mt-4 text-xs">
-          <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-prats-navy" />TPV</span>
+          <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-prats-navy" />Boutique + Tarjetas</span>
           <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-blue-400" />Online</span>
           <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-purple-400" />Sastrería</span>
         </div>

@@ -48,6 +48,13 @@ export const getSalesReport = protectedAction<
   {
     chartData: { date: string; pos: number; online: number; tailoring: number; total: number }[]
     totals: { pos: number; online: number; tailoring: number; total: number; ticketCount: number; avgTicket: number }
+    // Desglose por TIENDA (dimensión nº4). Solo presente cuando NO se filtra una
+    // tienda concreta (store_id undefined = "Todas"). Se calcula con accumulateByStore
+    // sobre las filas ya cargadas, sin queries extra. Misma segmentación que
+    // getSalesByStore (nº9): Boutique (sale_type='boutique') y Tarjetas regalo
+    // (sale_type='gift_card') por separado, nunca un "TPV" mezclado. Online no tiene
+    // tienda física: va como pseudo-tienda "Tienda Online".
+    byStore?: { store_id: string; store_name: string; boutique: number; gift_cards: number; online: number; tailoring: number; total: number }[]
   }
 >(
   { permission: 'reports.view', auditModule: 'reports' },
@@ -60,7 +67,7 @@ export const getSalesReport = protectedAction<
     if (wantBoutique) {
       let salesQuery = ctx.adminClient
         .from('sale_lines')
-        .select('quantity, line_total, tax_rate, created_at, sales!inner(store_id, status, created_at)')
+        .select('quantity, line_total, tax_rate, created_at, sales!inner(store_id, stores(name), status, created_at, sale_type)')
         .gte('sales.created_at', start_date)
         .lte('sales.created_at', end_date + 'T23:59:59')
         .eq('sales.status', 'completed')
@@ -84,7 +91,7 @@ export const getSalesReport = protectedAction<
     if (wantTailoring) {
       let tailoringQuery = ctx.adminClient
         .from('tailoring_orders')
-        .select('subtotal, total, created_at, status, store_id')
+        .select('subtotal, total, created_at, status, store_id, stores(name)')
         .gte('created_at', start_date)
         .lte('created_at', end_date + 'T23:59:59')
         .not('status', 'eq', 'cancelled')
@@ -140,6 +147,32 @@ export const getSalesReport = protectedAction<
     const ticketCount = saleIds.size + (onlineOrders || []).length + (tailoringOrders || []).length
     const grandTotal = totalPos + totalOnline + totalTailoring
 
+    // Desglose por tienda (solo en modo "Todas"): agrupa las filas YA cargadas con
+    // el helper común accumulateByStore. Misma segmentación que getSalesByStore (nº9):
+    // Boutique y Tarjetas regalo separadas por sale_type. Online -> pseudo-tienda.
+    let byStore: { store_id: string; store_name: string; boutique: number; gift_cards: number; online: number; tailoring: number; total: number }[] | undefined
+    if (!store_id) {
+      const lines = (saleLines || []) as any[]
+      const pickLine = (l: any) => ({ storeId: l.sales?.store_id, storeName: l.sales?.stores?.name, value: valueOf(l, 'line_total') })
+      const boutiqueByStore = accumulateByStore(lines.filter((l) => l.sales?.sale_type === BOUTIQUE_SALE_TYPE), pickLine)
+      const giftByStore = accumulateByStore(lines.filter((l) => l.sales?.sale_type === GIFT_CARD_SALE_TYPE), pickLine)
+      const tailByStore = accumulateByStore(tailoringOrders || [], (o: any) => ({
+        storeId: o.store_id, storeName: o.stores?.name, value: valueOf(o, 'total'),
+      }))
+      const ids = new Set([...Object.keys(boutiqueByStore), ...Object.keys(giftByStore), ...Object.keys(tailByStore)])
+      byStore = [...ids].map((id) => {
+        const boutique = boutiqueByStore[id]?.total || 0
+        const gift_cards = giftByStore[id]?.total || 0
+        const tailoring = tailByStore[id]?.total || 0
+        const store_name = boutiqueByStore[id]?.store_name || giftByStore[id]?.store_name || tailByStore[id]?.store_name || 'Sin tienda'
+        return { store_id: id, store_name, boutique, gift_cards, online: 0, tailoring, total: boutique + gift_cards + tailoring }
+      })
+      if (totalOnline > 0) {
+        byStore.push({ store_id: 'online', store_name: 'Tienda Online', boutique: 0, gift_cards: 0, online: totalOnline, tailoring: 0, total: totalOnline })
+      }
+      byStore.sort((a, b) => b.total - a.total)
+    }
+
     return success({
       chartData,
       totals: {
@@ -148,6 +181,7 @@ export const getSalesReport = protectedAction<
         ticketCount,
         avgTicket: ticketCount > 0 ? grandTotal / ticketCount : 0,
       },
+      byStore,
     })
   }
 )

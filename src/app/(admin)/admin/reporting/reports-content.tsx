@@ -39,6 +39,7 @@ function getDefaultEnd() {
 type SalesData = {
   chartData: { date: string; pos: number; online: number; tailoring: number; total: number }[]
   totals: { pos: number; online: number; tailoring: number; total: number; ticketCount: number; avgTicket: number }
+  byStore?: { store_id: string; store_name: string; boutique: number; gift_cards: number; online: number; tailoring: number; total: number }[]
 }
 
 type CompareData = {
@@ -118,6 +119,10 @@ export function ReportsContent() {
   const [storeFilter, setStoreFilter] = useState<string>(activeStoreId || 'all')
   const [channelFilter, setChannelFilter] = useState<ReportChannel>('all')
   const [taxMode, setTaxMode] = useState<TaxMode>('without_tax')
+  // Dimensión nº4: desglose por tienda. Estado COMPARTIDO por todas las pestañas
+  // que lo soporten (Ventas ahora; nº5/nº10/hora/clientes después). Solo aplica
+  // cuando no hay una tienda concreta filtrada (storeFilter='all').
+  const [groupByStore, setGroupByStore] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -204,6 +209,21 @@ export function ReportsContent() {
   const activeStoreName = storeFilter === 'all'
     ? 'Todas las tiendas'
     : (stores.find(s => s.id === storeFilter)?.name || '')
+
+  // Desglose por tienda activo solo en modo "Todas" + toggle on. Cada pestaña que
+  // lo soporte mapea su `byStore` a StoreBreakdownRow[] aquí.
+  const showStoreBreakdown = groupByStore && storeFilter === 'all'
+  const salesStoreBreakdown: StoreBreakdownRow[] | null = showStoreBreakdown && salesData?.byStore
+    ? salesData.byStore.map(s => ({
+        store_id: s.store_id, store_name: s.store_name, total: s.total,
+        metrics: [
+          { key: 'boutique', label: 'Boutique', value: s.boutique, color: SALES_STORE_COLORS.boutique },
+          { key: 'gift_cards', label: 'Tarjetas regalo', value: s.gift_cards, color: SALES_STORE_COLORS.gift_cards },
+          { key: 'online', label: 'Online', value: s.online, color: SALES_STORE_COLORS.online },
+          { key: 'tailoring', label: 'Sastrería', value: s.tailoring, color: SALES_STORE_COLORS.tailoring },
+        ],
+      }))
+    : null
 
   const channelLabel = channelFilter === 'boutique'
     ? 'Boutique'
@@ -370,6 +390,19 @@ export function ReportsContent() {
             Sin IVA
           </Label>
         </div>
+
+        {storeFilter === 'all' && (
+          <div className="flex items-center gap-2 h-8">
+            <Switch
+              id="group-by-store"
+              checked={groupByStore}
+              onCheckedChange={setGroupByStore}
+            />
+            <Label htmlFor="group-by-store" className="text-xs cursor-pointer select-none flex items-center gap-1">
+              <Store className="h-3 w-3" /> Ver por tienda
+            </Label>
+          </div>
+        )}
       </div>
 
       {isLoading ? (
@@ -390,7 +423,7 @@ export function ReportsContent() {
             <Card>
               <CardContent className="pt-4 pb-3">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-muted-foreground">TPV / Boutique</span>
+                  <span className="text-xs text-muted-foreground">Boutique + Tarjetas</span>
                   <ShoppingBag className="h-4 w-4 text-muted-foreground" />
                 </div>
                 <p className="text-2xl font-bold">{formatCurrency(salesData?.totals?.pos || 0)}</p>
@@ -442,7 +475,7 @@ export function ReportsContent() {
             </TabsList>
 
             <div className="mt-6">
-              <TabsContent value="sales"><VentasTab salesData={salesData} timePatternData={timePatternData} /></TabsContent>
+              <TabsContent value="sales"><VentasTab salesData={salesData} timePatternData={timePatternData} storeBreakdown={salesStoreBreakdown} /></TabsContent>
               <TabsContent value="bytype"><TailoringByTypeTab data={tailoringByCat} storeName={activeStoreName} /></TabsContent>
               <TabsContent value="products">
                 <Input
@@ -476,9 +509,84 @@ export function ReportsContent() {
   )
 }
 
+// ─── Desglose por tienda (dimensión nº4, REUTILIZABLE) ───────────────────────
+// Componente genérico que pinta el desglose por tienda de CUALQUIER informe:
+// barras apiladas por tienda (una franja por métrica) + leyenda + tabla con una
+// columna por métrica y la fila TOTAL. Cada pestaña (Ventas, nº5, nº10, hora,
+// clientes) solo tiene que mapear su `byStore` a `StoreBreakdownRow[]` con las
+// métricas que correspondan; este componente no sabe nada del informe concreto.
+
+export type StoreBreakdownMetric = { key: string; label: string; value: number; color: string }
+export type StoreBreakdownRow = { store_id: string; store_name: string; total: number; metrics: StoreBreakdownMetric[] }
+
+function StoreBreakdown({ rows, title = 'Desglose por tienda' }: { rows: StoreBreakdownRow[]; title?: string }) {
+  if (!rows.length) return null
+  const maxTotal = Math.max(...rows.map(r => r.total), 1)
+  const legend = rows[0]?.metrics ?? []
+  const metricTotal = (key: string) => rows.reduce((s, r) => s + (r.metrics.find(m => m.key === key)?.value || 0), 0)
+
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-base flex items-center gap-2"><Store className="h-4 w-4" /> {title}</CardTitle></CardHeader>
+      <CardContent>
+        <div className="space-y-4">
+          {rows.map(r => (
+            <div key={r.store_id}>
+              <div className="flex justify-between text-sm mb-1">
+                <span className="font-medium">{r.store_name}</span>
+                <span className="text-muted-foreground">{formatCurrency(r.total)}</span>
+              </div>
+              <div className="flex h-4 rounded-full overflow-hidden bg-gray-100">
+                {r.metrics.map(m => {
+                  const w = maxTotal > 0 ? (m.value / maxTotal) * 100 : 0
+                  return w > 0
+                    ? <div key={m.key} className="transition-all" style={{ width: `${w}%`, backgroundColor: m.color }} title={`${m.label}: ${formatCurrency(m.value)}`} />
+                    : null
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="flex flex-wrap justify-center gap-4 mt-5 text-xs">
+          {legend.map(m => (
+            <span key={m.key} className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: m.color }} />{m.label}</span>
+          ))}
+        </div>
+        <Table className="mt-4">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Tienda</TableHead>
+              {legend.map(m => <TableHead key={m.key} className="text-right">{m.label}</TableHead>)}
+              <TableHead className="text-right">Total</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map(r => (
+              <TableRow key={r.store_id}>
+                <TableCell className="font-medium">{r.store_name}</TableCell>
+                {r.metrics.map(m => <TableCell key={m.key} className="text-right">{formatCurrency(m.value)}</TableCell>)}
+                <TableCell className="text-right font-bold">{formatCurrency(r.total)}</TableCell>
+              </TableRow>
+            ))}
+            {rows.length > 1 && (
+              <TableRow className="bg-muted/50 font-bold">
+                <TableCell>TOTAL</TableCell>
+                {legend.map(m => <TableCell key={m.key} className="text-right">{formatCurrency(metricTotal(m.key))}</TableCell>)}
+                <TableCell className="text-right">{formatCurrency(rows.reduce((s, r) => s + r.total, 0))}</TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  )
+}
+
 // ─── Tab: Ventas ─────────────────────────────────────────────────────────────
 
-function VentasTab({ salesData, timePatternData }: { salesData: SalesData | null; timePatternData: TimePatternData | null }) {
+const SALES_STORE_COLORS = { boutique: '#1e3a5f', gift_cards: '#f59e0b', online: '#0ea5e9', tailoring: '#c084fc' }
+
+function VentasTab({ salesData, timePatternData, storeBreakdown }: { salesData: SalesData | null; timePatternData: TimePatternData | null; storeBreakdown: StoreBreakdownRow[] | null }) {
   const chartData = salesData?.chartData || []
 
   const bestDay = chartData.length
@@ -523,6 +631,7 @@ function VentasTab({ salesData, timePatternData }: { salesData: SalesData | null
           )}
         </div>
       )}
+      {storeBreakdown && <StoreBreakdown rows={storeBreakdown} title="Ventas por tienda" />}
       <SalesChart data={chartData} />
     </div>
   )
