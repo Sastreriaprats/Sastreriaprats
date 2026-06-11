@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Users, UserPlus, UserCheck, Trophy, Store, Sparkles, Repeat, Calendar } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import type { ClientsAdvancedAnalytics } from '@/actions/reports'
-import { clientSourceLabel, clientSourceColor } from '@/lib/clients/sources'
+import { clientSourceLabel, assignSourceColors } from '@/lib/clients/sources'
 
 type ClientsData = {
   newClients: number
@@ -49,6 +49,8 @@ export function ClientsChart({
 
   const sources = data.sources || {}
   const totalSources = Object.values(sources).reduce((s, v) => s + v, 0)
+  // Color ÚNICO por origen presente (ninguno comparte color, ni los legacy).
+  const sourceColors = assignSourceColors(Object.keys(sources))
   const top3 = (data.topClients || []).slice(0, 3)
   // % de clientes históricos que compraron en el periodo. Numerador = del
   // periodo, denominador = histórico → métrica deliberadamente "tasa de
@@ -80,7 +82,7 @@ export function ClientsChart({
                   className="transition-all"
                   style={{
                     width: `${totalSources > 0 ? (value / totalSources) * 100 : 0}%`,
-                    backgroundColor: clientSourceColor(key),
+                    backgroundColor: sourceColors[key],
                   }}
                   title={`${clientSourceLabel(key)}: ${value}`}
                 />
@@ -92,7 +94,7 @@ export function ClientsChart({
                   <span className="flex items-center gap-2">
                     <span
                       className="h-3 w-3 rounded-full"
-                      style={{ backgroundColor: clientSourceColor(key) }}
+                      style={{ backgroundColor: sourceColors[key] }}
                     />
                     {clientSourceLabel(key)}
                   </span>

@@ -82,9 +82,12 @@ type EmployeeStoreRow = { store_id: string; store_name: string; boutique: number
 
 type StoreOption = { id: string; name: string }
 
+type TimePatternHour = { hour: number; total: number; count: number }
+type TimePatternDay = { day: number; label: string; total: number; count: number }
 type TimePatternData = {
-  byHour: { hour: number; total: number; count: number }[]
-  byDayOfWeek: { day: number; label: string; total: number; count: number }[]
+  byHour: TimePatternHour[]
+  byDayOfWeek: TimePatternDay[]
+  byStore?: { store_id: string; store_name: string; byHour: TimePatternHour[]; byDayOfWeek: TimePatternDay[] }[]
 }
 
 type ExpensesData = {
@@ -531,7 +534,7 @@ export function ReportsContent() {
               <TabsContent value="clients"><ClientsChart data={clientsData} advanced={clientsAdvanced} /></TabsContent>
               <TabsContent value="stores"><StoreTab data={storeData} /></TabsContent>
               <TabsContent value="employees"><EmployeeTab data={employeeData} storeBreakdown={employeeStoreBreakdown} /></TabsContent>
-              <TabsContent value="time"><TimePatternTab data={timePatternData} /></TabsContent>
+              <TabsContent value="time"><TimePatternTab data={timePatternData} showByStore={showStoreBreakdown} /></TabsContent>
               <TabsContent value="expenses"><ExpensesTab data={expensesData} comparison={expensesComparison} /></TabsContent>
             </div>
           </Tabs>
@@ -980,7 +983,44 @@ function EmployeeTab({ data, storeBreakdown }: { data: EmployeeItem[]; storeBrea
 
 // ─── Tab: Por hora / día de semana ───────────────────────────────────────────
 
-function TimePatternTab({ data }: { data: TimePatternData | null }) {
+function StoreTimePattern({ store }: { store: { store_name: string; byHour: TimePatternHour[]; byDayOfWeek: TimePatternDay[] } }) {
+  const maxHour = Math.max(...store.byHour.map(h => h.total), 1)
+  const maxDay = Math.max(...store.byDayOfWeek.map(d => d.total), 1)
+  const peakHour = store.byHour.reduce((b, h) => h.total > b.total ? h : b, store.byHour[0])
+  const peakDay = store.byDayOfWeek.reduce((b, d) => d.total > b.total ? d : b, store.byDayOfWeek[0])
+  return (
+    <Card>
+      <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Store className="h-4 w-4" /> {store.store_name}</CardTitle></CardHeader>
+      <CardContent>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div>
+            <p className="text-[11px] text-muted-foreground mb-1">Por hora · pico {peakHour.hour}:00 ({formatCurrency(peakHour.total)})</p>
+            <div className="flex items-end gap-px" style={{ height: '96px' }}>
+              {store.byHour.map(h => (
+                <div key={h.hour} className="flex-1 flex flex-col justify-end h-full" title={`${h.hour}:00 · ${formatCurrency(h.total)} · ${h.count} op.`}>
+                  <div className="rounded-t-sm" style={{ height: `${(h.total / maxHour) * 100}%`, minHeight: h.total > 0 ? '2px' : '0', backgroundColor: '#6366f1', opacity: h.total > 0 ? 1 : 0.15 }} />
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-[11px] text-muted-foreground mb-1">Por día · top {peakDay.label} ({formatCurrency(peakDay.total)})</p>
+            <div className="flex items-end gap-1.5" style={{ height: '96px' }}>
+              {store.byDayOfWeek.map(d => (
+                <div key={d.day} className="flex-1 flex flex-col items-center justify-end h-full" title={`${d.label} · ${formatCurrency(d.total)} · ${d.count} op.`}>
+                  <div className="w-full rounded-t-sm" style={{ height: `${(d.total / maxDay) * 100}%`, minHeight: d.total > 0 ? '2px' : '0', backgroundColor: '#6366f1', opacity: d.total > 0 ? 1 : 0.15 }} />
+                  <span className="text-[9px] text-muted-foreground mt-1">{d.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function TimePatternTab({ data, showByStore }: { data: TimePatternData | null; showByStore: boolean }) {
   if (!data) return <p className="text-center text-muted-foreground py-12">Sin datos para el periodo seleccionado</p>
 
   const maxHour = Math.max(...data.byHour.map(h => h.total), 1)
@@ -1081,6 +1121,13 @@ function TimePatternTab({ data }: { data: TimePatternData | null }) {
           </div>
         </CardContent>
       </Card>
+
+      {showByStore && data.byStore && data.byStore.length > 0 && (
+        <div className="space-y-4">
+          <p className="text-xs font-medium text-muted-foreground flex items-center gap-1"><Store className="h-3.5 w-3.5" /> Patrón horario por tienda</p>
+          {data.byStore.map(s => <StoreTimePattern key={s.store_id} store={s} />)}
+        </div>
+      )}
     </div>
   )
 }

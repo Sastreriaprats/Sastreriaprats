@@ -916,6 +916,8 @@ export const getSalesByTimePattern = protectedAction<
   {
     byHour: { hour: number; total: number; count: number }[]
     byDayOfWeek: { day: number; label: string; total: number; count: number }[]
+    // Mismo patrón hora/día PERO por tienda (dimensión nº4). Solo en modo "Todas".
+    byStore?: { store_id: string; store_name: string; byHour: { hour: number; total: number; count: number }[]; byDayOfWeek: { day: number; label: string; total: number; count: number }[] }[]
   }
 >(
   { permission: 'reports.view', auditModule: 'reports' },
@@ -927,7 +929,7 @@ export const getSalesByTimePattern = protectedAction<
 
     let saleLinesQ = ctx.adminClient
       .from('sale_lines')
-      .select('line_total, tax_rate, sales!inner(created_at, status, store_id)')
+      .select('line_total, tax_rate, sales!inner(created_at, status, store_id, stores(name))')
       .gte('sales.created_at', start_date)
       .lte('sales.created_at', end_date + 'T23:59:59')
       .eq('sales.status', 'completed')
@@ -935,7 +937,7 @@ export const getSalesByTimePattern = protectedAction<
 
     let paymentsQ = ctx.adminClient
       .from('tailoring_order_payments')
-      .select('amount, created_at, tailoring_orders!inner(store_id)')
+      .select('amount, created_at, tailoring_orders!inner(store_id, stores(name))')
       .gte('created_at', start_date)
       .lte('created_at', end_date + 'T23:59:59')
     if (store_id) paymentsQ = paymentsQ.eq('tailoring_orders.store_id', store_id)
@@ -946,33 +948,53 @@ export const getSalesByTimePattern = protectedAction<
     ])
 
     const DAY_LABELS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
-    const hourMap = Array.from({ length: 24 }, (_, i) => ({ hour: i, total: 0, count: 0 }))
-    const dayMap = Array.from({ length: 7 }, (_, i) => ({ day: i, label: DAY_LABELS[i], total: 0, count: 0 }))
+    const emptyHour = () => Array.from({ length: 24 }, (_, i) => ({ hour: i, total: 0, count: 0 }))
+    const emptyDay = () => Array.from({ length: 7 }, (_, i) => ({ day: i, label: DAY_LABELS[i], total: 0, count: 0 }))
+    const hourMap = emptyHour()
+    const dayMap = emptyDay()
 
-    const accumulate = (dateStr: string, amount: number) => {
+    // Acumula en un par de mapas hora/día concretos (global o de una tienda).
+    const accInto = (hm: typeof hourMap, dm: typeof dayMap, dateStr: string, amount: number) => {
       const hour = madridHour(dateStr) // hora en Madrid, no en la TZ del proceso
       const dow = madridDow(dateStr)   // 0=Lun…6=Dom, en Madrid
-      hourMap[hour].total += amount
-      hourMap[hour].count += 1
-      dayMap[dow].total += amount
-      dayMap[dow].count += 1
+      hm[hour].total += amount; hm[hour].count += 1
+      dm[dow].total += amount; dm[dow].count += 1
+    }
+
+    // Mapas por tienda (solo si no se filtra una tienda concreta).
+    const perStore: Record<string, { name: string; hourMap: typeof hourMap; dayMap: typeof dayMap }> = {}
+    const ensureStore = (id: string | null | undefined, name: string | null | undefined) => {
+      const key = id || 'unknown'
+      if (!perStore[key]) perStore[key] = { name: name || 'Sin tienda', hourMap: emptyHour(), dayMap: emptyDay() }
+      return perStore[key]
     }
 
     for (const line of saleLinesRes.data || []) {
       const sale = line.sales as any
       if (sale?.created_at) {
         const lt = (line.line_total as number) || 0
-        accumulate(sale.created_at, net ? lineNet(lt, (line as any).tax_rate) : lt)
+        const amount = net ? lineNet(lt, (line as any).tax_rate) : lt
+        accInto(hourMap, dayMap, sale.created_at, amount)
+        if (!store_id) { const s = ensureStore(sale.store_id, sale.stores?.name); accInto(s.hourMap, s.dayMap, sale.created_at, amount) }
       }
     }
     for (const payment of paymentsRes.data || []) {
       if (payment.created_at) {
         const amt = (payment.amount as number) || 0
-        accumulate(payment.created_at as string, net ? stripDefault(amt) : amt)
+        const amount = net ? stripDefault(amt) : amt
+        accInto(hourMap, dayMap, payment.created_at as string, amount)
+        if (!store_id) { const o = (payment as any).tailoring_orders; const s = ensureStore(o?.store_id, o?.stores?.name); accInto(s.hourMap, s.dayMap, payment.created_at as string, amount) }
       }
     }
 
-    return success({ byHour: hourMap, byDayOfWeek: dayMap })
+    let byStore: { store_id: string; store_name: string; byHour: typeof hourMap; byDayOfWeek: typeof dayMap }[] | undefined
+    if (!store_id) {
+      byStore = Object.entries(perStore)
+        .map(([id, s]) => ({ store_id: id, store_name: s.name, byHour: s.hourMap, byDayOfWeek: s.dayMap }))
+        .sort((a, b) => b.byHour.reduce((t, h) => t + h.total, 0) - a.byHour.reduce((t, h) => t + h.total, 0))
+    }
+
+    return success({ byHour: hourMap, byDayOfWeek: dayMap, byStore })
   }
 )
 
