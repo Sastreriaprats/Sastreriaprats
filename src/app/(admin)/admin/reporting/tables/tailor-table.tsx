@@ -32,7 +32,7 @@ export function TailorTable({ data }: { data: TailorItem[] }) {
 
   return (
     <Card>
-      <CardHeader><CardTitle className="text-base">Rendimiento por sastre</CardTitle></CardHeader>
+      <CardHeader><CardTitle className="text-base">Rendimiento por sastre — por pedidos creados</CardTitle></CardHeader>
       <CardContent>
         <Table>
           <TableHeader>
@@ -42,7 +42,7 @@ export function TailorTable({ data }: { data: TailorItem[] }) {
               <TableHead className="text-right">Completados</TableHead>
               <TableHead className="text-right">% Completado</TableHead>
               <TableHead className="text-right">Pruebas</TableHead>
-              <TableHead className="text-right">Facturación</TableHead>
+              <TableHead className="text-right">Facturación de pedidos creados</TableHead>
               <TableHead className="text-right">Cobrado en periodo</TableHead>
               <TableHead className="text-right">Pendiente de pedidos</TableHead>
               <TableHead className="text-right">% Cobrado</TableHead>
@@ -104,10 +104,15 @@ export function TailorTable({ data }: { data: TailorItem[] }) {
           </TableBody>
         </Table>
         <div className="text-[11px] text-muted-foreground mt-3 space-y-1">
-          <p>Esta tabla muestra los pedidos <strong>creados</strong> por cada sastre en el periodo seleccionado.</p>
           <p>
-            <strong>Cobrado en periodo</strong>: cobros registrados en este periodo, agrupados por el sastre del pedido
-            (independientemente de quién registró el cobro físicamente).
+            Aquí «sastre» = el usuario que <strong>registró/creó el pedido</strong> en el sistema (agrupa por «creado por»),
+            <strong> no</strong> un rol ni quien lo cosió. <strong>Facturación de pedidos creados</strong> = valor de los pedidos
+            que ese usuario registró, <strong>no</strong> ventas personales suyas.
+          </p>
+          <p>
+            <strong>Cobrado en periodo</strong>: cobros registrados en este periodo, atribuidos al <strong>creador del pedido</strong>,
+            aunque el cobro lo registre físicamente otra persona (es el <strong>inverso</strong> de «Por empleado», donde el cobro
+            se imputa al cajero que lo registró).
           </p>
           <p>
             <strong>Pendiente de pedidos</strong>: lo que falta por cobrar de los pedidos creados en el periodo (basado en
