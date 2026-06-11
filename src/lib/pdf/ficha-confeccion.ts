@@ -897,7 +897,11 @@ function buildCamiseriaDocDefinition(
   order: FichaConfeccionOrder,
   line: { configuration?: Record<string, unknown> },
   lineIndex: number,
-  fontSizeDelta: number = 0
+  fontSizeDelta: number = 0,
+  // El talón INFERIOR es la copia de taller del oficial y NUNCA debe mostrar
+  // importes (Precio / Entregado a cuenta). Solo la ficha SUPERIOR los lleva.
+  // Mismo criterio que el talón de sastrería (ver talonLeftStack más arriba).
+  showPrecio: boolean = true
 ): PdfDocDefinition {
   const cfg = line.configuration ?? {}
   const client = order.clients
@@ -1121,35 +1125,56 @@ function buildCamiseriaDocDefinition(
     layout: { hLineWidth: () => 0.5, vLineWidth: () => 0.5, hLineColor: () => BORDER_COLOR, vLineColor: () => BORDER_COLOR },
   })
 
-  // Tabla TEJIDO + PRECIO (65% / 35%)
+  // Tabla TEJIDO + PRECIO (65% / 35%). En la copia inferior (talón del oficial)
+  // el precio NO se muestra: el TEJIDO ocupa todo el ancho.
   const tejidoStr = String(cfg.tejido ?? '—').trim()
   const precioLinea = Number(cfg.precio ?? 0)
-  content.push({
-    table: {
-      widths: ['65%', '35%'],
-      body: [
-        [
-          {
-            stack: [
-              { text: 'TEJIDO', fontSize: fs7, color: LABEL_COLOR },
-              { text: tejidoStr, fontSize: fs9 + 2, ...valueStyle },
-            ],
-            margin: [0, 0, 0, 40],
-          },
-          {
-            stack: [
-              { text: 'PRECIO', fontSize: fs7, color: LABEL_COLOR },
-              { text: `${precioLinea.toFixed(2)} €`, fontSize: fs9 + 2, bold: true, ...valueStyle },
-              { text: 'ENTREGADO A CUENTA', fontSize: fs7, color: LABEL_COLOR, margin: [0, 6, 0, 0] },
-              { text: `${totalPaid.toFixed(2)} €`, fontSize: fs9, ...valueStyle },
-            ],
-            fillColor: '#f5f5f5',
-          },
+  if (showPrecio) {
+    content.push({
+      table: {
+        widths: ['65%', '35%'],
+        body: [
+          [
+            {
+              stack: [
+                { text: 'TEJIDO', fontSize: fs7, color: LABEL_COLOR },
+                { text: tejidoStr, fontSize: fs9 + 2, ...valueStyle },
+              ],
+              margin: [0, 0, 0, 40],
+            },
+            {
+              stack: [
+                { text: 'PRECIO', fontSize: fs7, color: LABEL_COLOR },
+                { text: `${precioLinea.toFixed(2)} €`, fontSize: fs9 + 2, bold: true, ...valueStyle },
+                { text: 'ENTREGADO A CUENTA', fontSize: fs7, color: LABEL_COLOR, margin: [0, 6, 0, 0] },
+                { text: `${totalPaid.toFixed(2)} €`, fontSize: fs9, ...valueStyle },
+              ],
+              fillColor: '#f5f5f5',
+            },
+          ],
         ],
-      ],
-    },
-    layout: tableLayoutBorders,
-  })
+      },
+      layout: tableLayoutBorders,
+    })
+  } else {
+    content.push({
+      table: {
+        widths: ['*'],
+        body: [
+          [
+            {
+              stack: [
+                { text: 'TEJIDO', fontSize: fs7, color: LABEL_COLOR },
+                { text: tejidoStr, fontSize: fs9 + 2, ...valueStyle },
+              ],
+              margin: [0, 0, 0, 40],
+            },
+          ],
+        ],
+      },
+      layout: tableLayoutBorders,
+    })
+  }
 
   // Tabla OBSERVACIONES
   const obsStr = String(cfg.obs ?? '').trim() || '—'
@@ -1193,8 +1218,8 @@ export async function generateFichaForLineCamiseria(
     pdfMake.addVirtualFileSystem(vfs)
   }
 
-  const contentTop: Content[] = buildCamiseriaDocDefinition(order, line, lineIndex, 0).content as Content[]
-  const contentBottom = buildCamiseriaDocDefinition(order, line, lineIndex, -1).content as Content[]
+  const contentTop: Content[] = buildCamiseriaDocDefinition(order, line, lineIndex, 0, true).content as Content[]
+  const contentBottom = buildCamiseriaDocDefinition(order, line, lineIndex, -1, false).content as Content[]
 
   const docDef: PdfDocDefinition = {
     pageSize: 'A4',
