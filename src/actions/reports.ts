@@ -428,15 +428,24 @@ export const getComparePeriods = protectedAction<
 
 export const getTopProducts = protectedAction<
   { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel; limit?: number; tax_mode?: TaxMode },
-  { name: string; sku: string; units: number; revenue: number }[]
+  {
+    product_id: string; name: string; sku: string; units: number; revenue: number
+    // Desglose por TALLA y TIENDA dentro del producto (nº6, expandible).
+    breakdown: { size: string; store_id: string; store_name: string; units: number; revenue: number }[]
+  }[]
 >(
   { permission: 'reports.view', auditModule: 'reports' },
   async (ctx, { start_date, end_date, store_id, channel = 'all', limit = 10, tax_mode = 'with_tax' }) => {
     if (channel === 'tailoring') return success([])
     const net = tax_mode === 'without_tax'
+    // Agrupamos por PRODUCTO BASE (products.id), no por variante/talla. La línea
+    // de venta apunta a la variante (product_variant_id); subimos a su producto
+    // (product_variants.product_id -> products) para consolidar todas las tallas
+    // de un mismo producto en una sola fila. La `description` incluye la talla
+    // (".. T.52"), por eso agrupar por description duplicaba el producto.
     let q = ctx.adminClient
       .from('sale_lines')
-      .select('description, sku, quantity, line_total, tax_rate, sales!inner(created_at, status, store_id)')
+      .select('description, sku, quantity, line_total, tax_rate, sales!inner(created_at, status, store_id, stores(name)), product_variants(size, products(id, name, sku))')
       .gte('sales.created_at', start_date)
       .lte('sales.created_at', end_date + 'T23:59:59')
       .eq('sales.status', 'completed')
@@ -448,17 +457,40 @@ export const getTopProducts = protectedAction<
       (line: any) => !String(line.description || '').startsWith('Cobro pendiente')
     )
 
-    const products: Record<string, { name: string; sku: string; units: number; revenue: number }> = {}
-    for (const line of filteredLines) {
-      const key = (line.description as string) || (line.sku as string) || 'Desconocido'
-      if (!products[key]) products[key] = { name: key, sku: (line.sku as string) || '', units: 0, revenue: 0 }
-      products[key].units += (line.quantity as number) || 1
-      const lt = (line.line_total as number) || 0
-      products[key].revenue += net ? lineNet(lt, (line as any).tax_rate) : lt
+    type Bucket = { size: string; store_id: string; store_name: string; units: number; revenue: number }
+    const products: Record<string, { product_id: string; name: string; sku: string; units: number; revenue: number; bd: Record<string, Bucket> }> = {}
+    for (const line of filteredLines as any[]) {
+      const v = Array.isArray(line.product_variants) ? line.product_variants[0] : line.product_variants
+      const p = v ? (Array.isArray(v.products) ? v.products[0] : v.products) : null
+      const sale = Array.isArray(line.sales) ? line.sales[0] : line.sales
+      // Clave = producto base si la línea mapea a variante->producto; si no
+      // (tarjeta regalo, arreglos, líneas legacy sin variante), fallback por texto.
+      const key = p?.id ? `prod:${p.id}` : `desc:${line.description || line.sku || 'Desconocido'}`
+      const name = (p?.name as string) || (line.description as string) || (line.sku as string) || 'Desconocido'
+      const sku = (p?.sku as string) || (line.sku as string) || ''
+      const size = (v?.size as string) || '—'
+      const storeId = (sale?.store_id as string) || 'unknown'
+      const storeName = (sale?.stores?.name as string) || 'Sin tienda'
+      const units = (line.quantity as number) || 1
+      const revenue = net ? lineNet((line.line_total as number) || 0, line.tax_rate) : ((line.line_total as number) || 0)
+
+      const prod = (products[key] ||= { product_id: (p?.id as string) || '', name, sku, units: 0, revenue: 0, bd: {} })
+      prod.units += units
+      prod.revenue += revenue
+      const bk = `${size}|${storeId}`
+      const b = (prod.bd[bk] ||= { size, store_id: storeId, store_name: storeName, units: 0, revenue: 0 })
+      b.units += units
+      b.revenue += revenue
     }
 
     return success(
-      Object.values(products).sort((a, b) => b.revenue - a.revenue).slice(0, limit)
+      Object.values(products)
+        .sort((a, b) => b.revenue - a.revenue)
+        .slice(0, limit)
+        .map((p) => ({
+          product_id: p.product_id, name: p.name, sku: p.sku, units: p.units, revenue: p.revenue,
+          breakdown: Object.values(p.bd).sort((a, b) => b.revenue - a.revenue),
+        }))
     )
   }
 )
