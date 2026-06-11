@@ -65,8 +65,10 @@ type TailorItem = {
 type ClientsData = {
   newClients: number; totalClientsHistorical: number
   sources: Record<string, number>
+  sourcesDetail: { source: string; clients: { id: string; name: string; types: string[] }[] }[]
   topClients: { full_name: string; total_revenue: number }[]
   clientsWithPurchases: number
+  dailyUniqueByStore?: { store_id: string; store_name: string; byDay: { day: string; count: number }[] }[]
 }
 
 type StoreItem = { store_id: string; store_name: string; pos: number; gift_cards: number; tailoring: number; total: number }
@@ -531,7 +533,7 @@ export function ReportsContent() {
                 />
               </TabsContent>
               <TabsContent value="tailors"><TailorTable data={tailorData} /></TabsContent>
-              <TabsContent value="clients"><ClientsChart data={clientsData} advanced={clientsAdvanced} /></TabsContent>
+              <TabsContent value="clients"><ClientsChart data={clientsData} advanced={clientsAdvanced} showByStore={showStoreBreakdown} /></TabsContent>
               <TabsContent value="stores"><StoreTab data={storeData} /></TabsContent>
               <TabsContent value="employees"><EmployeeTab data={employeeData} storeBreakdown={employeeStoreBreakdown} /></TabsContent>
               <TabsContent value="time"><TimePatternTab data={timePatternData} showByStore={showStoreBreakdown} /></TabsContent>

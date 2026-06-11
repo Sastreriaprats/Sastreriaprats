@@ -10,8 +10,17 @@ type ClientsData = {
   newClients: number
   totalClientsHistorical: number
   sources: Record<string, number>
+  sourcesDetail: { source: string; clients: { id: string; name: string; types: string[] }[] }[]
   topClients: { full_name: string; total_revenue: number }[]
   clientsWithPurchases: number
+  dailyUniqueByStore?: { store_id: string; store_name: string; byDay: { day: string; count: number }[] }[]
+}
+
+// nº8b: etiqueta + color del tipo de compra (misma terminología que el resto).
+const PURCHASE_TYPE_META: Record<string, { label: string; color: string }> = {
+  boutique: { label: 'Boutique', color: '#1e3a5f' },
+  gift_cards: { label: 'Tarjetas', color: '#f59e0b' },
+  sastreria: { label: 'Sastrería', color: '#c084fc' },
 }
 
 // Mapas locales eliminados. La fuente de verdad vive en
@@ -41,9 +50,11 @@ function formatBucketDate(iso: string, granularity: ClientsAdvancedAnalytics['gr
 export function ClientsChart({
   data,
   advanced,
+  showByStore = false,
 }: {
   data: ClientsData | null
   advanced: ClientsAdvancedAnalytics | null
+  showByStore?: boolean
 }) {
   if (!data) return <p className="text-center text-muted-foreground py-12">Sin datos</p>
 
@@ -51,6 +62,9 @@ export function ClientsChart({
   const totalSources = Object.values(sources).reduce((s, v) => s + v, 0)
   // Color ÚNICO por origen presente (ninguno comparte color, ni los legacy).
   const sourceColors = assignSourceColors(Object.keys(sources))
+  // nº8a: clientes por origen (para la lista expandible).
+  const clientsBySource: Record<string, { id: string; name: string; types: string[] }[]> =
+    Object.fromEntries((data.sourcesDetail || []).map(s => [s.source, s.clients]))
   const top3 = (data.topClients || []).slice(0, 3)
   // % de clientes históricos que compraron en el periodo. Numerador = del
   // periodo, denominador = histórico → métrica deliberadamente "tasa de
@@ -88,21 +102,42 @@ export function ClientsChart({
                 />
               ))}
             </div>
-            <div className="space-y-2">
-              {Object.entries(sources).map(([key, value]) => (
-                <div key={key} className="flex items-center justify-between text-sm">
-                  <span className="flex items-center gap-2">
-                    <span
-                      className="h-3 w-3 rounded-full"
-                      style={{ backgroundColor: sourceColors[key] }}
-                    />
-                    {clientSourceLabel(key)}
-                  </span>
-                  <span className="font-medium">
-                    {value} ({totalSources > 0 ? ((value / totalSources) * 100).toFixed(0) : 0}%)
-                  </span>
-                </div>
-              ))}
+            <div className="space-y-1">
+              {Object.entries(sources).map(([key, value]) => {
+                const clients = clientsBySource[key] || []
+                return (
+                  <details key={key} className="group">
+                    <summary className="flex items-center justify-between text-sm cursor-pointer select-none list-none py-0.5">
+                      <span className="flex items-center gap-2">
+                        <span className="h-3 w-3 rounded-full" style={{ backgroundColor: sourceColors[key] }} />
+                        {clientSourceLabel(key)}
+                        <span className="text-muted-foreground text-[10px] transition-transform group-open:rotate-90">▸</span>
+                      </span>
+                      <span className="font-medium">
+                        {value} ({totalSources > 0 ? ((value / totalSources) * 100).toFixed(0) : 0}%)
+                      </span>
+                    </summary>
+                    <div className="mt-1 mb-2 ml-5 space-y-1">
+                      {clients.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">Sin detalle de clientes.</p>
+                      ) : clients.map(c => (
+                        <div key={c.id} className="flex items-center justify-between gap-2 text-xs">
+                          <span className="truncate">{c.name}</span>
+                          <span className="flex items-center gap-1 shrink-0">
+                            {c.types.length === 0
+                              ? <span className="text-muted-foreground">sin compra</span>
+                              : c.types.map(t => (
+                                  <span key={t} className="px-1.5 py-px rounded text-[10px] text-white" style={{ backgroundColor: PURCHASE_TYPE_META[t]?.color ?? '#6b7280' }}>
+                                    {PURCHASE_TYPE_META[t]?.label ?? t}
+                                  </span>
+                                ))}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )
+              })}
             </div>
           </CardContent>
         </Card>
@@ -164,7 +199,46 @@ export function ClientsChart({
 
       {/* ── Fila 3: Serie temporal ─────────────────────────────────────── */}
       <ClientsByDayCard advanced={advanced} />
+
+      {/* ── Fila 4: Únicos por día y tienda (toggle "Ver por tienda") ──── */}
+      {showByStore && data.dailyUniqueByStore && data.dailyUniqueByStore.length > 0 && (
+        <ClientsByDayStoreCard stores={data.dailyUniqueByStore} />
+      )}
     </div>
+  )
+}
+
+function ClientsByDayStoreCard({ stores }: { stores: NonNullable<ClientsData['dailyUniqueByStore']> }) {
+  const max = Math.max(1, ...stores.flatMap(s => s.byDay.map(d => d.count)))
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-base flex items-center gap-2"><Store className="h-4 w-4" /> Clientes únicos por día y tienda</CardTitle></CardHeader>
+      <CardContent>
+        <div className="space-y-5">
+          {stores.map(s => {
+            const total = s.byDay.reduce((a, d) => a + d.count, 0)
+            return (
+              <div key={s.store_id}>
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="font-medium">{s.store_name}</span>
+                  <span className="text-muted-foreground text-xs">{total} cliente-día</span>
+                </div>
+                <div className="flex items-end gap-px" style={{ height: '80px' }}>
+                  {s.byDay.map(d => (
+                    <div key={d.day} className="flex-1 flex flex-col justify-end h-full" title={`${d.day} · ${d.count} cliente${d.count === 1 ? '' : 's'}`}>
+                      <div className="rounded-t-sm" style={{ height: `${(d.count / max) * 100}%`, minHeight: d.count > 0 ? '2px' : '0', backgroundColor: '#6366f1', opacity: d.count > 0 ? 1 : 0.15 }} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <p className="text-[10px] text-muted-foreground mt-3">
+          Un cliente que compra en ambas tiendas el mismo día cuenta en cada una; la unión diaria reconstruye el total único del periodo.
+        </p>
+      </CardContent>
+    </Card>
   )
 }
 

@@ -1144,14 +1144,21 @@ export const getClientsAnalytics = protectedAction<
     newClients: number
     totalClientsHistorical: number
     sources: Record<string, number>
+    // nº8a — quiénes son los nuevos clientes de cada origen, con su tipo de compra
+    // (nº8b). `types` vacío = el cliente aún no ha comprado en el periodo.
+    sourcesDetail: { source: string; clients: { id: string; name: string; types: string[] }[] }[]
     topClients: { full_name: string; total_revenue: number }[]
     clientsWithPurchases: number
+    // Clientes únicos por DÍA y TIENDA (nº4 + nº8). Solo en modo "Todas". Un cliente
+    // que compra en dos tiendas el mismo día cuenta en cada una (como "Clientes por
+    // tienda"); la UNIÓN por día reconstruye el agregado (cada compra tiene tienda).
+    dailyUniqueByStore?: { store_id: string; store_name: string; byDay: { day: string; count: number }[] }[]
   }
 >(
   { permission: 'reports.view', auditModule: 'reports' },
   async (ctx, { start_date, end_date, store_id }) => {
     // Clientes NUEVOS = creados en el periodo (atributo clients.created_at)
-    let newClientsQ = ctx.adminClient.from('clients').select('id, source').gte('created_at', start_date).lte('created_at', end_date + 'T23:59:59')
+    let newClientsQ = ctx.adminClient.from('clients').select('id, first_name, last_name, source').gte('created_at', start_date).lte('created_at', end_date + 'T23:59:59')
     // TOTAL HISTÓRICO de clients (sin filtro de fecha — la UI lo etiqueta
     // como "Total clientes (BBDD)" para que se entienda que no es del periodo).
     let totalQ = ctx.adminClient.from('clients').select('id', { count: 'exact' })
@@ -1176,7 +1183,7 @@ export const getClientsAnalytics = protectedAction<
       (() => {
         let q = ctx.adminClient
           .from('sales')
-          .select('client_id')
+          .select('client_id, store_id, created_at, sale_type, stores(name)')
           .not('client_id', 'is', null)
           .gte('created_at', start_date)
           .lte('created_at', end_date + 'T23:59:59')
@@ -1186,7 +1193,7 @@ export const getClientsAnalytics = protectedAction<
       (() => {
         let q = ctx.adminClient
           .from('tailoring_orders')
-          .select('client_id')
+          .select('client_id, store_id, created_at, stores(name)')
           .not('client_id', 'is', null)
           .gte('created_at', start_date)
           .lte('created_at', end_date + 'T23:59:59')
@@ -1194,24 +1201,66 @@ export const getClientsAnalytics = protectedAction<
         return q
       })(),
     ])
+
     const uniqueIds = new Set<string>()
-    for (const r of (salesRes.data ?? []) as Array<{ client_id: string | null }>) {
-      if (r.client_id) uniqueIds.add(r.client_id)
+    // nº8b: tipo de compra por cliente (misma definición que dimensions.ts).
+    const clientTypes: Record<string, Set<string>> = {}
+    const addType = (cid: string, t: string) => { (clientTypes[cid] ||= new Set()).add(t) }
+    // nº8: sets únicos por (día, tienda). Cada compra tiene tienda → la unión por
+    // día reconstruye el agregado.
+    const dayStore: Record<string, Record<string, { name: string; set: Set<string> }>> = {}
+    const ensureDayStore = (day: string, sid: string | null | undefined, name: string | null | undefined) => {
+      const k = sid || 'unknown'
+      ;(dayStore[day] ||= {})[k] ||= { name: name || 'Sin tienda', set: new Set<string>() }
+      return dayStore[day][k]
     }
-    for (const r of (tailoringRes.data ?? []) as Array<{ client_id: string | null }>) {
-      if (r.client_id) uniqueIds.add(r.client_id)
+
+    for (const r of (salesRes.data ?? []) as any[]) {
+      if (!r.client_id) continue
+      uniqueIds.add(r.client_id)
+      if (r.sale_type === BOUTIQUE_SALE_TYPE) addType(r.client_id, 'boutique')
+      else if (r.sale_type === GIFT_CARD_SALE_TYPE) addType(r.client_id, 'gift_cards')
+      if (!store_id && r.created_at) ensureDayStore(madridDateKey(r.created_at), r.store_id, r.stores?.name).set.add(r.client_id)
+    }
+    for (const r of (tailoringRes.data ?? []) as any[]) {
+      if (!r.client_id) continue
+      uniqueIds.add(r.client_id)
+      addType(r.client_id, 'sastreria')
+      if (!store_id && r.created_at) ensureDayStore(madridDateKey(r.created_at), r.store_id, r.stores?.name).set.add(r.client_id)
     }
     const clientsWithPurchases = uniqueIds.size
+
+    let dailyUniqueByStore: { store_id: string; store_name: string; byDay: { day: string; count: number }[] }[] | undefined
+    if (!store_id) {
+      const days = Object.keys(dayStore).sort()
+      const storeNames: Record<string, string> = {}
+      for (const day of days) for (const [sid, v] of Object.entries(dayStore[day])) storeNames[sid] = v.name
+      dailyUniqueByStore = Object.keys(storeNames)
+        .map((sid) => ({
+          store_id: sid,
+          store_name: storeNames[sid],
+          byDay: days.map((day) => ({ day, count: dayStore[day][sid]?.set.size || 0 })),
+        }))
+        .sort((a, b) => b.byDay.reduce((s, d) => s + d.count, 0) - a.byDay.reduce((s, d) => s + d.count, 0))
+    }
 
     const [newClientsRes, totalRes, topClientsRes] = await Promise.all([
       newClientsQ, totalQ, topClientsQ,
     ])
 
     const sources: Record<string, number> = {}
+    const sourcesDetailMap: Record<string, { id: string; name: string; types: string[] }[]> = {}
+    const TYPE_ORDER = ['boutique', 'gift_cards', 'sastreria']
     for (const c of newClientsRes.data || []) {
       const src = (c.source as string) || 'unknown'
       sources[src] = (sources[src] || 0) + 1
+      const name = `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || '(sin nombre)'
+      const types = TYPE_ORDER.filter((t) => clientTypes[c.id as string]?.has(t))
+      ;(sourcesDetailMap[src] ||= []).push({ id: c.id as string, name, types })
     }
+    const sourcesDetail = Object.entries(sourcesDetailMap)
+      .map(([source, clients]) => ({ source, clients }))
+      .sort((a, b) => b.clients.length - a.clients.length)
 
     const topClients = (topClientsRes.data || []).map(c => ({
       full_name: `${c.first_name} ${c.last_name}`,
@@ -1222,8 +1271,10 @@ export const getClientsAnalytics = protectedAction<
       newClients: newClientsRes.data?.length || 0,
       totalClientsHistorical: totalRes.count || 0,
       sources,
+      sourcesDetail,
       topClients,
       clientsWithPurchases,
+      dailyUniqueByStore,
     })
   }
 )
