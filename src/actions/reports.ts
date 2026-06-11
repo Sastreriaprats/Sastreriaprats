@@ -678,12 +678,18 @@ export const getSalesByStore = protectedAction<
 export const getSalesByEmployee = protectedAction<
   { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel; tax_mode?: TaxMode },
   {
-    employee_id: string; employee_name: string
-    pos_ops: number; pos_total: number; boutique_total: number
-    tailoring_ops: number; tailoring_total: number
-    tailor_orders_count: number; tailor_orders_revenue: number
-    total: number
-  }[]
+    employees: {
+      employee_id: string; employee_name: string
+      pos_ops: number; pos_total: number; boutique_total: number; gift_cards_total: number
+      tailoring_ops: number; tailoring_total: number
+      tailor_orders_count: number; tailor_orders_revenue: number
+      total: number
+    }[]
+    // Desglose por TIENDA (dimensión nº4) de los importes de ESTE tab: Boutique,
+    // Tarjetas y Sastrería COBRADA (pagos registrados, agrupados por la tienda del
+    // pedido). Solo cuando no se filtra una tienda concreta.
+    byStore?: { store_id: string; store_name: string; boutique: number; gift_cards: number; tailoring: number; total: number }[]
+  }
 >(
   { permission: 'reports.view', auditModule: 'reports' },
   async (ctx, { start_date, end_date, store_id, channel = 'all', tax_mode = 'with_tax' }) => {
@@ -694,7 +700,7 @@ export const getSalesByEmployee = protectedAction<
 
     let saleLinesQ = ctx.adminClient
       .from('sale_lines')
-      .select('sale_id, line_total, tax_rate, sales!inner(salesperson_id, status, store_id, created_at, sale_type)')
+      .select('sale_id, line_total, tax_rate, sales!inner(salesperson_id, status, store_id, stores(name), created_at, sale_type)')
       .gte('sales.created_at', start_date)
       .lte('sales.created_at', end_date + 'T23:59:59')
       .eq('sales.status', 'completed')
@@ -702,7 +708,7 @@ export const getSalesByEmployee = protectedAction<
 
     let paymentsQ = ctx.adminClient
       .from('tailoring_order_payments')
-      .select('amount, created_by, created_at, tailoring_orders!inner(store_id)')
+      .select('amount, created_by, created_at, tailoring_orders!inner(store_id, stores(name))')
       .gte('created_at', start_date)
       .lte('created_at', end_date + 'T23:59:59')
     if (store_id) paymentsQ = paymentsQ.eq('tailoring_orders.store_id', store_id)
@@ -723,7 +729,7 @@ export const getSalesByEmployee = protectedAction<
 
     const employees: Record<string, {
       name: string
-      saleIds: Set<string>; pos_total: number; boutique_total: number
+      saleIds: Set<string>; pos_total: number; boutique_total: number; gift_cards_total: number
       tailoring_ops: number; tailoring_total: number
       tailor_orders_count: number; tailor_orders_revenue: number
     }> = {}
@@ -731,7 +737,7 @@ export const getSalesByEmployee = protectedAction<
     const ensure = (id: string) => {
       if (!employees[id]) employees[id] = {
         name: id, saleIds: new Set(),
-        pos_total: 0, boutique_total: 0, tailoring_ops: 0, tailoring_total: 0,
+        pos_total: 0, boutique_total: 0, gift_cards_total: 0, tailoring_ops: 0, tailoring_total: 0,
         tailor_orders_count: 0, tailor_orders_revenue: 0,
       }
       return employees[id]
@@ -745,9 +751,11 @@ export const getSalesByEmployee = protectedAction<
       const lt = (line.line_total as number) || 0
       const amount = net ? lineNet(lt, (line as any).tax_rate) : lt
       e.pos_total += amount
-      // Boutique = ventas de producto de tienda (sale_type 'boutique'), separadas
-      // del resto de operaciones del TPV (sastrería cobrada en caja, etc.).
-      if ((sale?.sale_type ?? '') === 'boutique') e.boutique_total += amount
+      // Boutique = producto de tienda (sale_type 'boutique'); Tarjetas = saldo
+      // (sale_type 'gift_card'). Separadas con la misma definición que dimensions.ts;
+      // pos_total = boutique + gift_cards (no hay otros sale_type).
+      if ((sale?.sale_type ?? '') === BOUTIQUE_SALE_TYPE) e.boutique_total += amount
+      else if ((sale?.sale_type ?? '') === GIFT_CARD_SALE_TYPE) e.gift_cards_total += amount
     }
 
     for (const payment of paymentsRes.data || []) {
@@ -783,6 +791,7 @@ export const getSalesByEmployee = protectedAction<
         pos_ops: d.saleIds.size,
         pos_total: d.pos_total,
         boutique_total: d.boutique_total,
+        gift_cards_total: d.gift_cards_total,
         tailoring_ops: d.tailoring_ops,
         tailoring_total: d.tailoring_total,
         tailor_orders_count: d.tailor_orders_count,
@@ -791,7 +800,30 @@ export const getSalesByEmployee = protectedAction<
       }))
       .sort((a, b) => b.total - a.total)
 
-    return success(result)
+    // Desglose por tienda (solo en "Todas"): los importes de este tab agrupados por
+    // tienda. Boutique/Tarjetas por sales.store_id; Sastrería cobrada por la tienda
+    // del pedido (tailoring_orders.store_id). Reusa accumulateByStore.
+    let byStore: { store_id: string; store_name: string; boutique: number; gift_cards: number; tailoring: number; total: number }[] | undefined
+    if (!store_id) {
+      const lines = (saleLinesRes.data || []) as any[]
+      const pickLine = (l: any) => ({ storeId: l.sales?.store_id, storeName: l.sales?.stores?.name, value: net ? lineNet((l.line_total as number) || 0, l.tax_rate) : ((l.line_total as number) || 0) })
+      const boutiqueByStore = accumulateByStore(lines.filter((l) => l.sales?.sale_type === BOUTIQUE_SALE_TYPE), pickLine)
+      const giftByStore = accumulateByStore(lines.filter((l) => l.sales?.sale_type === GIFT_CARD_SALE_TYPE), pickLine)
+      const tailByStore = accumulateByStore((paymentsRes.data || []) as any[], (p: any) => ({
+        storeId: p.tailoring_orders?.store_id, storeName: p.tailoring_orders?.stores?.name,
+        value: net ? stripDefault((p.amount as number) || 0) : ((p.amount as number) || 0),
+      }))
+      const ids = new Set([...Object.keys(boutiqueByStore), ...Object.keys(giftByStore), ...Object.keys(tailByStore)])
+      byStore = [...ids].map((id) => {
+        const boutique = boutiqueByStore[id]?.total || 0
+        const gift_cards = giftByStore[id]?.total || 0
+        const tailoring = tailByStore[id]?.total || 0
+        const store_name = boutiqueByStore[id]?.store_name || giftByStore[id]?.store_name || tailByStore[id]?.store_name || 'Sin tienda'
+        return { store_id: id, store_name, boutique, gift_cards, tailoring, total: boutique + gift_cards + tailoring }
+      }).sort((a, b) => b.total - a.total)
+    }
+
+    return success({ employees: result, byStore })
   }
 )
 

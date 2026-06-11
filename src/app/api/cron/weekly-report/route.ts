@@ -64,7 +64,7 @@ export async function GET(request: NextRequest) {
             <p style="color:#6b7280;">Periodo: ${start} a ${end}</p>
             <table style="width:100%;border-collapse:collapse;margin:20px 0;">
               <tr><td style="padding:12px;border:1px solid #e5e7eb;font-weight:bold;">Facturación total</td><td style="padding:12px;border:1px solid #e5e7eb;text-align:right;font-size:20px;font-weight:bold;color:#1a2744;">${fmt(total)}</td></tr>
-              <tr><td style="padding:12px;border:1px solid #e5e7eb;">TPV / Boutique</td><td style="padding:12px;border:1px solid #e5e7eb;text-align:right;">${fmt(posTotal)}</td></tr>
+              <tr><td style="padding:12px;border:1px solid #e5e7eb;">Boutique + Tarjetas</td><td style="padding:12px;border:1px solid #e5e7eb;text-align:right;">${fmt(posTotal)}</td></tr>
               <tr><td style="padding:12px;border:1px solid #e5e7eb;">Online</td><td style="padding:12px;border:1px solid #e5e7eb;text-align:right;">${fmt(onlineTotal)}</td></tr>
               <tr><td style="padding:12px;border:1px solid #e5e7eb;">Sastrería</td><td style="padding:12px;border:1px solid #e5e7eb;text-align:right;">${fmt(tailoringTotal)}</td></tr>
               <tr><td style="padding:12px;border:1px solid #e5e7eb;">Nuevos clientes</td><td style="padding:12px;border:1px solid #e5e7eb;text-align:right;">${newClients || 0}</td></tr>

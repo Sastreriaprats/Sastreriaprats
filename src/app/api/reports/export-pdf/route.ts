@@ -141,7 +141,7 @@ function renderSales(salesData: AnyRec | null, compareData: AnyRec | null): stri
   const kpis = `
 <div class="kpi-grid">
   <div class="kpi"><div class="kpi-value">${fmtEur(t.total as number)}</div><div class="kpi-label">Facturación total ${changes ? fmtPct(changes.revenue as number) : ''}</div></div>
-  <div class="kpi"><div class="kpi-value">${fmtEur(t.pos as number)}</div><div class="kpi-label">TPV / Boutique</div></div>
+  <div class="kpi"><div class="kpi-value">${fmtEur(t.pos as number)}</div><div class="kpi-label">Boutique + Tarjetas</div></div>
   <div class="kpi"><div class="kpi-value">${fmtEur(t.tailoring as number)}</div><div class="kpi-label">Sastrería</div></div>
   <div class="kpi"><div class="kpi-value">${fmtEur(t.avgTicket as number)}</div><div class="kpi-label">Ticket medio (${t.ticketCount || 0} tickets)</div></div>
 </div>`
@@ -162,7 +162,7 @@ function renderSales(salesData: AnyRec | null, compareData: AnyRec | null): stri
   return `${kpis}
 <h2>Evolución de ventas</h2>
 <table>
-  <thead><tr><th>Fecha</th><th class="right">TPV</th><th class="right">Online</th><th class="right">Sastrería</th><th class="right">Total</th></tr></thead>
+  <thead><tr><th>Fecha</th><th class="right">Boutique + Tarjetas</th><th class="right">Online</th><th class="right">Sastrería</th><th class="right">Total</th></tr></thead>
   <tbody>${rows}</tbody>
   <tfoot><tr>
     <td>TOTAL</td>
@@ -248,17 +248,19 @@ function renderStores(items: AnyRec[] | null): string {
 <tr>
   <td>${escapeHtml(String(s.store_name ?? ''))}</td>
   <td class="right">${fmtEur(s.pos as number)}</td>
+  <td class="right">${fmtEur(s.gift_cards as number)}</td>
   <td class="right">${fmtEur(s.tailoring as number)}</td>
   <td class="right"><b>${fmtEur(s.total as number)}</b></td>
 </tr>`).join('')
   const sum = (k: string) => items.reduce((s, d) => s + (Number(d[k]) || 0), 0)
   return `<h2>Facturación por tienda</h2>
 <table>
-  <thead><tr><th>Tienda</th><th class="right">TPV</th><th class="right">Sastrería</th><th class="right">Total</th></tr></thead>
+  <thead><tr><th>Tienda</th><th class="right">Boutique</th><th class="right">Tarjetas</th><th class="right">Sastrería</th><th class="right">Total</th></tr></thead>
   <tbody>${rows}</tbody>
   <tfoot><tr>
     <td>TOTAL</td>
     <td class="right">${fmtEur(sum('pos'))}</td>
+    <td class="right">${fmtEur(sum('gift_cards'))}</td>
     <td class="right">${fmtEur(sum('tailoring'))}</td>
     <td class="right">${fmtEur(sum('total'))}</td>
   </tr></tfoot>
@@ -271,7 +273,8 @@ function renderEmployees(items: AnyRec[] | null): string {
 <tr>
   <td>${escapeHtml(String(e.employee_name ?? ''))}</td>
   <td class="right muted">${e.pos_ops || 0}</td>
-  <td class="right">${fmtEur(e.pos_total as number)}</td>
+  <td class="right">${fmtEur(e.boutique_total as number)}</td>
+  <td class="right">${fmtEur(e.gift_cards_total as number)}</td>
   <td class="right muted">${e.tailoring_ops || 0}</td>
   <td class="right">${fmtEur(e.tailoring_total as number)}</td>
   <td class="right muted">${e.tailor_orders_count || 0}</td>
@@ -280,22 +283,25 @@ function renderEmployees(items: AnyRec[] | null): string {
 </tr>`).join('')
   const sum = (k: string) => items.reduce((s, d) => s + (Number(d[k]) || 0), 0)
   return `<h2>Ventas por empleado</h2>
+<p class="muted" style="font-size:10px;margin:0 0 6px">Dinero que pasó por la caja de cada empleado (cobrar ≠ vender). «Sastrería cobrada» = pagos registrados en su caja, aunque el pedido sea de otro sastre.</p>
 <table>
   <thead><tr>
     <th>Empleado</th>
-    <th class="right">Ventas TPV</th>
-    <th class="right">Total TPV</th>
-    <th class="right">Cobros Sast.</th>
-    <th class="right">Total Sast.</th>
+    <th class="right">Nº ventas</th>
+    <th class="right">Boutique</th>
+    <th class="right">Tarjetas</th>
+    <th class="right">Nº cobros sast.</th>
+    <th class="right">Sastrería cobrada (su caja)</th>
     <th class="right">Pedidos sastre</th>
     <th class="right">Fact. sastre</th>
-    <th class="right">Total</th>
+    <th class="right">Total (su caja)</th>
   </tr></thead>
   <tbody>${rows}</tbody>
   <tfoot><tr>
     <td>TOTAL</td>
     <td class="right">${sum('pos_ops')}</td>
-    <td class="right">${fmtEur(sum('pos_total'))}</td>
+    <td class="right">${fmtEur(sum('boutique_total'))}</td>
+    <td class="right">${fmtEur(sum('gift_cards_total'))}</td>
     <td class="right">${sum('tailoring_ops')}</td>
     <td class="right">${fmtEur(sum('tailoring_total'))}</td>
     <td class="right">${sum('tailor_orders_count')}</td>

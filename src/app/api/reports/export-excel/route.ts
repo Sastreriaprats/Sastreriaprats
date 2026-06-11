@@ -84,7 +84,7 @@ function sectionSales(rows: Row[], salesData: AnyRec | null, compareData: AnyRec
 
   rows.push(['RESUMEN'])
   rows.push(['Facturación total', num(t.total)])
-  rows.push(['TPV / Boutique', num(t.pos)])
+  rows.push(['Boutique + Tarjetas', num(t.pos)])
   rows.push(['Online', num(t.online)])
   rows.push(['Sastrería', num(t.tailoring)])
   rows.push(['Tickets', num(t.ticketCount)])
@@ -97,7 +97,7 @@ function sectionSales(rows: Row[], salesData: AnyRec | null, compareData: AnyRec
   rows.push([])
 
   rows.push(['EVOLUCIÓN DE VENTAS'])
-  rows.push(['Fecha', 'TPV', 'Online', 'Sastrería', 'Total'])
+  rows.push(['Fecha', 'Boutique + Tarjetas', 'Online', 'Sastrería', 'Total'])
   for (const d of chart) {
     rows.push([String(d.date ?? ''), num(d.pos), num(d.online), num(d.tailoring), num(d.total)])
   }
@@ -157,27 +157,28 @@ function sectionClients(rows: Row[], data: AnyRec | null) {
 function sectionStores(rows: Row[], items: AnyRec[] | null) {
   if (!items?.length) { rows.push(['Sin datos para el periodo seleccionado']); return }
   rows.push(['FACTURACIÓN POR TIENDA'])
-  rows.push(['Tienda', 'TPV', 'Sastrería', 'Total'])
+  rows.push(['Tienda', 'Boutique', 'Tarjetas', 'Sastrería', 'Total'])
   for (const s of items) {
-    rows.push([String(s.store_name ?? ''), num(s.pos), num(s.tailoring), num(s.total)])
+    rows.push([String(s.store_name ?? ''), num(s.pos), num(s.gift_cards), num(s.tailoring), num(s.total)])
   }
   const sum = (k: string) => items.reduce((acc, d) => acc + (Number(d[k]) || 0), 0)
-  rows.push(['TOTAL', sum('pos'), sum('tailoring'), sum('total')])
+  rows.push(['TOTAL', sum('pos'), sum('gift_cards'), sum('tailoring'), sum('total')])
 }
 
 function sectionEmployees(rows: Row[], items: AnyRec[] | null) {
   if (!items?.length) { rows.push(['Sin datos para el periodo seleccionado']); return }
   rows.push(['VENTAS POR EMPLEADO'])
-  rows.push(['Empleado', 'Ventas TPV', 'Total TPV', 'Cobros Sastrería', 'Total Sastrería', 'Pedidos sastre', 'Fact. sastre', 'Total'])
+  rows.push(['(Dinero por la caja de cada empleado — cobrar ≠ vender; «Sastrería cobrada» = pagos registrados en su caja aunque el pedido sea de otro sastre)'])
+  rows.push(['Empleado', 'Nº ventas', 'Boutique', 'Tarjetas', 'Nº cobros sast.', 'Sastrería cobrada (su caja)', 'Pedidos sastre', 'Fact. sastre', 'Total (su caja)'])
   for (const e of items) {
     rows.push([
-      String(e.employee_name ?? ''), num(e.pos_ops), num(e.pos_total),
+      String(e.employee_name ?? ''), num(e.pos_ops), num(e.boutique_total), num(e.gift_cards_total),
       num(e.tailoring_ops), num(e.tailoring_total), num(e.tailor_orders_count),
       num(e.tailor_orders_revenue), num(e.total),
     ])
   }
   const sum = (k: string) => items.reduce((acc, d) => acc + (Number(d[k]) || 0), 0)
-  rows.push(['TOTAL', sum('pos_ops'), sum('pos_total'), sum('tailoring_ops'), sum('tailoring_total'), sum('tailor_orders_count'), sum('tailor_orders_revenue'), sum('total')])
+  rows.push(['TOTAL', sum('pos_ops'), sum('boutique_total'), sum('gift_cards_total'), sum('tailoring_ops'), sum('tailoring_total'), sum('tailor_orders_count'), sum('tailor_orders_revenue'), sum('total')])
 }
 
 function sectionTime(rows: Row[], data: AnyRec | null) {
