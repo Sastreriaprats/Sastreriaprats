@@ -1318,6 +1318,33 @@ function recalculateInvoiceTotals(
   }
 }
 
+// Genera el siguiente número de una serie documental (facturas, presupuestos…)
+// del año en curso. Usa el MÁXIMO de la secuencia existente + 1 (no el conteo):
+// el conteo se rompe en cuanto hay un hueco —p. ej. un documento borrado o
+// anulado— porque vuelve a producir un número ya usado y choca con la
+// restricción UNIQUE de la columna (invoices_invoice_number_key, etc.).
+async function nextSeriesNumber(
+  adminClient: AdminClient,
+  table: 'invoices' | 'estimates',
+  column: string,
+  prefix: string
+): Promise<string> {
+  const year = new Date().getFullYear()
+  const { data } = await adminClient
+    .from(table)
+    .select(column)
+    .like(column, `${prefix}${year}-%`)
+    .order(column, { ascending: false })
+    .limit(1)
+  const last = (data?.[0] as Record<string, string | undefined> | undefined)?.[column]
+  const lastSeq = last ? parseInt(last.split('-')[1], 10) || 0 : 0
+  const seq = String(lastSeq + 1).padStart(4, '0')
+  return `${prefix}${year}-${seq}`
+}
+
+const nextInvoiceNumber = (adminClient: AdminClient) =>
+  nextSeriesNumber(adminClient, 'invoices', 'invoice_number', 'F')
+
 export const createInvoiceAction = protectedAction<CreateInvoiceInput, { id: string; invoice_number: string }>(
   {
     permission: 'accounting.manage_invoices',
@@ -1326,14 +1353,7 @@ export const createInvoiceAction = protectedAction<CreateInvoiceInput, { id: str
     auditEntity: 'invoice',
   },
   async (ctx, input) => {
-    const year = new Date().getFullYear()
-    const { count } = await ctx.adminClient
-      .from('invoices')
-      .select('*', { count: 'exact', head: true })
-      .like('invoice_number', `F${year}-%`)
-
-    const seq = String((count ?? 0) + 1).padStart(4, '0')
-    const invoice_number = `F${year}-${seq}`
+    const invoice_number = await nextInvoiceNumber(ctx.adminClient)
 
     const recalc = recalculateInvoiceTotals(input.lines, input.irpf_rate)
 
@@ -1465,13 +1485,7 @@ export const createInvoiceFromSaleAction = protectedAction<
       }
     }
 
-    const year = new Date().getFullYear()
-    const { count } = await ctx.adminClient
-      .from('invoices')
-      .select('*', { count: 'exact', head: true })
-      .like('invoice_number', `F${year}-%`)
-    const seq = String((count ?? 0) + 1).padStart(4, '0')
-    const invoice_number = `F${year}-${seq}`
+    const invoice_number = await nextInvoiceNumber(ctx.adminClient)
 
     const subtotal = Number((sale as { subtotal?: number }).subtotal ?? 0)
     const taxAmount = Number((sale as { tax_amount?: number }).tax_amount ?? 0)
@@ -1667,13 +1681,7 @@ export const createInvoiceFromTailoringOrderAction = protectedAction<
       }
     }
 
-    const year = new Date().getFullYear()
-    const { count } = await ctx.adminClient
-      .from('invoices')
-      .select('*', { count: 'exact', head: true })
-      .like('invoice_number', `F${year}-%`)
-    const seq = String((count ?? 0) + 1).padStart(4, '0')
-    const invoice_number = `F${year}-${seq}`
+    const invoice_number = await nextInvoiceNumber(ctx.adminClient)
 
     const subtotal = lines.reduce((s: number, l: any) => s + l.quantity * l.unit_price, 0)
     const taxAmount = lines.reduce((s: number, l: any) => s + (l.line_total - l.quantity * l.unit_price), 0)
@@ -2118,14 +2126,7 @@ export const createEstimateAction = protectedAction<CreateEstimateInput, { id: s
     auditEntity: 'estimate',
   },
   async (ctx, input) => {
-    const year = new Date().getFullYear()
-    const { count } = await ctx.adminClient
-      .from('estimates')
-      .select('*', { count: 'exact', head: true })
-      .like('estimate_number', `PRES${year}-%`)
-
-    const seq = String((count ?? 0) + 1).padStart(4, '0')
-    const estimate_number = `PRES${year}-${seq}`
+    const estimate_number = await nextSeriesNumber(ctx.adminClient, 'estimates', 'estimate_number', 'PRES')
 
     const { data: est, error } = await ctx.adminClient
       .from('estimates')
@@ -2470,10 +2471,7 @@ export const convertEstimateToInvoiceAction = protectedAction<{ estimateId: stri
     if (!est) return failure('Presupuesto no encontrado')
     if (est.status !== 'accepted') return failure('Solo se pueden facturar presupuestos aceptados')
 
-    const year = new Date().getFullYear()
-    const { count } = await ctx.adminClient.from('invoices').select('*', { count: 'exact', head: true }).like('invoice_number', `F${year}-%`)
-    const seq = String((count ?? 0) + 1).padStart(4, '0')
-    const invoice_number = `F${year}-${seq}`
+    const invoice_number = await nextInvoiceNumber(ctx.adminClient)
 
     const { data: lines } = await ctx.adminClient.from('estimate_lines').select('description, quantity, unit_price, tax_rate, total').eq('estimate_id', estimateId)
 
