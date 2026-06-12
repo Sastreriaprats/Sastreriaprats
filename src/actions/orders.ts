@@ -1818,20 +1818,34 @@ export const updateOrderPaymentDate = protectedAction<
 )
 
 export const deleteOrder = protectedAction<string, void>(
-  { permission: 'orders.delete', auditModule: 'orders', auditAction: 'delete' },
+  { permission: 'orders.delete', auditModule: 'orders', auditEntity: 'tailoring_order', auditAction: 'delete' },
   async (ctx, orderId) => {
     const admin = ctx.adminClient
 
-    // Verificar que el pedido existe
+    // Verificar que el pedido existe. Capturamos la cabecera COMPLETA (no solo
+    // id/order_number) porque al borrar se pierde todo por CASCADE: el snapshot
+    // que guardamos en auditoría es la única vía para identificar y reconstruir
+    // el pedido después. (Antes el log de borrado salía con todos los campos en
+    // null y era imposible saber qué pedido se había eliminado.)
     const { data: order, error: fetchError } = await admin
       .from('tailoring_orders')
-      .select('id, order_number')
+      .select('*')
       .eq('id', orderId)
       .single()
 
     if (fetchError || !order) {
       return failure('Pedido no encontrado', 'NOT_FOUND')
     }
+
+    // Snapshot de líneas y cobros para el registro de auditoría (append-only).
+    const { data: snapshotLines } = await admin
+      .from('tailoring_order_lines')
+      .select('*')
+      .eq('tailoring_order_id', orderId)
+    const { data: snapshotPayments } = await admin
+      .from('tailoring_order_payments')
+      .select('*')
+      .eq('tailoring_order_id', orderId)
 
     // 1. Reponer stock de tejido ANTES de borrar las líneas (necesita leerlas
     //    para saber qué metros volver al stock). Idempotente.
@@ -1875,6 +1889,20 @@ export const deleteOrder = protectedAction<string, void>(
     }
 
     revalidatePath('/admin/pedidos')
-    return success(undefined)
+    return success({
+      auditEntityId: orderId,
+      auditEntityDisplay: `tailoring_order: ${(order as { order_number?: string }).order_number ?? orderId}`,
+      auditDescription: `Eliminó el pedido ${(order as { order_number?: string }).order_number ?? orderId}`,
+      auditOldData: {
+        order,
+        lines: snapshotLines ?? [],
+        payments: snapshotPayments ?? [],
+      },
+      auditMetadata: {
+        order_number: (order as { order_number?: string }).order_number ?? null,
+        lines_count: snapshotLines?.length ?? 0,
+        payments_count: snapshotPayments?.length ?? 0,
+      },
+    } as unknown as void)
   }
 )
