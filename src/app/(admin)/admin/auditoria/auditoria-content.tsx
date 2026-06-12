@@ -8,7 +8,7 @@ import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Loader2, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react'
+import { Loader2, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Search, X } from 'lucide-react'
 import { getAuditLogs } from '@/actions/users'
 import { formatDateTime } from '@/lib/utils'
 
@@ -89,9 +89,16 @@ export function AuditoriaContent() {
 
   const [filterAction, setFilterAction] = useState('all')
   const [filterEntity, setFilterEntity] = useState('all')
-  const [filterUser, setFilterUser] = useState('')
   const [filterDateFrom, setFilterDateFrom] = useState('')
   const [filterDateTo, setFilterDateTo] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const [search, setSearch] = useState('')
+
+  // Debounce de la búsqueda: 350ms tras dejar de teclear
+  useEffect(() => {
+    const t = setTimeout(() => { setSearch(searchInput.trim()); setPage(1) }, 350)
+    return () => clearTimeout(t)
+  }, [searchInput])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -102,11 +109,12 @@ export function AuditoriaContent() {
       entityType: filterEntity !== 'all' ? filterEntity : undefined,
       dateFrom: filterDateFrom || undefined,
       dateTo: filterDateTo ? filterDateTo + 'T23:59:59Z' : undefined,
+      search: search || undefined,
     })
     if (res.error) setLoadError(res.error)
     else if (res.data) { setLogs(res.data); setCount(res.count ?? 0) }
     setLoading(false)
-  }, [page, filterAction, filterEntity, filterDateFrom, filterDateTo])
+  }, [page, filterAction, filterEntity, filterDateFrom, filterDateTo, search])
 
   useEffect(() => { load() }, [load])
 
@@ -370,6 +378,25 @@ export function AuditoriaContent() {
       {/* Filtros */}
       <Card>
         <CardContent className="pt-4 pb-3">
+          <div className="relative mb-3">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+              value={searchInput}
+              onChange={e => setSearchInput(e.target.value)}
+              placeholder="Buscar por descripción, usuario, nº de pedido, ticket, cliente…"
+              className="pl-9 pr-9 h-9"
+            />
+            {searchInput && (
+              <button
+                type="button"
+                onClick={() => setSearchInput('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label="Limpiar búsqueda"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
           <div className="flex flex-wrap gap-3">
                 <Select value={filterAction} onValueChange={v => { setFilterAction(v); setPage(1) }}>
               <SelectTrigger className="w-40 h-8 text-sm"><SelectValue placeholder="Acción" /></SelectTrigger>
@@ -397,7 +424,7 @@ export function AuditoriaContent() {
               value={filterDateTo}
               onChange={date => { setFilterDateTo(date); setPage(1) }}
             />
-            <Button variant="ghost" size="sm" onClick={() => { setFilterAction('all'); setFilterEntity('all'); setFilterDateFrom(''); setFilterDateTo(''); setPage(1) }}>
+            <Button variant="ghost" size="sm" onClick={() => { setFilterAction('all'); setFilterEntity('all'); setFilterDateFrom(''); setFilterDateTo(''); setSearchInput(''); setPage(1) }}>
               Limpiar
             </Button>
           </div>

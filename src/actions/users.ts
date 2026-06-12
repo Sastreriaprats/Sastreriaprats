@@ -436,6 +436,7 @@ export async function getAuditLogs(filters: {
   action?: string
   dateFrom?: string
   dateTo?: string
+  search?: string
 } = {}): Promise<{ data?: { id: string; user_name: string; action: string; action_display: string; entity_type: string; entity_type_display: string; entity_id: string | null; entity_label: string | null; changes: Record<string, unknown> | null; metadata: Record<string, unknown> | null; created_at: string }[]; count?: number; error?: string }> {
   // Traducción de acciones y entidades al español (columnas Acción y Entidad)
   const ACTION_DISPLAY_ES: Record<string, string> = {
@@ -520,6 +521,29 @@ export async function getAuditLogs(filters: {
     if (filters.action)     q = q.eq('action', filters.action)
     if (filters.dateFrom)   q = q.gte('created_at', filters.dateFrom)
     if (filters.dateTo)     q = q.lte('created_at', filters.dateTo)
+
+    // Búsqueda inteligente: por descripción, usuario, email o nº de pedido/ticket
+    // (los números viven dentro de description/entity_display). Multi-palabra ⇒ se
+    // unen con % para no exigir orden exacto: "luis cobo" casa "Cliente: LUIS COBO".
+    if (filters.search && filters.search.trim()) {
+      // Sanear caracteres que rompen el parser de PostgREST en .or() (comas, paréntesis)
+      const words = filters.search
+        .trim()
+        .replace(/[(),]/g, ' ')
+        .split(/\s+/)
+        .filter(Boolean)
+      if (words.length > 0) {
+        const pattern = `%${words.join('%')}%`
+        q = q.or(
+          [
+            `description.ilike.${pattern}`,
+            `entity_display.ilike.${pattern}`,
+            `user_full_name.ilike.${pattern}`,
+            `user_email.ilike.${pattern}`,
+          ].join(',')
+        )
+      }
+    }
 
     const { data, count, error } = await q
     if (error) return { error: error.message }
