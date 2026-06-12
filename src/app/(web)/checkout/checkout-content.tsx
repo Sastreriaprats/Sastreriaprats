@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Loader2, Lock, ShoppingBag, Truck, Store, AlertCircle, Tag, X } from 'lucide-react'
 import { AcceptedCards } from './accepted-cards'
 import { useCart } from '@/components/providers/cart-provider'
@@ -37,6 +38,7 @@ export function CheckoutContent() {
   const [deliveryMethod, setDeliveryMethod] = useState<'home' | 'store'>('home')
   const [clientProfile, setClientProfile] = useState<ClientProfile | null>(null)
   const [profileLoaded, setProfileLoaded] = useState(false)
+  const [acceptedTerms, setAcceptedTerms] = useState(false)
 
   const [form, setForm] = useState({
     first_name: '', last_name: '', email: '', phone: '',
@@ -132,6 +134,10 @@ export function CheckoutContent() {
   const handlePay = async () => {
     if (!form.first_name || !form.last_name || !form.email) {
       toast.error('Completa los datos de contacto')
+      return
+    }
+    if (!acceptedTerms) {
+      toast.error('Debes aceptar los términos y condiciones')
       return
     }
     if (deliveryMethod === 'home') {
@@ -421,10 +427,37 @@ export function CheckoutContent() {
                 <span>{formatPrice(total)}</span>
               </div>
             </div>
+            <div className="mt-6 flex items-start gap-2.5">
+              <Checkbox
+                id="checkout-terms"
+                checked={acceptedTerms}
+                onCheckedChange={v => setAcceptedTerms(v === true)}
+                className="mt-0.5"
+              />
+              <Label htmlFor="checkout-terms" className="text-xs font-normal leading-snug text-gray-600 cursor-pointer">
+                He leído y acepto los{' '}
+                <Link
+                  href="/terminos"
+                  target="_blank"
+                  className="font-medium text-prats-navy underline underline-offset-2 hover:text-prats-navy-light"
+                >
+                  términos y condiciones
+                </Link>
+                {' '}y la{' '}
+                <Link
+                  href="/privacidad"
+                  target="_blank"
+                  className="font-medium text-prats-navy underline underline-offset-2 hover:text-prats-navy-light"
+                >
+                  política de privacidad
+                </Link>
+                .
+              </Label>
+            </div>
             <Button
               size="lg"
-              className="w-full mt-6 h-14 bg-prats-navy hover:bg-prats-navy-light text-sm tracking-wide uppercase"
-              disabled={isProcessing}
+              className="w-full mt-4 h-14 bg-prats-navy hover:bg-prats-navy-light text-sm tracking-wide uppercase"
+              disabled={isProcessing || !acceptedTerms}
               onClick={handlePay}
             >
               {isProcessing ? (
