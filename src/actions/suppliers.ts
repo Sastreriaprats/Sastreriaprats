@@ -1176,7 +1176,7 @@ export const updateSupplierOrderLinesAction = protectedAction<
           quantity: l.quantity,
           unit: l.unit,
           unit_price: l.unit_price,
-          total_price: l.quantity * l.unit_price,
+          // total_price es columna generada (GENERATED ALWAYS) en la BD: no se escribe.
           quantity_received: String(l.quantity_received.toFixed(2)),
           is_fully_received: l.quantity_received >= l.quantity,
           ...(delta !== 0 ? { received_at: now, received_by: userId } : {}),
@@ -1210,7 +1210,7 @@ export const updateSupplierOrderLinesAction = protectedAction<
             quantity: l.quantity,
             unit: l.unit,
             unit_price: l.unit_price,
-            total_price: l.quantity * l.unit_price,
+            // total_price es columna generada (GENERATED ALWAYS) en la BD: no se escribe.
             quantity_received: String(l.quantity_received.toFixed(2)),
             is_fully_received: l.quantity_received >= l.quantity,
             sort_order: nextSort,
