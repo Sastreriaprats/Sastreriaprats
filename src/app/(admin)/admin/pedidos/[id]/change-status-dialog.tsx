@@ -44,7 +44,7 @@ export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus,
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader><DialogTitle>Avanzar estado de las prendas</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Estado del pedido</DialogTitle></DialogHeader>
         <div className="space-y-4 py-4">
           <div className="flex items-center gap-3 p-3 rounded-lg bg-muted">
             <Badge className={`${getOrderStatusColor(currentStatus)}`}>{getOrderStatusLabel(currentStatus)}</Badge>

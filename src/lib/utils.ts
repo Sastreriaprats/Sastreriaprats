@@ -172,10 +172,10 @@ export function getOrderStatusLabel(status: string): string {
     fabric_received_factory: 'Tejido recibido en fábrica',
     cut: 'Cortado',
     in_production: 'En confección',
-    in_fitting: 'En prueba',
+    in_fitting: 'Pendiente 1ª prueba',
     received_in_store: 'Recibido en tienda',
     finished: 'Terminado',
-    delivered: 'Entregado',
+    delivered: 'Entregado al cliente',
     incident: 'Incidencia',
     cancelled: 'Cancelado',
   }

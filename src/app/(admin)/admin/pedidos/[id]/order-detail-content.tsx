@@ -131,7 +131,7 @@ export function OrderDetailContent({ order }: { order: any }) {
           )}
           {can('orders.edit') && (isAdmin || !['delivered', 'cancelled'].includes(order.status)) && (
             <Button onClick={() => setShowStatusDialog(true)} className="bg-prats-navy hover:bg-prats-navy-light">
-              Avanzar prendas
+              Estado del pedido
             </Button>
           )}
         </div>
