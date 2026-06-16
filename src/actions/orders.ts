@@ -1212,9 +1212,10 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
     if (orderErr || !orderBefore) return failure('Pedido no encontrado', 'NOT_FOUND')
 
     const currentStatus = String((orderBefore as any).status)
-    // Editabilidad por PAGO/FACTURA, no por entrega: un pedido entregado pero aún
-    // pendiente de cobro se puede corregir de precio. Bloqueamos si está cancelado,
-    // ya pagado por completo, o facturado. (delivered por sí solo ya no bloquea.)
+    // Editabilidad: un pedido cancelado no se edita. Si está PAGADO del todo
+    // (total_pending<=0) o FACTURADO, los DATOS de confección sí se pueden editar
+    // (medidas, tejido, cortador, notas…) pero NO los importes (evita descuadrar el
+    // cobro/factura). El rechazo es selectivo: solo si el update intenta cambiar precio.
     const ob = orderBefore as Record<string, unknown>
     const totalPaidBefore = Number(ob.total_paid) || 0
     const totalPendingBefore = Number(ob.total_pending) || 0
@@ -1222,12 +1223,7 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
     if (currentStatus === 'cancelled') {
       return failure('No se puede editar un pedido cancelado', 'CONFLICT')
     }
-    if (invoiceId) {
-      return failure('No se puede editar un pedido ya facturado', 'CONFLICT')
-    }
-    if (totalPendingBefore <= 0) {
-      return failure('No se puede editar un pedido ya pagado por completo', 'CONFLICT')
-    }
+    const priceLocked = totalPendingBefore <= 0 || !!invoiceId
 
     const { data: linesBefore } = await admin
       .from('tailoring_order_lines')
@@ -1252,11 +1248,46 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
       }
     }
 
+    // 2.a Rechazo SELECTIVO de cambios de importe en pedidos pagados/facturados
+    // (ANTES de tocar nada, para no persistir parcial). Se permite editar confección;
+    // solo se bloquea si el update intenta cambiar el PRECIO: descuento de cabecera,
+    // o (en alguna línea) unit_price / descuento / IVA, o añadir/quitar líneas.
+    if (priceLocked) {
+      let monetaryChange = false
+      if (headerUpdate.discount_percentage !== undefined &&
+          Number(headerUpdate.discount_percentage) !== (Number(ob.discount_percentage) || 0)) {
+        monetaryChange = true
+      }
+      if (!monetaryChange && input.lines !== undefined) {
+        const beforeById = new Map(linesBeforeArr.map((l) => [String(l.id), l]))
+        const incomingIds = new Set(input.lines.map((l) => l.id).filter(Boolean) as string[])
+        if (input.lines.some((l) => !l.id)) {
+          monetaryChange = true // línea nueva → cambia el total
+        } else if (linesBeforeArr.some((l) => !incomingIds.has(String(l.id)))) {
+          monetaryChange = true // línea eliminada → cambia el total
+        } else {
+          for (const l of input.lines) {
+            const b = beforeById.get(String(l.id))
+            if (!b) { monetaryChange = true; break }
+            if ((Number(l.unit_price) || 0) !== (Number(b.unit_price) || 0)) { monetaryChange = true; break }
+            if ((Number(l.discount_percentage) || 0) !== (Number(b.discount_percentage) || 0)) { monetaryChange = true; break }
+            if (Number(l.tax_rate ?? 21) !== Number(b.tax_rate ?? 21)) { monetaryChange = true; break }
+          }
+        }
+      }
+      if (monetaryChange) {
+        return failure(
+          'No se puede cambiar el precio de un pedido ya pagado o facturado (evita descuadrar el cobro). El resto de datos (confección, medidas, tejido, notas…) sí se puede editar.',
+          'CONFLICT',
+        )
+      }
+    }
+
     // 2.b Protección de cobros (ANTES de tocar líneas/stock, para no persistir nada
     // si se rechaza): si ya hay algo cobrado, el nuevo total no puede quedar por
     // debajo de lo pagado. Calculamos el total proyectado con la misma fórmula que
     // el recálculo posterior (líneas entrantes si vienen, si no las actuales).
-    if (totalPaidBefore > 0) {
+    if (!priceLocked && totalPaidBefore > 0) {
       const projectedSubtotalLines = input.lines !== undefined
         ? input.lines.reduce((s, l) => {
             const up = Number(l.unit_price) || 0
@@ -1440,10 +1471,15 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
     const total = subtotalAfterHeaderDiscount
     const subtotal = round2(total - taxAmount)
 
-    headerUpdate.subtotal = subtotal
-    headerUpdate.discount_amount = discountAmount
-    headerUpdate.tax_amount = taxAmount
-    headerUpdate.total = total
+    // Pedido con precio bloqueado (pagado/facturado): ya validamos arriba que el
+    // update NO cambia importes, así que NO reescribimos la cabecera monetaria
+    // (la preservamos tal cual, sin riesgo de drift por el recálculo).
+    if (!priceLocked) {
+      headerUpdate.subtotal = subtotal
+      headerUpdate.discount_amount = discountAmount
+      headerUpdate.tax_amount = taxAmount
+      headerUpdate.total = total
+    }
     headerUpdate.updated_at = new Date().toISOString()
 
     const { data: orderAfter, error: updOrderErr } = await admin

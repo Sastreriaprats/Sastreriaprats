@@ -54,10 +54,11 @@ export function OrderDetailContent({ order }: { order: any }) {
   }
 
   const isOverdue = order.estimated_delivery_date && new Date(order.estimated_delivery_date) < new Date() && !['delivered', 'cancelled'].includes(order.status)
-  // Editable por PAGO/FACTURA, no por entrega: se puede corregir el precio de un
-  // pedido entregado pero pendiente de cobro. Bloqueado si cancelado, ya pagado del
-  // todo, o facturado. (Coincide con la regla del backend en updateOrderAction.)
-  const canEditOrder = order.status !== 'cancelled' && !order.invoice_id && Number(order.total_pending) > 0
+  // El botón "Editar pedido" se muestra siempre salvo en cancelados: los datos de
+  // confección (medidas, tejido, cortador, notas…) deben poder corregirse aunque el
+  // pedido esté pagado. El bloqueo de los campos MONETARIOS en pagados/facturados se
+  // hace dentro del diálogo y en updateOrderAction (rechazo selectivo del precio).
+  const canEditOrder = order.status !== 'cancelled'
   const totalCost = (order.total_material_cost || 0) + (order.total_labor_cost || 0) + (order.total_factory_cost || 0)
   const marginAmount = Number(order.total ?? 0) - totalCost
   const marginPct = order.total > 0 ? (marginAmount / Number(order.total) * 100) : 0

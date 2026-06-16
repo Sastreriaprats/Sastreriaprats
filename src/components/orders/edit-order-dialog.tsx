@@ -116,6 +116,9 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
   const router = useRouter()
   const { can } = usePermissions()
   const canViewCosts = can('orders.view_costs')
+  // Pedido pagado del todo o facturado → los campos MONETARIOS van en read-only
+  // (no descuadrar el cobro). El resto de datos (confección) sí editables.
+  const priceLocked = (Number(order?.total_pending) || 0) <= 0 || !!order?.invoice_id
 
   // Cabecera
   const [clientId, setClientId] = useState<string | null>(order?.client_id ?? null)
@@ -694,6 +697,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                 <Input
                   type="number" min={0} max={100} step={0.01}
                   value={discountPct}
+                  disabled={priceLocked}
                   onChange={(e) => setDiscountPct(Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)))}
                 />
               </div>
@@ -732,10 +736,15 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
           <section className="space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold">Prendas ({lines.length})</h3>
-              <Button size="sm" variant="outline" className="gap-1" onClick={addLine}>
+              <Button size="sm" variant="outline" className="gap-1" onClick={addLine} disabled={priceLocked}>
                 <Plus className="h-3 w-3" /> Añadir línea
               </Button>
             </div>
+            {priceLocked && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                El precio no se puede editar porque el pedido ya está pagado o facturado (evita descuadrar el cobro). El resto de datos (tejido, cortador, medidas, notas…) sí se puede editar.
+              </p>
+            )}
             {lines.length === 0 ? (
               <div className="rounded-md border p-6 text-center text-sm text-muted-foreground">
                 No hay prendas. Añade al menos una.
@@ -784,29 +793,29 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                           </Select>
                         </TableCell>
                         <TableCell>
-                          <Input className="h-8 text-xs" type="number" min={0} step={0.01}
+                          <Input className="h-8 text-xs" type="number" min={0} step={0.01} disabled={priceLocked}
                             value={l.unit_price} onChange={(e) => updateLine(l._key, 'unit_price', parseFloat(e.target.value) || 0)} />
                         </TableCell>
                         <TableCell>
-                          <Input className="h-8 text-xs" type="number" min={0} max={100} step={0.01}
+                          <Input className="h-8 text-xs" type="number" min={0} max={100} step={0.01} disabled={priceLocked}
                             value={l.discount_percentage} onChange={(e) => updateLine(l._key, 'discount_percentage', parseFloat(e.target.value) || 0)} />
                         </TableCell>
                         <TableCell>
-                          <Input className="h-8 text-xs" type="number" min={0} max={100} step={0.01}
+                          <Input className="h-8 text-xs" type="number" min={0} max={100} step={0.01} disabled={priceLocked}
                             value={l.tax_rate} onChange={(e) => updateLine(l._key, 'tax_rate', parseFloat(e.target.value) || 0)} />
                         </TableCell>
                         {canViewCosts && (
                           <>
                             <TableCell>
-                              <Input className="h-8 text-xs" type="number" min={0} step={0.01}
+                              <Input className="h-8 text-xs" type="number" min={0} step={0.01} disabled={priceLocked}
                                 value={l.material_cost} onChange={(e) => updateLine(l._key, 'material_cost', parseFloat(e.target.value) || 0)} />
                             </TableCell>
                             <TableCell>
-                              <Input className="h-8 text-xs" type="number" min={0} step={0.01}
+                              <Input className="h-8 text-xs" type="number" min={0} step={0.01} disabled={priceLocked}
                                 value={l.labor_cost} onChange={(e) => updateLine(l._key, 'labor_cost', parseFloat(e.target.value) || 0)} />
                             </TableCell>
                             <TableCell>
-                              <Input className="h-8 text-xs" type="number" min={0} step={0.01}
+                              <Input className="h-8 text-xs" type="number" min={0} step={0.01} disabled={priceLocked}
                                 value={l.factory_cost} onChange={(e) => updateLine(l._key, 'factory_cost', parseFloat(e.target.value) || 0)} />
                             </TableCell>
                           </>
@@ -984,7 +993,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-red-600" onClick={() => removeLine(l._key)}>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-red-600" onClick={() => removeLine(l._key)} disabled={priceLocked} title={priceLocked ? 'No se pueden quitar líneas en un pedido pagado' : 'Eliminar línea'}>
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </TableCell>
