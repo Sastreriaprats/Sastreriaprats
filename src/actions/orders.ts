@@ -734,6 +734,70 @@ export const updateStateHistoryDate = protectedAction<{ historyId: string; newDa
   }
 )
 
+/**
+ * Re-numera un pedido al SIGUIENTE número libre del prefijo de su tienda actual
+ * (getNextNumber). Pensado para corregir el prefijo cuando se ha movido el pedido
+ * a otra tienda y el order_number quedó con el prefijo viejo (caso Teresa).
+ *
+ * PROTECCIÓN: si el pedido YA tiene cobros (total_paid > 0) se BLOQUEA. Los espejos
+ * de caja en manual_transactions se enlazan por el TEXTO del order_number (no hay FK
+ * uuid), y rpc_remove/update_order_payment los localizan por ese texto: renumerar
+ * dejaría esos apuntes huérfanos → descuadre de caja. El manejo de pedidos con
+ * cobros se decide aparte; aquí, de momento, no se permite.
+ */
+export const renumberOrderToStore = protectedAction<{ orderId: string }, { order_number: string }>(
+  {
+    permission: 'orders.edit',
+    auditModule: 'orders',
+    auditEntity: 'tailoring_order',
+    auditAction: 'update',
+    revalidate: ['/admin/pedidos'],
+  },
+  async (ctx, { orderId }) => {
+    if (!orderId?.trim()) return failure('Pedido requerido', 'VALIDATION')
+
+    const { data: order, error: orderErr } = await ctx.adminClient
+      .from('tailoring_orders')
+      .select('id, order_number, store_id, total_paid')
+      .eq('id', orderId)
+      .single()
+    if (orderErr || !order) return failure('Pedido no encontrado', 'NOT_FOUND')
+    const o = order as { order_number: string; store_id: string | null; total_paid: number | string }
+
+    // Protección de cobros: si ya hay algo cobrado, no renumerar (rompería los
+    // espejos de caja enlazados por texto del número).
+    if ((Number(o.total_paid) || 0) > 0) {
+      return failure(
+        'Este pedido ya tiene cobros registrados. Renumerarlo dejaría los apuntes de caja descuadrados (se enlazan por el número de pedido). Mantén el número actual; para cambiarlo hay que ajustar también esos apuntes a mano.',
+        'CONFLICT',
+      )
+    }
+    if (!o.store_id) return failure('El pedido no tiene tienda asignada', 'VALIDATION')
+
+    const { data: store } = await ctx.adminClient
+      .from('stores').select('order_prefix').eq('id', o.store_id).single()
+    const prefix = (store as { order_prefix?: string } | null)?.order_prefix || 'ORD'
+    const currentPrefix = String(o.order_number).split('-')[0]
+    if (currentPrefix === prefix) {
+      // Ya coincide: nada que hacer (no-op idempotente).
+      return success({ order_number: o.order_number })
+    }
+
+    const newNumber = await getNextNumber('tailoring_orders', 'order_number', prefix)
+    const { error: updErr } = await ctx.adminClient
+      .from('tailoring_orders').update({ order_number: newNumber }).eq('id', orderId)
+    if (updErr) return failure(updErr.message || 'Error al renumerar', 'INTERNAL')
+
+    return success({
+      order_number: newNumber,
+      auditEntityId: orderId,
+      auditDescription: `Pedido renumerado por cambio de tienda: ${o.order_number} → ${newNumber}`,
+      auditOldData: { order_number: o.order_number },
+      auditNewData: { order_number: newNumber },
+    } as unknown as { order_number: string })
+  }
+)
+
 export const scheduleFitting = protectedAction<{
   orderId: string; lineId?: string; date: string; time: string;
   storeId: string; tailorId?: string; notes?: string;

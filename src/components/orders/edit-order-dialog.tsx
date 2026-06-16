@@ -27,7 +27,7 @@ import {
 import { Loader2, Plus, Trash2, Search, Check, X, Scissors, ChevronsUpDown } from 'lucide-react'
 import { toast } from 'sonner'
 import { listClients, getClientMeasurements } from '@/actions/clients'
-import { updateOrderAction } from '@/actions/orders'
+import { updateOrderAction, renumberOrderToStore } from '@/actions/orders'
 import { listFabrics } from '@/actions/fabrics'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency, fuzzyFilterSort } from '@/lib/utils'
@@ -97,7 +97,7 @@ function camiseriaDefaultsForCode(code: string | null | undefined): Record<strin
   if (code === 'camisa' || code === 'camiseria') return { tipo: 'camiseria', puno: 'sencillo' }
   return {}
 }
-type StoreOpt = { id: string; name: string }
+type StoreOpt = { id: string; name: string; order_prefix?: string | null }
 type ClientOpt = { id: string; full_name?: string | null; first_name?: string | null; last_name?: string | null; phone?: string | null; client_code?: string | null }
 
 interface EditOrderDialogProps {
@@ -167,6 +167,9 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
   const [stores, setStores] = useState<StoreOpt[]>([])
   const [saving, setSaving] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  // Aviso de renumeración cuando el prefijo del número deja de coincidir con la tienda.
+  const [renumberPrompt, setRenumberPrompt] = useState(false)
+  const [renumbering, setRenumbering] = useState(false)
   const [fabrics, setFabrics] = useState<FabricOpt[]>([])
   const [fabricsLoading, setFabricsLoading] = useState(false)
   // Ref para acceder al catálogo desde callbacks estables sin invalidarlos.
@@ -253,7 +256,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
     const sb = createClient()
     sb.from('garment_types').select('id, name, code').eq('is_active', true).order('name')
       .then(({ data }) => { if (data) setGarmentTypes(data as GarmentType[]) })
-    sb.from('stores').select('id, name').eq('is_active', true).neq('store_type', 'online').order('name')
+    sb.from('stores').select('id, name, order_prefix').eq('is_active', true).neq('store_type', 'online').order('name')
       .then(({ data }) => { if (data) setStores(data as StoreOpt[]) })
   }, [open])
 
@@ -555,6 +558,33 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
     setConfirmOpen(false)
     if (!res.success) { toast.error(res.error || 'No se pudo guardar'); return }
     toast.success('Pedido actualizado')
+    // Si el prefijo del número ya no coincide con la tienda nueva, avisar (NO
+    // renumerar en silencio). El cambio de tienda ya quedó guardado arriba.
+    const newStore = stores.find((s) => s.id === storeId)
+    const currentPrefix = String(order?.order_number ?? '').split('-')[0]
+    if (newStore?.order_prefix && currentPrefix && currentPrefix !== newStore.order_prefix) {
+      setRenumberPrompt(true)
+      return
+    }
+    onOpenChange(false)
+    onSaved?.()
+    router.refresh()
+  }
+
+  const doRenumber = async () => {
+    setRenumbering(true)
+    const res = await renumberOrderToStore({ orderId: order.id })
+    setRenumbering(false)
+    if (!res.success) { toast.error(res.error || 'No se pudo renumerar'); return }
+    toast.success(`Pedido renumerado a ${res.data.order_number}`)
+    setRenumberPrompt(false)
+    onOpenChange(false)
+    onSaved?.()
+    router.refresh()
+  }
+
+  const keepNumber = () => {
+    setRenumberPrompt(false)
     onOpenChange(false)
     onSaved?.()
     router.refresh()
@@ -1133,6 +1163,28 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
               {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Check className="h-4 w-4 mr-2" />}
               Confirmar
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Aviso de renumeración: el número no coincide con la tienda nueva. */}
+      <AlertDialog open={renumberPrompt} onOpenChange={(v) => { if (!renumbering) setRenumberPrompt(v) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Renumerar el pedido a la nueva tienda?</AlertDialogTitle>
+            <AlertDialogDescription>
+              El número de este pedido es <strong>{order?.order_number}</strong>, pero lo has movido a{' '}
+              <strong>{stores.find((s) => s.id === storeId)?.name}</strong>{' '}
+              (prefijo {stores.find((s) => s.id === storeId)?.order_prefix}). El cambio de tienda ya se ha guardado.
+              <br />¿Quieres renumerarlo al siguiente número libre de esa tienda, o mantener el número actual?
+              <br /><span className="text-xs text-muted-foreground">Si el pedido ya tiene cobros, no se puede renumerar (los apuntes de caja se enlazan por el número).</span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button variant="outline" onClick={keepNumber} disabled={renumbering}>Mantener número</Button>
+            <Button onClick={doRenumber} disabled={renumbering} className="bg-prats-navy hover:bg-prats-navy-light">
+              {renumbering ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null} Renumerar
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
