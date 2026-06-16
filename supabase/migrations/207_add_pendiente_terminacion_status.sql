@@ -1,0 +1,11 @@
+-- Añade el estado 'pendiente_terminacion' al enum de estados de pedido de
+-- sastrería (recta final: rematar tras prueba/recepción, antes de 'finished').
+-- Aplica en código a los 5 tipos con flujo hasta 'terminado' (artesanal,
+-- camiseria, industrial, camiseria_industrial, oficial); NO a 'proveedor'
+-- (su secuencia no llega a finished). El orden lógico lo da getStatusIndex en
+-- código (statuses.ts), no el ordinal del enum; la posición BEFORE 'finished'
+-- es solo cosmética.
+--
+-- IMPORTANTE: ALTER TYPE ... ADD VALUE no puede usarse en la MISMA transacción
+-- en que se cree; ejecutar como sentencia suelta (autocommit). Idempotente.
+ALTER TYPE tailoring_order_status ADD VALUE IF NOT EXISTS 'pendiente_terminacion' BEFORE 'finished';
