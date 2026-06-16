@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     start, end, tab,
     storeFilterName, channelLabel, taxLabel,
     salesData, compareData, topProducts, tailorData, clientsData,
-    storeData, employeeData, timePatternData, expensesData, expensesComparison,
+    storeData, employeeData, employeeStores, timePatternData, expensesData, expensesComparison,
   } = body
 
   const activeTab: string = typeof tab === 'string' && TAB_TITLES[tab] ? tab : 'sales'
@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
     case 'tailors': sectionTailors(rows, tailorData); break
     case 'clients': sectionClients(rows, clientsData); break
     case 'stores': sectionStores(rows, storeData); break
-    case 'employees': sectionEmployees(rows, employeeData); break
+    case 'employees': sectionEmployees(rows, employeeData, employeeStores); break
     case 'time': sectionTime(rows, timePatternData); break
     case 'expenses': sectionExpenses(rows, expensesData, expensesComparison); break
   }
@@ -165,7 +165,7 @@ function sectionStores(rows: Row[], items: AnyRec[] | null) {
   rows.push(['TOTAL', sum('pos'), sum('gift_cards'), sum('tailoring'), sum('total')])
 }
 
-function sectionEmployees(rows: Row[], items: AnyRec[] | null) {
+function sectionEmployees(rows: Row[], items: AnyRec[] | null, stores: AnyRec[] | null) {
   if (!items?.length) { rows.push(['Sin datos para el periodo seleccionado']); return }
   rows.push(['VENTAS POR EMPLEADO'])
   rows.push(['(Dinero por la caja de cada empleado — cobrar ≠ vender; «Sastrería cobrada» = pagos registrados en su caja aunque el pedido sea de otro sastre)'])
@@ -179,6 +179,21 @@ function sectionEmployees(rows: Row[], items: AnyRec[] | null) {
   }
   const sum = (k: string) => items.reduce((acc, d) => acc + (Number(d[k]) || 0), 0)
   rows.push(['TOTAL', sum('pos_ops'), sum('boutique_total'), sum('gift_cards_total'), sum('tailoring_ops'), sum('tailoring_total'), sum('tailor_orders_count'), sum('tailor_orders_revenue'), sum('total')])
+
+  // Tabla cruzada empleado × tienda (total "su caja" por tienda). Solo en modo "Todas".
+  if (stores && stores.length > 1) {
+    const cross = items
+      .map((e) => ({ name: String(e.employee_name ?? ''), st: (e.store_totals as AnyRec) || {}, total: stores.reduce((s, c) => s + (Number((e.store_totals as AnyRec)?.[String(c.store_id)]) || 0), 0) }))
+      .filter((r) => r.total > 0)
+    if (cross.length) {
+      rows.push([])
+      rows.push(['VENTAS POR EMPLEADO Y TIENDA'])
+      rows.push(['(Total «su caja» = Boutique + Tarjetas + Sastrería cobrada, separado por la tienda donde se registró)'])
+      rows.push(['Empleado', ...stores.map((c) => String(c.store_name ?? '')), 'Total'])
+      for (const r of cross) rows.push([r.name, ...stores.map((c) => num(r.st[String(c.store_id)])), num(r.total)])
+      rows.push(['TOTAL', ...stores.map((c) => num(cross.reduce((s, r) => s + (Number(r.st[String(c.store_id)]) || 0), 0))), num(cross.reduce((s, r) => s + r.total, 0))])
+    }
+  }
 }
 
 function sectionTime(rows: Row[], data: AnyRec | null) {
@@ -224,7 +239,22 @@ function sectionExpenses(rows: Row[], data: AnyRec | null, comparison: AnyRec | 
     rows.push([])
   }
 
+  const providers = (data.providersBreakdown as AnyRec[]) || []
+  if (providers.length) {
+    rows.push([])
+    rows.push(['PROVEEDORES — POR TIPO DE PROVEEDOR Y FACTURA'])
+    for (const t of providers) {
+      rows.push([`${String(t.label ?? '')}`, '', num(t.total)])
+      rows.push(['', 'Nº factura', 'Proveedor', 'Importe'])
+      for (const inv of (t.invoices as AnyRec[]) || []) {
+        rows.push(['', String(inv.invoice_number ?? ''), String(inv.supplier_name ?? ''), num(inv.total)])
+      }
+    }
+    rows.push(['TOTAL proveedores', '', num(providers.reduce((s, t) => s + (Number(t.total) || 0), 0))])
+  }
+
   if (recent.length) {
+    rows.push([])
     rows.push(['ÚLTIMOS MOVIMIENTOS'])
     rows.push(['Fecha', 'Categoría', 'Descripción', 'Importe'])
     for (const t of recent) {

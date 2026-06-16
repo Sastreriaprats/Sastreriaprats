@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     start, end, tab,
     storeFilterName, channelLabel, taxLabel,
     salesData, compareData, topProducts, tailorData, clientsData,
-    storeData, employeeData, timePatternData, expensesData, expensesComparison,
+    storeData, employeeData, employeeStores, timePatternData, expensesData, expensesComparison,
   } = body
 
   const activeTab: string = typeof tab === 'string' && TAB_TITLES[tab] ? tab : 'sales'
@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
       section = renderStores(storeData)
       break
     case 'employees':
-      section = renderEmployees(employeeData)
+      section = renderEmployees(employeeData, employeeStores)
       break
     case 'time':
       section = renderTime(timePatternData)
@@ -267,7 +267,7 @@ function renderStores(items: AnyRec[] | null): string {
 </table>`
 }
 
-function renderEmployees(items: AnyRec[] | null): string {
+function renderEmployees(items: AnyRec[] | null, stores: AnyRec[] | null): string {
   if (!items?.length) return empty()
   const rows = items.map(e => `
 <tr>
@@ -309,7 +309,31 @@ function renderEmployees(items: AnyRec[] | null): string {
     <td class="right">${fmtEur(sum('total'))}</td>
   </tr></tfoot>
 </table>
-<p class="muted" style="font-size:10px;margin-top:6px">Pedidos sastre y Fact. sastre no se suman al total (evita duplicar con los cobros).</p>`
+<p class="muted" style="font-size:10px;margin-top:6px">Pedidos sastre y Fact. sastre no se suman al total (evita duplicar con los cobros).</p>
+${renderEmployeesByStore(items, stores)}`
+}
+
+function renderEmployeesByStore(items: AnyRec[], stores: AnyRec[] | null): string {
+  if (!stores || stores.length <= 1) return ''
+  const cross = items
+    .map((e) => ({ name: String(e.employee_name ?? ''), st: (e.store_totals as AnyRec) || {}, total: stores.reduce((s, c) => s + (Number((e.store_totals as AnyRec)?.[String(c.store_id)]) || 0), 0) }))
+    .filter((r) => r.total > 0)
+  if (!cross.length) return ''
+  const head = stores.map((c) => `<th class="right">${escapeHtml(String(c.store_name ?? ''))}</th>`).join('')
+  const rows = cross.map((r) => `
+<tr>
+  <td>${escapeHtml(r.name)}</td>
+  ${stores.map((c) => `<td class="right">${fmtEur(r.st[String(c.store_id)] as number)}</td>`).join('')}
+  <td class="right"><b>${fmtEur(r.total)}</b></td>
+</tr>`).join('')
+  const foot = stores.map((c) => `<td class="right">${fmtEur(cross.reduce((s, r) => s + (Number(r.st[String(c.store_id)]) || 0), 0))}</td>`).join('')
+  return `<h2>Ventas por empleado y tienda</h2>
+<p class="muted" style="font-size:10px;margin:0 0 6px">Total «su caja» (Boutique + Tarjetas + Sastrería cobrada) de cada empleado, separado por la tienda donde se registró la venta o el cobro.</p>
+<table>
+  <thead><tr><th>Empleado</th>${head}<th class="right">Total</th></tr></thead>
+  <tbody>${rows}</tbody>
+  <tfoot><tr><td>TOTAL</td>${foot}<td class="right">${fmtEur(cross.reduce((s, r) => s + r.total, 0))}</td></tr></tfoot>
+</table>`
 }
 
 function renderTime(data: AnyRec | null): string {
@@ -385,9 +409,32 @@ function renderExpenses(data: AnyRec | null, comparison: AnyRec | null): string 
   </tr></tfoot>
 </table>
 
+${renderProvidersBreakdown((data.providersBreakdown as AnyRec[]) || [])}
+
 ${recentRows ? `<h2>Últimos movimientos</h2>
 <table>
   <thead><tr><th>Fecha</th><th>Categoría</th><th>Descripción</th><th class="right">Importe</th></tr></thead>
   <tbody>${recentRows}</tbody>
 </table>` : ''}`
+}
+
+function renderProvidersBreakdown(providers: AnyRec[]): string {
+  if (!providers.length) return ''
+  const blocks = providers.map((t) => {
+    const invRows = ((t.invoices as AnyRec[]) || []).map((inv) => `
+<tr>
+  <td>${escapeHtml(String(inv.invoice_number ?? ''))}</td>
+  <td>${escapeHtml(String(inv.supplier_name ?? ''))}</td>
+  <td class="right neg">${fmtEur(inv.total as number)}</td>
+</tr>`).join('')
+    return `<h3>${escapeHtml(String(t.label ?? ''))} — <span class="neg">${fmtEur(t.total as number)}</span></h3>
+<table>
+  <thead><tr><th>Nº factura</th><th>Proveedor</th><th class="right">Importe</th></tr></thead>
+  <tbody>${invRows}</tbody>
+</table>`
+  }).join('')
+  const total = providers.reduce((s, t) => s + (Number(t.total) || 0), 0)
+  return `<h2>Proveedores — por tipo de proveedor y factura</h2>
+${blocks}
+<p style="margin-top:8px"><b>TOTAL proveedores: <span class="neg">${fmtEur(total)}</span></b></p>`
 }

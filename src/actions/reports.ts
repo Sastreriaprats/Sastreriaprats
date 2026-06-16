@@ -716,11 +716,16 @@ export const getSalesByEmployee = protectedAction<
       tailoring_ops: number; tailoring_total: number
       tailor_orders_count: number; tailor_orders_revenue: number
       total: number
+      store_totals: Record<string, number>
     }[]
     // Desglose por TIENDA (dimensión nº4) de los importes de ESTE tab: Boutique,
     // Tarjetas y Sastrería COBRADA (pagos registrados, agrupados por la tienda del
     // pedido). Solo cuando no se filtra una tienda concreta.
     byStore?: { store_id: string; store_name: string; boutique: number; gift_cards: number; tailoring: number; total: number }[]
+    // Tabla cruzada empleado × tienda: el total "su caja" (Boutique + Tarjetas +
+    // Sastrería cobrada) de cada empleado desglosado por tienda. `stores` define las
+    // columnas; cada empleado trae `store_totals[store_id]`. Solo en modo "Todas".
+    stores?: { store_id: string; store_name: string }[]
   }
 >(
   { permission: 'reports.view', auditModule: 'reports' },
@@ -764,13 +769,17 @@ export const getSalesByEmployee = protectedAction<
       saleIds: Set<string>; pos_total: number; boutique_total: number; gift_cards_total: number
       tailoring_ops: number; tailoring_total: number
       tailor_orders_count: number; tailor_orders_revenue: number
+      storeTotals: Record<string, number>
     }> = {}
+    // Nombres de tienda vistos (para las columnas de la tabla cruzada empleado × tienda).
+    const storeNames: Record<string, string> = {}
 
     const ensure = (id: string) => {
       if (!employees[id]) employees[id] = {
         name: id, saleIds: new Set(),
         pos_total: 0, boutique_total: 0, gift_cards_total: 0, tailoring_ops: 0, tailoring_total: 0,
         tailor_orders_count: 0, tailor_orders_revenue: 0,
+        storeTotals: {},
       }
       return employees[id]
     }
@@ -788,6 +797,8 @@ export const getSalesByEmployee = protectedAction<
       // pos_total = boutique + gift_cards (no hay otros sale_type).
       if ((sale?.sale_type ?? '') === BOUTIQUE_SALE_TYPE) e.boutique_total += amount
       else if ((sale?.sale_type ?? '') === GIFT_CARD_SALE_TYPE) e.gift_cards_total += amount
+      const sId = sale?.store_id as string | undefined
+      if (sId) { e.storeTotals[sId] = (e.storeTotals[sId] || 0) + amount; storeNames[sId] = sale?.stores?.name || storeNames[sId] || 'Sin tienda' }
     }
 
     for (const payment of paymentsRes.data || []) {
@@ -795,7 +806,10 @@ export const getSalesByEmployee = protectedAction<
       const e = ensure(empId)
       e.tailoring_ops += 1
       const amt = (payment.amount as number) || 0
-      e.tailoring_total += net ? stripDefault(amt) : amt
+      const tAmount = net ? stripDefault(amt) : amt
+      e.tailoring_total += tAmount
+      const sId = (payment.tailoring_orders as any)?.store_id as string | undefined
+      if (sId) { e.storeTotals[sId] = (e.storeTotals[sId] || 0) + tAmount; storeNames[sId] = (payment.tailoring_orders as any)?.stores?.name || storeNames[sId] || 'Sin tienda' }
     }
 
     for (const order of tailoringOrdersRes.data || []) {
@@ -829,6 +843,7 @@ export const getSalesByEmployee = protectedAction<
         tailor_orders_count: d.tailor_orders_count,
         tailor_orders_revenue: d.tailor_orders_revenue,
         total: d.pos_total + d.tailoring_total,
+        store_totals: d.storeTotals,
       }))
       .sort((a, b) => b.total - a.total)
 
@@ -855,7 +870,19 @@ export const getSalesByEmployee = protectedAction<
       }).sort((a, b) => b.total - a.total)
     }
 
-    return success({ employees: result, byStore })
+    // Columnas de la tabla cruzada empleado × tienda: tiendas presentes ordenadas por
+    // su total (Boutique + Tarjetas + Sastrería cobrada). Solo en modo "Todas".
+    let stores: { store_id: string; store_name: string }[] | undefined
+    if (!store_id) {
+      const totalByStore: Record<string, number> = {}
+      for (const e of Object.values(employees))
+        for (const [sId, v] of Object.entries(e.storeTotals)) totalByStore[sId] = (totalByStore[sId] || 0) + v
+      stores = Object.keys(totalByStore)
+        .sort((a, b) => (totalByStore[b] || 0) - (totalByStore[a] || 0))
+        .map((sId) => ({ store_id: sId, store_name: storeNames[sId] || 'Sin tienda' }))
+    }
+
+    return success({ employees: result, byStore, stores })
   }
 )
 

@@ -79,8 +79,10 @@ type EmployeeItem = {
   tailoring_ops: number; tailoring_total: number
   tailor_orders_count: number; tailor_orders_revenue: number
   total: number
+  store_totals: Record<string, number>
 }
 type EmployeeStoreRow = { store_id: string; store_name: string; boutique: number; gift_cards: number; tailoring: number; total: number }
+type EmployeeStoreCol = { store_id: string; store_name: string }
 
 type StoreOption = { id: string; name: string }
 
@@ -122,6 +124,7 @@ export function ReportsContent() {
   const [storeData, setStoreData] = useState<StoreItem[]>([])
   const [employeeData, setEmployeeData] = useState<EmployeeItem[]>([])
   const [employeeByStore, setEmployeeByStore] = useState<EmployeeStoreRow[] | null>(null)
+  const [employeeStores, setEmployeeStores] = useState<EmployeeStoreCol[] | null>(null)
   const [timePatternData, setTimePatternData] = useState<TimePatternData | null>(null)
   const [tailoringByCat, setTailoringByCat] = useState<TailoringByCatData | null>(null)
   const [expensesData, setExpensesData] = useState<ExpensesData | null>(null)
@@ -189,7 +192,7 @@ export function ReportsContent() {
       if (clientsRes.success) setClientsData(clientsRes.data)
       if (clientsAdvRes.success) setClientsAdvanced(clientsAdvRes.data)
       if (storeRes.success) setStoreData(storeRes.data)
-      if (employeeRes.success) { setEmployeeData(employeeRes.data.employees); setEmployeeByStore(employeeRes.data.byStore ?? null) }
+      if (employeeRes.success) { setEmployeeData(employeeRes.data.employees); setEmployeeByStore(employeeRes.data.byStore ?? null); setEmployeeStores(employeeRes.data.stores ?? null) }
       if (timeRes.success) setTimePatternData(timeRes.data)
       if (expensesRes.success) setExpensesData(expensesRes.data)
       if (expCompRes.success) setExpensesComparison(expCompRes.data)
@@ -287,6 +290,7 @@ export function ReportsContent() {
     clientsAdvanced,
     storeData,
     employeeData,
+    employeeStores: storeFilter === 'all' ? employeeStores : null,
     timePatternData,
     expensesData,
     expensesComparison,
@@ -535,7 +539,7 @@ export function ReportsContent() {
               <TabsContent value="tailors"><TailorTable data={tailorData} /></TabsContent>
               <TabsContent value="clients"><ClientsChart data={clientsData} advanced={clientsAdvanced} showByStore={showStoreBreakdown} /></TabsContent>
               <TabsContent value="stores"><StoreTab data={storeData} /></TabsContent>
-              <TabsContent value="employees"><EmployeeTab data={employeeData} storeBreakdown={employeeStoreBreakdown} /></TabsContent>
+              <TabsContent value="employees"><EmployeeTab data={employeeData} storeBreakdown={employeeStoreBreakdown} stores={storeFilter === 'all' ? employeeStores : null} /></TabsContent>
               <TabsContent value="time"><TimePatternTab data={timePatternData} showByStore={showStoreBreakdown} /></TabsContent>
               <TabsContent value="expenses"><ExpensesTab data={expensesData} comparison={expensesComparison} /></TabsContent>
             </div>
@@ -884,7 +888,7 @@ function StoreTab({ data }: { data: StoreItem[] }) {
 
 // ─── Tab: Por empleado ───────────────────────────────────────────────────────
 
-function EmployeeTab({ data, storeBreakdown }: { data: EmployeeItem[]; storeBreakdown: StoreBreakdownRow[] | null }) {
+function EmployeeTab({ data, storeBreakdown, stores }: { data: EmployeeItem[]; storeBreakdown: StoreBreakdownRow[] | null; stores: EmployeeStoreCol[] | null }) {
   if (!data.length) return <p className="text-center text-muted-foreground py-12">Sin datos para el periodo seleccionado</p>
 
   const hasSales = data.some(e => e.pos_ops > 0 || e.pos_total > 0)
@@ -970,6 +974,56 @@ function EmployeeTab({ data, storeBreakdown }: { data: EmployeeItem[]; storeBrea
           </div>
         </CardContent>
       </Card>
+
+      {stores && stores.length > 1 && (() => {
+        const rows = data
+          .map((e) => ({
+            e,
+            cells: stores.map((s) => e.store_totals?.[s.store_id] || 0),
+            rowTotal: stores.reduce((sum, s) => sum + (e.store_totals?.[s.store_id] || 0), 0),
+          }))
+          .filter((r) => r.rowTotal > 0)
+        if (!rows.length) return null
+        const colTotals = stores.map((_, i) => rows.reduce((sum, r) => sum + r.cells[i], 0))
+        const grandTotal = colTotals.reduce((s, v) => s + v, 0)
+        return (
+          <Card>
+            <CardHeader><CardTitle className="text-base">Ventas por empleado y tienda</CardTitle></CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Empleado</TableHead>
+                    {stores.map((s) => <TableHead key={s.store_id} className="text-right">{s.store_name}</TableHead>)}
+                    <TableHead className="text-right">Total</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((r) => (
+                    <TableRow key={r.e.employee_id}>
+                      <TableCell className="font-medium">{r.e.employee_name}</TableCell>
+                      {r.cells.map((v, i) => (
+                        <TableCell key={stores[i].store_id} className="text-right">{v ? formatCurrency(v) : <span className="text-muted-foreground">—</span>}</TableCell>
+                      ))}
+                      <TableCell className="text-right font-bold">{formatCurrency(r.rowTotal)}</TableCell>
+                    </TableRow>
+                  ))}
+                  {rows.length > 1 && (
+                    <TableRow className="bg-muted/50 font-bold">
+                      <TableCell>TOTAL</TableCell>
+                      {colTotals.map((v, i) => <TableCell key={stores[i].store_id} className="text-right">{formatCurrency(v)}</TableCell>)}
+                      <TableCell className="text-right">{formatCurrency(grandTotal)}</TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+              <p className="text-[11px] text-muted-foreground mt-3">
+                Total &ldquo;su caja&rdquo; (Boutique + Tarjetas + Sastrería cobrada) de cada empleado, separado por la tienda donde se registró la venta o el cobro.
+              </p>
+            </CardContent>
+          </Card>
+        )
+      })()}
 
       <Card className="border-dashed">
         <CardContent className="pt-4 pb-4">
