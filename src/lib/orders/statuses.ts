@@ -21,6 +21,7 @@ export type OrderStatus =
   | 'in_production'                // = EN_CONFECCION
   | 'in_fitting'                   // artesanal: en prueba
   | 'received_in_store'            // industrial: prenda terminada llega a tienda
+  | 'pendiente_terminacion'        // recta final: rematar tras prueba/recepción, antes de terminado
   | 'finished'
   | 'delivered'
   | 'incident'
@@ -39,11 +40,11 @@ export type TailoringOrderType =
 // - Industrial: created → fabric_ordered → fabric_received_factory → in_production → received_in_store → finished → delivered
 // - Camisería sigue el mismo flujo que su order_type (artesanal o industrial).
 export const ORDER_STATUSES_BY_TYPE: Record<string, OrderStatus[]> = {
-  artesanal:            ['created', 'fabric_ordered', 'fabric_received_store', 'cut', 'in_production', 'in_fitting', 'finished', 'delivered', 'incident', 'cancelled'],
-  industrial:           ['created', 'fabric_ordered', 'fabric_received_factory', 'in_production', 'received_in_store', 'finished', 'delivered', 'incident', 'cancelled'],
-  camiseria:            ['created', 'fabric_ordered', 'fabric_received_store', 'cut', 'in_production', 'in_fitting', 'finished', 'delivered', 'incident', 'cancelled'],
-  camiseria_industrial: ['created', 'fabric_ordered', 'fabric_received_factory', 'in_production', 'received_in_store', 'finished', 'delivered', 'incident', 'cancelled'],
-  oficial:              ['created', 'in_production', 'finished', 'delivered', 'cancelled'],
+  artesanal:            ['created', 'fabric_ordered', 'fabric_received_store', 'cut', 'in_production', 'in_fitting', 'pendiente_terminacion', 'finished', 'delivered', 'incident', 'cancelled'],
+  industrial:           ['created', 'fabric_ordered', 'fabric_received_factory', 'in_production', 'received_in_store', 'pendiente_terminacion', 'finished', 'delivered', 'incident', 'cancelled'],
+  camiseria:            ['created', 'fabric_ordered', 'fabric_received_store', 'cut', 'in_production', 'in_fitting', 'pendiente_terminacion', 'finished', 'delivered', 'incident', 'cancelled'],
+  camiseria_industrial: ['created', 'fabric_ordered', 'fabric_received_factory', 'in_production', 'received_in_store', 'pendiente_terminacion', 'finished', 'delivered', 'incident', 'cancelled'],
+  oficial:              ['created', 'in_production', 'pendiente_terminacion', 'finished', 'delivered', 'cancelled'],
   proveedor:            ['created', 'fabric_ordered', 'fabric_received_store', 'cancelled'],
 }
 
@@ -54,6 +55,7 @@ export const ALL_VISIBLE_STATUSES: OrderStatus[] = [
   'cut',
   'in_production',
   'in_fitting', 'received_in_store',
+  'pendiente_terminacion',
   'finished', 'delivered',
   'incident', 'cancelled',
 ]
