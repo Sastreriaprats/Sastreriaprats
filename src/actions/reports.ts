@@ -1117,7 +1117,7 @@ export const getExpensesReport = protectedAction<
 
     // ── Desglose de "proveedores": por tipo de proveedor y por factura ──────────
     // Vía manual_transactions.ap_supplier_invoice_id -> ap_supplier_invoices.supplier_id
-    // -> suppliers.expense_type. Los pagos sin enlace caen en "Sin clasificar".
+    // -> suppliers.supplier_types. Los pagos sin enlace caen en "Sin clasificar".
     const providerExpenses = expenses.filter((tx: any) => (tx.category as string) === 'proveedores')
     const invoiceIds = [...new Set(providerExpenses.map((tx: any) => tx.ap_supplier_invoice_id).filter(Boolean) as string[])]
     const invoiceMap = new Map<string, { invoice_number: string; supplier_name: string; supplier_id: string | null }>()
@@ -1129,19 +1129,36 @@ export const getExpensesReport = protectedAction<
       }
     }
     const supplierIds = [...new Set([...invoiceMap.values()].map((v) => v.supplier_id).filter(Boolean) as string[])]
-    const supplierTypeMap = new Map<string, string>()
+    // Tipos de proveedor (campo "Tipo de proveedor" de la ficha, suppliers.supplier_types).
+    // Es lo que la sastrería rellena; el desglose de gastos se agrupa por aquí (no por
+    // expense_type, que está sin clasificar). Es un array: un proveedor puede tener varios.
+    const supplierTypesMap = new Map<string, string[]>()
     if (supplierIds.length > 0) {
-      const { data: sups } = await ctx.adminClient.from('suppliers').select('id, expense_type').in('id', supplierIds)
-      for (const s of (sups ?? []) as any[]) supplierTypeMap.set(String(s.id), String(s.expense_type ?? 'general'))
+      const { data: sups } = await ctx.adminClient.from('suppliers').select('id, supplier_types').in('id', supplierIds)
+      for (const s of (sups ?? []) as any[]) supplierTypesMap.set(String(s.id), Array.isArray(s.supplier_types) ? s.supplier_types.map(String) : [])
     }
 
-    const TYPE_LABELS: Record<string, string> = { general: 'General', alquiler: 'Alquiler', compras: 'Compras', sin_clasificar: 'Sin clasificar' }
+    const TYPE_LABELS: Record<string, string> = {
+      fabric: 'Telas', manufacturing: 'Fabricación', accessories: 'Accesorios',
+      trimmings: 'Adornos', services: 'Servicios', logistics: 'Logística', other: 'Otros',
+      sin_clasificar: 'Sin clasificar',
+    }
+    // Grupo a partir de los tipos del proveedor. Sin tipos (o sin proveedor enlazado) →
+    // "Sin clasificar". Varios tipos → se agrupan juntos (p. ej. "Telas + Servicios")
+    // para que la suma de los grupos cuadre con el total de "proveedores".
+    const groupOf = (types: string[] | undefined) => {
+      const t = (types ?? []).filter(Boolean)
+      if (!t.length) return { key: 'sin_clasificar', label: TYPE_LABELS.sin_clasificar }
+      const sorted = [...t].sort()
+      return { key: sorted.join('+'), label: sorted.map((x) => TYPE_LABELS[x] ?? x).join(' + ') }
+    }
+
     const descRe = /^Pago (?:cuota )?factura (.+?) · (.+)$/
     type InvAgg = { invoice_number: string; supplier_name: string; total: number; count: number }
-    const byType: Record<string, { total: number; count: number; invoices: Map<string, InvAgg> }> = {}
+    const byType: Record<string, { label: string; total: number; count: number; invoices: Map<string, InvAgg> }> = {}
     for (const tx of providerExpenses as any[]) {
       const inv = tx.ap_supplier_invoice_id ? invoiceMap.get(String(tx.ap_supplier_invoice_id)) : null
-      const type = inv ? (supplierTypeMap.get(inv.supplier_id ?? '') ?? 'general') : 'sin_clasificar'
+      const g = inv && inv.supplier_id ? groupOf(supplierTypesMap.get(inv.supplier_id)) : { key: 'sin_clasificar', label: TYPE_LABELS.sin_clasificar }
       let invKey: string, invNum: string, supName: string
       if (inv) {
         invKey = String(tx.ap_supplier_invoice_id); invNum = inv.invoice_number; supName = inv.supplier_name
@@ -1150,20 +1167,20 @@ export const getExpensesReport = protectedAction<
         invNum = m ? m[1] : (String(tx.description ?? '—')); supName = m ? m[2] : '—'
         invKey = `desc:${invNum}·${supName}`
       }
-      if (!byType[type]) byType[type] = { total: 0, count: 0, invoices: new Map() }
+      if (!byType[g.key]) byType[g.key] = { label: g.label, total: 0, count: 0, invoices: new Map() }
       const v = valueOf(tx)
-      byType[type].total += v; byType[type].count += 1
-      const cur = byType[type].invoices.get(invKey)
+      byType[g.key].total += v; byType[g.key].count += 1
+      const cur = byType[g.key].invoices.get(invKey)
       if (cur) { cur.total += v; cur.count += 1 }
-      else byType[type].invoices.set(invKey, { invoice_number: invNum, supplier_name: supName, total: v, count: 1 })
+      else byType[g.key].invoices.set(invKey, { invoice_number: invNum, supplier_name: supName, total: v, count: 1 })
     }
-    const TYPE_ORDER = ['general', 'alquiler', 'compras', 'sin_clasificar']
     const providersBreakdown = Object.entries(byType)
       .map(([type, d]) => ({
-        type, label: TYPE_LABELS[type] ?? type, total: Math.round(d.total * 100) / 100, count: d.count,
+        type, label: d.label, total: Math.round(d.total * 100) / 100, count: d.count,
         invoices: [...d.invoices.values()].map((i) => ({ ...i, total: Math.round(i.total * 100) / 100 })).sort((a, b) => b.total - a.total),
       }))
-      .sort((a, b) => TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type))
+      // "Sin clasificar" al final; el resto por importe descendente.
+      .sort((a, b) => (a.type === 'sin_clasificar' ? 1 : b.type === 'sin_clasificar' ? -1 : b.total - a.total))
 
     return success({ byCategory, grandTotal: byCategory.reduce((s, c) => s + c.total, 0), recentExpenses, providersBreakdown })
   }
