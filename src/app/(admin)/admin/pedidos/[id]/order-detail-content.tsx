@@ -54,6 +54,10 @@ export function OrderDetailContent({ order }: { order: any }) {
   }
 
   const isOverdue = order.estimated_delivery_date && new Date(order.estimated_delivery_date) < new Date() && !['delivered', 'cancelled'].includes(order.status)
+  // Editable por PAGO/FACTURA, no por entrega: se puede corregir el precio de un
+  // pedido entregado pero pendiente de cobro. Bloqueado si cancelado, ya pagado del
+  // todo, o facturado. (Coincide con la regla del backend en updateOrderAction.)
+  const canEditOrder = order.status !== 'cancelled' && !order.invoice_id && Number(order.total_pending) > 0
   const totalCost = (order.total_material_cost || 0) + (order.total_labor_cost || 0) + (order.total_factory_cost || 0)
   const marginAmount = Number(order.total ?? 0) - totalCost
   const marginPct = order.total > 0 ? (marginAmount / Number(order.total) * 100) : 0
@@ -120,7 +124,7 @@ export function OrderDetailContent({ order }: { order: any }) {
           </div>
         </div>
         <div className="flex gap-2">
-          {can('orders.edit') && !['delivered', 'cancelled'].includes(order.status) && (
+          {can('orders.edit') && canEditOrder && (
             <Button onClick={() => setShowEditDialog(true)} variant="outline" className="gap-1">
               <Pencil className="h-4 w-4" /> Editar pedido
             </Button>

@@ -1060,8 +1060,21 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
     if (orderErr || !orderBefore) return failure('Pedido no encontrado', 'NOT_FOUND')
 
     const currentStatus = String((orderBefore as any).status)
-    if (currentStatus === 'delivered' || currentStatus === 'cancelled') {
-      return failure(`No se puede editar un pedido en estado "${currentStatus}"`, 'CONFLICT')
+    // Editabilidad por PAGO/FACTURA, no por entrega: un pedido entregado pero aún
+    // pendiente de cobro se puede corregir de precio. Bloqueamos si está cancelado,
+    // ya pagado por completo, o facturado. (delivered por sí solo ya no bloquea.)
+    const ob = orderBefore as Record<string, unknown>
+    const totalPaidBefore = Number(ob.total_paid) || 0
+    const totalPendingBefore = Number(ob.total_pending) || 0
+    const invoiceId = ob.invoice_id ?? null
+    if (currentStatus === 'cancelled') {
+      return failure('No se puede editar un pedido cancelado', 'CONFLICT')
+    }
+    if (invoiceId) {
+      return failure('No se puede editar un pedido ya facturado', 'CONFLICT')
+    }
+    if (totalPendingBefore <= 0) {
+      return failure('No se puede editar un pedido ya pagado por completo', 'CONFLICT')
     }
 
     const { data: linesBefore } = await admin
@@ -1084,6 +1097,28 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
       if (norm(incoming) !== norm(current)) {
         headerUpdate[field] = incoming
         headerDiff[field] = { old: current, new: incoming }
+      }
+    }
+
+    // 2.b Protección de cobros (ANTES de tocar líneas/stock, para no persistir nada
+    // si se rechaza): si ya hay algo cobrado, el nuevo total no puede quedar por
+    // debajo de lo pagado. Calculamos el total proyectado con la misma fórmula que
+    // el recálculo posterior (líneas entrantes si vienen, si no las actuales).
+    if (totalPaidBefore > 0) {
+      const projectedSubtotalLines = input.lines !== undefined
+        ? input.lines.reduce((s, l) => {
+            const up = Number(l.unit_price) || 0
+            const da = round2(up * (Number(l.discount_percentage) || 0) / 100)
+            return s + round2(up - da)
+          }, 0)
+        : linesBeforeArr.reduce((s, l) => s + Number(l.line_total || 0), 0)
+      const projDiscountPct = headerUpdate.discount_percentage ?? ob.discount_percentage ?? 0
+      const projectedTotal = round2(projectedSubtotalLines * (1 - Number(projDiscountPct) / 100))
+      if (projectedTotal < totalPaidBefore) {
+        return failure(
+          `El nuevo total (${projectedTotal}€) no puede ser menor que lo ya cobrado (${round2(totalPaidBefore)}€). Para bajar más, primero ajusta/anula el cobro.`,
+          'CONFLICT',
+        )
       }
     }
 
