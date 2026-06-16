@@ -9,7 +9,7 @@ import { ALL_VISIBLE_STATUSES, classifyLinesForForwardPropagation, deriveOrderSt
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { sendOrderConfirmation, sendTailoringStatusUpdate } from '@/lib/email/transactional'
-import { normalizeSearchTerm, getOrderStatusLabel } from '@/lib/utils'
+import { normalizeSearchTerm, getOrderStatusLabel, formatDateTimeMadrid } from '@/lib/utils'
 import { checkUserPermission } from '@/actions/auth'
 import { syncOrderLineMeasurementsToClient } from '@/lib/measurements/sync-from-order'
 
@@ -642,6 +642,94 @@ export const changeOrderStatus = protectedAction<any, any>(
       auditOldData: { estado: fromStatus },
       auditNewData: { estado: new_status },
       auditMetadata: notes ? { notas: notes, linea_id: line_id ?? null } : { linea_id: line_id ?? null },
+    })
+  }
+)
+
+/**
+ * Corrige la FECHA (changed_at) de una entrada del historial de estados, por si
+ * se registró con fecha equivocada. Solo informativo/trazabilidad: los informes
+ * datan por created_at, no por estas fechas. Reglas:
+ *  - Solo entradas de TRANSICIÓN de estado (from != to); las de auditoría de
+ *    datos (from == to) no se editan.
+ *  - La nueva fecha no puede ser futura ni romper el orden cronológico (debe
+ *    quedar entre la transición anterior y la siguiente del mismo pedido).
+ *  - Si la entrada es 'delivered', se actualiza también actual_delivery_date.
+ *  - Queda registrada en audit_logs (Seguimiento) vía la auditoría del wrapper.
+ */
+export const updateStateHistoryDate = protectedAction<{ historyId: string; newDate: string }, any>(
+  {
+    permission: 'orders.edit',
+    auditModule: 'orders',
+    auditEntity: 'tailoring_order',
+    auditAction: 'update',
+    revalidate: ['/admin/pedidos'],
+  },
+  async (ctx, { historyId, newDate }) => {
+    if (!historyId?.trim()) return failure('Entrada de historial requerida', 'VALIDATION')
+    const when = new Date(newDate)
+    if (isNaN(when.getTime())) return failure('Fecha no válida', 'VALIDATION')
+    if (when.getTime() > Date.now()) return failure('La fecha no puede ser futura', 'VALIDATION')
+
+    const { data: entry, error: entryErr } = await ctx.adminClient
+      .from('tailoring_order_state_history')
+      .select('id, tailoring_order_id, from_status, to_status, changed_at')
+      .eq('id', historyId)
+      .single()
+    if (entryErr || !entry) return failure('Entrada de historial no encontrada', 'NOT_FOUND')
+
+    const e = entry as { tailoring_order_id: string; from_status: string | null; to_status: string; changed_at: string }
+    // Solo transiciones de estado; las entradas de auditoría de datos (from == to) no se editan.
+    if (e.from_status === e.to_status) {
+      return failure('Esta entrada es un registro de edición de datos, no un cambio de estado: su fecha no se edita', 'VALIDATION')
+    }
+
+    // Orden cronológico: la nueva fecha debe quedar entre la transición anterior y la siguiente.
+    const { data: rows } = await ctx.adminClient
+      .from('tailoring_order_state_history')
+      .select('id, from_status, to_status, changed_at')
+      .eq('tailoring_order_id', e.tailoring_order_id)
+      .order('changed_at', { ascending: true })
+    const transitions = ((rows ?? []) as Array<{ id: string; from_status: string | null; to_status: string; changed_at: string }>)
+      .filter((h) => h.from_status !== h.to_status)
+    const idx = transitions.findIndex((h) => h.id === historyId)
+    const prev = idx > 0 ? transitions[idx - 1] : null
+    const next = idx >= 0 && idx < transitions.length - 1 ? transitions[idx + 1] : null
+    if (prev && when.getTime() < new Date(prev.changed_at).getTime()) {
+      return failure(`La fecha debe ser posterior a la del estado anterior (${formatDateTimeMadrid(prev.changed_at)})`, 'VALIDATION')
+    }
+    if (next && when.getTime() > new Date(next.changed_at).getTime()) {
+      return failure(`La fecha debe ser anterior a la del estado siguiente (${formatDateTimeMadrid(next.changed_at)})`, 'VALIDATION')
+    }
+
+    const oldChangedAt = e.changed_at
+    const { error: updErr } = await ctx.adminClient
+      .from('tailoring_order_state_history')
+      .update({ changed_at: when.toISOString() })
+      .eq('id', historyId)
+    if (updErr) return failure(updErr.message || 'Error al actualizar la fecha', 'INTERNAL')
+
+    // Coherencia: la fecha de entrega del pedido sigue a la del estado 'delivered'.
+    if (e.to_status === 'delivered') {
+      await ctx.adminClient
+        .from('tailoring_orders')
+        .update({ actual_delivery_date: when.toISOString().slice(0, 10) })
+        .eq('id', e.tailoring_order_id)
+    }
+
+    const { data: ord } = await ctx.adminClient
+      .from('tailoring_orders').select('order_number').eq('id', e.tailoring_order_id).single()
+    const estado = getOrderStatusLabel(e.to_status)
+    return success({
+      ok: true,
+      auditEntityId: e.tailoring_order_id,
+      auditDescription: `Pedido ${(ord as { order_number?: string })?.order_number ?? ''}: fecha del estado "${estado}" corregida a ${formatDateTimeMadrid(when)}`,
+      auditOldData: { estado: e.to_status, fecha: oldChangedAt },
+      auditNewData: { estado: e.to_status, fecha: when.toISOString() },
+      auditMetadata: {
+        history_id: historyId,
+        ...(e.to_status === 'delivered' ? { actual_delivery_date: when.toISOString().slice(0, 10) } : {}),
+      },
     })
   }
 )

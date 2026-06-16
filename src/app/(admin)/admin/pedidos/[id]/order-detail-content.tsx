@@ -178,7 +178,7 @@ export function OrderDetailContent({ order }: { order: any }) {
         </TabsList>
         <div className="mt-6">
           <TabsContent value="prendas"><OrderGarmentsTab order={order} /></TabsContent>
-          <TabsContent value="historial"><OrderHistoryTab history={order.tailoring_order_state_history || []} /></TabsContent>
+          <TabsContent value="historial"><OrderHistoryTab history={order.tailoring_order_state_history || []} canEditDates={can('orders.edit')} /></TabsContent>
           <TabsContent value="pruebas"><OrderFittingsTab orderId={order.id} fittings={order.tailoring_fittings || []} storeId={order.store_id} /></TabsContent>
           <TabsContent value="pagos">
             <div className="space-y-8">

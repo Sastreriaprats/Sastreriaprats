@@ -1,10 +1,14 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ArrowRight, History, Pencil, ChevronDown, ChevronUp } from 'lucide-react'
-import { formatDateTime, getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
+import { Input } from '@/components/ui/input'
+import { ArrowRight, History, Pencil, ChevronDown, ChevronUp, Save, X as XIcon, Loader2 } from 'lucide-react'
+import { formatDateTimeMadrid, getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
+import { useAction } from '@/hooks/use-action'
+import { updateStateHistoryDate } from '@/actions/orders'
 
 type HistoryEntry = {
   id: string
@@ -30,9 +34,24 @@ function tryParseJson(raw: string | null | undefined): any | null {
   }
 }
 
-export function OrderHistoryTab({ history }: { history: HistoryEntry[] }) {
+/** UTC ISO → valor para <input type="datetime-local"> en hora local del navegador. */
+function toLocalInput(iso: string): string {
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+export function OrderHistoryTab({ history, canEditDates = false }: { history: HistoryEntry[]; canEditDates?: boolean }) {
+  const router = useRouter()
   const sorted = [...history].sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime())
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [dateDraft, setDateDraft] = useState('')
+
+  const { execute, isLoading } = useAction(updateStateHistoryDate, {
+    successMessage: 'Fecha actualizada',
+    onSuccess: () => { setEditingId(null); router.refresh() },
+  })
 
   const toggle = (id: string) => {
     setExpanded((prev) => {
@@ -40,6 +59,16 @@ export function OrderHistoryTab({ history }: { history: HistoryEntry[] }) {
       if (next.has(id)) next.delete(id); else next.add(id)
       return next
     })
+  }
+
+  const startEdit = (h: HistoryEntry) => {
+    setDateDraft(toLocalInput(h.changed_at))
+    setEditingId(h.id)
+  }
+
+  const saveDate = (h: HistoryEntry) => {
+    if (!dateDraft) return
+    execute({ historyId: h.id, newDate: new Date(dateDraft).toISOString() })
   }
 
   if (sorted.length === 0) return (
@@ -55,6 +84,7 @@ export function OrderHistoryTab({ history }: { history: HistoryEntry[] }) {
         const isEdit = isEditEntry(h)
         const diff = isEdit ? tryParseJson(h.notes) : null
         const isExpanded = expanded.has(h.id)
+        const isEditingDate = editingId === h.id
         return (
           <div key={h.id} className="flex items-start gap-4 p-3 rounded-lg border">
             <div className="flex items-center gap-2 min-w-[220px]">
@@ -125,7 +155,36 @@ export function OrderHistoryTab({ history }: { history: HistoryEntry[] }) {
             </div>
             <div className="text-right text-xs text-muted-foreground whitespace-nowrap shrink-0">
               <p>{h.changed_by_name}</p>
-              <p>{formatDateTime(h.changed_at)}</p>
+              {isEditingDate ? (
+                <div className="flex items-center gap-1 mt-1">
+                  <Input
+                    type="datetime-local"
+                    value={dateDraft}
+                    onChange={(e) => setDateDraft(e.target.value)}
+                    className="h-7 w-[180px] text-xs"
+                    disabled={isLoading}
+                  />
+                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => saveDate(h)} disabled={isLoading || !dateDraft}>
+                    {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                  </Button>
+                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingId(null)} disabled={isLoading}>
+                    <XIcon className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-end gap-1">
+                  <span>{formatDateTimeMadrid(h.changed_at)}</span>
+                  {canEditDates && !isEdit && (
+                    <Button
+                      size="icon" variant="ghost" className="h-6 w-6"
+                      title="Corregir fecha"
+                      onClick={() => startEdit(h)}
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )

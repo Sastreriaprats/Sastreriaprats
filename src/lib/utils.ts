@@ -109,6 +109,23 @@ export function formatDateTime(date: Date | string | null | undefined): string {
   }).format(new Date(date))
 }
 
+/**
+ * Fecha y hora en TZ 'Europe/Madrid' EXPLÍCITA (DD/MM/YYYY HH:MM), independiente
+ * de la TZ del proceso/navegador. Para mostrar fechas guardadas en UTC (p. ej.
+ * el changed_at del historial de estados) sin que se desfasen ni salgan en UTC.
+ */
+export function formatDateTimeMadrid(date: Date | string | null | undefined): string {
+  if (!date) return '-'
+  return new Intl.DateTimeFormat('es-ES', {
+    timeZone: 'Europe/Madrid',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(date))
+}
+
 // Generate initials from name
 export function getInitials(name: string): string {
   return name
