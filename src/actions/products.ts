@@ -739,7 +739,14 @@ export const deleteVariantAction = protectedAction<string, void>(
 
     // stock_levels se eliminan en cascada
     const { error } = await ctx.adminClient.from('product_variants').delete().eq('id', variantId)
-    if (error) return failure(error.message)
+    if (error) {
+      // 23503 = violación de FK (reservas, líneas de traspaso, inventario…). Mensaje
+      // legible en vez del error crudo de Postgres (mismo patrón que hardDeleteClientAction).
+      if ((error as { code?: string }).code === '23503') {
+        return failure('No se puede borrar la variante: tiene reservas, traspasos o inventario asociado.', 'CONFLICT')
+      }
+      return failure(error.message)
+    }
 
     return success(undefined)
   }

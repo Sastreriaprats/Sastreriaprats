@@ -493,6 +493,7 @@ export const markSupplierInvoiceDueDatePaid = protectedAction<
       .maybeSingle()
 
     // 1. Registrar pago en ap_supplier_invoice_payments + manual_transaction
+    const invoiceId = (cuota as any).supplier_invoice_id
     let manualTransactionId: string | null = null
     if (input.create_accounting_entry !== false && invoice) {
       const mtPayload = {
@@ -500,6 +501,9 @@ export const markSupplierInvoiceDueDatePaid = protectedAction<
         date: paidAt,
         description: `Pago cuota factura ${(invoice as any).invoice_number} · ${(invoice as any).supplier_name}`,
         category: 'proveedores',
+        // FK estructural a la factura (igual que registerSupplierInvoicePayment): sin
+        // ella el espejo cae en "Sin clasificar" en el informe de gasto por proveedor.
+        ap_supplier_invoice_id: invoiceId,
         amount: Number((cuota as any).amount),
         tax_rate: 0,
         tax_amount: 0,
@@ -517,7 +521,7 @@ export const markSupplierInvoiceDueDatePaid = protectedAction<
 
     if (invoice) {
       await ctx.adminClient.from(TABLE).insert({
-        supplier_invoice_id: (cuota as any).supplier_invoice_id,
+        supplier_invoice_id: invoiceId,
         payment_date: paidAt,
         payment_method: paymentMethod,
         amount: Number((cuota as any).amount),
