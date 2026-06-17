@@ -14,6 +14,31 @@ const TABLE = 'ap_supplier_invoices'
 const LINK_TABLE = 'ap_supplier_invoice_delivery_notes'
 const LINES_TABLE = 'ap_supplier_invoice_lines'
 
+// Defensa en profundidad: el filtro envía el SLUG (card, transfer…), pero datos
+// históricos guardaron el método como ETIQUETA española ('Tarjeta', 'Transferencia'…).
+// Tras la normalización solo deberían quedar slugs, pero el filtro acepta ambos por
+// si se cuela algún valor sucio, para no volver a devolver vacío.
+const PAYMENT_METHOD_ALIASES: Record<string, string[]> = {
+  card: ['card', 'Tarjeta'],
+  transfer: ['transfer', 'Transferencia'],
+  direct_debit: ['direct_debit', 'Domiciliación'],
+  bank_draft: ['bank_draft', 'Pagaré', 'Giro'],
+  cash: ['cash', 'Efectivo'],
+  check: ['check', 'Cheque'],
+}
+
+// Inverso: etiqueta/slug → slug canónico. Para NORMALIZAR al guardar y no volver a
+// meter etiquetas en payment_method (origen del bug: listSuppliersForInvoice devolvía
+// el método del proveedor labelizado y el form lo guardaba tal cual).
+const PAYMENT_METHOD_LABEL_TO_SLUG: Record<string, string> = Object.fromEntries(
+  Object.entries(PAYMENT_METHOD_ALIASES).flatMap(([slug, vals]) => vals.map((v) => [v, slug])),
+)
+function toPaymentMethodSlug(v: string | null | undefined): string | null {
+  const t = (v ?? '').trim()
+  if (!t) return null
+  return PAYMENT_METHOD_LABEL_TO_SLUG[t] ?? t
+}
+
 export type ApSupplierInvoiceRow = {
   id: string
   store_id: string | null
@@ -252,7 +277,9 @@ export const listSupplierInvoices = protectedAction<
       if (paymentMethod === 'none') {
         q = q.is('payment_method', null)
       } else {
-        q = q.eq('payment_method', paymentMethod)
+        // Tolerante a slug + etiqueta histórica (ver PAYMENT_METHOD_ALIASES).
+        const aliases = PAYMENT_METHOD_ALIASES[paymentMethod] ?? [paymentMethod]
+        q = q.in('payment_method', aliases)
       }
     }
 
@@ -608,7 +635,7 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
         retention_rate: Number(input.retention_rate ?? 0),
         retention_amount: Number(input.retention_amount ?? 0),
         total_amount: Number(input.total_amount),
-        payment_method: input.payment_method?.trim() || supplierDefaults?.payment_method || null,
+        payment_method: toPaymentMethodSlug(input.payment_method || supplierDefaults?.payment_method),
         notes: input.notes?.trim() || null,
         attachment_url: input.attachment_url?.trim() || null,
         is_rectifying: input.is_rectifying === true,
@@ -771,7 +798,7 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
         retention_rate: Number(rest.retention_rate ?? 0),
         retention_amount: Number(rest.retention_amount ?? 0),
         total_amount: Number(rest.total_amount),
-        payment_method: rest.payment_method?.trim() || supplierDefaults?.payment_method || null,
+        payment_method: toPaymentMethodSlug(rest.payment_method || supplierDefaults?.payment_method),
         notes: rest.notes?.trim() || null,
         attachment_url: rest.attachment_url?.trim() || null,
         is_proforma: rest.is_proforma === true,
