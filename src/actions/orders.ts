@@ -758,20 +758,16 @@ export const renumberOrderToStore = protectedAction<{ orderId: string }, { order
 
     const { data: order, error: orderErr } = await ctx.adminClient
       .from('tailoring_orders')
-      .select('id, order_number, store_id, total_paid')
+      .select('id, order_number, store_id')
       .eq('id', orderId)
       .single()
     if (orderErr || !order) return failure('Pedido no encontrado', 'NOT_FOUND')
-    const o = order as { order_number: string; store_id: string | null; total_paid: number | string }
+    const o = order as { order_number: string; store_id: string | null }
 
-    // Protección de cobros: si ya hay algo cobrado, no renumerar (rompería los
-    // espejos de caja enlazados por texto del número).
-    if ((Number(o.total_paid) || 0) > 0) {
-      return failure(
-        'Este pedido ya tiene cobros registrados. Renumerarlo dejaría los apuntes de caja descuadrados (se enlazan por el número de pedido). Mantén el número actual; para cambiarlo hay que ajustar también esos apuntes a mano.',
-        'CONFLICT',
-      )
-    }
+    // Renumerar pedidos CON cobros está permitido (R8): la RPC refresca el texto de
+    // los espejos de caja al nº nuevo en la MISMA transacción, así que ni el reverso
+    // por FK ni el fallback por texto (rpc_remove) ni la edición de cobro
+    // (rpc_update_tailoring_payment, que localiza por texto) quedan descuadrados.
     if (!o.store_id) return failure('El pedido no tiene tienda asignada', 'VALIDATION')
 
     const { data: store } = await ctx.adminClient
@@ -784,9 +780,14 @@ export const renumberOrderToStore = protectedAction<{ orderId: string }, { order
     }
 
     const newNumber = await getNextNumber('tailoring_orders', 'order_number', prefix)
-    const { error: updErr } = await ctx.adminClient
-      .from('tailoring_orders').update({ order_number: newNumber }).eq('id', orderId)
-    if (updErr) return failure(updErr.message || 'Error al renumerar', 'INTERNAL')
+    // Renumerado + refresco de espejos ATÓMICO (una sola transacción en la RPC):
+    // si fallara el refresco, no se aplica el renumerado → nunca quedan espejos con
+    // el nº viejo.
+    const { error: rpcErr } = await ctx.adminClient.rpc('rpc_renumber_order', {
+      p_order_id: orderId,
+      p_new_number: newNumber,
+    })
+    if (rpcErr) return failure(rpcErr.message || 'Error al renumerar', 'INTERNAL')
 
     return success({
       order_number: newNumber,

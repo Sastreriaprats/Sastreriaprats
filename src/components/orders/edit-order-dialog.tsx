@@ -1186,7 +1186,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
               <strong>{stores.find((s) => s.id === storeId)?.name}</strong>{' '}
               (prefijo {stores.find((s) => s.id === storeId)?.order_prefix}). El cambio de tienda ya se ha guardado.
               <br />¿Quieres renumerarlo al siguiente número libre de esa tienda, o mantener el número actual?
-              <br /><span className="text-xs text-muted-foreground">Si el pedido ya tiene cobros, no se puede renumerar (los apuntes de caja se enlazan por el número).</span>
+              <br /><span className="text-xs text-muted-foreground">Si el pedido tiene cobros, los apuntes de caja se actualizan automáticamente al número nuevo.</span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
