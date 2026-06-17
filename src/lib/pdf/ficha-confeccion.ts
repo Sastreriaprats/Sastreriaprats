@@ -893,7 +893,7 @@ const PUNO_LABELS: Record<string, string> = {
   otro: 'Otro',
 }
 
-function buildCamiseriaDocDefinition(
+export function buildCamiseriaDocDefinition(
   order: FichaConfeccionOrder,
   line: { configuration?: Record<string, unknown> },
   lineIndex: number,
@@ -1129,73 +1129,138 @@ function buildCamiseriaDocDefinition(
   // el precio NO se muestra: el TEJIDO ocupa todo el ancho.
   const tejidoStr = String(cfg.tejido ?? '—').trim()
   const precioLinea = Number(cfg.precio ?? 0)
-  if (showPrecio) {
-    content.push({
-      table: {
-        widths: ['65%', '35%'],
-        body: [
-          [
-            {
-              stack: [
-                { text: 'TEJIDO', fontSize: fs7, color: LABEL_COLOR },
-                { text: tejidoStr, fontSize: fs9 + 2, ...valueStyle },
-              ],
-              margin: [0, 0, 0, 40],
-            },
-            {
-              stack: [
-                { text: 'PRECIO', fontSize: fs7, color: LABEL_COLOR },
-                { text: `${precioLinea.toFixed(2)} €`, fontSize: fs9 + 2, bold: true, ...valueStyle },
-                { text: 'ENTREGADO A CUENTA', fontSize: fs7, color: LABEL_COLOR, margin: [0, 6, 0, 0] },
-                { text: `${totalPaid.toFixed(2)} €`, fontSize: fs9, ...valueStyle },
-              ],
-              fillColor: '#f5f5f5',
-            },
+
+  // Tabla TEJIDO. Superior: 65/35 con bloque PRECIO. Inferior: ancho completo
+  // (sin precio). Se construye como objeto para poder envolverlo, en la copia
+  // inferior, junto a OBSERVACIONES dentro de la columna izquierda del talón.
+  const tejidoTable: Content = showPrecio
+    ? {
+        table: {
+          widths: ['65%', '35%'],
+          body: [
+            [
+              {
+                stack: [
+                  { text: 'TEJIDO', fontSize: fs7, color: LABEL_COLOR },
+                  { text: tejidoStr, fontSize: fs9 + 2, ...valueStyle },
+                ],
+                margin: [0, 0, 0, 40],
+              },
+              {
+                stack: [
+                  { text: 'PRECIO', fontSize: fs7, color: LABEL_COLOR },
+                  { text: `${precioLinea.toFixed(2)} €`, fontSize: fs9 + 2, bold: true, ...valueStyle },
+                  { text: 'ENTREGADO A CUENTA', fontSize: fs7, color: LABEL_COLOR, margin: [0, 6, 0, 0] },
+                  { text: `${totalPaid.toFixed(2)} €`, fontSize: fs9, ...valueStyle },
+                ],
+                fillColor: '#f5f5f5',
+              },
+            ],
           ],
+        },
+        layout: tableLayoutBorders,
+      }
+    : {
+        table: {
+          widths: ['*'],
+          body: [
+            [
+              {
+                stack: [
+                  { text: 'TEJIDO', fontSize: fs7, color: LABEL_COLOR },
+                  { text: tejidoStr, fontSize: fs9 + 2, ...valueStyle },
+                ],
+                margin: [0, 0, 0, 40],
+              },
+            ],
+          ],
+        },
+        layout: tableLayoutBorders,
+      }
+
+  // Tabla OBSERVACIONES. En la copia SUPERIOR se reserva mucho aire (60pt) para
+  // anotaciones a mano. En la INFERIOR el texto comparte fila con el talón a la
+  // derecha (columna más estrecha → las observaciones largas ocupan más líneas);
+  // se reduce el aire a 30pt para que el conjunto siga cabiendo en 1 hoja sin
+  // recortar ni una palabra de las observaciones (el aire es espacio en blanco,
+  // no contenido).
+  const obsStr = String(cfg.obs ?? '').trim() || '—'
+  const obsTable: Content = {
+    table: {
+      widths: ['25%', '75%'],
+      body: [
+        [
+          { text: 'OBSERVACIONES:', fontSize: fs7, ...labelStyle },
+          { text: obsStr, fontSize: fs9, margin: [0, 0, 0, showPrecio ? 60 : 30], ...valueStyle },
         ],
-      },
-      layout: tableLayoutBorders,
-    })
+      ],
+    },
+    layout: tableLayoutBorders,
+  }
+
+  if (showPrecio) {
+    // Copia SUPERIOR (tienda): sin cambios — tejido (con precio) y observaciones
+    // a ancho completo, una debajo de otra.
+    content.push(tejidoTable)
+    content.push(obsTable)
   } else {
-    content.push({
+    // Copia INFERIOR (talón del oficial): se añade el "Talón de cobro" a la
+    // derecha, replicando el de sastrería (ver talonLeftStack/Talón de cobro en
+    // buildDocDefinition). Se aprovecha el aire vertical ya reservado por los
+    // márgenes de tejido (40pt) y observaciones (60pt): el talón cabe a la
+    // derecha SIN añadir altura → la ficha no desborda a una 2ª página.
+    // ⚠️ El talón NUNCA muestra importes (Precio / Entregado a cuenta), igual
+    // que el de sastrería: solo datos identificativos del trabajo.
+    const oficialStr = String(cfg.oficial ?? '').trim()
+    const prendaLabelCam = String(cfg.prendaLabel ?? '').trim() || 'Camisa a medida'
+    const situacionLabel = getOrderStatusLabel(String(cfg.situacionTrabajo ?? '—'))
+    // El talón es su propia tabla de 1 celda con borde. Se coloca a la derecha
+    // con `columns` (NO una tabla envolvente): columns no añade bordes ni padding
+    // de fila, por lo que el conjunto NO gana altura respecto al original
+    // (tejido+observaciones a la izquierda con su aire ya reservado) y la ficha
+    // sigue cabiendo en 1 hoja aunque las observaciones sean largas.
+    const talonBox: Content = {
       table: {
         widths: ['*'],
         body: [
           [
             {
               stack: [
-                { text: 'TEJIDO', fontSize: fs7, color: LABEL_COLOR },
-                { text: tejidoStr, fontSize: fs9 + 2, ...valueStyle },
+                { text: 'Talón de cobro', bold: true, alignment: 'center', fontSize: fs9 + 3, margin: [3, 6, 3, 8] },
+                { text: `Nº talón: ${orderNum}`, bold: true, fontSize: fs9 + 1, margin: [4, 4, 4, 4] },
+                { text: `Cliente: ${clientName}`, fontSize: fs9, margin: [4, 3] },
+                { text: `Oficial: ${oficialStr || ' '}`, fontSize: fs9, margin: [4, 3] },
+                { text: `Prenda: ${prendaLabelCam}`, fontSize: fs9, margin: [4, 3] },
+                { text: `Situación: ${situacionLabel}`, fontSize: fs9, margin: [4, 3] },
+                { text: `F. compromiso: ${fechaCompromiso}`, fontSize: fs9, margin: [4, 3] },
+                { text: `Fecha emisión: ${hoy}`, fontSize: fs9, margin: [4, 3, 4, 6] },
               ],
-              margin: [0, 0, 0, 40],
             },
           ],
         ],
       },
       layout: tableLayoutBorders,
+    }
+    content.push({
+      columns: [
+        { width: '*', stack: [tejidoTable, obsTable] },
+        { width: 135, stack: [talonBox] },
+      ],
+      columnGap: 4,
     })
   }
-
-  // Tabla OBSERVACIONES
-  const obsStr = String(cfg.obs ?? '').trim() || '—'
-  content.push({
-    table: {
-      widths: ['25%', '75%'],
-      body: [
-        [
-          { text: 'OBSERVACIONES:', fontSize: fs7, ...labelStyle },
-          { text: obsStr, fontSize: fs9, margin: [0, 0, 0, 60], ...valueStyle },
-        ],
-      ],
-    },
-    layout: tableLayoutBorders,
-  })
 
   return {
     pageSize: 'A4',
     pageOrientation: 'portrait',
     pageMargins: MARGIN_PT,
-    content,
+    // Cada copia (tienda o oficial) se envuelve en un bloque `unbreakable` para
+    // que pdfmake NUNCA la parta entre páginas: si no cabe en la página actual,
+    // se mueve ENTERA a la siguiente. Garantiza que la copia del oficial
+    // (medidas + tejido + observaciones + talón) quede SIEMPRE junta — el talón
+    // nunca cae en una hoja distinta de sus observaciones, aunque las
+    // observaciones sean muy largas.
+    content: [{ stack: content, unbreakable: true } as Content],
   }
 }
 
