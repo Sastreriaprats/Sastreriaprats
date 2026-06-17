@@ -594,6 +594,13 @@ export const changeOrderStatus = protectedAction<any, any>(
 
       if (new_status === 'cancelled' || new_status === 'incident') {
         // Acciones MANUALES a nivel pedido (no derivables del mínimo de prendas).
+        // R2-A: reembolsar los cobros ANTES de marcar 'cancelled' (para que el guard
+        // de _revert_order_money lea el estado REAL). delivered/sin-cobro -> no-op interno.
+        // Atómico (la RPC reusa rpc_remove_order_payment en una sola transacción).
+        if (new_status === 'cancelled' && fromStatus !== 'cancelled') {
+          const { error: revErr } = await ctx.adminClient.rpc('_revert_order_money', { p_order_id: order_id })
+          if (revErr) return failure(revErr.message || 'No se pudieron reembolsar los cobros del pedido', 'INTERNAL')
+        }
         await ctx.adminClient
           .from('tailoring_orders').update({ status: new_status }).eq('id', order_id)
         const prop = classifyLinesForForwardPropagation(new_status, (order as any).order_type, lines)
@@ -932,6 +939,12 @@ export const updateOrderStatus = protectedAction<
 
       if (trimmedStatus === 'cancelled' || trimmedStatus === 'incident') {
         // Acciones MANUALES a nivel pedido (no derivables del mínimo).
+        // R2-A: reembolsar los cobros ANTES de marcar 'cancelled' (guard lee estado real;
+        // delivered/sin-cobro -> no-op). Atómico vía _revert_order_money.
+        if (trimmedStatus === 'cancelled' && fromStatus !== 'cancelled') {
+          const { error: revErr } = await ctx.adminClient.rpc('_revert_order_money', { p_order_id: orderId.trim() })
+          if (revErr) return failure(revErr.message || 'No se pudieron reembolsar los cobros del pedido', 'INTERNAL')
+        }
         const { error } = await ctx.adminClient
           .from('tailoring_orders').update({ status: trimmedStatus }).eq('id', orderId.trim())
         if (error) return failure(error.message, 'INTERNAL')

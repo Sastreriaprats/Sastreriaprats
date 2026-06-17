@@ -200,6 +200,7 @@ export function OrderDetailContent({ order }: { order: any }) {
         open={showStatusDialog} onOpenChange={setShowStatusDialog}
         orderId={order.id} currentStatus={order.status} lines={order.tailoring_order_lines || []}
         orderType={order.order_type}
+        totalPaid={order.total_paid}
       />
 
       <EditOrderDialog

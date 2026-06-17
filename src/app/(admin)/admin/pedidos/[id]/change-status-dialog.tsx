@@ -16,10 +16,11 @@ import { getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
 import { getStatusesFor } from '@/lib/orders/statuses'
 import { statusChangeToast } from '@/lib/orders/status-toast'
 
-export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus, lines, orderType = 'artesanal' }: {
+export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus, lines, orderType = 'artesanal', totalPaid = 0 }: {
   open: boolean; onOpenChange: (open: boolean) => void
   orderId: string; currentStatus: string; lines: any[]
   orderType?: string
+  totalPaid?: number
 }) {
   const router = useRouter()
   const [newStatus, setNewStatus] = useState('')
@@ -70,6 +71,12 @@ export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus,
               El estado del pedido se calcula solo: sigue al de la prenda <strong>menos avanzada</strong>. No llega a un estado hasta que todas las prendas lo alcanzan.
             </p>
           </div>
+
+          {newStatus === 'cancelled' && currentStatus === 'delivered' && (Number(totalPaid) || 0) > 0 && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+              Este pedido ya está <strong>entregado</strong> y tiene cobros registrados. Al cancelarlo <strong>NO se reembolsan automáticamente</strong> (el cliente ya tiene la prenda). Si quieres devolver el dinero, regístralo a mano como un gasto en la caja (devolución de pedido).
+            </div>
+          )}
 
           {lines.length > 1 && (
             <div className="space-y-2">
