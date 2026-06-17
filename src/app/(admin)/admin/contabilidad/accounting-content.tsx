@@ -3179,6 +3179,7 @@ const TAX_RATES = [0, 4, 10, 21]
 const MONTHS_OPT = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 
 function MovimientosTab() {
+  const { can } = usePermissions()
   const [rows, setRows] = useState<AccountingMovementRow[]>([])
   const [loading, setLoading] = useState(true)
   const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all')
@@ -3422,7 +3423,7 @@ function MovimientosTab() {
                             <ExternalLink className="h-3.5 w-3.5" />
                           </Button>
                         )}
-                        {r.isManual && (
+                        {r.isManual && can('accounting.edit') && (
                           <>
                             <Button
                               size="icon" variant="ghost" className="h-7 w-7"

@@ -284,6 +284,27 @@ export const deleteClientAction = protectedAction<string, { id: string }>(
   }
 )
 
+// Reactivar un cliente desactivado (is_active=true). Contraparte de
+// deleteClientAction (soft delete); mismo permiso, permite deshacer desde la UI.
+export const reactivateClientAction = protectedAction<string, { id: string }>(
+  {
+    permission: 'clients.delete',
+    auditModule: 'clients',
+    auditAction: 'update',
+    auditEntity: 'client',
+    revalidate: ['/admin/clientes'],
+  },
+  async (ctx, clientId) => {
+    const { error } = await ctx.adminClient
+      .from('clients')
+      .update({ is_active: true })
+      .eq('id', clientId)
+
+    if (error) return failure(error.message)
+    return success({ id: clientId })
+  }
+)
+
 export const hardDeleteClientAction = protectedAction<string, { id: string }>(
   {
     permission: 'clients.delete',

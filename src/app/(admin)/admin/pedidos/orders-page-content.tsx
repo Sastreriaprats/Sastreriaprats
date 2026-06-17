@@ -565,13 +565,17 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                                 <DropdownMenuItem onClick={() => router.push(`/admin/pedidos/${order.id}`)}>
                                   <Eye className="mr-2 h-4 w-4" /> Ver ficha
                                 </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  className="text-red-600 focus:text-red-600"
-                                  onClick={() => setOrderToDelete({ id: order.id, order_number: order.order_number })}
-                                >
-                                  <Trash2 className="mr-2 h-4 w-4" /> Eliminar
-                                </DropdownMenuItem>
+                                {can('orders.delete') && (
+                                  <>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      className="text-red-600 focus:text-red-600"
+                                      onClick={() => setOrderToDelete({ id: order.id, order_number: order.order_number })}
+                                    >
+                                      <Trash2 className="mr-2 h-4 w-4" /> Eliminar
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </TableCell>

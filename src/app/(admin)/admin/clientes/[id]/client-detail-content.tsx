@@ -12,12 +12,12 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
-  ArrowLeft, Phone, Mail, Trash2, GitMerge,
+  ArrowLeft, Phone, Mail, Trash2, GitMerge, Ban, UserCheck,
   Ruler, StickyNote, Scissors, Shirt, ShoppingBag, History, Pencil, CalendarDays, Receipt, Building2, BookmarkCheck,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { usePermissions } from '@/hooks/use-permissions'
-import { hardDeleteClientAction } from '@/actions/clients'
+import { hardDeleteClientAction, deleteClientAction, reactivateClientAction } from '@/actions/clients'
 import { MergeClientDialog } from './merge-client-dialog'
 import { clientSourceLabel } from '@/lib/clients/sources'
 import { getInitials, formatCurrency, formatDate } from '@/lib/utils'
@@ -84,6 +84,22 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [showMergeDialog, setShowMergeDialog] = useState(false)
+  const [isToggling, setIsToggling] = useState(false)
+
+  // Toggle desactivar/reactivar (soft). Distinto del hard delete (admin) de abajo.
+  const handleToggleActive = async () => {
+    setIsToggling(true)
+    const result = client.is_active
+      ? await deleteClientAction(client.id)
+      : await reactivateClientAction(client.id)
+    setIsToggling(false)
+    if (result.success) {
+      toast.success(client.is_active ? 'Cliente desactivado' : 'Cliente reactivado')
+      router.refresh()
+    } else {
+      toast.error(result.error)
+    }
+  }
 
   const handleHardDelete = async () => {
     setIsDeleting(true)
@@ -130,6 +146,13 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
             {can('clients.merge') && (
               <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowMergeDialog(true)}>
                 <GitMerge className="h-4 w-4" /> Fusionar con…
+              </Button>
+            )}
+            {can('clients.delete') && (
+              <Button variant="outline" size="sm" className="gap-2" onClick={handleToggleActive} disabled={isToggling}>
+                {client.is_active
+                  ? <><Ban className="h-4 w-4" /> Desactivar</>
+                  : <><UserCheck className="h-4 w-4" /> Reactivar</>}
               </Button>
             )}
             {isAdmin && (
