@@ -323,6 +323,9 @@ export const addSalePayment = protectedAction<AddSalePaymentInput, any>(
           notes: `Método: ${input.payment_method} - Tipo: ${saleData?.sale_type ?? ''}`,
           created_by: ctx.userId,
           cash_session_id: sessionId,
+          // Fase C (mig 208/209): enlace estructural del espejo a su cobro a plazos,
+          // además del texto del ticket (que se mantiene para los reversos Fase D).
+          sale_payment_id: payment.id,
         }
         const { error: mtErrorSale } = await ctx.adminClient.from('manual_transactions').insert(mtPayloadSale)
         if (mtErrorSale) {
