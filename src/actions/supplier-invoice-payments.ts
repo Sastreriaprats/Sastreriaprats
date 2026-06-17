@@ -1,6 +1,6 @@
 'use server'
 
-import { protectedAction } from '@/lib/server/action-wrapper'
+import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { serializeForServerAction } from '@/lib/server/serialize'
 import {
@@ -72,6 +72,61 @@ export type SupplierVencimientosKpis = {
 }
 
 const today = () => new Date().toISOString().slice(0, 10)
+
+/**
+ * Re-deriva is_paid de las cuotas de una factura desde el dinero realmente pagado
+ * (Σ ap_supplier_invoice_payments), con el MISMO orden FIFO (sort_order, due_date) y
+ * el MISMO umbral (0.005) que registerSupplierInvoicePayment. Marca las cuotas que el
+ * total pagado cubre consecutivamente y DESMARCA (is_paid=false, paid_at=null,
+ * payment_method=null) las que ya no se cubren. Maneja ambos sentidos por robustez,
+ * pero al BORRAR un pago el dinero solo baja → en la práctica solo desmarca.
+ * Solo toca la clasificación de cuotas — nunca importes, pagos ni espejos de caja.
+ */
+async function rederiveDueDatesFifo(adminClient: AdminClient, invoiceId: string): Promise<void> {
+  if (!invoiceId) return
+
+  const { data: pays } = await adminClient
+    .from(TABLE)
+    .select('amount')
+    .eq('supplier_invoice_id', invoiceId)
+  const realPaid = (pays || []).reduce((s: number, p: { amount: number | null }) => s + Number(p.amount ?? 0), 0)
+
+  const { data: dueRows } = await adminClient
+    .from(DUE_DATES_TABLE)
+    .select('id, amount, sort_order, due_date, is_paid')
+    .eq('supplier_invoice_id', invoiceId)
+    .order('sort_order', { ascending: true })
+    .order('due_date', { ascending: true })
+
+  const idsToMarkPaid: string[] = []
+  const idsToUnmark: string[] = []
+  let remaining = realPaid
+  let covered = true // FIFO estricto: tras la primera cuota no cubierta, ninguna posterior se paga
+  for (const r of (dueRows || []) as Array<{ id: string; amount: number | null; is_paid: boolean }>) {
+    const amt = Number(r.amount ?? 0)
+    const shouldBePaid = covered && remaining + 0.005 >= amt
+    if (shouldBePaid) {
+      if (!r.is_paid) idsToMarkPaid.push(String(r.id))
+      remaining = Math.round((remaining - amt) * 100) / 100
+    } else {
+      covered = false
+      if (r.is_paid) idsToUnmark.push(String(r.id))
+    }
+  }
+
+  if (idsToMarkPaid.length > 0) {
+    await adminClient
+      .from(DUE_DATES_TABLE)
+      .update({ is_paid: true, paid_at: today(), payment_method: 'transfer' })
+      .in('id', idsToMarkPaid)
+  }
+  if (idsToUnmark.length > 0) {
+    await adminClient
+      .from(DUE_DATES_TABLE)
+      .update({ is_paid: false, paid_at: null, payment_method: null })
+      .in('id', idsToUnmark)
+  }
+}
 
 // ─── Registrar pago ──────────────────────────────────────────────────────────
 
@@ -264,17 +319,26 @@ export const deleteSupplierInvoicePayment = protectedAction<{ id: string }, void
 
     const { data: existing } = await ctx.adminClient
       .from(TABLE)
-      .select('manual_transaction_id')
+      .select('manual_transaction_id, supplier_invoice_id')
       .eq('id', id)
       .maybeSingle()
 
-    const mtId = (existing as any)?.manual_transaction_id ?? null
+    const ex = existing as { manual_transaction_id: string | null; supplier_invoice_id: string | null } | null
+    const mtId = ex?.manual_transaction_id ?? null
+    const invoiceId = ex?.supplier_invoice_id ?? null
 
     const { error } = await ctx.adminClient.from(TABLE).delete().eq('id', id)
     if (error) return failure(error.message || 'Error al eliminar pago')
 
     if (mtId) {
       await ctx.adminClient.from('manual_transactions').delete().eq('id', mtId)
+    }
+
+    // Re-derivar is_paid de las cuotas desde el dinero que queda (arregla el "fantasma":
+    // cuotas marcadas pagadas cuyo pago se acaba de borrar). El status de cabecera ya lo
+    // re-deriva el trigger ap_sipay_recalc; aquí solo la clasificación de cuotas.
+    if (invoiceId) {
+      await rederiveDueDatesFifo(ctx.adminClient, invoiceId)
     }
 
     return success(undefined)
