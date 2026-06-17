@@ -242,6 +242,10 @@ export function SupplierInvoicesContent() {
   ])
 
   const selectedSupplier = suppliers.find((s) => s.id === form.supplier_id) || null
+  // IVA por defecto del proveedor seleccionado, usado como default del tax_rate de
+  // las líneas nuevas. OJO: 0 es un IVA válido (exento) → comparar con != null, NO
+  // con truthy, para que un 0 legítimo no caiga al fallback 21.
+  const supplierDefaultTaxRate = selectedSupplier?.default_tax_rate != null ? String(selectedSupplier.default_tax_rate) : '21'
 
   const loadKpis = useCallback(async () => {
     const r = await getSupplierInvoicesKpis()
@@ -506,6 +510,7 @@ export function SupplierInvoicesContent() {
 
   const handleSelectSupplier = (supplierId: string) => {
     const supplier = suppliers.find((s) => s.id === supplierId) || null
+    // 0 es válido (exento) → != null, no truthy, para no caer al fallback 21.
     const supplierTaxRate = supplier?.default_tax_rate != null ? String(supplier.default_tax_rate) : '21'
     setForm((f) => ({
       ...f,
@@ -516,6 +521,15 @@ export function SupplierInvoicesContent() {
       payment_method: supplier?.payment_method ?? f.payment_method,
       tax_rate: supplierTaxRate,
     }))
+    // El IVA real de la factura sale del tax_rate de cada LÍNEA (no de form.tax_rate).
+    // Propagar el IVA del proveedor SOLO a las líneas VACÍAS (sin descripción ni base):
+    // es el default de las líneas nuevas, pero NUNCA pisa un IVA que la usuaria ya
+    // haya ajustado a mano en una línea con datos.
+    setLines((prev) => prev.map((l) =>
+      l.description.trim() === '' && String(l.base).trim() === ''
+        ? { ...l, tax_rate: supplierTaxRate }
+        : l
+    ))
     setSupplierPopoverOpen(false)
     setSelectedDeliveryNoteIds([])
     loadDeliveryNotesForSupplier(supplierId, editingId)
@@ -1343,7 +1357,7 @@ export function SupplierInvoicesContent() {
                     variant="outline"
                     size="sm"
                     className="gap-1"
-                    onClick={() => setLines((prev) => [...prev, { description: '', base: '', tax_rate: '21' }])}
+                    onClick={() => setLines((prev) => [...prev, { description: '', base: '', tax_rate: supplierDefaultTaxRate }])}
                   >
                     <Plus className="h-3 w-3" /> Añadir línea
                   </Button>
