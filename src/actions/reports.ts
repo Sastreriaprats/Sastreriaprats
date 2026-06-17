@@ -91,9 +91,12 @@ export const getSalesReport = protectedAction<
     if (wantTailoring) {
       let tailoringQuery = ctx.adminClient
         .from('tailoring_orders')
-        .select('subtotal, total, created_at, status, store_id, stores(name)')
-        .gte('created_at', start_date)
-        .lte('created_at', end_date + 'T23:59:59')
+        // Sastrería data por order_date (fecha REAL del pedido), no por created_at
+        // (fecha de tecleo): un pedido viejo migrado hoy debe contar en su mes real.
+        // order_date es DATE → rango inclusivo sin sufijo de hora.
+        .select('subtotal, total, order_date, status, store_id, stores(name)')
+        .gte('order_date', start_date)
+        .lte('order_date', end_date)
         .not('status', 'eq', 'cancelled')
       if (store_id) tailoringQuery = tailoringQuery.eq('store_id', store_id)
       const res = await tailoringQuery
@@ -111,13 +114,16 @@ export const getSalesReport = protectedAction<
       return Number(item[valueField]) || 0
     }
 
-    const groupData = (items: Record<string, unknown>[], valueField: string, nestedDate?: string) => {
+    const groupData = (items: Record<string, unknown>[], valueField: string, nestedDate?: string, dateField: string = 'created_at') => {
       const groups: Record<string, number> = {}
       for (const item of items) {
-        const rawDate = nestedDate
+        let rawDate = nestedDate
           ? (item[nestedDate] as Record<string, unknown>)?.created_at as string
-          : item.created_at as string
+          : item[dateField] as string
         if (!rawDate) continue
+        // order_date es DATE (sin hora): se ancla a mediodía para que las claves
+        // de Madrid (día/semana/mes) sean inequívocas.
+        if (typeof rawDate === 'string' && !rawDate.includes('T')) rawDate = rawDate + 'T12:00:00'
         let key: string
         if (group_by === 'month') key = madridMonthKey(rawDate)
         else if (group_by === 'week') key = madridWeekKey(rawDate)
@@ -129,7 +135,7 @@ export const getSalesReport = protectedAction<
 
     const posGrouped = groupData(saleLines || [], 'line_total', 'sales')
     const onlineGrouped = groupData(onlineOrders || [], 'total')
-    const tailoringGrouped = groupData(tailoringOrders || [], 'total')
+    const tailoringGrouped = groupData(tailoringOrders || [], 'total', undefined, 'order_date')
 
     const allDates = new Set([...Object.keys(posGrouped), ...Object.keys(onlineGrouped), ...Object.keys(tailoringGrouped)])
     const chartData = Array.from(allDates).sort().map(date => ({
@@ -240,11 +246,12 @@ export const getTailoringByCategory = protectedAction<
     //    created_at del pedido. + stores(name) para el desglose por tienda.
     let query = ctx.adminClient
       .from('tailoring_order_lines')
-      .select('line_type, line_total, tax_rate, status, garment_types(category), tailoring_orders!inner(created_at, store_id, status, order_type, stores(name))')
+      .select('line_type, line_total, tax_rate, status, garment_types(category), tailoring_orders!inner(order_date, store_id, status, order_type, stores(name))')
       .neq('status', 'cancelled')
       .neq('tailoring_orders.status', 'cancelled')
-      .gte('tailoring_orders.created_at', start_date)
-      .lte('tailoring_orders.created_at', end_date + 'T23:59:59')
+      // Sastrería por order_date (fecha real del pedido), no created_at. DATE → sin sufijo de hora.
+      .gte('tailoring_orders.order_date', start_date)
+      .lte('tailoring_orders.order_date', end_date)
     if (store_id) query = query.eq('tailoring_orders.store_id', store_id)
 
     // 2) Líneas de BOUTIQUE + TARJETAS REGALO — de sale_lines, misma definición que
@@ -344,8 +351,9 @@ export const getComparePeriods = protectedAction<
     if (store_id) saleLinesQ = saleLinesQ.eq('sales.store_id', store_id)
 
     let tailoringQ = ctx.adminClient.from('tailoring_orders')
-      .select('subtotal, total, created_at, store_id')
-      .gte('created_at', minStart).lte('created_at', rangeEnd)
+      // Sastrería por order_date (fecha real), no created_at. DATE → rango sin sufijo de hora.
+      .select('subtotal, total, order_date, store_id')
+      .gte('order_date', minStart).lte('order_date', maxEnd)
       .not('status', 'eq', 'cancelled')
     if (store_id) tailoringQ = tailoringQ.eq('store_id', store_id)
 
@@ -391,8 +399,9 @@ export const getComparePeriods = protectedAction<
     let currentOrders = 0
     let previousOrders = 0
     for (const t of tailoringRes.data || []) {
-      const d = (t.created_at ?? '').slice(0, 10)
-      const v = net ? (Number((t as any).subtotal) || 0) : (Number(t.total) || 0)
+      const tt = t as any
+      const d = (tt.order_date ?? '').slice(0, 10)
+      const v = net ? (Number(tt.subtotal) || 0) : (Number(t.total) || 0)
       if (inCurrent(d)) {
         currentRevenue += v
         currentOrders += 1
@@ -527,8 +536,10 @@ export const getTailorPerformance = protectedAction<
     let q = ctx.adminClient
       .from('tailoring_orders')
       .select('id, subtotal, total, total_paid, status, created_by, store_id, profiles!tailoring_orders_created_by_fkey(full_name), tailoring_fittings(count)')
-      .gte('created_at', start_date)
-      .lte('created_at', end_date + 'T23:59:59')
+      // Facturado/pedidos por order_date (fecha real). El "cobrado" (más abajo, pagos)
+      // sigue por la fecha del cobro, no se toca. DATE → rango sin sufijo de hora.
+      .gte('order_date', start_date)
+      .lte('order_date', end_date)
       .not('status', 'eq', 'cancelled')
     if (store_id) q = q.eq('store_id', store_id)
     const { data: orders } = await q
@@ -567,16 +578,16 @@ export const getTailorPerformance = protectedAction<
     }
 
     // 2) Cobros realizados en el periodo, agrupados por el sastre del pedido.
-    //    Esta query SUSTITUYE el bug anterior (que usaba total_paid acumulado
-    //    filtrado por created_at del pedido — métrica semánticamente errónea).
-    //    Ahora suma exactamente los pagos cuyo created_at cae en el periodo,
-    //    independientemente de cuándo se creó el pedido. Se atribuye al sastre
-    //    del pedido (no al cajero que registró el cobro).
+    //    Se data por payment_date (fecha REAL del cobro), no por created_at
+    //    (fecha de tecleo): un cobro viejo migrado debe contar en su mes real.
+    //    Esto ADEMÁS alinea con la caja, cuyo espejo (manual_transactions) se
+    //    fecha por payment_date. payment_date es DATE → rango sin sufijo de hora.
+    //    Se atribuye al sastre del pedido (no al cajero que registró el cobro).
     let paymentsQ = ctx.adminClient
       .from('tailoring_order_payments')
       .select('amount, tailoring_orders!inner(created_by, store_id)')
-      .gte('created_at', start_date)
-      .lte('created_at', end_date + 'T23:59:59')
+      .gte('payment_date', start_date)
+      .lte('payment_date', end_date)
     if (store_id) paymentsQ = paymentsQ.eq('tailoring_orders.store_id', store_id)
     const { data: payments } = await paymentsQ
 
@@ -655,9 +666,10 @@ export const getSalesByStore = protectedAction<
 
     let tailoringQ = ctx.adminClient
       .from('tailoring_orders')
+      // Sastrería por order_date (fecha real), no created_at. DATE → rango sin sufijo de hora.
       .select('subtotal, total, store_id, stores(name)')
-      .gte('created_at', start_date)
-      .lte('created_at', end_date + 'T23:59:59')
+      .gte('order_date', start_date)
+      .lte('order_date', end_date)
       .not('status', 'eq', 'cancelled')
     if (store_id) tailoringQ = tailoringQ.eq('store_id', store_id)
 
@@ -743,18 +755,22 @@ export const getSalesByEmployee = protectedAction<
       .eq('sales.status', 'completed')
     if (store_id) saleLinesQ = saleLinesQ.eq('sales.store_id', store_id)
 
+    // Cobrado por payment_date (fecha real del cobro), no created_at (tecleo).
+    // Alinea con la caja (espejo fechado por payment_date). DATE → sin sufijo de hora.
     let paymentsQ = ctx.adminClient
       .from('tailoring_order_payments')
-      .select('amount, created_by, created_at, tailoring_orders!inner(store_id, stores(name))')
-      .gte('created_at', start_date)
-      .lte('created_at', end_date + 'T23:59:59')
+      .select('amount, created_by, payment_date, tailoring_orders!inner(store_id, stores(name))')
+      .gte('payment_date', start_date)
+      .lte('payment_date', end_date)
     if (store_id) paymentsQ = paymentsQ.eq('tailoring_orders.store_id', store_id)
 
     let tailoringOrdersQ = ctx.adminClient
       .from('tailoring_orders')
-      .select('subtotal, total, created_by, status, store_id, created_at')
-      .gte('created_at', start_date)
-      .lte('created_at', end_date + 'T23:59:59')
+      // Facturado/pedidos por order_date (fecha real), no created_at. El bloque de
+      // pagos (cobrado) sigue por la fecha del cobro. DATE → rango sin sufijo de hora.
+      .select('subtotal, total, created_by, status, store_id, order_date')
+      .gte('order_date', start_date)
+      .lte('order_date', end_date)
       .not('status', 'eq', 'cancelled')
     if (store_id) tailoringOrdersQ = tailoringOrdersQ.eq('store_id', store_id)
 
@@ -1269,10 +1285,12 @@ export const getClientsAnalytics = protectedAction<
       (() => {
         let q = ctx.adminClient
           .from('tailoring_orders')
-          .select('client_id, store_id, created_at, stores(name)')
+          // Actividad de cliente por order_date (fecha real del pedido), no created_at.
+          // DATE → rango sin sufijo de hora.
+          .select('client_id, store_id, order_date, stores(name)')
           .not('client_id', 'is', null)
-          .gte('created_at', start_date)
-          .lte('created_at', end_date + 'T23:59:59')
+          .gte('order_date', start_date)
+          .lte('order_date', end_date)
         if (store_id) q = q.eq('store_id', store_id)
         return q
       })(),
@@ -1302,7 +1320,7 @@ export const getClientsAnalytics = protectedAction<
       if (!r.client_id) continue
       uniqueIds.add(r.client_id)
       addType(r.client_id, 'sastreria')
-      if (!store_id && r.created_at) ensureDayStore(madridDateKey(r.created_at), r.store_id, r.stores?.name).set.add(r.client_id)
+      if (!store_id && r.order_date) ensureDayStore(madridDateKey(r.order_date + 'T12:00:00'), r.store_id, r.stores?.name).set.add(r.client_id)
     }
     const clientsWithPurchases = uniqueIds.size
 
