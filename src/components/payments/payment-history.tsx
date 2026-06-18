@@ -25,7 +25,7 @@ import { useActiveStore } from '@/hooks/use-store'
 import { usePermissions } from '@/hooks/use-permissions'
 import {
   getOrderPayments, addOrderPayment, deleteOrderPayment, updateOrderPayment,
-  getSalePayments, addSalePayment,
+  getSalePayments, addSalePayment, deleteSalePayment, updateSalePayment,
   type OrderPayment, type PaymentMethod,
 } from '@/actions/payments'
 import { checkCashSessionOpen } from '@/actions/pos'
@@ -84,9 +84,14 @@ export function PaymentHistory({
   // Wellington caiga en la caja de Pinzón solo porque el operador tenía
   // esa otra tienda como activa.
   const effectiveStoreId = entityStoreId ?? activeStoreId ?? undefined
-  // Editar cobro: solo admin pleno (administrador/super_admin) con orders.edit,
-  // igual que el cerrojo del server (updateOrderPayment → orders.edit + isFullAdmin).
-  const canEditPayment = entityType === 'tailoring_order' && !readonly && can('orders.edit') && isSuperAdmin
+  // Permiso de gestión de cobros según el tipo: pedido (orders.edit) o venta (sales.edit).
+  const paymentPerm = entityType === 'sale' ? 'sales.edit' : 'orders.edit'
+  // Editar cobro: solo admin pleno (administrador/super_admin), igual que el cerrojo
+  // del server (update*Payment → permiso + isFullAdmin).
+  const canEditPayment = !readonly && can(paymentPerm) && isSuperAdmin
+  // Columna de acciones (editar/borrar). Pedido: visible con !readonly (comportamiento
+  // previo). Venta: gateada por sales.edit (sin permiso no aparece).
+  const showActions = !readonly && (entityType === 'tailoring_order' || (entityType === 'sale' && can('sales.edit')))
   const [payments, setPayments] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -221,12 +226,18 @@ export function PaymentHistory({
     }
     setIsEditing(true)
     try {
-      const result = await updateOrderPayment({
-        payment_id: editTarget.id,
-        tailoring_order_id: entityId,
-        amount,
-        method: editMethod,
-      })
+      const result = entityType === 'tailoring_order'
+        ? await updateOrderPayment({
+            payment_id: editTarget.id,
+            tailoring_order_id: entityId,
+            amount,
+            method: editMethod,
+          })
+        : await updateSalePayment({
+            salePaymentId: editTarget.id,
+            amount,
+            method: editMethod,
+          })
       if (result.success) {
         toast.success('Cobro actualizado')
         setEditTarget(null)
@@ -244,11 +255,13 @@ export function PaymentHistory({
   }
 
   async function confirmDelete() {
-    if (!deleteTargetId || entityType !== 'tailoring_order') return
+    if (!deleteTargetId) return
     const paymentId = deleteTargetId
     setDeletingId(paymentId)
     try {
-      const result = await deleteOrderPayment({ payment_id: paymentId, tailoring_order_id: entityId })
+      const result = entityType === 'tailoring_order'
+        ? await deleteOrderPayment({ payment_id: paymentId, tailoring_order_id: entityId })
+        : await deleteSalePayment({ salePaymentId: paymentId })
       if (result.success) {
         toast.success('Pago eliminado')
         await loadPayments()
@@ -340,7 +353,7 @@ export function PaymentHistory({
                 <TableHead className={variant === 'sastre' ? 'text-xs text-right text-white/50' : 'text-xs text-right'}>Importe</TableHead>
                 <TableHead className={variant === 'sastre' ? 'text-xs text-white/50' : 'text-xs'}>Referencia</TableHead>
                 <TableHead className={variant === 'sastre' ? 'text-xs text-white/50' : 'text-xs'}>Próximo pago</TableHead>
-                {entityType === 'tailoring_order' && !readonly && (
+                {showActions && (
                   <TableHead className={canEditPayment ? 'w-20' : 'w-10'} />
                 )}
               </TableRow>
@@ -388,7 +401,7 @@ export function PaymentHistory({
                       </span>
                     ) : '—'}
                   </TableCell>
-                  {entityType === 'tailoring_order' && !readonly && (
+                  {showActions && (
                     <TableCell className={variant === 'sastre' ? 'py-3 px-4' : ''}>
                       <div className="flex items-center justify-end gap-1">
                         {canEditPayment && (

@@ -31,6 +31,7 @@ import { Badge } from '@/components/ui/badge'
 import { Loader2, FileDown, Receipt, ChevronLeft, ChevronRight, FileText, Gift, Trash2, AlertTriangle, Pencil, X, CreditCard, Plus, Package } from 'lucide-react'
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils'
 import { listTickets, getSaleForTicket, previewSaleDeletion, deleteSaleCompletely, updateSaleClientNotes, updateSalePayments, previewSaleEdit, editSaleLines, searchProductsForPos } from '@/actions/pos'
+import { PaymentHistory } from '@/components/payments/payment-history'
 import { listClients } from '@/actions/clients'
 import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
 import { generateTicketPdf } from '@/components/pos/ticket-pdf'
@@ -141,6 +142,9 @@ export function TicketsContent() {
   const [savingPay, setSavingPay] = useState(false)
   const [payList, setPayList] = useState<{ payment_method: string; amount: string }[]>([])
   const [payTotal, setPayTotal] = useState(0)
+  // Total y tienda de la venta (para el historial de cobros a plazos en el diálogo).
+  const [paySaleTotal, setPaySaleTotal] = useState(0)
+  const [paySaleStoreId, setPaySaleStoreId] = useState<string | null>(null)
 
   // Editar líneas/precio/descuento — Fase E3
   const [linesRow, setLinesRow] = useState<DeleteRow | null>(null)
@@ -396,12 +400,15 @@ export function TicketsContent() {
     try {
       const res = await getSaleForTicket(row.id)
       if (res.success && res.data) {
-        const d = res.data as { sale: { total: number }; payments: { payment_method: string; amount: number }[] }
+        const d = res.data as { sale: { total: number; store_id?: string | null }; payments: { payment_method: string; amount: number }[] }
         const pays = d.payments ?? []
         // El objetivo es el importe COBRADO (suma de pagos actuales), no el total
         // de la venta: una venta parcial corrige el método sin cambiar lo cobrado.
         setPayTotal(Math.round(pays.reduce((s, p) => s + (Number(p.amount) || 0), 0) * 100) / 100)
         setPayList(pays.map((p) => ({ payment_method: p.payment_method, amount: String(p.amount) })))
+        // Para el historial de cobros a plazos (PaymentHistory): total de la venta + su tienda.
+        setPaySaleTotal(Number(d.sale.total) || 0)
+        setPaySaleStoreId(d.sale.store_id ?? null)
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Error al cargar la venta')
@@ -979,7 +986,7 @@ export function TicketsContent() {
       </Dialog>
 
       <Dialog open={Boolean(payRow)} onOpenChange={(v) => { if (!v && !savingPay) setPayRow(null) }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <CreditCard className="h-4 w-4" /> Editar pagos · {payRow?.ticket_number}
@@ -1044,6 +1051,21 @@ export function TicketsContent() {
                   {payBalanced ? 'Cuadra' : (payDiff > 0 ? `Faltan ${formatCurrency(payDiff)}` : `Sobran ${formatCurrency(Math.abs(payDiff))}`)}
                 </span>
               </div>
+            </div>
+          )}
+
+          {/* Historial de cobros a plazos de la venta: ver/añadir/editar/borrar
+              cobros individuales (PaymentHistory para entityType='sale'). Distinto
+              del redistribuidor de arriba, que corrige el método del cobro inicial. */}
+          {payRow && !payLoading && (
+            <div className="border-t pt-4 mt-1">
+              <PaymentHistory
+                entityType="sale"
+                entityId={payRow.id}
+                total={paySaleTotal}
+                entityStoreId={paySaleStoreId}
+                onPaymentAdded={() => { openPayments(payRow); load() }}
+              />
             </div>
           )}
 

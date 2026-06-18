@@ -51,6 +51,12 @@ export interface AddSalePaymentInput {
   storeId?: string
 }
 
+export interface UpdateSalePaymentInput {
+  salePaymentId: string
+  amount: number
+  method: PaymentMethod
+}
+
 // ─── Tailoring Order Payments ──────────────────────────────────────────────────
 
 export const getOrderPayments = protectedAction<{ tailoring_order_id: string }, OrderPayment[]>(
@@ -282,6 +288,62 @@ export const addSalePayment = protectedAction<AddSalePaymentInput, any>(
       console.error('[addSalePayment] unexpected:', e)
       return failure('Error al registrar pago')
     }
+  }
+)
+
+// ── Borrar cobro de venta (sales.edit) ──────────────────────────────────────
+// Delega en rpc_remove_sale_payment (mig 218): revierte cash_sessions.total_*,
+// recalcula el arqueo si la sesión está cerrada, borra el espejo por FK y
+// recalcula amount_paid/payment_status. Mismo patrón que deleteOrderPayment.
+export const deleteSalePayment = protectedAction<{ salePaymentId: string }, void>(
+  { permission: 'sales.edit', auditAction: 'delete', auditModule: 'sales' },
+  async (ctx, { salePaymentId }) => {
+    try {
+      const { error: rpcError } = await ctx.adminClient.rpc('rpc_remove_sale_payment', {
+        p_sale_payment_id: salePaymentId,
+      })
+      if (rpcError) {
+        console.error('[deleteSalePayment]', rpcError)
+        return failure(rpcError.message)
+      }
+      revalidatePath('/admin/tickets')
+      return success(undefined)
+    } catch (e) {
+      console.error('[deleteSalePayment] unexpected:', e)
+      return failure('Error al eliminar el cobro')
+    }
+  }
+)
+
+// ── Editar cobro de venta (sales.edit + isFullAdmin) ─────────────────────────
+// Delega en rpc_update_sale_payment (mig 218): ajusta los totales de la sesión
+// por el delta (mismo método o cambio de método), recalcula el arqueo si la
+// sesión está cerrada y actualiza el espejo IN-PLACE por FK. Alcance: solo
+// importe + método (no fecha, no mover de sesión). Igual que updateOrderPayment.
+export const updateSalePayment = protectedAction<UpdateSalePaymentInput, void>(
+  { permission: 'sales.edit', auditAction: 'update', auditModule: 'sales' },
+  async (ctx, { salePaymentId, amount, method }) => {
+    if (!salePaymentId) return failure('Falta el identificador del cobro', 'VALIDATION')
+    if (!(Number(amount) > 0)) return failure('El importe debe ser mayor que 0', 'VALIDATION')
+    const validMethods: PaymentMethod[] = ['cash', 'card', 'transfer', 'check', 'bizum']
+    if (!validMethods.includes(method)) return failure('Método de pago no válido', 'VALIDATION')
+    if (!(await userIsFullAdmin(ctx))) return failure('Solo un administrador puede editar un cobro.', 'FORBIDDEN')
+
+    const { data: result, error: rpcError } = await ctx.adminClient.rpc('rpc_update_sale_payment', {
+      p_sale_payment_id: salePaymentId,
+      p_amount: amount,
+      p_method: method,
+      p_user_id: ctx.userId,
+    })
+    if (rpcError) {
+      console.error('[updateSalePayment]', rpcError)
+      return failure(rpcError.message)
+    }
+    if (result && result.success === false) {
+      return failure(String(result.error || 'No se pudo actualizar el cobro'), 'CONFLICT')
+    }
+    revalidatePath('/admin/tickets')
+    return success(undefined)
   }
 )
 
