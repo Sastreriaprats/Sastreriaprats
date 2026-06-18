@@ -928,6 +928,106 @@ export const createReturn = protectedAction<{
   }
 )
 
+/**
+ * Cambio directo ATÓMICO (reescritura del flujo antiguo que dejaba huérfanos).
+ * Delega TODO en la RPC rpc_process_exchange (mig 222): devolución a vale +
+ * venta de los productos nuevos pagada con ese vale + residual si sobra +
+ * ligado del return, en una sola transacción. Hermana de createReturn/createSale.
+ */
+export const processExchange = protectedAction<{
+  original_sale_id: string
+  return_line_ids: string[]
+  new_lines: Array<{
+    product_variant_id: string
+    description: string
+    sku?: string | null
+    quantity: number
+    unit_price: number
+    tax_rate?: number
+    cost_price?: number | null
+    discount_percentage?: number
+  }>
+  diff_payment: { payment_method: 'cash' | 'card' | 'bizum' | 'transfer'; amount: number } | null
+  reason: string
+  store_id: string
+  cash_session_id: string
+}, any>(
+  {
+    permission: 'pos.sell',
+    auditModule: 'pos',
+    auditAction: 'refund',
+    auditEntity: 'return',
+    revalidate: ['/pos'],
+  },
+  async (ctx, input) => {
+    // Validación de FORMA (la RPC valida la lógica de negocio)
+    if (!input.original_sale_id) return failure('Falta la venta original', 'VALIDATION')
+    if (!Array.isArray(input.return_line_ids) || input.return_line_ids.length === 0)
+      return failure('Selecciona al menos una línea a devolver', 'VALIDATION')
+    if (!Array.isArray(input.new_lines) || input.new_lines.length === 0)
+      return failure('Añade al menos un producto nuevo para el cambio', 'VALIDATION')
+    if (!input.store_id) return failure('Falta la tienda', 'VALIDATION')
+    if (!input.cash_session_id)
+      return failure('No hay una caja abierta. Abre la caja antes de hacer un cambio.', 'VALIDATION')
+
+    const { data: result, error: rpcError } = await ctx.adminClient.rpc('rpc_process_exchange', {
+      p_original_sale_id: input.original_sale_id,
+      p_return_line_ids: input.return_line_ids,
+      p_new_lines: input.new_lines,
+      p_diff_payment: input.diff_payment ?? null,
+      p_reason: input.reason,
+      p_store_id: input.store_id,
+      p_cash_session_id: input.cash_session_id,
+      p_user_id: ctx.userId,
+    })
+
+    // La RPC lanza mensajes legibles ("La compra supera el crédito…",
+    // "Stock insuficiente…"): los pasamos tal cual al usuario.
+    if (rpcError) return failure(rpcError.message)
+
+    // Datos extra para el ticket de cambio (igual que createReturn enriquece su modal)
+    const [{ data: originalSale }, { data: lines }] = await Promise.all([
+      ctx.adminClient
+        .from('sales')
+        .select('ticket_number, clients(full_name)')
+        .eq('id', input.original_sale_id)
+        .maybeSingle(),
+      ctx.adminClient
+        .from('sale_lines')
+        .select('description, sku, quantity, unit_price, line_total')
+        .in('id', input.return_line_ids),
+    ])
+
+    const sale = originalSale as { ticket_number?: string; clients?: { full_name?: string } | null } | null
+    const returnedLines = (lines ?? []) as Array<{ description?: string; sku?: string | null; quantity?: number; unit_price?: number; line_total?: number }>
+    const ticketNumber = sale?.ticket_number ?? null
+    const r = result as {
+      return_id?: string; credito_X?: number; compra_Y?: number
+      diferencia_cobrada?: number; residual_amount?: number; residual_code?: string | null
+    }
+
+    return success({
+      ...result,
+      original_ticket_number: ticketNumber,
+      original_client_name: sale?.clients?.full_name ?? null,
+      reason: input.reason,
+      returned_lines: returnedLines.map((l) => ({
+        description: l.description,
+        sku: l.sku,
+        quantity: l.quantity,
+        unit_price: Number(l.unit_price ?? 0),
+        line_total: Number(l.line_total ?? 0),
+      })),
+      new_lines: input.new_lines,
+      // Auditoría: identificar el return y describir el cambio en Seguimiento
+      auditEntityId: r?.return_id,
+      auditDescription: `Cambio${ticketNumber ? ` de ${ticketNumber}` : ''}: devuelto ${Number(r?.credito_X ?? 0).toFixed(2)}€ → comprado ${Number(r?.compra_Y ?? 0).toFixed(2)}€`
+        + (Number(r?.diferencia_cobrada ?? 0) > 0 ? ` · diferencia ${Number(r.diferencia_cobrada).toFixed(2)}€` : '')
+        + (Number(r?.residual_amount ?? 0) > 0 ? ` · vale residual ${Number(r.residual_amount).toFixed(2)}€ (${r.residual_code})` : ''),
+    })
+  }
+)
+
 export const searchProductsForPos = protectedAction<{
   query: string; storeId: string
 }, any[]>(
