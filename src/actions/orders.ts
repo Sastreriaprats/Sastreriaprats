@@ -1931,7 +1931,29 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
       }
     }
 
-    return success({ orderId: order.id, orderNumber })
+    // Auditoría: identificar el pedido (nº + cliente) y, si la hubo, la entrega a
+    // cuenta con su método. Sin estos campos el wrapper guardaba "Crear Pedido"
+    // con entity_id NULL (no se podía saber qué pedido era).
+    let clientName = 'Sin cliente'
+    if (input.clientId) {
+      const { data: client } = await ctx.adminClient
+        .from('clients')
+        .select('full_name, first_name, last_name')
+        .eq('id', input.clientId)
+        .single()
+      if (client) clientName = (client as any).full_name || [ (client as any).first_name, (client as any).last_name ].filter(Boolean).join(' ') || 'Sin nombre'
+    }
+    const PAYMENT_METHOD_ES: Record<string, string> = { cash: 'efectivo', card: 'tarjeta', transfer: 'transferencia', bizum: 'bizum' }
+    const auditDescription = entrega > 0 && paymentMethodDb
+      ? `Pedido ${orderNumber} · Cliente: ${clientName} · Total ${total.toFixed(2)}€ · Entrega a cuenta ${entrega.toFixed(2)}€ (${PAYMENT_METHOD_ES[paymentMethodDb] ?? paymentMethodDb})`
+      : `Pedido ${orderNumber} · Cliente: ${clientName} · Total ${total.toFixed(2)}€`
+
+    return success({
+      orderId: order.id,
+      orderNumber,
+      auditEntityId: order.id,
+      auditDescription,
+    } as unknown as { orderId: string; orderNumber: string })
   }
 )
 

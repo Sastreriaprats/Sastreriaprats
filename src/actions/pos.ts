@@ -670,7 +670,9 @@ export const cashWithdrawal = protectedAction<{
       withdrawal_id: withdrawal.id,
     })
 
-    return success(withdrawal)
+    const tipoEs = withdrawalType === 'gasto' ? 'Gasto' : 'Extracción'
+    const auditDescription = `${tipoEs} de caja · ${Number(input.amount).toFixed(2)}€ · Motivo: ${input.reason}`
+    return success({ ...(withdrawal as Record<string, unknown>), auditDescription })
   }
 )
 

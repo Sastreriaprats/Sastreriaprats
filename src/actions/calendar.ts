@@ -4,6 +4,28 @@ import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { getBusinessHours } from '@/lib/schedule-utils'
 
+const APPOINTMENT_TYPE_ES: Record<string, string> = {
+  fitting: 'Prueba',
+  measurement: 'Toma de medidas',
+  delivery: 'Entrega',
+  consultation: 'Consulta',
+  pickup: 'Recogida',
+  other: 'Cita',
+}
+
+/** Descripción legible de una cita para auditoría: "Prueba · Cliente: Juan Pérez · 2026-06-20 10:00". */
+function describeAppointment(row: unknown): string {
+  const r = (row ?? {}) as Record<string, unknown>
+  const clientName = (r.clients as { full_name?: string } | null)?.full_name
+    || (typeof r.title === 'string' && r.title.trim() ? r.title : '')
+    || 'Sin cliente'
+  const tipo = typeof r.type === 'string' ? (APPOINTMENT_TYPE_ES[r.type] ?? r.type) : 'Cita'
+  const fecha = typeof r.date === 'string' ? r.date : ''
+  const hora = typeof r.start_time === 'string' ? r.start_time.slice(0, 5) : ''
+  const cuando = [fecha, hora].filter(Boolean).join(' ')
+  return `${tipo} · Cliente: ${clientName}${cuando ? ` · ${cuando}` : ''}`
+}
+
 export const listAppointments = protectedAction<{
   start_date: string
   end_date: string
@@ -137,7 +159,7 @@ export const createAppointment = protectedAction<Record<string, unknown>, unknow
       .single()
 
     if (error) return failure(error.message)
-    return success(data)
+    return success({ ...(data as Record<string, unknown>), auditDescription: describeAppointment(data) })
   }
 )
 
@@ -166,7 +188,7 @@ export const updateAppointment = protectedAction<{ id: string; data: Record<stri
       .single()
 
     if (error) return failure(error.message)
-    return success(data)
+    return success({ ...(data as Record<string, unknown>), auditDescription: describeAppointment(data) })
   }
 )
 
