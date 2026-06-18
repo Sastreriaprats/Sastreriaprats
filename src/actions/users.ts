@@ -618,26 +618,32 @@ export async function getAuditLogs(filters: {
         changes = Object.keys(diff).length > 0 ? diff : null
       }
       let entityLabel = row.description ?? row.entity_display ?? null
-      // Traducir descripciones genéricas guardadas por el wrapper, tanto en inglés
-      // puro ("create supplier_invoice") como medio-traducidas ("Crear supplier_invoice",
-      // con la acción en español pero el tipo de entidad sin traducir).
+      const et = row.entity_type ?? row.module ?? ''
+      const actionEs = ACTION_DISPLAY_ES[row.action] ?? row.action
+      const entityEs = ENTITY_TYPE_DISPLAY_ES[et] ?? et
+      // Detectar descripción GENÉRICA (acción + entidad, sin identificador) — en inglés
+      // puro ("create supplier_invoice"), medio-traducida ("Crear supplier_invoice") o ya
+      // en español ("Editar Cita") — para traducirla y, si hay entity_id, RESOLVER el
+      // identificador real (nº de pedido, cliente y fecha de la cita, nº de reserva…).
+      let isGeneric = false
       if (typeof entityLabel === 'string' && entityLabel.trim()) {
-        const et = row.entity_type ?? row.module ?? ''
-        const actionEs = ACTION_DISPLAY_ES[row.action] ?? row.action
         const t = entityLabel.trim()
         if (et && (t === `${row.action} ${et}`.trim() || t === `${actionEs} ${et}`.trim())) {
-          const entityEs = ENTITY_TYPE_DISPLAY_ES[et] ?? et
           entityLabel = `${actionEs} ${entityEs}`
+          isGeneric = true
+        } else if (t === `${actionEs} ${entityEs}`.trim()) {
+          isGeneric = true
         }
       }
-      const needsResolution = !entityLabel || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(entityLabel).trim())
+      const isUuid = entityLabel != null && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(entityLabel).trim())
+      const needsResolution = !entityLabel || isUuid || isGeneric
       return {
         id: row.id,
         user_name: row.user_full_name ?? row.user_email ?? 'Sistema',
         action: row.action,
-        action_display: ACTION_DISPLAY_ES[row.action] ?? row.action,
-        entity_type: row.entity_type ?? row.module ?? '—',
-        entity_type_display: ENTITY_TYPE_DISPLAY_ES[row.entity_type ?? row.module ?? ''] ?? row.entity_type ?? row.module ?? '—',
+        action_display: actionEs,
+        entity_type: et || '—',
+        entity_type_display: entityEs || '—',
         entity_id: row.entity_id,
         entity_label: entityLabel,
         _resolve: needsResolution && row.entity_id ? { entity_type: row.entity_type ?? row.module, action: row.action, entity_id: row.entity_id } : null,
@@ -757,7 +763,7 @@ export async function getAuditLogs(filters: {
             labels.set((t as any).id, `Traspaso: ${(t as any).transfer_number}`)
           }
         } else if (entityType === 'appointment') {
-          const { data: apps } = await admin.from('appointments').select('id, client_id').in('id', uniqueIds)
+          const { data: apps } = await admin.from('appointments').select('id, client_id, date, start_time').in('id', uniqueIds)
           const clientIds = [...new Set((apps ?? []).map((a: any) => a.client_id).filter(Boolean))]
           const { data: clients } = clientIds.length > 0 ? await admin.from('clients').select('id, full_name, first_name, last_name').in('id', clientIds) : { data: [] }
           const nameByClientId = new Map<string, string>()
@@ -766,8 +772,21 @@ export async function getAuditLogs(filters: {
             nameByClientId.set((c as any).id, name)
           }
           for (const a of apps ?? []) {
-            const name = nameByClientId.get((a as any).client_id) ?? 'Cita'
-            labels.set((a as any).id, `Cita: ${name}`)
+            const name = nameByClientId.get((a as any).client_id) ?? 'Sin cliente'
+            const cuando = [(a as any).date, String((a as any).start_time ?? '').slice(0, 5)].filter(Boolean).join(' ')
+            labels.set((a as any).id, `Cita · ${name}${cuando ? ` · ${cuando}` : ''}`)
+          }
+        } else if (entityType === 'product_reservation') {
+          const { data: res } = await admin.from('product_reservations').select('id, reservation_number').in('id', uniqueIds)
+          for (const r of res ?? []) labels.set((r as any).id, `Reserva: ${(r as any).reservation_number}`)
+        } else if (entityType === 'supplier_invoice') {
+          const { data: invs } = await admin.from('ap_supplier_invoices').select('id, invoice_number, supplier_name').in('id', uniqueIds)
+          for (const inv of invs ?? []) labels.set((inv as any).id, `Factura ${(inv as any).invoice_number}${(inv as any).supplier_name ? ` · ${(inv as any).supplier_name}` : ''}`)
+        } else if (entityType === 'cash_withdrawal') {
+          const { data: ws } = await admin.from('cash_withdrawals').select('id, amount, reason').in('id', uniqueIds)
+          for (const w of ws ?? []) {
+            const amt = (w as any).amount != null ? Number((w as any).amount).toFixed(2) : ''
+            labels.set((w as any).id, amt ? `Retirada ${amt}€${(w as any).reason ? ` · ${(w as any).reason}` : ''}` : 'Retirada de caja')
           }
         }
       }
