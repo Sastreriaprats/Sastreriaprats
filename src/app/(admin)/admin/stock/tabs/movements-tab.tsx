@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { formatDateTime } from '@/lib/utils'
 import { usePermissions } from '@/hooks/use-permissions'
 import { listStockMovements, reverseStockMovement } from '@/actions/products'
+import { OrphanMovementsPanel } from './orphan-movements-panel'
 
 const PAGE_SIZE = 30
 
@@ -84,6 +85,7 @@ export function MovementsTab() {
 
   return (
     <div className="space-y-4">
+      <OrphanMovementsPanel />
       <div className="flex flex-wrap items-center gap-3">
         <Select value={typeFilter} onValueChange={(v) => { setTypeFilter(v); setPage(0) }}>
           <SelectTrigger className="w-52"><SelectValue placeholder="Tipo de movimiento" /></SelectTrigger>
