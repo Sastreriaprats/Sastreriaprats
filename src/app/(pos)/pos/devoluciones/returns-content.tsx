@@ -16,6 +16,8 @@ import { useAuth } from '@/components/providers/auth-provider'
 import { useAction } from '@/hooks/use-action'
 import {
   createReturn,
+  processExchange,
+  checkCashSessionOpen,
   findSaleByBarcode,
   findSaleByTicketNumber,
   getSaleByIdForReturn,
@@ -49,7 +51,21 @@ export function ReturnsContent() {
   const { activeStoreId, stores } = useAuth()
   const activeStoreName = stores.find((s) => s.storeId === activeStoreId)?.storeName ?? null
 
-  const [completedReturn, setCompletedReturn] = useState<ReturnTicketData & { voucher_code: string | null; exchange_payload?: any } | null>(null)
+  // completedReturn cubre tanto el vale de devolución como el resultado de un cambio.
+  // Campos de cambio (exchange): nº de ticket nuevo, vale residual y diferencia cobrada.
+  const [completedReturn, setCompletedReturn] = useState<(ReturnTicketData & {
+    voucher_code: string | null
+    new_ticket_number?: string | null
+    residual_code?: string | null
+    residual_amount?: number
+    diferencia_cobrada?: number
+    compra_Y?: number
+  }) | null>(null)
+
+  // Sesión de caja abierta de la tienda activa (necesaria para la venta del cambio)
+  const [cashSessionId, setCashSessionId] = useState<string | null>(null)
+  // Método para cobrar la diferencia cuando lo nuevo cuesta más que lo devuelto
+  const [diffMethod, setDiffMethod] = useState<'cash' | 'card' | 'bizum' | 'transfer'>('card')
 
   const [ticketSearch, setTicketSearch] = useState('')
   const [barcodeSearch, setBarcodeSearch] = useState('')
@@ -218,6 +234,19 @@ export function ReturnsContent() {
     return () => clearTimeout(t)
   }, [productQuery, activeStoreId, returnType])
 
+  // Sesión de caja abierta de la tienda (para poder cobrar la venta del cambio)
+  useEffect(() => {
+    if (!activeStoreId) { setCashSessionId(null); return }
+    let cancel = false
+    ;(async () => {
+      try {
+        const res = await checkCashSessionOpen({ storeId: activeStoreId })
+        if (!cancel) setCashSessionId(res.success ? (res.data?.sessionId ?? null) : null)
+      } catch { if (!cancel) setCashSessionId(null) }
+    })()
+    return () => { cancel = true }
+  }, [activeStoreId])
+
   const addReplacement = (variant: any) => {
     const existing = replacements.find(r => r.variantId === variant.id)
     if (existing) {
@@ -256,12 +285,13 @@ export function ReturnsContent() {
   const replacementsTotal = replacements.reduce((sum, r) => sum + r.unitPrice * r.quantity, 0)
   const priceDiff = replacementsTotal - selectedTotal // positivo = cliente paga; negativo = se devuelve saldo
 
+  // Devolución a VALE (flujo existente, sin cambios)
   const { execute, isLoading: isProcessing } = useAction(createReturn, {
-    successMessage: returnType === 'voucher' ? 'Vale de devolución generado' : 'Devolución registrada',
+    successMessage: 'Vale de devolución generado',
     onSuccess: (data: any) => {
       const storeConfig = getStorePdfData(activeStoreName)
-      const ticketData: ReturnTicketData & { voucher_code: string | null; exchange_payload?: any } = {
-        return_type: returnType,
+      setCompletedReturn({
+        return_type: 'voucher',
         original_ticket_number: data?.original_ticket_number ?? foundSale?.ticket_number ?? null,
         client_name: data?.original_client_name ?? foundSale?.clients?.full_name ?? null,
         total_returned: Number(data?.total_returned ?? selectedTotal ?? 0),
@@ -273,39 +303,48 @@ export function ReturnsContent() {
           : (foundSale?.sale_lines ?? [])
               .filter((l: any) => selectedLineIds.includes(l.id))
               .map((l: any) => ({
-                description: l.description,
-                sku: l.sku,
-                quantity: l.quantity,
-                unit_price: Number(l.unit_price ?? 0),
-                line_total: Number(l.line_total ?? 0),
+                description: l.description, sku: l.sku, quantity: l.quantity,
+                unit_price: Number(l.unit_price ?? 0), line_total: Number(l.line_total ?? 0),
               })),
         storeAddress: storeConfig.address,
         storeSubtitle: storeConfig.subtitle ?? null,
         storePhones: storeConfig.phones,
-      }
+      })
+      if (data?.voucher_code) toast.success(`Código del vale: ${data.voucher_code}`, { duration: 10000 })
+    },
+  })
 
-      if (returnType === 'exchange') {
-        // Guardar payload del cambio para aplicarlo en caja cuando el usuario continúe
-        ticketData.exchange_payload = {
-          created_at: Date.now(),
-          origin_ticket: foundSale?.ticket_number ?? null,
-          return_id: data?.return_id ?? null,
-          credit: selectedTotal,
-          items: replacements.map(r => ({
-            variant_id: r.variantId,
-            description: r.description,
-            sku: r.sku,
-            unit_price: r.unitPrice,
-            quantity: r.quantity,
-            tax_rate: r.taxRate,
-            image_url: r.imageUrl ?? null,
-          })),
-        }
-      } else if (data?.voucher_code) {
-        toast.success(`Código del vale: ${data.voucher_code}`, { duration: 10000 })
-      }
-
-      setCompletedReturn(ticketData)
+  // CAMBIO directo ATÓMICO (flujo nuevo): una sola llamada, sin caja ni sessionStorage.
+  const { execute: executeExchange, isLoading: isExchanging } = useAction(processExchange, {
+    successMessage: 'Cambio procesado',
+    onSuccess: (data: any) => {
+      const storeConfig = getStorePdfData(activeStoreName)
+      setCompletedReturn({
+        return_type: 'exchange',
+        original_ticket_number: data?.original_ticket_number ?? foundSale?.ticket_number ?? null,
+        client_name: data?.original_client_name ?? foundSale?.clients?.full_name ?? null,
+        total_returned: Number(data?.credito_X ?? selectedTotal ?? 0),
+        voucher_code: data?.residual_code ?? null,
+        reason: reason,
+        created_at: new Date().toISOString(),
+        lines: Array.isArray(data?.returned_lines) && data.returned_lines.length > 0
+          ? data.returned_lines
+          : (foundSale?.sale_lines ?? [])
+              .filter((l: any) => selectedLineIds.includes(l.id))
+              .map((l: any) => ({
+                description: l.description, sku: l.sku, quantity: l.quantity,
+                unit_price: Number(l.unit_price ?? 0), line_total: Number(l.line_total ?? 0),
+              })),
+        storeAddress: storeConfig.address,
+        storeSubtitle: storeConfig.subtitle ?? null,
+        storePhones: storeConfig.phones,
+        new_ticket_number: data?.new_ticket_number ?? null,
+        residual_code: data?.residual_code ?? null,
+        residual_amount: Number(data?.residual_amount ?? 0),
+        diferencia_cobrada: Number(data?.diferencia_cobrada ?? 0),
+        compra_Y: Number(data?.compra_Y ?? replacementsTotal ?? 0),
+      })
+      if (data?.residual_code) toast.success(`Vale generado: ${data.residual_code}`, { duration: 10000 })
     },
   })
 
@@ -319,17 +358,6 @@ export function ReturnsContent() {
     setReplacements([])
     setProductQuery('')
     setProductResults([])
-  }
-
-  const continueToExchangeCaja = () => {
-    if (!completedReturn?.exchange_payload) return
-    try {
-      sessionStorage.setItem('pos_pending_exchange', JSON.stringify(completedReturn.exchange_payload))
-      toast.success('Redirigiendo a caja para completar el cambio…')
-      router.push('/pos/caja')
-    } catch {
-      toast.error('No se pudo redirigir a caja. Añade el artículo manualmente.')
-    }
   }
 
   const handlePrintReturnTicket = async () => {
@@ -353,8 +381,38 @@ export function ReturnsContent() {
   const canProcess = () => {
     if (!reason) return false
     if (selectedLineIds.length === 0) return false
-    if (returnType === 'exchange' && replacements.length === 0) return false
+    if (returnType === 'exchange') {
+      if (replacements.length === 0) return false
+      if (!cashSessionId) return false // la venta del cambio necesita caja abierta
+    }
     return true
+  }
+
+  // Lanza el flujo correcto según el tipo: vale (createReturn) o cambio (processExchange)
+  const handleProcess = () => {
+    if (!foundSale || !activeStoreId) return
+    if (returnType === 'voucher') {
+      execute({ original_sale_id: foundSale.id, return_type: 'voucher', line_ids: selectedLineIds, reason, store_id: activeStoreId })
+      return
+    }
+    // Cambio: una sola llamada atómica
+    executeExchange({
+      original_sale_id: foundSale.id,
+      return_line_ids: selectedLineIds,
+      new_lines: replacements.map(r => ({
+        product_variant_id: r.variantId,
+        description: r.description,
+        sku: r.sku,
+        quantity: r.quantity,
+        unit_price: r.unitPrice,
+        tax_rate: r.taxRate,
+        cost_price: 0,
+      })),
+      diff_payment: priceDiff > 0.005 ? { payment_method: diffMethod, amount: Math.round(priceDiff * 100) / 100 } : null,
+      reason,
+      store_id: activeStoreId,
+      cash_session_id: cashSessionId!,
+    })
   }
 
   return (
@@ -479,20 +537,17 @@ export function ReturnsContent() {
                           <Ticket className="h-5 w-5" /><span className="text-sm">Vale de compra</span>
                           <span className="text-xs opacity-70">Válido 1 año</span>
                         </Button>
-                        {/* "Cambio directo" deshabilitado temporalmente: el flujo dejaba cambios
-                            huérfanos (sin vale ni venta ligada) cuando lo devuelto valía más que
-                            lo nuevo. Hasta reescribirlo (rpc_process_exchange), hacer el cambio a
-                            mano: devolución a VALE + cobrar la compra nueva con ese vale. */}
-                        <Button variant="outline" disabled
-                          className="h-16 flex-col gap-1"
-                          title="Función en mantenimiento. Para un cambio: haz una devolución a VALE y cobra la compra nueva con ese vale.">
+                        <Button variant={returnType === 'exchange' ? 'default' : 'outline'} className="h-16 flex-col gap-1"
+                          onClick={() => setReturnType('exchange')}>
                           <ShoppingBag className="h-5 w-5" /><span className="text-sm">Cambio directo</span>
-                          <span className="text-xs opacity-70">En mantenimiento</span>
+                          <span className="text-xs opacity-70">Por otro artículo</span>
                         </Button>
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        El <strong>cambio directo</strong> está temporalmente desactivado. Para un cambio: emite un <strong>vale</strong> por lo devuelto y cobra la compra nueva con ese vale (si sobra saldo, se genera un vale por la diferencia).
-                      </p>
+                      {returnType === 'exchange' && !cashSessionId && (
+                        <p className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded p-2">
+                          No hay una caja abierta en esta tienda. Abre la caja para poder hacer un cambio (la compra nueva se cobra por caja).
+                        </p>
+                      )}
                     </div>
 
                     {returnType === 'exchange' && (
@@ -566,15 +621,44 @@ export function ReturnsContent() {
                               </div>
                             ))}
 
-                            <div className="flex justify-between text-sm pt-2 border-t">
-                              <span>Total reemplazo</span>
-                              <span className="font-semibold">{formatCurrency(replacementsTotal)}</span>
-                            </div>
-                            <div className={`flex justify-between text-sm font-bold p-2 rounded ${priceDiff > 0 ? 'bg-orange-100 text-orange-900' : priceDiff < 0 ? 'bg-green-100 text-green-900' : 'bg-muted'}`}>
-                              <span>
-                                {priceDiff > 0 ? 'Diferencia a cobrar' : priceDiff < 0 ? 'Saldo a favor del cliente' : 'Sin diferencia'}
-                              </span>
-                              <span>{formatCurrency(Math.abs(priceDiff))}</span>
+                            {/* Neto del cambio, en lenguaje del vendedor */}
+                            <div className="rounded border bg-white divide-y">
+                              <div className="flex justify-between text-sm px-3 py-2">
+                                <span className="text-muted-foreground">Se devuelve</span>
+                                <span className="font-semibold tabular-nums">{formatCurrency(selectedTotal)}</span>
+                              </div>
+                              <div className="flex justify-between text-sm px-3 py-2">
+                                <span className="text-muted-foreground">Se lleva</span>
+                                <span className="font-semibold tabular-nums">{formatCurrency(replacementsTotal)}</span>
+                              </div>
+                              {priceDiff > 0.005 ? (
+                                <div className="px-3 py-2 bg-orange-50">
+                                  <div className="flex justify-between text-sm font-bold text-orange-900">
+                                    <span>El cliente paga</span>
+                                    <span className="tabular-nums">{formatCurrency(priceDiff)}</span>
+                                  </div>
+                                  <div className="mt-2 grid grid-cols-4 gap-1.5">
+                                    {([['cash','Efectivo'],['card','Tarjeta'],['bizum','Bizum'],['transfer','Transf.']] as const).map(([m,label]) => (
+                                      <Button key={m} type="button" size="sm"
+                                        variant={diffMethod === m ? 'default' : 'outline'}
+                                        className="h-8 text-xs"
+                                        onClick={() => setDiffMethod(m)}>
+                                        {label}
+                                      </Button>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : priceDiff < -0.005 ? (
+                                <div className="flex justify-between text-sm font-bold px-3 py-2 bg-green-50 text-green-900">
+                                  <span>Se generará un vale de</span>
+                                  <span className="tabular-nums">{formatCurrency(Math.abs(priceDiff))}</span>
+                                </div>
+                              ) : (
+                                <div className="flex justify-between text-sm font-bold px-3 py-2 bg-muted">
+                                  <span>Sin diferencia a cobrar</span>
+                                  <span className="tabular-nums">{formatCurrency(0)}</span>
+                                </div>
+                              )}
                             </div>
                           </div>
                         )}
@@ -586,11 +670,10 @@ export function ReturnsContent() {
                       <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Motivo de la devolución..." rows={2} />
                     </div>
 
-                    <Button onClick={() => execute({
-                      original_sale_id: foundSale.id, return_type: returnType,
-                      line_ids: selectedLineIds, reason, store_id: activeStoreId!,
-                    })} disabled={isProcessing || !canProcess()} className="w-full h-12 bg-prats-navy hover:bg-prats-navy-light">
-                      {isProcessing ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <ArrowRightLeft className="mr-2 h-5 w-5" />}
+                    <Button onClick={handleProcess}
+                      disabled={isProcessing || isExchanging || !canProcess()}
+                      className="w-full h-12 bg-prats-navy hover:bg-prats-navy-light">
+                      {(isProcessing || isExchanging) ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <ArrowRightLeft className="mr-2 h-5 w-5" />}
                       {returnType === 'voucher' ? 'Generar vale de devolución' : 'Procesar cambio'}
                     </Button>
                   </CardContent>
@@ -601,19 +684,12 @@ export function ReturnsContent() {
         </div>
       </div>
 
-      <Dialog open={!!completedReturn} onOpenChange={(open) => {
-        if (open) return
-        if (completedReturn?.return_type === 'exchange' && completedReturn.exchange_payload) {
-          // No permitir cerrar sin decidir en caso de cambio directo
-          return
-        }
-        resetAfterReturn()
-      }}>
+      <Dialog open={!!completedReturn} onOpenChange={(open) => { if (!open) resetAfterReturn() }}>
         <DialogContent className="max-w-md" onPointerDownOutside={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Receipt className="h-5 w-5 text-green-600" />
-              {completedReturn?.return_type === 'voucher' ? 'Vale de devolución generado' : 'Devolución registrada'}
+              {completedReturn?.return_type === 'voucher' ? 'Vale de devolución generado' : 'Cambio realizado'}
             </DialogTitle>
           </DialogHeader>
           {completedReturn && (
@@ -623,10 +699,28 @@ export function ReturnsContent() {
                 <p className="text-lg font-mono font-bold text-slate-900 mt-0.5">{completedReturn.original_ticket_number ?? '—'}</p>
               </div>
               <dl className="grid grid-cols-1 gap-3 text-sm">
+                {completedReturn.return_type === 'exchange' && completedReturn.new_ticket_number && (
+                  <div className="flex justify-between items-center py-2 border-b border-slate-100">
+                    <dt className="text-slate-600">Ticket del cambio</dt>
+                    <dd className="font-mono font-semibold">{completedReturn.new_ticket_number}</dd>
+                  </div>
+                )}
                 <div className="flex justify-between items-center py-2 border-b border-slate-100">
-                  <dt className="text-slate-600">Total devuelto</dt>
+                  <dt className="text-slate-600">{completedReturn.return_type === 'exchange' ? 'Se devolvió' : 'Total devuelto'}</dt>
                   <dd className="font-semibold tabular-nums">{formatCurrency(completedReturn.total_returned)}</dd>
                 </div>
+                {completedReturn.return_type === 'exchange' && (
+                  <div className="flex justify-between items-center py-2 border-b border-slate-100">
+                    <dt className="text-slate-600">Se llevó</dt>
+                    <dd className="font-semibold tabular-nums">{formatCurrency(completedReturn.compra_Y ?? 0)}</dd>
+                  </div>
+                )}
+                {completedReturn.return_type === 'exchange' && (completedReturn.diferencia_cobrada ?? 0) > 0 && (
+                  <div className="flex justify-between items-center py-2 border-b border-slate-100">
+                    <dt className="text-slate-600">Diferencia cobrada</dt>
+                    <dd className="font-semibold tabular-nums text-orange-700">{formatCurrency(completedReturn.diferencia_cobrada ?? 0)}</dd>
+                  </div>
+                )}
                 {completedReturn.client_name && (
                   <div className="flex justify-between items-center py-2 border-b border-slate-100">
                     <dt className="text-slate-600">Cliente</dt>
@@ -634,9 +728,13 @@ export function ReturnsContent() {
                   </div>
                 )}
                 {completedReturn.voucher_code && (
-                  <div className="flex justify-between items-center py-2">
-                    <dt className="text-slate-600">Código del vale</dt>
-                    <dd className="font-mono font-semibold">{completedReturn.voucher_code}</dd>
+                  <div className="flex flex-col gap-1 py-2 rounded bg-green-50 border border-green-200 px-3">
+                    <dt className="text-xs text-green-800 uppercase tracking-wide font-medium">
+                      {completedReturn.return_type === 'exchange'
+                        ? `Vale generado${(completedReturn.residual_amount ?? 0) > 0 ? ` (${formatCurrency(completedReturn.residual_amount ?? 0)})` : ''}`
+                        : 'Código del vale'}
+                    </dt>
+                    <dd className="font-mono font-bold text-lg text-green-900">{completedReturn.voucher_code}</dd>
                   </div>
                 )}
               </dl>
@@ -651,15 +749,9 @@ export function ReturnsContent() {
               <Receipt className="h-4 w-4" />
               Descargar PDF
             </Button>
-            {completedReturn?.return_type === 'exchange' ? (
-              <Button className="flex-1 min-w-[140px] bg-prats-navy hover:bg-prats-navy-light" onClick={continueToExchangeCaja}>
-                Continuar a caja
-              </Button>
-            ) : (
-              <Button className="flex-1 min-w-[140px] bg-prats-navy hover:bg-prats-navy-light" onClick={resetAfterReturn}>
-                Nueva devolución
-              </Button>
-            )}
+            <Button className="flex-1 min-w-[140px] bg-prats-navy hover:bg-prats-navy-light" onClick={resetAfterReturn}>
+              Nueva devolución
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
