@@ -479,12 +479,20 @@ export function ReturnsContent() {
                           <Ticket className="h-5 w-5" /><span className="text-sm">Vale de compra</span>
                           <span className="text-xs opacity-70">Válido 1 año</span>
                         </Button>
-                        <Button variant={returnType === 'exchange' ? 'default' : 'outline'} className="h-16 flex-col gap-1"
-                          onClick={() => setReturnType('exchange')}>
+                        {/* "Cambio directo" deshabilitado temporalmente: el flujo dejaba cambios
+                            huérfanos (sin vale ni venta ligada) cuando lo devuelto valía más que
+                            lo nuevo. Hasta reescribirlo (rpc_process_exchange), hacer el cambio a
+                            mano: devolución a VALE + cobrar la compra nueva con ese vale. */}
+                        <Button variant="outline" disabled
+                          className="h-16 flex-col gap-1"
+                          title="Función en mantenimiento. Para un cambio: haz una devolución a VALE y cobra la compra nueva con ese vale.">
                           <ShoppingBag className="h-5 w-5" /><span className="text-sm">Cambio directo</span>
-                          <span className="text-xs opacity-70">Por otro artículo</span>
+                          <span className="text-xs opacity-70">En mantenimiento</span>
                         </Button>
                       </div>
+                      <p className="text-xs text-muted-foreground">
+                        El <strong>cambio directo</strong> está temporalmente desactivado. Para un cambio: emite un <strong>vale</strong> por lo devuelto y cobra la compra nueva con ese vale (si sobra saldo, se genera un vale por la diferencia).
+                      </p>
                     </div>
 
                     {returnType === 'exchange' && (
