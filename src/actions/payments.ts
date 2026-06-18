@@ -257,83 +257,27 @@ export const addSalePayment = protectedAction<AddSalePaymentInput, any>(
         return failure('No hay una caja abierta. Abre la caja antes de registrar un cobro.')
       }
 
-      const { data: saleData } = await ctx.adminClient
-        .from('sales')
-        .select('ticket_number, sale_type')
-        .eq('id', input.sale_id)
-        .single()
+      // Crear el cobro + (si hay sesión) el espejo con FK + sumar a la caja, todo
+      // ATÓMICO en la RPC (igual que rpc_add_order_payment). La sesión la
+      // resolvemos arriba con la lógica de fecha + gate "hoy sin caja"; la RPC
+      // suma a cash_sessions.total_* para que el cobro a plazos entre en el arqueo.
+      const { data: result, error: rpcError } = await ctx.adminClient.rpc('rpc_add_sale_payment', {
+        p_sale_id: input.sale_id,
+        p_payment_method: input.payment_method,
+        p_amount: input.amount,
+        p_reference: input.reference ?? null,
+        p_next_payment_date: input.next_payment_date ?? null,
+        p_payment_date: paymentDate,
+        p_cash_session_id: sessionId,
+        p_user_id: ctx.userId,
+      })
 
-      const { data: payment, error: insertError } = await ctx.adminClient
-        .from('sale_payments')
-        .insert({
-          sale_id: input.sale_id,
-          payment_method: input.payment_method,
-          amount: input.amount,
-          reference: input.reference ?? null,
-          next_payment_date: input.next_payment_date ?? null,
-          cash_session_id: sessionId,
-        })
-        .select('id, sale_id, payment_method, amount, reference, next_payment_date, created_at')
-        .single()
-
-      if (insertError) {
-        console.error('[addSalePayment] insert:', insertError)
-        return failure(insertError.message)
+      if (rpcError) {
+        console.error('[addSalePayment] rpc:', rpcError)
+        return failure(rpcError.message || 'Error al registrar pago')
       }
 
-      // Recalcular amount_paid y payment_status
-      const { data: agg } = await ctx.adminClient
-        .from('sale_payments')
-        .select('amount')
-        .eq('sale_id', input.sale_id)
-
-      const { data: sale } = await ctx.adminClient
-        .from('sales')
-        .select('total')
-        .eq('id', input.sale_id)
-        .single()
-
-      if (agg && sale) {
-        const amountPaid = agg.reduce((sum, p) => sum + Number(p.amount), 0)
-        const total = Number(sale.total)
-        const paymentStatus =
-          amountPaid >= total ? 'paid' : amountPaid > 0 ? 'partial' : 'pending'
-
-        await ctx.adminClient
-          .from('sales')
-          .update({ amount_paid: amountPaid, payment_status: paymentStatus })
-          .eq('id', input.sale_id)
-      }
-
-      // Solo insertar manual_transaction si el pago se ha vinculado a una sesión.
-      // Cobros con fecha pasada/futura sin sesión disponible quedan registrados
-      // en sale_payments pero no contaminan los totales de la caja actual.
-      if (sessionId) {
-        const baseAmount = input.amount / 1.21
-        const taxAmount = input.amount - baseAmount
-        const mtPayloadSale = {
-          type: 'income',
-          date: paymentDate,
-          description: `Cobro venta - Ticket ${saleData?.ticket_number ?? input.sale_id}`,
-          category: 'boutique',
-          amount: baseAmount,
-          tax_rate: 21,
-          tax_amount: taxAmount,
-          total: input.amount,
-          notes: `Método: ${input.payment_method} - Tipo: ${saleData?.sale_type ?? ''}`,
-          created_by: ctx.userId,
-          cash_session_id: sessionId,
-          // Fase C (mig 208/209): enlace estructural del espejo a su cobro a plazos,
-          // además del texto del ticket (que se mantiene para los reversos Fase D).
-          sale_payment_id: payment.id,
-        }
-        const { error: mtErrorSale } = await ctx.adminClient.from('manual_transactions').insert(mtPayloadSale)
-        if (mtErrorSale) {
-          console.error('[addSalePayment] manual_transactions INSERT error:', mtErrorSale.message, { code: (mtErrorSale as any).code, payload: mtPayloadSale })
-        }
-      }
-
-      return success(serializeForServerAction(payment!))
+      return success(serializeForServerAction(result))
     } catch (e) {
       console.error('[addSalePayment] unexpected:', e)
       return failure('Error al registrar pago')
