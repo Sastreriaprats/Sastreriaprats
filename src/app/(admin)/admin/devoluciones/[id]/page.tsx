@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ArrowLeft } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { ReturnCancelButton } from './return-cancel-button'
 
 export const metadata: Metadata = { title: 'Detalle de devolución' }
 
@@ -35,6 +36,9 @@ export default async function ReturnDetailPage(props: { params: Promise<{ id: st
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Devolución · {TYPE_LABEL[r.return_type] ?? r.return_type}</h1>
           <p className="text-muted-foreground">{formatDate(r.created_at)} · {formatCurrency(r.total_returned)}</p>
+        </div>
+        <div className="ml-auto">
+          <ReturnCancelButton returnId={r.id} />
         </div>
       </div>
 

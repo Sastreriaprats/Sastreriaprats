@@ -145,3 +145,47 @@ export const getReturn = protectedAction<string, ReturnDetail>(
     return success({ ...base, returned_lines })
   }
 )
+
+// ─── Anular una devolución (R6) ───────────────────────────────────────────────
+
+export type ReturnCancellationPreview = {
+  return_id: string
+  return_type: string
+  total_returned: number
+  sale: { id: string; ticket_number: string | null; status: string } | null
+  reverts: {
+    stock_back_to_sold: { product_variant_id: string; warehouse_id: string; quantity: number }[]
+    cash: { amount: number; cash_session_id: string; session_status: string } | null
+    voucher_to_cancel: { voucher_id: string; code: string | null; amount: number } | null
+  }
+  blockers: string[]
+  warnings: string[]
+  can_cancel: boolean
+}
+
+// Preview READ-ONLY: clasifica si la devolución es anulable + qué se revertiría.
+// Mismo permiso que ver devoluciones (no muta nada).
+export const previewReturnCancellation = protectedAction<{ returnId: string }, ReturnCancellationPreview>(
+  { permission: 'returns.view', auditModule: 'pos' },
+  async (ctx, { returnId }) => {
+    const { data, error } = await ctx.adminClient.rpc('rpc_preview_return_cancellation', { p_return_id: returnId })
+    if (error) return failure(error.message)
+    const d = data as ReturnCancellationPreview & { error?: string }
+    if (!d || d.error) return failure(d?.error || 'Devolución no encontrada', 'NOT_FOUND')
+    return success(d)
+  }
+)
+
+// Anular: delega en rpc_cancel_return (mig 220), que re-evalúa los guards y, si es
+// anulable, revierte stock + caja (arqueo canónico) + vale + restaura la venta,
+// atómicamente. Permiso sales.edit (anular corrige la venta/stock/caja, como los
+// otros reversos). El propio RPC aborta si está bloqueada.
+export const cancelReturn = protectedAction<{ returnId: string }, { return_id: string; ticket_number: string | null; auditEntityId: string }>(
+  { permission: 'sales.edit', auditAction: 'delete', auditModule: 'pos', auditEntity: 'return' },
+  async (ctx, { returnId }) => {
+    const { data, error } = await ctx.adminClient.rpc('rpc_cancel_return', { p_return_id: returnId, p_user_id: ctx.userId })
+    if (error) return failure(error.message, 'CONFLICT')
+    const d = data as { ticket_number?: string | null }
+    return success({ return_id: returnId, ticket_number: d?.ticket_number ?? null, auditEntityId: returnId })
+  }
+)
