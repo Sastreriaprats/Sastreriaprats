@@ -1214,26 +1214,36 @@ export function buildCamiseriaDocDefinition(
     const oficialStr = String(cfg.oficial ?? '').trim()
     const prendaLabelCam = String(cfg.prendaLabel ?? '').trim() || 'Camisa a medida'
     const situacionLabel = getOrderStatusLabel(String(cfg.situacionTrabajo ?? '—'))
-    // El talón es su propia tabla de 1 celda con borde. Se coloca a la derecha
-    // con `columns` (NO una tabla envolvente): columns no añade bordes ni padding
-    // de fila, por lo que el conjunto NO gana altura respecto al original
-    // (tejido+observaciones a la izquierda con su aire ya reservado) y la ficha
-    // sigue cabiendo en 1 hoja aunque las observaciones sean largas.
+    // El talón es su propia tabla de 1 celda con borde y ALTURA FIJA. En
+    // sastrería el recuadro se estira hasta la zona de corte porque su columna
+    // izquierda (talonLeftStack) va llena; aquí el vecino (tejido+obs) es corto,
+    // así que `columns` no lo estiraría y quedaba pequeño. Forzamos la altura con
+    // `heights` para que el talón sea alto y baje hacia el corte como el de
+    // sastrería. 138pt es el MÁXIMO validado que mantiene la copia inferior en 1
+    // sola hoja en los 111 pedidos de camisería reales (techo medido 140pt; 2pt
+    // de colchón). OJO: la copia inferior de camisería duplica TODA la ficha
+    // (medidas+casillas+tejido+obs) y deja muy poco aire vertical — no subir de
+    // 140 sin re-validar contra pedidos reales o algunos saltarán a una 2ª hoja.
+    // Fuentes un punto mayores que antes (título 12 / Nº 10 / campos 9; antes
+    // 11/9/8 por el fontSizeDelta=-1) para leerse como el de sastrería: es el
+    // máximo que cabe sin empujar ningún pedido a la 2ª hoja. Márgenes ajustados
+    // (1pt) para ganar legibilidad sin pasarse del presupuesto de 140pt.
     const talonBox: Content = {
       table: {
         widths: ['*'],
+        heights: [138],
         body: [
           [
             {
               stack: [
-                { text: 'Talón de cobro', bold: true, alignment: 'center', fontSize: fs9 + 3, margin: [3, 6, 3, 8] },
-                { text: `Nº talón: ${orderNum}`, bold: true, fontSize: fs9 + 1, margin: [4, 4, 4, 4] },
-                { text: `Cliente: ${clientName}`, fontSize: fs9, margin: [4, 3] },
-                { text: `Oficial: ${oficialStr || ' '}`, fontSize: fs9, margin: [4, 3] },
-                { text: `Prenda: ${prendaLabelCam}`, fontSize: fs9, margin: [4, 3] },
-                { text: `Situación: ${situacionLabel}`, fontSize: fs9, margin: [4, 3] },
-                { text: `F. compromiso: ${fechaCompromiso}`, fontSize: fs9, margin: [4, 3] },
-                { text: `Fecha emisión: ${hoy}`, fontSize: fs9, margin: [4, 3, 4, 6] },
+                { text: 'Talón de cobro', bold: true, alignment: 'center', fontSize: 12, margin: [4, 8, 4, 12] },
+                { text: `Nº talón: ${orderNum}`, bold: true, fontSize: 10, margin: [4, 1, 4, 1] },
+                { text: `Cliente: ${clientName}`, fontSize: 9, margin: [4, 1] },
+                { text: `Oficial: ${oficialStr || ' '}`, fontSize: 9, margin: [4, 1] },
+                { text: `Prenda: ${prendaLabelCam}`, fontSize: 9, margin: [4, 1] },
+                { text: `Situación: ${situacionLabel}`, fontSize: 9, margin: [4, 1] },
+                { text: `F. compromiso: ${fechaCompromiso}`, fontSize: 9, margin: [4, 1] },
+                { text: `Fecha emisión: ${hoy}`, fontSize: 9, margin: [4, 1, 4, 1] },
               ],
             },
           ],
