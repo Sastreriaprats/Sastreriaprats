@@ -713,7 +713,11 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
       // No abortamos la factura por un fallo de cuotas; se reintenta al editar.
     }
 
-    return success({ id: String(data.id) })
+    return success({
+      id: String(data.id),
+      auditEntityId: String(data.id),
+      auditDescription: `Factura ${input.invoice_number.trim()} · ${supplierName}`,
+    })
   }
 )
 

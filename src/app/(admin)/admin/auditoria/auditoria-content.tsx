@@ -308,59 +308,68 @@ export function AuditoriaContent() {
 
   const isComplex = (v: unknown) => v !== null && typeof v === 'object'
 
-  const renderChanges = (changes: Record<string, unknown> | null) => {
-    if (!changes) return <span className="text-muted-foreground">—</span>
+  // Campos técnicos que son ruido en el desglose (ids, marcas de tiempo, orden interno).
+  const NOISE_FIELDS = new Set<string>([
+    ...HIDDEN_FIELDS,
+    'created_at', 'updated_at', 'last_movement_at', 'fulfilled_at',
+    'stock_reserved_at', 'returned_at', 'sort_order', 'line_order',
+  ])
+
+  type Leaf = { rk: string; label: string; key: string; old: unknown; new: unknown }
+  // Diff PROFUNDO: recorre old/new y devuelve SOLO las hojas que han cambiado, con su
+  // ruta legible. Así, al editar una prenda, se ve solo el campo tocado (p.ej.
+  // "Líneas › #1 › Cuello: 38 → 39") en vez de volcar la línea entera.
+  const diffLeaves = (oldV: unknown, newV: unknown, path: string[] = []): Leaf[] => {
+    if (JSON.stringify(oldV) === JSON.stringify(newV)) return []
+    if (!(isComplex(oldV) && isComplex(newV))) {
+      // Un lado `undefined` = el campo existe en un snapshot y no en el otro
+      // (artefacto de serialización), no una edición real → se omite.
+      if (oldV === undefined || newV === undefined) return []
+      const key = path[path.length - 1] ?? ''
+      const label = path.map((p) => (p.startsWith('#') ? p : labelize(p))).join(' › ')
+      return [{ rk: path.join('.'), label, key, old: oldV, new: newV }]
+    }
+    if (Array.isArray(oldV) || Array.isArray(newV)) {
+      const o = (oldV as unknown[]) ?? [], n = (newV as unknown[]) ?? []
+      const out: Leaf[] = []
+      for (let i = 0; i < Math.max(o.length, n.length); i++) out.push(...diffLeaves(o[i], n[i], [...path, `#${i + 1}`]))
+      return out
+    }
+    const oo = oldV as Record<string, unknown>, nn = newV as Record<string, unknown>
+    const keys = [...new Set([...Object.keys(oo), ...Object.keys(nn)])].filter((k) => !NOISE_FIELDS.has(k))
+    const out: Leaf[] = []
+    for (const k of keys) out.push(...diffLeaves(oo[k], nn[k], [...path, k]))
+    return out
+  }
+
+  const leafSide = (key: string, val: unknown, side: 'old' | 'new') => {
+    if (isComplex(val)) return <div className={side === 'old' ? 'text-red-600' : 'text-green-700'}>{renderValue(val, key)}</div>
+    return <span className={side === 'old' ? 'line-through text-red-600' : 'text-green-700'}>{formatPrimitive(key, val)}</span>
+  }
+
+  const leafRow = (l: Leaf) => {
+    const hasOld = l.old !== undefined && l.old !== null && l.old !== ''
+    const hasNew = l.new !== undefined && l.new !== null && l.new !== ''
     return (
-      <div className="space-y-2">
-        {Object.entries(changes).map(([field, val]) => {
-          const v = val as { old: unknown; new: unknown }
-          const hasOld = v?.old !== undefined && v?.old !== null && v?.old !== ''
-          const hasNew = v?.new !== undefined && v?.new !== null && v?.new !== ''
-          const complex = isComplex(v?.old) || isComplex(v?.new)
-
-          if (complex) {
-            return (
-              <div key={field} className="rounded-md border border-muted bg-muted/30 p-2">
-                <p className="text-xs font-semibold mb-1">{labelize(field)}</p>
-                {hasOld && (
-                  <div className="text-xs mb-1">
-                    <span className="inline-block text-[10px] font-semibold uppercase tracking-wide text-red-600 mb-0.5">Anterior</span>
-                    <div>{renderValue(v.old, field)}</div>
-                  </div>
-                )}
-                {hasNew && (
-                  <div className="text-xs">
-                    <span className="inline-block text-[10px] font-semibold uppercase tracking-wide text-green-700 mb-0.5">
-                      {hasOld ? 'Nuevo' : 'Valor'}
-                    </span>
-                    <div>{renderValue(v.new, field)}</div>
-                  </div>
-                )}
-              </div>
-            )
-          }
-
-          const oldStr = formatPrimitive(field, v?.old)
-          const newStr = formatPrimitive(field, v?.new)
-          return (
-            <div key={field} className="text-xs flex flex-wrap items-center gap-1">
-              <span className="font-medium text-muted-foreground">{labelize(field)}:</span>
-              {hasOld && !hasNew ? (
-                <span className="line-through text-red-600">{oldStr}</span>
-              ) : !hasOld && hasNew ? (
-                <span className="text-green-700">{newStr}</span>
-              ) : (
-                <>
-                  <span className="line-through text-red-600">{oldStr}</span>
-                  <span className="text-muted-foreground">→</span>
-                  <span className="text-green-700">{newStr}</span>
-                </>
-              )}
-            </div>
-          )
-        })}
+      <div key={l.rk} className="text-xs flex flex-wrap items-center gap-1">
+        <span className="font-medium text-muted-foreground">{l.label}:</span>
+        {hasOld && !hasNew ? leafSide(l.key, l.old, 'old')
+          : !hasOld && hasNew ? leafSide(l.key, l.new, 'new')
+          : (<>{leafSide(l.key, l.old, 'old')}<span className="text-muted-foreground">→</span>{leafSide(l.key, l.new, 'new')}</>)}
       </div>
     )
+  }
+
+  const renderChanges = (changes: Record<string, unknown> | null) => {
+    if (!changes) return <span className="text-muted-foreground">—</span>
+    const leaves: Leaf[] = []
+    for (const [field, val] of Object.entries(changes)) {
+      const v = val as { old: unknown; new: unknown }
+      if (isComplex(v?.old) || isComplex(v?.new)) leaves.push(...diffLeaves(v.old, v.new, [field]))
+      else leaves.push({ rk: field, label: labelize(field), key: field, old: v?.old, new: v?.new })
+    }
+    if (leaves.length === 0) return <span className="text-muted-foreground">—</span>
+    return <div className="space-y-1">{leaves.map(leafRow)}</div>
   }
 
   return (

@@ -314,7 +314,14 @@ export const updateAlterationStatus = protectedAction<
         console.error('[updateAlterationStatus]', error)
         return failure(error.message)
       }
-      return success({ ok: true })
+      const { data: alt } = await ctx.adminClient
+        .from('alterations').select('alteration_number').eq('id', id).maybeSingle()
+      const num = (alt as { alteration_number?: string } | null)?.alteration_number ?? id
+      const ST: Record<string, string> = {
+        pending: 'Pendiente', sent: 'Enviado al taller', ready: 'Listo',
+        delivered: 'Entregado', cancelled: 'Cancelado',
+      }
+      return success({ ok: true, auditEntityId: id, auditDescription: `Arreglo ${num}: ${ST[status] ?? status}` })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error al cambiar estado'
       return failure(msg)

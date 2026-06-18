@@ -567,14 +567,21 @@ export async function getAuditLogs(filters: {
 
     const list = rows.map((row) => {
       let changes: Record<string, unknown> | null = null
-      if (row.old_data != null || row.new_data != null) {
-        const oldData = row.old_data ?? {}
-        const newData = row.new_data ?? {}
+      // Las CREACIONES no se desglosan campo a campo (volcaban el objeto entero,
+      // p.ej. 18 campos de una factura): la acción "Crear" + la descripción ya
+      // dicen qué se creó. En el resto (editar, cambio de estado, etc.) solo se
+      // muestran los campos que REALMENTE han cambiado, no todo el registro.
+      if (row.action !== 'create' && (row.old_data != null || row.new_data != null)) {
+        const oldData = (row.old_data ?? {}) as Record<string, unknown>
+        const newData = (row.new_data ?? {}) as Record<string, unknown>
         const keys = new Set([...Object.keys(oldData), ...Object.keys(newData)])
-        changes = {}
+        const diff: Record<string, unknown> = {}
         for (const k of keys) {
-          (changes as Record<string, unknown>)[k] = { old: (oldData as Record<string, unknown>)[k], new: (newData as Record<string, unknown>)[k] }
+          if (JSON.stringify(oldData[k]) !== JSON.stringify(newData[k])) {
+            diff[k] = { old: oldData[k], new: newData[k] }
+          }
         }
+        changes = Object.keys(diff).length > 0 ? diff : null
       }
       let entityLabel = row.description ?? row.entity_display ?? null
       // Traducir descripciones en inglés guardadas por el wrapper (ej: "create sale" → "Crear Venta")

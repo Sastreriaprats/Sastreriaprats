@@ -210,11 +210,11 @@ export const cancelAppointment = protectedAction<{ id: string; reason?: string }
         cancelled_by: ctx.userId,
       })
       .eq('id', id)
-      .select()
+      .select(`*, clients(full_name)`)
       .single()
 
     if (error) return failure(error.message)
-    return success(data)
+    return success({ ...(data as Record<string, unknown>), auditDescription: `Cancelada · ${describeAppointment(data)}` })
   }
 )
 
@@ -275,7 +275,7 @@ export const moveAppointment = protectedAction<{
       .single()
 
     if (error) return failure(error.message)
-    return success(data)
+    return success({ ...(data as Record<string, unknown>), auditDescription: describeAppointment(data) })
   }
 )
 
@@ -312,11 +312,12 @@ export const markAttendance = protectedAction<{ id: string; status: 'completed' 
       .from('appointments')
       .update({ status })
       .eq('id', id)
-      .select()
+      .select(`*, clients(full_name)`)
       .single()
 
     if (error) return failure(error.message)
-    return success(data)
+    const attLabel: Record<string, string> = { completed: 'Asistió', no_show: 'No asistió', scheduled: 'Reprogramada' }
+    return success({ ...(data as Record<string, unknown>), auditDescription: `${attLabel[status] ?? status} · ${describeAppointment(data)}` })
   }
 )
 
