@@ -618,13 +618,15 @@ export async function getAuditLogs(filters: {
         changes = Object.keys(diff).length > 0 ? diff : null
       }
       let entityLabel = row.description ?? row.entity_display ?? null
-      // Traducir descripciones en inglés guardadas por el wrapper (ej: "create sale" → "Crear Venta")
+      // Traducir descripciones genéricas guardadas por el wrapper, tanto en inglés
+      // puro ("create supplier_invoice") como medio-traducidas ("Crear supplier_invoice",
+      // con la acción en español pero el tipo de entidad sin traducir).
       if (typeof entityLabel === 'string' && entityLabel.trim()) {
-        const entityTypeOrModule = row.entity_type ?? row.module ?? ''
-        const expectedEnglish = `${row.action} ${entityTypeOrModule}`.trim()
-        if (entityLabel.trim() === expectedEnglish) {
-          const actionEs = ACTION_DISPLAY_ES[row.action] ?? row.action
-          const entityEs = ENTITY_TYPE_DISPLAY_ES[entityTypeOrModule] ?? (entityTypeOrModule || '—')
+        const et = row.entity_type ?? row.module ?? ''
+        const actionEs = ACTION_DISPLAY_ES[row.action] ?? row.action
+        const t = entityLabel.trim()
+        if (et && (t === `${row.action} ${et}`.trim() || t === `${actionEs} ${et}`.trim())) {
+          const entityEs = ENTITY_TYPE_DISPLAY_ES[et] ?? et
           entityLabel = `${actionEs} ${entityEs}`
         }
       }
