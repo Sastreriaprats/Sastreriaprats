@@ -107,7 +107,7 @@ export const toggleDiscountCodeActive = protectedAction<{ id: string; is_active:
 
 export const deleteDiscountCode = protectedAction<{ id: string }, { id: string }>(
   {
-    permission: 'pos.apply_discount',
+    permission: 'config.edit',
     auditModule: 'discounts',
     auditAction: 'delete',
     auditEntity: 'discount_code',

@@ -19,6 +19,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Plus, Pencil, Trash2, Loader2, CalendarRange } from 'lucide-react'
+import { usePermissions } from '@/hooks/use-permissions'
 import { toast } from 'sonner'
 import {
   listSeasons,
@@ -77,6 +78,7 @@ const emptyForm: FormState = {
 }
 
 export function TemporadasContent({ initialSeasons }: { initialSeasons: SeasonRow[] }) {
+  const { can } = usePermissions()
   const [seasons, setSeasons] = useState<SeasonRow[]>(initialSeasons)
   const [refreshing, setRefreshing] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -250,6 +252,7 @@ export function TemporadasContent({ initialSeasons }: { initialSeasons: SeasonRo
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(s)} title="Editar">
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
+                      {can('config.edit') && (
                       <Button
                         variant="ghost" size="icon"
                         className="h-7 w-7 text-red-600 hover:text-red-700 hover:bg-red-50"
@@ -258,6 +261,7 @@ export function TemporadasContent({ initialSeasons }: { initialSeasons: SeasonRo
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

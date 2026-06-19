@@ -24,6 +24,7 @@ import {
   Plus, Search, Pencil, Trash2, ChevronUp, ChevronDown, Loader2, FolderTree, Eye, EyeOff,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { usePermissions } from '@/hooks/use-permissions'
 import {
   listCategories,
   createCategoryAction,
@@ -76,6 +77,7 @@ const emptyForm: FormState = {
 }
 
 export function CategoriesContent({ initialCategories }: { initialCategories: ProductCategoryRow[] }) {
+  const { can } = usePermissions()
   const [categories, setCategories] = useState<ProductCategoryRow[]>(initialCategories)
   const [refreshing, setRefreshing] = useState(false)
   const [search, setSearch] = useState('')
@@ -282,6 +284,7 @@ export function CategoriesContent({ initialCategories }: { initialCategories: Pr
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(cat)} title="Editar">
               <Pencil className="h-3.5 w-3.5" />
             </Button>
+            {can('config.edit') && (
             <Button
               variant="ghost" size="icon"
               className="h-7 w-7 text-red-600 hover:text-red-700 hover:bg-red-50"
@@ -290,6 +293,7 @@ export function CategoriesContent({ initialCategories }: { initialCategories: Pr
             >
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
+            )}
           </div>
         </TableCell>
       </TableRow>,

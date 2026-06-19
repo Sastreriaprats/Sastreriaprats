@@ -23,6 +23,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { Plus, Loader2, Copy, Power, Trash2, Tag, Truck } from 'lucide-react'
+import { usePermissions } from '@/hooks/use-permissions'
 import { toast } from 'sonner'
 
 export interface DiscountCode {
@@ -63,6 +64,7 @@ function generateCode(): string {
 }
 
 export function DescuentosContent({ initialCodes }: { initialCodes: DiscountCode[] }) {
+  const { can } = usePermissions()
   const [codes, setCodes] = useState<DiscountCode[]>(initialCodes)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -335,9 +337,11 @@ export function DescuentosContent({ initialCodes }: { initialCodes: DiscountCode
                           <Button variant="ghost" size="icon" title={dc.is_active ? 'Desactivar' : 'Activar'} onClick={() => toggleActive(dc.id, dc.is_active)}>
                             <Power className={`h-4 w-4 ${dc.is_active ? 'text-green-600' : 'text-muted-foreground'}`} />
                           </Button>
+                          {can('config.edit') && (
                           <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDelete(dc.id)}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>

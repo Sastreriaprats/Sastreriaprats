@@ -287,7 +287,7 @@ export const toggleSeasonAction = protectedAction<
 
 export const deleteSeasonAction = protectedAction<{ id: string }, { deleted: true }>(
   {
-    permission: 'config.manage_stores',
+    permission: 'config.edit',
     auditModule: 'config',
     auditAction: 'delete',
     auditEntity: 'season',

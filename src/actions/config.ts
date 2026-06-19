@@ -165,7 +165,7 @@ export async function deleteStoreAction(storeId: string) {
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
-    const hasPerm = await checkUserPermission(user.id, 'config.manage_stores')
+    const hasPerm = await checkUserPermission(user.id, 'config.edit')
     if (!hasPerm) return { error: 'Sin permisos para gestionar tiendas' }
 
     const admin = createAdminClient()

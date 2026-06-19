@@ -12,6 +12,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Store, Package, AlertTriangle, Loader2, RefreshCw, ArrowRight, Plus, Pencil, Trash2, RotateCcw } from 'lucide-react'
+import { usePermissions } from '@/hooks/use-permissions'
 import { getStoresWithStats, type StoreStats } from '@/actions/dashboard'
 import { deleteStoreAction, reactivateStoreAction } from '@/actions/config'
 import { formatCurrency, cn } from '@/lib/utils'
@@ -20,6 +21,7 @@ import { StoreEditDialog, type StoreEditRow } from '@/components/admin/store-edi
 import { toast } from 'sonner'
 
 export function TiendasContent({ initialStores = [] }: { initialStores?: StoreStats[] }) {
+  const { can } = usePermissions()
   const router = useRouter()
   const [stores, setStores] = useState<StoreStats[]>(initialStores)
   const [loading, setLoading] = useState(false)
@@ -140,7 +142,7 @@ export function TiendasContent({ initialStores = [] }: { initialStores?: StoreSt
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
-                    {isInactive ? (
+                    {can('config.edit') && (isInactive ? (
                       <Button
                         variant="ghost"
                         size="icon"
@@ -160,7 +162,7 @@ export function TiendasContent({ initialStores = [] }: { initialStores?: StoreSt
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
-                    )}
+                    ))}
                   </div>
                 </div>
               </CardHeader>

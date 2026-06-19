@@ -280,7 +280,7 @@ export const updateCategoryAction = protectedAction<
 
 export const deleteCategoryAction = protectedAction<{ id: string }, { deleted: true }>(
   {
-    permission: 'config.manage_stores',
+    permission: 'config.edit',
     auditModule: 'config',
     auditAction: 'delete',
     auditEntity: 'product_category',
