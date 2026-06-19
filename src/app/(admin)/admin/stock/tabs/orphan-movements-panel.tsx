@@ -21,8 +21,9 @@ export function OrphanMovementsPanel() {
   const [cleaning, setCleaning] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
 
-  // Sin permiso de ajuste de stock, el panel no aparece.
-  if (!can('stock.adjust')) return null
+  // Sin permiso de revertir movimientos de stock, el panel no aparece
+  // (mismo permiso real que usa el botón de revertir en movements-tab).
+  if (!can('stock_movements.reverse')) return null
 
   async function search() {
     setLoading(true)

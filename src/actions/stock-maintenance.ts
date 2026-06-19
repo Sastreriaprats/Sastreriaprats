@@ -15,10 +15,10 @@ export type OrphanStockMovement = {
 }
 
 // Lista los stock_movements huérfanos (reference_id NOT NULL cuya entidad ya no
-// existe), de TODOS los reference_type. Read-only (el RPC solo lee). Permiso de
-// ajuste de stock.
+// existe), de TODOS los reference_type. Read-only (el RPC solo lee). Permiso real
+// stock_movements.reverse (mismo que revertir movimientos).
 export const listOrphanStockMovements = protectedAction<void, OrphanStockMovement[]>(
-  { permission: 'stock.adjust', auditModule: 'stock' },
+  { permission: 'stock_movements.reverse', auditModule: 'stock' },
   async (ctx) => {
     const { data, error } = await ctx.adminClient.rpc('rpc_list_orphan_stock_movements')
     if (error) return failure(error.message)
@@ -31,7 +31,7 @@ export const listOrphanStockMovements = protectedAction<void, OrphanStockMovemen
 // el registro del log; NO recalcula stock_levels (no hay trigger). Snapshot a
 // audit_logs vía el wrapper (auditOldData = lo borrado).
 export const cleanOrphanStockMovements = protectedAction<void, { count: number }>(
-  { permission: 'stock.adjust', auditAction: 'delete', auditModule: 'stock', auditEntity: 'stock' },
+  { permission: 'stock_movements.reverse', auditAction: 'delete', auditModule: 'stock', auditEntity: 'stock' },
   async (ctx) => {
     const { data, error } = await ctx.adminClient.rpc('rpc_clean_orphan_stock_movements')
     if (error) return failure(error.message)
