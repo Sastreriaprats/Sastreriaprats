@@ -50,6 +50,7 @@ import {
   type EditSupplierOrderLineInput,
 } from '@/actions/suppliers'
 import { getProductVariantsById } from '@/actions/products'
+import { usePermissions } from '@/hooks/use-permissions'
 
 type WarehouseOption = {
   id: string
@@ -137,6 +138,7 @@ export function PedidoDetailContent({
   supplier: { id: string; name: string }
 }) {
   const router = useRouter()
+  const { can } = usePermissions()
   const [currentStatus, setCurrentStatus] = useState<string>(order.status)
   const [currentInvoice, setCurrentInvoice] = useState<any>(order.ap_invoice)
   const [loading, setLoading] = useState<string | null>(null)
@@ -541,7 +543,7 @@ export function PedidoDetailContent({
             </Button>
           )}
 
-          {(currentStatus === 'draft' || currentStatus === 'sent' || currentStatus === 'confirmed') && (
+          {can('suppliers.create_order') && (currentStatus === 'draft' || currentStatus === 'sent' || currentStatus === 'confirmed') && (
             <Button
               size="sm"
               variant="destructive"

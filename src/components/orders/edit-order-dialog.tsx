@@ -993,7 +993,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-red-600" onClick={() => removeLine(l._key)} disabled={priceLocked} title={priceLocked ? 'No se pueden quitar líneas en un pedido pagado' : 'Eliminar línea'}>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-red-600" onClick={() => removeLine(l._key)} disabled={priceLocked || !can('orders.edit')} title={priceLocked ? 'No se pueden quitar líneas en un pedido pagado' : 'Eliminar línea'}>
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </TableCell>

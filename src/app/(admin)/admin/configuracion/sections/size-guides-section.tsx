@@ -23,6 +23,7 @@ import {
   Loader2, Plus, Pencil, Trash2, Ruler, Search, FolderTree, X, GripVertical,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { usePermissions } from '@/hooks/use-permissions'
 import {
   listSizeGuidesAdmin,
   createSizeGuide,
@@ -43,6 +44,7 @@ const DEFAULT_COLUMNS: SizeGuideColumn[] = [
 ]
 
 export function SizeGuidesSection() {
+  const { can } = usePermissions()
   const [items, setItems] = useState<SizeGuideItem[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -149,9 +151,11 @@ export function SizeGuidesSection() {
                   <Button variant="ghost" size="sm" onClick={() => openEdit(item)} title="Editar">
                     <Pencil className="h-4 w-4" />
                   </Button>
+                  {can('products.delete') && (
                   <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(item)} title="Eliminar">
                     <Trash2 className="h-4 w-4 text-destructive" />
                   </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>

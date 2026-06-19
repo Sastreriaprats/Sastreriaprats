@@ -38,7 +38,7 @@ const categoryColors: Record<string, string> = {
 
 export function ClientsPageContent({ basePath = '/admin' }: { basePath?: string }) {
   const router = useRouter()
-  const { can, isAdmin } = usePermissions()
+  const { can } = usePermissions()
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -277,7 +277,7 @@ export function ClientsPageContent({ basePath = '/admin' }: { basePath?: string 
                           </DropdownMenuItem>
                         </>
                       )}
-                      {isAdmin && (
+                      {can('clients.delete') && (
                         <DropdownMenuItem onClick={() => setDeleteTarget({ id: client.id, name: client.full_name })} className="text-destructive">
                           <Trash2 className="mr-2 h-4 w-4" /> Eliminar cliente
                         </DropdownMenuItem>

@@ -22,6 +22,7 @@ import {
 import { Plus, Loader2, Trash2, CreditCard, Banknote, ArrowRightLeft, FileText } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { toast } from 'sonner'
+import { usePermissions } from '@/hooks/use-permissions'
 import {
   registerSupplierInvoicePayment,
   listSupplierInvoicePayments,
@@ -64,6 +65,7 @@ interface Props {
 }
 
 export function SupplierPaymentDialog({ open, onOpenChange, invoice, onChanged }: Props) {
+  const { can } = usePermissions()
   const [payments, setPayments] = useState<SupplierInvoicePayment[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -318,6 +320,7 @@ export function SupplierPaymentDialog({ open, onOpenChange, invoice, onChanged }
                             {p.reference ?? '—'}
                           </TableCell>
                           <TableCell>
+                            {can('supplier_invoices.manage') && (
                             <Button
                               variant="ghost"
                               size="icon"
@@ -329,6 +332,7 @@ export function SupplierPaymentDialog({ open, onOpenChange, invoice, onChanged }
                                 ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                 : <Trash2 className="h-3.5 w-3.5" />}
                             </Button>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}

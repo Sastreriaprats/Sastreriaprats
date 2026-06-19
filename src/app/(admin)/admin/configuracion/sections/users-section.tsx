@@ -14,6 +14,7 @@ import { Switch } from '@/components/ui/switch'
 import { Loader2, UserPlus, KeyRound, Pencil, Copy, Check, Trash2, TrendingUp } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { listAdminUsers, createAdminUser, updateAdminUser, deleteAdminUser, getUserStoreAssignments, type UserRow } from '@/actions/users'
+import { usePermissions } from '@/hooks/use-permissions'
 import { UserSalesDialog } from '@/components/admin/user-sales-dialog'
 import { useStores, useRolesAndPermissions } from '@/hooks/use-cached-queries'
 import { formatDateTime } from '@/lib/utils'
@@ -28,6 +29,7 @@ const ROLE_COLORS: Record<string, string> = {
 }
 
 export function UsersSection() {
+  const { can } = usePermissions()
   const { data: storesData } = useStores()
   const { data: rolesAndPerms } = useRolesAndPermissions()
   const stores = (storesData ?? []).map(s => ({ id: s.id, name: s.name }))
@@ -187,9 +189,11 @@ export function UsersSection() {
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditUser(u)}>
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
+                        {can('config.users') && (
                         <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => setDeleteUser(u)}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   )

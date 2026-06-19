@@ -742,6 +742,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                               </Button>
                             </div>
                           )}
+                          {can('suppliers.create_order') && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -754,6 +755,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                             {deletingOrderId === o.id ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Trash2 className="h-3 w-3 mr-1" />}
                             Eliminar
                           </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>

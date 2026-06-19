@@ -13,12 +13,14 @@ import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { listScheduleBlocks, createScheduleBlock, deleteScheduleBlock } from '@/actions/schedule-blocks'
 import type { ScheduleBlock } from '@/actions/schedule-blocks'
+import { usePermissions } from '@/hooks/use-permissions'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 
 export function ScheduleBlocksPanel() {
+  const { can } = usePermissions()
   const supabase = useMemo(() => createClient(), [])
   const [blocks, setBlocks] = useState<ScheduleBlock[]>([])
   const [loading, setLoading] = useState(true)
@@ -226,6 +228,7 @@ export function ScheduleBlocksPanel() {
                         : <Badge variant="outline" className="text-[10px] h-4">Todas</Badge>}
                     </div>
                   </div>
+                  {can('calendar.edit') && (
                   <Button
                     variant="ghost"
                     size="icon"
@@ -234,6 +237,7 @@ export function ScheduleBlocksPanel() {
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
+                  )}
                 </div>
               ))}
             </div>

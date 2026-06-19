@@ -617,6 +617,7 @@ export function EmailsContent() {
                               </Button>
                             </>
                           )}
+                          {can('emails.send') && (
                           <Button
                             size="icon"
                             variant="ghost"
@@ -634,6 +635,7 @@ export function EmailsContent() {
                               ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                               : <Trash2 className="h-3.5 w-3.5" />}
                           </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>

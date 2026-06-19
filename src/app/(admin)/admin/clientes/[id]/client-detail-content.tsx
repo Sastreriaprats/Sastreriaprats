@@ -80,7 +80,7 @@ function ClientSummaryTab({ client }: { client: any }) {
 
 export function ClientDetailContent({ client, initialTab, basePath = '/admin' }: { client: any; initialTab: string; basePath?: string }) {
   const router = useRouter()
-  const { can, isAdmin } = usePermissions()
+  const { can } = usePermissions()
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [showMergeDialog, setShowMergeDialog] = useState(false)
@@ -155,7 +155,7 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
                   : <><UserCheck className="h-4 w-4" /> Reactivar</>}
               </Button>
             )}
-            {isAdmin && (
+            {can('clients.delete') && (
               <Button variant="destructive" size="sm" className="gap-2" onClick={() => setShowDeleteDialog(true)}>
                 <Trash2 className="h-4 w-4" /> Eliminar cliente
               </Button>

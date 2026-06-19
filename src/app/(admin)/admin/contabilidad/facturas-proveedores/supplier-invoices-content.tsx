@@ -69,7 +69,7 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { downloadExcel } from '@/lib/excel/export'
 import { toast } from 'sonner'
 import Papa from 'papaparse'
-import { useAuth } from '@/components/providers/auth-provider'
+import { usePermissions } from '@/hooks/use-permissions'
 import {
   getSupplierInvoicesKpis,
   listSupplierInvoices,
@@ -173,7 +173,7 @@ const PAYMENT_TERMS_LABEL: Record<string, string> = {
 }
 
 export function SupplierInvoicesContent() {
-  const { isAdmin } = useAuth()
+  const { can } = usePermissions()
   const [kpis, setKpis] = useState<SupplierInvoicesKpis | null>(null)
   const [rows, setRows] = useState<ApSupplierInvoiceRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -1040,7 +1040,7 @@ export function SupplierInvoicesContent() {
                             <Undo2 className="h-3.5 w-3.5" />
                           </Button>
                         )}
-                        {isAdmin && (
+                        {can('supplier_invoices.manage') && (
                           <Button
                             size="sm"
                             variant="ghost"
