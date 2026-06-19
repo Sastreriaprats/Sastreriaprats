@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -10,6 +9,14 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Building2, Plus, Pencil, Trash2, Star, Loader2, Save, X } from 'lucide-react'
 import { toast } from 'sonner'
+import { usePermissions } from '@/hooks/use-permissions'
+import {
+  listClientCompanies,
+  createClientCompany,
+  updateClientCompany,
+  deleteClientCompany,
+  setDefaultClientCompany,
+} from '@/actions/clients'
 
 interface Company {
   id: string
@@ -45,7 +52,8 @@ const EMPTY_FORM = {
 }
 
 export function ClientCompaniesTab({ clientId }: { clientId: string }) {
-  const supabase = useMemo(() => createClient(), [])
+  const { can } = usePermissions()
+  const canEdit = can('clients.edit')
   const [companies, setCompanies] = useState<Company[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -54,14 +62,10 @@ export function ClientCompaniesTab({ clientId }: { clientId: string }) {
   const [form, setForm] = useState(EMPTY_FORM)
 
   const fetchCompanies = useCallback(async () => {
-    const { data } = await supabase
-      .from('client_companies')
-      .select('*')
-      .eq('client_id', clientId)
-      .order('is_default', { ascending: false })
-      .order('created_at', { ascending: true })
-    if (data) setCompanies(data)
-  }, [supabase, clientId])
+    const res = await listClientCompanies({ clientId })
+    if (res.success) setCompanies((res.data ?? []) as Company[])
+    else toast.error(res.error ?? 'Error al cargar las empresas')
+  }, [clientId])
 
   useEffect(() => {
     fetchCompanies().finally(() => setIsLoading(false))
@@ -105,45 +109,16 @@ export function ClientCompaniesTab({ clientId }: { clientId: string }) {
     }
     setSaving(true)
     try {
-      // If marking as default, unset others first
-      if (form.is_default) {
-        await supabase
-          .from('client_companies')
-          .update({ is_default: false })
-          .eq('client_id', clientId)
+      const res = editingId
+        ? await updateClientCompany({ id: editingId, clientId, data: form })
+        : await createClientCompany({ clientId, data: form })
+      if (!res.success) {
+        toast.error(res.error ?? 'Error al guardar')
+        return
       }
-
-      const payload = {
-        client_id: clientId,
-        company_name: form.company_name.trim(),
-        nif: form.nif.trim() || null,
-        address: form.address.trim() || null,
-        city: form.city.trim() || null,
-        postal_code: form.postal_code.trim() || null,
-        province: form.province.trim() || null,
-        country: form.country.trim() || null,
-        contact_name: form.contact_name.trim() || null,
-        contact_email: form.contact_email.trim() || null,
-        contact_phone: form.contact_phone.trim() || null,
-        notes: form.notes.trim() || null,
-        is_default: form.is_default,
-        updated_at: new Date().toISOString(),
-      }
-
-      if (editingId) {
-        const { error } = await supabase.from('client_companies').update(payload).eq('id', editingId)
-        if (error) throw error
-        toast.success('Empresa actualizada')
-      } else {
-        const { error } = await supabase.from('client_companies').insert(payload)
-        if (error) throw error
-        toast.success('Empresa añadida')
-      }
-
+      toast.success(editingId ? 'Empresa actualizada' : 'Empresa añadida')
       cancel()
       await fetchCompanies()
-    } catch (err: any) {
-      toast.error(err?.message || 'Error al guardar')
     } finally {
       setSaving(false)
     }
@@ -151,9 +126,9 @@ export function ClientCompaniesTab({ clientId }: { clientId: string }) {
 
   const handleDelete = async (id: string) => {
     if (!confirm('¿Eliminar esta empresa?')) return
-    const { error } = await supabase.from('client_companies').delete().eq('id', id)
-    if (error) {
-      toast.error('Error al eliminar')
+    const res = await deleteClientCompany({ id })
+    if (!res.success) {
+      toast.error(res.error ?? 'Error al eliminar')
     } else {
       toast.success('Empresa eliminada')
       await fetchCompanies()
@@ -161,8 +136,11 @@ export function ClientCompaniesTab({ clientId }: { clientId: string }) {
   }
 
   const handleSetDefault = async (id: string) => {
-    await supabase.from('client_companies').update({ is_default: false }).eq('client_id', clientId)
-    await supabase.from('client_companies').update({ is_default: true }).eq('id', id)
+    const res = await setDefaultClientCompany({ id, clientId })
+    if (!res.success) {
+      toast.error(res.error ?? 'Error al actualizar')
+      return
+    }
     await fetchCompanies()
     toast.success('Empresa predeterminada actualizada')
   }
@@ -175,7 +153,7 @@ export function ClientCompaniesTab({ clientId }: { clientId: string }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">Empresas de facturación</h3>
-        {!showForm && (
+        {canEdit && !showForm && (
           <Button size="sm" onClick={openNew} className="gap-1">
             <Plus className="h-4 w-4" /> Añadir empresa
           </Button>
@@ -281,19 +259,21 @@ export function ClientCompaniesTab({ clientId }: { clientId: string }) {
                 {c.contact_name && <p className="text-sm">Contacto: {c.contact_name}{c.contact_phone ? ` · ${c.contact_phone}` : ''}{c.contact_email ? ` · ${c.contact_email}` : ''}</p>}
                 {c.notes && <p className="text-sm text-muted-foreground italic">{c.notes}</p>}
               </div>
-              <div className="flex gap-1">
-                {!c.is_default && (
-                  <Button variant="ghost" size="icon" title="Marcar como predeterminada" onClick={() => handleSetDefault(c.id)}>
-                    <Star className="h-4 w-4" />
+              {canEdit && (
+                <div className="flex gap-1">
+                  {!c.is_default && (
+                    <Button variant="ghost" size="icon" title="Marcar como predeterminada" onClick={() => handleSetDefault(c.id)}>
+                      <Star className="h-4 w-4" />
+                    </Button>
+                  )}
+                  <Button variant="ghost" size="icon" onClick={() => openEdit(c)}>
+                    <Pencil className="h-4 w-4" />
                   </Button>
-                )}
-                <Button variant="ghost" size="icon" onClick={() => openEdit(c)}>
-                  <Pencil className="h-4 w-4" />
-                </Button>
-                <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDelete(c.id)}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
+                  <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDelete(c.id)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

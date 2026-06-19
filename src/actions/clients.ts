@@ -305,6 +305,125 @@ export const reactivateClientAction = protectedAction<string, { id: string }>(
   }
 )
 
+// ── Empresas de facturación del cliente (client_companies) ──────────────────
+// Datos fiscales (NIF, dirección). Antes se escribían client-side directo con
+// RLS abierta; ahora pasan por estas acciones (clients.edit) + RLS endurecida.
+type ClientCompanyInput = {
+  company_name: string
+  nif?: string | null
+  address?: string | null
+  city?: string | null
+  postal_code?: string | null
+  province?: string | null
+  country?: string | null
+  contact_name?: string | null
+  contact_email?: string | null
+  contact_phone?: string | null
+  notes?: string | null
+  is_default?: boolean
+}
+
+const s = (v: string | null | undefined) => {
+  const t = (v ?? '').toString().trim()
+  return t === '' ? null : t
+}
+const buildCompanyPayload = (clientId: string, d: ClientCompanyInput) => ({
+  client_id: clientId,
+  company_name: (d.company_name ?? '').trim(),
+  nif: s(d.nif),
+  address: s(d.address),
+  city: s(d.city),
+  postal_code: s(d.postal_code),
+  province: s(d.province),
+  country: s(d.country),
+  contact_name: s(d.contact_name),
+  contact_email: s(d.contact_email),
+  contact_phone: s(d.contact_phone),
+  notes: s(d.notes),
+  is_default: !!d.is_default,
+})
+
+export const listClientCompanies = protectedAction<{ clientId: string }, any[]>(
+  { permission: 'clients.view', auditModule: 'clients' },
+  async (ctx, { clientId }) => {
+    if (!clientId) return failure('Falta el cliente', 'VALIDATION')
+    const { data, error } = await ctx.adminClient
+      .from('client_companies')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('is_default', { ascending: false })
+      .order('created_at', { ascending: true })
+    if (error) return failure(error.message)
+    return success(data ?? [])
+  }
+)
+
+export const createClientCompany = protectedAction<{ clientId: string; data: ClientCompanyInput }, { id: string }>(
+  { permission: 'clients.edit', auditModule: 'clients', auditAction: 'create', auditEntity: 'client_company', revalidate: ['/admin/clientes'] },
+  async (ctx, { clientId, data }) => {
+    if (!clientId) return failure('Falta el cliente', 'VALIDATION')
+    if (!data?.company_name?.trim()) return failure('El nombre de la empresa es obligatorio', 'VALIDATION')
+    const payload = buildCompanyPayload(clientId, data)
+    if (payload.is_default) {
+      await ctx.adminClient.from('client_companies').update({ is_default: false }).eq('client_id', clientId)
+    }
+    const { data: row, error } = await ctx.adminClient
+      .from('client_companies').insert(payload).select('id').single()
+    if (error) return failure(error.message)
+    return success({
+      id: row.id as string,
+      auditEntityId: row.id as string,
+      auditDescription: `Empresa de facturación añadida: ${payload.company_name}${payload.nif ? ` (NIF ${payload.nif})` : ''}`,
+    } as { id: string })
+  }
+)
+
+export const updateClientCompany = protectedAction<{ id: string; clientId: string; data: ClientCompanyInput }, { id: string }>(
+  { permission: 'clients.edit', auditModule: 'clients', auditAction: 'update', auditEntity: 'client_company', revalidate: ['/admin/clientes'] },
+  async (ctx, { id, clientId, data }) => {
+    if (!id || !clientId) return failure('Faltan datos', 'VALIDATION')
+    if (!data?.company_name?.trim()) return failure('El nombre de la empresa es obligatorio', 'VALIDATION')
+    const payload = { ...buildCompanyPayload(clientId, data), updated_at: new Date().toISOString() }
+    if (payload.is_default) {
+      await ctx.adminClient.from('client_companies').update({ is_default: false }).eq('client_id', clientId).neq('id', id)
+    }
+    const { error } = await ctx.adminClient.from('client_companies').update(payload).eq('id', id)
+    if (error) return failure(error.message)
+    return success({
+      id,
+      auditEntityId: id,
+      auditDescription: `Empresa de facturación editada: ${payload.company_name}`,
+    } as { id: string })
+  }
+)
+
+export const deleteClientCompany = protectedAction<{ id: string }, { id: string }>(
+  { permission: 'clients.edit', auditModule: 'clients', auditAction: 'delete', auditEntity: 'client_company', revalidate: ['/admin/clientes'] },
+  async (ctx, { id }) => {
+    if (!id) return failure('Falta el identificador', 'VALIDATION')
+    const { data: existing } = await ctx.adminClient
+      .from('client_companies').select('company_name').eq('id', id).maybeSingle()
+    const { error } = await ctx.adminClient.from('client_companies').delete().eq('id', id)
+    if (error) return failure(error.message)
+    return success({
+      id,
+      auditEntityId: id,
+      auditDescription: `Empresa de facturación eliminada: ${(existing as { company_name?: string } | null)?.company_name ?? id}`,
+    } as { id: string })
+  }
+)
+
+export const setDefaultClientCompany = protectedAction<{ id: string; clientId: string }, { id: string }>(
+  { permission: 'clients.edit', auditModule: 'clients', auditAction: 'update', auditEntity: 'client_company', revalidate: ['/admin/clientes'] },
+  async (ctx, { id, clientId }) => {
+    if (!id || !clientId) return failure('Faltan datos', 'VALIDATION')
+    await ctx.adminClient.from('client_companies').update({ is_default: false }).eq('client_id', clientId)
+    const { error } = await ctx.adminClient.from('client_companies').update({ is_default: true }).eq('id', id)
+    if (error) return failure(error.message)
+    return success({ id, auditEntityId: id, auditDescription: 'Empresa de facturación marcada como predeterminada' } as { id: string })
+  }
+)
+
 export const hardDeleteClientAction = protectedAction<string, { id: string }>(
   {
     permission: 'clients.delete',
