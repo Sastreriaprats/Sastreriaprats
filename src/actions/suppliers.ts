@@ -1368,42 +1368,24 @@ export const deleteSupplierOrderAction = protectedAction<
   async (ctx, orderId) => {
     if (!orderId?.trim()) return failure('ID del pedido obligatorio', 'VALIDATION')
 
-    const { data: order, error: orderErr } = await ctx.adminClient
-      .from('supplier_orders')
-      .select('id, order_number, status')
-      .eq('id', orderId.trim())
-      .single()
-    if (orderErr || !order) return failure('Pedido no encontrado', 'NOT_FOUND')
+    // Todo el borrado es atómico en rpc_delete_supplier_order (mig 223): deshace el
+    // stock recibido (solo purchase_receipt), limpia TODOS los stock_movements
+    // (cero huérfanos), borra dependencias en orden FK correcto y aborta si el
+    // pedido tiene factura de proveedor ligada o si revertir dejaría stock negativo.
+    // Los RAISE de la RPC dan mensajes legibles → se pasan tal cual al usuario.
+    const { data: result, error: rpcError } = await ctx.adminClient.rpc('rpc_delete_supplier_order', {
+      p_supplier_order_id: orderId.trim(),
+      p_user_id: ctx.userId,
+    })
+    if (rpcError) return failure(rpcError.message || 'Error al eliminar el pedido')
 
-    const status = (order as any).status
-    if (status === 'cancelled') {
-      return failure('Este pedido ya está cancelado', 'VALIDATION')
-    }
-
-    // Delete in FK dependency order
-    // 1. delivery note lines
-    const { data: notes } = await ctx.adminClient
-      .from('supplier_delivery_notes')
-      .select('id')
-      .eq('supplier_order_id', orderId)
-    const noteIds = (notes || []).map((n: any) => n.id)
-    if (noteIds.length > 0) {
-      await ctx.adminClient.from('supplier_delivery_note_lines').delete().in('delivery_note_id', noteIds)
-    }
-    // 2. delivery notes
-    await ctx.adminClient.from('supplier_delivery_notes').delete().eq('supplier_order_id', orderId)
-    // 3. supplier invoices
-    await ctx.adminClient.from('ap_supplier_invoices').delete().eq('supplier_order_id', orderId)
-    // 4. order lines
-    await ctx.adminClient.from('supplier_order_lines').delete().eq('supplier_order_id', orderId)
-    // 5. the order itself
-    const { error: deleteErr } = await ctx.adminClient
-      .from('supplier_orders')
-      .delete()
-      .eq('id', orderId)
-    if (deleteErr) return failure(deleteErr.message || 'Error al eliminar el pedido')
-
-    return success({ deleted: true })
+    const r = result as { order_number?: string; movements_deleted?: number; reverted?: unknown[] }
+    return success({
+      deleted: true,
+      auditEntityId: orderId.trim(),
+      auditDescription: `Borrado pedido a proveedor ${r?.order_number ?? ''} (recepción deshecha: ${r?.reverted?.length ?? 0} variante(s), ${r?.movements_deleted ?? 0} movimiento(s) de stock eliminados)`,
+      auditOldData: { order_number: r?.order_number, reverted: r?.reverted, movements_deleted: r?.movements_deleted },
+    } as { deleted: boolean })
   }
 )
 
