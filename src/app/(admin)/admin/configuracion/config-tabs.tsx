@@ -34,19 +34,19 @@ const ALL_TABS = [
     value: 'stores',
     label: 'Tiendas',
     icon: Store,
-    perms: ['config.edit', 'config.manage_stores', 'config.view', 'config.access'],
+    perms: ['config.edit', 'config.view', 'config.access'],
   },
   {
     value: 'store-employees',
     label: 'Empleados por tienda',
     icon: UserCog,
-    perms: ['config.edit', 'config.manage_stores', 'config.view', 'config.access'],
+    perms: ['config.edit', 'config.view', 'config.access'],
   },
   {
     value: 'goals',
     label: 'Objetivos',
     icon: Target,
-    perms: ['config.edit', 'config.manage_stores', 'config.view', 'config.access'],
+    perms: ['config.edit', 'config.view', 'config.access'],
   },
   {
     value: 'garments',

@@ -18,7 +18,7 @@ export async function listAvailableEmployees(): Promise<{
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
 
-    const hasPerm = await checkUserPermission(user.id, 'config.manage_stores')
+    const hasPerm = await checkUserPermission(user.id, 'config.edit')
     if (!hasPerm) return { error: 'Sin permisos' }
 
     const admin = createAdminClient()
@@ -69,7 +69,7 @@ export async function listStoreEmployees(
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
 
-    const hasPerm = await checkUserPermission(user.id, 'config.manage_stores')
+    const hasPerm = await checkUserPermission(user.id, 'config.edit')
     if (!hasPerm) return { error: 'Sin permisos' }
     if (!storeId) return { data: [] }
 
@@ -100,7 +100,7 @@ export async function setStoreEmployees(
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
 
-    const hasPerm = await checkUserPermission(user.id, 'config.manage_stores')
+    const hasPerm = await checkUserPermission(user.id, 'config.edit')
     if (!hasPerm) return { error: 'Sin permisos para gestionar tiendas' }
     if (!storeId) return { error: 'Tienda no válida' }
 

@@ -120,7 +120,7 @@ export const listCategories = protectedAction<void, ProductCategoryRow[]>(
 
 export const createCategoryAction = protectedAction<CategoryInput, { id: string; name: string }>(
   {
-    permission: 'config.manage_stores',
+    permission: 'config.edit',
     auditModule: 'config',
     auditAction: 'create',
     auditEntity: 'product_category',
@@ -188,7 +188,7 @@ export const updateCategoryAction = protectedAction<
   { id: string }
 >(
   {
-    permission: 'config.manage_stores',
+    permission: 'config.edit',
     auditModule: 'config',
     auditAction: 'update',
     auditEntity: 'product_category',
@@ -336,7 +336,7 @@ export const moveCategorySortOrderAction = protectedAction<
   { id: string }
 >(
   {
-    permission: 'config.manage_stores',
+    permission: 'config.edit',
     auditModule: 'config',
     auditAction: 'update',
     auditEntity: 'product_category',

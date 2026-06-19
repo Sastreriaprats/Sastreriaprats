@@ -80,7 +80,7 @@ export async function createStoreAction(data: {
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
-    const hasPerm = await checkUserPermission(user.id, 'config.manage_stores')
+    const hasPerm = await checkUserPermission(user.id, 'config.edit')
     if (!hasPerm) return { error: 'Sin permisos para gestionar tiendas' }
 
     const admin = createAdminClient()
@@ -133,7 +133,7 @@ export async function updateStoreAction(
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
-    const hasPerm = await checkUserPermission(user.id, 'config.manage_stores')
+    const hasPerm = await checkUserPermission(user.id, 'config.edit')
     if (!hasPerm) return { error: 'Sin permisos para gestionar tiendas' }
 
     const admin = createAdminClient()
@@ -227,7 +227,7 @@ export async function reactivateStoreAction(storeId: string) {
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
-    const hasPerm = await checkUserPermission(user.id, 'config.manage_stores')
+    const hasPerm = await checkUserPermission(user.id, 'config.edit')
     if (!hasPerm) return { error: 'Sin permisos para gestionar tiendas' }
 
     const admin = createAdminClient()
@@ -280,7 +280,7 @@ export async function createWarehouseAction(data: {
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
-    const hasPerm = await checkUserPermission(user.id, 'config.manage_stores')
+    const hasPerm = await checkUserPermission(user.id, 'config.edit')
     if (!hasPerm) return { error: 'Sin permisos para gestionar tiendas' }
 
     const admin = createAdminClient()
@@ -316,7 +316,7 @@ export async function updateWarehouseAction(
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
-    const hasPerm = await checkUserPermission(user.id, 'config.manage_stores')
+    const hasPerm = await checkUserPermission(user.id, 'config.edit')
     if (!hasPerm) return { error: 'Sin permisos para gestionar tiendas' }
 
     const admin = createAdminClient()

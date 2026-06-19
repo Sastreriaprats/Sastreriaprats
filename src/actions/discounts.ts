@@ -34,7 +34,7 @@ export interface CreateDiscountCodeInput {
 }
 
 export const listDiscountCodes = protectedAction<void, DiscountCodeRow[]>(
-  { permission: 'pos.apply_discount', auditModule: 'discounts' },
+  { permission: 'config.edit', auditModule: 'discounts' },
   async (ctx) => {
     const { data, error } = await ctx.adminClient
       .from('discount_codes')
@@ -47,7 +47,7 @@ export const listDiscountCodes = protectedAction<void, DiscountCodeRow[]>(
 
 export const createDiscountCode = protectedAction<CreateDiscountCodeInput, DiscountCodeRow>(
   {
-    permission: 'pos.apply_discount',
+    permission: 'config.edit',
     auditModule: 'discounts',
     auditAction: 'create',
     auditEntity: 'discount_code',
@@ -89,7 +89,7 @@ export const createDiscountCode = protectedAction<CreateDiscountCodeInput, Disco
 
 export const toggleDiscountCodeActive = protectedAction<{ id: string; is_active: boolean }, { id: string; is_active: boolean }>(
   {
-    permission: 'pos.apply_discount',
+    permission: 'config.edit',
     auditModule: 'discounts',
     auditAction: 'update',
     auditEntity: 'discount_code',

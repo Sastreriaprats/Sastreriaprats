@@ -130,7 +130,7 @@ export async function upsertStoreGoalAction(input: {
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
-    const hasPerm = await checkUserPermission(user.id, 'config.manage_stores')
+    const hasPerm = await checkUserPermission(user.id, 'config.edit')
     if (!hasPerm) return { error: 'Sin permisos para gestionar objetivos' }
 
     if (input.month < 1 || input.month > 12) return { error: 'Mes inválido' }
@@ -334,7 +334,7 @@ export async function upsertEmployeeGoal(input: {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
 
-    const hasPerm = await checkUserPermission(user.id, 'config.manage_stores')
+    const hasPerm = await checkUserPermission(user.id, 'config.edit')
     if (!hasPerm) return { error: 'Sin permisos para gestionar objetivos' }
 
     if (input.month < 1 || input.month > 12) return { error: 'Mes inválido' }
@@ -393,7 +393,7 @@ export async function copyEmployeeGoalsFromPreviousMonth(input: {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
 
-    const hasPerm = await checkUserPermission(user.id, 'config.manage_stores')
+    const hasPerm = await checkUserPermission(user.id, 'config.edit')
     if (!hasPerm) return { error: 'Sin permisos' }
 
     if (input.month < 1 || input.month > 12) return { error: 'Mes inválido' }

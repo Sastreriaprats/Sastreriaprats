@@ -122,7 +122,7 @@ export async function listActiveSeasonSlugs(): Promise<string[]> {
 
 export const createSeasonAction = protectedAction<SeasonInput, { id: string; name: string }>(
   {
-    permission: 'config.manage_stores',
+    permission: 'config.edit',
     auditModule: 'config',
     auditAction: 'create',
     auditEntity: 'season',
@@ -172,7 +172,7 @@ export const updateSeasonAction = protectedAction<
   { id: string }
 >(
   {
-    permission: 'config.manage_stores',
+    permission: 'config.edit',
     auditModule: 'config',
     auditAction: 'update',
     auditEntity: 'season',
@@ -255,7 +255,7 @@ export const toggleSeasonAction = protectedAction<
   { id: string; is_active: boolean }
 >(
   {
-    permission: 'config.manage_stores',
+    permission: 'config.edit',
     auditModule: 'config',
     auditAction: 'state_change',
     auditEntity: 'season',
