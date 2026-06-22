@@ -1028,7 +1028,8 @@ export interface OfficialCommission {
   official_id: string
   official_name: string
   garments_count: number          // prendas DEVENGADAS con tarifa (finished_at en rango)
-  total_amount: number            // Σ tarifa×quantity devengado en el periodo
+  total_amount: number            // Σ tarifa×quantity PENDIENTE (devengado NO liquidado) en el periodo
+  settled_amount: number          // Σ ya liquidado (pagado) en el periodo (paid_at en rango) — contexto
   untariffed_count: number        // prendas ASIGNADAS sin tarifa (NO acotado por periodo: guía)
   untariffed_specialties: string[]
   lines: OfficialCommissionLine[] // detalle del devengo (drill-down)
@@ -1086,6 +1087,7 @@ export const getOfficialsCommissions = protectedAction<
       .not('status', 'in', '("cancelled","incident")')
       .gte('finished_at', start_date)
       .lte('finished_at', end_date + 'T23:59:59')
+      .is('settlement_id', null)   // R9b: solo lo NO liquidado → el informe muestra el PENDIENTE
     if (official_id) devengo = devengo.eq('official_id', official_id)
     const { data: devLines, error: dErr } = await devengo
     if (dErr) return failure(dErr.message || 'Error al consultar líneas devengadas', 'INTERNAL')
@@ -1100,9 +1102,20 @@ export const getOfficialsCommissions = protectedAction<
     const { data: asgLines, error: aErr } = await assigned
     if (aErr) return failure(aErr.message || 'Error al consultar líneas asignadas', 'INTERNAL')
 
+    // C) YA LIQUIDADO en el periodo (contexto "pendiente / liquidado"): settlements pagados con paid_at en [start,end]
+    let settledQ = ctx.adminClient
+      .from('official_settlements')
+      .select('official_id, total_amount')
+      .eq('status', 'paid')
+      .gte('paid_at', start_date)
+      .lte('paid_at', end_date)
+    if (official_id) settledQ = settledQ.eq('official_id', official_id)
+    const { data: settledRows } = await settledQ
+
     const ids = new Set<string>()
     for (const l of devLines || []) if (l.official_id) ids.add(String(l.official_id))
     for (const l of asgLines || []) if (l.official_id) ids.add(String(l.official_id))
+    for (const s of settledRows || []) if (s.official_id) ids.add(String(s.official_id))
     const names: Record<string, string> = {}
     if (ids.size > 0) {
       const { data: offs } = await ctx.adminClient.from('officials').select('id, name').in('id', [...ids])
@@ -1111,7 +1124,7 @@ export const getOfficialsCommissions = protectedAction<
 
     const acc: Record<string, OfficialCommission> = {}
     const ensure = (oid: string): OfficialCommission => {
-      if (!acc[oid]) acc[oid] = { official_id: oid, official_name: names[oid] || oid, garments_count: 0, total_amount: 0, untariffed_count: 0, untariffed_specialties: [], lines: [] }
+      if (!acc[oid]) acc[oid] = { official_id: oid, official_name: names[oid] || oid, garments_count: 0, total_amount: 0, settled_amount: 0, untariffed_count: 0, untariffed_specialties: [], lines: [] }
       return acc[oid]
     }
 
@@ -1152,7 +1165,13 @@ export const getOfficialsCommissions = protectedAction<
     }
     for (const oid of Object.keys(untSpec)) acc[oid].untariffed_specialties = [...untSpec[oid]].sort()
 
-    const result = Object.values(acc).sort((a, b) => b.total_amount - a.total_amount || b.untariffed_count - a.untariffed_count)
+    // Contexto "ya liquidado" (incluye oficiales que solo tienen liquidado, sin pendiente).
+    for (const s of settledRows || []) {
+      const e = ensure(String(s.official_id))
+      e.settled_amount = Math.round((e.settled_amount + Number(s.total_amount || 0)) * 100) / 100
+    }
+
+    const result = Object.values(acc).sort((a, b) => b.total_amount - a.total_amount || b.settled_amount - a.settled_amount || b.untariffed_count - a.untariffed_count)
     return success(result)
   },
 )
