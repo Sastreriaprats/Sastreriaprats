@@ -986,6 +986,177 @@ export const getCommissionsByEmployee = protectedAction<
   }
 )
 
+// ── R9a: comisiones de OFICIALES (confeccionador) ───────────────────────────
+/**
+ * mapBase: garment_type.name → especialidad BASE de tarifa. Solo los casos que NO
+ * casan directo con el catálogo de especialidades (Camisa = trabajo de camisería).
+ * El resto: identidad. Diagnóstico jun-2026 sobre datos reales (garment_types
+ * usados con oficial: Americana/Camisería/Chaleco/Chaqué/Pantalón casan directo;
+ * solo Camisa no). NO se inventan mapeos para tipos sin tarifa (Bata, Falda… caen
+ * a "sin tarifa", que es lo correcto: a revisar).
+ */
+const OFFICIAL_SPECIALTY_BASE: Record<string, string> = {
+  'Camisa': 'Camisería',
+  'Camisería Industrial': 'Camisería', // defensivo: hoy sin líneas con oficial
+}
+const mapOfficialBase = (garmentName: string | null | undefined): string =>
+  OFFICIAL_SPECIALTY_BASE[(garmentName ?? '').trim()] ?? (garmentName ?? '').trim()
+
+/**
+ * Candidatos de especialidad para resolver la tarifa, en orden de prioridad:
+ *  - industrial → ["<base> Industrial", "<base>"]  (fallback industrial→base SÍ)
+ *  - artesanal  → ["<base>"]
+ */
+const officialSpecialtyCandidates = (garmentName: string | null | undefined, lineType: string | null | undefined): string[] => {
+  const base = mapOfficialBase(garmentName)
+  if (!base) return []
+  return lineType === 'industrial' ? [`${base} Industrial`, base] : [base]
+}
+
+export interface OfficialCommissionLine {
+  line_id: string
+  order_number: string | null
+  garment: string | null
+  line_type: string | null
+  specialty: string   // especialidad/tarifa aplicada
+  unit_price: number  // tarifa por prenda
+  quantity: number
+  amount: number      // unit_price × quantity
+  finished_at: string | null
+}
+export interface OfficialCommission {
+  official_id: string
+  official_name: string
+  garments_count: number          // prendas DEVENGADAS con tarifa (finished_at en rango)
+  total_amount: number            // Σ tarifa×quantity devengado en el periodo
+  untariffed_count: number        // prendas ASIGNADAS sin tarifa (NO acotado por periodo: guía)
+  untariffed_specialties: string[]
+  lines: OfficialCommissionLine[] // detalle del devengo (drill-down)
+}
+
+/**
+ * Comisiones de oficiales (el confeccionador, `official_id`). Cálculo en vivo,
+ * molde de getCommissionsByEmployee. Importe COMPUTADO desde
+ * official_specialty_prices (no hay importe guardado).
+ *
+ * - Dinero (garments_count/total_amount/lines): devengo = `finished_at` en
+ *   [start,end]; excluye cancelled/incident; importe = tarifa(oficial,especialidad)
+ *   × quantity, resolviendo especialidad por mapBase + candidatos (fallback
+ *   industrial→base). Líneas devengadas SIN tarifa no suman (se ven en untariffed).
+ * - untariffed_* : prendas ASIGNADAS activas (official_id NOT NULL, no cancel/inc)
+ *   cuya (oficial,especialidad) no tiene precio. NO se acota por finished_at, para
+ *   que guíe la carga de tarifas desde el día 1.
+ * - Puerta a R9b (liquidación): cálculo por LÍNEA → basta añadir luego un filtro
+ *   de exclusión de líneas ya liquidadas, sin rehacer.
+ */
+export const getOfficialsCommissions = protectedAction<
+  { start_date: string; end_date: string; official_id?: string | null },
+  OfficialCommission[]
+>(
+  { permission: 'reports.view', auditModule: 'reports' },
+  async (ctx, { start_date, end_date, official_id }) => {
+    const { data: prices, error: pErr } = await ctx.adminClient
+      .from('official_specialty_prices')
+      .select('official_id, specialty, price')
+    if (pErr) return failure(pErr.message || 'Error al consultar tarifas', 'INTERNAL')
+    const priceMap = new Map<string, number>()
+    for (const p of prices || []) priceMap.set(`${p.official_id}|${p.specialty}`, Number(p.price) || 0)
+
+    const resolve = (oid: string, garment: string | null, lineType: string | null): { specialty: string; price: number } | null => {
+      for (const sp of officialSpecialtyCandidates(garment, lineType)) {
+        const k = `${oid}|${sp}`
+        if (priceMap.has(k)) return { specialty: sp, price: priceMap.get(k) as number }
+      }
+      return null
+    }
+    const garmentName = (gt: unknown): string | null => {
+      const v = Array.isArray(gt) ? gt[0] : gt
+      return (v as { name?: string } | null)?.name ?? null
+    }
+    const orderNumber = (o: unknown): string | null => {
+      const v = Array.isArray(o) ? o[0] : o
+      return (v as { order_number?: string } | null)?.order_number ?? null
+    }
+
+    // A) DEVENGO: finished_at en rango → dinero
+    let devengo = ctx.adminClient
+      .from('tailoring_order_lines')
+      .select('id, official_id, quantity, line_type, finished_at, garment_types(name), tailoring_orders(order_number)')
+      .not('official_id', 'is', null)
+      .not('status', 'in', '("cancelled","incident")')
+      .gte('finished_at', start_date)
+      .lte('finished_at', end_date + 'T23:59:59')
+    if (official_id) devengo = devengo.eq('official_id', official_id)
+    const { data: devLines, error: dErr } = await devengo
+    if (dErr) return failure(dErr.message || 'Error al consultar líneas devengadas', 'INTERNAL')
+
+    // B) ASIGNADAS activas (sin acotar por finished_at) → guía sin-tarifa
+    let assigned = ctx.adminClient
+      .from('tailoring_order_lines')
+      .select('id, official_id, quantity, line_type, garment_types(name)')
+      .not('official_id', 'is', null)
+      .not('status', 'in', '("cancelled","incident")')
+    if (official_id) assigned = assigned.eq('official_id', official_id)
+    const { data: asgLines, error: aErr } = await assigned
+    if (aErr) return failure(aErr.message || 'Error al consultar líneas asignadas', 'INTERNAL')
+
+    const ids = new Set<string>()
+    for (const l of devLines || []) if (l.official_id) ids.add(String(l.official_id))
+    for (const l of asgLines || []) if (l.official_id) ids.add(String(l.official_id))
+    const names: Record<string, string> = {}
+    if (ids.size > 0) {
+      const { data: offs } = await ctx.adminClient.from('officials').select('id, name').in('id', [...ids])
+      for (const o of offs || []) names[o.id as string] = (o.name as string) || (o.id as string)
+    }
+
+    const acc: Record<string, OfficialCommission> = {}
+    const ensure = (oid: string): OfficialCommission => {
+      if (!acc[oid]) acc[oid] = { official_id: oid, official_name: names[oid] || oid, garments_count: 0, total_amount: 0, untariffed_count: 0, untariffed_specialties: [], lines: [] }
+      return acc[oid]
+    }
+
+    for (const l of devLines || []) {
+      const oid = String(l.official_id)
+      const g = garmentName(l.garment_types)
+      const q = Number(l.quantity) || 1
+      const r = resolve(oid, g, l.line_type as string | null)
+      if (!r) continue // devengada sin tarifa: no suma dinero (aparece en untariffed vía scan B)
+      const e = ensure(oid)
+      const amount = r.price * q
+      e.garments_count += q
+      e.total_amount = Math.round((e.total_amount + amount) * 100) / 100
+      e.lines.push({
+        line_id: String(l.id),
+        order_number: orderNumber(l.tailoring_orders),
+        garment: g,
+        line_type: (l.line_type as string) ?? null,
+        specialty: r.specialty,
+        unit_price: r.price,
+        quantity: q,
+        amount: Math.round(amount * 100) / 100,
+        finished_at: (l.finished_at as string) ?? null,
+      })
+    }
+
+    const untSpec: Record<string, Set<string>> = {}
+    for (const l of asgLines || []) {
+      const oid = String(l.official_id)
+      const g = garmentName(l.garment_types)
+      const q = Number(l.quantity) || 1
+      if (resolve(oid, g, l.line_type as string | null)) continue // tarifada: ok
+      const e = ensure(oid)
+      e.untariffed_count += q
+      if (!untSpec[oid]) untSpec[oid] = new Set()
+      const label = mapOfficialBase(g) + (l.line_type === 'industrial' ? ' Industrial' : '')
+      if (label.trim()) untSpec[oid].add(label)
+    }
+    for (const oid of Object.keys(untSpec)) acc[oid].untariffed_specialties = [...untSpec[oid]].sort()
+
+    const result = Object.values(acc).sort((a, b) => b.total_amount - a.total_amount || b.untariffed_count - a.untariffed_count)
+    return success(result)
+  },
+)
+
 export const getSalesByTimePattern = protectedAction<
   { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel; tax_mode?: TaxMode },
   {
