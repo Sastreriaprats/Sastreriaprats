@@ -1278,6 +1278,35 @@ export const settleOfficialCommissions = protectedAction<
   },
 )
 
+export interface OfficialSettlementRow {
+  id: string
+  period_start: string | null
+  period_end: string | null
+  garments_count: number
+  total_amount: number
+  paid_at: string | null
+  payment_method: string | null
+  reference: string | null
+  notes: string | null
+  created_at: string
+}
+
+/** R9b — historial de liquidaciones de un oficial (lectura, para el drill-down). */
+export const getOfficialSettlements = protectedAction<{ official_id: string }, OfficialSettlementRow[]>(
+  { permission: 'reports.view', auditModule: 'reports' },
+  async (ctx, { official_id }) => {
+    if (!official_id) return failure('Oficial requerido', 'VALIDATION')
+    const { data, error } = await ctx.adminClient
+      .from('official_settlements')
+      .select('id, period_start, period_end, garments_count, total_amount, paid_at, payment_method, reference, notes, created_at')
+      .eq('official_id', official_id)
+      .eq('status', 'paid')
+      .order('paid_at', { ascending: false })
+    if (error) return failure(error.message || 'Error al consultar liquidaciones', 'INTERNAL')
+    return success((data ?? []) as OfficialSettlementRow[])
+  },
+)
+
 export const getSalesByTimePattern = protectedAction<
   { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel; tax_mode?: TaxMode },
   {
