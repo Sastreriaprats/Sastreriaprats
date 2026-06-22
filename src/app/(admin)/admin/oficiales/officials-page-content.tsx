@@ -46,8 +46,10 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { usePermissions } from '@/hooks/use-permissions'
 import { SPECIALTIES } from '@/lib/officials/specialties'
+import { OfficialsCommissionsTab } from './officials-commissions-tab'
 
 // Formato de la columna "Precios" de la tabla (sin decimales innecesarios):
 //   sin precios -> "—" · 1 o varios iguales -> "50 €" · varios distintos -> "42–145 €"
@@ -96,7 +98,9 @@ export function OfficialsPageContent() {
   const canEdit = can('officials.edit')
   const canCreate = can('officials.create')
   const canDelete = isAdmin
+  const canViewReports = can('reports.view')
 
+  const [activeTab, setActiveTab] = useState('oficiales')
   const [officials, setOfficials] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -283,16 +287,24 @@ export function OfficialsPageContent() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold tracking-tight text-prats-navy">Oficiales</h1>
-        {canCreate && (
-          <Button className="gap-2 bg-prats-navy hover:bg-prats-navy/90 text-white" onClick={openCreate}>
-            <Plus className="h-4 w-4" /> Nuevo oficial
-          </Button>
-        )}
-      </div>
+      <h1 className="text-2xl font-bold tracking-tight text-prats-navy">Oficiales</h1>
 
-      <Card>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="oficiales">Oficiales</TabsTrigger>
+          {canViewReports && <TabsTrigger value="comisiones">Comisiones</TabsTrigger>}
+        </TabsList>
+
+        <TabsContent value="oficiales" className="space-y-4">
+          {canCreate && (
+            <div className="flex justify-end">
+              <Button className="gap-2 bg-prats-navy hover:bg-prats-navy/90 text-white" onClick={openCreate}>
+                <Plus className="h-4 w-4" /> Nuevo oficial
+              </Button>
+            </div>
+          )}
+
+          <Card>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
@@ -390,7 +402,15 @@ export function OfficialsPageContent() {
             </TableBody>
           </Table>
         </CardContent>
-      </Card>
+          </Card>
+        </TabsContent>
+
+        {canViewReports && (
+          <TabsContent value="comisiones">
+            <OfficialsCommissionsTab onGoToOficiales={() => setActiveTab('oficiales')} />
+          </TabsContent>
+        )}
+      </Tabs>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
