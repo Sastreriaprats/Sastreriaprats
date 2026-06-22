@@ -1157,6 +1157,108 @@ export const getOfficialsCommissions = protectedAction<
   },
 )
 
+/**
+ * R9b — liquidar comisiones de un oficial por periodo (registra el PAGO).
+ * Reusa la resolución de tarifa de R9a (mapBase + candidatos) para calcular las
+ * líneas PAGABLES NO LIQUIDADAS (official_id, finished_at en rango, no cancel/inc,
+ * con tarifa, settlement_id IS NULL) y delega en la RPC atómica rpc_settle_official
+ * (inserta el snapshot, marca las líneas con guards anti-doble-pago, actualiza
+ * officials.total_paid). Permiso accounting.edit (mueve dinero).
+ */
+export const settleOfficialCommissions = protectedAction<
+  {
+    official_id: string
+    period_start: string
+    period_end: string
+    paid_at: string
+    payment_method?: string | null
+    reference?: string | null
+    notes?: string | null
+  },
+  { settlement_id: string; garments_count: number; total_amount: number }
+>(
+  {
+    permission: 'accounting.edit',
+    auditModule: 'accounting',
+    auditAction: 'payment',
+    auditEntity: 'official_settlement',
+    revalidate: ['/admin/oficiales'],
+  },
+  async (ctx, { official_id, period_start, period_end, paid_at, payment_method, reference, notes }) => {
+    if (!official_id) return failure('Oficial requerido', 'VALIDATION')
+
+    const { data: prices, error: pErr } = await ctx.adminClient
+      .from('official_specialty_prices')
+      .select('specialty, price')
+      .eq('official_id', official_id)
+    if (pErr) return failure(pErr.message || 'Error al consultar tarifas', 'INTERNAL')
+    const priceMap = new Map<string, number>()
+    for (const p of prices || []) priceMap.set(p.specialty as string, Number(p.price) || 0)
+
+    // Líneas pagables NO liquidadas del oficial en el periodo (devengo = finished_at).
+    const { data: lines, error: lErr } = await ctx.adminClient
+      .from('tailoring_order_lines')
+      .select('id, quantity, line_type, garment_types(name)')
+      .eq('official_id', official_id)
+      .is('settlement_id', null)
+      .not('status', 'in', '("cancelled","incident")')
+      .gte('finished_at', period_start)
+      .lte('finished_at', period_end + 'T23:59:59')
+    if (lErr) return failure(lErr.message || 'Error al consultar líneas', 'INTERNAL')
+
+    const garmentName = (gt: unknown): string | null => {
+      const v = Array.isArray(gt) ? gt[0] : gt
+      return (v as { name?: string } | null)?.name ?? null
+    }
+
+    const lineIds: string[] = []
+    let total = 0
+    let garments = 0
+    for (const l of lines || []) {
+      const g = garmentName(l.garment_types)
+      const q = Number(l.quantity) || 1
+      let price: number | null = null
+      for (const sp of officialSpecialtyCandidates(g, l.line_type as string | null)) {
+        if (priceMap.has(sp)) { price = priceMap.get(sp) as number; break }
+      }
+      if (price == null) continue // sin tarifa → no pagable (no se liquida a ciegas)
+      lineIds.push(String(l.id))
+      total += price * q
+      garments += q
+    }
+    total = Math.round(total * 100) / 100
+
+    if (lineIds.length === 0 || total <= 0) {
+      return failure('No hay comisiones pendientes para liquidar en este periodo', 'VALIDATION')
+    }
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_settle_official', {
+      p_official_id: official_id,
+      p_line_ids: lineIds,
+      p_total: total,
+      p_garments: garments,
+      p_period_start: period_start,
+      p_period_end: period_end,
+      p_paid_at: paid_at,
+      p_payment_method: payment_method ?? null,
+      p_reference: reference ?? null,
+      p_notes: notes ?? null,
+      p_user: ctx.userId,
+    })
+    if (error) return failure(error.message || 'No se pudo registrar la liquidación', 'INTERNAL')
+
+    const res = (data ?? {}) as { settlement_id: string; garments_count: number; total_amount: number }
+    return success({
+      settlement_id: res.settlement_id,
+      garments_count: res.garments_count,
+      total_amount: res.total_amount,
+      auditEntityId: res.settlement_id,
+      auditDescription: `Liquidación a oficial: ${garments} prenda(s), ${total.toFixed(2)}€ (${period_start} – ${period_end})`,
+      auditMetadata: { official_id, lines: lineIds.length, period_start, period_end },
+    })
+  },
+)
+
 export const getSalesByTimePattern = protectedAction<
   { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel; tax_mode?: TaxMode },
   {
