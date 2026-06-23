@@ -509,6 +509,10 @@ export const getSaleForTicket = protectedAction<string, {
   }
 )
 
+// Tipos de venta TPV considerados "sastrería" (señal y pago final de un pedido).
+// Se excluyen de la pestaña Tienda y se muestran en la pestaña Sastrería.
+const SASTRERIA_SALE_TYPES = ['tailoring_deposit', 'tailoring_final'] as const
+
 export const listTickets = protectedAction<{
   page?: number
   pageSize?: number
@@ -516,13 +520,18 @@ export const listTickets = protectedAction<{
   dateFrom?: string
   dateTo?: string
   productSearch?: string
+  scope?: 'all' | 'tienda'
 }, { data: any[]; total: number; page: number; pageSize: number; totalPages: number }>(
   { permission: 'pos.access', auditModule: 'pos' },
-  async (ctx, { page = 1, pageSize = 20, clientSearch, dateFrom, dateTo, productSearch }) => {
+  async (ctx, { page = 1, pageSize = 20, clientSearch, dateFrom, dateTo, productSearch, scope = 'all' }) => {
     let query = ctx.adminClient
       .from('sales')
       .select('id, ticket_number, created_at, total, total_returned, payment_method, status, client_id, stores(name), profiles!sales_salesperson_id_fkey(full_name)', { count: 'exact' })
       .order('created_at', { ascending: false })
+
+    // Pestaña Tienda: deja fuera las ventas de sastrería (señal/pago final), que
+    // tienen su propia pestaña. Los sale_type NULL (ventas antiguas) permanecen.
+    if (scope === 'tienda') query = query.not('sale_type', 'in', `(${SASTRERIA_SALE_TYPES.join(',')})`)
 
     if (dateFrom) query = query.gte('created_at', dateFrom + 'T00:00:00')
     if (dateTo) query = query.lte('created_at', dateTo + 'T23:59:59')
@@ -603,6 +612,169 @@ export const listTickets = protectedAction<{
       products_summary: (linesBySale[s.id] ?? []).slice(0, 3).join(' · ') || '—',
       salesperson_name: (s.profiles as any)?.full_name ?? null,
     }))
+
+    return success({
+      data,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    })
+  }
+)
+
+/**
+ * Lista unificada de movimientos diarios de SASTRERÍA, fusionando las dos
+ * fuentes que hasta ahora vivían separadas:
+ *   1) Ventas TPV de sastrería: `sales` con sale_type tailoring_deposit/final.
+ *   2) Cobros de pedido desde backoffice: `tailoring_order_payments`.
+ * Se mezclan en memoria y se ordenan por fecha. El tope (CAP) es holgado para
+ * los volúmenes reales de sastrería en un rango filtrado.
+ */
+export const listSastreriaTickets = protectedAction<{
+  page?: number
+  pageSize?: number
+  clientSearch?: string
+  dateFrom?: string
+  dateTo?: string
+}, { data: any[]; total: number; page: number; pageSize: number; totalPages: number }>(
+  { permission: 'pos.access', auditModule: 'pos' },
+  async (ctx, { page = 1, pageSize = 20, clientSearch, dateFrom, dateTo }) => {
+    const CAP = 2000
+    const fromTs = dateFrom ? dateFrom + 'T00:00:00' : null
+    const toTs = dateTo ? dateTo + 'T23:59:59' : null
+
+    // Filtro por cliente: resolvemos ids una sola vez. Para los cobros de pedido
+    // resolvemos además los ids de pedido de esos clientes (filtrar por la columna
+    // embebida tailoring_orders.client_id no descarta la fila padre en PostgREST).
+    let clientIdFilter: string[] | null = null
+    let orderIdFilter: string[] | null = null
+    if (clientSearch && clientSearch.trim()) {
+      const q = normalizeSearchTerm(clientSearch)
+      if (q) {
+        const { data: clients } = await ctx.adminClient
+          .from('clients')
+          .select('id')
+          .ilike('search_text', `%${q}%`)
+          .limit(500)
+        clientIdFilter = (clients ?? []).map((c: any) => c.id)
+        if (clientIdFilter.length === 0) {
+          return success({ data: [], total: 0, page, pageSize, totalPages: 0 })
+        }
+        const { data: orders } = await ctx.adminClient
+          .from('tailoring_orders')
+          .select('id')
+          .in('client_id', clientIdFilter)
+          .limit(CAP)
+        orderIdFilter = (orders ?? []).map((o: any) => o.id)
+      }
+    }
+
+    // 1) Ventas TPV de sastrería
+    let salesQuery = ctx.adminClient
+      .from('sales')
+      .select('id, ticket_number, sale_type, created_at, total, total_returned, payment_method, status, client_id, tailoring_order_id, stores(name), profiles!sales_salesperson_id_fkey(full_name)')
+      .in('sale_type', SASTRERIA_SALE_TYPES as unknown as string[])
+      .order('created_at', { ascending: false })
+      .range(0, CAP - 1)
+    if (fromTs) salesQuery = salesQuery.gte('created_at', fromTs)
+    if (toTs) salesQuery = salesQuery.lte('created_at', toTs)
+    if (clientIdFilter) salesQuery = salesQuery.in('client_id', clientIdFilter)
+
+    // 2) Cobros de pedido (backoffice)
+    let paymentsQuery = ctx.adminClient
+      .from('tailoring_order_payments')
+      .select('id, amount, payment_method, created_at, created_by, tailoring_order_id, tailoring_orders(order_number, client_id, stores(name))')
+      .order('created_at', { ascending: false })
+      .range(0, CAP - 1)
+    if (fromTs) paymentsQuery = paymentsQuery.gte('created_at', fromTs)
+    if (toTs) paymentsQuery = paymentsQuery.lte('created_at', toTs)
+    if (orderIdFilter) {
+      if (orderIdFilter.length === 0) paymentsQuery = paymentsQuery.in('tailoring_order_id', ['00000000-0000-0000-0000-000000000000'])
+      else paymentsQuery = paymentsQuery.in('tailoring_order_id', orderIdFilter)
+    }
+
+    const [salesRes, paymentsRes] = await Promise.all([salesQuery, paymentsQuery])
+    if (salesRes.error) return failure(salesRes.error.message)
+    if (paymentsRes.error) return failure(paymentsRes.error.message)
+
+    const salesRows = (salesRes.data ?? []) as any[]
+    // El filtro anidado sobre tailoring_orders.client_id no descarta la fila padre,
+    // solo anula la relación; filtramos aquí las que se quedaron sin pedido.
+    const paymentRows = ((paymentsRes.data ?? []) as any[]).filter((p) => p.tailoring_orders)
+
+    // Mapas de cliente (nombre/código) y de empleado (created_by de los cobros).
+    const clientIds = new Set<string>()
+    for (const s of salesRows) if (s.client_id) clientIds.add(s.client_id)
+    for (const p of paymentRows) if (p.tailoring_orders?.client_id) clientIds.add(p.tailoring_orders.client_id)
+    const createdByIds = new Set<string>()
+    for (const p of paymentRows) if (p.created_by) createdByIds.add(p.created_by)
+
+    const [clientsResult, profilesResult] = await Promise.all([
+      clientIds.size > 0
+        ? ctx.adminClient.from('clients').select('id, full_name, client_code').in('id', [...clientIds])
+        : Promise.resolve({ data: [] as any[] }),
+      createdByIds.size > 0
+        ? ctx.adminClient.from('profiles').select('id, full_name').in('id', [...createdByIds])
+        : Promise.resolve({ data: [] as any[] }),
+    ])
+
+    const clientsMap: Record<string, { full_name: string; client_code: string }> = {}
+    for (const c of clientsResult.data ?? []) {
+      clientsMap[c.id] = { full_name: c.full_name ?? '', client_code: c.client_code ?? '' }
+    }
+    const profilesMap: Record<string, string> = {}
+    for (const p of profilesResult.data ?? []) profilesMap[p.id] = p.full_name ?? ''
+
+    const SALE_TYPE_LABELS: Record<string, string> = {
+      tailoring_deposit: 'Señal sastrería',
+      tailoring_final: 'Pago final',
+    }
+
+    const saleMovements = salesRows.map((s) => ({
+      id: s.id,
+      kind: 'sale' as const,
+      number: s.ticket_number,
+      concept: SALE_TYPE_LABELS[s.sale_type] ?? 'Venta sastrería',
+      created_at: s.created_at,
+      total: (Number(s.total) || 0) - (Number(s.total_returned) || 0),
+      payment_method: s.payment_method,
+      status: s.status,
+      client_name: s.client_id ? (clientsMap[s.client_id]?.full_name ?? '') : null,
+      client_code: s.client_id ? (clientsMap[s.client_id]?.client_code ?? '') : null,
+      salesperson_name: (s.profiles as any)?.full_name ?? null,
+      store_name: (s.stores as any)?.name ?? null,
+      order_id: s.tailoring_order_id ?? null,
+      sale_id: s.id,
+    }))
+
+    const paymentMovements = paymentRows.map((p) => {
+      const cid = p.tailoring_orders?.client_id ?? null
+      return {
+        id: p.id,
+        kind: 'order_payment' as const,
+        number: p.tailoring_orders?.order_number ?? '—',
+        concept: 'Cobro pedido',
+        created_at: p.created_at,
+        total: Number(p.amount) || 0,
+        payment_method: p.payment_method,
+        status: 'paid',
+        client_name: cid ? (clientsMap[cid]?.full_name ?? '') : null,
+        client_code: cid ? (clientsMap[cid]?.client_code ?? '') : null,
+        salesperson_name: p.created_by ? (profilesMap[p.created_by] ?? null) : null,
+        store_name: (p.tailoring_orders?.stores as any)?.name ?? null,
+        order_id: p.tailoring_order_id ?? null,
+        sale_id: null,
+      }
+    })
+
+    const merged = [...saleMovements, ...paymentMovements].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    )
+
+    const total = merged.length
+    const from = (page - 1) * pageSize
+    const data = merged.slice(from, from + pageSize)
 
     return success({
       data,

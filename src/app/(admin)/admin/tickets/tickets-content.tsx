@@ -28,9 +28,9 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, FileDown, Receipt, ChevronLeft, ChevronRight, FileText, Gift, Trash2, AlertTriangle, Pencil, X, CreditCard, Plus, Package } from 'lucide-react'
+import { Loader2, FileDown, Receipt, ChevronLeft, ChevronRight, FileText, Gift, Trash2, AlertTriangle, Pencil, X, CreditCard, Plus, Package, Scissors, ExternalLink } from 'lucide-react'
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils'
-import { listTickets, getSaleForTicket, previewSaleDeletion, deleteSaleCompletely, updateSaleClientNotes, updateSalePayments, previewSaleEdit, editSaleLines, searchProductsForPos } from '@/actions/pos'
+import { listTickets, listSastreriaTickets, getSaleForTicket, previewSaleDeletion, deleteSaleCompletely, updateSaleClientNotes, updateSalePayments, previewSaleEdit, editSaleLines, searchProductsForPos } from '@/actions/pos'
 import { PaymentHistory } from '@/components/payments/payment-history'
 import { listClients } from '@/actions/clients'
 import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
@@ -103,6 +103,7 @@ const STATUS_BADGE: Record<string, { label: string; className: string } | null> 
 export function TicketsContent() {
   const router = useRouter()
   const { can } = usePermissions()
+  const [view, setView] = useState<'tienda' | 'sastreria'>('tienda')
   const [data, setData] = useState<any[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -163,14 +164,23 @@ export function TicketsContent() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const result = await listTickets({
-        page,
-        pageSize,
-        clientSearch: clientSearch.trim() || undefined,
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
-        productSearch: productSearch.trim() || undefined,
-      })
+      const result = view === 'sastreria'
+        ? await listSastreriaTickets({
+            page,
+            pageSize,
+            clientSearch: clientSearch.trim() || undefined,
+            dateFrom: dateFrom || undefined,
+            dateTo: dateTo || undefined,
+          })
+        : await listTickets({
+            page,
+            pageSize,
+            clientSearch: clientSearch.trim() || undefined,
+            dateFrom: dateFrom || undefined,
+            dateTo: dateTo || undefined,
+            productSearch: productSearch.trim() || undefined,
+            scope: 'tienda',
+          })
       if (result.success && result.data) {
         setData(result.data.data ?? [])
         setTotal(result.data.total ?? 0)
@@ -181,7 +191,7 @@ export function TicketsContent() {
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, clientSearch, dateFrom, dateTo, productSearch])
+  }, [view, page, pageSize, clientSearch, dateFrom, dateTo, productSearch])
 
   useEffect(() => {
     load()
@@ -544,7 +554,7 @@ export function TicketsContent() {
             <Receipt className="h-7 w-7" />
             Tickets
           </h1>
-          <p className="text-muted-foreground text-sm mt-1">Listado de tickets de venta. Descarga el PDF desde aquí o desde la ficha del cliente.</p>
+          <p className="text-muted-foreground text-sm mt-1">Tickets de tienda y, en la pestaña Sastrería, las ventas y cobros diarios de pedidos de sastrería.</p>
         </div>
         <Link href="/admin/tickets/vales">
           <Button variant="outline" size="sm" className="gap-1">
@@ -552,6 +562,30 @@ export function TicketsContent() {
             Vales
           </Button>
         </Link>
+      </div>
+
+      {/* Pestañas: tickets de tienda vs. movimientos de sastrería */}
+      <div className="inline-flex rounded-lg border bg-muted/40 p-1">
+        <button
+          type="button"
+          onClick={() => { if (view !== 'tienda') { setView('tienda'); setPage(1) } }}
+          className={cn(
+            'inline-flex items-center gap-1.5 rounded-md px-4 py-1.5 text-sm font-medium transition-colors',
+            view === 'tienda' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          <Receipt className="h-4 w-4" /> Tienda
+        </button>
+        <button
+          type="button"
+          onClick={() => { if (view !== 'sastreria') { setView('sastreria'); setPage(1) } }}
+          className={cn(
+            'inline-flex items-center gap-1.5 rounded-md px-4 py-1.5 text-sm font-medium transition-colors',
+            view === 'sastreria' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          <Scissors className="h-4 w-4" /> Sastrería
+        </button>
       </div>
 
       <Card>
@@ -584,15 +618,17 @@ export function TicketsContent() {
               onChange={(date) => setDateTo(date)}
             />
           </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-muted-foreground">Producto</label>
-            <Input
-              placeholder="Texto en descripción..."
-              value={productSearch}
-              onChange={(e) => setProductSearch(e.target.value)}
-              className="w-48"
-            />
-          </div>
+          {view === 'tienda' && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-muted-foreground">Producto</label>
+              <Input
+                placeholder="Texto en descripción..."
+                value={productSearch}
+                onChange={(e) => setProductSearch(e.target.value)}
+                className="w-48"
+              />
+            </div>
+          )}
           <div className="flex items-end">
             <Button variant="outline" onClick={() => { setPage(1); load() }}>Buscar</Button>
           </div>
@@ -612,6 +648,7 @@ export function TicketsContent() {
             </div>
           ) : (
             <>
+              {view === 'tienda' && (
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -742,10 +779,102 @@ export function TicketsContent() {
                   })}
                 </TableBody>
               </Table>
+              )}
+
+              {view === 'sastreria' && (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Nº</TableHead>
+                    <TableHead>Fecha</TableHead>
+                    <TableHead>Concepto</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Importe</TableHead>
+                    <TableHead>Pago</TableHead>
+                    <TableHead>Empleado</TableHead>
+                    <TableHead>Tienda</TableHead>
+                    <TableHead className="w-[220px]">Acciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.map((row) => {
+                    const isPayment = row.kind === 'order_payment'
+                    return (
+                      <TableRow key={`${row.kind}-${row.id}`}>
+                        <TableCell className="font-mono">{row.number}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{formatDateTime(row.created_at)}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={cn('text-xs font-medium',
+                              isPayment
+                                ? 'bg-sky-100 text-sky-800 border-sky-200 hover:bg-sky-100'
+                                : 'bg-violet-100 text-violet-800 border-violet-200 hover:bg-violet-100')}
+                          >
+                            {row.concept}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {row.client_name ? (
+                            <span>{row.client_name}{row.client_code ? ` (${row.client_code})` : ''}</span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="font-medium">{formatCurrency(Number(row.total) || 0)}</TableCell>
+                        <TableCell className="text-sm capitalize">{PAYMENT_LABELS[row.payment_method] ?? row.payment_method}</TableCell>
+                        <TableCell className="text-sm text-slate-600">{row.salesperson_name ?? '—'}</TableCell>
+                        <TableCell className="text-sm">{row.store_name ?? '—'}</TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1.5 items-center">
+                            {row.kind === 'sale' ? (
+                              <>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="gap-1"
+                                  disabled={downloadingId === row.id}
+                                  onClick={() => handleDownloadPdf(row.id)}
+                                >
+                                  {downloadingId === row.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileDown className="h-3 w-3" />}
+                                  Descargar
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="gap-1"
+                                  disabled={invoiceLoadingId === row.id}
+                                  onClick={() => setInvoiceConfirmRow({ id: row.id, ticket_number: row.number, client_name: row.client_name, total: row.total })}
+                                >
+                                  {invoiceLoadingId === row.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
+                                  Factura
+                                </Button>
+                              </>
+                            ) : null}
+                            {row.order_id && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="gap-1"
+                                onClick={() => router.push(`/admin/pedidos/${row.order_id}`)}
+                              >
+                                <ExternalLink className="h-3 w-3" />
+                                Ver pedido
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+              )}
+
               {totalPages > 1 && (
                 <div className="flex items-center justify-between px-4 py-3 border-t">
                   <p className="text-sm text-muted-foreground">
-                    {total} ticket{total !== 1 ? 's' : ''} · Página {page} de {totalPages}
+                    {total} {view === 'sastreria' ? `movimiento${total !== 1 ? 's' : ''}` : `ticket${total !== 1 ? 's' : ''}`} · Página {page} de {totalPages}
                   </p>
                   <div className="flex gap-2">
                     <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
