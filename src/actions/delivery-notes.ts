@@ -218,7 +218,7 @@ export const getDeliveryNote = protectedAction<string, any>(
   }
 )
 
-export const createDeliveryNote = protectedAction<DeliveryNoteInput, { id: string; number: string }>(
+export const createDeliveryNote = protectedAction<DeliveryNoteInput, { id: string; number: string; auditEntityId: string; auditDescription: string }>(
   {
     permission: 'products.edit',
     auditModule: 'stock',
@@ -264,11 +264,11 @@ export const createDeliveryNote = protectedAction<DeliveryNoteInput, { id: strin
         if (linesError) return failure(linesError.message || 'Error al guardar líneas', 'INTERNAL')
       }
     }
-    return success({ id: note.id, number: note.number })
+    return success({ id: note.id, number: note.number, auditEntityId: String(note.id), auditDescription: `Albarán ${note.number}` })
   }
 )
 
-export const updateDeliveryNote = protectedAction<{ id: string; data: Partial<DeliveryNoteInput> }, { id: string }>(
+export const updateDeliveryNote = protectedAction<{ id: string; data: Partial<DeliveryNoteInput> }, { id: string; auditEntityId: string; auditDescription: string }>(
   {
     permission: 'products.edit',
     auditModule: 'stock',
@@ -277,7 +277,7 @@ export const updateDeliveryNote = protectedAction<{ id: string; data: Partial<De
     revalidate: ['/admin/almacen/albaranes', '/admin/stock'],
   },
   async (ctx, { id, data }) => {
-    const { data: current } = await ctx.adminClient.from('delivery_notes').select('id, status').eq('id', id).single()
+    const { data: current } = await ctx.adminClient.from('delivery_notes').select('id, status, number').eq('id', id).single()
     if (!current) return failure('Albarán no encontrado', 'NOT_FOUND')
     if (current.status !== 'borrador') return failure('Solo se puede editar un albarán en borrador', 'CONFLICT')
 
@@ -314,11 +314,11 @@ export const updateDeliveryNote = protectedAction<{ id: string; data: Partial<De
       }
     }
 
-    return success({ id })
+    return success({ id, auditEntityId: String(id), auditDescription: `Albarán ${current.number}` })
   }
 )
 
-export const confirmDeliveryNote = protectedAction<string, { id: string }>(
+export const confirmDeliveryNote = protectedAction<string, { id: string; auditEntityId: string; auditDescription: string }>(
   {
     permission: 'products.edit',
     auditModule: 'stock',
@@ -327,7 +327,7 @@ export const confirmDeliveryNote = protectedAction<string, { id: string }>(
     revalidate: ['/admin/almacen/albaranes', '/admin/stock'],
   },
   async (ctx, id) => {
-    const { data: note } = await ctx.adminClient.from('delivery_notes').select('id, status').eq('id', id).single()
+    const { data: note } = await ctx.adminClient.from('delivery_notes').select('id, status, number').eq('id', id).single()
     if (!note) return failure('Albarán no encontrado', 'NOT_FOUND')
     if (note.status !== 'borrador') return failure('Solo se puede confirmar un albarán en borrador', 'CONFLICT')
     const { error } = await ctx.adminClient
@@ -338,11 +338,11 @@ export const confirmDeliveryNote = protectedAction<string, { id: string }>(
       })
       .eq('id', id)
     if (error) return failure(error.message || 'Error al confirmar albarán', 'INTERNAL')
-    return success({ id })
+    return success({ id, auditEntityId: String(id), auditDescription: `Albarán ${note.number} confirmado` })
   }
 )
 
-export const cancelDeliveryNote = protectedAction<string, { id: string }>(
+export const cancelDeliveryNote = protectedAction<string, { id: string; auditEntityId: string; auditDescription: string }>(
   {
     permission: 'products.edit',
     auditModule: 'stock',
@@ -351,19 +351,19 @@ export const cancelDeliveryNote = protectedAction<string, { id: string }>(
     revalidate: ['/admin/almacen/albaranes', '/admin/stock'],
   },
   async (ctx, id) => {
-    const { data: note } = await ctx.adminClient.from('delivery_notes').select('id, status').eq('id', id).single()
+    const { data: note } = await ctx.adminClient.from('delivery_notes').select('id, status, number').eq('id', id).single()
     if (!note) return failure('Albarán no encontrado', 'NOT_FOUND')
-    if (note.status === 'anulado') return success({ id })
+    if (note.status === 'anulado') return success({ id, auditEntityId: String(id), auditDescription: `Albarán ${note.number} anulado` })
     const { error } = await ctx.adminClient
       .from('delivery_notes')
       .update({ status: 'anulado' })
       .eq('id', id)
     if (error) return failure(error.message || 'Error al anular albarán', 'INTERNAL')
-    return success({ id })
+    return success({ id, auditEntityId: String(id), auditDescription: `Albarán ${note.number} anulado` })
   }
 )
 
-export const deleteDeliveryNote = protectedAction<string, { id: string }>(
+export const deleteDeliveryNote = protectedAction<string, { id: string; auditEntityId: string; auditDescription: string }>(
   {
     permission: 'products.edit',
     auditModule: 'stock',
@@ -372,12 +372,12 @@ export const deleteDeliveryNote = protectedAction<string, { id: string }>(
     revalidate: ['/admin/almacen/albaranes', '/admin/stock'],
   },
   async (ctx, id) => {
-    const { data: note } = await ctx.adminClient.from('delivery_notes').select('id, status').eq('id', id).single()
+    const { data: note } = await ctx.adminClient.from('delivery_notes').select('id, status, number').eq('id', id).single()
     if (!note) return failure('Albarán no encontrado', 'NOT_FOUND')
     if (note.status !== 'borrador') return failure('Solo se puede eliminar un albarán en borrador', 'CONFLICT')
     const { error } = await ctx.adminClient.from('delivery_notes').delete().eq('id', id)
     if (error) return failure(error.message || 'Error al eliminar albarán', 'INTERNAL')
-    return success({ id })
+    return success({ id, auditEntityId: String(id), auditDescription: `Albarán ${note.number} eliminado` })
   }
 )
 
@@ -499,7 +499,7 @@ export const searchProductVariantsForDeliveryNote = protectedAction<{ search?: s
   }
 )
 
-export const createDeliveryNoteFromTransfer = protectedAction<string, { id: string; number: string }>(
+export const createDeliveryNoteFromTransfer = protectedAction<string, { id: string; number: string; auditEntityId: string; auditDescription: string }>(
   {
     permission: 'products.edit',
     auditModule: 'stock',
@@ -515,7 +515,7 @@ export const createDeliveryNoteFromTransfer = protectedAction<string, { id: stri
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
-    if (existing?.id) return success({ id: existing.id, number: existing.number })
+    if (existing?.id) return success({ id: existing.id, number: existing.number, auditEntityId: String(existing.id), auditDescription: `Albarán ${existing.number} (traspaso)` })
 
     const { data: transfer, error: transferError } = await ctx.adminClient
       .from('stock_transfers')
@@ -568,7 +568,7 @@ export const createDeliveryNoteFromTransfer = protectedAction<string, { id: stri
       }
     }
 
-    return success({ id: note.id, number: note.number })
+    return success({ id: note.id, number: note.number, auditEntityId: String(note.id), auditDescription: `Albarán ${note.number} (traspaso)` })
   }
 )
 
@@ -664,7 +664,7 @@ export const getSupplierDeliveryNote = protectedAction<string, any>(
   }
 )
 
-export const createSupplierDeliveryNote = protectedAction<SupplierDeliveryNoteInput, { id: string }>(
+export const createSupplierDeliveryNote = protectedAction<SupplierDeliveryNoteInput, { id: string; auditEntityId: string; auditDescription: string }>(
   {
     permission: 'suppliers.create_order',
     auditModule: 'suppliers',
@@ -705,13 +705,13 @@ export const createSupplierDeliveryNote = protectedAction<SupplierDeliveryNoteIn
       if (rowsError) return failure(rowsError.message || 'Error al guardar líneas de proveedor', 'INTERNAL')
     }
 
-    return success({ id: note.id })
+    return success({ id: note.id, auditEntityId: String(note.id), auditDescription: `Albarán de proveedor ${input.supplier_reference || note.id}` })
   }
 )
 
 export const upsertSupplierDeliveryNoteForOrder = protectedAction<
   { supplier_id: string; supplier_order_id: string; delivery_date?: string | null },
-  { id: string; created: boolean }
+  { id: string; created: boolean; auditEntityId: string; auditDescription: string }
 >(
   {
     permission: 'suppliers.create_order',
@@ -728,7 +728,7 @@ export const upsertSupplierDeliveryNoteForOrder = protectedAction<
 
     const { data: existing, error: existingError } = await ctx.adminClient
       .from('supplier_delivery_notes')
-      .select('id, supplier_id')
+      .select('id, supplier_id, supplier_reference')
       .eq('supplier_order_id', supplierOrderId)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -743,7 +743,7 @@ export const upsertSupplierDeliveryNoteForOrder = protectedAction<
           .eq('id', existing.id)
       }
       revalidatePath(`/admin/proveedores/${supplierId}`)
-      return success({ id: existing.id, created: false })
+      return success({ id: existing.id, created: false, auditEntityId: String(existing.id), auditDescription: `Albarán de proveedor ${(existing as any).supplier_reference || existing.id}` })
     }
 
     const today = new Date().toISOString().slice(0, 10)
@@ -761,11 +761,11 @@ export const upsertSupplierDeliveryNoteForOrder = protectedAction<
 
     if (createError || !created?.id) return failure(createError?.message || 'Error al crear albarán de proveedor', 'INTERNAL')
     revalidatePath(`/admin/proveedores/${supplierId}`)
-    return success({ id: created.id, created: true })
+    return success({ id: created.id, created: true, auditEntityId: String(created.id), auditDescription: `Albarán de proveedor ${created.id}` })
   }
 )
 
-export const updateSupplierDeliveryNote = protectedAction<{ id: string; data: Partial<SupplierDeliveryNoteInput> }, { id: string }>(
+export const updateSupplierDeliveryNote = protectedAction<{ id: string; data: Partial<SupplierDeliveryNoteInput> }, { id: string; auditEntityId: string; auditDescription: string }>(
   {
     permission: 'suppliers.create_order',
     auditModule: 'suppliers',
@@ -805,13 +805,22 @@ export const updateSupplierDeliveryNote = protectedAction<{ id: string; data: Pa
       }
     }
 
-    return success({ id })
+    let reference: string | null = data.supplier_reference ?? null
+    if (!reference) {
+      const { data: noteRef } = await ctx.adminClient
+        .from('supplier_delivery_notes')
+        .select('supplier_reference')
+        .eq('id', id)
+        .maybeSingle()
+      reference = (noteRef as any)?.supplier_reference ?? null
+    }
+    return success({ id, auditEntityId: String(id), auditDescription: `Albarán de proveedor ${reference || id}` })
   }
 )
 
 export const markSupplierDeliveryNoteReceived = protectedAction<
   string,
-  { id: string; stock_warnings: number; stock_update_skipped: boolean }
+  { id: string; stock_warnings: number; stock_update_skipped: boolean; auditEntityId: string; auditDescription: string }
 >(
   {
     permission: 'suppliers.create_order',
@@ -834,7 +843,7 @@ export const markSupplierDeliveryNoteReceived = protectedAction<
         .update({ status: 'recibido' })
         .eq('id', id)
       if (statusErr) return failure(statusErr.message || 'Error al marcar recibido', 'INTERNAL')
-      return success({ id, stock_warnings: 0, stock_update_skipped: true })
+      return success({ id, stock_warnings: 0, stock_update_skipped: true, auditEntityId: String(id), auditDescription: `Albarán de proveedor ${(note as any).supplier_reference || id} recibido` })
     }
 
     let destinationStoreId: string | null = (note as any).store_id || null
@@ -988,11 +997,11 @@ export const markSupplierDeliveryNoteReceived = protectedAction<
       .eq('id', id)
     if (updateErr) return failure(updateErr.message || 'Error al marcar recibido', 'INTERNAL')
 
-    return success({ id, stock_warnings: stockWarnings, stock_update_skipped: !warehouseId })
+    return success({ id, stock_warnings: stockWarnings, stock_update_skipped: !warehouseId, auditEntityId: String(id), auditDescription: `Albarán de proveedor ${(note as any).supplier_reference || id} recibido` })
   }
 )
 
-export const uploadSupplierDeliveryNoteAttachment = protectedAction<FormData, { id: string; url: string }>(
+export const uploadSupplierDeliveryNoteAttachment = protectedAction<FormData, { id: string; url: string; auditEntityId: string; auditDescription: string }>(
   {
     permission: 'suppliers.create_order',
     auditModule: 'suppliers',
@@ -1008,7 +1017,7 @@ export const uploadSupplierDeliveryNoteAttachment = protectedAction<FormData, { 
 
     const { data: noteExists, error: noteErr } = await ctx.adminClient
       .from('supplier_delivery_notes')
-      .select('id, supplier_id')
+      .select('id, supplier_id, supplier_reference')
       .eq('id', id)
       .maybeSingle()
     if (noteErr || !noteExists?.id) {
@@ -1055,6 +1064,6 @@ export const uploadSupplierDeliveryNoteAttachment = protectedAction<FormData, { 
     if (noteExists?.supplier_id) {
       revalidatePath(`/admin/proveedores/${noteExists.supplier_id}`)
     }
-    return success({ id, url })
+    return success({ id, url, auditEntityId: String(id), auditDescription: `Adjunto en albarán ${(noteExists as any).supplier_reference || id}` })
   }
 )

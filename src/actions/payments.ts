@@ -119,10 +119,20 @@ export const addOrderPayment = protectedAction<AddOrderPaymentInput, OrderPaymen
   }
 )
 
-export const deleteOrderPayment = protectedAction<{ payment_id: string; tailoring_order_id: string }, void>(
+export const deleteOrderPayment = protectedAction<
+  { payment_id: string; tailoring_order_id: string },
+  { auditEntityId: string; auditDescription: string }
+>(
   { permission: 'orders.edit', auditAction: 'delete', auditModule: 'orders' },
   async (ctx, { payment_id, tailoring_order_id }) => {
     try {
+      // Traer el nº de pedido para el log de Seguimiento.
+      const { data: order } = await ctx.adminClient
+        .from('tailoring_orders')
+        .select('order_number')
+        .eq('id', tailoring_order_id)
+        .maybeSingle()
+
       // Delegar en rpc_remove_order_payment (mig 150 + 191): revierte
       // manual_transactions + cash_sessions.total_*_sales y borra la fila
       // en una transacción. Si el pago vivía en una sesión cerrada, recalcula
@@ -140,7 +150,10 @@ export const deleteOrderPayment = protectedAction<{ payment_id: string; tailorin
       // es columna generada (total - total_paid): no se tocan aquí.
       revalidatePath(`/sastre/pedidos/${tailoring_order_id}`)
 
-      return success(undefined)
+      return success({
+        auditEntityId: String(tailoring_order_id),
+        auditDescription: `Cobro eliminado del pedido ${order?.order_number ?? tailoring_order_id}`,
+      })
     } catch (e) {
       console.error('[deleteOrderPayment] unexpected:', e)
       return failure('Error al eliminar pago')
@@ -163,7 +176,10 @@ async function userIsFullAdmin(ctx: { adminClient: AdminClient; userId: string }
   })
 }
 
-export const updateOrderPayment = protectedAction<UpdateOrderPaymentInput, void>(
+export const updateOrderPayment = protectedAction<
+  UpdateOrderPaymentInput,
+  { auditEntityId: string; auditDescription: string }
+>(
   { permission: 'orders.edit', auditAction: 'update', auditModule: 'orders' },
   async (ctx, { payment_id, tailoring_order_id, amount, method }) => {
     if (!payment_id) return failure('Falta el identificador del cobro', 'VALIDATION')
@@ -171,6 +187,13 @@ export const updateOrderPayment = protectedAction<UpdateOrderPaymentInput, void>
     const validMethods: PaymentMethod[] = ['cash', 'card', 'transfer', 'check', 'bizum']
     if (!validMethods.includes(method)) return failure('Método de pago no válido', 'VALIDATION')
     if (!(await userIsFullAdmin(ctx))) return failure('Solo un administrador puede editar un cobro.', 'FORBIDDEN')
+
+    // Traer el nº de pedido para el log de Seguimiento.
+    const { data: order } = await ctx.adminClient
+      .from('tailoring_orders')
+      .select('order_number')
+      .eq('id', tailoring_order_id)
+      .maybeSingle()
 
     const { data: result, error: rpcError } = await ctx.adminClient.rpc('rpc_update_tailoring_payment', {
       p_payment_id: payment_id,
@@ -190,7 +213,10 @@ export const updateOrderPayment = protectedAction<UpdateOrderPaymentInput, void>
     // total_paid lo recalcula la propia RPC (UPDATE explícito) y total_pending
     // es columna generada (total - total_paid): no se tocan aquí.
     revalidatePath(`/sastre/pedidos/${tailoring_order_id}`)
-    return success(undefined)
+    return success({
+      auditEntityId: String(tailoring_order_id),
+      auditDescription: `Cobro editado del pedido ${order?.order_number ?? tailoring_order_id} (${Number(amount).toFixed(2)} €)`,
+    })
   }
 )
 
@@ -283,7 +309,18 @@ export const addSalePayment = protectedAction<AddSalePaymentInput, any>(
         return failure(rpcError.message || 'Error al registrar pago')
       }
 
-      return success(serializeForServerAction(result))
+      // Traer el nº de ticket para el log de Seguimiento.
+      const { data: sale } = await ctx.adminClient
+        .from('sales')
+        .select('ticket_number')
+        .eq('id', input.sale_id)
+        .maybeSingle()
+
+      return success(serializeForServerAction({
+        ...result,
+        auditEntityId: String(input.sale_id),
+        auditDescription: `Cobro de la venta ${sale?.ticket_number ?? input.sale_id} (${Number(input.amount).toFixed(2)} €)`,
+      }))
     } catch (e) {
       console.error('[addSalePayment] unexpected:', e)
       return failure('Error al registrar pago')
@@ -295,10 +332,23 @@ export const addSalePayment = protectedAction<AddSalePaymentInput, any>(
 // Delega en rpc_remove_sale_payment (mig 218): revierte cash_sessions.total_*,
 // recalcula el arqueo si la sesión está cerrada, borra el espejo por FK y
 // recalcula amount_paid/payment_status. Mismo patrón que deleteOrderPayment.
-export const deleteSalePayment = protectedAction<{ salePaymentId: string }, void>(
+export const deleteSalePayment = protectedAction<
+  { salePaymentId: string },
+  { auditEntityId: string; auditDescription: string }
+>(
   { permission: 'sales.edit', auditAction: 'delete', auditModule: 'sales' },
   async (ctx, { salePaymentId }) => {
     try {
+      // Resolver venta + nº de ticket ANTES de borrar (luego ya no existe la fila).
+      const { data: pay } = await ctx.adminClient
+        .from('sale_payments')
+        .select('sale_id, sales(ticket_number)')
+        .eq('id', salePaymentId)
+        .maybeSingle()
+      const sale = pay ? (Array.isArray(pay.sales) ? pay.sales[0] : pay.sales) : null
+      const saleId = pay?.sale_id ?? salePaymentId
+      const ticketNumber = sale?.ticket_number ?? saleId
+
       const { error: rpcError } = await ctx.adminClient.rpc('rpc_remove_sale_payment', {
         p_sale_payment_id: salePaymentId,
       })
@@ -307,7 +357,10 @@ export const deleteSalePayment = protectedAction<{ salePaymentId: string }, void
         return failure(rpcError.message)
       }
       revalidatePath('/admin/tickets')
-      return success(undefined)
+      return success({
+        auditEntityId: String(saleId),
+        auditDescription: `Cobro eliminado de la venta ${ticketNumber}`,
+      })
     } catch (e) {
       console.error('[deleteSalePayment] unexpected:', e)
       return failure('Error al eliminar el cobro')
@@ -320,7 +373,10 @@ export const deleteSalePayment = protectedAction<{ salePaymentId: string }, void
 // por el delta (mismo método o cambio de método), recalcula el arqueo si la
 // sesión está cerrada y actualiza el espejo IN-PLACE por FK. Alcance: solo
 // importe + método (no fecha, no mover de sesión). Igual que updateOrderPayment.
-export const updateSalePayment = protectedAction<UpdateSalePaymentInput, void>(
+export const updateSalePayment = protectedAction<
+  UpdateSalePaymentInput,
+  { auditEntityId: string; auditDescription: string }
+>(
   { permission: 'sales.edit', auditAction: 'update', auditModule: 'sales' },
   async (ctx, { salePaymentId, amount, method }) => {
     if (!salePaymentId) return failure('Falta el identificador del cobro', 'VALIDATION')
@@ -328,6 +384,16 @@ export const updateSalePayment = protectedAction<UpdateSalePaymentInput, void>(
     const validMethods: PaymentMethod[] = ['cash', 'card', 'transfer', 'check', 'bizum']
     if (!validMethods.includes(method)) return failure('Método de pago no válido', 'VALIDATION')
     if (!(await userIsFullAdmin(ctx))) return failure('Solo un administrador puede editar un cobro.', 'FORBIDDEN')
+
+    // Resolver venta + nº de ticket para el log de Seguimiento.
+    const { data: pay } = await ctx.adminClient
+      .from('sale_payments')
+      .select('sale_id, sales(ticket_number)')
+      .eq('id', salePaymentId)
+      .maybeSingle()
+    const sale = pay ? (Array.isArray(pay.sales) ? pay.sales[0] : pay.sales) : null
+    const saleId = pay?.sale_id ?? salePaymentId
+    const ticketNumber = sale?.ticket_number ?? saleId
 
     const { data: result, error: rpcError } = await ctx.adminClient.rpc('rpc_update_sale_payment', {
       p_sale_payment_id: salePaymentId,
@@ -343,7 +409,10 @@ export const updateSalePayment = protectedAction<UpdateSalePaymentInput, void>(
       return failure(String(result.error || 'No se pudo actualizar el cobro'), 'CONFLICT')
     }
     revalidatePath('/admin/tickets')
-    return success(undefined)
+    return success({
+      auditEntityId: String(saleId),
+      auditDescription: `Cobro editado de la venta ${ticketNumber} (${Number(amount).toFixed(2)} €)`,
+    })
   }
 )
 

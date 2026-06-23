@@ -83,7 +83,11 @@ export const createDiscountCode = protectedAction<CreateDiscountCodeInput, Disco
       }
       return failure(error.message)
     }
-    return success(data as DiscountCodeRow)
+    return success({
+      ...(data as DiscountCodeRow),
+      auditEntityId: String((data as DiscountCodeRow).id),
+      auditDescription: `Código de descuento ${(data as DiscountCodeRow).code}`,
+    } as DiscountCodeRow)
   },
 )
 
@@ -96,12 +100,23 @@ export const toggleDiscountCodeActive = protectedAction<{ id: string; is_active:
     revalidate: ['/admin/descuentos'],
   },
   async (ctx, { id, is_active }) => {
+    const { data: existing } = await ctx.adminClient
+      .from('discount_codes')
+      .select('code')
+      .eq('id', id)
+      .maybeSingle()
     const { error } = await ctx.adminClient
       .from('discount_codes')
       .update({ is_active, updated_at: new Date().toISOString() })
       .eq('id', id)
     if (error) return failure(error.message)
-    return success({ id, is_active })
+    const code = (existing as { code?: string } | null)?.code ?? id
+    return success({
+      id,
+      is_active,
+      auditEntityId: String(id),
+      auditDescription: `Código de descuento ${code} ${is_active ? 'activado' : 'desactivado'}`,
+    } as { id: string; is_active: boolean })
   },
 )
 
@@ -114,11 +129,21 @@ export const deleteDiscountCode = protectedAction<{ id: string }, { id: string }
     revalidate: ['/admin/descuentos'],
   },
   async (ctx, { id }) => {
+    const { data: existing } = await ctx.adminClient
+      .from('discount_codes')
+      .select('code')
+      .eq('id', id)
+      .maybeSingle()
     const { error } = await ctx.adminClient
       .from('discount_codes')
       .delete()
       .eq('id', id)
     if (error) return failure(error.message)
-    return success({ id })
+    const code = (existing as { code?: string } | null)?.code ?? id
+    return success({
+      id,
+      auditEntityId: String(id),
+      auditDescription: `Código de descuento ${code} eliminado`,
+    } as { id: string })
   },
 )

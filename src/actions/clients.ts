@@ -265,7 +265,7 @@ export const updateClientAction = protectedAction<{ id: string; data: any }, any
   }
 )
 
-export const deleteClientAction = protectedAction<string, { id: string }>(
+export const deleteClientAction = protectedAction<string, { id: string; auditEntityId: string; auditDescription: string }>(
   {
     permission: 'clients.delete',
     auditModule: 'clients',
@@ -274,19 +274,29 @@ export const deleteClientAction = protectedAction<string, { id: string }>(
     revalidate: ['/admin/clientes'],
   },
   async (ctx, clientId) => {
+    const { data: existing } = await ctx.adminClient
+      .from('clients')
+      .select('full_name')
+      .eq('id', clientId)
+      .maybeSingle()
+
     const { error } = await ctx.adminClient
       .from('clients')
       .update({ is_active: false })
       .eq('id', clientId)
 
     if (error) return failure(error.message)
-    return success({ id: clientId })
+    return success({
+      id: clientId,
+      auditEntityId: String(clientId),
+      auditDescription: `Cliente "${(existing as { full_name?: string } | null)?.full_name ?? clientId}" eliminado`,
+    })
   }
 )
 
 // Reactivar un cliente desactivado (is_active=true). Contraparte de
 // deleteClientAction (soft delete); mismo permiso, permite deshacer desde la UI.
-export const reactivateClientAction = protectedAction<string, { id: string }>(
+export const reactivateClientAction = protectedAction<string, { id: string; auditEntityId: string; auditDescription: string }>(
   {
     permission: 'clients.delete',
     auditModule: 'clients',
@@ -295,13 +305,23 @@ export const reactivateClientAction = protectedAction<string, { id: string }>(
     revalidate: ['/admin/clientes'],
   },
   async (ctx, clientId) => {
+    const { data: existing } = await ctx.adminClient
+      .from('clients')
+      .select('full_name')
+      .eq('id', clientId)
+      .maybeSingle()
+
     const { error } = await ctx.adminClient
       .from('clients')
       .update({ is_active: true })
       .eq('id', clientId)
 
     if (error) return failure(error.message)
-    return success({ id: clientId })
+    return success({
+      id: clientId,
+      auditEntityId: String(clientId),
+      auditDescription: `Cliente "${(existing as { full_name?: string } | null)?.full_name ?? clientId}" reactivado`,
+    })
   }
 )
 
@@ -424,7 +444,7 @@ export const setDefaultClientCompany = protectedAction<{ id: string; clientId: s
   }
 )
 
-export const hardDeleteClientAction = protectedAction<string, { id: string }>(
+export const hardDeleteClientAction = protectedAction<string, { id: string; auditEntityId: string; auditDescription: string }>(
   {
     permission: 'clients.delete',
     auditModule: 'clients',
@@ -446,6 +466,13 @@ export const hardDeleteClientAction = protectedAction<string, { id: string }>(
 
     if (!isAdmin) return failure('Solo los administradores pueden eliminar clientes permanentemente')
 
+    // Leer datos identificativos ANTES del borrado físico
+    const { data: existing } = await ctx.adminClient
+      .from('clients')
+      .select('full_name, client_code')
+      .eq('id', clientId)
+      .maybeSingle()
+
     const { error } = await ctx.adminClient
       .from('clients')
       .delete()
@@ -457,7 +484,12 @@ export const hardDeleteClientAction = protectedAction<string, { id: string }>(
       }
       return failure(error.message)
     }
-    return success({ id: clientId })
+    const ex = existing as { full_name?: string; client_code?: string } | null
+    return success({
+      id: clientId,
+      auditEntityId: String(clientId),
+      auditDescription: `Cliente "${ex?.full_name ?? clientId}" (${ex?.client_code ?? '—'}) eliminado definitivamente`,
+    })
   }
 )
 
@@ -503,12 +535,26 @@ export const mergeClients = protectedAction<
     if (sourceId === targetId) return failure('No se puede fusionar un cliente consigo mismo', 'VALIDATION')
     if (!(await userIsFullAdmin(ctx))) return failure('Solo un administrador puede fusionar clientes.', 'FORBIDDEN')
 
+    // Leer nombres de ambos clientes ANTES de fusionar (el origen se elimina)
+    const { data: bothClients } = await ctx.adminClient
+      .from('clients')
+      .select('id, full_name')
+      .in('id', [sourceId, targetId])
+    const nameOf = (cid: string) =>
+      (bothClients as Array<{ id: string; full_name?: string }> | null)?.find((c) => c.id === cid)?.full_name ?? cid
+    const sourceName = nameOf(sourceId)
+    const targetName = nameOf(targetId)
+
     const { data, error } = await ctx.adminClient.rpc('rpc_merge_clients', {
       p_source_id: sourceId, p_target_id: targetId, p_fill_empty: fillEmpty,
     })
     if (error) return failure(error.message)
     if (data && data.success === false) return failure(String(data.error || 'No se pudo fusionar'), 'CONFLICT')
-    return success(data)
+    return success({
+      ...(data ?? {}),
+      auditEntityId: String(targetId),
+      auditDescription: `Clientes fusionados: "${sourceName}" → "${targetName}"`,
+    })
   }
 )
 
@@ -535,7 +581,13 @@ export const addClientNote = protectedAction<any, any>(
       .single()
 
     if (error) return failure(error.message)
-    return success(note)
+    const n = note as { id?: string; title?: string | null; note_type?: string | null }
+    const noteLabel = (n.title && String(n.title).trim()) || (n.note_type ? String(n.note_type) : 'Nota')
+    return success({
+      ...note,
+      auditEntityId: n.id != null ? String(n.id) : undefined,
+      auditDescription: `Nota de cliente: "${noteLabel}"`,
+    })
   }
 )
 

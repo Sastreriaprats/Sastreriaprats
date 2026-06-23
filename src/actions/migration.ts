@@ -9,7 +9,7 @@ import { success, failure } from '@/lib/errors'
 
 export const importClients = protectedAction<
   { rows: Record<string, string>[]; mapping: Record<string, string>; dedup_field: string },
-  { imported: number; updated: number; skipped: number; errors: { row: number; error: string }[]; batchId: string }
+  { imported: number; updated: number; skipped: number; errors: { row: number; error: string }[]; batchId: string; auditEntityId: string; auditDescription: string }
 >(
   { permission: 'migration.access', auditModule: 'migration', auditAction: 'import' },
   async (ctx, { rows, mapping, dedup_field }) => {
@@ -95,7 +95,12 @@ export const importClients = protectedAction<
       created_by: ctx.userId,
     })
 
-    return success({ ...results, batchId })
+    return success({
+      ...results,
+      batchId,
+      auditEntityId: String(batchId),
+      auditDescription: `Importación de clientes: ${results.imported} creados, ${results.updated} actualizados, ${results.skipped} omitidos, ${results.errors.length} errores`,
+    })
   }
 )
 
@@ -105,7 +110,7 @@ export const importClients = protectedAction<
 
 export const importProducts = protectedAction<
   { rows: Record<string, string>[]; mapping: Record<string, string>; store_id: string },
-  { imported: number; updated: number; skipped: number; errors: { row: number; error: string }[]; batchId: string }
+  { imported: number; updated: number; skipped: number; errors: { row: number; error: string }[]; batchId: string; auditEntityId: string; auditDescription: string }
 >(
   { permission: 'migration.access', auditModule: 'migration', auditAction: 'import' },
   async (ctx, { rows, mapping, store_id }) => {
@@ -222,7 +227,12 @@ export const importProducts = protectedAction<
       errors: results.errors, created_by: ctx.userId,
     })
 
-    return success({ ...results, batchId })
+    return success({
+      ...results,
+      batchId,
+      auditEntityId: String(batchId),
+      auditDescription: `Importación de productos: ${results.imported} creados, ${results.updated} actualizados, ${results.skipped} omitidos, ${results.errors.length} errores`,
+    })
   }
 )
 
@@ -232,7 +242,7 @@ export const importProducts = protectedAction<
 
 export const importOrders = protectedAction<
   { rows: Record<string, string>[]; mapping: Record<string, string>; store_id: string },
-  { imported: number; skipped: number; errors: { row: number; error: string }[]; batchId: string }
+  { imported: number; skipped: number; errors: { row: number; error: string }[]; batchId: string; auditEntityId: string; auditDescription: string }
 >(
   { permission: 'migration.access', auditModule: 'migration', auditAction: 'import' },
   async (ctx, { rows, mapping, store_id }) => {
@@ -298,7 +308,12 @@ export const importOrders = protectedAction<
       errors: results.errors, created_by: ctx.userId,
     })
 
-    return success({ ...results, batchId })
+    return success({
+      ...results,
+      batchId,
+      auditEntityId: String(batchId),
+      auditDescription: `Importación de pedidos: ${results.imported} creados, ${results.skipped} omitidos, ${results.errors.length} errores`,
+    })
   }
 )
 
@@ -308,7 +323,7 @@ export const importOrders = protectedAction<
 
 export const importMeasurements = protectedAction<
   { rows: Record<string, string>[]; mapping: Record<string, string> },
-  { imported: number; skipped: number; errors: { row: number; error: string }[]; batchId: string }
+  { imported: number; skipped: number; errors: { row: number; error: string }[]; batchId: string; auditEntityId: string; auditDescription: string }
 >(
   { permission: 'migration.access', auditModule: 'migration', auditAction: 'import' },
   async (ctx, { rows, mapping }) => {
@@ -394,7 +409,12 @@ export const importMeasurements = protectedAction<
       errors: results.errors, created_by: ctx.userId,
     })
 
-    return success({ ...results, batchId })
+    return success({
+      ...results,
+      batchId,
+      auditEntityId: String(batchId),
+      auditDescription: `Importación de medidas: ${results.imported} creadas, ${results.skipped} omitidas, ${results.errors.length} errores`,
+    })
   }
 )
 
@@ -404,7 +424,7 @@ export const importMeasurements = protectedAction<
 
 export const rollbackMigration = protectedAction<
   string,
-  { deleted: number; entity_type: string }
+  { deleted: number; entity_type: string; auditEntityId: string; auditDescription: string }
 >(
   { permission: 'migration.access', auditModule: 'migration', auditAction: 'delete' },
   async (ctx, batchId) => {
@@ -449,7 +469,12 @@ export const rollbackMigration = protectedAction<
       rolled_back_at: new Date().toISOString(),
     }).eq('batch_id', batchId)
 
-    return success({ deleted, entity_type: log.entity_type })
+    return success({
+      deleted,
+      entity_type: log.entity_type,
+      auditEntityId: String(batchId),
+      auditDescription: `Migración revertida: ${deleted} ${log.entity_type} eliminados`,
+    })
   }
 )
 

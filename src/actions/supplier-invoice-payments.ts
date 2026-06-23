@@ -140,7 +140,7 @@ export const registerSupplierInvoicePayment = protectedAction<
     notes?: string | null
     create_accounting_entry?: boolean
   },
-  { id: string; amount_paid: number; amount_pending: number; status: string }
+  { id: string; amount_paid: number; amount_pending: number; status: string; auditEntityId: string; auditDescription: string }
 >(
   {
     permission: PERMISSION,
@@ -281,6 +281,8 @@ export const registerSupplierInvoicePayment = protectedAction<
       amount_paid: Math.round(newPaid * 100) / 100,
       amount_pending: Math.round(newPending * 100) / 100,
       status: newStatus,
+      auditEntityId: String(input.supplier_invoice_id),
+      auditDescription: `Pago de factura ${(invoice as any).invoice_number} · ${(invoice as any).supplier_name} (${amount.toFixed(2)} €)`,
     })
   },
 )
@@ -307,7 +309,10 @@ export const listSupplierInvoicePayments = protectedAction<
 
 // ─── Eliminar pago ───────────────────────────────────────────────────────────
 
-export const deleteSupplierInvoicePayment = protectedAction<{ id: string }, void>(
+export const deleteSupplierInvoicePayment = protectedAction<
+  { id: string },
+  { auditEntityId: string; auditDescription: string }
+>(
   {
     permission: PERMISSION,
     auditModule: 'accounting',
@@ -319,13 +324,14 @@ export const deleteSupplierInvoicePayment = protectedAction<{ id: string }, void
 
     const { data: existing } = await ctx.adminClient
       .from(TABLE)
-      .select('manual_transaction_id, supplier_invoice_id')
+      .select('manual_transaction_id, supplier_invoice_id, amount, invoice:ap_supplier_invoices!supplier_invoice_id(invoice_number)')
       .eq('id', id)
       .maybeSingle()
 
-    const ex = existing as { manual_transaction_id: string | null; supplier_invoice_id: string | null } | null
+    const ex = existing as { manual_transaction_id: string | null; supplier_invoice_id: string | null; amount: number | null; invoice: { invoice_number: string | null } | null } | null
     const mtId = ex?.manual_transaction_id ?? null
     const invoiceId = ex?.supplier_invoice_id ?? null
+    const invoiceNumber = ex?.invoice?.invoice_number ?? ''
 
     const { error } = await ctx.adminClient.from(TABLE).delete().eq('id', id)
     if (error) return failure(error.message || 'Error al eliminar pago')
@@ -341,7 +347,10 @@ export const deleteSupplierInvoicePayment = protectedAction<{ id: string }, void
       await rederiveDueDatesFifo(ctx.adminClient, invoiceId)
     }
 
-    return success(undefined)
+    return success({
+      auditEntityId: String(invoiceId ?? id),
+      auditDescription: `Pago eliminado de la factura ${invoiceNumber}`,
+    })
   },
 )
 
@@ -527,7 +536,7 @@ export const listSupplierVencimientos = protectedAction<
 
 export const markSupplierInvoiceDueDatePaid = protectedAction<
   { id: string; paid_at?: string; payment_method?: SupplierPaymentMethod | string; create_accounting_entry?: boolean },
-  { id: string; invoice_status: string; all_paid: boolean }
+  { id: string; invoice_status: string; all_paid: boolean; auditEntityId: string; auditDescription: string }
 >(
   {
     permission: PERMISSION,
@@ -627,6 +636,8 @@ export const markSupplierInvoiceDueDatePaid = protectedAction<
       id: input.id,
       invoice_status: invoiceStatus,
       all_paid: allPaid,
+      auditEntityId: String((cuota as any).supplier_invoice_id),
+      auditDescription: `Vencimiento pagado · factura ${(invoice as any)?.invoice_number ?? ''} · ${(invoice as any)?.supplier_name ?? ''}`,
     })
   },
 )

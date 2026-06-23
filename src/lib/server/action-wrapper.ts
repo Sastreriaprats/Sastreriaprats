@@ -6,6 +6,31 @@ import { failure } from '@/lib/errors'
 import { checkUserPermission, checkUserAnyPermission } from '@/actions/auth'
 import { serializeForServerAction } from '@/lib/server/serialize'
 
+/** Traducción de acción de auditoría a español (columna "Acción" / fallback). */
+const ACTION_ES: Record<string, string> = {
+  create: 'Crear', update: 'Editar', delete: 'Eliminar', payment: 'Pago',
+  state_change: 'Cambio estado', refund: 'Devolución', export: 'Exportar', import: 'Importar',
+}
+
+/** Traducción de entidad de auditoría a español (prefijo de descripción y fallback). */
+const ENTITY_ES: Record<string, string> = {
+  sale: 'Venta', sales: 'Venta', tailoring_order: 'Pedido', order: 'Pedido', orders: 'Pedido',
+  tailoring_order_line: 'Línea de pedido', client: 'Cliente', client_note: 'Nota de cliente',
+  client_measurements: 'Medidas', invoice: 'Factura', estimate: 'Presupuesto',
+  journal_entry: 'Asiento', stock: 'Stock', product: 'Producto', product_variant: 'Variante',
+  product_category: 'Categoría', appointment: 'Cita', cash_withdrawal: 'Arqueo',
+  cash_session: 'Sesión de caja', return: 'Devolución', fitting: 'Prueba', alteration: 'Arreglo',
+  fabric: 'Tejido', voucher: 'Vale', schedule_block: 'Bloqueo de agenda',
+  discount_code: 'Código de descuento', blog_post: 'Entrada de blog',
+  email_template: 'Plantilla de email', email_campaign: 'Campaña de email',
+  delivery_note: 'Albarán', supplier_delivery_note: 'Albarán de proveedor',
+  product_reservation: 'Reserva', product_reservation_line: 'Línea de reserva',
+  supplier: 'Proveedor', supplier_order: 'Pedido a proveedor',
+  supplier_invoice: 'Factura de proveedor', supplier_invoice_payment: 'Pago de factura de proveedor',
+  supplier_order_payment_schedule: 'Plazo de pedido a proveedor',
+  ap_supplier_invoice_due_date: 'Vencimiento de factura', migration: 'Migración',
+}
+
 export interface ActionContext {
   userId: string
   userEmail: string
@@ -95,19 +120,24 @@ export function protectedAction<TInput, TOutput>(
         // Descripción legible: la acción puede devolver auditDescription y audit_entity_display (no se envían al cliente)
         const auditDescription = data?.auditDescription ?? data?.audit_description
         const auditEntityDisplay = data?.auditEntityDisplay ?? data?.audit_entity_display
+        // Identificadores de negocio reconocidos automáticamente para la descripción.
+        // El orden no importa (normalmente solo uno existe); todos deben ser identificadores
+        // legibles de la entidad, no campos de cantidad.
         const fallbackDisplay = data?.name ?? data?.full_name ?? data?.order_number ?? data?.ticket_number
+          ?? data?.invoice_number ?? data?.estimate_number ?? data?.entry_number
+          ?? data?.reservation_number ?? data?.fitting_number ?? data?.alteration_number
+          ?? data?.variant_sku ?? data?.supplier_reference
+        const entityLabel = ENTITY_ES[options.auditEntity || options.auditModule || ''] ?? options.auditEntity
         const entityDisplay = typeof auditEntityDisplay === 'string'
           ? auditEntityDisplay
           : typeof fallbackDisplay === 'string'
-            ? `${options.auditEntity}: ${fallbackDisplay}`
+            ? `${entityLabel}: ${fallbackDisplay}`
             : undefined
         const description = typeof auditDescription === 'string'
           ? auditDescription
           : entityDisplay ?? (() => {
-              const actionEs: Record<string, string> = { create: 'Crear', update: 'Editar', delete: 'Eliminar', payment: 'Pago', state_change: 'Cambio estado', refund: 'Devolución', export: 'Exportar', import: 'Importar' }
-              const entityEs: Record<string, string> = { sale: 'Venta', tailoring_order: 'Pedido', order: 'Pedido', orders: 'Pedidos', client: 'Cliente', invoice: 'Factura', stock: 'Stock', client_measurements: 'Medidas', product_variant: 'Variante', product: 'Producto', appointment: 'Cita', cash_withdrawal: 'Arqueo', return: 'Devolución' }
               const e = options.auditEntity || options.auditModule || ''
-              return `${actionEs[options.auditAction] ?? options.auditAction} ${entityEs[e] ?? e}`
+              return `${ACTION_ES[options.auditAction] ?? options.auditAction} ${ENTITY_ES[e] ?? e}`
             })()
 
         // Datos antes/después provistos explícitamente por el handler para registrar diff detallado
@@ -156,7 +186,10 @@ export function protectedAction<TInput, TOutput>(
             auditMetadata: _10, audit_metadata: _11,
             ...rest
           } = data
-          result.data = rest as TOutput
+          // Si tras quitar los campos de auditoría no queda nada, devolvemos
+          // undefined para preservar el contrato de los handlers que antes
+          // hacían success(undefined) (ahora solo aportan auditDescription).
+          result.data = (Object.keys(rest).length > 0 ? rest : undefined) as TOutput
         }
       }
 

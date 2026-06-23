@@ -371,7 +371,7 @@ export const adjustFabricStock = protectedAction<
 
     const { data: row, error: fetchError } = await ctx.adminClient
       .from('fabrics')
-      .select('stock_meters')
+      .select('stock_meters, name, fabric_code')
       .eq('id', fabricId)
       .single()
     if (fetchError || !row) return failure('Tejido no encontrado', 'NOT_FOUND')
@@ -419,6 +419,11 @@ export const adjustFabricStock = protectedAction<
       console.error('[adjustFabricStock] failed to insert movement row:', movementError)
     }
 
-    return success({ stock_before: before, stock_after: after })
+    return success({
+      stock_before: before,
+      stock_after: after,
+      auditEntityId: String(fabricId),
+      auditDescription: `Ajuste de stock de tejido "${(row as any).name}" (${before}→${after})`,
+    } as unknown as { stock_before: number; stock_after: number })
   }
 )

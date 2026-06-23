@@ -101,7 +101,7 @@ export const updateTemplateContent = protectedAction<
      *  plantilla en `editable_fields`). Opcional: si no se pasa, no se toca. */
     editable_fields?: Record<string, string>
   },
-  { id: string }
+  { id: string; auditEntityId: string; auditDescription: string }
 >(
   {
     permission: 'emails.view',
@@ -139,11 +139,18 @@ export const updateTemplateContent = protectedAction<
       .eq('id', input.id)
 
     if (error) return failure(error.message)
-    return success({ id: input.id })
+    return success({
+      id: input.id,
+      auditEntityId: String(input.id),
+      auditDescription: `Plantilla de email "${name}"`,
+    })
   }
 )
 
-export const upsertEmailTemplate = protectedAction<Record<string, unknown>, { id: string }>(
+export const upsertEmailTemplate = protectedAction<
+  Record<string, unknown>,
+  { id: string; auditEntityId: string; auditDescription: string }
+>(
   {
     permission: 'emails.manage_templates_html',
     auditModule: 'emails',
@@ -153,13 +160,18 @@ export const upsertEmailTemplate = protectedAction<Record<string, unknown>, { id
   },
   async (ctx, input) => {
     const { id, ...data } = input
+    const tplName = (typeof data.name === 'string' ? data.name : '').trim()
     if (id) {
       const { error } = await ctx.adminClient
         .from('email_templates')
         .update({ ...data, updated_by: ctx.userId })
         .eq('id', id as string)
       if (error) return failure(error.message)
-      return success({ id: id as string })
+      return success({
+        id: id as string,
+        auditEntityId: String(id),
+        auditDescription: `Plantilla de email "${tplName}"`,
+      })
     } else {
       const { data: row, error } = await ctx.adminClient
         .from('email_templates')
@@ -167,7 +179,11 @@ export const upsertEmailTemplate = protectedAction<Record<string, unknown>, { id
         .select('id')
         .single()
       if (error) return failure(error.message)
-      return success({ id: row.id })
+      return success({
+        id: row.id,
+        auditEntityId: String(row.id),
+        auditDescription: `Plantilla de email "${tplName}"`,
+      })
     }
   }
 )
@@ -192,7 +208,10 @@ export const listCampaigns = protectedAction<void, Record<string, unknown>[]>(
  *  aparecer en el listado. Los email_logs y métricas asociadas se
  *  conservan (su FK no se toca). Idempotente: si ya está eliminada,
  *  no hace nada. */
-export const deleteCampaignAction = protectedAction<string, { deleted: true }>(
+export const deleteCampaignAction = protectedAction<
+  string,
+  { deleted: true; auditEntityId: string; auditDescription: string }
+>(
   {
     permission: 'emails.send',
     auditModule: 'emails',
@@ -202,13 +221,23 @@ export const deleteCampaignAction = protectedAction<string, { deleted: true }>(
   },
   async (ctx, campaignId) => {
     if (!campaignId?.trim()) return failure('ID de campaña requerido', 'VALIDATION')
+    const { data: existing } = await ctx.adminClient
+      .from('email_campaigns')
+      .select('name')
+      .eq('id', campaignId)
+      .single()
+    const campaignName = (existing?.name as string) || ''
     const { error } = await ctx.adminClient
       .from('email_campaigns')
       .update({ deleted_at: new Date().toISOString() })
       .eq('id', campaignId)
       .is('deleted_at', null)
     if (error) return failure(error.message)
-    return success({ deleted: true })
+    return success({
+      deleted: true,
+      auditEntityId: String(campaignId),
+      auditDescription: `Campaña "${campaignName}" eliminada`,
+    })
   }
 )
 
@@ -237,7 +266,7 @@ export const createCampaign = protectedAction<
      *  Se guarda en segment_filters.content sin pisar otros filters. */
     content?: Record<string, unknown>
   },
-  { id: string; recipients: number }
+  { id: string; recipients: number; auditEntityId: string; auditDescription: string }
 >(
   {
     permission: 'emails.send',
@@ -267,7 +296,12 @@ export const createCampaign = protectedAction<
     }).select('id').single()
 
     if (error) return failure(error.message)
-    return success({ id: data.id, recipients: recipientCount })
+    return success({
+      id: data.id,
+      recipients: recipientCount,
+      auditEntityId: String(data.id),
+      auditDescription: `Campaña "${input.name}" creada (${recipientCount} destinatarios)`,
+    })
   }
 )
 
@@ -281,7 +315,7 @@ export const updateEmailCampaign = protectedAction<
     /** Contenido estructurado. Si se pasa, sobreescribe segment_filters.content. */
     content?: Record<string, unknown>
   },
-  { id: string }
+  { id: string; auditEntityId: string; auditDescription: string }
 >(
   {
     permission: 'emails.send',
@@ -293,7 +327,7 @@ export const updateEmailCampaign = protectedAction<
   async (ctx, input) => {
     const { data: existing } = await ctx.adminClient
       .from('email_campaigns')
-      .select('id, status, segment_filters')
+      .select('id, name, status, segment_filters')
       .eq('id', input.id)
       .single()
 
@@ -323,11 +357,18 @@ export const updateEmailCampaign = protectedAction<
       .eq('id', input.id)
 
     if (error) return failure(error.message)
-    return success({ id: input.id })
+    return success({
+      id: input.id,
+      auditEntityId: String(input.id),
+      auditDescription: `Campaña "${(existing.name as string) || ''}"`,
+    })
   }
 )
 
-export const sendCampaign = protectedAction<string, { sent: number; total: number }>(
+export const sendCampaign = protectedAction<
+  string,
+  { sent: number; total: number; auditEntityId: string; auditDescription: string }
+>(
   {
     permission: 'emails.send',
     auditModule: 'emails',
@@ -521,7 +562,12 @@ export const sendCampaign = protectedAction<string, { sent: number; total: numbe
       status: 'sent', sent_count: sentCount, total_recipients: recipients.length,
     }).eq('id', campaignId)
 
-    return success({ sent: sentCount, total: recipients.length })
+    return success({
+      sent: sentCount,
+      total: recipients.length,
+      auditEntityId: String(campaignId),
+      auditDescription: `Campaña "${(campaign.name as string) || ''}" enviada (${sentCount}/${recipients.length})`,
+    })
   }
 )
 
@@ -768,7 +814,7 @@ export const previewCampaignEmail = protectedAction<
  */
 export const sendCampaignTestEmail = protectedAction<
   { campaignId: string },
-  { sentTo: string }
+  { sentTo: string; auditEntityId: string; auditDescription: string }
 >(
   {
     permission: 'emails.send',
@@ -842,7 +888,11 @@ export const sendCampaignTestEmail = protectedAction<
 
     try {
       await sendEmail({ to: adminEmail, subject, html })
-      return success({ sentTo: adminEmail })
+      return success({
+        sentTo: adminEmail,
+        auditEntityId: String(campaignId),
+        auditDescription: `Email de prueba de campaña "${(campaign.name as string) || ''}" a ${adminEmail}`,
+      })
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Error al enviar'
       return failure(msg)

@@ -61,9 +61,13 @@ export const addOrderLinePhoto = protectedAction<FormData, { path: string; photo
     }
 
     const { data: line, error: lineErr } = await ctx.adminClient
-      .from('tailoring_order_lines').select('id, photos').eq('id', lineId).maybeSingle()
+      .from('tailoring_order_lines')
+      .select('id, photos, tailoring_order:tailoring_orders(order_number)')
+      .eq('id', lineId).maybeSingle()
     if (lineErr) return failure(lineErr.message)
     if (!line) return failure('Línea de pedido no encontrada', 'NOT_FOUND')
+    const orderNumber =
+      (line as { tailoring_order?: { order_number?: string } | null }).tailoring_order?.order_number ?? lineId
     const current = readPhotos(line)
     if (current.length >= MAX_PHOTOS) return failure(`Máximo ${MAX_PHOTOS} fotos por prenda`, 'VALIDATION')
 
@@ -85,7 +89,12 @@ export const addOrderLinePhoto = protectedAction<FormData, { path: string; photo
       return failure(updErr.message)
     }
 
-    return success({ path, photos: next, auditEntityId: lineId } as { path: string; photos: string[] })
+    return success({
+      path,
+      photos: next,
+      auditEntityId: lineId,
+      auditDescription: `Foto añadida · pedido ${orderNumber}`,
+    } as { path: string; photos: string[] })
   }
 )
 
@@ -107,9 +116,13 @@ export const removeOrderLinePhoto = protectedAction<{ lineId: string; path: stri
     if (!lineId?.trim() || !path?.trim()) return failure('Parámetros no válidos', 'VALIDATION')
 
     const { data: line, error: lineErr } = await ctx.adminClient
-      .from('tailoring_order_lines').select('id, photos').eq('id', lineId).maybeSingle()
+      .from('tailoring_order_lines')
+      .select('id, photos, tailoring_order:tailoring_orders(order_number)')
+      .eq('id', lineId).maybeSingle()
     if (lineErr) return failure(lineErr.message)
     if (!line) return failure('Línea de pedido no encontrada', 'NOT_FOUND')
+    const orderNumber =
+      (line as { tailoring_order?: { order_number?: string } | null }).tailoring_order?.order_number ?? lineId
     const current = readPhotos(line)
     if (!current.includes(path)) return failure('La foto no pertenece a esta prenda', 'VALIDATION')
 
@@ -126,7 +139,11 @@ export const removeOrderLinePhoto = protectedAction<{ lineId: string; path: stri
       return failure(rmErr.message || 'No se pudo borrar la foto del almacenamiento')
     }
 
-    return success({ photos: next, auditEntityId: lineId } as { photos: string[] })
+    return success({
+      photos: next,
+      auditEntityId: lineId,
+      auditDescription: `Foto eliminada · pedido ${orderNumber}`,
+    } as { photos: string[] })
   }
 )
 

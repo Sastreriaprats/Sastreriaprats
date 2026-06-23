@@ -87,7 +87,11 @@ export const createScheduleBlock = protectedAction<{
       .single()
 
     if (error) return failure(error.message)
-    return success(data)
+    return success({
+      ...(data as Record<string, unknown>),
+      auditEntityId: String((data as { id: string }).id),
+      auditDescription: `Bloqueo de agenda "${input.title}" (${input.block_date})`,
+    })
   }
 )
 
@@ -100,13 +104,23 @@ export const deleteScheduleBlock = protectedAction<{ id: string }, unknown>(
     revalidate: ['/admin/calendario'],
   },
   async (ctx, { id }) => {
+    const { data: prev } = await ctx.adminClient
+      .from('schedule_blocks')
+      .select('title, block_date')
+      .eq('id', id)
+      .maybeSingle()
     const { error } = await ctx.adminClient
       .from('schedule_blocks')
       .update({ is_active: false })
       .eq('id', id)
 
     if (error) return failure(error.message)
-    return success({ deleted: true })
+    const title = (prev as { title?: string } | null)?.title ?? id
+    return success({
+      deleted: true,
+      auditEntityId: String(id),
+      auditDescription: `Bloqueo de agenda "${title}" eliminado`,
+    })
   }
 )
 

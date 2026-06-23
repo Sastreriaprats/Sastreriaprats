@@ -721,7 +721,7 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
   }
 )
 
-export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInput & { id: string }, void>(
+export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInput & { id: string }, { auditEntityId: string; auditDescription: string }>(
   {
     permission: PERMISSION,
     auditModule: 'accounting',
@@ -890,7 +890,10 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
       }
     }
 
-    return success(undefined)
+    return success({
+      auditEntityId: id,
+      auditDescription: `Factura ${rest.invoice_number.trim()} · ${supplierName}`,
+    })
   }
 )
 
@@ -920,7 +923,7 @@ export const listSupplierInvoiceInstallments = protectedAction<
 
 export const markSupplierInvoicePaidAction = protectedAction<
   { id: string; payment_date: string; payment_method?: string },
-  void
+  { auditEntityId: string; auditDescription: string }
 >(
   {
     permission: PERMISSION,
@@ -929,6 +932,12 @@ export const markSupplierInvoicePaidAction = protectedAction<
     auditEntity: 'supplier_invoice',
   },
   async (ctx, { id, payment_date, payment_method }) => {
+    const { data: inv } = await ctx.adminClient
+      .from(TABLE)
+      .select('invoice_number, supplier_name')
+      .eq('id', id)
+      .maybeSingle()
+
     const { error } = await ctx.adminClient
       .from(TABLE)
       .update({
@@ -952,14 +961,17 @@ export const markSupplierInvoicePaidAction = protectedAction<
       console.error('[markSupplierInvoicePaidAction] cuotas:', cuotasErr.message)
     }
 
-    return success(undefined)
+    return success({
+      auditEntityId: String(id),
+      auditDescription: `Factura ${(inv as any)?.invoice_number ?? ''} · ${(inv as any)?.supplier_name ?? ''} marcada como pagada`,
+    })
   }
 )
 
 /** Marca un plazo de pago de pedido a proveedor como pagado. */
 export const markSupplierOrderScheduleItemPaidAction = protectedAction<
   { id: string; payment_date: string; payment_method?: string },
-  void
+  { auditEntityId: string; auditDescription: string }
 >(
   {
     permission: PERMISSION,
@@ -968,6 +980,12 @@ export const markSupplierOrderScheduleItemPaidAction = protectedAction<
     auditEntity: 'supplier_order_payment_schedule',
   },
   async (ctx, { id, payment_date, payment_method }) => {
+    const { data: plazo } = await ctx.adminClient
+      .from('supplier_order_payment_schedule')
+      .select('id, supplier_orders!inner(order_number)')
+      .eq('id', id)
+      .maybeSingle()
+
     const { error } = await ctx.adminClient
       .from('supplier_order_payment_schedule')
       .update({
@@ -978,13 +996,17 @@ export const markSupplierOrderScheduleItemPaidAction = protectedAction<
       .eq('id', id)
 
     if (error) return failure(error.message)
-    return success(undefined)
+    const orderNumber = (plazo as any)?.supplier_orders?.order_number ?? ''
+    return success({
+      auditEntityId: String(id),
+      auditDescription: `Plazo pagado del pedido a proveedor ${orderNumber}`,
+    })
   }
 )
 
 export const importSupplierInvoicesCsvAction = protectedAction<
   { rows: Array<Record<string, string>> },
-  { created: number; errors: string[] }
+  { created: number; errors: string[]; auditEntityId: string; auditDescription: string }
 >(
   {
     permission: PERMISSION,
@@ -1042,7 +1064,12 @@ export const importSupplierInvoicesCsvAction = protectedAction<
       }
     }
 
-    return success({ created, errors })
+    return success({
+      created,
+      errors,
+      auditEntityId: 'import',
+      auditDescription: `Importadas ${created} facturas de proveedor`,
+    })
   }
 )
 
@@ -1133,7 +1160,7 @@ export const getSupplierInvoicesForCalendar = protectedAction<
  * `supplier_invoices.manage` (asignado al rol administrador).
  * Los vínculos con albaranes se borran en cascada por FK.
  */
-export const deleteSupplierInvoiceAction = protectedAction<{ id: string }, void>(
+export const deleteSupplierInvoiceAction = protectedAction<{ id: string }, { auditEntityId: string; auditDescription: string }>(
   {
     permission: PERMISSION,
     auditModule: 'accounting',
@@ -1145,7 +1172,7 @@ export const deleteSupplierInvoiceAction = protectedAction<{ id: string }, void>
 
     const { data: current } = await ctx.adminClient
       .from(TABLE)
-      .select('status')
+      .select('status, invoice_number, supplier_name')
       .eq('id', id)
       .maybeSingle()
     if ((current as { status?: string } | null)?.status === 'pagada') {
@@ -1158,6 +1185,15 @@ export const deleteSupplierInvoiceAction = protectedAction<{ id: string }, void>
       .eq('id', id)
 
     if (error) return failure(error.message || 'Error al eliminar la factura', 'INTERNAL')
-    return success(undefined)
+
+    const cur = current as { invoice_number?: string; supplier_name?: string } | null
+    const invoiceNumber = cur?.invoice_number?.trim() || ''
+    const supplierName = cur?.supplier_name?.trim() || ''
+    return success({
+      auditEntityId: id,
+      auditDescription: invoiceNumber
+        ? `Factura ${invoiceNumber}${supplierName ? ` · ${supplierName}` : ''} eliminada`
+        : 'Eliminar Factura de proveedor',
+    })
   }
 )

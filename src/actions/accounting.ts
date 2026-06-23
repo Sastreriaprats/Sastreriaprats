@@ -380,7 +380,7 @@ export const createManualJournalEntry = protectedAction<
 
 export const updateManualJournalEntry = protectedAction<
   { id: string; date: string; description: string; lines: JournalLineInput[] },
-  { success?: boolean; message?: string; error?: string }
+  { success?: boolean; message?: string; error?: string; auditEntityId: string; auditDescription: string }
 >(
   { permission: 'journal_entries.manage', auditModule: 'accounting', auditAction: 'update', auditEntity: 'journal_entry', revalidate: ['/admin/contabilidad'] },
   async (ctx, { id, date, description, lines }) => {
@@ -397,23 +397,37 @@ export const updateManualJournalEntry = protectedAction<
     })
     if (error) return failure(error.message)
     if (data && data.success === false) return failure(String(data.error || 'No se pudo actualizar el asiento'), 'CONFLICT')
-    return success(data)
+
+    const { data: entry } = await ctx.adminClient
+      .from('journal_entries')
+      .select('entry_number')
+      .eq('id', id)
+      .maybeSingle()
+    const entryNumber = (entry as { entry_number?: number } | null)?.entry_number
+    return success({ ...data, auditEntityId: String(id), auditDescription: `Asiento ${entryNumber ?? ''}`.trim() })
   }
 )
 
 export const deleteJournalEntry = protectedAction<
   { id: string },
-  { success?: boolean; message?: string; error?: string }
+  { success?: boolean; message?: string; error?: string; auditEntityId: string; auditDescription: string }
 >(
   { permission: 'journal_entries.manage', auditModule: 'accounting', auditAction: 'delete', auditEntity: 'journal_entry', revalidate: ['/admin/contabilidad'] },
   async (ctx, { id }) => {
     if (!id) return failure('Falta el identificador del asiento', 'VALIDATION')
     if (!(await userIsFullAdmin(ctx))) return failure('Solo un administrador puede anular asientos.', 'FORBIDDEN')
 
+    const { data: entry } = await ctx.adminClient
+      .from('journal_entries')
+      .select('entry_number')
+      .eq('id', id)
+      .maybeSingle()
+    const entryNumber = (entry as { entry_number?: number } | null)?.entry_number
+
     const { data, error } = await ctx.adminClient.rpc('rpc_delete_journal_entry', { p_id: id })
     if (error) return failure(error.message)
     if (data && data.success === false) return failure(String(data.error || 'No se pudo anular el asiento'), 'CONFLICT')
-    return success(data)
+    return success({ ...data, auditEntityId: String(id), auditDescription: `Asiento ${entryNumber ?? ''} eliminado`.replace('  ', ' ').trim() })
   }
 )
 
@@ -1422,7 +1436,7 @@ export const createInvoiceAction = protectedAction<CreateInvoiceInput, { id: str
 // ── Crear factura desde ticket/venta TPV ─────────────────────────────────────
 export const createInvoiceFromSaleAction = protectedAction<
   { saleId: string; draft?: boolean },
-  { id: string; invoice_number: string }
+  { id: string; invoice_number: string; auditEntityId: string; auditDescription: string }
 >(
   {
     permission: 'accounting.manage_invoices',
@@ -1448,9 +1462,12 @@ export const createInvoiceFromSaleAction = protectedAction<
       .maybeSingle()
 
     if (existing.data?.id) {
+      const num = (existing.data as { invoice_number: string }).invoice_number
       return success({
         id: existing.data.id as string,
-        invoice_number: (existing.data as { invoice_number: string }).invoice_number,
+        invoice_number: num,
+        auditEntityId: String(existing.data.id),
+        auditDescription: `Factura ${num}`,
       })
     }
 
@@ -1565,14 +1582,14 @@ export const createInvoiceFromSaleAction = protectedAction<
     if (!draft) {
       createInvoiceJournalEntry(inv.id as string).catch((e) => console.error('Journal entry from sale invoice:', e))
     }
-    return success({ id: inv.id as string, invoice_number })
+    return success({ id: inv.id as string, invoice_number, auditEntityId: String(inv.id), auditDescription: `Factura ${invoice_number}` })
   }
 )
 
 // ── Crear factura desde pedido de sastrería ─────────────────────────────────
 export const createInvoiceFromTailoringOrderAction = protectedAction<
   string,
-  { id: string; invoice_number: string }
+  { id: string; invoice_number: string; auditEntityId: string; auditDescription: string }
 >(
   {
     permission: 'accounting.manage_invoices',
@@ -1589,9 +1606,12 @@ export const createInvoiceFromTailoringOrderAction = protectedAction<
       .maybeSingle()
 
     if (existing.data?.id) {
+      const num = (existing.data as { invoice_number: string }).invoice_number
       return success({
         id: existing.data.id as string,
-        invoice_number: (existing.data as { invoice_number: string }).invoice_number,
+        invoice_number: num,
+        auditEntityId: String(existing.data.id),
+        auditDescription: `Factura ${num}`,
       })
     }
 
@@ -1747,24 +1767,25 @@ export const createInvoiceFromTailoringOrderAction = protectedAction<
     }
 
     createInvoiceJournalEntry(inv.id as string).catch((e) => console.error('Journal entry from tailoring order invoice:', e))
-    return success({ id: inv.id as string, invoice_number })
+    return success({ id: inv.id as string, invoice_number, auditEntityId: String(inv.id), auditDescription: `Factura ${invoice_number}` })
   }
 )
 
 // ── Editar factura borrador ───────────────────────────────────────────────────
 export type UpdateInvoiceInput = CreateInvoiceInput & { id: string; conceptOnly?: boolean }
 
-export const updateInvoiceAction = protectedAction<UpdateInvoiceInput, { id: string }>(
+export const updateInvoiceAction = protectedAction<UpdateInvoiceInput, { id: string; auditEntityId: string; auditDescription: string }>(
   { permission: 'accounting.manage_invoices', auditModule: 'accounting', auditAction: 'update', auditEntity: 'invoice' },
   async (ctx, input) => {
     const { data: existing } = await ctx.adminClient
       .from('invoices')
-      .select('status, verifactu_sent')
+      .select('status, verifactu_sent, invoice_number')
       .eq('id', input.id)
       .single()
     if (!existing) return failure('Factura no encontrada', 'NOT_FOUND')
     const status = (existing as { status: string }).status
     const verifactuSent = (existing as { verifactu_sent?: boolean }).verifactu_sent === true
+    const invoiceNumber = (existing as { invoice_number?: string }).invoice_number ?? ''
 
     // Verifactu lock: si ya está en Hacienda, no se puede tocar nada
     // (ni siquiera descripciones de líneas). Hay que emitir rectificativa.
@@ -1800,7 +1821,7 @@ export const updateInvoiceAction = protectedAction<UpdateInvoiceInput, { id: str
 
       // No tocamos pdf_url ni totales: generateInvoicePdf siempre lee
       // de invoice_lines en caliente y reescribe el archivo del Storage.
-      return success({ id: input.id })
+      return success({ id: input.id, auditEntityId: String(input.id), auditDescription: `Factura ${invoiceNumber}` })
     }
 
     // Estados editables completos (sin Verifactu): draft + ciclo de vida
@@ -1863,12 +1884,12 @@ export const updateInvoiceAction = protectedAction<UpdateInvoiceInput, { id: str
       )
       if (insertLinesError) return failure(insertLinesError.message)
     }
-    return success({ id: input.id })
+    return success({ id: input.id, auditEntityId: String(input.id), auditDescription: `Factura ${invoiceNumber}` })
   }
 )
 
 // ── Emitir factura (draft → issued) y crear asiento ──────────────────────────
-export const issueInvoiceAction = protectedAction<string, { id: string }>(
+export const issueInvoiceAction = protectedAction<string, { id: string; auditEntityId: string; auditDescription: string }>(
   { permission: 'accounting.manage_invoices', auditModule: 'accounting', auditAction: 'state_change', auditEntity: 'invoice' },
   async (ctx, invoiceId) => {
     const { error } = await ctx.adminClient.from('invoices').update({
@@ -1877,7 +1898,14 @@ export const issueInvoiceAction = protectedAction<string, { id: string }>(
       sent_at: new Date().toISOString(),
     }).eq('id', invoiceId)
     if (error) return failure(error.message)
-    return success({ id: invoiceId })
+
+    const { data: inv } = await ctx.adminClient
+      .from('invoices')
+      .select('invoice_number')
+      .eq('id', invoiceId)
+      .maybeSingle()
+    const invoiceNumber = (inv as { invoice_number?: string } | null)?.invoice_number ?? ''
+    return success({ id: invoiceId, auditEntityId: String(invoiceId), auditDescription: `Factura ${invoiceNumber} emitida` })
   }
 )
 
@@ -2086,12 +2114,19 @@ export const getInvoiceLinesAction = protectedAction<string, { lines: { descript
 )
 
 // ── Editar descripción de asiento ─────────────────────────────────────────────
-export const updateJournalEntryDescriptionAction = protectedAction<{ id: string; description: string }, void>(
+export const updateJournalEntryDescriptionAction = protectedAction<{ id: string; description: string }, { auditEntityId: string; auditDescription: string }>(
   { permission: 'accounting.manage_invoices', auditModule: 'accounting', auditAction: 'update', auditEntity: 'journal_entry' },
   async (ctx, { id, description }) => {
     const { error } = await ctx.adminClient.from('journal_entries').update({ description }).eq('id', id)
     if (error) return failure(error.message)
-    return success(undefined)
+
+    const { data: entry } = await ctx.adminClient
+      .from('journal_entries')
+      .select('entry_number')
+      .eq('id', id)
+      .maybeSingle()
+    const entryNumber = (entry as { entry_number?: number } | null)?.entry_number
+    return success({ auditEntityId: String(id), auditDescription: `Asiento ${entryNumber ?? ''}`.trim() })
   }
 )
 
@@ -2118,7 +2153,7 @@ export type CreateEstimateInput = {
   }[]
 }
 
-export const createEstimateAction = protectedAction<CreateEstimateInput, { id: string; estimate_number: string }>(
+export const createEstimateAction = protectedAction<CreateEstimateInput, { id: string; estimate_number: string; auditEntityId: string; auditDescription: string }>(
   {
     permission: 'accounting.edit',
     auditModule: 'accounting',
@@ -2180,13 +2215,13 @@ export const createEstimateAction = protectedAction<CreateEstimateInput, { id: s
       return failure(linesError.message ?? 'Error al crear las líneas del presupuesto')
     }
 
-    return success({ id: est.id as string, estimate_number })
+    return success({ id: est.id as string, estimate_number, auditEntityId: String(est.id), auditDescription: `Presupuesto ${estimate_number}` })
   }
 )
 
 export const updateEstimateAction = protectedAction<
   { estimateId: string; client_email?: string | null },
-  undefined
+  { auditEntityId: string; auditDescription: string }
 >(
   {
     permission: 'accounting.edit',
@@ -2196,7 +2231,7 @@ export const updateEstimateAction = protectedAction<
     revalidate: ['/admin/contabilidad'],
   },
   async (ctx, { estimateId, client_email }) => {
-    const { data: est } = await ctx.adminClient.from('estimates').select('id').eq('id', estimateId).single()
+    const { data: est } = await ctx.adminClient.from('estimates').select('id, estimate_number').eq('id', estimateId).single()
     if (!est) return failure('Presupuesto no encontrado')
 
     const { error } = await ctx.adminClient
@@ -2204,7 +2239,7 @@ export const updateEstimateAction = protectedAction<
       .update({ client_email: client_email?.trim() || null })
       .eq('id', estimateId)
     if (error) return failure(error.message)
-    return success(undefined)
+    return success({ auditEntityId: String(estimateId), auditDescription: `Presupuesto ${(est as { estimate_number?: string }).estimate_number ?? ''}`.trim() })
   }
 )
 
@@ -2280,7 +2315,7 @@ export const getEstimateDetail = protectedAction<{ estimateId: string }, Estimat
 
 export type UpdateEstimateFullInput = CreateEstimateInput & { estimateId: string }
 
-export const updateEstimateFullAction = protectedAction<UpdateEstimateFullInput, { id: string }>(
+export const updateEstimateFullAction = protectedAction<UpdateEstimateFullInput, { id: string; auditEntityId: string; auditDescription: string }>(
   {
     permission: 'accounting.edit',
     auditModule: 'accounting',
@@ -2291,7 +2326,7 @@ export const updateEstimateFullAction = protectedAction<UpdateEstimateFullInput,
   async (ctx, input) => {
     const { data: est } = await ctx.adminClient
       .from('estimates')
-      .select('id, status')
+      .select('id, status, estimate_number')
       .eq('id', input.estimateId)
       .single()
     if (!est) return failure('Presupuesto no encontrado')
@@ -2342,13 +2377,13 @@ export const updateEstimateFullAction = protectedAction<UpdateEstimateFullInput,
     )
     if (insErr) return failure(insErr.message)
 
-    return success({ id: input.estimateId })
+    return success({ id: input.estimateId, auditEntityId: String(input.estimateId), auditDescription: `Presupuesto ${(est as { estimate_number?: string }).estimate_number ?? ''}`.trim() })
   }
 )
 
 // ── Presupuesto: enviar, aceptar, rechazar, convertir a factura ─────────────────
 
-export const sendEstimateAction = protectedAction<{ estimateId: string }, undefined>(
+export const sendEstimateAction = protectedAction<{ estimateId: string }, { auditEntityId: string; auditDescription: string }>(
   {
     permission: 'accounting.edit',
     auditModule: 'accounting',
@@ -2405,11 +2440,11 @@ export const sendEstimateAction = protectedAction<{ estimateId: string }, undefi
 
     const { error } = await ctx.adminClient.from('estimates').update({ status: 'sent' }).eq('id', estimateId)
     if (error) return failure(error.message)
-    return success(undefined)
+    return success({ auditEntityId: String(estimateId), auditDescription: `Presupuesto ${String((est as { estimate_number?: string }).estimate_number ?? '')} enviado`.replace('  ', ' ').trim() })
   }
 )
 
-export const acceptEstimateAction = protectedAction<{ estimateId: string }, undefined>(
+export const acceptEstimateAction = protectedAction<{ estimateId: string }, { auditEntityId: string; auditDescription: string }>(
   {
     permission: 'accounting.edit',
     auditModule: 'accounting',
@@ -2424,11 +2459,11 @@ export const acceptEstimateAction = protectedAction<{ estimateId: string }, unde
 
     const { error } = await ctx.adminClient.from('estimates').update({ status: 'accepted' }).eq('id', estimateId)
     if (error) return failure(error.message)
-    return success(undefined)
+    return success({ auditEntityId: String(estimateId), auditDescription: `Presupuesto ${String((est as { estimate_number?: string }).estimate_number ?? '')} aceptado`.replace('  ', ' ').trim() })
   }
 )
 
-export const rejectEstimateAction = protectedAction<{ estimateId: string; reason?: string }, undefined>(
+export const rejectEstimateAction = protectedAction<{ estimateId: string; reason?: string }, { auditEntityId: string; auditDescription: string }>(
   {
     permission: 'accounting.edit',
     auditModule: 'accounting',
@@ -2450,11 +2485,11 @@ export const rejectEstimateAction = protectedAction<{ estimateId: string; reason
       notes: newNotes ?? null,
     }).eq('id', estimateId)
     if (error) return failure(error.message)
-    return success(undefined)
+    return success({ auditEntityId: String(estimateId), auditDescription: `Presupuesto ${String((est as { estimate_number?: string }).estimate_number ?? '')} rechazado`.replace('  ', ' ').trim() })
   }
 )
 
-export const convertEstimateToInvoiceAction = protectedAction<{ estimateId: string }, { invoiceId: string; invoice_number: string }>(
+export const convertEstimateToInvoiceAction = protectedAction<{ estimateId: string }, { invoiceId: string; invoice_number: string; auditEntityId: string; auditDescription: string }>(
   {
     permission: 'accounting.edit',
     auditModule: 'accounting',
@@ -2525,7 +2560,12 @@ export const convertEstimateToInvoiceAction = protectedAction<{ estimateId: stri
     }).eq('id', estimateId)
 
     createInvoiceJournalEntry(inv.id).catch(() => {})
-    return success({ invoiceId: inv.id as string, invoice_number })
+    return success({
+      invoiceId: inv.id as string,
+      invoice_number,
+      auditEntityId: String(inv.id),
+      auditDescription: `Factura ${invoice_number} (desde presupuesto ${String((est as { estimate_number?: string }).estimate_number ?? '')})`.replace(' )', ')'),
+    })
   }
 )
 

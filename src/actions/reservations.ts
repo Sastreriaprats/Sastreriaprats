@@ -160,6 +160,8 @@ type CreateReservationResult = {
     line_total: number
     status: string
   }>
+  auditEntityId: string
+  auditDescription: string
 }
 
 export const createReservation = protectedAction<CreateReservationInput, CreateReservationResult>(
@@ -221,6 +223,8 @@ export const createReservation = protectedAction<CreateReservationInput, CreateR
         unit_price: Number(l.unit_price),
         line_total: Number(l.line_total),
       })),
+      auditEntityId: String(result.id),
+      auditDescription: `Reserva ${result.reservation_number}`,
     })
   }
 )
@@ -234,6 +238,8 @@ type AddReservationPaymentResult = {
   total_paid: number
   payment_status: 'pending' | 'partial' | 'paid'
   created_at: string
+  auditEntityId: string
+  auditDescription: string
 }
 
 export const addReservationPayment = protectedAction<
@@ -266,15 +272,18 @@ export const addReservationPayment = protectedAction<
     const result = data as AddReservationPaymentResult | null
     if (!result?.id) return failure('Respuesta inválida del servidor', 'INTERNAL')
 
+    const amount = Number(result.amount)
     return success({
       ...result,
-      amount: Number(result.amount),
+      amount,
       total_paid: Number(result.total_paid),
+      auditEntityId: String(result.reservation_id),
+      auditDescription: `Pago de reserva ${result.reservation_number} (${amount} €)`,
     })
   }
 )
 
-export const updateReservation = protectedAction<UpdateReservationInput, { id: string }>(
+export const updateReservation = protectedAction<UpdateReservationInput, { id: string; auditEntityId: string; auditDescription: string }>(
   {
     permission: 'reservations.edit',
     auditModule: 'reservations',
@@ -290,17 +299,24 @@ export const updateReservation = protectedAction<UpdateReservationInput, { id: s
     if (input.reason !== undefined) updates.reason = input.reason
     if (input.expires_at !== undefined) updates.expires_at = input.expires_at
 
-    const { error } = await ctx.adminClient
+    const { data, error } = await ctx.adminClient
       .from('product_reservations')
       .update(updates)
       .eq('id', input.id)
+      .select('reservation_number')
+      .maybeSingle()
 
     if (error) return failure(error.message || 'Error al actualizar reserva', 'INTERNAL')
-    return success({ id: input.id })
+    const reservation_number = (data as { reservation_number: string } | null)?.reservation_number ?? ''
+    return success({
+      id: input.id,
+      auditEntityId: String(input.id),
+      auditDescription: `Reserva ${reservation_number}`,
+    })
   }
 )
 
-export const cancelReservation = protectedAction<CancelReservationInput, { id: string; status: string }>(
+export const cancelReservation = protectedAction<CancelReservationInput, { id: string; status: string; auditEntityId: string; auditDescription: string }>(
   {
     permission: 'reservations.delete',
     auditModule: 'reservations',
@@ -311,6 +327,13 @@ export const cancelReservation = protectedAction<CancelReservationInput, { id: s
   async (ctx, rawInput) => {
     const input = cancelReservationSchema.parse(rawInput)
 
+    const { data: existing } = await ctx.adminClient
+      .from('product_reservations')
+      .select('reservation_number')
+      .eq('id', input.id)
+      .maybeSingle()
+    const reservation_number = (existing as { reservation_number: string } | null)?.reservation_number ?? ''
+
     const { data, error } = await ctx.adminClient.rpc('rpc_cancel_reservation', {
       p_reservation_id: input.id,
       p_reason: input.reason ?? null,
@@ -320,11 +343,15 @@ export const cancelReservation = protectedAction<CancelReservationInput, { id: s
     if (error) return failure(error.message || 'Error al cancelar reserva', 'INTERNAL')
     const result = data as { id: string; status: string } | null
     if (!result?.id) return failure('Respuesta inválida del servidor', 'INTERNAL')
-    return success(result)
+    return success({
+      ...result,
+      auditEntityId: String(result.id),
+      auditDescription: `Reserva ${reservation_number} cancelada`,
+    })
   }
 )
 
-export const cancelReservationLine = protectedAction<CancelReservationLineInput, { id: string; status: string }>(
+export const cancelReservationLine = protectedAction<CancelReservationLineInput, { id: string; status: string; auditEntityId: string; auditDescription: string }>(
   {
     permission: 'reservations.delete',
     auditModule: 'reservations',
@@ -335,6 +362,14 @@ export const cancelReservationLine = protectedAction<CancelReservationLineInput,
   async (ctx, rawInput) => {
     const input = cancelReservationLineSchema.parse(rawInput)
 
+    const { data: lineRow } = await ctx.adminClient
+      .from('product_reservation_lines')
+      .select('reservation:product_reservations ( reservation_number )')
+      .eq('id', input.line_id)
+      .maybeSingle()
+    const reservation_number =
+      (lineRow as { reservation: { reservation_number: string } | null } | null)?.reservation?.reservation_number ?? ''
+
     const { data, error } = await ctx.adminClient.rpc('rpc_cancel_reservation_line', {
       p_line_id: input.line_id,
       p_reason: input.reason ?? null,
@@ -344,11 +379,15 @@ export const cancelReservationLine = protectedAction<CancelReservationLineInput,
     if (error) return failure(error.message || 'Error al cancelar línea', 'INTERNAL')
     const result = data as { id: string; status: string } | null
     if (!result?.id) return failure('Respuesta inválida del servidor', 'INTERNAL')
-    return success(result)
+    return success({
+      ...result,
+      auditEntityId: String(result.id),
+      auditDescription: `Línea de reserva ${reservation_number} cancelada`,
+    })
   }
 )
 
-export const fulfillReservationLine = protectedAction<FulfillReservationLineInput, { id: string; status: string }>(
+export const fulfillReservationLine = protectedAction<FulfillReservationLineInput, { id: string; status: string; auditEntityId: string; auditDescription: string }>(
   {
     permission: 'reservations.edit',
     auditModule: 'reservations',
@@ -359,6 +398,14 @@ export const fulfillReservationLine = protectedAction<FulfillReservationLineInpu
   async (ctx, rawInput) => {
     const input = fulfillReservationLineSchema.parse(rawInput)
 
+    const { data: lineRow } = await ctx.adminClient
+      .from('product_reservation_lines')
+      .select('reservation:product_reservations ( reservation_number )')
+      .eq('id', input.line_id)
+      .maybeSingle()
+    const reservation_number =
+      (lineRow as { reservation: { reservation_number: string } | null } | null)?.reservation?.reservation_number ?? ''
+
     const { data, error } = await ctx.adminClient.rpc('rpc_fulfill_reservation_line', {
       p_line_id: input.line_id,
       p_sale_id: input.sale_id ?? null,
@@ -368,7 +415,11 @@ export const fulfillReservationLine = protectedAction<FulfillReservationLineInpu
     if (error) return failure(error.message || 'Error al cumplir línea', 'INTERNAL')
     const result = data as { id: string; status: string } | null
     if (!result?.id) return failure('Respuesta inválida del servidor', 'INTERNAL')
-    return success(result)
+    return success({
+      ...result,
+      auditEntityId: String(result.id),
+      auditDescription: `Línea de reserva ${reservation_number} entregada`,
+    })
   }
 )
 

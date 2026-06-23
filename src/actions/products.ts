@@ -676,7 +676,11 @@ export const createVariantAction = protectedAction<any, any>(
       }
     }
 
-    return success(variant)
+    return success({
+      ...(variant as Record<string, unknown>),
+      auditEntityId: String((variant as any)?.id),
+      auditDescription: `Variante ${(variant as any)?.variant_sku}`,
+    })
   }
 )
 
@@ -717,7 +721,7 @@ export const updateVariantAction = protectedAction<any, any>(
   }
 )
 
-export const deleteVariantAction = protectedAction<string, void>(
+export const deleteVariantAction = protectedAction<string, { auditEntityId: string; auditDescription: string }>(
   {
     permission: 'products.delete',
     auditModule: 'stock',
@@ -748,7 +752,10 @@ export const deleteVariantAction = protectedAction<string, void>(
       return failure(error.message)
     }
 
-    return success(undefined)
+    return success({
+      auditEntityId: String(variant.id),
+      auditDescription: `Variante ${variant.variant_sku} eliminada`,
+    })
   }
 )
 
@@ -868,7 +875,7 @@ async function userIsFullAdminStock(ctx: { adminClient: AdminClient; userId: str
 
 export const reverseStockMovement = protectedAction<
   { movementId: string },
-  { success?: boolean; message?: string; reversal_movement_id?: string; new_stock?: number; error?: string }
+  { success?: boolean; message?: string; reversal_movement_id?: string; new_stock?: number; error?: string; auditEntityId?: string; auditDescription?: string }
 >(
   {
     permission: 'stock_movements.reverse',
@@ -881,12 +888,26 @@ export const reverseStockMovement = protectedAction<
     if (!movementId) return failure('Falta el identificador del movimiento', 'VALIDATION')
     if (!(await userIsFullAdminStock(ctx))) return failure('Solo un administrador puede revertir movimientos de stock.', 'FORBIDDEN')
 
+    // Resolver producto/variante del movimiento para una descripción legible de auditoría.
+    const { data: mov } = await ctx.adminClient
+      .from('stock_movements')
+      .select('product_variant_id, product_variants(variant_sku, products(name, sku))')
+      .eq('id', movementId)
+      .single()
+    const movVariant = (mov as any)?.product_variants
+    const movProduct = movVariant?.products
+    const movLabel = movVariant?.variant_sku || movProduct?.name || movProduct?.sku || movementId
+
     const { data, error } = await ctx.adminClient.rpc('rpc_reverse_stock_movement', {
       p_movement_id: movementId, p_user_id: ctx.userId,
     })
     if (error) return failure(error.message)
     if (data && data.success === false) return failure(String(data.error || 'No se pudo revertir el movimiento'), 'CONFLICT')
-    return success(data)
+    return success({
+      ...(data as Record<string, unknown>),
+      auditEntityId: String(movementId),
+      auditDescription: `Reverso de movimiento de stock · ${movLabel}`,
+    })
   }
 )
 
@@ -2121,7 +2142,7 @@ export const listStockByWarehouse = protectedAction<{ warehouseId?: string; sear
 // ─── Códigos de barras EAN-13 ─────────────────────────────────────────────────
 
 /** Genera EAN-13 para todas las variantes que no tienen barcode (cada talla tiene su propio código). */
-export const generateBarcodesForAllVariants = protectedAction<void, { generated: number; errors: string[] }>(
+export const generateBarcodesForAllVariants = protectedAction<void, { generated: number; errors: string[]; auditDescription: string }>(
   { permission: 'products.edit', auditModule: 'stock', auditAction: 'update', auditEntity: 'product' },
   async (ctx) => {
     const { data: activeProductIds } = await ctx.adminClient
@@ -2129,7 +2150,7 @@ export const generateBarcodesForAllVariants = protectedAction<void, { generated:
       .select('id')
       .eq('is_active', true)
     const ids = (activeProductIds ?? []).map((p: { id: string }) => p.id)
-    if (!ids.length) return success({ generated: 0, errors: [] })
+    if (!ids.length) return success({ generated: 0, errors: [], auditDescription: 'Generados 0 códigos de barras de variantes' })
 
     // Paginar — Supabase limita a 1000 filas por query. Obtener TODAS las variantes sin barcode en chunks por lotes de product_ids.
     const variants: any[] = []
@@ -2154,7 +2175,7 @@ export const generateBarcodesForAllVariants = protectedAction<void, { generated:
       }
     }
 
-    if (!variants.length) return success({ generated: 0, errors: [] })
+    if (!variants.length) return success({ generated: 0, errors: [], auditDescription: 'Generados 0 códigos de barras de variantes' })
 
     const used = new Set<string>()
     const errors: string[] = []
@@ -2185,12 +2206,12 @@ export const generateBarcodesForAllVariants = protectedAction<void, { generated:
       else generated++
     }
 
-    return success({ generated, errors })
+    return success({ generated, errors, auditDescription: `Generados ${generated} códigos de barras de variantes` })
   }
 )
 
 /** Genera EAN-13 para todos los productos que no tienen barcode. @deprecated Use generateBarcodesForAllVariants */
-export const generateBarcodesForAllProducts = protectedAction<void, { generated: number; errors: string[] }>(
+export const generateBarcodesForAllProducts = protectedAction<void, { generated: number; errors: string[]; auditDescription: string }>(
   { permission: 'products.edit', auditModule: 'stock', auditAction: 'update', auditEntity: 'product' },
   async (ctx) => {
     const { data: products } = await ctx.adminClient
@@ -2199,7 +2220,7 @@ export const generateBarcodesForAllProducts = protectedAction<void, { generated:
       .or('barcode.is.null,barcode.eq.')
       .eq('is_active', true)
 
-    if (!products?.length) return success({ generated: 0, errors: [] })
+    if (!products?.length) return success({ generated: 0, errors: [], auditDescription: 'Generados 0 códigos de barras de productos' })
 
     const used = new Set<string>()
     const errors: string[] = []
@@ -2228,7 +2249,7 @@ export const generateBarcodesForAllProducts = protectedAction<void, { generated:
       else generated++
     }
 
-    return success({ generated, errors })
+    return success({ generated, errors, auditDescription: `Generados ${generated} códigos de barras de productos` })
   }
 )
 
@@ -2344,7 +2365,7 @@ export const getProductByBarcode = protectedAction<
 /** Genera un EAN-13 único para cada variante activa del producto (un código distinto por talla). */
 export const generateBarcodeForProduct = protectedAction<
   { productId: string },
-  { variantsUpdated: number; firstBarcode: string | null }
+  { variantsUpdated: number; firstBarcode: string | null; auditEntityId: string; auditDescription: string }
 >(
   {
     permission: 'products.edit',
@@ -2355,6 +2376,13 @@ export const generateBarcodeForProduct = protectedAction<
   },
   async (ctx, { productId }) => {
     if (!productId) return failure('productId requerido', 'VALIDATION')
+
+    const { data: prod } = await ctx.adminClient
+      .from('products')
+      .select('name, sku')
+      .eq('id', productId)
+      .single()
+    const prodLabel = (prod as any)?.name ?? (prod as any)?.sku ?? productId
 
     const { data: variants, error: vErr } = await ctx.adminClient
       .from('product_variants')
@@ -2400,7 +2428,12 @@ export const generateBarcodeForProduct = protectedAction<
       .eq('id', productId)
     if (pErr) return failure(pErr.message)
 
-    return success({ variantsUpdated: assignments.length, firstBarcode })
+    return success({
+      variantsUpdated: assignments.length,
+      firstBarcode,
+      auditEntityId: String(productId),
+      auditDescription: `Código de barras generado · ${prodLabel}`,
+    })
   }
 )
 
@@ -2425,7 +2458,11 @@ export const updateVariantBarcode = protectedAction<{ variantId: string; barcode
       .single()
 
     if (error) return failure(error.message)
-    return success(data)
+    return success({
+      ...(data as Record<string, unknown>),
+      auditEntityId: String((data as any)?.id ?? variantId),
+      auditDescription: `Código de barras de variante ${(data as any)?.variant_sku}`,
+    })
   }
 )
 
@@ -2460,7 +2497,7 @@ export const updateProductBarcode = protectedAction<{ productId: string; barcode
 /** Importa códigos de barras por SKU (desde archivo externo). */
 export const importProductBarcodes = protectedAction<
   { data: { sku: string; barcode: string }[] },
-  { updated: number; errors: string[] }
+  { updated: number; errors: string[]; auditDescription: string }
 >(
   {
     permission: 'products.edit',
@@ -2501,7 +2538,7 @@ export const importProductBarcodes = protectedAction<
       else updated++
     }
 
-    return success({ updated, errors })
+    return success({ updated, errors, auditDescription: `Importados ${updated} códigos de barras` })
   }
 )
 

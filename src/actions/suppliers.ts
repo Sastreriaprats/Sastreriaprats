@@ -817,7 +817,7 @@ export type ReceiveSupplierOrderLineInput = {
 
 export const receiveSupplierOrderLines = protectedAction<
   { orderId: string; lines: ReceiveSupplierOrderLineInput[]; warehouseId?: string | null },
-  { status: string; stock_warnings?: number }
+  { status: string; stock_warnings?: number; auditEntityId: string; auditDescription: string }
 >(
   {
     permission: 'suppliers.create_order',
@@ -999,7 +999,12 @@ export const receiveSupplierOrderLines = protectedAction<
 
     if (allFullyReceived) createPurchaseJournalEntry(orderId).catch(() => {})
 
-    return success({ status: newStatus, stock_warnings: stockWarnings })
+    return success({
+      status: newStatus,
+      stock_warnings: stockWarnings,
+      auditEntityId: String(orderId),
+      auditDescription: `Recepción del pedido a proveedor ${(order as any).order_number ?? ''}`,
+    })
   }
 )
 
@@ -1026,7 +1031,7 @@ export type EditSupplierOrderLineInput = {
  */
 export const updateSupplierOrderLinesAction = protectedAction<
   { orderId: string; lines: EditSupplierOrderLineInput[]; deletedLineIds?: string[] },
-  { status: string; total: number; stock_warnings?: number }
+  { status: string; total: number; stock_warnings?: number; auditEntityId: string; auditDescription: string }
 >(
   {
     permission: 'suppliers.create_order',
@@ -1307,13 +1312,19 @@ export const updateSupplierOrderLinesAction = protectedAction<
     // recibido, no se toca contabilidad: revisar la factura del proveedor a mano.
     if (becameReceived) createPurchaseJournalEntry(orderId).catch(() => {})
 
-    return success({ status: newStatus, total, stock_warnings: stockWarnings })
+    return success({
+      status: newStatus,
+      total,
+      stock_warnings: stockWarnings,
+      auditEntityId: String(orderId),
+      auditDescription: `Líneas del pedido a proveedor ${orderNumber ?? ''}`,
+    })
   }
 )
 
 export const updateSupplierOrderFinanceAction = protectedAction<
   { supplierOrderId: string; total: number; payment_due_date?: string | null; notes?: string | null; alert_on_payment?: boolean },
-  { id: string }
+  { id: string; auditEntityId: string; auditDescription: string }
 >(
   {
     permission: 'suppliers.create_order',
@@ -1350,7 +1361,11 @@ export const updateSupplierOrderFinanceAction = protectedAction<
     // La gestión de facturas es manual desde /admin/contabilidad/facturas-proveedores.
     void alert_on_payment
 
-    return success({ id: order.id })
+    return success({
+      id: order.id,
+      auditEntityId: String(order.id),
+      auditDescription: `Datos económicos del pedido a proveedor ${(order as any).order_number ?? ''}`,
+    })
   }
 )
 
@@ -1659,7 +1674,7 @@ export const getSupplierOrderDetail = protectedAction<
 /** Marca la factura de un pedido como pagada. */
 export const markSupplierInvoicePaid = protectedAction<
   { orderId: string },
-  { ok: boolean }
+  { ok: boolean; auditEntityId: string; auditDescription: string }
 >(
   {
     permission: 'suppliers.create_order',
@@ -1672,15 +1687,24 @@ export const markSupplierInvoicePaid = protectedAction<
     if (!orderId?.trim()) return failure('ID de pedido obligatorio', 'VALIDATION')
     const { data: inv } = await ctx.adminClient
       .from('ap_supplier_invoices')
-      .select('id')
+      .select('id, invoice_number')
       .eq('supplier_order_id', orderId)
       .maybeSingle()
     if (!inv?.id) return failure('No hay factura asociada a este pedido', 'NOT_FOUND')
+    const { data: ord } = await ctx.adminClient
+      .from('supplier_orders')
+      .select('order_number')
+      .eq('id', orderId)
+      .maybeSingle()
     const { error } = await ctx.adminClient
       .from('ap_supplier_invoices')
       .update({ status: 'pagada', payment_date: new Date().toISOString().slice(0, 10) })
       .eq('id', inv.id)
     if (error) return failure(error.message)
-    return success({ ok: true })
+    return success({
+      ok: true,
+      auditEntityId: String(orderId),
+      auditDescription: `Pedido a proveedor ${(ord as any)?.order_number ?? ''} marcado como facturado`,
+    })
   }
 )

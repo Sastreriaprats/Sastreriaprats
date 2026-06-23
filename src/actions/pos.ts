@@ -908,11 +908,14 @@ export const createReturn = protectedAction<{
     ])
 
     const originalClientName = (originalSale as any)?.clients?.full_name ?? null
+    const originalTicketNumber = (originalSale as any)?.ticket_number ?? null
 
     return success({
       ...result,
+      auditEntityId: String(result.return_id),
+      auditDescription: `Devolución del ticket ${originalTicketNumber ?? '—'}${originalClientName ? ' · ' + originalClientName : ''}`,
       voucher_code: result.voucher_code ?? null,
-      original_ticket_number: (originalSale as any)?.ticket_number ?? null,
+      original_ticket_number: originalTicketNumber,
       original_client_name: originalClientName,
       return_created_at: returnRow?.created_at ?? new Date().toISOString(),
       return_type: input.return_type,
@@ -1395,11 +1398,15 @@ export const getVouchersSummaryByClient = protectedAction<{
 // tiene factura, sincroniza el snapshot de cliente (atómico vía RPC).
 export const updateSaleClientNotes = protectedAction<
   { saleId: string; clientId?: string | null; notes?: string | null },
-  { success?: boolean; client_changed?: boolean; invoice_updated?: boolean; error?: string }
+  { auditEntityId: string; auditDescription: string }
 >(
   { permission: 'sales.edit', auditModule: 'pos', auditAction: 'update', auditEntity: 'sale', revalidate: ['/admin/tickets'] },
   async (ctx, { saleId, clientId, notes }) => {
     if (!saleId) return failure('Falta el identificador de la venta', 'VALIDATION')
+
+    const { data: saleRow } = await ctx.adminClient
+      .from('sales').select('ticket_number').eq('id', saleId).maybeSingle()
+    const ticketNumber = (saleRow as { ticket_number?: string } | null)?.ticket_number ?? saleId
 
     // Snapshot del cliente para la factura (consistente con createInvoiceFromSale).
     let snapshot: Record<string, string | null> | null = null
@@ -1431,7 +1438,10 @@ export const updateSaleClientNotes = protectedAction<
     if (data && data.success === false) {
       return failure(String(data.error || 'No se pudo actualizar la venta'), 'CONFLICT')
     }
-    return success(data)
+    return success({
+      auditEntityId: String(saleId),
+      auditDescription: `Notas de la venta ${ticketNumber}`,
+    })
   }
 )
 
@@ -1439,12 +1449,16 @@ export const updateSaleClientNotes = protectedAction<
 // Redistribuye los importes entre métodos sin cambiar el total. Gated sales.edit.
 export const updateSalePayments = protectedAction<
   { saleId: string; payments: { payment_method: string; amount: number }[] },
-  { success?: boolean; message?: string; payment_method?: string; cash_delta?: number; error?: string }
+  { success?: boolean; message?: string; payment_method?: string; cash_delta?: number; error?: string; auditEntityId: string; auditDescription: string }
 >(
   { permission: 'sales.edit', auditModule: 'pos', auditAction: 'update', auditEntity: 'sale', revalidate: ['/admin/tickets'] },
   async (ctx, { saleId, payments }) => {
     if (!saleId) return failure('Falta el identificador de la venta', 'VALIDATION')
     if (!Array.isArray(payments) || payments.length === 0) return failure('Indica al menos un pago', 'VALIDATION')
+
+    const { data: saleRow } = await ctx.adminClient
+      .from('sales').select('ticket_number').eq('id', saleId).maybeSingle()
+    const ticketNumber = (saleRow as { ticket_number?: string } | null)?.ticket_number ?? saleId
     const cleaned = payments
       .map((p) => ({ payment_method: String(p.payment_method), amount: Math.round((Number(p.amount) || 0) * 100) / 100 }))
       .filter((p) => p.amount > 0)
@@ -1458,7 +1472,11 @@ export const updateSalePayments = protectedAction<
     if (data && data.success === false) {
       return failure(String(data.error || 'No se pudieron actualizar los pagos'), 'CONFLICT')
     }
-    return success(data)
+    return success({
+      ...(data as Record<string, unknown>),
+      auditEntityId: String(saleId),
+      auditDescription: `Cobros de la venta ${ticketNumber}`,
+    })
   }
 )
 
@@ -1503,12 +1521,16 @@ export const previewSaleEdit = protectedAction<
 
 export const editSaleLines = protectedAction<
   { saleId: string; lines: SaleEditLineInput[]; discount?: SaleEditDiscount },
-  { success?: boolean; message?: string; new_total?: number; old_total?: number; payment_status?: string; error?: string }
+  { success?: boolean; message?: string; new_total?: number; old_total?: number; payment_status?: string; error?: string; auditEntityId: string; auditDescription: string }
 >(
   { permission: 'sales.edit', auditModule: 'pos', auditAction: 'update', auditEntity: 'sale', revalidate: ['/admin/tickets'] },
   async (ctx, { saleId, lines, discount }) => {
     if (!saleId) return failure('Falta el identificador de la venta', 'VALIDATION')
     if (!Array.isArray(lines) || lines.length === 0) return failure('La venta debe tener al menos una línea', 'VALIDATION')
+
+    const { data: saleRow } = await ctx.adminClient
+      .from('sales').select('ticket_number').eq('id', saleId).maybeSingle()
+    const ticketNumber = (saleRow as { ticket_number?: string } | null)?.ticket_number ?? saleId
 
     // Doble cerrojo: solo administrador (operación destructiva: toca stock, caja y asiento).
     const { data: roleRows } = await ctx.adminClient
@@ -1531,7 +1553,11 @@ export const editSaleLines = protectedAction<
     if (data?.regenerate_journal) {
       await createSaleJournalEntry(saleId)
     }
-    return success(data)
+    return success({
+      ...(data as Record<string, unknown>),
+      auditEntityId: String(saleId),
+      auditDescription: `Líneas de la venta ${ticketNumber}`,
+    })
   }
 )
 
@@ -1564,6 +1590,11 @@ export const deleteSaleCompletely = protectedAction<
   async (ctx, { saleId, withdrawalIds }) => {
     if (!saleId) return failure('Falta el identificador de la venta', 'VALIDATION')
 
+    // Leer el nº de ticket ANTES del borrado (después ya no existe).
+    const { data: saleRow } = await ctx.adminClient
+      .from('sales').select('ticket_number').eq('id', saleId).maybeSingle()
+    const ticketNumber = (saleRow as { ticket_number?: string } | null)?.ticket_number ?? saleId
+
     // Doble cerrojo: solo administrador/super_admin puede borrar ventas.
     const { data: roleRows } = await ctx.adminClient
       .from('user_roles')
@@ -1585,7 +1616,11 @@ export const deleteSaleCompletely = protectedAction<
     if (data && data.success === false) {
       return failure(String(data.error || 'No se pudo eliminar la venta'), 'CONFLICT')
     }
-    return success(data)
+    return success({
+      ...(data as Record<string, unknown>),
+      auditEntityId: String(saleId),
+      auditDescription: `Venta ${ticketNumber} eliminada`,
+    })
   }
 )
 
@@ -1604,7 +1639,7 @@ async function userIsFullAdmin(ctx: { adminClient: any; userId: string }): Promi
 
 export const updateWithdrawal = protectedAction<
   { withdrawalId: string; amount: number; reason: string },
-  { success?: boolean; message?: string; error?: string }
+  { auditEntityId: string; auditDescription: string }
 >(
   { permission: 'cash_withdrawals.manage', auditModule: 'pos', auditAction: 'update', auditEntity: 'cash_withdrawal', revalidate: ['/admin/contabilidad'] },
   async (ctx, { withdrawalId, amount, reason }) => {
@@ -1621,13 +1656,16 @@ export const updateWithdrawal = protectedAction<
     })
     if (error) return failure(error.message)
     if (data && data.success === false) return failure(String(data.error || 'No se pudo actualizar la retirada'), 'CONFLICT')
-    return success(data)
+    return success({
+      auditEntityId: String(withdrawalId),
+      auditDescription: `Arqueo editado: ${cleanReason} (${cleanAmount.toFixed(2)} €)`,
+    })
   }
 )
 
 export const deleteWithdrawal = protectedAction<
   { withdrawalId: string },
-  { success?: boolean; message?: string; error?: string }
+  { auditEntityId: string; auditDescription: string }
 >(
   { permission: 'cash_withdrawals.manage', auditModule: 'pos', auditAction: 'delete', auditEntity: 'cash_withdrawal', revalidate: ['/admin/contabilidad'] },
   async (ctx, { withdrawalId }) => {
@@ -1635,20 +1673,55 @@ export const deleteWithdrawal = protectedAction<
 
     if (!(await userIsFullAdmin(ctx))) return failure('Solo un administrador puede eliminar retiradas de caja.', 'FORBIDDEN')
 
+    // Leer motivo/importe ANTES del borrado.
+    const { data: wdRow } = await ctx.adminClient
+      .from('cash_withdrawals').select('reason, amount').eq('id', withdrawalId).maybeSingle()
+    const wd = wdRow as { reason?: string; amount?: number | string } | null
+    const wdReason = wd?.reason ?? 'sin motivo'
+    const wdAmount = Number(wd?.amount ?? 0)
+
     const { data, error } = await ctx.adminClient.rpc('rpc_delete_withdrawal', {
       p_withdrawal_id: withdrawalId,
     })
     if (error) return failure(error.message)
     if (data && data.success === false) return failure(String(data.error || 'No se pudo eliminar la retirada'), 'CONFLICT')
-    return success(data)
+    return success({
+      auditEntityId: String(withdrawalId),
+      auditDescription: `Arqueo eliminado: ${wdReason} (${wdAmount.toFixed(2)} €)`,
+    })
   }
 )
 
 // ── Corregir/reabrir/borrar sesiones de caja (cash_sessions.manage) ────────
 // Todas atómicas vía RPC. Doble cerrojo: permiso + isFullAdmin.
+
+// Referencia legible de una sesión de caja para el log de Seguimiento:
+// fecha de apertura + nombre de tienda; si no se puede, el id corto.
+async function cashSessionRef(ctx: { adminClient: any }, sessionId: string): Promise<string> {
+  try {
+    const { data } = await ctx.adminClient
+      .from('cash_sessions')
+      .select('opened_at, stores(name)')
+      .eq('id', sessionId)
+      .maybeSingle()
+    const row = data as { opened_at?: string; stores?: { name?: string } | { name?: string }[] } | null
+    if (row) {
+      const store = Array.isArray(row.stores) ? row.stores[0] : row.stores
+      const storeName = store?.name
+      const fecha = row.opened_at
+        ? new Date(row.opened_at).toLocaleDateString('es-ES')
+        : null
+      const parts = [fecha, storeName].filter(Boolean)
+      if (parts.length > 0) return parts.join(' · ')
+    }
+  } catch {
+    // ignorar; usar id corto
+  }
+  return sessionId.slice(0, 8)
+}
 export const updateCashSessionClose = protectedAction<
   { sessionId: string; countedCash: number; closingNotes?: string | null; closingBreakdown?: unknown },
-  { success?: boolean; message?: string; error?: string }
+  { auditEntityId: string; auditDescription: string }
 >(
   { permission: 'cash_sessions.manage', auditModule: 'pos', auditAction: 'update', auditEntity: 'cash_session', revalidate: ['/admin/contabilidad'] },
   async (ctx, { sessionId, countedCash, closingNotes, closingBreakdown }) => {
@@ -1663,13 +1736,17 @@ export const updateCashSessionClose = protectedAction<
     })
     if (error) return failure(error.message)
     if (data && data.success === false) return failure(String(data.error || 'No se pudo corregir el arqueo'), 'CONFLICT')
-    return success(data)
+    const ref = await cashSessionRef(ctx, sessionId)
+    return success({
+      auditEntityId: String(sessionId),
+      auditDescription: `Cierre de sesión de caja ${ref}`,
+    })
   }
 )
 
 export const updateCashSessionOpening = protectedAction<
   { sessionId: string; openingAmount: number; openingBreakdown?: unknown },
-  { success?: boolean; message?: string; error?: string }
+  { auditEntityId: string; auditDescription: string }
 >(
   { permission: 'cash_sessions.manage', auditModule: 'pos', auditAction: 'update', auditEntity: 'cash_session', revalidate: ['/admin/contabilidad'] },
   async (ctx, { sessionId, openingAmount, openingBreakdown }) => {
@@ -1683,13 +1760,17 @@ export const updateCashSessionOpening = protectedAction<
     })
     if (error) return failure(error.message)
     if (data && data.success === false) return failure(String(data.error || 'No se pudo corregir el fondo'), 'CONFLICT')
-    return success(data)
+    const ref = await cashSessionRef(ctx, sessionId)
+    return success({
+      auditEntityId: String(sessionId),
+      auditDescription: `Apertura de sesión de caja ${ref}`,
+    })
   }
 )
 
 export const reopenCashSession = protectedAction<
   { sessionId: string },
-  { success?: boolean; message?: string; error?: string }
+  { auditEntityId: string; auditDescription: string }
 >(
   { permission: 'cash_sessions.manage', auditModule: 'pos', auditAction: 'update', auditEntity: 'cash_session', revalidate: ['/admin/contabilidad'] },
   async (ctx, { sessionId }) => {
@@ -1699,22 +1780,32 @@ export const reopenCashSession = protectedAction<
     const { data, error } = await ctx.adminClient.rpc('rpc_reopen_cash_session', { p_session_id: sessionId })
     if (error) return failure(error.message)
     if (data && data.success === false) return failure(String(data.error || 'No se pudo reabrir la sesión'), 'CONFLICT')
-    return success(data)
+    const ref = await cashSessionRef(ctx, sessionId)
+    return success({
+      auditEntityId: String(sessionId),
+      auditDescription: `Reapertura de sesión de caja ${ref}`,
+    })
   }
 )
 
 export const deleteCashSession = protectedAction<
   { sessionId: string },
-  { success?: boolean; message?: string; error?: string }
+  { auditEntityId: string; auditDescription: string }
 >(
   { permission: 'cash_sessions.manage', auditModule: 'pos', auditAction: 'delete', auditEntity: 'cash_session', revalidate: ['/admin/contabilidad'] },
   async (ctx, { sessionId }) => {
     if (!sessionId) return failure('Falta el identificador de la sesión', 'VALIDATION')
     if (!(await userIsFullAdmin(ctx))) return failure('Solo un administrador puede borrar una sesión de caja.', 'FORBIDDEN')
 
+    // Resolver la referencia legible ANTES del borrado.
+    const ref = await cashSessionRef(ctx, sessionId)
+
     const { data, error } = await ctx.adminClient.rpc('rpc_delete_cash_session', { p_session_id: sessionId })
     if (error) return failure(error.message)
     if (data && data.success === false) return failure(String(data.error || 'No se pudo borrar la sesión'), 'CONFLICT')
-    return success(data)
+    return success({
+      auditEntityId: String(sessionId),
+      auditDescription: `Sesión de caja ${ref} eliminada`,
+    })
   }
 )

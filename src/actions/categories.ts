@@ -345,10 +345,11 @@ export const moveCategorySortOrderAction = protectedAction<
   async (ctx, { id, direction }) => {
     const { data: cat } = await ctx.adminClient
       .from('product_categories')
-      .select('id, parent_id, sort_order')
+      .select('id, parent_id, sort_order, name')
       .eq('id', id)
       .single()
     if (!cat) return failure('Categoría no encontrada', 'NOT_FOUND')
+    const catName = (cat as any).name
 
     let siblingsQ = ctx.adminClient
       .from('product_categories')
@@ -366,7 +367,7 @@ export const moveCategorySortOrderAction = protectedAction<
     const idx = ordered.findIndex((s) => s.id === id)
     if (idx === -1) return failure('Categoría no encontrada en su nivel', 'INTERNAL')
     const swapIdx = direction === 'up' ? idx - 1 : idx + 1
-    if (swapIdx < 0 || swapIdx >= ordered.length) return success({ id })
+    if (swapIdx < 0 || swapIdx >= ordered.length) return success({ id, auditEntityId: String(id), auditDescription: `Orden de categoría "${catName}"` } as any)
 
     const a = ordered[idx]
     const b = ordered[swapIdx]
@@ -379,6 +380,6 @@ export const moveCategorySortOrderAction = protectedAction<
     await ctx.adminClient.from('product_categories').update({ sort_order: newA }).eq('id', a.id)
     await ctx.adminClient.from('product_categories').update({ sort_order: newB }).eq('id', b.id)
 
-    return success({ id })
+    return success({ id, auditEntityId: String(id), auditDescription: `Orden de categoría "${catName}"` } as any)
   }
 )

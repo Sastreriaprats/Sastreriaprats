@@ -498,7 +498,7 @@ export const upsertBlogPost = protectedAction<Record<string, unknown>, unknown>(
         .update({ ...postData, updated_by: ctx.userId })
         .eq('id', id as string)
       if (error) return failure(error.message)
-      return success({ id })
+      return success({ id, auditEntityId: String(id), auditDescription: `Entrada de blog "${input.title_es ?? ''}"` })
     } else {
       const { data, error } = await ctx.adminClient
         .from('blog_posts')
@@ -506,7 +506,7 @@ export const upsertBlogPost = protectedAction<Record<string, unknown>, unknown>(
         .select('id')
         .single()
       if (error) return failure(error.message)
-      return success({ id: data.id })
+      return success({ id: data.id, auditEntityId: String(data.id), auditDescription: `Entrada de blog "${input.title_es ?? ''}"` })
     }
   }
 )

@@ -843,11 +843,23 @@ export const scheduleFitting = protectedAction<{
       .single()
 
     if (error) return failure(error.message)
-    return success(fitting)
+
+    const { data: order } = await ctx.adminClient
+      .from('tailoring_orders')
+      .select('order_number')
+      .eq('id', input.orderId)
+      .maybeSingle()
+    const orderNumber = (order as { order_number?: string } | null)?.order_number ?? input.orderId
+
+    return success({
+      ...(fitting as Record<string, unknown>),
+      auditEntityId: input.orderId,
+      auditDescription: `Prueba ${(fitting as { fitting_number?: number }).fitting_number} programada · pedido ${orderNumber}`,
+    })
   }
 )
 
-export const markLineDelivered = protectedAction<string, { orderId: string }>(
+export const markLineDelivered = protectedAction<string, { orderId: string; auditEntityId: string; auditDescription: string }>(
   {
     permission: 'orders.edit',
     auditModule: 'orders',
@@ -860,7 +872,7 @@ export const markLineDelivered = protectedAction<string, { orderId: string }>(
 
     const { data: line } = await ctx.adminClient
       .from('tailoring_order_lines')
-      .select('id, tailoring_order_id')
+      .select('id, tailoring_order_id, tailoring_order:tailoring_orders(order_number)')
       .eq('id', lineId.trim())
       .single()
 
@@ -877,8 +889,14 @@ export const markLineDelivered = protectedAction<string, { orderId: string }>(
     if (error) return failure(error.message, 'INTERNAL')
 
     const orderId = (line as { tailoring_order_id: string }).tailoring_order_id
+    const orderNumber =
+      (line as { tailoring_order?: { order_number?: string } | null }).tailoring_order?.order_number ?? orderId
     revalidatePath(`/sastre/pedidos/${orderId}`)
-    return success({ orderId })
+    return success({
+      orderId,
+      auditEntityId: orderId,
+      auditDescription: `Prenda entregada · pedido ${orderNumber}`,
+    })
   }
 )
 
@@ -2049,7 +2067,7 @@ export const searchComplementProducts = protectedAction<
  */
 export const updateOrderPaymentDate = protectedAction<
   { orderId: string; payment_date: string | null },
-  { id: string }
+  { id: string; auditEntityId: string; auditDescription: string }
 >(
   {
     permission: 'orders.edit',
@@ -2069,10 +2087,15 @@ export const updateOrderPaymentDate = protectedAction<
       .from('tailoring_orders')
       .update({ payment_date: paymentDate })
       .eq('id', orderId)
-      .select('id')
+      .select('id, order_number')
       .single()
     if (error || !data) return failure(error?.message || 'Pedido no encontrado', 'NOT_FOUND')
-    return success({ id: data.id })
+    const orderNumber = (data as { order_number?: string }).order_number ?? data.id
+    return success({
+      id: data.id,
+      auditEntityId: data.id,
+      auditDescription: `Fecha de pago del pedido ${orderNumber}`,
+    })
   }
 )
 
