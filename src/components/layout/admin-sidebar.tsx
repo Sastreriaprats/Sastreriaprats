@@ -11,6 +11,7 @@ import { useState, useEffect, useRef } from 'react'
 import { getOverduePaymentsCount } from '@/actions/payments'
 import { getOverdueSupplierInvoicesCount } from '@/actions/supplier-invoices'
 import { ADMIN_NAV_ITEMS } from './admin-nav-items'
+import { OpsNavLink } from './ops-nav-link'
 
 const COBROS_LAST_VISIT_KEY = 'cobros_last_visit'
 
@@ -189,6 +190,7 @@ export function AdminSidebar({ collapsed = false }: { collapsed?: boolean }) {
               </div>
             )
           })}
+          <OpsNavLink collapsed={collapsed} />
         </nav>
       </ScrollArea>
 
