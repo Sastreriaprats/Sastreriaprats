@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/components/providers/auth-provider'
-import { Users, Shield, Store, Settings, Shirt, UserCog, Target, Layers, CalendarDays, Ruler } from 'lucide-react'
+import { Users, Shield, Store, Settings, Shirt, UserCog, Target, Layers, CalendarDays, Ruler, Percent } from 'lucide-react'
 import { UsersSection } from './sections/users-section'
 import { RolesSection } from './sections/roles-section'
 import { StoresSection } from './sections/stores-section'
@@ -11,6 +11,7 @@ import { StoreEmployeesSection } from './sections/store-employees-section'
 import { GarmentTypesSection } from './sections/garment-types-section'
 import { SettingsSection } from './sections/settings-section'
 import { GoalsSection } from './sections/goals-section'
+import { CommissionsSection } from './sections/commissions-section'
 import { CollectionsSection } from './sections/collections-section'
 import { SeasonsSection } from './sections/seasons-section'
 import { SizeGuidesSection } from './sections/size-guides-section'
@@ -46,6 +47,12 @@ const ALL_TABS = [
     value: 'goals',
     label: 'Objetivos',
     icon: Target,
+    perms: ['config.edit', 'config.view', 'config.access'],
+  },
+  {
+    value: 'commissions',
+    label: 'Comisiones',
+    icon: Percent,
     perms: ['config.edit', 'config.view', 'config.access'],
   },
   {
@@ -137,6 +144,7 @@ export function ConfigTabs({ activeTab }: { activeTab: string }) {
         <TabsContent value="stores"><StoresSection /></TabsContent>
         <TabsContent value="store-employees"><StoreEmployeesSection /></TabsContent>
         <TabsContent value="goals"><GoalsSection /></TabsContent>
+        <TabsContent value="commissions"><CommissionsSection /></TabsContent>
         <TabsContent value="garments"><GarmentTypesSection /></TabsContent>
         <TabsContent value="collections"><CollectionsSection /></TabsContent>
         <TabsContent value="seasons"><SeasonsSection /></TabsContent>

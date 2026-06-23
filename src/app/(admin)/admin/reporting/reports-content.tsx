@@ -20,6 +20,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, Cartes
 import { useAuth } from '@/components/providers/auth-provider'
 import { getSalesReport, getComparePeriods, getTopProducts, getTailorPerformance, getClientsAnalytics, getClientsAdvancedAnalytics, getSalesByStore, getSalesByEmployee, getSalesByTimePattern, getExpensesReport, getExpensesComparison, getTailoringByCategory, type ReportChannel, type TaxMode, type ClientsAdvancedAnalytics, type TailoringCategoryRow } from '@/actions/reports'
 import { getStoresList } from '@/actions/config'
+import { getEmployeeCommissions, type EmployeeCommission, type GroupBonusResult } from '@/actions/commissions'
 import { SalesChart } from './charts/sales-chart'
 import { TopProductsChart } from './charts/top-products-chart'
 import { TailorTable } from './tables/tailor-table'
@@ -125,6 +126,8 @@ export function ReportsContent() {
   const [employeeData, setEmployeeData] = useState<EmployeeItem[]>([])
   const [employeeByStore, setEmployeeByStore] = useState<EmployeeStoreRow[] | null>(null)
   const [employeeStores, setEmployeeStores] = useState<EmployeeStoreCol[] | null>(null)
+  const [employeeCommissions, setEmployeeCommissions] = useState<EmployeeCommission[]>([])
+  const [groupBonuses, setGroupBonuses] = useState<GroupBonusResult[]>([])
   const [timePatternData, setTimePatternData] = useState<TimePatternData | null>(null)
   const [tailoringByCat, setTailoringByCat] = useState<TailoringByCatData | null>(null)
   const [expensesData, setExpensesData] = useState<ExpensesData | null>(null)
@@ -166,7 +169,7 @@ export function ReportsContent() {
       const prevStartStr = prevStart.toISOString().split('T')[0]
       const prevEndStr = prevEnd.toISOString().split('T')[0]
 
-      const [salesRes, compareRes, productsRes, tailorRes, clientsRes, clientsAdvRes, storeRes, employeeRes, timeRes, expensesRes, expCompRes, tailoringCatRes] = await Promise.all([
+      const [salesRes, compareRes, productsRes, tailorRes, clientsRes, clientsAdvRes, storeRes, employeeRes, timeRes, expensesRes, expCompRes, tailoringCatRes, commissionsRes] = await Promise.all([
         getSalesReport({ start_date: start, end_date: end, store_id: storeId, channel, group_by: groupBy, tax_mode }),
         getComparePeriods({
           current_start: start, current_end: end,
@@ -183,6 +186,7 @@ export function ReportsContent() {
         getExpensesReport({ start_date: start, end_date: end, tax_mode }),
         getExpensesComparison({ current_start: start, current_end: end, previous_start: prevStartStr, previous_end: prevEndStr, tax_mode }),
         getTailoringByCategory({ start_date: start, end_date: end, store_id: storeId }),
+        getEmployeeCommissions({ start_date: start, end_date: end }),
       ])
 
       if (salesRes.success) setSalesData(salesRes.data)
@@ -197,6 +201,7 @@ export function ReportsContent() {
       if (expensesRes.success) setExpensesData(expensesRes.data)
       if (expCompRes.success) setExpensesComparison(expCompRes.data)
       if (tailoringCatRes.success) setTailoringByCat(tailoringCatRes.data)
+      if (commissionsRes.success) { setEmployeeCommissions(commissionsRes.data.employees); setGroupBonuses(commissionsRes.data.groupBonuses) }
     } catch (err) {
       console.error('[ReportsContent fetchAll]', err)
       toast.error('Error al cargar los informes')
@@ -221,6 +226,39 @@ export function ReportsContent() {
     }
     setDateRange({ start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] })
   }
+
+  // Selector de mes natural completo (día 1 → último día). Formateo en hora LOCAL
+  // (no toISOString, que desplazaría un día por la zona horaria de Madrid).
+  const fmtLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const setMonth = (year: number, month: number) => {
+    const start = new Date(year, month, 1)
+    const end = new Date(year, month + 1, 0) // día 0 del mes siguiente = último día del mes
+    setDateRange({ start: fmtLocal(start), end: fmtLocal(end) })
+  }
+
+  // Lista de los últimos 24 meses para el desplegable. value = `${year}-${monthIndex}`.
+  const MONTH_NAMES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+  const monthOptions = (() => {
+    const out: { value: string; label: string; year: number; month: number }[] = []
+    const now = new Date()
+    let y = now.getFullYear(), m = now.getMonth()
+    for (let i = 0; i < 24; i++) {
+      out.push({ value: `${y}-${m}`, label: `${MONTH_NAMES[m].charAt(0).toUpperCase()}${MONTH_NAMES[m].slice(1)} ${y}`, year: y, month: m })
+      m -= 1
+      if (m < 0) { m = 11; y -= 1 }
+    }
+    return out
+  })()
+  // El desplegable refleja el rango solo cuando coincide EXACTO con un mes natural.
+  const selectedMonthValue = (() => {
+    const sd = new Date(dateRange.start + 'T00:00:00')
+    const ed = new Date(dateRange.end + 'T00:00:00')
+    const lastDay = new Date(sd.getFullYear(), sd.getMonth() + 1, 0).getDate()
+    if (sd.getDate() === 1 && ed.getFullYear() === sd.getFullYear() && ed.getMonth() === sd.getMonth() && ed.getDate() === lastDay) {
+      return `${sd.getFullYear()}-${sd.getMonth()}`
+    }
+    return ''
+  })()
 
   const activeStoreName = storeFilter === 'all'
     ? 'Todas las tiendas'
@@ -390,6 +428,19 @@ export function ReportsContent() {
           <span className="text-xs text-muted-foreground">a</span>
           <DatePickerPopover containerClassName="w-36 h-8" value={dateRange.end} onChange={date => setDateRange(prev => ({ ...prev, end: date }))} />
         </div>
+        <Select
+          value={selectedMonthValue}
+          onValueChange={(v) => { const opt = monthOptions.find(o => o.value === v); if (opt) setMonth(opt.year, opt.month) }}
+        >
+          <SelectTrigger className="w-36 h-8 text-xs">
+            <SelectValue placeholder="Elegir mes…" />
+          </SelectTrigger>
+          <SelectContent>
+            {monthOptions.map(o => (
+              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Select value={groupBy} onValueChange={(v: 'day' | 'week' | 'month') => setGroupBy(v)}>
           <SelectTrigger className="w-28 h-8 text-xs"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -539,7 +590,7 @@ export function ReportsContent() {
               <TabsContent value="tailors"><TailorTable data={tailorData} /></TabsContent>
               <TabsContent value="clients"><ClientsChart data={clientsData} advanced={clientsAdvanced} showByStore={showStoreBreakdown} /></TabsContent>
               <TabsContent value="stores"><StoreTab data={storeData} /></TabsContent>
-              <TabsContent value="employees"><EmployeeTab data={employeeData} storeBreakdown={employeeStoreBreakdown} stores={storeFilter === 'all' ? employeeStores : null} /></TabsContent>
+              <TabsContent value="employees"><EmployeeTab data={employeeData} storeBreakdown={employeeStoreBreakdown} stores={storeFilter === 'all' ? employeeStores : null} commissions={employeeCommissions} groupBonuses={groupBonuses} /></TabsContent>
               <TabsContent value="time"><TimePatternTab data={timePatternData} showByStore={showStoreBreakdown} /></TabsContent>
               <TabsContent value="expenses"><ExpensesTab data={expensesData} comparison={expensesComparison} /></TabsContent>
             </div>
@@ -888,7 +939,7 @@ function StoreTab({ data }: { data: StoreItem[] }) {
 
 // ─── Tab: Por empleado ───────────────────────────────────────────────────────
 
-function EmployeeTab({ data, storeBreakdown, stores }: { data: EmployeeItem[]; storeBreakdown: StoreBreakdownRow[] | null; stores: EmployeeStoreCol[] | null }) {
+function EmployeeTab({ data, storeBreakdown, stores, commissions, groupBonuses }: { data: EmployeeItem[]; storeBreakdown: StoreBreakdownRow[] | null; stores: EmployeeStoreCol[] | null; commissions: EmployeeCommission[]; groupBonuses: GroupBonusResult[] }) {
   if (!data.length) return <p className="text-center text-muted-foreground py-12">Sin datos para el periodo seleccionado</p>
 
   const hasSales = data.some(e => e.pos_ops > 0 || e.pos_total > 0)
@@ -1025,15 +1076,121 @@ function EmployeeTab({ data, storeBreakdown, stores }: { data: EmployeeItem[]; s
         )
       })()}
 
+      <CommissionsBlock commissions={commissions} groupBonuses={groupBonuses} />
+    </div>
+  )
+}
+
+// ─── Bloque de comisiones dentro de "Por empleado" ──────────────────────────
+function CommissionsBlock({ commissions, groupBonuses }: { commissions: EmployeeCommission[]; groupBonuses: GroupBonusResult[] }) {
+  const withCommission = commissions.filter(c => c.total !== 0 || c.tiered !== 0 || c.bonus !== 0)
+  const hasAny = withCommission.length > 0
+  const anyBonus = groupBonuses.length > 0
+  const hasBonusCol = withCommission.some(c => c.bonus !== 0)
+
+  if (!hasAny && !anyBonus) {
+    return (
       <Card className="border-dashed">
         <CardContent className="pt-4 pb-4">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Star className="h-4 w-4" />
-            <span>Comisiones — próximamente</span>
+            <span>Sin comisiones en este periodo. Configura los planes en Configuración → Comisiones y los objetivos en Configuración → Objetivos.</span>
           </div>
         </CardContent>
       </Card>
-    </div>
+    )
+  }
+
+  return (
+    <>
+      {hasAny && (
+        <Card>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><Star className="h-4 w-4" /> Comisiones por empleado</CardTitle></CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Empleado</TableHead>
+                  <TableHead>Plan</TableHead>
+                  <TableHead className="text-right">Base boutique</TableHead>
+                  <TableHead className="text-right">Base sastrería</TableHead>
+                  <TableHead className="text-right">Comisión tramos</TableHead>
+                  {hasBonusCol && <TableHead className="text-right">Bonus grupal</TableHead>}
+                  <TableHead className="text-right">Comisión total</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {withCommission.map((c) => (
+                  <TableRow key={c.employee_id}>
+                    <TableCell className="font-medium">{c.employee_name}</TableCell>
+                    <TableCell className="text-muted-foreground">{c.plan_name}</TableCell>
+                    <TableCell className="text-right text-muted-foreground">{c.base_boutique ? formatCurrency(c.base_boutique) : '—'}</TableCell>
+                    <TableCell className="text-right text-muted-foreground">{c.base_sastreria ? formatCurrency(c.base_sastreria) : '—'}</TableCell>
+                    <TableCell className="text-right">{formatCurrency(c.tiered)}</TableCell>
+                    {hasBonusCol && <TableCell className="text-right">{c.bonus ? formatCurrency(c.bonus) : '—'}</TableCell>}
+                    <TableCell className="text-right font-bold">{formatCurrency(c.total)}</TableCell>
+                  </TableRow>
+                ))}
+                {withCommission.length > 1 && (
+                  <TableRow className="bg-muted/50 font-bold">
+                    <TableCell colSpan={4}>TOTAL</TableCell>
+                    <TableCell className="text-right">{formatCurrency(withCommission.reduce((s, c) => s + c.tiered, 0))}</TableCell>
+                    {hasBonusCol && <TableCell className="text-right">{formatCurrency(withCommission.reduce((s, c) => s + c.bonus, 0))}</TableCell>}
+                    <TableCell className="text-right">{formatCurrency(withCommission.reduce((s, c) => s + c.total, 0))}</TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+            <div className="text-[11px] text-muted-foreground mt-3 space-y-1">
+              <p><strong>Base sin IVA</strong>, medida igual que los Objetivos (venta del empleado por <strong>vendedor</strong>, no por caja). <strong>Comisión tramos</strong> = % bajo objetivo hasta el objetivo individual + % sobre el exceso, separado Boutique/Sastrería.</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {groupBonuses.map((gb) => (
+        <Card key={gb.bonus_id + gb.quarter_label} className={gb.applies ? 'border-green-500/40' : 'border-dashed'}>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Star className="h-4 w-4" /> {gb.name} · {gb.quarter_label}
+              <Badge variant={gb.applies ? 'default' : 'outline'} className="ml-1">{gb.applies ? 'Activado' : 'No alcanzado'}</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Tienda</TableHead>
+                  <TableHead className="text-right">Objetivo trimestre</TableHead>
+                  <TableHead className="text-right">Real trimestre</TableHead>
+                  <TableHead className="text-right">¿Supera?</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {gb.stores.map((s) => (
+                  <TableRow key={s.store_id}>
+                    <TableCell className="font-medium">{s.store_name}</TableCell>
+                    <TableCell className="text-right text-muted-foreground">{formatCurrency(s.target)}</TableCell>
+                    <TableCell className="text-right">{formatCurrency(s.actual)}</TableCell>
+                    <TableCell className="text-right">{s.beat ? <span className="text-green-600 font-medium">Sí</span> : <span className="text-muted-foreground">No</span>}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <div className="text-[11px] text-muted-foreground mt-3">
+              {gb.applies ? (
+                <p>
+                  Bonus de <strong>{formatCurrency(gb.pool)}</strong> ({gb.rate}% sobre {gb.base_type === 'total' ? 'la venta conjunta' : 'el exceso conjunto'}),
+                  repartido entre {gb.members.length}: {gb.members.map(m => `${m.employee_name} (${formatCurrency(m.amount)})`).join(', ')}.
+                </p>
+              ) : (
+                <p>Todas las tiendas listadas deben superar su objetivo del trimestre para que se active el bonus ({gb.rate}% sobre {gb.base_type === 'total' ? 'la venta conjunta' : 'el exceso conjunto'}).</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </>
   )
 }
 
