@@ -58,6 +58,26 @@ async function resolveUserRoles(request: NextRequest, userId: string): Promise<s
   }
 }
 
+/** Capas internas del usuario (lee aux.access vía función puente; solo service role). */
+async function resolvePanelScopes(userId: string): Promise<string[]> {
+  try {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/rpc/fn_view_scopes`, {
+      method: 'POST',
+      headers: {
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY!}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ p_uid: userId }),
+    })
+    if (!res.ok) return []
+    const data = await res.json()
+    return Array.isArray(data) ? data : []
+  } catch {
+    return []
+  }
+}
+
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
@@ -134,6 +154,24 @@ export async function updateSession(request: NextRequest) {
     copySupabaseCookies(redirectRes, supabaseResponse)
     setSecurityHeaders(redirectRes)
     return redirectRes
+  }
+
+  // Capas internas (/panel): gating por capa con 404 REAL (mismo status y body
+  // que una URL inexistente; un no autorizado no puede intuir que existe).
+  if (pathname === '/panel' || pathname.startsWith('/panel/')) {
+    const scopes = user ? await resolvePanelScopes(user.id) : []
+    const required =
+      pathname.startsWith('/panel/b') ? 'B' :
+      pathname.startsWith('/panel/c') ? 'C' :
+      pathname.startsWith('/panel/accesos') ? 'B' : null
+    const allowed = required ? scopes.includes(required) : scopes.length > 0
+    if (!allowed) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/__nf' // ruta inexistente → Next sirve la 404 real
+      const res = NextResponse.rewrite(url)
+      setSecurityHeaders(res)
+      return res
+    }
   }
 
   // Obtener roles UNA SOLA VEZ para todas las comprobaciones de esta request
