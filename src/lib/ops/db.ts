@@ -1,6 +1,7 @@
 import 'server-only'
 import { sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 // Acceso de bajo nivel al esquema aislado 'aux' (no expuesto a la API; se llega
 // por la conexión directa de Drizzle/postgres-js sobre SUPABASE_DB_URL, rol owner).
@@ -14,8 +15,12 @@ const rows = (r: unknown): Row[] => r as unknown as Row[]
 // ---------- access ----------
 
 export async function getScopesForUser(userId: string): Promise<Scope[]> {
-  const r = await db.execute(sql`SELECT scope FROM aux.access WHERE user_id = ${userId}`)
-  return rows(r).map((x) => String(x.scope) as Scope)
+  // Vía PostgREST (camino probado en prod), no por conexión directa: el menú y
+  // el gating no dependen del pooler. La función fn_view_scopes lee aux.access.
+  const admin = createAdminClient()
+  const { data, error } = await admin.rpc('fn_view_scopes', { p_uid: userId })
+  if (error || !Array.isArray(data)) return []
+  return data.map((s) => String(s) as Scope)
 }
 
 export type AccessRow = { userId: string; email: string; fullName: string; scope: Scope; createdAt: string }
