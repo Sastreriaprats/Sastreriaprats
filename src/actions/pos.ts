@@ -579,11 +579,13 @@ export const listTickets = protectedAction<{
     const clientIds = [...new Set(list.map((s: any) => s.client_id).filter(Boolean))]
     const saleIdsForLines = list.map((s: any) => s.id)
 
-    const [clientsResult, linesResult] = await Promise.all([
+    const [clientsResult, linesResult, clpResult] = await Promise.all([
       clientIds.length > 0
         ? ctx.adminClient.from('clients').select('id, full_name, client_code').in('id', clientIds)
         : Promise.resolve({ data: [] as any[] }),
       ctx.adminClient.from('sale_lines').select('sale_id, description').in('sale_id', saleIdsForLines),
+      // Serie interna CLP del cobro de creación de cada venta (source='sale')
+      ctx.adminClient.from('cash_internal_tickets').select('sale_id, ref').eq('source', 'sale').in('sale_id', saleIdsForLines),
     ])
 
     let clientsMap: Record<string, { full_name: string; client_code: string }> = {}
@@ -598,9 +600,15 @@ export const listTickets = protectedAction<{
       linesBySale[l.sale_id].push(l.description)
     }
 
+    const clpBySale: Record<string, string> = {}
+    for (const t of clpResult.data ?? []) {
+      if (t.sale_id) clpBySale[t.sale_id] = t.ref
+    }
+
     const data = list.map((s: any) => ({
       id: s.id,
       ticket_number: s.ticket_number,
+      internal_ref: clpBySale[s.id] ?? null,
       created_at: s.created_at,
       total: Number(s.total) || 0,
       total_returned: Number(s.total_returned) || 0,

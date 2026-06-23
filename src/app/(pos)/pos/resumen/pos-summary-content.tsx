@@ -49,6 +49,9 @@ export function PosSummaryContent() {
   const { activeStoreId, stores } = useAuth()
   const [session, setSession] = useState<any>(null)
   const [sales, setSales] = useState<SessionMovement[]>([])
+  const [clp, setClp] = useState<{ E: { n: number; sum: number }; T: { n: number; sum: number } }>({
+    E: { n: 0, sum: 0 }, T: { n: 0, sum: 0 },
+  })
   const [isLoading, setIsLoading] = useState(true)
   const [printingId, setPrintingId] = useState<string | null>(null)
   const [invoicingId, setInvoicingId] = useState<string | null>(null)
@@ -64,7 +67,7 @@ export function PosSummaryContent() {
       if (sess) {
         const openedAt = sess.opened_at ?? new Date(0).toISOString()
         const closedAt = sess.closed_at ?? new Date().toISOString()
-        const [salesRes, orderPaymentsRes, reservationPaymentsRes, manualTxRes, returnsRes] = await Promise.all([
+        const [salesRes, orderPaymentsRes, reservationPaymentsRes, manualTxRes, returnsRes, clpRes] = await Promise.all([
           supabase.from('sales')
             .select('id, ticket_number, sale_type, subtotal, discount_amount, tax_amount, total, payment_method, is_tax_free, status, created_at, clients(full_name), profiles!sales_salesperson_id_fkey(full_name)')
             .eq('cash_session_id', sess.id)
@@ -88,7 +91,19 @@ export function PosSummaryContent() {
             .gte('created_at', openedAt)
             .lte('created_at', closedAt)
             .order('created_at', { ascending: false }),
+          // Serie interna CLP de esta sesión (control interno; cuadre serie E ↔ efectivo)
+          supabase.from('cash_internal_tickets')
+            .select('series, amount')
+            .eq('cash_session_id', sess.id),
         ])
+
+        const clpAgg = { E: { n: 0, sum: 0 }, T: { n: 0, sum: 0 } }
+        for (const t of (clpRes.data ?? []) as { series: string; amount: number | string }[]) {
+          const bucket = t.series === 'E' ? clpAgg.E : clpAgg.T
+          bucket.n += 1
+          bucket.sum += Number(t.amount ?? 0)
+        }
+        setClp(clpAgg)
 
         const saleRows: SessionMovement[] = (salesRes.data ?? []).map((s: any) => ({
           id: s.id,
@@ -330,6 +345,28 @@ export function PosSummaryContent() {
                 </div>
               ))}
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle className="text-base">Serie interna CLP (control interno)</CardTitle></CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="p-3 rounded-lg bg-green-50 border border-green-200">
+                <p className="text-xs font-medium text-green-800">Serie E · cobros 100% efectivo</p>
+                <p className="text-lg font-bold mt-1">{formatCurrency(clp.E.sum)}</p>
+                <p className="text-xs text-muted-foreground">{clp.E.n} ticket(s) CLP-E</p>
+              </div>
+              <div className="p-3 rounded-lg bg-blue-50 border border-blue-200">
+                <p className="text-xs font-medium text-blue-800">Serie T · tarjeta / transfer / bizum / vale / mixto</p>
+                <p className="text-lg font-bold mt-1">{formatCurrency(clp.T.sum)}</p>
+                <p className="text-xs text-muted-foreground">{clp.T.n} ticket(s) CLP-T</p>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground mt-3">
+              Efectivo contado en caja (incluye la parte en efectivo de cobros mixtos): {formatCurrency(session.total_cash_sales || 0)}.
+              La serie E recoge solo cobros íntegros en efectivo.
+            </p>
           </CardContent>
         </Card>
 

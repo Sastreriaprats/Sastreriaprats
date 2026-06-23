@@ -979,6 +979,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
     await generateTicketPdf({
       sale: {
         ticket_number: completedSale.ticket_number,
+        internal_ref: completedSale.internal_ref || null,
         created_at: completedSale.created_at || new Date().toISOString(),
         client_id: completedSale.client_id,
         subtotal: completedSale.subtotal,
@@ -1016,6 +1017,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
     return {
       sale: {
         ticket_number: completedSale.ticket_number,
+        internal_ref: completedSale.internal_ref || null,
         created_at: completedSale.created_at || new Date().toISOString(),
         client_id: completedSale.client_id,
         subtotal: completedSale.subtotal,
@@ -2060,6 +2062,12 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
               <div className="rounded-lg bg-slate-50 border border-slate-200 p-4">
                 <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Nº Ticket</p>
                 <p className="text-xl font-mono font-bold text-slate-900 mt-0.5">{completedSale.ticket_number}</p>
+                {completedSale.internal_ref && (
+                  <>
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mt-2">Ref. interna</p>
+                    <p className="text-base font-mono font-semibold text-slate-700 mt-0.5">{completedSale.internal_ref}</p>
+                  </>
+                )}
               </div>
               <dl className="grid grid-cols-1 gap-3 text-sm">
                 <div className="flex justify-between items-center py-2 border-b border-slate-100">

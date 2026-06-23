@@ -1270,6 +1270,23 @@ export const salePayments = pgTable('sale_payments', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
+// Serie interna CLP de tickets de caja (control interno, NO fiscal; mig 234).
+// E = cobro 100% efectivo · T = cualquier otro caso (tarjeta/transfer/bizum/vale/mixto).
+export const cashInternalTickets = pgTable('cash_internal_tickets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  ref: text('ref').notNull().unique(),
+  series: varchar('series', { length: 1 }).notNull(),
+  year: integer('year').notNull(),
+  seq: integer('seq').notNull(),
+  source: text('source').notNull(),
+  sourceId: uuid('source_id'),
+  saleId: uuid('sale_id').references(() => sales.id, { onDelete: 'set null' }),
+  amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
+  storeId: uuid('store_id'),
+  cashSessionId: uuid('cash_session_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
 export const vouchers: any = pgTable('vouchers', {
   id: uuid('id').primaryKey().defaultRandom(),
   code: varchar('code', { length: 20 }).notNull().unique(),

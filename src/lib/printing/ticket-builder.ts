@@ -6,6 +6,7 @@ export interface TicketData {
   store_phone: string
   store_cif: string
   ticket_number: string
+  internal_ref?: string
   date: string
   time: string
   cashier: string
@@ -36,7 +37,8 @@ export function buildPosTicket(data: TicketData): Uint8Array {
 
   b.alignLeft()
     .columns('Ticket:', data.ticket_number)
-    .columns('Fecha:', `${data.date} ${data.time}`)
+  if (data.internal_ref) b.columns('Ref. interna:', data.internal_ref)
+  b.columns('Fecha:', `${data.date} ${data.time}`)
     .columns('Cajero:', data.cashier)
   if (data.client_name) b.columns('Cliente:', data.client_name)
   b.line('-')

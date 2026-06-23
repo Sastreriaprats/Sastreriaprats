@@ -653,6 +653,7 @@ export function TicketsContent() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Nº Ticket</TableHead>
+                    <TableHead>Ref. interna</TableHead>
                     <TableHead>Fecha</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead>Productos (resumen)</TableHead>
@@ -671,6 +672,7 @@ export function TicketsContent() {
                     return (
                     <TableRow key={row.id} className={cn(isDimmed && 'opacity-60')}>
                       <TableCell className="font-mono">{row.ticket_number}</TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">{row.internal_ref ?? '—'}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">{formatDateTime(row.created_at)}</TableCell>
                       <TableCell>
                         {row.client_name ? (

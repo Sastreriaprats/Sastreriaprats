@@ -217,6 +217,7 @@ export interface TicketPaymentPayload {
 
 export interface TicketSalePayload {
   ticket_number: string
+  internal_ref?: string | null
   created_at: string
   client_id?: string | null
   subtotal: number
@@ -341,6 +342,9 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
       layout: 'noBorders',
       margin: [0, 0, 0, 2] as [number, number, number, number],
     },
+    ...(data.sale.internal_ref
+      ? [{ text: `Ref. interna: ${data.sale.internal_ref}`, fontSize: FONT_SMALL, bold: true, margin: [0, 0, 0, 2] as [number, number, number, number] } as Content]
+      : []),
     {
       // Nombre completo del cliente (sin truncar): a ancho completo para que
       // pueda envolver en varias líneas sin chocar con la hora.
