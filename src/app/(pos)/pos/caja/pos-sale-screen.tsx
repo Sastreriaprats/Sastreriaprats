@@ -37,16 +37,23 @@ import { addOrderPayment, addSalePayment, getClientPendingDebt } from '@/actions
 import { getProductByBarcode } from '@/actions/products'
 import { listClients } from '@/actions/clients'
 import { CreateClientDialog } from '@/app/(admin)/admin/clientes/create-client-dialog'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatDate } from '@/lib/utils'
+import { TAILORING_ORDER_STATES } from '@/lib/constants'
+import { ALTERATION_STATUS_LABELS, ALTERATION_STATUS_COLORS } from '@/types/alterations'
 import { generateTicketPdf, printTicketPdf, printGiftTicketPdf } from '@/components/pos/ticket-pdf'
 import { createPrintReporter } from '@/lib/client-telemetry'
 import { printGiftCardPdf, downloadGiftCardPdf } from '@/components/pos/gift-card-pdf'
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
 import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
 import { getActiveReservationsForVariant, listReservations } from '@/actions/reservations'
+import { getClientPendingWork, markAlterationCharged } from '@/actions/alterations'
 import { ReservationDialog } from './reservation-dialog'
 import { ReservationPickupDialog } from './reservation-pickup-dialog'
 import { sortBySize } from '@/lib/utils/sort-sizes'
+
+const TAILORING_ORDER_STATUS_LABELS: Record<string, string> = Object.fromEntries(
+  TAILORING_ORDER_STATES.map((s) => [s.key, s.label]),
+)
 
 interface TicketLine {
   id: string
@@ -62,8 +69,8 @@ interface TicketLine {
   image_url?: string
   /** Stock disponible para esta variante (para limitar cantidad) */
   available_stock?: number
-  /** Si la línea es un cobro de un pedido/venta pendiente, se registra el pago en onSuccess. */
-  cobro_ref?: { entity_type: 'tailoring_order' | 'sale'; entity_id: string }
+  /** Si la línea es un cobro de un pedido/venta/arreglo pendiente, se registra el pago en onSuccess. */
+  cobro_ref?: { entity_type: 'tailoring_order' | 'sale' | 'alteration'; entity_id: string }
   /** Si la línea corresponde a la recogida de una reserva, su id. */
   reservation_id?: string | null
   /** Línea específica de la reserva que se recoge. */
@@ -106,7 +113,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const barcodeBufferRef = useRef({ digits: '', firstAt: 0 })
   const scannerInputRef = useRef<HTMLInputElement>(null)
   const appliedCobroRef = useRef(false)
-  const lastCobroLinesRef = useRef<Array<{ entity_type: 'tailoring_order' | 'sale'; entity_id: string; amount: number }>>([])
+  const lastCobroLinesRef = useRef<Array<{ entity_type: 'tailoring_order' | 'sale' | 'alteration'; entity_id: string; amount: number }>>([])
   const cobroPaymentMethodRef = useRef<'cash' | 'card' | 'bizum' | 'transfer' | 'voucher'>('cash')
   const integroSubmitRef = useRef(false)
 
@@ -143,6 +150,9 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const [clientDebtLoading, setClientDebtLoading] = useState(false)
   const [clientReservations, setClientReservations] = useState<any[]>([])
   const [clientReservationsLoading, setClientReservationsLoading] = useState(false)
+  const [clientPendingWork, setClientPendingWork] = useState<{ alterations: any[]; orders: any[] }>({ alterations: [], orders: [] })
+  const [clientPendingWorkLoading, setClientPendingWorkLoading] = useState(false)
+  const [pendingWorkDialogOpen, setPendingWorkDialogOpen] = useState(false)
   const [showCloseReminderDialog, setShowCloseReminderDialog] = useState(false)
   const [lineToRemove, setLineToRemove] = useState<{ id: string; description: string } | null>(null)
   const [showStockWarning, setShowStockWarning] = useState(false)
@@ -373,6 +383,22 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
       })
       .catch(() => {})
       .finally(() => { if (!cancelled) setClientReservationsLoading(false) })
+    return () => { cancelled = true }
+  }, [selectedClientId])
+
+  // Arreglos + pedidos de sastrería pendientes de recoger del cliente (aviso en caja)
+  useEffect(() => {
+    if (!selectedClientId) { setClientPendingWork({ alterations: [], orders: [] }); return }
+    let cancelled = false
+    setClientPendingWorkLoading(true)
+    getClientPendingWork({ clientId: selectedClientId })
+      .then((result) => {
+        if (cancelled) return
+        if (result.success && result.data) setClientPendingWork(result.data)
+        else setClientPendingWork({ alterations: [], orders: [] })
+      })
+      .catch(() => { if (!cancelled) setClientPendingWork({ alterations: [], orders: [] }) })
+      .finally(() => { if (!cancelled) setClientPendingWorkLoading(false) })
     return () => { cancelled = true }
   }, [selectedClientId])
 
@@ -618,6 +644,45 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
     toast.success(`${toAdd.length} pendiente(s) añadido(s) al ticket`)
   }
 
+  const addPendingWorkToTicket = () => {
+    const existingEntityIds = new Set(ticketLines.filter(l => l.cobro_ref).map(l => l.cobro_ref!.entity_id))
+    const orderLines = clientPendingWork.orders
+      .filter((o: any) => Number(o.total_pending) > 0 && !existingEntityIds.has(o.id))
+      .map((o: any) => ({
+        id: crypto.randomUUID(),
+        product_variant_id: null as string | null,
+        description: `Pedido sastrería - ${o.order_number}`,
+        sku: '',
+        quantity: 1,
+        unit_price: Number(o.total_pending),
+        discount_percentage: 0,
+        tax_rate: 0,
+        cost_price: 0,
+        cobro_ref: { entity_type: 'tailoring_order' as const, entity_id: o.id },
+      }))
+    const altLines = clientPendingWork.alterations
+      .filter((a: any) => !a.already_charged && Number(a.sale_price) > 0 && !existingEntityIds.has(a.id))
+      .map((a: any) => ({
+        id: crypto.randomUUID(),
+        product_variant_id: null as string | null,
+        description: `Arreglo - ${a.alteration_number}${a.garment_type ? ` (${a.garment_type})` : ''}`,
+        sku: '',
+        quantity: 1,
+        unit_price: Number(a.sale_price),
+        discount_percentage: 0,
+        tax_rate: 0,
+        cost_price: 0,
+        cobro_ref: { entity_type: 'alteration' as const, entity_id: a.id },
+      }))
+    const toAdd = [...orderLines, ...altLines]
+    if (toAdd.length === 0) {
+      toast.info('No hay arreglos/pedidos pendientes de cobro o ya están en el ticket')
+      return
+    }
+    setTicketLines(prev => [...prev, ...toAdd])
+    toast.success(`${toAdd.length} cobro(s) añadido(s) al ticket`)
+  }
+
   const quickPay = (method: Payment['payment_method']) => {
     if (wantPartialPayment) {
       const amount = Math.min(
@@ -698,6 +763,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
         const method = cobroPaymentMethodRef.current
         const orderMethod = method === 'bizum' || method === 'voucher' ? 'card' : (method === 'cash' || method === 'card' || method === 'transfer' ? method : 'cash')
         const today = new Date().toISOString().split('T')[0]
+        const newSaleId = (data as any)?.id ?? (data as any)?.sale?.id ?? null
         for (const item of cobroLines) {
           try {
             if (item.entity_type === 'tailoring_order') {
@@ -709,6 +775,13 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
                 storeId: activeStoreId ?? undefined,
               })
               if (res?.success !== true) toast.error(res && 'error' in res ? res.error : 'Error al registrar pago en pedido')
+            } else if (item.entity_type === 'alteration') {
+              const res = await markAlterationCharged({
+                alterationId: item.entity_id,
+                saleId: newSaleId,
+                paymentMethod: orderMethod,
+              })
+              if (res?.success !== true) toast.error(res && 'error' in res ? res.error : 'Error al marcar el arreglo como cobrado')
             } else {
               const res = await addSalePayment({
                 sale_id: item.entity_id,
@@ -736,6 +809,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
     setSelectedClientId(null)
     setSelectedClientName('')
     setClientReservations([])
+    setClientPendingWork({ alterations: [], orders: [] })
     setGlobalDiscount(0)
     setIsTaxFree(false)
     setShowPayment(false)
@@ -1239,6 +1313,46 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
                 </Button>
               </div>
             )}
+            {!clientPendingWorkLoading && selectedClientId && (clientPendingWork.alterations.length + clientPendingWork.orders.length) > 0 && (() => {
+              const nAlt = clientPendingWork.alterations.length
+              const nOrd = clientPendingWork.orders.length
+              const chargeable =
+                clientPendingWork.orders.reduce((s: number, o: any) => s + (Number(o.total_pending) > 0 ? Number(o.total_pending) : 0), 0) +
+                clientPendingWork.alterations.reduce((s: number, a: any) => s + (!a.already_charged ? Number(a.sale_price || 0) : 0), 0)
+              return (
+                <div className="mt-1.5 rounded-lg border border-indigo-200 bg-indigo-50 p-2.5 text-xs">
+                  <p className="font-semibold text-indigo-800">
+                    {nAlt + nOrd} pendiente{nAlt + nOrd !== 1 ? 's' : ''} de recoger
+                    {chargeable > 0 ? <>{' · '}{formatCurrency(chargeable)} a cobrar</> : null}
+                  </p>
+                  <p className="text-indigo-700/90 mt-0.5 leading-tight">
+                    {nAlt > 0 ? `${nAlt} arreglo${nAlt !== 1 ? 's' : ''}` : ''}
+                    {nAlt > 0 && nOrd > 0 ? ' · ' : ''}
+                    {nOrd > 0 ? `${nOrd} pedido${nOrd !== 1 ? 's' : ''} de sastrería` : ''}
+                  </p>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs border-indigo-300 text-indigo-700 hover:bg-indigo-100"
+                      onClick={() => setPendingWorkDialogOpen(true)}
+                    >
+                      Ver detalle
+                    </Button>
+                    {chargeable > 0 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs border-indigo-300 text-indigo-700 hover:bg-indigo-100"
+                        onClick={addPendingWorkToTicket}
+                      >
+                        Cobrar en ticket
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )
+            })()}
           </div>
           <div className="p-4 border-b border-slate-200">
             <label className="flex flex-col gap-1 cursor-pointer rounded bg-slate-200 border border-slate-300 px-3 py-2.5">
@@ -2067,6 +2181,74 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
           setReservationPickupOpen(false)
         }}
       />
+
+      {/* Diálogo: Detalle de arreglos / pedidos de sastrería pendientes de recoger */}
+      <Dialog open={pendingWorkDialogOpen} onOpenChange={setPendingWorkDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Pendiente de recoger{selectedClientName ? ` — ${selectedClientName}` : ''}</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto space-y-4 text-sm">
+            {clientPendingWork.alterations.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Arreglos</p>
+                <ul className="space-y-1.5">
+                  {clientPendingWork.alterations.map((a: any) => (
+                    <li key={a.id} className="flex items-start justify-between gap-3 rounded-md border border-slate-200 px-2.5 py-2">
+                      <div className="min-w-0">
+                        <p className="font-medium text-slate-800 truncate">
+                          {a.alteration_number}{a.garment_type ? ` · ${a.garment_type}` : ''}
+                        </p>
+                        {a.description && <p className="text-xs text-slate-500 truncate">{a.description}</p>}
+                        <div className="mt-1 flex items-center gap-1.5">
+                          <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${ALTERATION_STATUS_COLORS[a.status as keyof typeof ALTERATION_STATUS_COLORS] ?? ''}`}>
+                            {ALTERATION_STATUS_LABELS[a.status as keyof typeof ALTERATION_STATUS_LABELS] ?? a.status}
+                          </Badge>
+                          {a.already_charged && <span className="text-[10px] text-green-700">Cobrado</span>}
+                        </div>
+                      </div>
+                      <span className="shrink-0 tabular-nums font-medium text-slate-700">{formatCurrency(Number(a.sale_price || 0))}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {clientPendingWork.orders.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Pedidos de sastrería</p>
+                <ul className="space-y-1.5">
+                  {clientPendingWork.orders.map((o: any) => (
+                    <li key={o.id} className="flex items-start justify-between gap-3 rounded-md border border-slate-200 px-2.5 py-2">
+                      <div className="min-w-0">
+                        <p className="font-medium text-slate-800 truncate">{o.order_number}</p>
+                        <div className="mt-1 flex items-center gap-1.5">
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-slate-100 text-slate-700 border-slate-200">
+                            {TAILORING_ORDER_STATUS_LABELS[o.status as keyof typeof TAILORING_ORDER_STATUS_LABELS] ?? o.status}
+                          </Badge>
+                          {o.estimated_delivery_date && <span className="text-[10px] text-slate-500">Entrega est.: {formatDate(o.estimated_delivery_date)}</span>}
+                        </div>
+                      </div>
+                      <span className="shrink-0 tabular-nums text-right">
+                        <span className="font-medium text-slate-700">{formatCurrency(Number(o.total_pending || 0))}</span>
+                        <span className="block text-[10px] text-slate-400">de {formatCurrency(Number(o.total || 0))}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={() => setPendingWorkDialogOpen(false)}>Cerrar</Button>
+            <Button
+              size="sm"
+              onClick={() => { addPendingWorkToTicket(); setPendingWorkDialogOpen(false) }}
+            >
+              Cobrar en ticket
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Diálogo: Vender tarjeta regalo */}
       <Dialog

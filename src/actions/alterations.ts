@@ -342,13 +342,13 @@ export const cancelAlteration = protectedAction<{ id: string; reason?: string },
   async (ctx, { id, reason }) => {
     if (!id) return failure('ID requerido', 'VALIDATION')
     try {
+      const { data: prev } = await ctx.adminClient
+        .from('alterations')
+        .select('notes, alteration_number')
+        .eq('id', id)
+        .maybeSingle()
       const updates: Record<string, unknown> = { status: 'cancelled' }
       if (reason && reason.trim()) {
-        const { data: prev } = await ctx.adminClient
-          .from('alterations')
-          .select('notes')
-          .eq('id', id)
-          .maybeSingle()
         const prevNotes = ((prev as { notes?: string | null } | null)?.notes ?? '').trim()
         const stamp = new Date().toISOString().slice(0, 10)
         const line = `[${stamp}] Cancelado: ${reason.trim()}`
@@ -359,7 +359,8 @@ export const cancelAlteration = protectedAction<{ id: string; reason?: string },
         console.error('[cancelAlteration]', error)
         return failure(error.message)
       }
-      return success({ ok: true })
+      const num = (prev as { alteration_number?: string } | null)?.alteration_number ?? id
+      return success({ ok: true, auditEntityId: String(id), auditDescription: `Arreglo ${num} cancelado` } as unknown as { ok: boolean })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error al cancelar arreglo'
       return failure(msg)
@@ -407,6 +408,116 @@ export const deleteAlteration = protectedAction<{ id: string }, { ok: boolean; c
       const msg = err instanceof Error ? err.message : 'Error al eliminar arreglo'
       return failure(msg)
     }
+  }
+)
+
+// ─── getClientPendingWork ─────────────────────────────────────────────────
+// Trabajo pendiente de recoger de un cliente para el aviso en caja (TPV):
+// arreglos no entregados/cancelados + pedidos de sastrería no entregados/cancelados.
+
+export const getClientPendingWork = protectedAction<
+  { clientId: string },
+  {
+    alterations: Array<{
+      id: string
+      alteration_number: string
+      garment_type: string | null
+      description: string | null
+      status: string
+      sale_price: number
+      already_charged: boolean
+      estimated_completion: string | null
+    }>
+    orders: Array<{
+      id: string
+      order_number: string
+      status: string
+      total: number
+      total_paid: number
+      total_pending: number
+      estimated_delivery_date: string | null
+    }>
+  }
+>(
+  { permission: 'clients.view' },
+  async (ctx, { clientId }) => {
+    const { data: altRows, error: altErr } = await ctx.adminClient
+      .from('alterations')
+      .select('id, alteration_number, garment_type, description, status, sale_price, sale_id, payment_method, estimated_completion, alteration_date')
+      .eq('client_id', clientId)
+      .in('status', ['pending', 'sent', 'ready'])
+      .order('alteration_date', { ascending: false })
+      .limit(50)
+    if (altErr) {
+      console.error('[getClientPendingWork] alterations', altErr)
+      return failure(altErr.message)
+    }
+
+    const { data: ordRows, error: ordErr } = await ctx.adminClient
+      .from('tailoring_orders')
+      .select('id, order_number, status, total, total_paid, total_pending, estimated_delivery_date, order_date')
+      .eq('client_id', clientId)
+      .not('status', 'in', '(delivered,cancelled)')
+      .order('order_date', { ascending: false })
+      .limit(50)
+    if (ordErr) {
+      console.error('[getClientPendingWork] tailoring_orders', ordErr)
+      return failure(ordErr.message)
+    }
+
+    const alterations = (altRows || []).map((a: Record<string, unknown>) => ({
+      id: a.id as string,
+      alteration_number: a.alteration_number as string,
+      garment_type: (a.garment_type as string) ?? null,
+      description: (a.description as string) ?? null,
+      status: a.status as string,
+      sale_price: Number(a.sale_price ?? 0),
+      already_charged: Boolean(a.sale_id) || Boolean(a.payment_method),
+      estimated_completion: (a.estimated_completion as string) ?? null,
+    }))
+
+    const orders = (ordRows || []).map((o: Record<string, unknown>) => {
+      const total = Number(o.total ?? 0)
+      const totalPaid = Number(o.total_paid ?? 0)
+      const totalPending = o.total_pending != null ? Number(o.total_pending) : Math.max(0, total - totalPaid)
+      return {
+        id: o.id as string,
+        order_number: o.order_number as string,
+        status: o.status as string,
+        total,
+        total_paid: totalPaid,
+        total_pending: totalPending,
+        estimated_delivery_date: (o.estimated_delivery_date as string) ?? null,
+      }
+    })
+
+    return success({ alterations, orders })
+  }
+)
+
+// ─── markAlterationCharged ────────────────────────────────────────────────
+// Marca un arreglo como cobrado desde el TPV: vincula la venta y deja constancia
+// del método de pago para que no se vuelva a ofrecer su cobro. No cambia el estado
+// (cobrar ≠ entregar).
+
+export const markAlterationCharged = protectedAction<
+  { alterationId: string; saleId?: string | null; paymentMethod?: string | null },
+  { id: string }
+>(
+  { permission: 'sales.create', auditModule: 'alterations' },
+  async (ctx, { alterationId, saleId, paymentMethod }) => {
+    const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (saleId) patch.sale_id = saleId
+    if (paymentMethod) patch.payment_method = paymentMethod
+    const { error } = await ctx.adminClient
+      .from('alterations')
+      .update(patch)
+      .eq('id', alterationId)
+    if (error) {
+      console.error('[markAlterationCharged]', error)
+      return failure(error.message)
+    }
+    return success({ id: alterationId })
   }
 )
 
