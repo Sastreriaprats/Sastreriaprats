@@ -111,7 +111,11 @@ type ExpensesData = {
 type ExpensesComparison = { current: number; previous: number; change: number }
 
 export function ReportsContent() {
-  const { activeStoreId } = useAuth()
+  const { activeStoreId, permissions, isAdmin } = useAuth()
+  // Vista global (KPIs de empresa + todas las pestañas) solo para admin/propietario
+  // (reports.view). Los vendedores con reports.view_own ven SOLO "Por empleado" con
+  // su propia fila (el scoping de datos se aplica en el servidor).
+  const canSeeGlobal = isAdmin || permissions.has('reports.view')
   const [dateRange, setDateRange] = useState({ start: getDefaultStart(), end: getDefaultEnd() })
   const [groupBy, setGroupBy] = useState<'day' | 'week' | 'month'>('day')
   const [isLoading, setIsLoading] = useState(true)
@@ -401,14 +405,16 @@ export function ReportsContent() {
             </span>
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-1" onClick={handleExportPDF} disabled={isExporting || isLoading}>
-            <FileText className="h-3 w-3" /> PDF
-          </Button>
-          <Button variant="outline" size="sm" className="gap-1" onClick={handleExportExcel} disabled={isExporting || isLoading}>
-            <FileSpreadsheet className="h-3 w-3" /> Excel
-          </Button>
-        </div>
+        {canSeeGlobal && (
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="gap-1" onClick={handleExportPDF} disabled={isExporting || isLoading}>
+              <FileText className="h-3 w-3" /> PDF
+            </Button>
+            <Button variant="outline" size="sm" className="gap-1" onClick={handleExportExcel} disabled={isExporting || isLoading}>
+              <FileSpreadsheet className="h-3 w-3" /> Excel
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -499,6 +505,12 @@ export function ReportsContent() {
 
       {isLoading ? (
         <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin" /></div>
+      ) : !canSeeGlobal ? (
+        // Vista personal del vendedor: solo su "Por empleado" (datos ya acotados en servidor).
+        <div className="space-y-4">
+          <h2 className="text-lg font-semibold">Mis ventas y comisiones</h2>
+          <EmployeeTab data={employeeData} storeBreakdown={null} stores={null} commissions={employeeCommissions} groupBonuses={groupBonuses} />
+        </div>
       ) : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">

@@ -1,5 +1,5 @@
 import { Metadata } from 'next'
-import { requirePermission } from '@/actions/auth'
+import { requireAnyPermission } from '@/actions/auth'
 import dynamic from 'next/dynamic'
 
 const ReportsContent = dynamic(
@@ -16,6 +16,8 @@ const ReportsContent = dynamic(
 export const metadata: Metadata = { title: 'Informes y Reporting' }
 
 export default async function ReportingPage() {
-  await requirePermission('reports.view')
+  // Admin/propietario (reports.view) ve todo; vendedores (reports.view_own) entran
+  // a su vista personal. El scoping real (solo su fila) se aplica en las acciones.
+  await requireAnyPermission(['reports.view', 'reports.view_own', 'reports.view_all_employees'])
   return <ReportsContent />
 }

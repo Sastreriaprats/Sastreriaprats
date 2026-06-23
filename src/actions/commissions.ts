@@ -5,7 +5,7 @@ import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
-import { checkUserPermission } from '@/actions/auth'
+import { checkUserPermission, checkUserExplicitPermission } from '@/actions/auth'
 import { revalidatePath } from 'next/cache'
 
 // ============================================================================
@@ -108,9 +108,12 @@ export const getEmployeeCommissions = protectedAction<
   { start_date: string; end_date: string },
   { employees: EmployeeCommission[]; groupBonuses: GroupBonusResult[] }
 >(
-  { permission: 'reports.view', auditModule: 'reports' },
+  { permission: ['reports.view', 'reports.view_own', 'reports.view_all_employees'], auditModule: 'reports' },
   async (ctx, { start_date, end_date }) => {
     const admin = ctx.adminClient
+    // Solo quien tiene reports.view_all_employees EXPLÍCITO (sin bypass de admin)
+    // ve a todos; el resto, únicamente su propia comisión.
+    const canViewAll = await checkUserExplicitPermission(ctx.userId, 'reports.view_all_employees')
     const monthKeys = new Set(monthKeysInRange(start_date, end_date))
     const years = Array.from(new Set([...monthKeys].map(k => Number(k.slice(0, 4)))))
 
@@ -319,6 +322,13 @@ export const getEmployeeCommissions = protectedAction<
       for (const p of (profiles || []) as any[]) nameById.set(p.id, p.full_name || p.id)
       for (const e of result.values()) e.employee_name = nameById.get(e.employee_id) || e.employee_id
       for (const gb of groupBonuses) for (const m of gb.members) m.employee_name = nameById.get(m.employee_id) || m.employee_id
+    }
+
+    // Scoping de privacidad: si NO puede ver a todos, solo su propia fila y sin
+    // el desglose del bonus grupal (que revela cifras de tienda y otros empleados).
+    if (!canViewAll) {
+      const mine = result.get(ctx.userId)
+      return success({ employees: mine ? [mine] : [], groupBonuses: [] })
     }
 
     return success({

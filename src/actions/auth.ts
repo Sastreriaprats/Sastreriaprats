@@ -43,6 +43,31 @@ export async function checkUserPermission(userId: string, permissionCode: string
   return (perms?.length ?? 0) > 0
 }
 
+/**
+ * Como checkUserPermission pero SIN el bypass de administrador: el usuario debe
+ * tener el permiso EXPLÍCITAMENTE vía un rol (role_permissions). Para capacidades
+ * que ni los admin deben tener salvo asignación expresa (p.ej. ver ventas y
+ * comisiones de TODOS los empleados, reservado a una persona concreta).
+ */
+export async function checkUserExplicitPermission(userId: string, permissionCode: string): Promise<boolean> {
+  const admin = createAdminClient()
+  const { data: userRoles } = await admin
+    .from('user_roles')
+    .select('role_id')
+    .eq('user_id', userId)
+  const roleIds = (userRoles ?? []).map(ur => ur.role_id)
+  if (roleIds.length === 0) return false
+
+  const { data: perms } = await admin
+    .from('role_permissions')
+    .select('permissions!inner(code)')
+    .in('role_id', roleIds)
+    .eq('permissions.code', permissionCode)
+    .limit(1)
+
+  return (perms?.length ?? 0) > 0
+}
+
 /** Comprueba si el usuario tiene al menos uno de los permisos indicados. */
 export async function checkUserAnyPermission(userId: string, permissionCodes: string[]): Promise<boolean> {
   if (permissionCodes.length === 0) return false
@@ -700,6 +725,36 @@ export async function requirePermission(permissionCode: string) {
   if (!hasPermission && !isFullAdmin) {
     redirect('/admin/sin-permisos')
   }
+
+  return user
+}
+
+/** Como requirePermission pero basta con tener UNO de los permisos indicados. */
+export async function requireAnyPermission(permissionCodes: string[]) {
+  const supabase = await createServerSupabaseClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/auth/login')
+
+  const admin = createAdminClient()
+  const { data: match } = await admin
+    .from('user_roles')
+    .select('role_id, roles!inner(name, role_permissions!inner(permissions!inner(code)))')
+    .eq('user_id', user.id)
+    .limit(100)
+
+  const codes = new Set<string>()
+  const roleCodes = new Set<string>()
+  for (const ur of match ?? []) {
+    const roles = ur.roles as unknown as { name?: string; role_permissions: { permissions: { code: string } }[] }
+    if (roles?.name) roleCodes.add(roles.name)
+    for (const rp of roles?.role_permissions ?? []) {
+      if (rp.permissions?.code) codes.add(rp.permissions.code)
+    }
+  }
+
+  const hasAny = permissionCodes.some(c => codes.has(c))
+  const isFullAdmin = roleCodes.has('administrador') || roleCodes.has('super_admin')
+  if (!hasAny && !isFullAdmin) redirect('/admin/sin-permisos')
 
   return user
 }

@@ -1,6 +1,7 @@
 'use server'
 
 import { protectedAction } from '@/lib/server/action-wrapper'
+import { checkUserExplicitPermission } from '@/actions/auth'
 import { success, failure } from '@/lib/errors'
 import { BOUTIQUE_SALE_TYPE, GIFT_CARD_SALE_TYPE, accumulateByStore } from '@/lib/reports/dimensions'
 
@@ -740,8 +741,11 @@ export const getSalesByEmployee = protectedAction<
     stores?: { store_id: string; store_name: string }[]
   }
 >(
-  { permission: 'reports.view', auditModule: 'reports' },
+  { permission: ['reports.view', 'reports.view_own', 'reports.view_all_employees'], auditModule: 'reports' },
   async (ctx, { start_date, end_date, store_id, channel = 'all', tax_mode = 'with_tax' }) => {
+    // Privacidad: sin reports.view_all_employees EXPLÍCITO (sin bypass de admin), el
+    // usuario solo ve su propia fila y sin desglose cruzado por tienda.
+    const canViewAll = await checkUserExplicitPermission(ctx.userId, 'reports.view_all_employees')
     const wantBoutique = channel === 'all' || channel === 'boutique'
     const wantTailoring = channel === 'all' || channel === 'tailoring'
     const net = tax_mode === 'without_tax'
@@ -896,6 +900,12 @@ export const getSalesByEmployee = protectedAction<
       stores = Object.keys(totalByStore)
         .sort((a, b) => (totalByStore[b] || 0) - (totalByStore[a] || 0))
         .map((sId) => ({ store_id: sId, store_name: storeNames[sId] || 'Sin tienda' }))
+    }
+
+    // Scoping de privacidad: sin permiso global, solo la propia fila y sin desgloses
+    // cruzados por tienda (que revelarían las cifras de otros empleados).
+    if (!canViewAll) {
+      return success({ employees: result.filter(e => e.employee_id === ctx.userId), byStore: undefined, stores: undefined })
     }
 
     return success({ employees: result, byStore, stores })
