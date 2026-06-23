@@ -203,7 +203,13 @@ export async function generateCamiseriaFichaPdf(params: CamiseriaFichaPdfParams)
     y += 4
   }
 
-  y = A4_H_MM - MARGIN - 12
+  // El pie fluye tras el contenido (no se ancla al borde inferior). Anclarlo a
+  // ~277mm dejaba el texto fuera del área imprimible de muchas impresoras, que
+  // lo desbordaban a una 2ª hoja. Lo bajamos solo si hay sitio, pero nunca por
+  // debajo de un límite seguro, garantizando siempre una única hoja.
+  const FOOTER_LINE_MIN = A4_H_MM - MARGIN - 30 // ≈253mm: holgura para el pie
+  const FOOTER_LINE_MAX = A4_H_MM - MARGIN - 18 // ≈265mm: tope seguro de impresión
+  y = Math.min(Math.max(y + 4, FOOTER_LINE_MIN), FOOTER_LINE_MAX)
   doc.setDrawColor(0, 0, 0)
   doc.line(MARGIN, y, pageW - MARGIN, y)
   y += LINE
