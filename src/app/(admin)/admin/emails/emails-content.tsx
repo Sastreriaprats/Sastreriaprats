@@ -36,10 +36,13 @@ import {
   deleteCampaignAction,
   listNewsletterSubscribers,
   getSegmentCounts,
+  previewCampaignContent,
+  previewCampaignEmail,
 } from '@/actions/emails'
 import { formatDate, formatDateTime } from '@/lib/utils'
 import { TemplateContentEditorDialog, type TemplateForEditor } from '@/components/admin/template-content-editor-dialog'
 import { EmailTemplatePreviewModal } from '@/components/admin/email-template-preview-modal'
+import { EmailPreviewDialog } from '@/components/admin/email-preview-dialog'
 import { NewsletterContentEditor, type CampaignContent } from '@/components/admin/newsletter-content-editor'
 import { TemplatesGallery } from '@/components/admin/templates-gallery'
 import type { ProductSearchResult } from '@/actions/products'
@@ -192,6 +195,64 @@ export function EmailsContent() {
   const [zoomThumbnail, setZoomThumbnail] = useState<Template | null>(null)
   /** Plantilla en edición de contenido (lápiz). null = dialog cerrado. */
   const [editingContent, setEditingContent] = useState<TemplateForEditor | null>(null)
+
+  /**
+   * Estado del diálogo de vista previa de email (reutilizado para 3 casos):
+   *  - Previa "en caliente" del modal Nueva campaña / Editar (sin guardar).
+   *  - Previa de una campaña en borrador ya guardada.
+   *  - "Ver envío" de una campaña enviada: previa + lista de destinatarios
+   *    (cuando `campaignId` está presente).
+   */
+  const [previewState, setPreviewState] = useState<{
+    open: boolean
+    loading: boolean
+    html?: string
+    subject?: string
+    title: string
+    campaignId?: string
+  }>({ open: false, loading: false, title: 'Vista previa del email' })
+
+  type CampaignFormLike = { subject: string; segment: string; template_id: string; body_html: string }
+
+  /** Vista previa a partir del contenido del formulario, sin guardar la campaña. */
+  const previewFromForm = async (form: CampaignFormLike, content: CampaignContent) => {
+    const structured = STRUCTURED_TEMPLATE_CODES.has(templateCodeFor(form.template_id))
+    setPreviewState({ open: true, loading: true, title: 'Vista previa del email' })
+    const res = await previewCampaignContent({
+      template_id: form.template_id && form.template_id !== 'none' ? form.template_id : null,
+      subject: form.subject,
+      body_html: form.body_html,
+      segment: form.segment,
+      content: structured ? (content as unknown as Record<string, unknown>) : null,
+    })
+    if (res.success && res.data) {
+      setPreviewState((p) => ({ ...p, loading: false, html: res.data!.html, subject: res.data!.subject }))
+    } else {
+      toast.error((!res.success && res.error) || 'No se pudo generar la vista previa')
+      setPreviewState((p) => ({ ...p, open: false, loading: false }))
+    }
+  }
+
+  /**
+   * Vista previa de una campaña ya guardada. Si `withRecipients` es true (campaña
+   * enviada), el diálogo añade la pestaña de destinatarios con su estado.
+   */
+  const openCampaignPreview = async (campaign: Campaign, withRecipients: boolean) => {
+    const id = campaign.id as string
+    setPreviewState({
+      open: true,
+      loading: true,
+      title: withRecipients ? `Envío — ${(campaign.name as string) || 'campaña'}` : 'Vista previa del email',
+      campaignId: withRecipients ? id : undefined,
+    })
+    const res = await previewCampaignEmail({ campaignId: id })
+    if (res.success && res.data) {
+      setPreviewState((p) => ({ ...p, loading: false, html: res.data!.html, subject: res.data!.subject }))
+    } else {
+      toast.error((!res.success && res.error) || 'No se pudo generar la vista previa')
+      setPreviewState((p) => ({ ...p, open: false, loading: false, campaignId: undefined }))
+    }
+  }
 
   /** Abre el dialog "sin código" para editar nombre/asunto/estado. */
   const openContentEditor = (t: Template) => {
@@ -630,11 +691,14 @@ export function EmailsContent() {
                               >
                                 <Pencil className="h-3 w-3" /> Editar
                               </Button>
-                              <Link href={`/admin/emails/preview/${c.id as string}`} target="_blank">
-                                <Button size="sm" variant="outline" className="gap-1 text-xs">
-                                  <Eye className="h-3 w-3" /> Vista previa
-                                </Button>
-                              </Link>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="gap-1 text-xs"
+                                onClick={() => openCampaignPreview(c, false)}
+                              >
+                                <Eye className="h-3 w-3" /> Vista previa
+                              </Button>
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -652,6 +716,16 @@ export function EmailsContent() {
                                 Enviar
                               </Button>
                             </>
+                          )}
+                          {(c.status as string) !== 'draft' && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-1 text-xs"
+                              onClick={() => openCampaignPreview(c, true)}
+                            >
+                              <Eye className="h-3 w-3" /> Ver envío
+                            </Button>
                           )}
                           {can('emails.send') && (
                           <Button
@@ -970,6 +1044,13 @@ export function EmailsContent() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowNewCampaign(false)}>Cancelar</Button>
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={() => previewFromForm(campaignForm, campaignContent)}
+            >
+              <Eye className="h-4 w-4" /> Vista previa
+            </Button>
             <Button onClick={handleCreateCampaign} className="bg-prats-navy hover:bg-prats-navy/90">
               Crear campaña
             </Button>
@@ -1030,17 +1111,13 @@ export function EmailsContent() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEditCampaign(null)}>Cancelar</Button>
-            {campaignEditForm.id &&
-              STRUCTURED_TEMPLATE_CODES.has(templateCodeFor(campaignEditForm.template_id)) && (
-                <Link
-                  href={`/admin/emails/preview/${campaignEditForm.id}`}
-                  target="_blank"
-                >
-                  <Button variant="outline" className="gap-2">
-                    <Eye className="h-4 w-4" /> Vista previa
-                  </Button>
-                </Link>
-              )}
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={() => previewFromForm(campaignEditForm, campaignEditContent)}
+            >
+              <Eye className="h-4 w-4" /> Vista previa
+            </Button>
             <Button onClick={handleUpdateCampaign} className="bg-prats-navy hover:bg-prats-navy/90">
               Guardar
             </Button>
@@ -1296,6 +1373,17 @@ export function EmailsContent() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Vista previa de email: en caliente (modal), borrador, o envío + destinatarios */}
+      <EmailPreviewDialog
+        open={previewState.open}
+        onOpenChange={(o) => setPreviewState((p) => ({ ...p, open: o }))}
+        title={previewState.title}
+        html={previewState.html}
+        subject={previewState.subject}
+        loading={previewState.loading}
+        campaignId={previewState.campaignId}
+      />
     </div>
   )
 }

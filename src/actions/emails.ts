@@ -906,6 +906,78 @@ export const previewCampaignEmail = protectedAction<
 )
 
 /**
+ * Vista previa "en caliente" desde el modal de creación/edición: renderiza el
+ * email a partir del contenido que el usuario está escribiendo en ese momento,
+ * SIN necesidad de guardar la campaña antes. Usa exactamente la misma lógica de
+ * render que `previewCampaignEmail`, pero cargando la plantilla por id en vez de
+ * leer una campaña existente. No persiste nada.
+ */
+export const previewCampaignContent = protectedAction<
+  {
+    template_id?: string | null
+    subject?: string
+    body_html?: string
+    segment?: string
+    content?: Record<string, unknown> | null
+    recipient?: { first_name?: string; full_name?: string; email?: string }
+  },
+  { html: string; subject: string }
+>(
+  { permission: 'emails.view', auditModule: 'emails' },
+  async (ctx, input) => {
+    let template: Record<string, unknown> | null = null
+    if (input.template_id && input.template_id !== 'none') {
+      const { data } = await ctx.adminClient
+        .from('email_templates')
+        .select('*')
+        .eq('id', input.template_id)
+        .single()
+      if (!data) return failure('La plantilla seleccionada ya no existe.')
+      template = data
+    }
+
+    const templateCode = (template?.code as string) || ''
+    const isStructured = STRUCTURED_CODES.has(templateCode)
+    const isOptInInvitation =
+      templateCode === 'newsletter_optin' || input.segment === 'optin_invitation'
+    const publicUrl = getPublicSiteUrl() || 'https://sastreriaprats.com'
+
+    const fakeToken = 'preview-token'
+    const unsubscribeUrl = isOptInInvitation ? undefined : `${publicUrl}/newsletter/baja?token=${fakeToken}`
+    const confirmationUrl = isOptInInvitation ? `${publicUrl}/newsletter/confirmar?token=${fakeToken}` : undefined
+
+    const rec: NewsletterRecipient = {
+      first_name: input.recipient?.first_name || 'Ejemplo',
+      full_name: input.recipient?.full_name || 'Cliente Ejemplo',
+      email: input.recipient?.email || 'preview@sastreriaprats.com',
+    }
+
+    let html: string
+    if (isStructured && template) {
+      html = composeNewsletterEmail({
+        template: template as NewsletterTemplate,
+        content: (input.content as NewsletterContent | undefined) || null,
+        recipient: rec,
+        urls: { unsubscribeUrl, confirmationUrl },
+        subject: input.subject || '',
+      })
+    } else {
+      html = renderTemplate(
+        (template?.body_html_es as string) || (input.body_html as string) || '',
+        {
+          client_name: rec.full_name || rec.first_name || 'Cliente',
+          client_email: rec.email || '',
+          first_name: rec.first_name || '',
+          last_name: '',
+        }
+      )
+    }
+
+    return success({ html, subject: input.subject || '' })
+  }
+)
+
+/**
  * Envía la campaña al email del usuario autenticado como vista previa real,
  * con el subject prefijado `[PRUEBA]`. No toca email_logs, no toca clients,
  * no añade cabeceras List-Unsubscribe. Aplica la misma validación de
