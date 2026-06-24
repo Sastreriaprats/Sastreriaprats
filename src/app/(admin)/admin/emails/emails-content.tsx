@@ -35,6 +35,7 @@ import {
   upsertEmailTemplate,
   deleteCampaignAction,
   listNewsletterSubscribers,
+  getSegmentCounts,
 } from '@/actions/emails'
 import { formatDate, formatDateTime } from '@/lib/utils'
 import { TemplateContentEditorDialog, type TemplateForEditor } from '@/components/admin/template-content-editor-dialog'
@@ -151,6 +152,8 @@ export function EmailsContent() {
   const [subscribers, setSubscribers] = useState<{ rows: SubRow[]; total: number }>({ rows: [], total: 0 })
   const [subCounts, setSubCounts] = useState({ total: 0, active: 0, inactive: 0, unsubscribed: 0 })
   const [subsLoading, setSubsLoading] = useState(false)
+  /** Nº de destinatarios por segmento, para el selector de campaña. */
+  const [segmentCounts, setSegmentCounts] = useState<Record<string, number>>({})
 
   const [campaignForm, setCampaignForm] = useState({
     name: '', subject: '', segment: 'all', template_id: '', body_html: '',
@@ -223,17 +226,23 @@ export function EmailsContent() {
     if (res.success) setLogs(res.data ?? { logs: [], total: 0, page: 1 })
   }, [])
 
+  const loadSegmentCounts = useCallback(async () => {
+    const res = await getSegmentCounts()
+    if (res.success && res.data) setSegmentCounts(res.data)
+  }, [])
+
   useEffect(() => {
     const load = async () => {
       setIsLoading(true)
       await Promise.all([
         loadTemplates(),
         loadCampaigns(),
+        loadSegmentCounts(),
       ])
       setIsLoading(false)
     }
     load()
-  }, [loadTemplates, loadCampaigns])
+  }, [loadTemplates, loadCampaigns, loadSegmentCounts])
 
   useEffect(() => {
     loadLogs(logsPage)
@@ -927,7 +936,9 @@ export function EmailsContent() {
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {Object.entries(segmentLabels).map(([k, v]) => (
-                    <SelectItem key={k} value={k}>{v}</SelectItem>
+                    <SelectItem key={k} value={k}>
+                      {v}{segmentCounts[k] != null ? ` · ${segmentCounts[k]} destinatarios` : ''}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -985,7 +996,9 @@ export function EmailsContent() {
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {Object.entries(segmentLabels).map(([k, v]) => (
-                    <SelectItem key={k} value={k}>{v}</SelectItem>
+                    <SelectItem key={k} value={k}>
+                      {v}{segmentCounts[k] != null ? ` · ${segmentCounts[k]} destinatarios` : ''}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>

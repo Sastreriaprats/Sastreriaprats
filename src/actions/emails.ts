@@ -678,6 +678,23 @@ export const listNewsletterSubscribers = protectedAction<
   }
 )
 
+/**
+ * Número de destinatarios de cada segmento, para mostrarlo junto a las opciones
+ * del selector de campaña. Reutiliza exactamente la misma lógica de conteo que
+ * el envío real (countSegment), así que el número coincide con lo que recibiría
+ * una campaña creada con ese segmento.
+ */
+export const getSegmentCounts = protectedAction<void, Record<string, number>>(
+  { permission: 'emails.view', auditModule: 'emails' },
+  async (ctx) => {
+    const segments = ['all', 'vip', 'new_30d', 'inactive_90d', 'with_orders', 'web_registered', 'optin_invitation']
+    const entries = await Promise.all(
+      segments.map(async (s) => [s, await countSegment(ctx.adminClient, s, undefined)] as const)
+    )
+    return success(Object.fromEntries(entries))
+  }
+)
+
 // ==========================================
 // HELPERS
 // ==========================================
