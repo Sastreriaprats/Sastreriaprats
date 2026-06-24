@@ -1417,7 +1417,7 @@ export const getExpensesReport = protectedAction<
       label: string
       total: number
       count: number
-      invoices: { invoice_number: string; supplier_name: string; total: number; count: number }[]
+      invoices: { invoice_number: string; supplier_name: string; date: string; total: number; count: number }[]
     }[]
   }
 >(
@@ -1467,12 +1467,12 @@ export const getExpensesReport = protectedAction<
     // -> suppliers.supplier_types. Los pagos sin enlace caen en "Sin clasificar".
     const providerExpenses = expenses.filter((tx: any) => (tx.category as string) === 'proveedores')
     const invoiceIds = [...new Set(providerExpenses.map((tx: any) => tx.ap_supplier_invoice_id).filter(Boolean) as string[])]
-    const invoiceMap = new Map<string, { invoice_number: string; supplier_name: string; supplier_id: string | null }>()
+    const invoiceMap = new Map<string, { invoice_number: string; supplier_name: string; supplier_id: string | null; invoice_date: string }>()
     if (invoiceIds.length > 0) {
       const { data: invs } = await ctx.adminClient
-        .from('ap_supplier_invoices').select('id, invoice_number, supplier_name, supplier_id').in('id', invoiceIds)
+        .from('ap_supplier_invoices').select('id, invoice_number, supplier_name, supplier_id, invoice_date').in('id', invoiceIds)
       for (const i of (invs ?? []) as any[]) {
-        invoiceMap.set(String(i.id), { invoice_number: String(i.invoice_number ?? ''), supplier_name: String(i.supplier_name ?? ''), supplier_id: i.supplier_id ?? null })
+        invoiceMap.set(String(i.id), { invoice_number: String(i.invoice_number ?? ''), supplier_name: String(i.supplier_name ?? ''), supplier_id: i.supplier_id ?? null, invoice_date: String(i.invoice_date ?? '') })
       }
     }
     const supplierIds = [...new Set([...invoiceMap.values()].map((v) => v.supplier_id).filter(Boolean) as string[])]
@@ -1501,30 +1501,36 @@ export const getExpensesReport = protectedAction<
     }
 
     const descRe = /^Pago (?:cuota )?factura (.+?) · (.+)$/
-    type InvAgg = { invoice_number: string; supplier_name: string; total: number; count: number }
+    type InvAgg = { invoice_number: string; supplier_name: string; date: string; total: number; count: number }
     const byType: Record<string, { label: string; total: number; count: number; invoices: Map<string, InvAgg> }> = {}
     for (const tx of providerExpenses as any[]) {
       const inv = tx.ap_supplier_invoice_id ? invoiceMap.get(String(tx.ap_supplier_invoice_id)) : null
       const g = inv && inv.supplier_id ? groupOf(supplierTypesMap.get(inv.supplier_id)) : { key: 'sin_clasificar', label: TYPE_LABELS.sin_clasificar }
-      let invKey: string, invNum: string, supName: string
+      let invKey: string, invNum: string, supName: string, invDate: string
+      // Fecha mostrada: la de la factura cuando hay factura enlazada; si no, la del
+      // movimiento de gasto (pagos sin factura, identificados por descripción).
       if (inv) {
         invKey = String(tx.ap_supplier_invoice_id); invNum = inv.invoice_number; supName = inv.supplier_name
+        invDate = inv.invoice_date || String(tx.date ?? '')
       } else {
         const m = descRe.exec(String(tx.description ?? ''))
         invNum = m ? m[1] : (String(tx.description ?? '—')); supName = m ? m[2] : '—'
-        invKey = `desc:${invNum}·${supName}`
+        invKey = `desc:${invNum}·${supName}`; invDate = String(tx.date ?? '')
       }
       if (!byType[g.key]) byType[g.key] = { label: g.label, total: 0, count: 0, invoices: new Map() }
       const v = valueOf(tx)
       byType[g.key].total += v; byType[g.key].count += 1
       const cur = byType[g.key].invoices.get(invKey)
-      if (cur) { cur.total += v; cur.count += 1 }
-      else byType[g.key].invoices.set(invKey, { invoice_number: invNum, supplier_name: supName, total: v, count: 1 })
+      // Si la factura se paga en varias cuotas, conserva la fecha más reciente.
+      if (cur) { cur.total += v; cur.count += 1; if (invDate > cur.date) cur.date = invDate }
+      else byType[g.key].invoices.set(invKey, { invoice_number: invNum, supplier_name: supName, date: invDate, total: v, count: 1 })
     }
     const providersBreakdown = Object.entries(byType)
       .map(([type, d]) => ({
         type, label: d.label, total: Math.round(d.total * 100) / 100, count: d.count,
-        invoices: [...d.invoices.values()].map((i) => ({ ...i, total: Math.round(i.total * 100) / 100 })).sort((a, b) => b.total - a.total),
+        // Ordenado por fecha descendente (más reciente primero); sin fecha al final.
+        invoices: [...d.invoices.values()].map((i) => ({ ...i, total: Math.round(i.total * 100) / 100 }))
+          .sort((a, b) => (b.date || '').localeCompare(a.date || '')),
       }))
       // "Sin clasificar" al final; el resto por importe descendente.
       .sort((a, b) => (a.type === 'sin_clasificar' ? 1 : b.type === 'sin_clasificar' ? -1 : b.total - a.total))

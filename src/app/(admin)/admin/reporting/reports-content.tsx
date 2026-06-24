@@ -104,7 +104,7 @@ type ExpensesData = {
     label: string
     total: number
     count: number
-    invoices: { invoice_number: string; supplier_name: string; total: number; count: number }[]
+    invoices: { invoice_number: string; supplier_name: string; date: string; total: number; count: number }[]
   }[]
 }
 
@@ -1473,6 +1473,7 @@ function ExpensesTab({ data, comparison }: { data: ExpensesData | null; comparis
                     <Table>
                       <TableHeader>
                         <TableRow>
+                          <TableHead>Fecha</TableHead>
                           <TableHead>Nº factura</TableHead>
                           <TableHead>Proveedor</TableHead>
                           <TableHead className="text-right">Importe</TableHead>
@@ -1481,6 +1482,7 @@ function ExpensesTab({ data, comparison }: { data: ExpensesData | null; comparis
                       <TableBody>
                         {t.invoices.map((inv, i) => (
                           <TableRow key={i}>
+                            <TableCell className="text-xs whitespace-nowrap text-muted-foreground">{inv.date ? inv.date.slice(0, 10).split('-').reverse().join('/') : '—'}</TableCell>
                             <TableCell className="font-mono text-xs">{inv.invoice_number}</TableCell>
                             <TableCell className="text-sm">{inv.supplier_name}</TableCell>
                             <TableCell className="text-right">{formatCurrency(inv.total)}</TableCell>
