@@ -1244,18 +1244,29 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
     if (orderErr || !orderBefore) return failure('Pedido no encontrado', 'NOT_FOUND')
 
     const currentStatus = String((orderBefore as any).status)
-    // Editabilidad: un pedido cancelado no se edita. Si está PAGADO del todo
-    // (total_pending<=0) o FACTURADO, los DATOS de confección sí se pueden editar
-    // (medidas, tejido, cortador, notas…) pero NO los importes (evita descuadrar el
-    // cobro/factura). El rechazo es selectivo: solo si el update intenta cambiar precio.
+    // Editabilidad: un pedido cancelado no se edita. Los DATOS de confección
+    // (medidas, tejido, cortador, notas…) siempre son editables. Los IMPORTES solo
+    // se bloquean si el pedido tiene una factura VIGENTE (emitida y no anulada):
+    // editar el precio descuadraría una factura ya emitida. El PAGO no bloquea —
+    // un pedido pagado pero sin factura se puede reajustar; la red de seguridad
+    // 2.b impide que el nuevo total quede por debajo de lo ya cobrado. Para editar
+    // un pedido facturado hay que anular antes la factura (genera nota de abono):
+    // al quedar 'cancelled' deja de ser vigente y se vuelve a poder editar.
     const ob = orderBefore as Record<string, unknown>
     const totalPaidBefore = Number(ob.total_paid) || 0
-    const totalPendingBefore = Number(ob.total_pending) || 0
-    const invoiceId = ob.invoice_id ?? null
     if (currentStatus === 'cancelled') {
       return failure('No se puede editar un pedido cancelado', 'CONFLICT')
     }
-    const priceLocked = totalPendingBefore <= 0 || !!invoiceId
+    // Factura vigente = emitida y no anulada (cualquier status salvo draft/cancelled).
+    // El vínculo real es invoices.tailoring_order_id (la columna tailoring_orders.invoice_id
+    // está en desuso). Anular la factura la deja en 'cancelled' → ya no bloquea.
+    const { data: vigentInvoices } = await admin
+      .from('invoices')
+      .select('id')
+      .eq('tailoring_order_id', input.orderId)
+      .not('status', 'in', '(draft,cancelled)')
+      .limit(1)
+    const priceLocked = (vigentInvoices?.length ?? 0) > 0
 
     const { data: linesBefore } = await admin
       .from('tailoring_order_lines')
@@ -1309,7 +1320,7 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
       }
       if (monetaryChange) {
         return failure(
-          'No se puede cambiar el precio de un pedido ya pagado o facturado (evita descuadrar el cobro). El resto de datos (confección, medidas, tejido, notas…) sí se puede editar.',
+          'No se puede cambiar el precio de un pedido facturado (descuadraría la factura emitida). Anula antes la factura (se generará una nota de abono) y podrás editar el precio. El resto de datos (confección, medidas, tejido, notas…) sí se puede editar.',
           'CONFLICT',
         )
       }

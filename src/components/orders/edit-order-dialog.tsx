@@ -116,9 +116,27 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
   const router = useRouter()
   const { can } = usePermissions()
   const canViewCosts = can('orders.view_costs')
-  // Pedido pagado del todo o facturado → los campos MONETARIOS van en read-only
-  // (no descuadrar el cobro). El resto de datos (confección) sí editables.
-  const priceLocked = (Number(order?.total_pending) || 0) <= 0 || !!order?.invoice_id
+  // Los IMPORTES solo se bloquean si el pedido tiene una factura VIGENTE (emitida y
+  // no anulada). El pago NO bloquea: un pedido pagado pero sin factura se puede
+  // reajustar (el servidor impide bajar el total por debajo de lo ya cobrado). Para
+  // editar uno facturado hay que anular antes la factura (genera nota de abono) → al
+  // quedar anulada deja de ser vigente y se desbloquea. El vínculo real es
+  // invoices.tailoring_order_id (la columna order.invoice_id está en desuso).
+  // El servidor revalida esto en updateOrderAction; aquí es solo UX.
+  const [hasValidInvoice, setHasValidInvoice] = useState(false)
+  useEffect(() => {
+    if (!open || !order?.id) return
+    let cancelled = false
+    createClient()
+      .from('invoices')
+      .select('id')
+      .eq('tailoring_order_id', order.id)
+      .not('status', 'in', '(draft,cancelled)')
+      .limit(1)
+      .then(({ data }) => { if (!cancelled) setHasValidInvoice((data?.length ?? 0) > 0) })
+    return () => { cancelled = true }
+  }, [open, order?.id])
+  const priceLocked = hasValidInvoice
 
   // Cabecera
   const [clientId, setClientId] = useState<string | null>(order?.client_id ?? null)
@@ -742,7 +760,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
             </div>
             {priceLocked && (
               <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-                El precio no se puede editar porque el pedido ya está pagado o facturado (evita descuadrar el cobro). El resto de datos (tejido, cortador, medidas, notas…) sí se puede editar.
+                El precio no se puede editar porque el pedido tiene una factura emitida (evita descuadrarla). Para cambiar importes, anula antes la factura (se generará una nota de abono) y volverás a poder editarlos. El resto de datos (tejido, cortador, medidas, notas…) sí se puede editar.
               </p>
             )}
             {lines.length === 0 ? (
@@ -993,7 +1011,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-red-600" onClick={() => removeLine(l._key)} disabled={priceLocked || !can('orders.edit')} title={priceLocked ? 'No se pueden quitar líneas en un pedido pagado' : 'Eliminar línea'}>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-red-600" onClick={() => removeLine(l._key)} disabled={priceLocked || !can('orders.edit')} title={priceLocked ? 'No se pueden quitar líneas en un pedido facturado' : 'Eliminar línea'}>
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </TableCell>
