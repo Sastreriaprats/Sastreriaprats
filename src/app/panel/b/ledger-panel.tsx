@@ -59,8 +59,8 @@ export function LedgerPanel() {
         { Concepto: 'Facturación efectivo (base)', Importe: n2(data.view.income) },
         { Concepto: 'IVA repercutido efectivo', Importe: n2(data.view.ivaRepercutido) },
         { Concepto: 'Nº cobros efectivo', Importe: data.view.salesCount },
-        { Concepto: 'Cobros manuales', Importe: n2(data.totalIn) },
-        { Concepto: 'Pagos manuales', Importe: n2(data.totalOut) },
+        { Concepto: 'Cobros manuales', Importe: n2(data.manual.inTotal) },
+        { Concepto: 'Pagos manuales', Importe: n2(data.manual.outTotal) },
       ] },
       { name: 'IVA trimestral', rows: data.view.quarters.map((q) => ({
         Trimestre: q.quarter, Periodo: q.period, 'Base ventas': n2(q.baseSales), 'IVA repercutido': n2(q.ivaRepercutido),
@@ -101,9 +101,48 @@ export function LedgerPanel() {
       {loading || !data ? (
         <p className="text-slate-400">{loading ? 'Cargando…' : 'Sin datos.'}</p>
       ) : tab === 'resumen' ? (
-        <div className="space-y-4">
+        <div className="space-y-5">
           <Kpis view={data.view} variant="cash" />
-          <p className="text-xs text-slate-400">Cobros 100% en efectivo de todas las ventas del año. Es la parte que la Capa C resta a la contabilidad real.</p>
+          {(() => {
+            const v = data.view, m = data.manual
+            const tBase = v.income, tVat = v.ivaRepercutido, tTotal = v.income + v.ivaRepercutido
+            const cBase = tBase + m.inBase, cVat = tVat + m.inVat, cTotal = tTotal + m.inTotal
+            const neto = cTotal - m.outTotal
+            const Row = (label: string, base: number, vat: number, total: number, cls = '') => (
+              <tr className={cls}>
+                <td className="px-4 py-2.5">{label}</td>
+                <td className="px-4 py-2.5 text-right tabular-nums">{eur(base)}</td>
+                <td className="px-4 py-2.5 text-right tabular-nums">{eur(vat)}</td>
+                <td className="px-4 py-2.5 text-right tabular-nums font-medium">{eur(total)}</td>
+              </tr>
+            )
+            return (
+              <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="border-b px-4 py-3 text-sm font-semibold text-slate-700">Resumen general de efectivo</div>
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-4 py-2.5 text-left">Concepto</th>
+                      <th className="px-4 py-2.5 text-right">Base</th>
+                      <th className="px-4 py-2.5 text-right">IVA</th>
+                      <th className="px-4 py-2.5 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {Row('Cobros por ventas (tickets)', tBase, tVat, tTotal)}
+                    {Row('Cobros manuales (efectivo)', m.inBase, m.inVat, m.inTotal)}
+                    {Row('Total cobros en efectivo', cBase, cVat, cTotal, 'bg-emerald-50/50 font-semibold text-emerald-800')}
+                    {Row('Pagos manuales (efectivo)', m.outBase, m.outVat, m.outTotal, 'text-red-700')}
+                    <tr className="bg-slate-800 font-semibold text-white">
+                      <td className="px-4 py-3" colSpan={3}>NETO EN EFECTIVO (cobros − pagos)</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{eur(neto)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )
+          })()}
+          <p className="text-xs text-slate-400">Incluye los cobros en efectivo de ventas + los cobros y pagos manuales. Solo los cobros de ventas afectan al escenario C; los manuales son control interno.</p>
         </div>
       ) : tab === 'iva' ? (
         <QuarterTable view={data.view} variant="cash" />
@@ -159,15 +198,15 @@ export function LedgerPanel() {
           <div className="grid grid-cols-3 gap-4">
             <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <p className="text-xs text-slate-500">Cobros manuales</p>
-              <p className="text-lg font-bold text-emerald-700">{eur(data.totalIn)}</p>
+              <p className="text-lg font-bold text-emerald-700">{eur(data.manual.inTotal)}</p>
             </div>
             <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <p className="text-xs text-slate-500">Pagos manuales</p>
-              <p className="text-lg font-bold text-red-700">{eur(data.totalOut)}</p>
+              <p className="text-lg font-bold text-red-700">{eur(data.manual.outTotal)}</p>
             </div>
             <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <p className="text-xs text-slate-500">Neto</p>
-              <p className="text-lg font-bold">{eur(data.totalIn - data.totalOut)}</p>
+              <p className="text-lg font-bold">{eur(data.manual.inTotal - data.manual.outTotal)}</p>
             </div>
           </div>
 

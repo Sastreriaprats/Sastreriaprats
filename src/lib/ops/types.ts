@@ -52,12 +52,16 @@ export type AccountingView = {
   salesCount: number
 }
 
+export type ManualSummary = {
+  inBase: number; inVat: number; inTotal: number    // cobros manuales
+  outBase: number; outVat: number; outTotal: number // pagos manuales
+}
+
 export type ViewB = {
-  view: AccountingView          // contabilidad de los cobros 100% efectivo
+  view: AccountingView          // contabilidad de los cobros 100% efectivo (tickets)
   movements: MovementRow[]      // todos los cobros en efectivo (tickets)
   entries: CashEntry[]          // movimientos manuales de control (cobros/pagos)
-  totalIn: number               // total cobros manuales
-  totalOut: number              // total pagos manuales
+  manual: ManualSummary         // totales de los movimientos manuales
 }
 
 export type InvoiceLite = {

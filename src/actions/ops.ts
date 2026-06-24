@@ -172,9 +172,14 @@ export async function getViewB(year: number) {
     // debe tumbar toda la contabilidad de B (las demás pestañas no dependen).
     let entries: CashEntry[] = []
     try { entries = await loadEntries(year) } catch { /* ledger no disponible */ }
-    const totalIn = r2(entries.filter((e) => e.direction === 'in').reduce((s, e) => s + e.amount, 0))
-    const totalOut = r2(entries.filter((e) => e.direction === 'out').reduce((s, e) => s + e.amount, 0))
-    return ok({ view, movements, entries, totalIn, totalOut } as ViewB)
+    const ein = entries.filter((e) => e.direction === 'in')
+    const eout = entries.filter((e) => e.direction === 'out')
+    const sum = (arr: CashEntry[], k: 'base' | 'vat' | 'amount') => r2(arr.reduce((s, e) => s + e[k], 0))
+    const manual = {
+      inBase: sum(ein, 'base'), inVat: sum(ein, 'vat'), inTotal: sum(ein, 'amount'),
+      outBase: sum(eout, 'base'), outVat: sum(eout, 'vat'), outTotal: sum(eout, 'amount'),
+    }
+    return ok({ view, movements, entries, manual } as ViewB)
   } catch { return fail() }
 }
 
