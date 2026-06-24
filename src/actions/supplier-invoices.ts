@@ -6,6 +6,7 @@ import { normalizeSearchTerm } from '@/lib/utils'
 import {
   buildInstallments,
   computeDueDate,
+  earliestInstallmentDate,
   replaceInvoiceInstallments,
 } from '@/lib/server/supplier-payments'
 
@@ -619,6 +620,31 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
       ? Math.round(lines.reduce((s, l) => s + l.tax_amount, 0) * 100) / 100
       : Number(input.tax_amount ?? 0)
 
+    // Calendario de cuotas (fuente de verdad del vencimiento). Se calcula ANTES
+    // de insertar para que el due_date de cabecera siga al plan de pago del
+    // proveedor (primera cuota) y cabecera y cuotas nunca diverjan.
+    // Si el formulario manda cuotas explícitas (editor de plazos), las usamos;
+    // un abono o una proforma no generan cuotas.
+    const explicitInstallments = (input.installments ?? [])
+      .filter((it) => Number(it.amount) > 0 && it.due_date)
+    const installments = input.is_rectifying || input.is_proforma
+      ? []
+      : explicitInstallments.length > 0
+        ? explicitInstallments.map((it, idx) => ({
+            due_date: String(it.due_date),
+            amount: Math.round(Number(it.amount) * 100) / 100,
+            sort_order: idx,
+          }))
+        : buildInstallments(
+            input.invoice_date,
+            dueDate,
+            Number(input.total_amount),
+            supplierDefaults,
+          )
+    // Vencimiento de cabecera = primera cuota del plan. Proforma/abono sin
+    // cuotas conservan el vencimiento ya calculado.
+    const headlineDueDate = earliestInstallmentDate(installments) ?? dueDate
+
     const { data, error } = await ctx.adminClient
       .from(TABLE)
       .insert({
@@ -628,7 +654,7 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
         supplier_cif: supplierCif,
         invoice_number: input.invoice_number.trim(),
         invoice_date: input.invoice_date,
-        due_date: dueDate,
+        due_date: headlineDueDate,
         amount: headerAmount,
         tax_amount: headerTaxAmount,
         shipping_amount: Number(input.shipping_amount ?? 0),
@@ -686,27 +712,7 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
         .eq('status', 'pendiente')
     }
 
-    // Generar cuotas de vencimiento. Si el formulario manda cuotas explícitas
-    // (editor de plazos), las usamos directamente; si no, buildInstallments.
-    const explicitInstallments = (input.installments ?? [])
-      .filter((it) => Number(it.amount) > 0 && it.due_date)
-    // Un abono (importe negativo) no tiene calendario de pago propio: reduce la
-    // deuda con el proveedor. Una proforma tampoco genera cuotas (no es pagadera
-    // hasta que llega la factura real). No generamos cuotas de vencimiento.
-    const installments = input.is_rectifying || input.is_proforma
-      ? []
-      : explicitInstallments.length > 0
-        ? explicitInstallments.map((it, idx) => ({
-            due_date: String(it.due_date),
-            amount: Math.round(Number(it.amount) * 100) / 100,
-            sort_order: idx,
-          }))
-        : buildInstallments(
-            input.invoice_date,
-            dueDate,
-            Number(input.total_amount),
-            supplierDefaults,
-          )
+    // Persistir el calendario de cuotas ya calculado arriba (cabecera incluida).
     const schedErr = await replaceInvoiceInstallments(ctx.adminClient, String(data.id), installments)
     if (schedErr) {
       console.error('[createSupplierInvoiceAction] cuotas:', schedErr)
@@ -786,6 +792,35 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
       ? Math.round(lines.reduce((s, l) => s + l.tax_amount, 0) * 100) / 100
       : Number(rest.tax_amount ?? 0)
 
+    // Calendario de cuotas. Si ya hay cuotas pagadas las conservamos (el usuario
+    // ya cobró por ellas) y NO tocamos el vencimiento de cabecera. Si no, se
+    // regenera según el plan del proveedor y la cabecera sigue a la primera cuota.
+    const { data: existing } = await ctx.adminClient
+      .from('ap_supplier_invoice_due_dates')
+      .select('id, amount, is_paid')
+      .eq('supplier_invoice_id', id)
+    const hasPaid = Array.isArray(existing) && existing.some((r: any) => r.is_paid)
+
+    const explicitInstallments = (rest.installments ?? [])
+      .filter((it) => Number(it.amount) > 0 && it.due_date)
+    // Una proforma no genera cuotas. Al convertirla en factura real (quitar el
+    // flag) este mismo update sí las generará.
+    const installments = rest.is_proforma
+      ? []
+      : explicitInstallments.length > 0
+        ? explicitInstallments.map((it, idx) => ({
+            due_date: String(it.due_date),
+            amount: Math.round(Number(it.amount) * 100) / 100,
+            sort_order: idx,
+          }))
+        : buildInstallments(
+            rest.invoice_date,
+            dueDate,
+            Number(rest.total_amount),
+            supplierDefaults,
+          )
+    const headlineDueDate = hasPaid ? dueDate : (earliestInstallmentDate(installments) ?? dueDate)
+
     const { error } = await ctx.adminClient
       .from(TABLE)
       .update({
@@ -795,7 +830,7 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
         supplier_cif: supplierCif,
         invoice_number: rest.invoice_number.trim(),
         invoice_date: rest.invoice_date,
-        due_date: dueDate,
+        due_date: headlineDueDate,
         amount: headerAmount,
         tax_amount: headerTaxAmount,
         shipping_amount: Number(rest.shipping_amount ?? 0),
@@ -858,32 +893,9 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
         .eq('status', 'pendiente')
     }
 
-    // Regenerar cuotas. Si ya existen cuotas pagadas las conservamos porque el
-    // usuario ya cobró por ellas; solo regeneramos las pendientes.
-    const { data: existing } = await ctx.adminClient
-      .from('ap_supplier_invoice_due_dates')
-      .select('id, amount, is_paid')
-      .eq('supplier_invoice_id', id)
-    const hasPaid = Array.isArray(existing) && existing.some((r: any) => r.is_paid)
+    // Regenerar cuotas (calculadas arriba). Si ya existen cuotas pagadas las
+    // conservamos porque el usuario ya cobró por ellas.
     if (!hasPaid) {
-      const explicitInstallments = (rest.installments ?? [])
-        .filter((it) => Number(it.amount) > 0 && it.due_date)
-      // Una proforma no genera cuotas. Al convertirla en factura real (quitar el
-      // flag) este mismo update sí las generará.
-      const installments = rest.is_proforma
-        ? []
-        : explicitInstallments.length > 0
-        ? explicitInstallments.map((it, idx) => ({
-            due_date: String(it.due_date),
-            amount: Math.round(Number(it.amount) * 100) / 100,
-            sort_order: idx,
-          }))
-        : buildInstallments(
-            rest.invoice_date,
-            dueDate,
-            Number(rest.total_amount),
-            supplierDefaults,
-          )
       const schedErr = await replaceInvoiceInstallments(ctx.adminClient, id, installments)
       if (schedErr) {
         console.error('[updateSupplierInvoiceAction] cuotas:', schedErr)

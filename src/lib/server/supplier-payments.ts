@@ -73,6 +73,20 @@ export function buildInstallments(
   return [{ due_date: fallbackDueDate, amount: total, sort_order: 0 }]
 }
 
+/**
+ * Vencimiento de cabecera = primera cuota del calendario (la más temprana).
+ * Mantiene `ap_supplier_invoices.due_date` sincronizado con el plan de pago del
+ * proveedor para que cabecera y cuotas nunca diverjan. Devuelve null si no hay
+ * cuotas (proforma/abono): el llamante decide el fallback.
+ */
+export function earliestInstallmentDate(installments: InstallmentSpec[]): string | null {
+  if (installments.length === 0) return null
+  return installments.reduce(
+    (min, it) => (it.due_date < min ? it.due_date : min),
+    installments[0].due_date,
+  )
+}
+
 export async function replaceInvoiceInstallments(
   adminClient: AdminClient,
   supplierInvoiceId: string,
