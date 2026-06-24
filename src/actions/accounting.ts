@@ -18,11 +18,16 @@ export type AccountingSummary = {
   latestInvoices: { id: string; invoice_number: string; client_name: string; invoice_date: string; total: number; status: string }[]
 }
 
-export const getAccountingSummary = protectedAction<{ year: number }, AccountingSummary>(
+export const getAccountingSummary = protectedAction<{ from: string; to: string }, AccountingSummary>(
   { permission: 'accounting.view', auditModule: 'accounting' },
-  async (ctx, { year }) => {
-    const start = `${year}-01-01`
-    const end = `${year}-12-31T23:59:59`
+  async (ctx, { from, to }) => {
+    // Rango de fechas (YYYY-MM-DD). Si vienen vacías/ inválidas, año en curso.
+    const isDate = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s)
+    const y = new Date().getFullYear()
+    const fromDate = isDate(from) ? from : `${y}-01-01`
+    const toDate = isDate(to) ? to : `${y}-12-31`
+    const start = `${fromDate}T00:00:00`
+    const end = `${toDate}T23:59:59`
 
     const [salesRes, purchasesRes, invoicesRes, tailoringPaymentsRes] = await Promise.all([
       ctx.adminClient.from('sales').select('total, total_returned, subtotal, tax_amount, created_at').gte('created_at', start).lte('created_at', end).in('status', ['completed', 'partially_returned']),
@@ -32,7 +37,7 @@ export const getAccountingSummary = protectedAction<{ year: number }, Accounting
       // no están en `sales`; y no se solapan con `invoices` (que aquí no se
       // suman, sólo se listan), por lo que no hay doble conteo. Fecha contable:
       // payment_date (el cobro real), no created_at (el registro en sistema).
-      ctx.adminClient.from('tailoring_order_payments').select('amount, payment_date, tailoring_order:tailoring_orders(subtotal, total)').gte('payment_date', start).lte('payment_date', `${year}-12-31`),
+      ctx.adminClient.from('tailoring_order_payments').select('amount, payment_date, tailoring_order:tailoring_orders(subtotal, total)').gte('payment_date', fromDate).lte('payment_date', toDate),
     ])
 
     const sales = salesRes.data || []
@@ -76,10 +81,17 @@ export const getAccountingSummary = protectedAction<{ year: number }, Accounting
     const expenses = purchases.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).total) - Number((x as any).tax_amount || 0)), 0)
     const vatPaid = purchases.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).tax_amount) || 0), 0)
 
+    // Pre-poblamos un punto por cada mes incluido en el rango (para que el
+    // gráfico muestre los meses vacíos también).
     const byMonth: Record<string, { income: number; expenses: number }> = {}
-    for (let m = 1; m <= 12; m++) {
-      const key = `${year}-${String(m).padStart(2, '0')}`
-      byMonth[key] = { income: 0, expenses: 0 }
+    {
+      let [yy, mm] = fromDate.slice(0, 7).split('-').map(Number)
+      const [ey, em] = toDate.slice(0, 7).split('-').map(Number)
+      // Tope de seguridad por si el rango fuese absurdo (máx 120 meses).
+      for (let guard = 0; (yy < ey || (yy === ey && mm <= em)) && guard < 120; guard++) {
+        byMonth[`${yy}-${String(mm).padStart(2, '0')}`] = { income: 0, expenses: 0 }
+        mm++; if (mm > 12) { mm = 1; yy++ }
+      }
     }
     for (const x of sales) {
       const d = (x as any).created_at

@@ -316,47 +316,93 @@ export function AccountingContent() {
 // ─── Tab: Resumen ────────────────────────────────────────────────────────────
 
 function SummaryTab() {
-  const [year, setYear] = useState(new Date().getFullYear())
+  // Filtro por rango de fechas (por defecto, el año en curso).
+  const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>('this_year')
+  const [customDateFrom, setCustomDateFrom] = useState('')
+  const [customDateTo, setCustomDateTo] = useState('')
   const [data, setData] = useState<AccountingSummary | null>(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
+  const dateFrom = dateRangePreset === 'custom' ? customDateFrom : getDateRangeForPreset(dateRangePreset).from
+  const dateTo   = dateRangePreset === 'custom' ? customDateTo   : getDateRangeForPreset(dateRangePreset).to
+
+  const fetchSummary = () => {
     setLoading(true)
-    getAccountingSummary({ year })
-      .then(r => {
-        setData(r.success && 'data' in r ? r.data : null)
-        setLoading(false)
-      })
+    getAccountingSummary({ from: dateFrom, to: dateTo })
+      .then(r => { setData(r.success && 'data' in r ? r.data : null); setLoading(false) })
       .catch(err => {
         console.error('[accounting] getAccountingSummary:', err)
         toast.error('Error al cargar resumen contable')
         setLoading(false)
       })
-  }, [year])
+  }
 
-  const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i)
+  useEffect(() => {
+    // En 'custom' esperamos a tener ambas fechas para no lanzar consultas a medias.
+    if (dateRangePreset === 'custom' && (!customDateFrom || !customDateTo)) { setLoading(false); return }
+    fetchSummary()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateFrom, dateTo, dateRangePreset])
 
-  if (loading) return <Spinner />
-
-  const monthlyData = (data?.monthlyData ?? []).map((m: { month: string; income: number; expenses: number }) => ({
-    ...m,
-    mes: MONTHS[parseInt(m.month.slice(5, 7), 10) - 1]?.slice(0, 3) ?? m.month,
-  }))
+  // ¿El rango abarca más de un año natural? → añadir el año corto en las etiquetas.
+  const spansYears = dateFrom.slice(0, 4) !== dateTo.slice(0, 4)
+  const monthlyData = (data?.monthlyData ?? []).map((m: { month: string; income: number; expenses: number }) => {
+    const monthLabel = MONTHS[parseInt(m.month.slice(5, 7), 10) - 1]?.slice(0, 3) ?? m.month
+    return { ...m, mes: spansYears ? `${monthLabel} '${m.month.slice(2, 4)}` : monthLabel }
+  })
+  const rangeLabel = getPresetLabel(dateRangePreset, dateFrom, dateTo)
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Select value={String(year)} onValueChange={v => setYear(Number(v))}>
-          <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
-          <SelectContent>{years.map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+      <div className="flex items-center gap-3 flex-wrap">
+        <Select
+          value={dateRangePreset}
+          onValueChange={(v) => {
+            const p = v as DateRangePreset
+            setDateRangePreset(p)
+            if (p === 'custom') {
+              const r = getDateRangeForPreset('this_year')
+              setCustomDateFrom(r.from)
+              setCustomDateTo(r.to)
+            }
+          }}
+        >
+          <SelectTrigger className="w-[220px] min-w-0">
+            <Calendar className="h-4 w-4 mr-2 text-muted-foreground shrink-0" />
+            <SelectValue placeholder="Rango de fechas" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="this_year">Este año</SelectItem>
+            <SelectItem value="this_month">Este mes</SelectItem>
+            <SelectItem value="this_quarter">Este trimestre</SelectItem>
+            <SelectItem value="last_30">Últimos 30 días</SelectItem>
+            <SelectItem value="last_7">Últimos 7 días</SelectItem>
+            <SelectItem value="custom">Elegir fechas (personalizado)</SelectItem>
+          </SelectContent>
         </Select>
-        <Button variant="outline" size="sm" onClick={() => {
-          setLoading(true)
-          getAccountingSummary({ year })
-            .then(r => { setData(r.success && 'data' in r ? r.data : null); setLoading(false) })
-            .catch(err => { console.error('[accounting] getAccountingSummary:', err); toast.error('Error al cargar resumen'); setLoading(false) })
-        }}><RefreshCw className="h-3.5 w-3.5 mr-1" /> Actualizar</Button>
+        {dateRangePreset === 'custom' && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="flex items-center gap-1">
+              <Label className="text-xs text-muted-foreground whitespace-nowrap">Desde</Label>
+              <DatePickerPopover containerClassName="w-36" value={customDateFrom} onChange={date => setCustomDateFrom(date)} />
+            </div>
+            <div className="flex items-center gap-1">
+              <Label className="text-xs text-muted-foreground whitespace-nowrap">Hasta</Label>
+              <DatePickerPopover containerClassName="w-36" value={customDateTo} onChange={date => setCustomDateTo(date)} />
+            </div>
+          </div>
+        )}
+        {dateRangePreset !== 'custom' && (
+          <span className="text-sm text-muted-foreground hidden sm:inline">{rangeLabel}</span>
+        )}
+        <Button variant="outline" size="sm" onClick={fetchSummary}>
+          <RefreshCw className="h-3.5 w-3.5 mr-1" /> Actualizar
+        </Button>
       </div>
+
+      {loading ? <Spinner /> : (
+      <>
+      {/* contenido del resumen */}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -368,7 +414,7 @@ function SummaryTab() {
 
       {/* Bar chart */}
       <Card>
-        <CardHeader><CardTitle className="text-base">Ingresos vs Gastos mensuales {year}</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">Ingresos vs Gastos mensuales <span className="text-muted-foreground font-normal">· {rangeLabel}</span></CardTitle></CardHeader>
         <CardContent>
           {monthlyData.length === 0 ? (
             <p className="text-center text-muted-foreground py-8">Sin datos</p>
@@ -420,6 +466,8 @@ function SummaryTab() {
           )}
         </CardContent>
       </Card>
+      </>
+      )}
     </div>
   )
 }
