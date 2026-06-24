@@ -1,16 +1,18 @@
 // Tipos compartidos del módulo interno (sin 'use server', solo tipos).
 
-// --- Pago en efectivo de control (proveedor, nómina…). Cifrado en aux.entries.
-//     Es informativo: NO afecta a la contabilidad A ni a la C.
-export type CashPaymentPayload = {
+// --- Movimiento manual en efectivo (cobro o pago) de control. Cifrado en
+//     aux.entries. Es informativo: NO afecta a la contabilidad A ni a la C.
+export type CashEntryPayload = {
   date: string            // YYYY-MM-DD
   concept: string
-  category: string        // 'proveedor' | 'nomina' | 'alquiler' | 'otro'
-  base: number
+  category: string        // proveedor / nomina / alquiler / venta / otro…
+  direction: 'in' | 'out' // cobro / pago
+  ivaRate: number         // 0 | 10 | 18 | 21
+  base: number            // importe neto
   vat: number
-  amount: number
+  amount: number          // base + vat
 }
-export type CashPayment = CashPaymentPayload & { id: string }
+export type CashEntry = CashEntryPayload & { id: string }
 
 // --- Contabilidad (espejo de la A) para una vista (B = efectivo, C = A−efectivo)
 export type MonthPoint = { month: string; income: number; expenses: number }
@@ -53,8 +55,9 @@ export type AccountingView = {
 export type ViewB = {
   view: AccountingView          // contabilidad de los cobros 100% efectivo
   movements: MovementRow[]      // todos los cobros en efectivo (tickets)
-  payments: CashPayment[]       // pagos en efectivo de control (manual)
-  paymentsTotal: number
+  entries: CashEntry[]          // movimientos manuales de control (cobros/pagos)
+  totalIn: number               // total cobros manuales
+  totalOut: number              // total pagos manuales
 }
 
 export type InvoiceLite = {

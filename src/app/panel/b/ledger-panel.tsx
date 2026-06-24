@@ -1,21 +1,17 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { getViewB, addCashPayment, removeCashPayment } from '@/actions/ops'
+import { getViewB, addCashEntry, removeCashEntry } from '@/actions/ops'
 import type { ViewB } from '@/lib/ops/types'
 import { downloadExcelMulti } from '@/lib/excel/export'
 import { Tabs, Kpis, QuarterTable, MonthlyTable, MovementsTable, eur, MONTH_LABELS } from '../accounting-ui'
 
 const thisYear = new Date().getFullYear()
-const CATS = [
-  { v: 'proveedor', l: 'Proveedor' },
-  { v: 'nomina', l: 'Nómina' },
-  { v: 'alquiler', l: 'Alquiler' },
-  { v: 'otro', l: 'Otro' },
-]
+const CATS = ['proveedor', 'nomina', 'alquiler', 'venta', 'otro']
+const IVAS = [0, 10, 18, 21]
 
 export function LedgerPanel() {
   const [year, setYear] = useState(thisYear)
@@ -24,10 +20,14 @@ export function LedgerPanel() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
 
+  const [direction, setDirection] = useState<'in' | 'out'>('in')
   const [date, setDate] = useState('')
+  const [category, setCategory] = useState('venta')
   const [concept, setConcept] = useState('')
-  const [category, setCategory] = useState('proveedor')
-  const [amount, setAmount] = useState('')
+  const [base, setBase] = useState('')
+  const [ivaRate, setIvaRate] = useState(0)
+
+  const total = useMemo(() => (Number(base) || 0) * (1 + ivaRate / 100), [base, ivaRate])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -39,15 +39,15 @@ export function LedgerPanel() {
   useEffect(() => { load() }, [load])
 
   const onAdd = async () => {
-    if (!date || !amount) { toast.error('Fecha e importe obligatorios'); return }
+    if (!date || !base) { toast.error('Fecha e importe neto obligatorios'); return }
     setBusy(true)
-    const res = await addCashPayment({ date, concept, category, amount: Number(amount) })
+    const res = await addCashEntry({ date, concept, category, direction, base: Number(base), ivaRate })
     setBusy(false)
-    if (res.ok) { toast.success('Pago en efectivo añadido'); setConcept(''); setAmount(''); load() }
+    if (res.ok) { toast.success(direction === 'in' ? 'Cobro añadido' : 'Pago añadido'); setConcept(''); setBase(''); load() }
     else toast.error('error' in res ? res.error : 'Error')
   }
   const onDelete = async (id: string) => {
-    const res = await removeCashPayment(id)
+    const res = await removeCashEntry(id)
     if (res.ok) load(); else toast.error('Error')
   }
 
@@ -59,7 +59,8 @@ export function LedgerPanel() {
         { Concepto: 'Facturación efectivo (base)', Importe: n2(data.view.income) },
         { Concepto: 'IVA repercutido efectivo', Importe: n2(data.view.ivaRepercutido) },
         { Concepto: 'Nº cobros efectivo', Importe: data.view.salesCount },
-        { Concepto: 'Pagos en efectivo (control)', Importe: n2(data.paymentsTotal) },
+        { Concepto: 'Cobros manuales', Importe: n2(data.totalIn) },
+        { Concepto: 'Pagos manuales', Importe: n2(data.totalOut) },
       ] },
       { name: 'IVA trimestral', rows: data.view.quarters.map((q) => ({
         Trimestre: q.quarter, Periodo: q.period, 'Base ventas': n2(q.baseSales), 'IVA repercutido': n2(q.ivaRepercutido),
@@ -68,8 +69,9 @@ export function LedgerPanel() {
       { name: 'Cobros efectivo', rows: data.movements.map((m) => ({
         Fecha: m.date, Ticket: m.ref, 'Método': m.method, Base: n2(m.base), IVA: n2(m.vat), Total: n2(m.total),
       })) },
-      { name: 'Pagos efectivo', rows: data.payments.map((p) => ({
-        Fecha: p.date, 'Categoría': p.category, Concepto: p.concept, Base: n2(p.base), IVA: n2(p.vat), Importe: n2(p.amount),
+      { name: 'Manuales', rows: data.entries.map((e) => ({
+        Fecha: e.date, Tipo: e.direction === 'in' ? 'Cobro' : 'Pago', 'Categoría': e.category, Concepto: e.concept,
+        Base: n2(e.base), 'IVA %': e.ivaRate, IVA: n2(e.vat), Total: n2(e.amount),
       })) },
     ], `efectivo-b-${year}`)
   }
@@ -92,7 +94,7 @@ export function LedgerPanel() {
           { key: 'iva', label: 'IVA trimestral' },
           { key: 'mensual', label: 'Mensual' },
           { key: 'movimientos', label: 'Cobros en efectivo' },
-          { key: 'pagos', label: 'Pagos en efectivo (control)' },
+          { key: 'manual', label: 'Movimientos manuales' },
         ]}
       />
 
@@ -101,7 +103,7 @@ export function LedgerPanel() {
       ) : tab === 'resumen' ? (
         <div className="space-y-4">
           <Kpis view={data.view} variant="cash" />
-          <p className="text-xs text-slate-400">Cobros 100% en efectivo (serie efectivo) de todas las ventas del año. Es la parte que la Capa C resta a la contabilidad real.</p>
+          <p className="text-xs text-slate-400">Cobros 100% en efectivo de todas las ventas del año. Es la parte que la Capa C resta a la contabilidad real.</p>
         </div>
       ) : tab === 'iva' ? (
         <QuarterTable view={data.view} variant="cash" />
@@ -111,17 +113,25 @@ export function LedgerPanel() {
         <MovementsTable rows={data.movements} />
       ) : (
         <div className="space-y-4">
-          <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-4">
-            <p className="text-sm font-medium mb-3">Añadir pago en efectivo (proveedor, nómina…)</p>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 items-end">
+          {/* Alta manual */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <p className="mb-3 text-sm font-medium">Añadir movimiento manual en efectivo</p>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-7 md:items-end">
+              <div>
+                <label className="text-xs text-slate-500">Tipo</label>
+                <select value={direction} onChange={(e) => setDirection(e.target.value as 'in' | 'out')} className="h-9 w-full rounded-md border px-2 text-sm">
+                  <option value="in">Cobro</option>
+                  <option value="out">Pago</option>
+                </select>
+              </div>
               <div>
                 <label className="text-xs text-slate-500">Fecha</label>
                 <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
               </div>
               <div>
                 <label className="text-xs text-slate-500">Categoría</label>
-                <select value={category} onChange={(e) => setCategory(e.target.value)} className="h-9 w-full rounded-md border px-2 text-sm">
-                  {CATS.map((c) => <option key={c.v} value={c.v}>{c.l}</option>)}
+                <select value={category} onChange={(e) => setCategory(e.target.value)} className="h-9 w-full rounded-md border px-2 text-sm capitalize">
+                  {CATS.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div className="md:col-span-2">
@@ -129,51 +139,78 @@ export function LedgerPanel() {
                 <Input value={concept} onChange={(e) => setConcept(e.target.value)} placeholder="Concepto" />
               </div>
               <div>
-                <label className="text-xs text-slate-500">Importe (€)</label>
-                <Input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+                <label className="text-xs text-slate-500">Importe neto (€)</label>
+                <Input type="number" step="0.01" value={base} onChange={(e) => setBase(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">IVA</label>
+                <select value={ivaRate} onChange={(e) => setIvaRate(Number(e.target.value))} className="h-9 w-full rounded-md border px-2 text-sm">
+                  {IVAS.map((v) => <option key={v} value={v}>{v}%</option>)}
+                </select>
               </div>
             </div>
-            <div className="mt-3"><Button onClick={onAdd} disabled={busy}>Añadir</Button></div>
+            <div className="mt-3 flex items-center gap-4">
+              <Button onClick={onAdd} disabled={busy}>Añadir</Button>
+              <span className="text-sm text-slate-500">Total: <b className="text-slate-800">{eur(total)}</b> <span className="text-xs">(neto {eur(Number(base) || 0)} + IVA {ivaRate}%)</span></span>
+            </div>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-4 flex items-center justify-between">
-            <span className="text-sm text-slate-600">Total pagos en efectivo {year}</span>
-            <span className="text-lg font-bold text-red-700">{eur(data.paymentsTotal)}</span>
+          {/* Totales */}
+          <div className="grid grid-cols-3 gap-4">
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-xs text-slate-500">Cobros manuales</p>
+              <p className="text-lg font-bold text-emerald-700">{eur(data.totalIn)}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-xs text-slate-500">Pagos manuales</p>
+              <p className="text-lg font-bold text-red-700">{eur(data.totalOut)}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-xs text-slate-500">Neto</p>
+              <p className="text-lg font-bold">{eur(data.totalIn - data.totalOut)}</p>
+            </div>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
+          {/* Tabla */}
+          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-slate-500">
+              <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="text-left font-medium px-3 py-2">Fecha</th>
-                  <th className="text-left font-medium px-3 py-2">Categoría</th>
-                  <th className="text-left font-medium px-3 py-2">Concepto</th>
-                  <th className="text-right font-medium px-3 py-2">Base</th>
-                  <th className="text-right font-medium px-3 py-2">IVA</th>
-                  <th className="text-right font-medium px-3 py-2">Importe</th>
-                  <th className="px-3 py-2" />
+                  <th className="px-3 py-2.5 text-left">Fecha</th>
+                  <th className="px-3 py-2.5 text-left">Tipo</th>
+                  <th className="px-3 py-2.5 text-left">Categoría</th>
+                  <th className="px-3 py-2.5 text-left">Concepto</th>
+                  <th className="px-3 py-2.5 text-right">Base</th>
+                  <th className="px-3 py-2.5 text-right">IVA</th>
+                  <th className="px-3 py-2.5 text-right">Total</th>
+                  <th className="px-3 py-2.5" />
                 </tr>
               </thead>
-              <tbody>
-                {data.payments.length === 0 ? (
-                  <tr><td colSpan={7} className="px-3 py-6 text-center text-slate-400">Sin pagos registrados.</td></tr>
-                ) : data.payments.map((p) => (
-                  <tr key={p.id} className="border-t">
-                    <td className="px-3 py-2">{p.date}</td>
-                    <td className="px-3 py-2 capitalize">{p.category}</td>
-                    <td className="px-3 py-2">{p.concept}</td>
-                    <td className="px-3 py-2 text-right">{eur(p.base)}</td>
-                    <td className="px-3 py-2 text-right">{eur(p.vat)}</td>
-                    <td className="px-3 py-2 text-right font-medium">{eur(p.amount)}</td>
-                    <td className="px-3 py-2 text-right">
-                      <button onClick={() => onDelete(p.id)} className="text-xs text-red-600 hover:underline">Borrar</button>
+              <tbody className="divide-y divide-slate-100">
+                {data.entries.length === 0 ? (
+                  <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-400">Sin movimientos manuales.</td></tr>
+                ) : data.entries.map((e) => (
+                  <tr key={e.id} className="hover:bg-slate-50/60">
+                    <td className="px-3 py-2.5 text-slate-500">{e.date}</td>
+                    <td className="px-3 py-2.5">
+                      <span className={`rounded px-1.5 py-0.5 text-xs ${e.direction === 'in' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+                        {e.direction === 'in' ? 'Cobro' : 'Pago'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 capitalize">{e.category}</td>
+                    <td className="px-3 py-2.5">{e.concept}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">{eur(e.base)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">{eur(e.vat)} <span className="text-[10px] text-slate-400">({e.ivaRate}%)</span></td>
+                    <td className="px-3 py-2.5 text-right font-medium tabular-nums">{eur(e.amount)}</td>
+                    <td className="px-3 py-2.5 text-right">
+                      <button onClick={() => onDelete(e.id)} className="text-xs text-red-600 hover:underline">Borrar</button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <p className="text-xs text-slate-400">Control interno de lo que pagáis en efectivo. NO afecta a la contabilidad A ni al escenario C; es solo informativo.</p>
+          <p className="text-xs text-slate-400">Control interno de cobros y pagos en efectivo hechos a mano. NO afectan a la contabilidad A ni al escenario C.</p>
         </div>
       )}
     </div>

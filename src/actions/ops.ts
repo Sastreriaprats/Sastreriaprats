@@ -8,7 +8,7 @@ import {
   listAccess, grantAccess, revokeAccess, type Scope,
 } from '@/lib/ops/db'
 import type {
-  CashPaymentPayload, CashPayment, AccountingView, MonthPoint, QuarterRow, MovementRow, ViewB, ViewC,
+  CashEntryPayload, CashEntry, AccountingView, MonthPoint, QuarterRow, MovementRow, ViewB, ViewC,
 } from '@/lib/ops/types'
 
 const r2 = (n: number) => Math.round(n * 100) / 100
@@ -168,12 +168,13 @@ export async function getViewB(year: number) {
       salesCount: c.cash.count,
     }
     const movements = c.cashMoves.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 1000)
-    // Los pagos de control viven en el ledger cifrado; si su lectura falla no debe
-    // tumbar toda la contabilidad de B (las demás pestañas no dependen de ellos).
-    let payments: CashPayment[] = []
-    try { payments = await loadPayments(year) } catch { /* ledger no disponible */ }
-    const paymentsTotal = r2(payments.reduce((s, p) => s + p.amount, 0))
-    return ok({ view, movements, payments, paymentsTotal } as ViewB)
+    // Los movimientos manuales viven en el ledger cifrado; si su lectura falla no
+    // debe tumbar toda la contabilidad de B (las demás pestañas no dependen).
+    let entries: CashEntry[] = []
+    try { entries = await loadEntries(year) } catch { /* ledger no disponible */ }
+    const totalIn = r2(entries.filter((e) => e.direction === 'in').reduce((s, e) => s + e.amount, 0))
+    const totalOut = r2(entries.filter((e) => e.direction === 'out').reduce((s, e) => s + e.amount, 0))
+    return ok({ view, movements, entries, totalIn, totalOut } as ViewB)
   } catch { return fail() }
 }
 
@@ -262,37 +263,53 @@ export async function getTicketData(saleId: string) {
 // ---------------------------------------------------------------------------
 // Pagos en efectivo de CONTROL (proveedor, nómina…). Cifrados. NO afectan a C.
 // ---------------------------------------------------------------------------
-async function loadPayments(year?: number): Promise<CashPayment[]> {
+async function loadEntries(year?: number): Promise<CashEntry[]> {
   const rows = await listEntries()
-  const out: CashPayment[] = []
+  const out: CashEntry[] = []
   for (const r of rows) {
     try {
-      const p = open<CashPaymentPayload>(r.payload)
+      const p = open<Partial<CashEntryPayload>>(r.payload)
       if (year && !String(p.date).startsWith(String(year))) continue
-      out.push({ ...p, id: r.id })
+      const base = Number(p.base) || 0
+      const vat = Number(p.vat) || 0
+      out.push({
+        date: String(p.date ?? ''),
+        concept: String(p.concept ?? ''),
+        category: String(p.category ?? 'otro'),
+        direction: p.direction === 'in' ? 'in' : 'out',
+        ivaRate: Number(p.ivaRate) || (base > 0 ? Math.round((vat / base) * 100) : 0),
+        base, vat, amount: Number(p.amount) || r2(base + vat),
+        id: r.id,
+      })
     } catch { /* clave incorrecta / fila ajena: omitir */ }
   }
   return out.sort((a, b) => b.date.localeCompare(a.date))
 }
 
-export async function addCashPayment(input: { date: string; concept: string; category: string; amount: number }) {
+const ALLOWED_IVA = [0, 10, 18, 21]
+
+export async function addCashEntry(input: {
+  date: string; concept: string; category: string; direction: 'in' | 'out'; base: number; ivaRate: number
+}) {
   try {
     await assertScope('B')
-    const amount = r2(Number(input.amount) || 0)
-    if (amount <= 0) return fail('Importe inválido')
-    const base = r2(amount / 1.21)
-    const payload: CashPaymentPayload = {
+    const base = r2(Number(input.base) || 0)
+    if (base <= 0) return fail('Importe inválido')
+    const ivaRate = ALLOWED_IVA.includes(Number(input.ivaRate)) ? Number(input.ivaRate) : 0
+    const vat = r2(base * ivaRate / 100)
+    const payload: CashEntryPayload = {
       date: input.date,
       concept: String(input.concept || '').slice(0, 200),
       category: input.category || 'otro',
-      base, vat: r2(amount - base), amount,
+      direction: input.direction === 'in' ? 'in' : 'out',
+      ivaRate, base, vat, amount: r2(base + vat),
     }
     await insertEntry(seal(payload))
     return ok(true)
   } catch { return fail() }
 }
 
-export async function removeCashPayment(id: string) {
+export async function removeCashEntry(id: string) {
   try {
     await assertScope('B')
     await deleteEntry(id)
