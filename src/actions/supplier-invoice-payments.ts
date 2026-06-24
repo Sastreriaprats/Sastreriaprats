@@ -130,16 +130,182 @@ async function rederiveDueDatesFifo(adminClient: AdminClient, invoiceId: string)
 
 // ─── Registrar pago ──────────────────────────────────────────────────────────
 
+type ApplyPaymentInput = {
+  supplier_invoice_id: string
+  amount: number
+  payment_date?: string
+  payment_method?: SupplierPaymentMethod
+  reference?: string | null
+  notes?: string | null
+  create_accounting_entry?: boolean
+}
+
+type ApplyPaymentResult =
+  | {
+      ok: true
+      id: string
+      amount_paid: number
+      amount_pending: number
+      status: string
+      invoice_number: string
+      supplier_name: string
+      amount: number
+    }
+  | { ok: false; error: string; code?: string }
+
+/**
+ * Núcleo del registro de un pago de factura de proveedor: inserta el pago en
+ * `ap_supplier_invoice_payments`, crea el asiento de gasto ligado a la factura,
+ * propaga FIFO a las cuotas y sincroniza el status de la cabecera. Lo comparten
+ * el alta individual (`registerSupplierInvoicePayment`) y la del lote
+ * (`registerBulkSupplierInvoicePayments`) para garantizar IDÉNTICO comportamiento.
+ */
+async function applySupplierInvoicePayment(
+  adminClient: AdminClient,
+  userId: string | null,
+  input: ApplyPaymentInput,
+): Promise<ApplyPaymentResult> {
+  if (!input.supplier_invoice_id) return { ok: false, error: 'Factura no indicada', code: 'VALIDATION' }
+  const amount = Number(input.amount)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, error: 'El importe debe ser mayor que 0', code: 'VALIDATION' }
+  }
+
+  const { data: invoice, error: invErr } = await adminClient
+    .from(INVOICES_TABLE)
+    .select('id, total_amount, supplier_name, invoice_number')
+    .eq('id', input.supplier_invoice_id)
+    .maybeSingle()
+  if (invErr || !invoice) return { ok: false, error: invErr?.message || 'Factura no encontrada' }
+
+  const { data: existingPays } = await adminClient
+    .from(TABLE)
+    .select('amount')
+    .eq('supplier_invoice_id', input.supplier_invoice_id)
+
+  const currentPaid = (existingPays || []).reduce(
+    (s: number, p: any) => s + Number(p.amount ?? 0),
+    0,
+  )
+  const total = Number((invoice as any).total_amount ?? 0)
+  const pending = Math.max(0, total - currentPaid)
+  if (amount > pending + 0.01) {
+    return { ok: false, error: `El importe supera el pendiente (${pending.toFixed(2)}€)`, code: 'VALIDATION' }
+  }
+
+  const paymentDate = input.payment_date || today()
+  const paymentMethod = (input.payment_method || 'transfer') as SupplierPaymentMethod
+
+  let manualTransactionId: string | null = null
+  if (input.create_accounting_entry !== false) {
+    const mtPayload = {
+      type: 'expense',
+      date: paymentDate,
+      description: `Pago factura ${(invoice as any).invoice_number} · ${(invoice as any).supplier_name}`,
+      category: 'proveedores',
+      amount,
+      tax_rate: 0,
+      tax_amount: 0,
+      total: amount,
+      notes: `Método: ${SUPPLIER_PAYMENT_METHOD_LABEL[paymentMethod] ?? paymentMethod}${input.reference ? ` · Ref: ${input.reference}` : ''}`,
+      created_by: userId,
+      // Enlace estructural con la factura pagada (para el desglose del informe de
+      // gastos por tipo de proveedor y por factura, sin depender del texto).
+      ap_supplier_invoice_id: input.supplier_invoice_id,
+    }
+    const { data: mt, error: mtErr } = await adminClient
+      .from('manual_transactions')
+      .insert(mtPayload)
+      .select('id')
+      .single()
+    if (mtErr) {
+      console.error('[applySupplierInvoicePayment] manual_transactions error:', mtErr.message)
+    } else if (mt) {
+      manualTransactionId = String((mt as any).id)
+    }
+  }
+
+  const { data: pay, error: payErr } = await adminClient
+    .from(TABLE)
+    .insert({
+      supplier_invoice_id: input.supplier_invoice_id,
+      payment_date: paymentDate,
+      payment_method: paymentMethod,
+      amount,
+      reference: input.reference?.trim() || null,
+      notes: input.notes?.trim() || null,
+      manual_transaction_id: manualTransactionId,
+      created_by: userId,
+    })
+    .select('id')
+    .single()
+  if (payErr) {
+    if (manualTransactionId) {
+      await adminClient.from('manual_transactions').delete().eq('id', manualTransactionId)
+    }
+    return { ok: false, error: payErr.message || 'Error al registrar pago' }
+  }
+
+  const newPaid = currentPaid + amount
+  const newPending = Math.max(0, total - newPaid)
+  const newStatus = newPaid >= total - 0.005 ? 'pagada' : newPaid > 0 ? 'parcial' : 'pendiente'
+
+  // Propagar a las cuotas: asignar el total pagado en orden (FIFO) y marcar
+  // como pagadas las que queden cubiertas. Sin esto, la pantalla de
+  // Vencimientos seguiría mostrando la factura como pendiente.
+  const { data: dueRows } = await adminClient
+    .from(DUE_DATES_TABLE)
+    .select('id, amount, sort_order, due_date, is_paid')
+    .eq('supplier_invoice_id', input.supplier_invoice_id)
+    .order('sort_order', { ascending: true })
+    .order('due_date', { ascending: true })
+
+  const idsToMarkPaid: string[] = []
+  let remaining = newPaid
+  for (const r of (dueRows || []) as any[]) {
+    const amt = Number(r.amount ?? 0)
+    if (remaining + 0.005 >= amt) {
+      if (!r.is_paid) idsToMarkPaid.push(String(r.id))
+      remaining = Math.round((remaining - amt) * 100) / 100
+    } else {
+      break
+    }
+  }
+  if (idsToMarkPaid.length > 0) {
+    await adminClient
+      .from(DUE_DATES_TABLE)
+      .update({ is_paid: true, paid_at: paymentDate, payment_method: paymentMethod })
+      .in('id', idsToMarkPaid)
+  }
+
+  // Sincronizar status de la factura
+  const invoiceUpdate: Record<string, unknown> = {
+    status: newStatus,
+    updated_at: new Date().toISOString(),
+  }
+  if (newStatus === 'pagada') {
+    invoiceUpdate.payment_date = paymentDate
+    invoiceUpdate.payment_method = paymentMethod
+  }
+  await adminClient
+    .from(INVOICES_TABLE)
+    .update(invoiceUpdate)
+    .eq('id', input.supplier_invoice_id)
+
+  return {
+    ok: true,
+    id: String((pay as any).id),
+    amount_paid: Math.round(newPaid * 100) / 100,
+    amount_pending: Math.round(newPending * 100) / 100,
+    status: newStatus,
+    invoice_number: String((invoice as any).invoice_number ?? ''),
+    supplier_name: String((invoice as any).supplier_name ?? ''),
+    amount,
+  }
+}
+
 export const registerSupplierInvoicePayment = protectedAction<
-  {
-    supplier_invoice_id: string
-    amount: number
-    payment_date?: string
-    payment_method?: SupplierPaymentMethod
-    reference?: string | null
-    notes?: string | null
-    create_accounting_entry?: boolean
-  },
+  ApplyPaymentInput,
   { id: string; amount_paid: number; amount_pending: number; status: string; auditEntityId: string; auditDescription: string }
 >(
   {
@@ -149,140 +315,116 @@ export const registerSupplierInvoicePayment = protectedAction<
     auditEntity: 'supplier_invoice',
   },
   async (ctx, input) => {
-    if (!input.supplier_invoice_id) return failure('Factura no indicada', 'VALIDATION')
-    const amount = Number(input.amount)
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return failure('El importe debe ser mayor que 0', 'VALIDATION')
-    }
+    const r = await applySupplierInvoicePayment(ctx.adminClient, ctx.userId, input)
+    if (!r.ok) return failure(r.error, r.code)
+    return success({
+      id: r.id,
+      amount_paid: r.amount_paid,
+      amount_pending: r.amount_pending,
+      status: r.status,
+      auditEntityId: String(input.supplier_invoice_id),
+      auditDescription: `Pago de factura ${r.invoice_number} · ${r.supplier_name} (${r.amount.toFixed(2)} €)`,
+    })
+  },
+)
 
-    const { data: invoice, error: invErr } = await ctx.adminClient
-      .from(INVOICES_TABLE)
-      .select('id, total_amount, supplier_name, invoice_number')
-      .eq('id', input.supplier_invoice_id)
-      .maybeSingle()
-    if (invErr || !invoice) return failure(invErr?.message || 'Factura no encontrada')
+// ─── Registrar pago COMPLETO de varias facturas a la vez ──────────────────────
+// Caso de uso: en el banco se paga un lote de facturas de golpe. Por cada factura
+// seleccionada se registra un pago por su importe PENDIENTE íntegro (mismo flujo
+// que el pago individual: asiento de gasto + cuotas FIFO + status). Las que ya no
+// tienen pendiente se omiten; los fallos individuales no abortan el resto del lote.
 
-    const { data: existingPays } = await ctx.adminClient
-      .from(TABLE)
-      .select('amount')
-      .eq('supplier_invoice_id', input.supplier_invoice_id)
-
-    const currentPaid = (existingPays || []).reduce(
-      (s: number, p: any) => s + Number(p.amount ?? 0),
-      0,
-    )
-    const total = Number((invoice as any).total_amount ?? 0)
-    const pending = Math.max(0, total - currentPaid)
-    if (amount > pending + 0.01) {
-      return failure(`El importe supera el pendiente (${pending.toFixed(2)}€)`, 'VALIDATION')
-    }
+export const registerBulkSupplierInvoicePayments = protectedAction<
+  {
+    ids: string[]
+    payment_date?: string
+    payment_method?: SupplierPaymentMethod
+    create_accounting_entry?: boolean
+  },
+  {
+    paid: number
+    skipped: number
+    failed: number
+    total_amount: number
+    errors: string[]
+    auditEntityId: string
+    auditDescription: string
+  }
+>(
+  {
+    permission: PERMISSION,
+    auditModule: 'accounting',
+    auditAction: 'payment',
+    auditEntity: 'supplier_invoice',
+  },
+  async (ctx, input) => {
+    const ids = Array.from(new Set((input.ids || []).filter(Boolean)))
+    if (ids.length === 0) return failure('No hay facturas seleccionadas', 'VALIDATION')
 
     const paymentDate = input.payment_date || today()
     const paymentMethod = (input.payment_method || 'transfer') as SupplierPaymentMethod
 
-    let manualTransactionId: string | null = null
-    if (input.create_accounting_entry !== false) {
-      const mtPayload = {
-        type: 'expense',
-        date: paymentDate,
-        description: `Pago factura ${(invoice as any).invoice_number} · ${(invoice as any).supplier_name}`,
-        category: 'proveedores',
-        amount,
-        tax_rate: 0,
-        tax_amount: 0,
-        total: amount,
-        notes: `Método: ${SUPPLIER_PAYMENT_METHOD_LABEL[paymentMethod] ?? paymentMethod}${input.reference ? ` · Ref: ${input.reference}` : ''}`,
-        created_by: ctx.userId,
-        // Enlace estructural con la factura pagada (para el desglose del informe de
-        // gastos por tipo de proveedor y por factura, sin depender del texto).
-        ap_supplier_invoice_id: input.supplier_invoice_id,
-      }
-      const { data: mt, error: mtErr } = await ctx.adminClient
-        .from('manual_transactions')
-        .insert(mtPayload)
-        .select('id')
-        .single()
-      if (mtErr) {
-        console.error('[registerSupplierInvoicePayment] manual_transactions error:', mtErr.message)
-      } else if (mt) {
-        manualTransactionId = String((mt as any).id)
-      }
+    // Pendiente por factura = total − Σ pagos ya registrados.
+    const { data: invoices, error: invErr } = await ctx.adminClient
+      .from(INVOICES_TABLE)
+      .select('id, total_amount, supplier_name, invoice_number')
+      .in('id', ids)
+    if (invErr) return failure(invErr.message)
+
+    const { data: pays } = await ctx.adminClient
+      .from(TABLE)
+      .select('supplier_invoice_id, amount')
+      .in('supplier_invoice_id', ids)
+    const paidByInvoice = new Map<string, number>()
+    for (const p of (pays || []) as any[]) {
+      const k = String(p.supplier_invoice_id)
+      paidByInvoice.set(k, (paidByInvoice.get(k) ?? 0) + Number(p.amount ?? 0))
     }
 
-    const { data: pay, error: payErr } = await ctx.adminClient
-      .from(TABLE)
-      .insert({
-        supplier_invoice_id: input.supplier_invoice_id,
+    let paid = 0
+    let skipped = 0
+    let failed = 0
+    let totalAmount = 0
+    const errors: string[] = []
+
+    for (const inv of (invoices || []) as any[]) {
+      const id = String(inv.id)
+      const total = Number(inv.total_amount ?? 0)
+      const already = paidByInvoice.get(id) ?? 0
+      const pending = Math.round((total - already) * 100) / 100
+      const label = `${inv.invoice_number ?? ''} · ${inv.supplier_name ?? ''}`.trim()
+      if (pending <= 0.005) {
+        skipped++
+        continue
+      }
+      const r = await applySupplierInvoicePayment(ctx.adminClient, ctx.userId, {
+        supplier_invoice_id: id,
+        amount: pending,
         payment_date: paymentDate,
         payment_method: paymentMethod,
-        amount,
-        reference: input.reference?.trim() || null,
-        notes: input.notes?.trim() || null,
-        manual_transaction_id: manualTransactionId,
-        created_by: ctx.userId,
+        create_accounting_entry: input.create_accounting_entry,
       })
-      .select('id')
-      .single()
-    if (payErr) {
-      if (manualTransactionId) {
-        await ctx.adminClient.from('manual_transactions').delete().eq('id', manualTransactionId)
-      }
-      return failure(payErr.message || 'Error al registrar pago')
-    }
-
-    const newPaid = currentPaid + amount
-    const newPending = Math.max(0, total - newPaid)
-    const newStatus = newPaid >= total - 0.005 ? 'pagada' : newPaid > 0 ? 'parcial' : 'pendiente'
-
-    // Propagar a las cuotas: asignar el total pagado en orden (FIFO) y marcar
-    // como pagadas las que queden cubiertas. Sin esto, la pantalla de
-    // Vencimientos seguiría mostrando la factura como pendiente.
-    const { data: dueRows } = await ctx.adminClient
-      .from(DUE_DATES_TABLE)
-      .select('id, amount, sort_order, due_date, is_paid')
-      .eq('supplier_invoice_id', input.supplier_invoice_id)
-      .order('sort_order', { ascending: true })
-      .order('due_date', { ascending: true })
-
-    const idsToMarkPaid: string[] = []
-    let remaining = newPaid
-    for (const r of (dueRows || []) as any[]) {
-      const amt = Number(r.amount ?? 0)
-      if (remaining + 0.005 >= amt) {
-        if (!r.is_paid) idsToMarkPaid.push(String(r.id))
-        remaining = Math.round((remaining - amt) * 100) / 100
+      if (r.ok) {
+        paid++
+        totalAmount = Math.round((totalAmount + pending) * 100) / 100
       } else {
-        break
+        failed++
+        errors.push(`${label}: ${r.error}`)
       }
     }
-    if (idsToMarkPaid.length > 0) {
-      await ctx.adminClient
-        .from(DUE_DATES_TABLE)
-        .update({ is_paid: true, paid_at: paymentDate, payment_method: paymentMethod })
-        .in('id', idsToMarkPaid)
-    }
 
-    // Sincronizar status de la factura
-    const invoiceUpdate: Record<string, unknown> = {
-      status: newStatus,
-      updated_at: new Date().toISOString(),
+    if (paid === 0 && failed > 0) {
+      return failure(`No se pudo registrar ningún pago. ${errors[0] ?? ''}`.trim())
     }
-    if (newStatus === 'pagada') {
-      invoiceUpdate.payment_date = paymentDate
-      invoiceUpdate.payment_method = paymentMethod
-    }
-    await ctx.adminClient
-      .from(INVOICES_TABLE)
-      .update(invoiceUpdate)
-      .eq('id', input.supplier_invoice_id)
 
     return success({
-      id: String((pay as any).id),
-      amount_paid: Math.round(newPaid * 100) / 100,
-      amount_pending: Math.round(newPending * 100) / 100,
-      status: newStatus,
-      auditEntityId: String(input.supplier_invoice_id),
-      auditDescription: `Pago de factura ${(invoice as any).invoice_number} · ${(invoice as any).supplier_name} (${amount.toFixed(2)} €)`,
+      paid,
+      skipped,
+      failed,
+      total_amount: totalAmount,
+      errors,
+      auditEntityId: ids[0],
+      auditDescription: `Pago en lote de ${paid} factura(s) de proveedor (${totalAmount.toFixed(2)} €)`,
     })
   },
 )

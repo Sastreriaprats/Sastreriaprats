@@ -88,7 +88,7 @@ import {
   type SupplierOptionForInvoice,
   type UnlinkedDeliveryNoteOption,
 } from '@/actions/supplier-invoices'
-import { getSupplierInvoicesPaidMap } from '@/actions/supplier-invoice-payments'
+import { getSupplierInvoicesPaidMap, registerBulkSupplierInvoicePayments } from '@/actions/supplier-invoice-payments'
 import {
   SupplierPaymentDialog,
   type SupplierPaymentDialogInvoice,
@@ -191,6 +191,13 @@ export function SupplierInvoicesContent() {
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false)
   const [paymentInvoice, setPaymentInvoice] = useState<SupplierPaymentDialogInvoice | null>(null)
   const [paidMap, setPaidMap] = useState<Record<string, number>>({})
+  // Selección múltiple para marcar varias facturas como pagadas a la vez
+  // (caso: un único pago en el banco que liquida N facturas).
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkPayOpen, setBulkPayOpen] = useState(false)
+  const [bulkPayDate, setBulkPayDate] = useState(today())
+  const [bulkPayMethod, setBulkPayMethod] = useState('transfer')
+  const [bulkPaying, setBulkPaying] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<ApSupplierInvoiceRow | null>(null)
   const [creditNoteTarget, setCreditNoteTarget] = useState<ApSupplierInvoiceRow | null>(null)
@@ -254,6 +261,7 @@ export function SupplierInvoicesContent() {
 
   const loadList = useCallback(async () => {
     setLoading(true)
+    setSelectedIds(new Set())
     const r = await listSupplierInvoices({
       status: statusFilter === 'all' ? undefined : statusFilter,
       supplierSearch: supplierSearch.trim() || undefined,
@@ -786,6 +794,63 @@ export function SupplierInvoicesContent() {
   // Las proformas se ven por defecto; el toggle "ocultar proformas" las filtra (cliente).
   const visibleRows = hideProformas ? rows.filter((r) => r.is_proforma !== true) : rows
 
+  // ─── Selección múltiple para pago en lote ───────────────────────────────────
+  const pendingOf = (row: ApSupplierInvoiceRow) =>
+    Math.max(0, Math.round((row.total_amount - (paidMap[row.id] ?? 0)) * 100) / 100)
+  // Solo se pueden marcar como pagadas las facturas con pendiente > 0 (no proformas).
+  const selectableRows = visibleRows.filter((r) => !r.is_proforma && pendingOf(r) > 0)
+  const selectedRows = visibleRows.filter((r) => selectedIds.has(r.id))
+  const selectedTotal = Math.round(selectedRows.reduce((s, r) => s + pendingOf(r), 0) * 100) / 100
+  const allSelectableSelected =
+    selectableRows.length > 0 && selectableRows.every((r) => selectedIds.has(r.id))
+
+  const toggleRow = (id: string, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }
+  const toggleAll = (checked: boolean) => {
+    setSelectedIds(checked ? new Set(selectableRows.map((r) => r.id)) : new Set())
+  }
+
+  const openBulkPay = () => {
+    setBulkPayDate(today())
+    setBulkPayMethod('transfer')
+    setBulkPayOpen(true)
+  }
+
+  const runBulkPay = async () => {
+    const ids = selectedRows.filter((r) => pendingOf(r) > 0).map((r) => r.id)
+    if (ids.length === 0) {
+      toast.error('No hay facturas con importe pendiente seleccionadas')
+      return
+    }
+    setBulkPaying(true)
+    const r = await registerBulkSupplierInvoicePayments({
+      ids,
+      payment_date: bulkPayDate,
+      payment_method: bulkPayMethod as any,
+    })
+    setBulkPaying(false)
+    if (r.success) {
+      const { paid, skipped, failed } = r.data
+      let msg = `${paid} factura(s) marcada(s) como pagada(s)`
+      if (skipped > 0) msg += ` · ${skipped} ya estaban al día`
+      if (failed > 0) msg += ` · ${failed} con error`
+      if (failed > 0) toast.warning(msg)
+      else toast.success(msg)
+      setBulkPayOpen(false)
+      setSelectedIds(new Set())
+      loadList()
+      loadKpis()
+    } else {
+      toast.error(r.error || 'No se pudieron registrar los pagos')
+    }
+  }
+
   return (
     <div className="space-y-6 p-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -923,6 +988,24 @@ export function SupplierInvoicesContent() {
         </Button>
       </div>
 
+      {/* Barra de acción para selección múltiple */}
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+          <span className="text-sm text-amber-900">
+            <span className="font-semibold">{selectedIds.size}</span> factura{selectedIds.size === 1 ? '' : 's'} seleccionada{selectedIds.size === 1 ? '' : 's'}
+            {' · '}Pendiente total: <span className="font-semibold tabular-nums">{formatCurrency(selectedTotal)}</span>
+          </span>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
+              Quitar selección
+            </Button>
+            <Button size="sm" className="bg-amber-600 hover:bg-amber-700" onClick={openBulkPay}>
+              <CreditCard className="h-4 w-4 mr-1" /> Marcar como pagadas
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Tabla */}
       <div className="rounded-lg border">
         {loading ? (
@@ -938,6 +1021,14 @@ export function SupplierInvoicesContent() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10">
+                  <Checkbox
+                    checked={allSelectableSelected}
+                    onCheckedChange={(checked) => toggleAll(checked === true)}
+                    disabled={selectableRows.length === 0}
+                    aria-label="Seleccionar todas"
+                  />
+                </TableHead>
                 <TableHead>Proveedor</TableHead>
                 <TableHead>Nº factura</TableHead>
                 <TableHead>Fecha factura</TableHead>
@@ -958,8 +1049,17 @@ export function SupplierInvoicesContent() {
                 const paymentLabel = row.payment_method
                   ? (PAYMENT_METHOD_LABEL[row.payment_method] ?? row.payment_method)
                   : null
+                const selectable = !row.is_proforma && pending > 0
                 return (
-                  <TableRow key={row.id}>
+                  <TableRow key={row.id} data-state={selectedIds.has(row.id) ? 'selected' : undefined}>
+                    <TableCell>
+                      <Checkbox
+                        checked={selectedIds.has(row.id)}
+                        onCheckedChange={(checked) => toggleRow(row.id, checked === true)}
+                        disabled={!selectable}
+                        aria-label={`Seleccionar factura ${row.invoice_number}`}
+                      />
+                    </TableCell>
                     <TableCell>
                       <span className="font-medium">{row.supplier_name}</span>
                       {row.supplier_cif && (
@@ -1071,14 +1171,14 @@ export function SupplierInvoicesContent() {
               return (
                 <TableFooter className="bg-muted/60">
                   <TableRow className="font-normal">
-                    <TableCell colSpan={4} className="text-right text-muted-foreground">
+                    <TableCell colSpan={5} className="text-right text-muted-foreground">
                       Base imponible
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{formatCurrency(totalBruto)}</TableCell>
                     <TableCell colSpan={5}></TableCell>
                   </TableRow>
                   <TableRow className="font-normal">
-                    <TableCell colSpan={4} className="text-right text-muted-foreground">
+                    <TableCell colSpan={5} className="text-right text-muted-foreground">
                       IVA
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{formatCurrency(totalIva)}</TableCell>
@@ -1086,7 +1186,7 @@ export function SupplierInvoicesContent() {
                   </TableRow>
                   {totalIrpf > 0 && (
                     <TableRow className="font-normal">
-                      <TableCell colSpan={4} className="text-right text-muted-foreground">
+                      <TableCell colSpan={5} className="text-right text-muted-foreground">
                         IRPF retenido
                       </TableCell>
                       <TableCell className="text-right tabular-nums">−{formatCurrency(totalIrpf)}</TableCell>
@@ -1094,7 +1194,7 @@ export function SupplierInvoicesContent() {
                     </TableRow>
                   )}
                   <TableRow className="font-semibold border-t-2">
-                    <TableCell colSpan={4} className="text-right">
+                    <TableCell colSpan={5} className="text-right">
                       Totales ({rows.length} factura{rows.length === 1 ? '' : 's'})
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{formatCurrency(totalFacturado)}</TableCell>
@@ -1640,6 +1740,59 @@ export function SupplierInvoicesContent() {
         invoice={paymentInvoice}
         onChanged={() => { loadList(); loadKpis() }}
       />
+
+      {/* Modal: marcar varias facturas como pagadas */}
+      <Dialog open={bulkPayOpen} onOpenChange={(open) => { if (!bulkPaying) setBulkPayOpen(open) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Marcar {selectedRows.length} factura{selectedRows.length === 1 ? '' : 's'} como pagada{selectedRows.length === 1 ? '' : 's'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              Se registrará el pago íntegro del importe pendiente de cada factura con la misma
+              fecha y método. Total a pagar:{' '}
+              <span className="font-semibold text-foreground tabular-nums">{formatCurrency(selectedTotal)}</span>.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Fecha de pago</Label>
+                <DatePickerPopover value={bulkPayDate} onChange={(d) => setBulkPayDate(d)} />
+              </div>
+              <div>
+                <Label>Método de pago</Label>
+                <Select value={bulkPayMethod} onValueChange={setBulkPayMethod}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(PAYMENT_METHOD_LABEL).map(([value, label]) => (
+                      <SelectItem key={value} value={value}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="max-h-48 overflow-y-auto rounded-md border divide-y">
+              {selectedRows.map((r) => (
+                <div key={r.id} className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm">
+                  <span className="truncate">
+                    <span className="font-medium">{r.supplier_name}</span>
+                    <span className="text-muted-foreground"> · {r.invoice_number}</span>
+                  </span>
+                  <span className="tabular-nums shrink-0">{formatCurrency(pendingOf(r))}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkPayOpen(false)} disabled={bulkPaying}>Cancelar</Button>
+            <Button onClick={runBulkPay} disabled={bulkPaying || !bulkPayDate}>
+              {bulkPaying && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+              Confirmar pago
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <CreditNoteDialog
         invoice={creditNoteTarget}
