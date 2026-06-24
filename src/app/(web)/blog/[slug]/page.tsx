@@ -1,11 +1,10 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { ArrowLeft, Calendar, Tag } from 'lucide-react'
+import { ArrowLeft, Calendar } from 'lucide-react'
 
 export const revalidate = 1800
 import { getPublicBlogPost } from '@/actions/cms'
-import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { ArticleSchema, BreadcrumbSchema } from '@/components/seo/schema-org'
 import { buildBreadcrumbs } from '@/lib/seo/metadata'
@@ -138,16 +137,6 @@ export default async function BlogPostPage({ params }: Props) {
         />
       )}
 
-      {post.tags && Array.isArray(post.tags) && post.tags.length > 0 && (
-        <div className="mt-12 flex flex-wrap items-center gap-2 border-t border-border pt-8">
-          <Tag className="h-4 w-4 text-prats-navy/60" />
-          {post.tags.map((tag: string) => (
-            <Badge key={tag} variant="outline" className="text-prats-navy">
-              {tag}
-            </Badge>
-          ))}
-        </div>
-      )}
     </article>
   )
 }
