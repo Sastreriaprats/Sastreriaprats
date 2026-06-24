@@ -609,15 +609,18 @@ export const getEmailLogs = protectedAction<
 const EMAIL_REGEX_POSIX = '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$'
 
 /**
- * Filtro RGPD obligatorio para CUALQUIER campaña excepto la invitación inicial
- * opt-in. Aplica los criterios mínimos para considerar a un cliente como
- * destinatario válido de marketing:
+ * Filtro base (modelo opt-out) para CUALQUIER campaña excepto la invitación
+ * inicial opt-in. Incluye a TODOS los clientes —altas manuales y registros
+ * web por igual— y solo deja fuera a quien no puede o no quiere recibir:
  *  - activo
- *  - email no nulo y con forma válida
- *  - consentimiento marketing explícito (accepts_marketing = true)
- *  - suscripción newsletter explícita (newsletter_subscribed = true)
- *  - sin rebotes previos (email_bounced = false)
- *  - no dado de baja (unsubscribed_at IS NULL)
+ *  - email no nulo y con forma válida (entregabilidad)
+ *  - sin rebotes previos (email_bounced = false) (entregabilidad)
+ *  - no dado de baja (unsubscribed_at IS NULL) (única exclusión por voluntad)
+ *
+ * NOTA: deliberadamente NO se exige accepts_marketing ni newsletter_subscribed.
+ * El criterio es opt-out: un cliente solo se excluye cuando pulsa "darse de
+ * baja" en una newsletter (que marca unsubscribed_at), no por no haber dado un
+ * opt-in explícito previo.
  *
  * El segmento 'optin_invitation' es la ÚNICA excepción legítima y NO debe
  * pasar por este helper.
@@ -628,8 +631,6 @@ function applyMarketingBaseFilter<T extends { eq: any; is: any; not: any; filter
     .eq('is_active', true)
     .not('email', 'is', null)
     .filter('email', 'imatch', EMAIL_REGEX_POSIX)
-    .eq('accepts_marketing', true)
-    .eq('newsletter_subscribed', true)
     .eq('email_bounced', false)
     .is('unsubscribed_at', null)
 }

@@ -52,12 +52,12 @@ const statusColors: Record<string, string> = {
 }
 
 const segmentLabels: Record<string, string> = {
-  all: 'Todos los clientes (consentidos)',
-  vip: 'Clientes VIP (consentidos)',
-  new_30d: 'Nuevos 30 días (consentidos)',
-  inactive_90d: 'Inactivos 90 días (consentidos)',
-  with_orders: 'Con pedidos (consentidos)',
-  web_registered: 'Registrados web (consentidos)',
+  all: 'Todos los clientes (excepto bajas)',
+  vip: 'Clientes VIP (excepto bajas)',
+  new_30d: 'Nuevos 30 días (excepto bajas)',
+  inactive_90d: 'Inactivos 90 días (excepto bajas)',
+  with_orders: 'Con pedidos (excepto bajas)',
+  web_registered: 'Registrados web (excepto bajas)',
   optin_invitation: '📨 Invitación opt-in (RGPD — solo campaña inicial)',
 }
 
