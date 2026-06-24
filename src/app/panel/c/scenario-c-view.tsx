@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { getViewC } from '@/actions/ops'
 import type { ViewC, AccountingView } from '@/lib/ops/types'
 import { downloadExcelMulti } from '@/lib/excel/export'
-import { Tabs, Kpis, QuarterTable, MonthlyTable, MovementsTable, eur, MONTH_LABELS } from '../accounting-ui'
+import { Tabs, Kpis, QuarterTable, MonthlyTable, LedgerTable, eur, MONTH_LABELS } from '../accounting-ui'
 
 const thisYear = new Date().getFullYear()
 const n2 = (n: number) => Number((Number(n) || 0).toFixed(2))
@@ -48,8 +48,8 @@ export function ScenarioCView() {
       { name: 'Mensual C', rows: data.C.monthly.map((m, i) => ({
         Mes: MONTH_LABELS[i], Ingresos: n2(m.income), Gastos: n2(m.expenses), Resultado: n2(m.income - m.expenses),
       })) },
-      { name: 'Ventas no efectivo', rows: data.movements.map((m) => ({
-        Fecha: m.date, Ticket: m.ref, 'Método': m.method, Base: n2(m.base), IVA: n2(m.vat), Total: n2(m.total),
+      { name: 'Movimientos', rows: data.ledger.map((m) => ({
+        Fecha: m.date, Tipo: m.type, Concepto: m.concept, Base: n2(m.base), IVA: n2(m.vat), Total: n2(m.total),
       })) },
       { name: 'Facturas', rows: data.invoices.map((f) => ({
         'Nº': f.number, Cliente: f.client, Fecha: f.date, Total: n2(f.total), Estado: f.status, Pago: f.method,
@@ -74,7 +74,7 @@ export function ScenarioCView() {
           { key: 'resumen', label: 'Resumen' },
           { key: 'iva', label: 'IVA trimestral' },
           { key: 'mensual', label: 'Mensual' },
-          { key: 'movimientos', label: 'Ventas (no efectivo)' },
+          { key: 'movimientos', label: 'Movimientos' },
           { key: 'facturas', label: 'Facturas' },
         ]}
       />
@@ -119,7 +119,7 @@ export function ScenarioCView() {
       ) : tab === 'mensual' ? (
         <MonthlyTable view={data.C} variant="full" />
       ) : tab === 'movimientos' ? (
-        <MovementsTable rows={data.movements} />
+        <LedgerTable rows={data.ledger} />
       ) : (
         <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
           <table className="w-full text-sm">

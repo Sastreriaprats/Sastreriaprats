@@ -8,7 +8,7 @@ import {
   listAccess, grantAccess, revokeAccess, type Scope,
 } from '@/lib/ops/db'
 import type {
-  CashEntryPayload, CashEntry, AccountingView, MonthPoint, QuarterRow, MovementRow, ViewB, ViewC,
+  CashEntryPayload, CashEntry, AccountingView, MonthPoint, QuarterRow, MovementRow, LedgerMovement, ViewB, ViewC,
 } from '@/lib/ops/types'
 
 const r2 = (n: number) => Math.round(n * 100) / 100
@@ -167,9 +167,7 @@ export async function getViewB(year: number) {
       quarters: buildQuarters(year, c.cash.quarters, emptyQ()),
       salesCount: c.cash.count,
     }
-    const movements = c.cashMoves.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 1000)
-    // Los movimientos manuales viven en el ledger cifrado; si su lectura falla no
-    // debe tumbar toda la contabilidad de B (las demás pestañas no dependen).
+    // Movimientos manuales (cifrados); si su lectura falla no debe tumbar B.
     let entries: CashEntry[] = []
     try { entries = await loadEntries(year) } catch { /* ledger no disponible */ }
     const ein = entries.filter((e) => e.direction === 'in')
@@ -179,6 +177,12 @@ export async function getViewB(year: number) {
       inBase: sum(ein, 'base'), inVat: sum(ein, 'vat'), inTotal: sum(ein, 'amount'),
       outBase: sum(eout, 'base'), outVat: sum(eout, 'vat'), outTotal: sum(eout, 'amount'),
     }
+    // Cobros en efectivo = tickets 100% efectivo + cobros manuales
+    const manualCobros: MovementRow[] = ein.map((e) => ({
+      date: e.date, ref: 'Manual', concept: e.concept || e.category, method: 'efectivo manual',
+      base: e.base, vat: e.vat, total: e.amount,
+    }))
+    const movements = [...c.cashMoves, ...manualCobros].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 1000)
     return ok({ view, movements, entries, manual } as ViewB)
   } catch { return fail() }
 }
@@ -207,10 +211,31 @@ export async function getViewC(year: number) {
       quarters: buildQuarters(year, c.noncash.quarters, c.apQ),
       salesCount: c.noncash.count,
     }
-    const movements = c.noncashMoves.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 1000)
+    const admin = createAdminClient()
+    const start = `${year}-01-01`, end = `${year}-12-31T23:59:59`
+
+    // Ledger COMPRENSIVO: ingresos (tickets no-efectivo) + gastos (compras + gastos manuales)
+    const ledger: LedgerMovement[] = c.noncashMoves.map((m) => ({
+      date: m.date, type: 'Ticket', concept: `Ticket ${m.ref}`, base: m.base, vat: m.vat, total: r2(m.base + m.vat), saleId: m.saleId,
+    }))
+    const { data: purch } = await admin.from('supplier_orders')
+      .select('order_number, total, tax_amount, created_at')
+      .gte('created_at', start).lte('created_at', end)
+      .in('status', ['received', 'partially_received'])
+    for (const p of (purch ?? []) as Record<string, unknown>[]) {
+      const total = Number(p.total) || 0, tax = Number(p.tax_amount) || 0
+      ledger.push({ date: String(p.created_at).slice(0, 10), type: 'Compra', concept: `Compra ${String(p.order_number ?? '')}`.trim(), base: r2(total - tax), vat: r2(tax), total: r2(-total) })
+    }
+    const { data: mexp } = await admin.from('manual_transactions')
+      .select('description, category, amount, tax_amount, total, date')
+      .eq('type', 'expense')
+      .gte('date', `${year}-01-01`).lte('date', `${year}-12-31`)
+    for (const e of (mexp ?? []) as Record<string, unknown>[]) {
+      ledger.push({ date: String(e.date), type: 'Gasto', concept: String(e.description ?? e.category ?? 'Gasto'), base: r2(Number(e.amount) || 0), vat: r2(Number(e.tax_amount) || 0), total: r2(-(Number(e.total) || 0)) })
+    }
+    ledger.sort((a, b) => b.date.localeCompare(a.date))
 
     // Facturas emitidas del año (documentos fiscales; se ven en C)
-    const admin = createAdminClient()
     const { data: inv } = await admin.from('invoices')
       .select('invoice_number, client_name, invoice_date, total, status, payment_method')
       .eq('invoice_type', 'issued')
@@ -226,7 +251,7 @@ export async function getViewC(year: number) {
       method: String(x.payment_method ?? ''),
     }))
 
-    return ok({ A, C, movements, invoices } as ViewC)
+    return ok({ A, C, ledger: ledger.slice(0, 2000), invoices } as ViewC)
   } catch { return fail() }
 }
 

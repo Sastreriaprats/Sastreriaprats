@@ -30,14 +30,25 @@ export type QuarterRow = {
 }
 
 export type MovementRow = {
-  saleId: string
+  saleId?: string         // vacío en cobros manuales (sin PDF)
   date: string
-  ref: string             // nº ticket (CLP)
+  ref: string             // nº ticket (CLP) o "Manual"
   concept: string
   method: string
   base: number
   vat: number
   total: number
+}
+
+// Movimiento contable comprensivo de C (ingresos y gastos)
+export type LedgerMovement = {
+  date: string
+  type: string            // 'Ticket' | 'Compra' | 'Gasto'
+  concept: string
+  base: number
+  vat: number
+  total: number           // con signo: + ingreso, − gasto
+  saleId?: string
 }
 
 export type AccountingView = {
@@ -76,6 +87,6 @@ export type InvoiceLite = {
 export type ViewC = {
   A: AccountingView             // referencia (real, íntegra)
   C: AccountingView             // A menos el efectivo
-  movements: MovementRow[]      // cobros NO efectivo
+  ledger: LedgerMovement[]      // TODOS los movimientos (ingresos no-efectivo + gastos)
   invoices: InvoiceLite[]       // facturas emitidas del año
 }
