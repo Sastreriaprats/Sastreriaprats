@@ -111,7 +111,7 @@ export function LedgerPanel() {
         <MovementsTable rows={data.movements} />
       ) : (
         <div className="space-y-4">
-          <div className="rounded-lg border bg-white p-4">
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-4">
             <p className="text-sm font-medium mb-3">Añadir pago en efectivo (proveedor, nómina…)</p>
             <div className="grid grid-cols-2 md:grid-cols-5 gap-2 items-end">
               <div>
@@ -136,12 +136,12 @@ export function LedgerPanel() {
             <div className="mt-3"><Button onClick={onAdd} disabled={busy}>Añadir</Button></div>
           </div>
 
-          <div className="rounded-lg border bg-white p-4 flex items-center justify-between">
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-4 flex items-center justify-between">
             <span className="text-sm text-slate-600">Total pagos en efectivo {year}</span>
             <span className="text-lg font-bold text-red-700">{eur(data.paymentsTotal)}</span>
           </div>
 
-          <div className="rounded-lg border bg-white overflow-x-auto">
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-slate-500">
                 <tr>

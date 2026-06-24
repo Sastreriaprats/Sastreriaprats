@@ -28,8 +28,9 @@ export type QuarterRow = {
 }
 
 export type MovementRow = {
+  saleId: string
   date: string
-  ref: string             // nº ticket
+  ref: string             // nº ticket (CLP)
   concept: string
   method: string
   base: number

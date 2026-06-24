@@ -87,7 +87,7 @@ export function ScenarioCView() {
             <p className="text-sm font-medium text-slate-700 mb-2">Escenario C (sin efectivo)</p>
             <Kpis view={data.C} variant="full" />
           </div>
-          <div className="rounded-lg border bg-white overflow-x-auto">
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-slate-500">
                 <tr>
@@ -121,7 +121,7 @@ export function ScenarioCView() {
       ) : tab === 'movimientos' ? (
         <MovementsTable rows={data.movements} />
       ) : (
-        <div className="rounded-lg border bg-white overflow-x-auto">
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-500">
               <tr>

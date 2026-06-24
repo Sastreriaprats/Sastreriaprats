@@ -36,7 +36,7 @@ async function readAllSales(admin: ReturnType<typeof createAdminClient>, start: 
   const out: Record<string, unknown>[] = []
   for (let from = 0; ; from += 1000) {
     const { data } = await admin.from('sales')
-      .select('ticket_number,total,total_returned,subtotal,tax_amount,created_at,payment_method,status')
+      .select('id,ticket_number,total,total_returned,subtotal,tax_amount,created_at,payment_method,status')
       .gte('created_at', start).lte('created_at', end)
       .in('status', ['completed', 'partially_returned'])
       .order('created_at', { ascending: true })
@@ -61,6 +61,14 @@ async function computeYear(year: number) {
     .eq('is_proforma', false)
     .gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`)
 
+  // Mapa venta -> nº de ticket oficial (CLP)
+  const { data: clpRows } = await admin.from('cash_internal_tickets')
+    .select('sale_id, ref').eq('source', 'sale').eq('year', year)
+  const clpMap: Record<string, string> = {}
+  for (const r of (clpRows ?? []) as Record<string, unknown>[]) {
+    if (r.sale_id) clpMap[String(r.sale_id)] = String(r.ref)
+  }
+
   const cash = emptyBucket(), noncash = emptyBucket()
   const cashMoves: MovementRow[] = [], noncashMoves: MovementRow[] = []
 
@@ -80,8 +88,9 @@ async function computeYear(year: number) {
     bk.income += base; bk.vat += vat; bk.count += 1
     bk.monthly[month] = (bk.monthly[month] || 0) + base
     bk.quarters[q].base += base; bk.quarters[q].vat += vat; bk.quarters[q].count += 1
+    const sid = String(x.id)
     const mv: MovementRow = {
-      date: created.slice(0, 10), ref: String(x.ticket_number ?? ''), concept: 'Venta',
+      saleId: sid, date: created.slice(0, 10), ref: clpMap[sid] ?? String(x.ticket_number ?? ''), concept: 'Venta',
       method: String(x.payment_method ?? ''), base: r2(base), vat: r2(vat), total: r2(base + vat),
     }
     ;(isCash ? cashMoves : noncashMoves).push(mv)
@@ -212,6 +221,41 @@ export async function getViewC(year: number) {
     }))
 
     return ok({ A, C, movements, invoices } as ViewC)
+  } catch { return fail() }
+}
+
+// ---------------------------------------------------------------------------
+// Datos de un ticket para descargar su PDF (gateado por cualquier capa).
+// ---------------------------------------------------------------------------
+export async function getTicketData(saleId: string) {
+  try {
+    const a = await getViewerAccess()
+    if (a.scopes.length === 0) return fail()
+    const admin = createAdminClient()
+    const { data: sale } = await admin.from('sales')
+      .select('ticket_number, created_at, client_id, subtotal, discount_amount, discount_percentage, tax_amount, total, payment_method, is_tax_free')
+      .eq('id', saleId).single()
+    if (!sale) return fail()
+    const s = sale as Record<string, unknown>
+    const { data: clp } = await admin.from('cash_internal_tickets')
+      .select('ref').eq('sale_id', saleId).eq('source', 'sale').limit(1)
+    const { data: lines } = await admin.from('sale_lines')
+      .select('description, quantity, unit_price, discount_percentage, line_total, tax_rate, sku')
+      .eq('sale_id', saleId)
+    const { data: payments } = await admin.from('sale_payments')
+      .select('payment_method, amount').eq('sale_id', saleId)
+    let clientName: string | null = null
+    if (s.client_id) {
+      const { data: cl } = await admin.from('clients').select('full_name').eq('id', s.client_id).single()
+      clientName = ((cl as Record<string, unknown> | null)?.full_name as string) ?? null
+    }
+    const ref = (clp?.[0] as Record<string, unknown> | undefined)?.ref ?? null
+    return ok({
+      sale: { ...s, internal_ref: ref },
+      lines: lines ?? [],
+      payments: payments ?? [],
+      clientName,
+    })
   } catch { return fail() }
 }
 
