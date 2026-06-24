@@ -112,11 +112,6 @@ export default async function BlogPostPage({ params }: Props) {
       )}
 
       <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-        {post.category && (
-          <Badge variant="secondary" className="text-prats-gold border-prats-gold/30">
-            {post.category}
-          </Badge>
-        )}
         {post.published_at && (
           <span className="flex items-center gap-1.5">
             <Calendar className="h-4 w-4" />
