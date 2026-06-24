@@ -70,8 +70,17 @@ async function computeYear(year: number) {
   }
 
   const cash = emptyBucket(), noncash = emptyBucket()
-  const cashMoves: MovementRow[] = [], noncashMoves: MovementRow[] = []
+  const cashMoves: MovementRow[] = []
+  const incomeLedger: LedgerMovement[] = []
 
+  const addIncome = (isCash: boolean, base: number, vat: number, month: string, q: number) => {
+    const bk = isCash ? cash : noncash
+    bk.income += base; bk.vat += vat; bk.count += 1
+    bk.monthly[month] = (bk.monthly[month] || 0) + base
+    bk.quarters[q].base += base; bk.quarters[q].vat += vat; bk.quarters[q].count += 1
+  }
+
+  // Ingresos por TICKETS
   for (const x of sales) {
     const total = Number(x.total) || 0
     const returned = Number(x.total_returned) || 0
@@ -84,16 +93,38 @@ async function computeYear(year: number) {
     const month = created.slice(0, 7)
     const q = Math.ceil(Number(created.slice(5, 7)) / 3)
     const isCash = x.payment_method === 'cash'
-    const bk = isCash ? cash : noncash
-    bk.income += base; bk.vat += vat; bk.count += 1
-    bk.monthly[month] = (bk.monthly[month] || 0) + base
-    bk.quarters[q].base += base; bk.quarters[q].vat += vat; bk.quarters[q].count += 1
+    addIncome(isCash, base, vat, month, q)
     const sid = String(x.id)
-    const mv: MovementRow = {
-      saleId: sid, date: created.slice(0, 10), ref: clpMap[sid] ?? String(x.ticket_number ?? ''), concept: 'Venta',
-      method: String(x.payment_method ?? ''), base: r2(base), vat: r2(vat), total: r2(base + vat),
+    const ref = clpMap[sid] ?? String(x.ticket_number ?? '')
+    if (isCash) {
+      cashMoves.push({ saleId: sid, date: created.slice(0, 10), ref, concept: 'Venta', method: String(x.payment_method ?? ''), base: r2(base), vat: r2(vat), total: r2(base + vat) })
+    } else {
+      incomeLedger.push({ date: created.slice(0, 10), type: 'Ticket', concept: `Ticket ${ref}`, base: r2(base), vat: r2(vat), total: r2(base + vat), saleId: sid })
     }
-    ;(isCash ? cashMoves : noncashMoves).push(mv)
+  }
+
+  // Ingresos por FACTURAS emitidas NO asociadas a un ticket (sale_id null)
+  const { data: stInv } = await admin.from('invoices')
+    .select('invoice_number, subtotal, tax_amount, total, payment_method, invoice_date')
+    .eq('invoice_type', 'issued')
+    .is('sale_id', null)
+    .not('status', 'in', '(draft,cancelled)')
+    .gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`)
+  for (const x of (stInv ?? []) as Record<string, unknown>[]) {
+    const total = Number(x.total) || 0
+    const tax = Number(x.tax_amount) || 0
+    const base = Number(x.subtotal) || (total - tax)
+    const d = String(x.invoice_date)
+    const month = d.slice(0, 7)
+    const q = Math.ceil(Number(d.slice(5, 7)) / 3)
+    const isCash = x.payment_method === 'cash'
+    addIncome(isCash, base, tax, month, q)
+    const num = String(x.invoice_number ?? '')
+    if (isCash) {
+      cashMoves.push({ date: d.slice(0, 10), ref: num, concept: `Factura ${num}`, method: String(x.payment_method ?? ''), base: r2(base), vat: r2(tax), total: r2(base + tax) })
+    } else {
+      incomeLedger.push({ date: d.slice(0, 10), type: 'Factura', concept: `Factura ${num}`, base: r2(base), vat: r2(tax), total: r2(base + tax) })
+    }
   }
 
   // Gastos (resumen) de supplier_orders — igual que A; no varía entre A y C.
@@ -113,7 +144,7 @@ async function computeYear(year: number) {
     apQ[q].count += 1
   }
 
-  return { cash, noncash, expenses, vatPaidSummary, expMonthly, apQ, cashMoves, noncashMoves }
+  return { cash, noncash, expenses, vatPaidSummary, expMonthly, apQ, cashMoves, incomeLedger }
 }
 
 function months(year: number, income: Record<string, number>, expenses: Record<string, number>): MonthPoint[] {
@@ -214,10 +245,8 @@ export async function getViewC(year: number) {
     const admin = createAdminClient()
     const start = `${year}-01-01`, end = `${year}-12-31T23:59:59`
 
-    // Ledger COMPRENSIVO: ingresos (tickets no-efectivo) + gastos (compras + gastos manuales)
-    const ledger: LedgerMovement[] = c.noncashMoves.map((m) => ({
-      date: m.date, type: 'Ticket', concept: `Ticket ${m.ref}`, base: m.base, vat: m.vat, total: r2(m.base + m.vat), saleId: m.saleId,
-    }))
+    // Ledger COMPRENSIVO: ingresos (tickets + facturas sin ticket) + gastos (compras de proveedor)
+    const ledger: LedgerMovement[] = [...c.incomeLedger]
     const { data: purch } = await admin.from('supplier_orders')
       .select('order_number, total, tax_amount, created_at')
       .gte('created_at', start).lte('created_at', end)
@@ -225,13 +254,6 @@ export async function getViewC(year: number) {
     for (const p of (purch ?? []) as Record<string, unknown>[]) {
       const total = Number(p.total) || 0, tax = Number(p.tax_amount) || 0
       ledger.push({ date: String(p.created_at).slice(0, 10), type: 'Compra', concept: `Compra ${String(p.order_number ?? '')}`.trim(), base: r2(total - tax), vat: r2(tax), total: r2(-total) })
-    }
-    const { data: mexp } = await admin.from('manual_transactions')
-      .select('description, category, amount, tax_amount, total, date')
-      .eq('type', 'expense')
-      .gte('date', `${year}-01-01`).lte('date', `${year}-12-31`)
-    for (const e of (mexp ?? []) as Record<string, unknown>[]) {
-      ledger.push({ date: String(e.date), type: 'Gasto', concept: String(e.description ?? e.category ?? 'Gasto'), base: r2(Number(e.amount) || 0), vat: r2(Number(e.tax_amount) || 0), total: r2(-(Number(e.total) || 0)) })
     }
     ledger.sort((a, b) => b.date.localeCompare(a.date))
 
