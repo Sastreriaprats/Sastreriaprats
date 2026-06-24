@@ -31,7 +31,12 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
 
     const [salesRes, purchasesRes, invoicesRes, tailoringPaymentsRes] = await Promise.all([
       ctx.adminClient.from('sales').select('total, total_returned, subtotal, tax_amount, created_at').gte('created_at', start).lte('created_at', end).in('status', ['completed', 'partially_returned']),
-      ctx.adminClient.from('supplier_orders').select('total, tax_amount, created_at').gte('created_at', start).lte('created_at', end).in('status', ['received', 'partially_received']),
+      // Gastos = facturas de proveedor recibidas (ap_supplier_invoices), por fecha
+      // de factura. Es el documento contable del gasto (no los pedidos a proveedor,
+      // que son operativos/de stock y solaparían con las facturas). amount es la
+      // base sin IVA; las rectificativas vienen en negativo y restan solas; las
+      // proformas se excluyen abajo. Cuenta cualquier estado (pagada/pendiente/parcial).
+      ctx.adminClient.from('ap_supplier_invoices').select('amount, tax_amount, invoice_date, is_proforma').gte('invoice_date', fromDate).lte('invoice_date', toDate),
       ctx.adminClient.from('invoices').select('id, invoice_number, client_name, invoice_date, total, status').eq('invoice_type', 'issued').order('invoice_date', { ascending: false }).limit(10),
       // Cobros de pedidos de sastrería (backoffice). No pasan por TPV, así que
       // no están en `sales`; y no se solapan con `invoices` (que aquí no se
@@ -41,7 +46,8 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
     ])
 
     const sales = salesRes.data || []
-    const purchases = purchasesRes.data || []
+    // Excluimos proformas (no son facturas reales).
+    const purchases = (purchasesRes.data || []).filter((x: Record<string, unknown>) => !(x as any).is_proforma)
     const tailoringPayments = tailoringPaymentsRes.data || []
 
     // Para ventas con devolución parcial: prorratear subtotal/IVA por la
@@ -78,7 +84,7 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
     const vatCollected =
       sales.reduce((s: number, x: Record<string, unknown>) => s + netSale(x).netVat, 0) +
       tailoringPayments.reduce((s: number, p: Record<string, unknown>) => s + netTailoringPayment(p).netVat, 0)
-    const expenses = purchases.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).total) - Number((x as any).tax_amount || 0)), 0)
+    const expenses = purchases.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).amount) || 0), 0)
     const vatPaid = purchases.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).tax_amount) || 0), 0)
 
     // Pre-poblamos un punto por cada mes incluido en el rango (para que el
@@ -110,11 +116,11 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
       }
     }
     for (const x of purchases) {
-      const d = (x as any).created_at
+      const d = (x as any).invoice_date
       if (d) {
         const key = d.slice(0, 7)
         if (!byMonth[key]) byMonth[key] = { income: 0, expenses: 0 }
-        byMonth[key].expenses += Number((x as any).total) - Number((x as any).tax_amount || 0) || 0
+        byMonth[key].expenses += Number((x as any).amount) || 0
       }
     }
     const monthlyData = Object.entries(byMonth)
