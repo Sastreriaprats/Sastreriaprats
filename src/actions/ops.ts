@@ -52,12 +52,9 @@ async function computeYear(year: number) {
   const admin = createAdminClient()
   const start = `${year}-01-01`, end = `${year}-12-31T23:59:59`
   const sales = await readAllSales(admin, start, end)
-  const { data: purch } = await admin.from('supplier_orders')
-    .select('total,tax_amount,created_at')
-    .gte('created_at', start).lte('created_at', end)
-    .in('status', ['received', 'partially_received'])
+  // Gastos / IVA soportado = FACTURAS RECIBIDAS (ap_supplier_invoices)
   const { data: apInv } = await admin.from('ap_supplier_invoices')
-    .select('amount,tax_amount,invoice_date')
+    .select('invoice_number, supplier_name, amount, tax_amount, invoice_date')
     .eq('is_proforma', false)
     .gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`)
 
@@ -127,24 +124,29 @@ async function computeYear(year: number) {
     }
   }
 
-  // Gastos (resumen) de supplier_orders — igual que A; no varía entre A y C.
-  const expenses = (purch ?? []).reduce((s: number, x: Record<string, unknown>) => s + (Number(x.total) - Number(x.tax_amount || 0)), 0)
-  const vatPaidSummary = (purch ?? []).reduce((s: number, x: Record<string, unknown>) => s + (Number(x.tax_amount) || 0), 0)
+  // Gastos = base de facturas recibidas; IVA soportado = su IVA; + ledger de gasto.
+  const expenseLedger: LedgerMovement[] = []
+  let expenses = 0, vatPaidSummary = 0
   const expMonthly: Record<string, number> = {}
-  for (const x of (purch ?? []) as Record<string, unknown>[]) {
-    const m = String(x.created_at).slice(0, 7)
-    expMonthly[m] = (expMonthly[m] || 0) + (Number(x.total) - Number(x.tax_amount || 0))
-  }
-  // IVA soportado por trimestre (ap_supplier_invoices) — igual que A.
   const apQ = emptyQ()
   for (const x of (apInv ?? []) as Record<string, unknown>[]) {
-    const q = Math.ceil(Number(String(x.invoice_date).slice(5, 7)) / 3)
-    apQ[q].base += Number(x.amount) || 0
-    apQ[q].vat += Number(x.tax_amount) || 0
-    apQ[q].count += 1
+    const base = Number(x.amount) || 0
+    const vat = Number(x.tax_amount) || 0
+    const d = String(x.invoice_date)
+    const m = d.slice(0, 7)
+    const q = Math.ceil(Number(d.slice(5, 7)) / 3)
+    expenses += base
+    vatPaidSummary += vat
+    expMonthly[m] = (expMonthly[m] || 0) + base
+    apQ[q].base += base; apQ[q].vat += vat; apQ[q].count += 1
+    expenseLedger.push({
+      date: d.slice(0, 10), type: 'Factura recibida',
+      concept: `${String(x.supplier_name ?? '')} ${String(x.invoice_number ?? '')}`.trim() || 'Factura recibida',
+      base: r2(base), vat: r2(vat), total: r2(-(base + vat)),
+    })
   }
 
-  return { cash, noncash, expenses, vatPaidSummary, expMonthly, apQ, cashMoves, incomeLedger }
+  return { cash, noncash, expenses, vatPaidSummary, expMonthly, apQ, cashMoves, incomeLedger, expenseLedger }
 }
 
 function months(year: number, income: Record<string, number>, expenses: Record<string, number>): MonthPoint[] {
@@ -243,19 +245,9 @@ export async function getViewC(year: number) {
       salesCount: c.noncash.count,
     }
     const admin = createAdminClient()
-    const start = `${year}-01-01`, end = `${year}-12-31T23:59:59`
 
-    // Ledger COMPRENSIVO: ingresos (tickets + facturas sin ticket) + gastos (compras de proveedor)
-    const ledger: LedgerMovement[] = [...c.incomeLedger]
-    const { data: purch } = await admin.from('supplier_orders')
-      .select('order_number, total, tax_amount, created_at')
-      .gte('created_at', start).lte('created_at', end)
-      .in('status', ['received', 'partially_received'])
-    for (const p of (purch ?? []) as Record<string, unknown>[]) {
-      const total = Number(p.total) || 0, tax = Number(p.tax_amount) || 0
-      ledger.push({ date: String(p.created_at).slice(0, 10), type: 'Compra', concept: `Compra ${String(p.order_number ?? '')}`.trim(), base: r2(total - tax), vat: r2(tax), total: r2(-total) })
-    }
-    ledger.sort((a, b) => b.date.localeCompare(a.date))
+    // Ledger COMPRENSIVO: ingresos (tickets + facturas emitidas sin ticket) + gastos (facturas recibidas)
+    const ledger: LedgerMovement[] = [...c.incomeLedger, ...c.expenseLedger].sort((a, b) => b.date.localeCompare(a.date))
 
     // Facturas emitidas del año (documentos fiscales; se ven en C)
     const { data: inv } = await admin.from('invoices')

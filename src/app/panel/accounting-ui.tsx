@@ -203,6 +203,7 @@ export function MovementsTable({ rows }: { rows: MovementRow[] }) {
 const TYPE_BADGE: Record<string, string> = {
   Ticket: 'bg-emerald-50 text-emerald-700',
   Factura: 'bg-blue-50 text-blue-700',
+  'Factura recibida': 'bg-red-50 text-red-700',
   Compra: 'bg-red-50 text-red-700',
   Gasto: 'bg-red-50 text-red-700',
 }
