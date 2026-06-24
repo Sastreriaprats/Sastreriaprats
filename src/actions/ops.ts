@@ -225,7 +225,7 @@ export async function addCashPayment(input: { date: string; concept: string; cat
       category: input.category || 'otro',
       base, vat: r2(amount - base), amount,
     }
-    await insertEntry(seal(payload), null)
+    await insertEntry(seal(payload))
     return ok(true)
   } catch { return fail() }
 }
