@@ -520,10 +520,11 @@ export const listTickets = protectedAction<{
   dateFrom?: string
   dateTo?: string
   productSearch?: string
+  ticketSearch?: string
   scope?: 'all' | 'tienda'
 }, { data: any[]; total: number; page: number; pageSize: number; totalPages: number }>(
   { permission: 'pos.access', auditModule: 'pos' },
-  async (ctx, { page = 1, pageSize = 20, clientSearch, dateFrom, dateTo, productSearch, scope = 'all' }) => {
+  async (ctx, { page = 1, pageSize = 20, clientSearch, dateFrom, dateTo, productSearch, ticketSearch, scope = 'all' }) => {
     let query = ctx.adminClient
       .from('sales')
       .select('id, ticket_number, created_at, total, total_returned, payment_method, status, client_id, stores(name), profiles!sales_salesperson_id_fkey(full_name)', { count: 'exact' })
@@ -563,6 +564,22 @@ export const listTickets = protectedAction<{
         if (ids.length === 0) return success({ data: [], total: 0, page, pageSize, totalPages: 0 })
         query = query.in('id', ids)
       }
+    }
+
+    // Búsqueda por nº de ticket: encuentra por el CLP nuevo o por el TICK viejo.
+    if (ticketSearch && ticketSearch.trim()) {
+      const q = ticketSearch.trim().replace(/[(),]/g, '')
+      const { data: clp } = await ctx.adminClient
+        .from('cash_internal_tickets')
+        .select('sale_id')
+        .eq('source', 'sale')
+        .ilike('ref', `%${q}%`)
+        .not('sale_id', 'is', null)
+        .limit(500)
+      const ids = [...new Set((clp ?? []).map((r: any) => r.sale_id).filter(Boolean))]
+      const orParts = [`ticket_number.ilike.%${q}%`]
+      if (ids.length) orParts.push(`id.in.(${ids.join(',')})`)
+      query = query.or(orParts.join(','))
     }
 
     const from = (page - 1) * pageSize

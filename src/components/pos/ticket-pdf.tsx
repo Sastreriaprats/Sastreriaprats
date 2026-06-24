@@ -330,7 +330,7 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
         widths: ['*', 50],
         body: [
           [
-            { text: `Ticket ${data.sale.ticket_number}`, fontSize: FONT_BODY, bold: true },
+            { text: `Ticket ${data.sale.internal_ref ?? data.sale.ticket_number}`, fontSize: FONT_BODY, bold: true },
             { text: dateStr, fontSize: FONT_BODY, alignment: 'right' },
           ],
           [
@@ -342,9 +342,6 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
       layout: 'noBorders',
       margin: [0, 0, 0, 2] as [number, number, number, number],
     },
-    ...(data.sale.internal_ref
-      ? [{ text: `Ref. interna: ${data.sale.internal_ref}`, fontSize: FONT_SMALL, bold: true, margin: [0, 0, 0, 2] as [number, number, number, number] } as Content]
-      : []),
     {
       // Nombre completo del cliente (sin truncar): a ancho completo para que
       // pueda envolver en varias líneas sin chocar con la hora.
@@ -567,7 +564,7 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
 
   const pdf = pdfMake.createPdf(docDef as Parameters<typeof pdfMake.createPdf>[0])
 
-  const fileName = `${giftMode ? 'ticket-regalo' : 'ticket'}-${data.sale.ticket_number}.pdf`
+  const fileName = `${giftMode ? 'ticket-regalo' : 'ticket'}-${data.sale.internal_ref ?? data.sale.ticket_number}.pdf`
   if (mode === 'print') {
     await printPdfDoc(pdf as unknown as PdfBufferDoc, fileName, diag)
   } else {

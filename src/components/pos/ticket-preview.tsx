@@ -75,10 +75,7 @@ export function TicketPreview({ open, onClose, ticketData }: TicketPreviewProps)
           <div className="text-center text-[10px] mb-1">CIF: {ticketData.store_cif}</div>
           <div className="border-t border-dashed border-gray-400 my-2" />
 
-          <div className="flex justify-between"><span>Ticket:</span><span>{ticketData.ticket_number}</span></div>
-          {ticketData.internal_ref && (
-            <div className="flex justify-between"><span>Ref. interna:</span><span>{ticketData.internal_ref}</span></div>
-          )}
+          <div className="flex justify-between"><span>Ticket:</span><span>{ticketData.internal_ref || ticketData.ticket_number}</span></div>
           <div className="flex justify-between"><span>Fecha:</span><span>{ticketData.date} {ticketData.time}</span></div>
           <div className="flex justify-between"><span>Cajero:</span><span>{ticketData.cashier}</span></div>
           {ticketData.client_name && (
@@ -158,8 +155,7 @@ function buildTicketHtml(data: TicketData): string {
     <div class="center">Tel: ${data.store_phone}</div>
     <div class="center">CIF: ${data.store_cif}</div>
     <div class="line"></div>
-    <div class="row"><span>Ticket:</span><span>${data.ticket_number}</span></div>
-    ${data.internal_ref ? `<div class="row"><span>Ref. interna:</span><span>${data.internal_ref}</span></div>` : ''}
+    <div class="row"><span>Ticket:</span><span>${data.internal_ref || data.ticket_number}</span></div>
     <div class="row"><span>Fecha:</span><span>${data.date} ${data.time}</span></div>
     <div class="row"><span>Cajero:</span><span>${data.cashier}</span></div>
     ${data.client_name ? `<div class="row"><span>Cliente:</span><span>${data.client_name}</span></div>` : ''}

@@ -114,6 +114,7 @@ export function TicketsContent() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [productSearch, setProductSearch] = useState('')
+  const [ticketSearch, setTicketSearch] = useState('')
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [invoiceLoadingId, setInvoiceLoadingId] = useState<string | null>(null)
   const [invoiceConfirmRow, setInvoiceConfirmRow] = useState<any | null>(null)
@@ -179,6 +180,7 @@ export function TicketsContent() {
             dateFrom: dateFrom || undefined,
             dateTo: dateTo || undefined,
             productSearch: productSearch.trim() || undefined,
+            ticketSearch: ticketSearch.trim() || undefined,
             scope: 'tienda',
           })
       if (result.success && result.data) {
@@ -191,7 +193,7 @@ export function TicketsContent() {
     } finally {
       setLoading(false)
     }
-  }, [view, page, pageSize, clientSearch, dateFrom, dateTo, productSearch])
+  }, [view, page, pageSize, clientSearch, dateFrom, dateTo, productSearch, ticketSearch])
 
   useEffect(() => {
     load()
@@ -629,6 +631,10 @@ export function TicketsContent() {
               />
             </div>
           )}
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-muted-foreground">Nº ticket</label>
+            <Input placeholder="CLP o TICK…" value={ticketSearch} onChange={(e) => setTicketSearch(e.target.value)} className="w-40" />
+          </div>
           <div className="flex items-end">
             <Button variant="outline" onClick={() => { setPage(1); load() }}>Buscar</Button>
           </div>
@@ -653,7 +659,6 @@ export function TicketsContent() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Nº Ticket</TableHead>
-                    <TableHead>Ref. interna</TableHead>
                     <TableHead>Fecha</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead>Productos (resumen)</TableHead>
@@ -671,8 +676,12 @@ export function TicketsContent() {
                     const isDimmed = row.status === 'fully_returned' || row.status === 'voided'
                     return (
                     <TableRow key={row.id} className={cn(isDimmed && 'opacity-60')}>
-                      <TableCell className="font-mono">{row.ticket_number}</TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">{row.internal_ref ?? '—'}</TableCell>
+                      <TableCell className="font-mono">
+                        <div>{row.internal_ref ?? row.ticket_number}</div>
+                        {row.internal_ref && row.ticket_number && (
+                          <div className="text-[10px] text-muted-foreground">ant. {row.ticket_number}</div>
+                        )}
+                      </TableCell>
                       <TableCell className="text-sm text-muted-foreground">{formatDateTime(row.created_at)}</TableCell>
                       <TableCell>
                         {row.client_name ? (

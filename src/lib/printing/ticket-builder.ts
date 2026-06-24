@@ -36,9 +36,8 @@ export function buildPosTicket(data: TicketData): Uint8Array {
     .line('=')
 
   b.alignLeft()
-    .columns('Ticket:', data.ticket_number)
-  if (data.internal_ref) b.columns('Ref. interna:', data.internal_ref)
-  b.columns('Fecha:', `${data.date} ${data.time}`)
+    .columns('Ticket:', data.internal_ref || data.ticket_number)
+    .columns('Fecha:', `${data.date} ${data.time}`)
     .columns('Cajero:', data.cashier)
   if (data.client_name) b.columns('Cliente:', data.client_name)
   b.line('-')
@@ -74,7 +73,7 @@ export function buildPosTicket(data: TicketData): Uint8Array {
     .text('www.sastreriaprats.com').newLine(2)
 
   b.alignCenter()
-    .barcode(data.ticket_number.replace(/[^A-Za-z0-9]/g, ''))
+    .barcode((data.internal_ref || data.ticket_number).replace(/[^A-Za-z0-9]/g, ''))
     .newLine(2)
 
   b.feed(4).cut()

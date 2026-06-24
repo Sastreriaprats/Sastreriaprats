@@ -2061,12 +2061,9 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
             <div className="space-y-4 py-2">
               <div className="rounded-lg bg-slate-50 border border-slate-200 p-4">
                 <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Nº Ticket</p>
-                <p className="text-xl font-mono font-bold text-slate-900 mt-0.5">{completedSale.ticket_number}</p>
-                {completedSale.internal_ref && (
-                  <>
-                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mt-2">Ref. interna</p>
-                    <p className="text-base font-mono font-semibold text-slate-700 mt-0.5">{completedSale.internal_ref}</p>
-                  </>
+                <p className="text-xl font-mono font-bold text-slate-900 mt-0.5">{completedSale.internal_ref ?? completedSale.ticket_number}</p>
+                {completedSale.internal_ref && completedSale.ticket_number && (
+                  <p className="text-[11px] text-slate-400 mt-1">ant. {completedSale.ticket_number}</p>
                 )}
               </div>
               <dl className="grid grid-cols-1 gap-3 text-sm">
