@@ -50,7 +50,7 @@ export function ArticleSchema({ post }: { post: { title_es: string; excerpt_es?:
     url,
     datePublished: post.published_at,
     dateModified: post.updated_at || post.published_at,
-    author: { '@type': 'Person', name: post.profiles?.full_name || 'Sastrería Prats' },
+    author: { '@type': 'Organization', name: 'Sastrería Prats' },
     publisher: {
       '@type': 'Organization',
       name: 'Sastrería Prats',

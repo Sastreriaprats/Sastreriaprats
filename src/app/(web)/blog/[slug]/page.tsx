@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { ArrowLeft, Calendar, User, Tag } from 'lucide-react'
+import { ArrowLeft, Calendar, Tag } from 'lucide-react'
 
 export const revalidate = 1800
 import { getPublicBlogPost } from '@/actions/cms'
@@ -12,6 +12,30 @@ import { buildBreadcrumbs } from '@/lib/seo/metadata'
 
 type Props = {
   params: Promise<{ slug: string }>
+}
+
+/**
+ * Agrupa las imágenes consecutivas del cuerpo en una galería en fila.
+ * El editor TipTap guarda cada imagen como un <img> de bloque, lo que las
+ * apila verticalmente. Aquí detectamos 2+ <img> seguidos (incluidos los que
+ * TipTap envuelve en su propio <p>) y los metemos en un <div class="blog-gallery">
+ * que el CSS dispone lado a lado. Una imagen suelta se queda a ancho completo.
+ */
+function groupImageGalleries(html: string): string {
+  // 1) Normalizar: una imagen sola dentro de su propio <p> → <img> de bloque,
+  //    así ambos flujos de TipTap (inline:false y <p><img></p>) quedan iguales.
+  const normalized = html.replace(
+    /<p>\s*(<img\b[^>]*>)\s*<\/p>/gi,
+    '$1'
+  )
+  // 2) Una sola pasada: 2+ <img> consecutivos → galería en fila.
+  return normalized.replace(
+    /(?:<img\b[^>]*>\s*){2,}/gi,
+    (run) => {
+      const imgs = run.match(/<img\b[^>]*>/gi) || []
+      return `<div class="blog-gallery">${imgs.join('')}</div>`
+    }
+  )
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -39,8 +63,6 @@ export default async function BlogPostPage({ params }: Props) {
     notFound()
   }
 
-  const author = post.profiles as { full_name?: string } | null
-
   // DOMPurify (isomorphic-dompurify) puede fallar en runtime serverless de
   // Vercel: jsdom hace requires dinámicos que el file-tracing de Next no
   // empaqueta, y un `import` estático a nivel de módulo CRASHEA la ruta (500)
@@ -60,6 +82,9 @@ export default async function BlogPostPage({ params }: Props) {
       .replace(/\son\w+\s*=\s*'[^']*'/gi, '')
       .replace(/javascript:/gi, '')
   }
+
+  // Agrupar imágenes consecutivas en galerías en fila (lado a lado).
+  body = groupImageGalleries(body)
 
   return (
     <article className="container mx-auto px-4 py-12 sm:py-16">
@@ -100,12 +125,6 @@ export default async function BlogPostPage({ params }: Props) {
               month: 'long',
               year: 'numeric',
             })}
-          </span>
-        )}
-        {author?.full_name && (
-          <span className="flex items-center gap-1.5">
-            <User className="h-4 w-4" />
-            {author.full_name}
           </span>
         )}
       </div>

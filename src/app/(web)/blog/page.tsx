@@ -2,7 +2,6 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import Image from 'next/image'
 import { getPublicBlogPosts } from '@/actions/cms'
-import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
 export const revalidate = 600
@@ -74,11 +73,6 @@ export default async function BlogPage() {
               </div>
 
               <div className="mt-4 flex flex-wrap items-center gap-2">
-                {post.category && (
-                  <Badge variant="secondary" className="text-prats-gold border-prats-gold/30">
-                    {post.category}
-                  </Badge>
-                )}
                 {post.published_at && (
                   <time
                     dateTime={
@@ -107,7 +101,7 @@ export default async function BlogPage() {
                 </p>
               )}
 
-              <span className="mt-4 inline-flex items-center text-sm font-medium text-prats-gold group-hover:underline">
+              <span className="mt-4 inline-flex items-center text-sm font-medium text-prats-navy group-hover:underline">
                 Leer más
               </span>
             </Link>

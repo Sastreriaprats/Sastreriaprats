@@ -142,6 +142,23 @@
   }
 }
 
+/* Galería del blog: imágenes consecutivas se muestran en fila (lado a lado)
+   en lugar de apiladas. Se generan automáticamente al renderizar el artículo
+   agrupando los <img> seguidos del cuerpo (ver blog/[slug]/page.tsx). */
+.blog-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 1.5rem 0;
+}
+.blog-gallery img {
+  flex: 1 1 0;
+  min-width: 220px;
+  margin: 0 !important;
+  border-radius: 0.5rem;
+  object-fit: cover;
+}
+
 @media print {
   .no-print {
     display: none !important;
