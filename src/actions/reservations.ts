@@ -7,6 +7,7 @@ import {
   createReservationSchema,
   updateReservationSchema,
   cancelReservationSchema,
+  reactivateReservationSchema,
   cancelReservationLineSchema,
   fulfillReservationLineSchema,
   listReservationsSchema,
@@ -14,6 +15,7 @@ import {
   type CreateReservationInput,
   type UpdateReservationInput,
   type CancelReservationInput,
+  type ReactivateReservationInput,
   type CancelReservationLineInput,
   type FulfillReservationLineInput,
   type ListReservationsInput,
@@ -347,6 +349,40 @@ export const cancelReservation = protectedAction<CancelReservationInput, { id: s
       ...result,
       auditEntityId: String(result.id),
       auditDescription: `Reserva ${reservation_number} cancelada`,
+    })
+  }
+)
+
+export const reactivateReservation = protectedAction<ReactivateReservationInput, { id: string; status: string; auditEntityId: string; auditDescription: string }>(
+  {
+    permission: 'reservations.delete',
+    auditModule: 'reservations',
+    auditAction: 'state_change',
+    auditEntity: 'product_reservation',
+    revalidate: ['/admin/stock'],
+  },
+  async (ctx, rawInput) => {
+    const input = reactivateReservationSchema.parse(rawInput)
+
+    const { data: existing } = await ctx.adminClient
+      .from('product_reservations')
+      .select('reservation_number')
+      .eq('id', input.id)
+      .maybeSingle()
+    const reservation_number = (existing as { reservation_number: string } | null)?.reservation_number ?? ''
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_reactivate_reservation', {
+      p_reservation_id: input.id,
+      p_user_id: ctx.userId !== 'system' ? ctx.userId : null,
+    })
+
+    if (error) return failure(error.message || 'Error al reactivar reserva', 'INTERNAL')
+    const result = data as { id: string; status: string } | null
+    if (!result?.id) return failure('Respuesta inválida del servidor', 'INTERNAL')
+    return success({
+      ...result,
+      auditEntityId: String(result.id),
+      auditDescription: `Reserva ${reservation_number} reactivada`,
     })
   }
 )

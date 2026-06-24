@@ -10,12 +10,13 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Loader2, Plus, ChevronLeft, ChevronRight, X, Check, Pencil, Bookmark, Clock, Printer, Euro, Banknote, CreditCard, Smartphone, ArrowRightLeft, Eye } from 'lucide-react'
+import { Loader2, Plus, ChevronLeft, ChevronRight, X, Check, Pencil, Bookmark, Clock, Printer, Euro, Banknote, CreditCard, Smartphone, ArrowRightLeft, Eye, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import {
   listReservations,
   cancelReservation,
+  reactivateReservation,
   cancelReservationLine,
   updateReservation,
   fulfillReservationLine,
@@ -135,6 +136,7 @@ export function ReservationsTab() {
   const [cancelTarget, setCancelTarget] = useState<Reservation | null>(null)
   const [cancelReasonInput, setCancelReasonInput] = useState('')
   const [cancelling, setCancelling] = useState(false)
+  const [reactivatingId, setReactivatingId] = useState<string | null>(null)
 
   const [cancelLineTarget, setCancelLineTarget] = useState<{ reservation: Reservation; line: ReservationLine } | null>(null)
 
@@ -223,6 +225,26 @@ export function ReservationsTab() {
       toast.error('Error al cancelar la reserva. Inténtalo de nuevo.')
     } finally {
       setCancelling(false)
+    }
+  }
+
+  const handleReactivate = async (r: Reservation) => {
+    setReactivatingId(r.id)
+    try {
+      const res = await reactivateReservation({ id: r.id })
+      if (!res.success) { toast.error(res.error || 'No se pudo reactivar la reserva'); return }
+      const newStatus = (res.data as { status?: string } | undefined)?.status
+      toast.success(
+        newStatus === 'pending_stock'
+          ? 'Reserva reactivada (pendiente de stock: no hay disponible ahora mismo)'
+          : 'Reserva reactivada'
+      )
+      fetchData()
+    } catch (err) {
+      console.error('Error reactivando reserva:', err)
+      toast.error('Error al reactivar la reserva. Inténtalo de nuevo.')
+    } finally {
+      setReactivatingId(null)
     }
   }
 
@@ -579,6 +601,18 @@ export function ReservationsTab() {
                           </Button>
                         </>
                       )}
+                      {r.status === 'cancelled' && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-1 text-emerald-700 hover:text-emerald-800"
+                          disabled={reactivatingId === r.id}
+                          title="Reactivar reserva cancelada"
+                          onClick={() => handleReactivate(r)}
+                        >
+                          {reactivatingId === r.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />} Reactivar
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -780,6 +814,16 @@ export function ReservationsTab() {
                         <X className="h-4 w-4" /> Cancelar
                       </Button>
                     </>
+                  )}
+                  {viewing.status === 'cancelled' && (
+                    <Button
+                      variant="outline"
+                      className="gap-1 text-emerald-700 hover:text-emerald-800"
+                      disabled={reactivatingId === viewing.id}
+                      onClick={() => { handleReactivate(viewing); setViewing(null) }}
+                    >
+                      {reactivatingId === viewing.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />} Reactivar
+                    </Button>
                   )}
                   <Button onClick={() => setViewing(null)}>Cerrar</Button>
                 </DialogFooter>

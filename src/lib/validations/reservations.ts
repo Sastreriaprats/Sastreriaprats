@@ -57,6 +57,10 @@ export const cancelReservationSchema = z.object({
   reason: z.string().max(300).optional().nullable(),
 })
 
+export const reactivateReservationSchema = z.object({
+  id: z.string().uuid(),
+})
+
 export const cancelReservationLineSchema = z.object({
   line_id: z.string().uuid(),
   reason: z.string().max(300).optional().nullable(),
@@ -83,6 +87,7 @@ export type CreateReservationInput = z.infer<typeof createReservationSchema>
 export type ReservationLineInput = z.infer<typeof reservationLineInputSchema>
 export type UpdateReservationInput = z.infer<typeof updateReservationSchema>
 export type CancelReservationInput = z.infer<typeof cancelReservationSchema>
+export type ReactivateReservationInput = z.infer<typeof reactivateReservationSchema>
 export type CancelReservationLineInput = z.infer<typeof cancelReservationLineSchema>
 export type FulfillReservationLineInput = z.infer<typeof fulfillReservationLineSchema>
 export type ListReservationsInput = z.infer<typeof listReservationsSchema>
