@@ -24,14 +24,20 @@ export const getAccountingSummary = protectedAction<{ year: number }, Accounting
     const start = `${year}-01-01`
     const end = `${year}-12-31T23:59:59`
 
-    const [salesRes, purchasesRes, invoicesRes] = await Promise.all([
+    const [salesRes, purchasesRes, invoicesRes, tailoringPaymentsRes] = await Promise.all([
       ctx.adminClient.from('sales').select('total, total_returned, subtotal, tax_amount, created_at').gte('created_at', start).lte('created_at', end).in('status', ['completed', 'partially_returned']),
       ctx.adminClient.from('supplier_orders').select('total, tax_amount, created_at').gte('created_at', start).lte('created_at', end).in('status', ['received', 'partially_received']),
       ctx.adminClient.from('invoices').select('id, invoice_number, client_name, invoice_date, total, status').eq('invoice_type', 'issued').order('invoice_date', { ascending: false }).limit(10),
+      // Cobros de pedidos de sastrería (backoffice). No pasan por TPV, así que
+      // no están en `sales`; y no se solapan con `invoices` (que aquí no se
+      // suman, sólo se listan), por lo que no hay doble conteo. Fecha contable:
+      // payment_date (el cobro real), no created_at (el registro en sistema).
+      ctx.adminClient.from('tailoring_order_payments').select('amount, payment_date, tailoring_order:tailoring_orders(subtotal, total)').gte('payment_date', start).lte('payment_date', `${year}-12-31`),
     ])
 
     const sales = salesRes.data || []
     const purchases = purchasesRes.data || []
+    const tailoringPayments = tailoringPaymentsRes.data || []
 
     // Para ventas con devolución parcial: prorratear subtotal/IVA por la
     // proporción del importe que NO se devolvió. Las fully_returned ya están
@@ -48,8 +54,25 @@ export const getAccountingSummary = protectedAction<{ year: number }, Accounting
       }
     }
 
-    const income = sales.reduce((s: number, x: Record<string, unknown>) => s + netSale(x).netBase, 0)
-    const vatCollected = sales.reduce((s: number, x: Record<string, unknown>) => s + netSale(x).netVat, 0)
+    // Pago de sastrería: amount es bruto (con IVA). Separamos base/IVA
+    // prorrateando por la proporción base/total del pedido, para respetar
+    // descuentos y cualquier tipo de IVA del propio pedido.
+    const netTailoringPayment = (p: Record<string, unknown>) => {
+      const amount = Number((p as any).amount) || 0
+      const order = ((p as any).tailoring_order as Record<string, unknown>) || {}
+      const oTotal = Number((order as any).total) || 0
+      const oSub = Number((order as any).subtotal) || 0
+      const ratio = oTotal > 0 ? oSub / oTotal : 1
+      const base = amount * ratio
+      return { netBase: base, netVat: amount - base }
+    }
+
+    const income =
+      sales.reduce((s: number, x: Record<string, unknown>) => s + netSale(x).netBase, 0) +
+      tailoringPayments.reduce((s: number, p: Record<string, unknown>) => s + netTailoringPayment(p).netBase, 0)
+    const vatCollected =
+      sales.reduce((s: number, x: Record<string, unknown>) => s + netSale(x).netVat, 0) +
+      tailoringPayments.reduce((s: number, p: Record<string, unknown>) => s + netTailoringPayment(p).netVat, 0)
     const expenses = purchases.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).total) - Number((x as any).tax_amount || 0)), 0)
     const vatPaid = purchases.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).tax_amount) || 0), 0)
 
@@ -64,6 +87,14 @@ export const getAccountingSummary = protectedAction<{ year: number }, Accounting
         const key = d.slice(0, 7)
         if (!byMonth[key]) byMonth[key] = { income: 0, expenses: 0 }
         byMonth[key].income += netSale(x).netBase
+      }
+    }
+    for (const p of tailoringPayments) {
+      const d = (p as any).payment_date
+      if (d) {
+        const key = d.slice(0, 7)
+        if (!byMonth[key]) byMonth[key] = { income: 0, expenses: 0 }
+        byMonth[key].income += netTailoringPayment(p).netBase
       }
     }
     for (const x of purchases) {
@@ -504,12 +535,18 @@ export const getVatQuarterly = protectedAction<
     // discriminado y que daban "IVA soportado = 0").
     // Sin filtro de status: el IVA soportado se contabiliza al RECIBIR la
     // factura, independientemente del estado de pago.
-    const [salesRes, purchasesRes] = await Promise.all([
+    const [salesRes, purchasesRes, tailoringPaymentsRes] = await Promise.all([
       ctx.adminClient.from('sales').select('total, total_returned, subtotal, tax_amount, created_at').gte('created_at', yearStart).lte('created_at', yearEnd).in('status', ['completed', 'partially_returned']),
       ctx.adminClient.from('ap_supplier_invoices').select('amount, tax_amount, invoice_date').eq('is_proforma', false).gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`),
+      // Cobros de sastrería (backoffice): mismo criterio que el Resumen. amount
+      // bruto → base/IVA prorrateando subtotal/total del pedido. Fecha contable:
+      // payment_date. No se solapan con `sales` ni con `invoices` (que aquí no
+      // se suman), por lo que no hay doble conteo.
+      ctx.adminClient.from('tailoring_order_payments').select('amount, payment_date, tailoring_order:tailoring_orders(subtotal, total)').gte('payment_date', `${year}-01-01`).lte('payment_date', `${year}-12-31`),
     ])
     const sales = (salesRes.data || []) as Array<{ total?: number; total_returned?: number; subtotal?: number; tax_amount?: number; created_at?: string }>
     const purchases = (purchasesRes.data || []) as Array<{ amount?: number; tax_amount?: number; invoice_date?: string }>
+    const tailoringPayments = (tailoringPaymentsRes.data || []) as Array<{ amount?: number; payment_date?: string; tailoring_order?: { subtotal?: number; total?: number } }>
 
     const quarterFromMonth = (m: number) => Math.ceil(m / 3) as 1 | 2 | 3 | 4
     const byQuarter: Record<number, {
@@ -533,6 +570,21 @@ export const getVatQuarterly = protectedAction<
         const iva = (Number(x.tax_amount) || 0) * proportion
         byQuarter[q].baseSales += base
         byQuarter[q].ivaRepercutido += iva
+        byQuarter[q].salesCount += 1
+      }
+    }
+    for (const p of tailoringPayments) {
+      const d = p.payment_date
+      if (d) {
+        const month = Number(d.slice(5, 7))
+        const q = quarterFromMonth(month)
+        const amount = Number(p.amount) || 0
+        const oTotal = Number(p.tailoring_order?.total) || 0
+        const oSub = Number(p.tailoring_order?.subtotal) || 0
+        const ratio = oTotal > 0 ? oSub / oTotal : 1
+        const base = amount * ratio
+        byQuarter[q].baseSales += base
+        byQuarter[q].ivaRepercutido += amount - base
         byQuarter[q].salesCount += 1
       }
     }

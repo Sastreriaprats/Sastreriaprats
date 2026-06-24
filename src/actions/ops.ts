@@ -48,10 +48,26 @@ async function readAllSales(admin: ReturnType<typeof createAdminClient>, start: 
   return out
 }
 
+async function readAllTailoringPayments(admin: ReturnType<typeof createAdminClient>, year: number) {
+  const out: Record<string, unknown>[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data } = await admin.from('tailoring_order_payments')
+      .select('amount,payment_date,payment_method,tailoring_order:tailoring_orders(order_number,subtotal,total)')
+      .gte('payment_date', `${year}-01-01`).lte('payment_date', `${year}-12-31`)
+      .order('payment_date', { ascending: true })
+      .range(from, from + 999)
+    const b = (data ?? []) as Record<string, unknown>[]
+    out.push(...b)
+    if (b.length < 1000) break
+  }
+  return out
+}
+
 async function computeYear(year: number) {
   const admin = createAdminClient()
   const start = `${year}-01-01`, end = `${year}-12-31T23:59:59`
   const sales = await readAllSales(admin, start, end)
+  const tailoringPayments = await readAllTailoringPayments(admin, year)
   // Gastos / IVA soportado = FACTURAS RECIBIDAS (ap_supplier_invoices)
   const { data: apInv } = await admin.from('ap_supplier_invoices')
     .select('invoice_number, supplier_name, amount, tax_amount, invoice_date')
@@ -100,11 +116,39 @@ async function computeYear(year: number) {
     }
   }
 
-  // Ingresos por FACTURAS emitidas NO asociadas a un ticket (sale_id null)
+  // Ingresos por COBROS DE SASTRERÍA (backoffice). amount bruto → base/IVA
+  // prorrateando subtotal/total del pedido. Se reparten cash/noncash por
+  // payment_method, igual que los tickets: efectivo → capa B; resto → C.
+  for (const p of tailoringPayments) {
+    const amount = Number((p as any).amount) || 0
+    const order = ((p as any).tailoring_order as Record<string, unknown>) || {}
+    const oTotal = Number((order as any).total) || 0
+    const oSub = Number((order as any).subtotal) || 0
+    const ratio = oTotal > 0 ? oSub / oTotal : 1
+    const base = amount * ratio
+    const vat = amount - base
+    const d = String((p as any).payment_date ?? '')
+    const month = d.slice(0, 7)
+    const q = Math.ceil(Number(d.slice(5, 7)) / 3)
+    const isCash = (p as any).payment_method === 'cash'
+    addIncome(isCash, base, vat, month, q)
+    const num = String((order as any).order_number ?? '')
+    const concept = num ? `Sastrería ${num}` : 'Cobro sastrería'
+    if (isCash) {
+      cashMoves.push({ date: d.slice(0, 10), ref: num, concept, method: String((p as any).payment_method ?? ''), base: r2(base), vat: r2(vat), total: r2(base + vat) })
+    } else {
+      incomeLedger.push({ date: d.slice(0, 10), type: 'Sastrería', concept, base: r2(base), vat: r2(vat), total: r2(base + vat) })
+    }
+  }
+
+  // Ingresos por FACTURAS emitidas NO asociadas a un ticket (sale_id null).
+  // Excluimos las ligadas a un pedido de sastrería (tailoring_order_id): ese
+  // cobro ya se cuenta arriba vía tailoring_order_payments → evita doble conteo.
   const { data: stInv } = await admin.from('invoices')
     .select('invoice_number, subtotal, tax_amount, total, payment_method, invoice_date')
     .eq('invoice_type', 'issued')
     .is('sale_id', null)
+    .is('tailoring_order_id', null)
     .not('status', 'in', '(draft,cancelled)')
     .gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`)
   for (const x of (stInv ?? []) as Record<string, unknown>[]) {
