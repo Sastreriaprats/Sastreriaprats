@@ -158,9 +158,12 @@ export async function getViewB(year: number) {
       quarters: buildQuarters(year, c.cash.quarters, emptyQ()),
       salesCount: c.cash.count,
     }
-    const payments = await loadPayments(year)
-    const paymentsTotal = r2(payments.reduce((s, p) => s + p.amount, 0))
     const movements = c.cashMoves.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 1000)
+    // Los pagos de control viven en el ledger cifrado; si su lectura falla no debe
+    // tumbar toda la contabilidad de B (las demás pestañas no dependen de ellos).
+    let payments: CashPayment[] = []
+    try { payments = await loadPayments(year) } catch { /* ledger no disponible */ }
+    const paymentsTotal = r2(payments.reduce((s, p) => s + p.amount, 0))
     return ok({ view, movements, payments, paymentsTotal } as ViewB)
   } catch { return fail() }
 }
