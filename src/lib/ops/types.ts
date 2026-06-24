@@ -56,8 +56,18 @@ export type ViewB = {
   paymentsTotal: number
 }
 
+export type InvoiceLite = {
+  number: string
+  client: string
+  date: string
+  total: number
+  status: string
+  method: string
+}
+
 export type ViewC = {
   A: AccountingView             // referencia (real, íntegra)
   C: AccountingView             // A menos el efectivo
   movements: MovementRow[]      // cobros NO efectivo
+  invoices: InvoiceLite[]       // facturas emitidas del año
 }

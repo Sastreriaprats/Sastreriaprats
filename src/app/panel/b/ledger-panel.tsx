@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { getViewB, addCashPayment, removeCashPayment } from '@/actions/ops'
 import type { ViewB } from '@/lib/ops/types'
-import { Tabs, Kpis, QuarterTable, MonthlyTable, MovementsTable, eur } from '../accounting-ui'
+import { downloadExcelMulti } from '@/lib/excel/export'
+import { Tabs, Kpis, QuarterTable, MonthlyTable, MovementsTable, eur, MONTH_LABELS } from '../accounting-ui'
 
 const thisYear = new Date().getFullYear()
 const CATS = [
@@ -50,6 +51,29 @@ export function LedgerPanel() {
     if (res.ok) load(); else toast.error('Error')
   }
 
+  const n2 = (n: number) => Number((Number(n) || 0).toFixed(2))
+  const onExcel = async () => {
+    if (!data) return
+    await downloadExcelMulti([
+      { name: 'Resumen efectivo', rows: [
+        { Concepto: 'Facturación efectivo (base)', Importe: n2(data.view.income) },
+        { Concepto: 'IVA repercutido efectivo', Importe: n2(data.view.ivaRepercutido) },
+        { Concepto: 'Nº cobros efectivo', Importe: data.view.salesCount },
+        { Concepto: 'Pagos en efectivo (control)', Importe: n2(data.paymentsTotal) },
+      ] },
+      { name: 'IVA trimestral', rows: data.view.quarters.map((q) => ({
+        Trimestre: q.quarter, Periodo: q.period, 'Base ventas': n2(q.baseSales), 'IVA repercutido': n2(q.ivaRepercutido),
+      })) },
+      { name: 'Mensual', rows: data.view.monthly.map((m, i) => ({ Mes: MONTH_LABELS[i], Ingresos: n2(m.income) })) },
+      { name: 'Cobros efectivo', rows: data.movements.map((m) => ({
+        Fecha: m.date, Ticket: m.ref, 'Método': m.method, Base: n2(m.base), IVA: n2(m.vat), Total: n2(m.total),
+      })) },
+      { name: 'Pagos efectivo', rows: data.payments.map((p) => ({
+        Fecha: p.date, 'Categoría': p.category, Concepto: p.concept, Base: n2(p.base), IVA: n2(p.vat), Importe: n2(p.amount),
+      })) },
+    ], `efectivo-b-${year}`)
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-3">
@@ -57,6 +81,7 @@ export function LedgerPanel() {
         <select value={year} onChange={(e) => setYear(Number(e.target.value))} className="ml-auto h-9 rounded-md border px-2 text-sm">
           {[thisYear, thisYear - 1, thisYear - 2].map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
+        <Button variant="outline" size="sm" disabled={!data} onClick={onExcel}>Exportar Excel</Button>
       </div>
 
       <Tabs

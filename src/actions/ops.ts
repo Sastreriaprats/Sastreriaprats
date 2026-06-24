@@ -193,7 +193,25 @@ export async function getViewC(year: number) {
       salesCount: c.noncash.count,
     }
     const movements = c.noncashMoves.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 1000)
-    return ok({ A, C, movements } as ViewC)
+
+    // Facturas emitidas del año (documentos fiscales; se ven en C)
+    const admin = createAdminClient()
+    const { data: inv } = await admin.from('invoices')
+      .select('invoice_number, client_name, invoice_date, total, status, payment_method')
+      .eq('invoice_type', 'issued')
+      .gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`)
+      .not('status', 'in', '(draft,cancelled)')
+      .order('invoice_date', { ascending: false })
+    const invoices = ((inv ?? []) as Record<string, unknown>[]).map((x) => ({
+      number: String(x.invoice_number ?? ''),
+      client: String(x.client_name ?? ''),
+      date: String(x.invoice_date ?? ''),
+      total: Number(x.total) || 0,
+      status: String(x.status ?? ''),
+      method: String(x.payment_method ?? ''),
+    }))
+
+    return ok({ A, C, movements, invoices } as ViewC)
   } catch { return fail() }
 }
 
