@@ -20,7 +20,7 @@ import { Switch } from '@/components/ui/switch'
 import {
   Mail, FileText, Send, Plus, Loader2, Eye, Pencil, Trash2,
   CheckCircle, XCircle, Clock, Megaphone, ChevronLeft, ChevronRight,
-  ImageIcon,
+  ImageIcon, Users, UserCheck, UserX, Search,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -34,6 +34,7 @@ import {
   updateEmailCampaign,
   upsertEmailTemplate,
   deleteCampaignAction,
+  listNewsletterSubscribers,
 } from '@/actions/emails'
 import { formatDate, formatDateTime } from '@/lib/utils'
 import { TemplateContentEditorDialog, type TemplateForEditor } from '@/components/admin/template-content-editor-dialog'
@@ -140,6 +141,17 @@ export function EmailsContent() {
   const [sendingId, setSendingId] = useState<string | null>(null)
   const [logsPage, setLogsPage] = useState(1)
 
+  // --- Pestaña Suscriptores ---
+  type SubStatus = 'active' | 'inactive' | 'unsubscribed'
+  type SubRow = Record<string, unknown>
+  const [subStatus, setSubStatus] = useState<SubStatus>('active')
+  const [subPage, setSubPage] = useState(1)
+  const [subSearch, setSubSearch] = useState('')
+  const [subSearchInput, setSubSearchInput] = useState('')
+  const [subscribers, setSubscribers] = useState<{ rows: SubRow[]; total: number }>({ rows: [], total: 0 })
+  const [subCounts, setSubCounts] = useState({ total: 0, active: 0, inactive: 0, unsubscribed: 0 })
+  const [subsLoading, setSubsLoading] = useState(false)
+
   const [campaignForm, setCampaignForm] = useState({
     name: '', subject: '', segment: 'all', template_id: '', body_html: '',
   })
@@ -226,6 +238,20 @@ export function EmailsContent() {
   useEffect(() => {
     loadLogs(logsPage)
   }, [logsPage, loadLogs])
+
+  const loadSubscribers = useCallback(async (status: SubStatus, page: number, search: string) => {
+    setSubsLoading(true)
+    const res = await listNewsletterSubscribers({ status, page, search })
+    if (res.success && res.data) {
+      setSubscribers({ rows: res.data.subscribers ?? [], total: res.data.total ?? 0 })
+      setSubCounts(res.data.counts ?? { total: 0, active: 0, inactive: 0, unsubscribed: 0 })
+    }
+    setSubsLoading(false)
+  }, [])
+
+  useEffect(() => {
+    loadSubscribers(subStatus, subPage, subSearch)
+  }, [subStatus, subPage, subSearch, loadSubscribers])
 
   const openNewTemplate = () => {
     setTemplateForm({
@@ -503,6 +529,7 @@ export function EmailsContent() {
       <Tabs defaultValue="campaigns">
         <TabsList>
           <TabsTrigger value="campaigns" className="gap-1"><Megaphone className="h-4 w-4" /> Campañas</TabsTrigger>
+          <TabsTrigger value="subscribers" className="gap-1"><Users className="h-4 w-4" /> Suscriptores</TabsTrigger>
           <TabsTrigger value="templates" className="gap-1"><FileText className="h-4 w-4" /> Plantillas</TabsTrigger>
           <TabsTrigger value="logs" className="gap-1"><Mail className="h-4 w-4" /> Historial ({logs.total})</TabsTrigger>
         </TabsList>
@@ -643,6 +670,137 @@ export function EmailsContent() {
                 </TableBody>
               </Table>
             </div>
+          </TabsContent>
+
+          {/* SUSCRIPTORES — clientes clasificados por estado de newsletter */}
+          <TabsContent value="subscribers">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+              {([
+                { key: 'total' as const, status: null, label: 'Total clientes', value: subCounts.total, icon: Users, color: 'text-muted-foreground', ring: 'ring-prats-navy' },
+                { key: 'active' as const, status: 'active' as SubStatus, label: 'Activos (reciben)', value: subCounts.active, icon: UserCheck, color: 'text-green-600', ring: 'ring-green-500' },
+                { key: 'inactive' as const, status: 'inactive' as SubStatus, label: 'Inactivos (no reciben)', value: subCounts.inactive, icon: UserX, color: 'text-amber-600', ring: 'ring-amber-500' },
+                { key: 'unsubscribed' as const, status: 'unsubscribed' as SubStatus, label: 'Dados de baja', value: subCounts.unsubscribed, icon: XCircle, color: 'text-red-600', ring: 'ring-red-500' },
+              ]).map(card => {
+                const Icon = card.icon
+                const selectable = card.status !== null
+                const selected = card.status === subStatus
+                return (
+                  <Card
+                    key={card.key}
+                    onClick={selectable ? () => { setSubStatus(card.status as SubStatus); setSubPage(1) } : undefined}
+                    className={`${selectable ? 'cursor-pointer hover:bg-muted/40' : ''} ${selected ? `ring-2 ${card.ring}` : ''}`}
+                  >
+                    <CardContent className="pt-4 pb-3 text-center">
+                      <Icon className={`h-5 w-5 mx-auto mb-1 ${card.color}`} />
+                      <p className="text-2xl font-bold">{card.value}</p>
+                      <p className="text-xs text-muted-foreground">{card.label}</p>
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
+
+            <form
+              className="flex items-center gap-2 mb-4"
+              onSubmit={(e) => { e.preventDefault(); setSubSearch(subSearchInput.trim()); setSubPage(1) }}
+            >
+              <div className="relative flex-1 max-w-sm">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  value={subSearchInput}
+                  onChange={(e) => setSubSearchInput(e.target.value)}
+                  placeholder="Buscar por nombre o email…"
+                  className="pl-8"
+                />
+              </div>
+              <Button type="submit" variant="secondary">Buscar</Button>
+              {subSearch && (
+                <Button type="button" variant="ghost" onClick={() => { setSubSearch(''); setSubSearchInput(''); setSubPage(1) }}>
+                  Limpiar
+                </Button>
+              )}
+            </form>
+
+            <div className="rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Origen</TableHead>
+                    <TableHead>{subStatus === 'unsubscribed' ? 'Baja' : subStatus === 'inactive' ? 'Motivo' : 'Alta'}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {subsLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                        <Loader2 className="h-5 w-5 animate-spin mx-auto" />
+                      </TableCell>
+                    </TableRow>
+                  ) : subscribers.rows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                        No hay clientes en este estado{subSearch ? ' para la búsqueda actual' : ''}.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    subscribers.rows.map((s) => {
+                      const name = (s.full_name as string)
+                        || [s.first_name, s.last_name].filter(Boolean).join(' ').trim()
+                        || '—'
+                      const inactiveReason = !s.is_active ? 'Ficha desactivada'
+                        : !s.email ? 'Sin email'
+                        : s.email_bounced ? 'Email rebotado'
+                        : 'Email inválido'
+                      return (
+                        <TableRow key={s.id as string}>
+                          <TableCell>
+                            <Link href={`/admin/clientes/${s.id}`} className="font-medium hover:underline">{name}</Link>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">{(s.email as string) || <span className="italic">sin email</span>}</TableCell>
+                          <TableCell className="text-muted-foreground text-sm">{(s.source as string) || '—'}</TableCell>
+                          <TableCell className="text-sm">
+                            {subStatus === 'unsubscribed' ? (
+                              <div>
+                                <span>{s.unsubscribed_at ? formatDate(s.unsubscribed_at as string) : '—'}</span>
+                                {s.unsubscribe_reason ? (
+                                  <p className="text-xs text-muted-foreground italic">{s.unsubscribe_reason as string}</p>
+                                ) : null}
+                              </div>
+                            ) : subStatus === 'inactive' ? (
+                              <Badge variant="outline" className="text-amber-600 border-amber-300">{inactiveReason}</Badge>
+                            ) : (
+                              <span className="text-muted-foreground">{s.created_at ? formatDate(s.created_at as string) : '—'}</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            {subscribers.total > 50 && (
+              <div className="flex items-center justify-between mt-4">
+                <p className="text-sm text-muted-foreground">
+                  {subscribers.total} clientes · página {subPage} de {Math.max(1, Math.ceil(subscribers.total / 50))}
+                </p>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" disabled={subPage <= 1} onClick={() => setSubPage(p => Math.max(1, p - 1))}>
+                    <ChevronLeft className="h-4 w-4" /> Anterior
+                  </Button>
+                  <Button
+                    variant="outline" size="sm"
+                    disabled={subPage >= Math.ceil(subscribers.total / 50)}
+                    onClick={() => setSubPage(p => p + 1)}
+                  >
+                    Siguiente <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </TabsContent>
 
           {/* TEMPLATES — galería visual */}

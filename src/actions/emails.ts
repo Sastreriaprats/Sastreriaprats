@@ -597,6 +597,87 @@ export const getEmailLogs = protectedAction<
   }
 )
 
+/**
+ * Listado de clientes para la pestaña "Suscriptores" de newsletter, clasificados
+ * en tres estados disjuntos que suman el total de clientes:
+ *
+ *  - 'unsubscribed' (dados de baja): unsubscribed_at IS NOT NULL. Pulsaron
+ *    "darse de baja" en una newsletter. Es la única exclusión por voluntad.
+ *  - 'active' (activos): NO dados de baja, ficha activa, con email y sin rebote.
+ *    Reciben las campañas.
+ *  - 'inactive' (inactivos): NO dados de baja pero no reciben por entregabilidad:
+ *    ficha desactivada, sin email, o dirección rebotada.
+ *
+ * Los conteos se calculan siempre (independientes del filtro de la tabla) con
+ * count exacto; 'inactive' se deriva como total − activos − bajas para evitar
+ * expresar el complemento en PostgREST. Las filas se paginan de 50 en 50.
+ */
+const SUBSCRIBERS_PAGE_SIZE = 50
+
+export const listNewsletterSubscribers = protectedAction<
+  { status?: 'active' | 'inactive' | 'unsubscribed'; page?: number; search?: string },
+  {
+    subscribers: Record<string, unknown>[]
+    total: number
+    page: number
+    counts: { total: number; active: number; inactive: number; unsubscribed: number }
+  }
+>(
+  { permission: 'emails.view', auditModule: 'emails' },
+  async (ctx, input) => {
+    const status = input?.status ?? 'active'
+    const page = Math.max(1, input?.page ?? 1)
+    // Saneamos la búsqueda: comas y paréntesis romperían el parser de .or().
+    const search = (input?.search ?? '').trim().replace(/[(),]/g, ' ').slice(0, 80)
+    const c = ctx.adminClient
+
+    // --- Conteos exactos (siempre, no dependen del filtro de la tabla) ---
+    // 'active' usa el MISMO criterio que el envío real (applyMarketingBaseFilter),
+    // incluida la validación de forma del email vía imatch, para que el número de
+    // activos coincida con quién recibe de verdad. 'inactive' se deriva por resta.
+    const [totalRes, unsubRes, activeRes] = await Promise.all([
+      c.from('clients').select('id', { count: 'exact', head: true }),
+      c.from('clients').select('id', { count: 'exact', head: true }).not('unsubscribed_at', 'is', null),
+      c.from('clients').select('id', { count: 'exact', head: true })
+        .is('unsubscribed_at', null).eq('is_active', true).not('email', 'is', null)
+        .eq('email_bounced', false).filter('email', 'imatch', EMAIL_REGEX_POSIX),
+    ])
+    const total = totalRes.count || 0
+    const unsubscribed = unsubRes.count || 0
+    const active = activeRes.count || 0
+    const counts = { total, active, unsubscribed, inactive: total - active - unsubscribed }
+
+    // --- Filas paginadas del estado seleccionado ---
+    // Inactivos = complemento de activos entre los NO dados de baja: ficha
+    // desactivada, sin email, rebotado, o email con forma inválida. La regex se
+    // envuelve en comillas dobles porque su `{2,}` lleva una coma que rompería
+    // el parser de .or() de PostgREST.
+    const inactiveOr =
+      `is_active.eq.false,email.is.null,email_bounced.eq.true,email.not.imatch."${EMAIL_REGEX_POSIX}"`
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const applyStatus = (q: any) => {
+      if (status === 'unsubscribed') return q.not('unsubscribed_at', 'is', null)
+      if (status === 'inactive') return q.is('unsubscribed_at', null).or(inactiveOr)
+      return q.is('unsubscribed_at', null).eq('is_active', true).not('email', 'is', null)
+        .eq('email_bounced', false).filter('email', 'imatch', EMAIL_REGEX_POSIX)
+    }
+
+    let query = c.from('clients').select(
+      'id, first_name, last_name, full_name, email, is_active, email_bounced, unsubscribed_at, unsubscribe_reason, source, created_at',
+      { count: 'exact' }
+    )
+    query = applyStatus(query)
+    if (search) query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`)
+    query = query
+      .order('unsubscribed_at', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false })
+      .range((page - 1) * SUBSCRIBERS_PAGE_SIZE, page * SUBSCRIBERS_PAGE_SIZE - 1)
+
+    const { data, count } = await query
+    return success({ subscribers: data || [], total: count || 0, page, counts })
+  }
+)
+
 // ==========================================
 // HELPERS
 // ==========================================
