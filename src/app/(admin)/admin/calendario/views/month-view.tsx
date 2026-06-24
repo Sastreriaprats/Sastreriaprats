@@ -49,7 +49,7 @@ export function MonthView({ currentDate, events, onSlotClick, onEventClick }: {
       </div>
       <div className="grid grid-cols-7">
         {Array.from({ length: startDay }).map((_, i) => (
-          <div key={`empty-${i}`} className="min-h-[90px] bg-muted/20 border-r border-b" />
+          <div key={`empty-${i}`} className="min-h-[64px] sm:min-h-[90px] bg-muted/20 border-r border-b" />
         ))}
         {Array.from({ length: totalDays }).map((_, i) => {
           const day = i + 1
@@ -61,7 +61,7 @@ export function MonthView({ currentDate, events, onSlotClick, onEventClick }: {
             <div
               key={day}
               className={cn(
-                'min-h-[90px] p-1 border-r border-b cursor-pointer hover:bg-muted/30 transition-colors',
+                'min-h-[64px] sm:min-h-[90px] p-1 border-r border-b cursor-pointer hover:bg-muted/30 transition-colors',
                 isToday && 'bg-prats-navy/5'
               )}
               onClick={() => onSlotClick(dateStr, '10:00')}

@@ -8,12 +8,14 @@ import { ChevronLeft, ChevronRight, Loader2, Plus, ShieldBan, Trash2, CalendarOf
 import { toast } from 'sonner'
 import { useAuth } from '@/components/providers/auth-provider'
 import { usePermissions } from '@/hooks/use-permissions'
+import { useIsMobile } from '@/hooks/use-is-mobile'
 import { listAppointments, findNextAppointmentByClient } from '@/actions/calendar'
 import { formatDate } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import { MonthView } from './views/month-view'
 import { WeekView } from './views/week-view'
 import { DayView } from './views/day-view'
+import { AgendaView } from './views/agenda-view'
 import { AppointmentDialog } from './appointment-dialog'
 import { ScheduleBlocksPanel } from './schedule-blocks-panel'
 
@@ -62,7 +64,9 @@ export function CalendarContent() {
   const supabase = useMemo(() => createClient(), [])
   const { activeStoreId } = useAuth()
   const { can } = usePermissions()
-  const [view, setView] = useState<'month' | 'week' | 'day'>('week')
+  const isMobile = useIsMobile()
+  const [view, setView] = useState<'month' | 'week' | 'day' | 'agenda'>('week')
+  const [viewInitialized, setViewInitialized] = useState(false)
   const [currentDate, setCurrentDate] = useState(new Date())
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -99,13 +103,20 @@ export function CalendarContent() {
     return () => { cancelled = true }
   }, [])
 
+  // En móvil la rejilla semanal queda comprimida: arrancamos en "Día" (un solo día) por defecto.
+  useEffect(() => {
+    if (viewInitialized) return
+    setView(isMobile ? 'day' : 'week')
+    setViewInitialized(true)
+  }, [isMobile, viewInitialized])
+
   const getDateRange = useCallback(() => {
     const d = new Date(currentDate)
     if (view === 'month') {
       const start = new Date(d.getFullYear(), d.getMonth(), 1)
       const end = new Date(d.getFullYear(), d.getMonth() + 1, 0)
       return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] }
-    } else if (view === 'week') {
+    } else if (view === 'week' || view === 'agenda') {
       const dayOfWeek = (d.getDay() + 6) % 7
       const start = new Date(d)
       start.setDate(d.getDate() - dayOfWeek)
@@ -134,14 +145,14 @@ export function CalendarContent() {
             id: a.id as string,
             type: a.type as string,
             title: a.title as string,
-            subtitle: (a.clients as Record<string, unknown> | null)?.full_name as string | undefined,
+            subtitle: ((a.clients as Record<string, unknown> | null)?.full_name as string | undefined) || (a.client_name as string | undefined),
             date: a.date as string,
             start_time: String(a.start_time || '').slice(0, 5),
             end_time: String(a.end_time || '').slice(0, 5),
             duration_minutes: (a.duration_minutes as number) || 60,
             status: a.status as string,
             color: typeColors[a.type as string] || typeColors.other,
-            client_name: (a.clients as Record<string, unknown> | null)?.full_name as string | undefined,
+            client_name: ((a.clients as Record<string, unknown> | null)?.full_name as string | undefined) || (a.client_name as string | undefined),
             tailor_name: (a.profiles as Record<string, unknown> | null)?.full_name as string | undefined,
             store_name: (a.stores as Record<string, unknown> | null)?.name as string | undefined,
             order_number: (a.tailoring_orders as Record<string, unknown> | null)?.order_number as string | undefined,
@@ -161,7 +172,7 @@ export function CalendarContent() {
   const navigate = (dir: number) => {
     const d = new Date(currentDate)
     if (view === 'month') d.setMonth(d.getMonth() + dir)
-    else if (view === 'week') d.setDate(d.getDate() + dir * 7)
+    else if (view === 'week' || view === 'agenda') d.setDate(d.getDate() + dir * 7)
     else d.setDate(d.getDate() + dir)
     setCurrentDate(d)
   }
@@ -208,7 +219,7 @@ export function CalendarContent() {
 
   const getTitle = () => {
     if (view === 'month') return `${MONTHS_ES[currentDate.getMonth()]} ${currentDate.getFullYear()}`
-    if (view === 'week') {
+    if (view === 'week' || view === 'agenda') {
       const { start, end } = getDateRange()
       return `${formatDate(start)} — ${formatDate(end)}`
     }
@@ -219,8 +230,8 @@ export function CalendarContent() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Calendario</h1>
-          <p className="text-muted-foreground">Citas, pruebas, entregas y agenda</p>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Calendario</h1>
+          <p className="text-sm sm:text-base text-muted-foreground">Citas, pruebas, entregas y agenda</p>
         </div>
         <div className="flex items-center gap-2">
           {can('calendar.edit') && (
@@ -228,13 +239,13 @@ export function CalendarContent() {
               <Button
                 variant="outline"
                 onClick={() => setShowBlocks(!showBlocks)}
-                className="gap-2"
+                className="gap-2 flex-1 sm:flex-none"
               >
                 <CalendarOff className="h-4 w-4" /> Bloqueos
               </Button>
               <Button
                 onClick={() => { setSelectedSlot(null); setSelectedEvent(null); setShowCreateDialog(true) }}
-                className="gap-2 bg-prats-navy hover:bg-prats-navy-light"
+                className="gap-2 flex-1 sm:flex-none bg-prats-navy hover:bg-prats-navy-light"
               >
                 <Plus className="h-4 w-4" /> Nueva cita
               </Button>
@@ -243,27 +254,29 @@ export function CalendarContent() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
-            <ChevronLeft className="h-5 w-5" />
-          </Button>
-          <h2 className="text-lg font-bold min-w-[200px] text-center">{getTitle()}</h2>
-          <Button variant="ghost" size="icon" onClick={() => navigate(1)}>
-            <ChevronRight className="h-5 w-5" />
-          </Button>
-          <Button variant="outline" size="sm" onClick={goToday}>Hoy</Button>
-        </div>
+      {/* Navegación de fecha */}
+      <div className="flex items-center justify-between sm:justify-start gap-1 sm:gap-2">
+        <Button variant="ghost" size="icon" className="shrink-0" onClick={() => navigate(-1)}>
+          <ChevronLeft className="h-5 w-5" />
+        </Button>
+        <h2 className="text-sm sm:text-lg font-bold flex-1 sm:flex-none sm:min-w-[200px] text-center">{getTitle()}</h2>
+        <Button variant="ghost" size="icon" className="shrink-0" onClick={() => navigate(1)}>
+          <ChevronRight className="h-5 w-5" />
+        </Button>
+        <Button variant="outline" size="sm" className="shrink-0" onClick={goToday}>Hoy</Button>
+      </div>
 
-        <div className="flex items-center gap-2">
-          <div className="relative">
+      {/* Búsqueda, filtro y selector de vista */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2">
+        <div className="flex gap-2">
+          <div className="relative flex-1 sm:flex-none">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
             <Input
               value={clientSearch}
               onChange={(e) => setClientSearch(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleClientSearch() } }}
               placeholder="Buscar cliente..."
-              className="w-48 h-8 pl-7 pr-8 text-xs"
+              className="w-full sm:w-48 h-9 sm:h-8 pl-7 pr-8 text-xs"
               disabled={searchingClient}
             />
             {searchingClient && (
@@ -272,7 +285,7 @@ export function CalendarContent() {
           </div>
 
           <Select value={tailorFilter} onValueChange={setTailorFilter}>
-            <SelectTrigger className="w-40 h-8 text-xs">
+            <SelectTrigger className="w-32 sm:w-40 h-9 sm:h-8 text-xs shrink-0">
               <SelectValue placeholder="Todos los sastres" />
             </SelectTrigger>
             <SelectContent>
@@ -282,12 +295,15 @@ export function CalendarContent() {
               ))}
             </SelectContent>
           </Select>
+        </div>
 
-          <div className="flex rounded-lg border p-0.5">
-            <Button variant={view === 'day' ? 'default' : 'ghost'} size="sm" className="h-7 px-2 text-xs" onClick={() => setView('day')}>Día</Button>
-            <Button variant={view === 'week' ? 'default' : 'ghost'} size="sm" className="h-7 px-2 text-xs" onClick={() => setView('week')}>Semana</Button>
-            <Button variant={view === 'month' ? 'default' : 'ghost'} size="sm" className="h-7 px-2 text-xs" onClick={() => setView('month')}>Mes</Button>
-          </div>
+        <div className="flex rounded-lg border p-0.5">
+          <Button variant={view === 'agenda' ? 'default' : 'ghost'} size="sm" className="h-8 sm:h-7 flex-1 sm:flex-none px-2 text-xs" onClick={() => setView('agenda')}>Agenda</Button>
+          <Button variant={view === 'day' ? 'default' : 'ghost'} size="sm" className="h-8 sm:h-7 flex-1 sm:flex-none px-2 text-xs" onClick={() => setView('day')}>Día</Button>
+          {!isMobile && (
+            <Button variant={view === 'week' ? 'default' : 'ghost'} size="sm" className="h-8 sm:h-7 flex-1 sm:flex-none px-2 text-xs" onClick={() => setView('week')}>Semana</Button>
+          )}
+          <Button variant={view === 'month' ? 'default' : 'ghost'} size="sm" className="h-8 sm:h-7 flex-1 sm:flex-none px-2 text-xs" onClick={() => setView('month')}>Mes</Button>
         </div>
       </div>
 
@@ -306,6 +322,7 @@ export function CalendarContent() {
         <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin" /></div>
       ) : (
         <>
+          {view === 'agenda' && <AgendaView events={events} onSlotClick={handleSlotClick} onEventClick={handleEventClick} />}
           {view === 'month' && <MonthView currentDate={currentDate} events={events} onSlotClick={handleSlotClick} onEventClick={handleEventClick} />}
           {view === 'week' && <WeekView currentDate={currentDate} events={events} onSlotClick={handleSlotClick} onEventClick={handleEventClick} />}
           {view === 'day' && <DayView currentDate={currentDate} events={events} onSlotClick={handleSlotClick} onEventClick={handleEventClick} />}

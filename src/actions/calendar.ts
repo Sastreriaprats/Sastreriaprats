@@ -17,6 +17,7 @@ const APPOINTMENT_TYPE_ES: Record<string, string> = {
 function describeAppointment(row: unknown): string {
   const r = (row ?? {}) as Record<string, unknown>
   const clientName = (r.clients as { full_name?: string } | null)?.full_name
+    || (typeof r.client_name === 'string' && r.client_name.trim() ? r.client_name : '')
     || (typeof r.title === 'string' && r.title.trim() ? r.title : '')
     || 'Sin cliente'
   const tipo = typeof r.type === 'string' ? (APPOINTMENT_TYPE_ES[r.type] ?? r.type) : 'Cita'
@@ -122,6 +123,7 @@ export const createAppointment = protectedAction<Record<string, unknown>, unknow
     const endDate = new Date(2000, 0, 1, hours, minutes + durationMinutes)
     const end_time = `${endDate.getHours().toString().padStart(2, '0')}:${endDate.getMinutes().toString().padStart(2, '0')}`
 
+    // El mismo sastre no puede tener dos citas solapadas.
     if (input.tailor_id) {
       const { data: conflicts } = await ctx.adminClient
         .from('appointments')
@@ -133,7 +135,24 @@ export const createAppointment = protectedAction<Record<string, unknown>, unknow
         .gt('end_time', startTime)
 
       if (conflicts && conflicts.length > 0) {
-        return failure(`Conflicto de horario con: ${conflicts.map((c: Record<string, unknown>) => `${c.title} (${String(c.start_time).slice(0, 5)}-${String(c.end_time).slice(0, 5)})`).join(', ')}`)
+        return failure(`El sastre ya tiene una cita: ${conflicts.map((c: Record<string, unknown>) => `${c.title} (${String(c.start_time).slice(0, 5)}-${String(c.end_time).slice(0, 5)})`).join(', ')}`)
+      }
+    }
+
+    // Aforo de la tienda: hasta 2 citas solapadas en el mismo sitio (se bloquea la 3ª).
+    const STORE_CAPACITY = 2
+    if (input.store_id) {
+      const { count } = await ctx.adminClient
+        .from('appointments')
+        .select('id', { count: 'exact', head: true })
+        .eq('date', input.date as string)
+        .eq('store_id', input.store_id as string)
+        .neq('status', 'cancelled')
+        .lt('start_time', end_time)
+        .gt('end_time', startTime)
+
+      if ((count ?? 0) >= STORE_CAPACITY) {
+        return failure(`Esa franja ya tiene ${STORE_CAPACITY} citas en esta tienda. Elige otra hora o tienda.`)
       }
     }
 
@@ -150,6 +169,7 @@ export const createAppointment = protectedAction<Record<string, unknown>, unknow
         store_id: input.store_id,
         tailor_id: input.tailor_id || null,
         client_id: input.client_id || null,
+        client_name: input.client_id ? null : ((input.client_name as string)?.trim() || null),
         order_id: input.order_id || null,
         notes: input.notes || null,
         status: 'scheduled',
@@ -173,6 +193,12 @@ export const updateAppointment = protectedAction<{ id: string; data: Record<stri
   },
   async (ctx, { id, data: input }) => {
     const updateData: Record<string, unknown> = { ...input }
+
+    if ('client_id' in updateData || 'client_name' in updateData) {
+      updateData.client_name = updateData.client_id
+        ? null
+        : ((updateData.client_name as string)?.trim() || null)
+    }
 
     if (input.start_time && input.duration_minutes) {
       const [hours, minutes] = String(input.start_time).split(':').map(Number)

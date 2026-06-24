@@ -93,6 +93,7 @@ export function AppointmentDialog({
     duration_minutes: 60,
     tailor_id: '',
     client_id: '',
+    client_name: '',
     order_id: '',
     store_id: '',
     description: '',
@@ -122,12 +123,13 @@ export function AppointmentDialog({
         duration_minutes: (raw.duration_minutes as number) || 60,
         tailor_id: (raw.tailor_id as string) || '',
         client_id: (raw.client_id as string) || '',
+        client_name: (raw.client_id ? '' : (raw.client_name as string)) || '',
         order_id: (raw.order_id as string) || '',
         store_id: (raw.store_id as string) || activeStoreId || '',
         description: (raw.description as string) || '',
         notes: (raw.notes as string) || '',
       })
-      setSelectedClientName(selectedEvent.client_name || '')
+      setSelectedClientName(selectedEvent.client_name || (raw.client_name as string) || '')
     } else if (selectedSlot) {
       setForm(prev => ({
         ...prev,
@@ -137,6 +139,7 @@ export function AppointmentDialog({
         description: '',
         notes: '',
         client_id: '',
+        client_name: '',
         order_id: '',
         tailor_id: '',
         store_id: activeStoreId || '',
@@ -212,6 +215,7 @@ export function AppointmentDialog({
       store_id: form.store_id,
       tailor_id: form.tailor_id || null,
       client_id: form.client_id || null,
+      client_name: form.client_id ? null : (form.client_name.trim() || null),
       order_id: form.order_id || null,
     }
     if (isEditing) {
@@ -365,15 +369,19 @@ export function AppointmentDialog({
           <div className="space-y-2">
             <Label>Cliente</Label>
             {selectedClientName ? (
-              <div className="flex items-center justify-between p-2 border rounded bg-blue-50">
+              <div className={`flex items-center justify-between p-2 border rounded ${form.client_id ? 'bg-blue-50' : 'bg-amber-50 border-amber-200'}`}>
                 <span className="text-sm flex items-center gap-1">
-                  <User className="h-3 w-3" />{selectedClientName}
+                  <User className="h-3 w-3" />
+                  {selectedClientName}
+                  {!form.client_id && (
+                    <span className="text-[11px] text-amber-700 ml-1">(sin dar de alta)</span>
+                  )}
                 </span>
                 <Button
                   variant="ghost"
                   size="sm"
                   className="h-6 text-xs"
-                  onClick={() => { setForm(p => ({ ...p, client_id: '' })); setSelectedClientName('') }}
+                  onClick={() => { setForm(p => ({ ...p, client_id: '', client_name: '' })); setSelectedClientName('') }}
                 >
                   Quitar
                 </Button>
@@ -381,18 +389,42 @@ export function AppointmentDialog({
             ) : (
               <>
                 <Input
-                  placeholder="Buscar cliente..."
+                  placeholder="Buscar cliente o escribir un nombre..."
                   value={clientSearch}
                   onChange={(e) => setClientSearch(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && clientSearch.trim().length >= 2) {
+                      e.preventDefault()
+                      const name = clientSearch.trim()
+                      setForm(p => ({ ...p, client_id: '', client_name: name }))
+                      setSelectedClientName(name)
+                      setClientSearch('')
+                      setClientResults([])
+                    }
+                  }}
                 />
-                {clientResults.length > 0 && (
-                  <div className="border rounded max-h-[120px] overflow-y-auto divide-y">
+                {clientSearch.trim().length >= 2 && (
+                  <div className="border rounded max-h-[200px] overflow-y-auto divide-y">
+                    {/* Opción destacada arriba: usar el texto como nombre sin dar de alta */}
+                    <div
+                      className="p-2 text-sm cursor-pointer bg-amber-50 hover:bg-amber-100 flex items-center gap-1.5 text-amber-800 font-medium"
+                      onClick={() => {
+                        const name = clientSearch.trim()
+                        setForm(p => ({ ...p, client_id: '', client_name: name }))
+                        setSelectedClientName(name)
+                        setClientSearch('')
+                        setClientResults([])
+                      }}
+                    >
+                      <Phone className="h-3.5 w-3.5 shrink-0" />
+                      Usar «{clientSearch.trim()}» sin dar de alta
+                    </div>
                     {clientResults.map(c => (
                       <div
                         key={c.id}
                         className="p-2 text-sm cursor-pointer hover:bg-muted"
                         onClick={() => {
-                          setForm(p => ({ ...p, client_id: c.id }))
+                          setForm(p => ({ ...p, client_id: c.id, client_name: '' }))
                           setSelectedClientName(c.full_name)
                           setClientSearch('')
                           setClientResults([])
