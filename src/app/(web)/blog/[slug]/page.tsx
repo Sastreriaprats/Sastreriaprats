@@ -7,7 +7,6 @@ export const revalidate = 1800
 import { getPublicBlogPost } from '@/actions/cms'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
-import DOMPurify from 'isomorphic-dompurify'
 import { ArticleSchema, BreadcrumbSchema } from '@/components/seo/schema-org'
 import { buildBreadcrumbs } from '@/lib/seo/metadata'
 
@@ -43,14 +42,17 @@ export default async function BlogPostPage({ params }: Props) {
   const author = post.profiles as { full_name?: string } | null
 
   // DOMPurify (isomorphic-dompurify) puede fallar en runtime serverless de
-  // Vercel (problema conocido con jsdom). Envolvemos en try/catch para no
-  // devolver 500 si lanza. Fallback: sanitización básica por regex — el HTML
-  // viene del admin autenticado, no de usuarios externos.
+  // Vercel: jsdom hace requires dinámicos que el file-tracing de Next no
+  // empaqueta, y un `import` estático a nivel de módulo CRASHEA la ruta (500)
+  // ANTES de que cualquier try/catch entre. Por eso lo cargamos con import
+  // dinámico DENTRO del try: así un fallo de carga es capturable y cae al
+  // saneado por regex — el HTML viene del admin autenticado, no de externos.
   let body = ''
   try {
+    const { default: DOMPurify } = await import('isomorphic-dompurify')
     body = DOMPurify.sanitize(post.body_es || '')
   } catch (err) {
-    console.error('[blog/[slug]] DOMPurify falló para slug=' + slug, err)
+    console.error('[blog/[slug]] DOMPurify no disponible para slug=' + slug, err)
     body = (post.body_es || '')
       .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
       .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')

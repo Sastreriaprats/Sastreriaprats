@@ -531,11 +531,23 @@ export async function getPublicBlogPosts(limit: number = 10) {
     const admin = createAdminClient()
     const { data } = await admin
       .from('blog_posts')
-      .select('id, slug, title_es, title_en, excerpt_es, excerpt_en, featured_image_url, category, tags, published_at, profiles!blog_posts_author_id_fkey(full_name)')
+      .select('id, slug, title_es, title_en, excerpt_es, excerpt_en, featured_image_url, body_es, category, tags, published_at, profiles!blog_posts_author_id_fkey(full_name)')
       .eq('status', 'published')
       .order('published_at', { ascending: false })
       .limit(limit)
-    return serializeForServerAction(data || [])
+    // Si un post no tiene imagen destacada, usamos como respaldo la primera
+    // imagen incrustada en el cuerpo para que la tarjeta del listado no quede
+    // vacía. Vaciamos body_es del resultado para no enviar el HTML completo.
+    const posts = (data || []).map((p) => {
+      const body = typeof p.body_es === 'string' ? p.body_es : ''
+      const firstBodyImg = body.match(/<img[^>]+src=["']([^"']+)["']/i)?.[1] ?? null
+      return {
+        ...p,
+        body_es: undefined,
+        featured_image_url: p.featured_image_url || firstBodyImg,
+      }
+    })
+    return serializeForServerAction(posts)
   } catch (err) {
     console.error('[getPublicBlogPosts]', err)
     return []
