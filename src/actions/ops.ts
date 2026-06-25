@@ -63,10 +63,43 @@ async function readAllTailoringPayments(admin: ReturnType<typeof createAdminClie
   return out
 }
 
+// Fracción de cada venta cobrada EN EFECTIVO (0..1), leyendo el desglose real
+// de sale_payments. Necesario porque una venta mixta (efectivo + tarjeta) lleva
+// payment_method = 'mixed' en `sales`: mirar solo ese campo dejaba fuera la parte
+// en efectivo de las mixtas. Devuelve mapa sale_id → fracción efectivo.
+async function readCashFractions(admin: ReturnType<typeof createAdminClient>, start: string, end: string) {
+  const acc: Record<string, { cash: number; total: number }> = {}
+  for (let from = 0; ; from += 1000) {
+    const { data } = await admin.from('sale_payments')
+      .select('sale_id, payment_method, amount, sales!inner(created_at, status)')
+      .gte('sales.created_at', start).lte('sales.created_at', end)
+      .in('sales.status', ['completed', 'partially_returned'])
+      .order('sale_id', { ascending: true })
+      .range(from, from + 999)
+    const b = (data ?? []) as Record<string, unknown>[]
+    for (const p of b) {
+      const sid = String((p as any).sale_id)
+      const amt = Number((p as any).amount) || 0
+      const e = acc[sid] ?? { cash: 0, total: 0 }
+      e.total += amt
+      if ((p as any).payment_method === 'cash') e.cash += amt
+      acc[sid] = e
+    }
+    if (b.length < 1000) break
+  }
+  const frac = new Map<string, number>()
+  for (const sid in acc) {
+    const e = acc[sid]
+    frac.set(sid, e.total > 0 ? Math.min(1, Math.max(0, e.cash / e.total)) : 0)
+  }
+  return frac
+}
+
 async function computeYear(year: number) {
   const admin = createAdminClient()
   const start = `${year}-01-01`, end = `${year}-12-31T23:59:59`
   const sales = await readAllSales(admin, start, end)
+  const cashFrac = await readCashFractions(admin, start, end)
   const tailoringPayments = await readAllTailoringPayments(admin, year)
   // Gastos / IVA soportado = FACTURAS RECIBIDAS (ap_supplier_invoices)
   const { data: apInv } = await admin.from('ap_supplier_invoices')
@@ -93,7 +126,10 @@ async function computeYear(year: number) {
     bk.quarters[q].base += base; bk.quarters[q].vat += vat; bk.quarters[q].count += 1
   }
 
-  // Ingresos por TICKETS
+  // Ingresos por TICKETS. Cada venta se reparte entre efectivo (capa B) y
+  // no-efectivo (capa C) según la fracción REAL cobrada en efectivo
+  // (sale_payments). Una venta mixta aporta su parte de efectivo a B y el resto
+  // a C, de modo que A = B + C sigue cuadrando exactamente.
   for (const x of sales) {
     const total = Number(x.total) || 0
     const returned = Number(x.total_returned) || 0
@@ -105,14 +141,20 @@ async function computeYear(year: number) {
     const created = String(x.created_at)
     const month = created.slice(0, 7)
     const q = Math.ceil(Number(created.slice(5, 7)) / 3)
-    const isCash = x.payment_method === 'cash'
-    addIncome(isCash, base, vat, month, q)
     const sid = String(x.id)
+    // Fracción de efectivo: del desglose sale_payments; si no hay desglose,
+    // fallback al método de cabecera (cash → 1, resto → 0).
+    const fr = cashFrac.has(sid) ? cashFrac.get(sid)! : (x.payment_method === 'cash' ? 1 : 0)
+    const cashBase = base * fr, cashVat = vat * fr
+    const ncBase = base - cashBase, ncVat = vat - cashVat
     const ref = clpMap[sid] ?? String(x.ticket_number ?? '')
-    if (isCash) {
-      cashMoves.push({ saleId: sid, date: created.slice(0, 10), ref, concept: 'Venta', method: String(x.payment_method ?? ''), base: r2(base), vat: r2(vat), total: r2(base + vat) })
-    } else {
-      incomeLedger.push({ date: created.slice(0, 10), type: 'Ticket', concept: `Ticket ${ref}`, base: r2(base), vat: r2(vat), total: r2(base + vat), saleId: sid })
+    if (cashBase > 0.0001) {
+      addIncome(true, cashBase, cashVat, month, q)
+      cashMoves.push({ saleId: sid, date: created.slice(0, 10), ref, concept: 'Venta', method: fr >= 0.9999 ? 'efectivo' : 'efectivo (parte de mixto)', base: r2(cashBase), vat: r2(cashVat), total: r2(cashBase + cashVat) })
+    }
+    if (ncBase > 0.0001) {
+      addIncome(false, ncBase, ncVat, month, q)
+      incomeLedger.push({ date: created.slice(0, 10), type: 'Ticket', concept: `Ticket ${ref}`, base: r2(ncBase), vat: r2(ncVat), total: r2(ncBase + ncVat), saleId: sid })
     }
   }
 

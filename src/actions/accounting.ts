@@ -9,6 +9,15 @@ import { sendEstimateEmail } from '@/lib/email/transactional'
 import { createInvoiceJournalEntry, reverseInvoiceJournalEntry } from '@/actions/accounting-triggers'
 import { formatClientAddress } from '@/lib/clients/format'
 
+/** Una fila del desglose por tienda. storeId null → gastos sin tienda asignada. */
+export type StoreBreakdownRow = {
+  storeId: string | null
+  storeName: string
+  income: number
+  expenses: number
+  profit: number
+}
+
 export type AccountingSummary = {
   income: number
   expenses: number
@@ -16,6 +25,27 @@ export type AccountingSummary = {
   vatToPay: number
   monthlyData: { month: string; income: number; expenses: number }[]
   latestInvoices: { id: string; invoice_number: string; client_name: string; invoice_date: string; total: number; status: string }[]
+  /** Desglose ingresos/gastos/resultado por tienda. Una tienda nueva aparece sola. */
+  byStore: StoreBreakdownRow[]
+  /** Previsión: total (con IVA) aún por cobrar (snapshot, NO filtrado por rango). */
+  pendingIncome: number
+  /** Previsión: total (con IVA) de facturas de proveedor por pagar (snapshot). */
+  pendingExpenses: number
+}
+
+/** Lee TODAS las filas de una query paginada (Supabase tope 1000 por página).
+ *  `build` debe crear una query nueva en cada llamada, con su `.range(f, t)`. */
+async function readAllPaged<T = Record<string, unknown>>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null }>,
+): Promise<T[]> {
+  const out: T[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data } = await build(from, from + 999)
+    const batch = data ?? []
+    out.push(...batch)
+    if (batch.length < 1000) break
+  }
+  return out
 }
 
 export const getAccountingSummary = protectedAction<{ from: string; to: string }, AccountingSummary>(
@@ -29,26 +59,35 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
     const start = `${fromDate}T00:00:00`
     const end = `${toDate}T23:59:59`
 
-    const [salesRes, purchasesRes, invoicesRes, tailoringPaymentsRes] = await Promise.all([
-      ctx.adminClient.from('sales').select('total, total_returned, subtotal, tax_amount, created_at').gte('created_at', start).lte('created_at', end).in('status', ['completed', 'partially_returned']),
+    const [sales, purchasesRaw, invoicesRes, tailoringPayments, storesRes, pendOrdersRows, pendSalesRows, pendDueRows] = await Promise.all([
+      // Ventas de TPV (boutique + TPV + sastrería-POS). Paginado: sin esto, un año
+      // con >1000 tickets se truncaba silenciosamente e infravaloraba ingresos.
+      readAllPaged((f, t) => ctx.adminClient.from('sales').select('total, total_returned, subtotal, tax_amount, created_at, store_id').gte('created_at', start).lte('created_at', end).in('status', ['completed', 'partially_returned']).order('created_at', { ascending: true }).range(f, t)),
       // Gastos = facturas de proveedor recibidas (ap_supplier_invoices), por fecha
       // de factura. Es el documento contable del gasto (no los pedidos a proveedor,
       // que son operativos/de stock y solaparían con las facturas). amount es la
       // base sin IVA; las rectificativas vienen en negativo y restan solas; las
       // proformas se excluyen abajo. Cuenta cualquier estado (pagada/pendiente/parcial).
-      ctx.adminClient.from('ap_supplier_invoices').select('amount, tax_amount, invoice_date, is_proforma').gte('invoice_date', fromDate).lte('invoice_date', toDate),
+      readAllPaged((f, t) => ctx.adminClient.from('ap_supplier_invoices').select('amount, tax_amount, invoice_date, is_proforma, store_id').gte('invoice_date', fromDate).lte('invoice_date', toDate).order('invoice_date', { ascending: true }).range(f, t)),
       ctx.adminClient.from('invoices').select('id, invoice_number, client_name, invoice_date, total, status').eq('invoice_type', 'issued').order('invoice_date', { ascending: false }).limit(10),
       // Cobros de pedidos de sastrería (backoffice). No pasan por TPV, así que
       // no están en `sales`; y no se solapan con `invoices` (que aquí no se
       // suman, sólo se listan), por lo que no hay doble conteo. Fecha contable:
       // payment_date (el cobro real), no created_at (el registro en sistema).
-      ctx.adminClient.from('tailoring_order_payments').select('amount, payment_date, tailoring_order:tailoring_orders(subtotal, total)').gte('payment_date', fromDate).lte('payment_date', toDate),
+      readAllPaged((f, t) => ctx.adminClient.from('tailoring_order_payments').select('amount, payment_date, tailoring_order:tailoring_orders(subtotal, total, store_id)').gte('payment_date', fromDate).lte('payment_date', toDate).order('payment_date', { ascending: true }).range(f, t)),
+      // Catálogo de tiendas: para que toda tienda activa salga en el desglose
+      // (aunque tenga 0 movimientos) y para resolver nombres. Dinámico: una
+      // tienda nueva aparece automáticamente.
+      ctx.adminClient.from('stores').select('id, name, display_name, is_active').order('name'),
+      // Previsión (snapshot, NO filtrado por rango): pendiente de cobro.
+      readAllPaged((f, t) => ctx.adminClient.from('tailoring_orders').select('total_pending').gt('total_pending', 0).neq('status', 'cancelled').range(f, t)),
+      readAllPaged((f, t) => ctx.adminClient.from('sales').select('total, amount_paid').in('payment_status', ['pending', 'partial']).range(f, t)),
+      // Previsión: gastos de proveedor por pagar (cuotas de vencimiento sin pagar).
+      readAllPaged((f, t) => ctx.adminClient.from('ap_supplier_invoice_due_dates').select('amount, is_paid').eq('is_paid', false).range(f, t)),
     ])
 
-    const sales = salesRes.data || []
     // Excluimos proformas (no son facturas reales).
-    const purchases = (purchasesRes.data || []).filter((x: Record<string, unknown>) => !(x as any).is_proforma)
-    const tailoringPayments = tailoringPaymentsRes.data || []
+    const purchases = (purchasesRaw || []).filter((x: Record<string, unknown>) => !(x as any).is_proforma)
 
     // Para ventas con devolución parcial: prorratear subtotal/IVA por la
     // proporción del importe que NO se devolvió. Las fully_returned ya están
@@ -136,6 +175,60 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
       status: String(inv.status ?? 'draft'),
     }))
 
+    // ── Desglose por tienda ──────────────────────────────────────────────────
+    // Ingresos: ventas por sales.store_id + cobros de sastrería por la tienda del
+    // pedido. Gastos: facturas de proveedor por su store_id; las que no tienen
+    // tienda asignada van a un grupo "Sin asignar". Sentinel para null.
+    const NO_STORE = '__none__'
+    const stores = (storesRes.data || []) as Array<{ id: string; name?: string; display_name?: string; is_active?: boolean }>
+    const storeName = new Map<string, string>()
+    for (const s of stores) storeName.set(String(s.id), String(s.name || s.display_name || 'Tienda'))
+
+    const buckets = new Map<string, { income: number; expenses: number }>()
+    const bucket = (key: string) => {
+      let b = buckets.get(key)
+      if (!b) { b = { income: 0, expenses: 0 }; buckets.set(key, b) }
+      return b
+    }
+    // Toda tienda activa aparece, aunque tenga 0 (incl. tiendas nuevas).
+    for (const s of stores) if (s.is_active) bucket(String(s.id))
+
+    for (const x of sales) {
+      const sid = (x as any).store_id ? String((x as any).store_id) : NO_STORE
+      bucket(sid).income += netSale(x).netBase
+    }
+    for (const p of tailoringPayments) {
+      const order = ((p as any).tailoring_order as Record<string, unknown>) || {}
+      const sid = (order as any).store_id ? String((order as any).store_id) : NO_STORE
+      bucket(sid).income += netTailoringPayment(p).netBase
+    }
+    for (const x of purchases) {
+      const sid = (x as any).store_id ? String((x as any).store_id) : NO_STORE
+      bucket(sid).expenses += Number((x as any).amount) || 0
+    }
+
+    const r2 = (n: number) => Math.round(n * 100) / 100
+    const byStore: StoreBreakdownRow[] = [...buckets.entries()].map(([key, v]) => ({
+      storeId: key === NO_STORE ? null : key,
+      storeName: key === NO_STORE ? 'Sin asignar' : (storeName.get(key) ?? 'Tienda'),
+      income: r2(v.income),
+      expenses: r2(v.expenses),
+      profit: r2(v.income - v.expenses),
+    }))
+    // Orden: por ingresos desc; "Sin asignar" siempre al final.
+    byStore.sort((a, b) => {
+      if (a.storeId === null) return 1
+      if (b.storeId === null) return -1
+      return b.income - a.income
+    })
+
+    // ── Previsión (snapshot) ─────────────────────────────────────────────────
+    const pendingIncome =
+      (pendOrdersRows || []).reduce((s, o: any) => s + (Number(o.total_pending) || 0), 0) +
+      (pendSalesRows || []).reduce((s, x: any) => s + Math.max(0, (Number(x.total) || 0) - (Number(x.amount_paid) || 0)), 0)
+    const pendingExpenses =
+      (pendDueRows || []).reduce((s, c: any) => s + Math.max(0, Number(c.amount) || 0), 0)
+
     return success({
       income,
       expenses,
@@ -143,6 +236,9 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
       vatToPay: vatCollected - vatPaid,
       monthlyData,
       latestInvoices,
+      byStore,
+      pendingIncome: r2(pendingIncome),
+      pendingExpenses: r2(pendingExpenses),
     })
   }
 )

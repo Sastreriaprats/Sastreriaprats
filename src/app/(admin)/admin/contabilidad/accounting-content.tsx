@@ -404,13 +404,86 @@ function SummaryTab() {
       <>
       {/* contenido del resumen */}
 
-      {/* KPI Cards */}
+      {/* KPI Cards — resumen general (todas las tiendas) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard label="Ingresos (base)" value={data?.income ?? 0} positive />
         <KpiCard label="Gastos (base)"   value={data?.expenses ?? 0} positive={false} />
         <KpiCard label="Resultado neto"  value={data?.profit ?? 0}   positive={(data?.profit ?? 0) >= 0} />
         <KpiCard label="IVA a ingresar"  value={data?.vatToPay ?? 0} neutral />
       </div>
+
+      {/* Previsión: importes aún NO contabilizados por estar sin cobrar / sin pagar */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Previsión · pendiente de cobrar y pagar</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Importes con IVA aún no contabilizados (no entran en los KPI de arriba). Es una foto del saldo vivo total, no del periodo seleccionado.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="rounded-lg border p-4">
+              <p className="text-xs text-muted-foreground">Pendiente de cobro</p>
+              <p className="text-xl font-bold text-emerald-700">{formatCurrency(data?.pendingIncome ?? 0)}</p>
+              <p className="text-[11px] text-muted-foreground mt-1">Pedidos de sastrería y ventas con saldo pendiente</p>
+            </div>
+            <div className="rounded-lg border p-4">
+              <p className="text-xs text-muted-foreground">Pendiente de pago</p>
+              <p className="text-xl font-bold text-red-600">{formatCurrency(data?.pendingExpenses ?? 0)}</p>
+              <p className="text-[11px] text-muted-foreground mt-1">Facturas de proveedor por vencer / vencidas</p>
+            </div>
+            <div className="rounded-lg border p-4">
+              <p className="text-xs text-muted-foreground">Saldo previsto (cobros − pagos)</p>
+              <p className={cn('text-xl font-bold', (data?.pendingIncome ?? 0) - (data?.pendingExpenses ?? 0) >= 0 ? 'text-slate-800' : 'text-red-600')}>
+                {formatCurrency((data?.pendingIncome ?? 0) - (data?.pendingExpenses ?? 0))}
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-1">Tesorería que entra menos la que sale</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Desglose por tienda (dinámico: una tienda nueva aparece sola) */}
+      <Card>
+        <CardHeader><CardTitle className="text-base">Resultado por tienda <span className="text-muted-foreground font-normal">· {rangeLabel}</span></CardTitle></CardHeader>
+        <CardContent className="p-0">
+          {(data?.byStore ?? []).length === 0 ? (
+            <p className="text-center text-muted-foreground py-8">Sin datos</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Tienda</TableHead>
+                  <TableHead className="text-right">Ingresos</TableHead>
+                  <TableHead className="text-right">Gastos</TableHead>
+                  <TableHead className="text-right">Resultado</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(data?.byStore ?? []).map((s) => (
+                  <TableRow key={s.storeId ?? 'none'}>
+                    <TableCell className="font-medium">
+                      <span className="flex items-center gap-1.5">
+                        <Store className="h-3.5 w-3.5 text-muted-foreground" />
+                        {s.storeName}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right text-emerald-700">{formatCurrency(s.income)}</TableCell>
+                    <TableCell className="text-right text-red-600">{formatCurrency(s.expenses)}</TableCell>
+                    <TableCell className={cn('text-right font-semibold', s.profit >= 0 ? 'text-slate-800' : 'text-red-600')}>{formatCurrency(s.profit)}</TableCell>
+                  </TableRow>
+                ))}
+                <TableRow className="border-t-2 bg-muted/40 font-semibold">
+                  <TableCell>Total</TableCell>
+                  <TableCell className="text-right">{formatCurrency(data?.income ?? 0)}</TableCell>
+                  <TableCell className="text-right">{formatCurrency(data?.expenses ?? 0)}</TableCell>
+                  <TableCell className="text-right">{formatCurrency(data?.profit ?? 0)}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Bar chart */}
       <Card>
