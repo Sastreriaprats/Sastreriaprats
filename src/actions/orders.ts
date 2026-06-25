@@ -13,6 +13,33 @@ import { normalizeSearchTerm, getOrderStatusLabel, formatDateTimeMadrid } from '
 import { checkUserPermission } from '@/actions/auth'
 import { syncOrderLineMeasurementsToClient } from '@/lib/measurements/sync-from-order'
 
+/** Slug canónico de prenda desde code/name del garment_type ("Pantalón"→"pantalon"). */
+function normalizeGarmentSlug(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, '_')
+}
+
+/** Mapa garment_type_id → slug, para sembrar `prenda`/`prendaSlug` en la
+ *  configuration de las líneas (la ficha de confección las necesita para
+ *  detectar el tipo de prenda; el wizard/edición no las persistían). */
+async function buildGarmentSlugMap(admin: AdminClient, garmentTypeIds: (string | null | undefined)[]): Promise<Map<string, string>> {
+  const ids = [...new Set(garmentTypeIds.filter((x): x is string => !!x))]
+  if (!ids.length) return new Map()
+  const { data } = await admin.from('garment_types').select('id, code, name').in('id', ids)
+  const map = new Map<string, string>()
+  for (const g of (data ?? []) as { id: string; code?: string; name?: string }[]) {
+    const slug = normalizeGarmentSlug(String(g.code || g.name || ''))
+    if (slug) map.set(String(g.id), slug)
+  }
+  return map
+}
+
+/** Devuelve la configuration con `prenda`/`prendaSlug` añadidos si faltan. */
+function withPrendaSlug(configuration: unknown, slug: string | undefined): Record<string, unknown> {
+  const cfg = (configuration ?? {}) as Record<string, unknown>
+  if (!slug || cfg.prenda || cfg.prendaSlug) return cfg
+  return { ...cfg, prenda: slug, prendaSlug: slug }
+}
+
 const SELECT_ORDERS = `
   id, order_number, order_type, status, order_date,
   estimated_delivery_date, payment_date, total, total_paid, total_pending,
@@ -397,8 +424,10 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
 
     if (orderError) return failure(orderError.message)
 
+    const gtSlugMap = await buildGarmentSlugMap(ctx.adminClient, processedLines.map((l: any) => l.garment_type_id))
     const linesToInsert = processedLines.map((line: any) => ({
       ...line,
+      configuration: withPrendaSlug(line.configuration, gtSlugMap.get(line.garment_type_id)),
       tailoring_order_id: order.id,
     }))
 
@@ -1369,6 +1398,7 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
       }
 
       // UPDATE / INSERT
+      const gtSlugMap = await buildGarmentSlugMap(admin, incomingLines.map((l: any) => l.garment_type_id))
       for (let i = 0; i < incomingLines.length; i++) {
         const line = incomingLines[i]
         const unitPrice = Number(line.unit_price) || 0
@@ -1395,7 +1425,7 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
           model_name: line.model_name?.toString().trim() || null,
           model_size: line.model_size?.toString().trim() || null,
           finishing_notes: line.finishing_notes?.toString().trim() || null,
-          configuration: line.configuration ?? {},
+          configuration: withPrendaSlug(line.configuration, gtSlugMap.get(line.garment_type_id)),
           sort_order: sortOrder,
         }
 

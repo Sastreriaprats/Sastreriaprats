@@ -221,10 +221,26 @@ function labelPliegues(v: unknown): string {
   return LABELS_PLIEGUES[String(v).trim()] ?? String(v)
 }
 
-function buildDescripcionAndConfig(config: Record<string, unknown>): { descripcion: string; configuracion: string } {
+/** Normaliza un nombre/slug de prenda a slug canónico sin tildes ni espacios:
+ *  "Pantalón" → "pantalon", "Chaqué" → "chaque", "Camisería" → "camiseria". */
+function normalizePrendaSlug(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, '_')
+}
+
+/** Resuelve el slug de la prenda: primero desde la configuración
+ *  (prendaSlug/prenda) y, si falta, desde el garment_type real de la línea
+ *  (las líneas creadas por el wizard/edición no persisten prendaSlug/prenda). */
+function resolvePrendaSlug(config: Record<string, unknown>, garmentName?: string | null): string {
+  const fromConfig = String(config.prendaSlug ?? config.prenda ?? '').trim()
+  if (fromConfig) return normalizePrendaSlug(fromConfig)
+  if (garmentName) return normalizePrendaSlug(garmentName)
+  return ''
+}
+
+function buildDescripcionAndConfig(config: Record<string, unknown>, garmentName?: string | null): { descripcion: string; configuracion: string } {
   const partes: string[] = []
   const confParts: string[] = []
-  const slug = String(config.prendaSlug ?? config.prenda ?? '').toLowerCase()
+  const slug = resolvePrendaSlug(config, garmentName)
   const isPantalon = slug === 'pantalon'
   const isChaleco = slug === 'chaleco'
   const isAmericana = !isPantalon && !isChaleco
@@ -347,7 +363,11 @@ function getFichaFromOrder(order: FichaConfeccionOrder): Record<string, unknown>
   const lines = order.tailoring_order_lines ?? []
   const first = lines[0]
   const config = (first?.configuration ?? {}) as Record<string, unknown>
-  const prendaSlug = String(config.prendaSlug ?? config.prenda ?? '').toLowerCase().replace(/\s+/g, '_')
+  // Fallback al garment_type real de la línea cuando la config no trae
+  // prendaSlug/prenda (líneas creadas por wizard/edición). Sin esto caían en
+  // la rama "americana" y la ficha salía vacía para pantalón/chaleco/etc.
+  const garmentName = (first?.garment_types?.name as string | undefined) ?? undefined
+  const prendaSlug = resolvePrendaSlug(config, garmentName)
   const isCamiseria = prendaSlug.includes('camiseria')
   const medidasPrefix = isCamiseria ? 'camiseria_' : (prendaSlug ? `${prendaSlug}_` : 'americana_')
   const medidasKeys = MEDIDAS_KEYS_POR_PRENDA[prendaSlug] ?? MEDIDAS_KEYS_POR_PRENDA['americana']
@@ -392,7 +412,7 @@ function getFichaFromOrder(order: FichaConfeccionOrder): Record<string, unknown>
     fechaCompromiso: order.estimated_delivery_date ?? config.fechaCompromiso ?? '',
     fechaCobro: config.fechaCobro ?? '',
     fechaProximaVisita: config.fechaProximaVisita ?? config.fechaCompromiso ?? '',
-    ...buildDescripcionAndConfig(config),
+    ...buildDescripcionAndConfig(config, garmentName),
     observaciones: config.observaciones ?? '',
     caracteristicas: caracteristicasStr,
     caracteristicasPrenda: String(config.caracteristicasPrenda ?? '').trim(),
