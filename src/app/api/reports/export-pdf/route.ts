@@ -176,19 +176,28 @@ function renderSales(salesData: AnyRec | null, compareData: AnyRec | null): stri
 
 function renderProducts(items: AnyRec[] | null): string {
   if (!items?.length) return empty()
-  const rows = items.map((p, i) => `
+  const rows = items.map((p, i) => {
+    const hasCost = Number(p.unit_cost) > 0
+    const marginPct = Number(p.revenue_net) > 0 ? (Number(p.margin) / Number(p.revenue_net)) * 100 : 0
+    return `
 <tr>
   <td>${i + 1}</td>
   <td>${escapeHtml(String(p.name ?? ''))}</td>
   <td class="muted">${escapeHtml(String(p.sku ?? ''))}</td>
+  <td class="right">${p.purchased_units || '—'}</td>
   <td class="right">${p.units || 0}</td>
   <td class="right">${fmtEur(p.revenue as number)}</td>
-</tr>`).join('')
+  <td class="right">${hasCost ? fmtEur(p.unit_cost as number) : '—'}</td>
+  <td class="right">${hasCost ? fmtEur(p.margin as number) : '—'}</td>
+  <td class="right">${hasCost && Number(p.revenue_net) > 0 ? `${marginPct.toFixed(1)}%` : '—'}</td>
+</tr>`
+  }).join('')
   return `<h2>Top productos</h2>
 <table>
-  <thead><tr><th>#</th><th>Producto</th><th>SKU</th><th class="right">Unidades</th><th class="right">Facturación</th></tr></thead>
+  <thead><tr><th>#</th><th>Producto</th><th>SKU</th><th class="right">Compradas</th><th class="right">Vendidas</th><th class="right">Facturación</th><th class="right">Coste ud.</th><th class="right">Margen</th><th class="right">Margen %</th></tr></thead>
   <tbody>${rows}</tbody>
-</table>`
+</table>
+<p class="muted" style="font-size:11px;margin-top:6px">Margen = facturación sin IVA − (uds vendidas × coste). Compradas = unidades pedidas a proveedor en el periodo.</p>`
 }
 
 function renderTailors(items: AnyRec[] | null): string {

@@ -440,6 +440,14 @@ export const getTopProducts = protectedAction<
   { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel; limit?: number; tax_mode?: TaxMode },
   {
     product_id: string; name: string; sku: string; units: number; revenue: number
+    // ── Rentabilidad ──────────────────────────────────────────────────────────
+    revenue_net: number   // facturación SIEMPRE sin IVA (base del margen)
+    unit_cost: number     // coste unitario del producto (cost_price, neto)
+    cogs: number          // coste de lo vendido = units × unit_cost
+    margin: number        // margen bruto = revenue_net − cogs
+    // ── Compras a proveedor (unidades repuestas en el periodo) ────────────────
+    purchased_units: number  // unidades pedidas a proveedor (order_date en rango)
+    purchased_cost: number   // € de coste de esas compras
     // Desglose por TALLA y TIENDA dentro del producto (nº6, expandible).
     breakdown: { size: string; store_id: string; store_name: string; units: number; revenue: number }[]
   }[]
@@ -455,7 +463,7 @@ export const getTopProducts = protectedAction<
     // (".. T.52"), por eso agrupar por description duplicaba el producto.
     let q = ctx.adminClient
       .from('sale_lines')
-      .select('description, sku, quantity, line_total, tax_rate, sales!inner(created_at, status, store_id, stores(name)), product_variants(size, products(id, name, sku))')
+      .select('description, sku, quantity, line_total, tax_rate, sales!inner(created_at, status, store_id, stores(name)), product_variants(size, cost_price_override, products(id, name, sku, cost_price))')
       .gte('sales.created_at', start_date)
       .lte('sales.created_at', end_date + 'T23:59:59')
       .eq('sales.status', 'completed')
@@ -468,7 +476,13 @@ export const getTopProducts = protectedAction<
     )
 
     type Bucket = { size: string; store_id: string; store_name: string; units: number; revenue: number }
-    const products: Record<string, { product_id: string; name: string; sku: string; units: number; revenue: number; bd: Record<string, Bucket> }> = {}
+    type Acc = {
+      product_id: string; name: string; sku: string
+      units: number; revenue: number; revenueNet: number
+      unitCost: number; purchasedUnits: number; purchasedCost: number
+      bd: Record<string, Bucket>
+    }
+    const products: Record<string, Acc> = {}
     for (const line of filteredLines as any[]) {
       const v = Array.isArray(line.product_variants) ? line.product_variants[0] : line.product_variants
       const p = v ? (Array.isArray(v.products) ? v.products[0] : v.products) : null
@@ -482,25 +496,66 @@ export const getTopProducts = protectedAction<
       const storeId = (sale?.store_id as string) || 'unknown'
       const storeName = (sale?.stores?.name as string) || 'Sin tienda'
       const units = (line.quantity as number) || 1
-      const revenue = net ? lineNet((line.line_total as number) || 0, line.tax_rate) : ((line.line_total as number) || 0)
+      const lineTotal = (line.line_total as number) || 0
+      const revenueNet = lineNet(lineTotal, line.tax_rate)
+      const revenue = net ? revenueNet : lineTotal
+      // Coste unitario: override de la variante si existe, si no el del producto.
+      const unitCost = Number(v?.cost_price_override) || Number(p?.cost_price) || 0
 
-      const prod = (products[key] ||= { product_id: (p?.id as string) || '', name, sku, units: 0, revenue: 0, bd: {} })
+      const prod = (products[key] ||= { product_id: (p?.id as string) || '', name, sku, units: 0, revenue: 0, revenueNet: 0, unitCost, purchasedUnits: 0, purchasedCost: 0, bd: {} })
+      if (!prod.unitCost && unitCost) prod.unitCost = unitCost
       prod.units += units
       prod.revenue += revenue
+      prod.revenueNet += revenueNet
       const bk = `${size}|${storeId}`
       const b = (prod.bd[bk] ||= { size, store_id: storeId, store_name: storeName, units: 0, revenue: 0 })
       b.units += units
       b.revenue += revenue
     }
 
+    // ── Compras a proveedor en el periodo ───────────────────────────────────
+    // Líneas de pedido a proveedor mapeadas a un producto (variante -> producto),
+    // por order_date dentro del rango, excluyendo cancelados. No se filtra por
+    // tienda: los pedidos a proveedor son compra de empresa (destination_store_id
+    // casi siempre nulo). `quantity` está en unidades para producto de boutique.
+    const { data: purchaseLines } = await ctx.adminClient
+      .from('supplier_order_lines')
+      .select('quantity, unit_price, total_price, product_variants!inner(product_id, products(id, name, sku, cost_price)), supplier_orders!inner(order_date, status)')
+      .not('product_variant_id', 'is', null)
+      .gte('supplier_orders.order_date', start_date)
+      .lte('supplier_orders.order_date', end_date)
+      .neq('supplier_orders.status', 'cancelled')
+
+    for (const line of (purchaseLines || []) as any[]) {
+      const v = Array.isArray(line.product_variants) ? line.product_variants[0] : line.product_variants
+      const p = v ? (Array.isArray(v.products) ? v.products[0] : v.products) : null
+      if (!p?.id) continue
+      const key = `prod:${p.id}`
+      const qty = Number(line.quantity) || 0
+      const cost = Number(line.total_price) || (Number(line.unit_price) || 0) * qty
+      // El producto puede no haberse vendido en el periodo: lo damos de alta con
+      // ventas a 0 para que también aparezca "comprado pero no vendido".
+      const prod = (products[key] ||= { product_id: p.id, name: (p.name as string) || '', sku: (p.sku as string) || '', units: 0, revenue: 0, revenueNet: 0, unitCost: Number(p.cost_price) || 0, purchasedUnits: 0, purchasedCost: 0, bd: {} })
+      if (!prod.unitCost) prod.unitCost = Number(p.cost_price) || 0
+      prod.purchasedUnits += qty
+      prod.purchasedCost += cost
+    }
+
     return success(
       Object.values(products)
-        .sort((a, b) => b.revenue - a.revenue)
+        // Ordenamos por facturación (vendidos arriba); los comprados-no-vendidos
+        // (revenue 0) caen al final pero siguen visibles dentro del límite.
+        .sort((a, b) => b.revenue - a.revenue || b.purchasedCost - a.purchasedCost)
         .slice(0, limit)
-        .map((p) => ({
-          product_id: p.product_id, name: p.name, sku: p.sku, units: p.units, revenue: p.revenue,
-          breakdown: Object.values(p.bd).sort((a, b) => b.revenue - a.revenue),
-        }))
+        .map((p) => {
+          const cogs = p.units * p.unitCost
+          return {
+            product_id: p.product_id, name: p.name, sku: p.sku, units: p.units, revenue: p.revenue,
+            revenue_net: p.revenueNet, unit_cost: p.unitCost, cogs, margin: p.revenueNet - cogs,
+            purchased_units: p.purchasedUnits, purchased_cost: p.purchasedCost,
+            breakdown: Object.values(p.bd).sort((a, b) => b.revenue - a.revenue),
+          }
+        })
     )
   }
 )

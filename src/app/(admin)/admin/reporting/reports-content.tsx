@@ -55,7 +55,7 @@ type CompareData = {
   changes: { revenue: number; newClients: number; ordersCount: number }
 }
 
-type ProductItem = { product_id: string; name: string; sku: string; units: number; revenue: number; breakdown: { size: string; store_id: string; store_name: string; units: number; revenue: number }[] }
+type ProductItem = { product_id: string; name: string; sku: string; units: number; revenue: number; revenue_net: number; unit_cost: number; cogs: number; margin: number; purchased_units: number; purchased_cost: number; breakdown: { size: string; store_id: string; store_name: string; units: number; revenue: number }[] }
 
 type TailorItem = {
   tailor_id: string; name: string; orders: number; revenue: number

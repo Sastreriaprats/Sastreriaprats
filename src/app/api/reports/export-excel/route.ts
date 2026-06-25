@@ -106,9 +106,15 @@ function sectionSales(rows: Row[], salesData: AnyRec | null, compareData: AnyRec
 function sectionProducts(rows: Row[], items: AnyRec[] | null) {
   if (!items?.length) { rows.push(['Sin datos para el periodo seleccionado']); return }
   rows.push(['TOP PRODUCTOS'])
-  rows.push(['#', 'Producto', 'SKU', 'Unidades', 'Facturación'])
+  rows.push(['#', 'Producto', 'SKU', 'Uds compradas', 'Uds vendidas', 'Facturación', 'Coste ud.', 'Margen (sin IVA)', 'Margen %'])
   items.forEach((p, i) => {
-    rows.push([i + 1, String(p.name ?? ''), String(p.sku ?? ''), num(p.units), num(p.revenue)])
+    const marginPct = Number(p.revenue_net) > 0 ? (Number(p.margin) / Number(p.revenue_net)) * 100 : 0
+    rows.push([
+      i + 1, String(p.name ?? ''), String(p.sku ?? ''),
+      num(p.purchased_units), num(p.units), num(p.revenue),
+      num(p.unit_cost), num(p.margin),
+      Number(p.unit_cost) > 0 && Number(p.revenue_net) > 0 ? `${marginPct.toFixed(1)}%` : '—',
+    ])
   })
 }
 
