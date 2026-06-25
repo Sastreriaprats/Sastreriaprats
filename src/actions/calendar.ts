@@ -1,8 +1,35 @@
 'use server'
 
-import { protectedAction } from '@/lib/server/action-wrapper'
+import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
-import { getBusinessHours } from '@/lib/schedule-utils'
+import { getBusinessHours, isSlotBlocked, type ScheduleBlockLike } from '@/lib/schedule-utils'
+
+/**
+ * Devuelve el bloqueo de agenda activo que choca con la franja indicada, o
+ * null si está libre. Filtra por fecha + alcance de tienda (la tienda concreta
+ * y los bloqueos "Todas" = store_id NULL) y delega la lógica de solapamiento en
+ * `isSlotBlocked` (misma fuente que el flujo público). Bloqueo duro: las
+ * acciones que crean/mueven citas rechazan si esto devuelve un bloqueo.
+ */
+async function findBlockingScheduleBlock(
+  adminClient: AdminClient,
+  date: string,
+  storeId: string | null | undefined,
+  startTime: string,
+  endTime: string,
+): Promise<(ScheduleBlockLike & { title: string }) | null> {
+  let q = adminClient
+    .from('schedule_blocks')
+    .select('title, all_day, start_time, end_time')
+    .eq('block_date', date)
+    .eq('is_active', true)
+  // Alcance: bloqueos de la tienda concreta + los de "Todas" (store_id NULL).
+  // Sin tienda en la cita, sólo aplican los de "Todas".
+  q = storeId ? q.or(`store_id.eq.${storeId},store_id.is.null`) : q.is('store_id', null)
+  const { data } = await q
+  const blocks = (data || []) as (ScheduleBlockLike & { title: string })[]
+  return isSlotBlocked(blocks, startTime, endTime)
+}
 
 const APPOINTMENT_TYPE_ES: Record<string, string> = {
   fitting: 'Prueba',
@@ -123,6 +150,13 @@ export const createAppointment = protectedAction<Record<string, unknown>, unknow
     const endDate = new Date(2000, 0, 1, hours, minutes + durationMinutes)
     const end_time = `${endDate.getHours().toString().padStart(2, '0')}:${endDate.getMinutes().toString().padStart(2, '0')}`
 
+    // Bloqueo duro: no se puede agendar en una franja bloqueada (la banda del
+    // grid era sólo visual; aquí se valida en servidor).
+    const blocked = await findBlockingScheduleBlock(ctx.adminClient, input.date as string, input.store_id as string | null, startTime, end_time)
+    if (blocked) {
+      return failure(`Esa franja está bloqueada: ${blocked.title}. No se puede agendar.`)
+    }
+
     // El mismo sastre no puede tener dos citas solapadas.
     if (input.tailor_id) {
       const { data: conflicts } = await ctx.adminClient
@@ -192,6 +226,29 @@ export const updateAppointment = protectedAction<{ id: string; data: Record<stri
     revalidate: ['/admin/calendario', '/sastre/calendario'],
   },
   async (ctx, { id, data: input }) => {
+    // Si el update cambia fecha u hora, validar contra bloqueos (bloqueo duro).
+    // Se carga la cita actual para completar los campos que no vengan en el input.
+    if (input.date || input.start_time) {
+      const { data: current } = await ctx.adminClient
+        .from('appointments')
+        .select('date, start_time, duration_minutes, store_id')
+        .eq('id', id)
+        .single()
+      if (current) {
+        const date = String(input.date ?? current.date)
+        const startTime = String(input.start_time ?? current.start_time).slice(0, 5)
+        const duration = Number(input.duration_minutes ?? current.duration_minutes) || 60
+        const [h, mi] = startTime.split(':').map(Number)
+        const ed = new Date(2000, 0, 1, h, mi + duration)
+        const endTime = `${ed.getHours().toString().padStart(2, '0')}:${ed.getMinutes().toString().padStart(2, '0')}`
+        const storeId = (input.store_id ?? current.store_id) as string | null
+        const blocked = await findBlockingScheduleBlock(ctx.adminClient, date, storeId, startTime, endTime)
+        if (blocked) {
+          return failure(`Esa franja está bloqueada: ${blocked.title}. No se puede cambiar la cita a esa franja.`)
+        }
+      }
+    }
+
     const updateData: Record<string, unknown> = { ...input }
 
     if ('client_id' in updateData || 'client_name' in updateData) {
@@ -260,7 +317,7 @@ export const moveAppointment = protectedAction<{
   async (ctx, { id, new_date, new_start_time, new_tailor_id }) => {
     const { data: current } = await ctx.adminClient
       .from('appointments')
-      .select('duration_minutes, tailor_id')
+      .select('duration_minutes, tailor_id, store_id')
       .eq('id', id)
       .single()
 
@@ -269,6 +326,12 @@ export const moveAppointment = protectedAction<{
     const [hours, minutes] = new_start_time.split(':').map(Number)
     const endDate = new Date(2000, 0, 1, hours, minutes + (current.duration_minutes as number))
     const new_end_time = `${endDate.getHours().toString().padStart(2, '0')}:${endDate.getMinutes().toString().padStart(2, '0')}`
+
+    // Bloqueo duro: no se puede mover una cita a una franja bloqueada.
+    const blocked = await findBlockingScheduleBlock(ctx.adminClient, new_date, current.store_id as string | null, new_start_time, new_end_time)
+    if (blocked) {
+      return failure(`Esa franja está bloqueada: ${blocked.title}. No se puede mover la cita ahí.`)
+    }
 
     const tailorId = new_tailor_id || (current.tailor_id as string | null)
 

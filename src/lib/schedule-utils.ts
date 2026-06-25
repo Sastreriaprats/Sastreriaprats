@@ -47,20 +47,53 @@ export function isSaturday(dateStr: string): boolean {
   return new Date(dateStr + 'T12:00:00').getDay() === 6
 }
 
+export interface ScheduleBlockLike {
+  all_day: boolean
+  start_time: string | null
+  end_time: string | null
+  title?: string | null
+}
+
+/**
+ * FUENTE ÚNICA de la lógica de choque cita↔bloqueo.
+ *
+ * Devuelve el primer bloqueo que choca con la franja [startTime, endTime), o
+ * null si la franja está libre. Se asume que `blocks` ya viene filtrado por
+ * fecha y por alcance de tienda (la query usa `store_id.eq.X OR store_id IS
+ * NULL`, donde NULL = "Todas las tiendas").
+ *
+ * Un bloqueo choca si:
+ *   - es de día completo (`all_day`), o
+ *   - solapa el horario: block.start < cita.end && block.end > cita.start
+ *     (el borde toca-pero-no-solapa NO cuenta: cita 10–11 vs bloqueo 11–12 = libre).
+ *
+ * Las horas se normalizan a HH:MM (la BD guarda HH:MM:SS; las citas, HH:MM).
+ */
+export function isSlotBlocked<T extends ScheduleBlockLike>(
+  blocks: T[],
+  startTime: string,
+  endTime: string,
+): T | null {
+  const s = startTime.slice(0, 5)
+  const e = endTime.slice(0, 5)
+  for (const b of blocks) {
+    if (b.all_day) return b
+    if (!b.start_time || !b.end_time) continue
+    if (b.start_time.slice(0, 5) < e && b.end_time.slice(0, 5) > s) return b
+  }
+  return null
+}
+
 /** Filtrar slots que caen dentro de un bloqueo horario */
 export function filterBlockedSlots(
   slots: string[],
-  blocks: { all_day: boolean; start_time: string | null; end_time: string | null }[]
+  blocks: ScheduleBlockLike[]
 ): string[] {
   if (blocks.length === 0) return slots
-  if (blocks.some(b => b.all_day)) return [] // Día completo bloqueado
 
   return slots.filter(slot => {
     const [h, m] = slot.split(':').map(Number)
     const slotEnd = `${Math.floor((h * 60 + m + 30) / 60).toString().padStart(2, '0')}:${((h * 60 + m + 30) % 60).toString().padStart(2, '0')}`
-    return !blocks.some(b => {
-      if (!b.start_time || !b.end_time) return false
-      return b.start_time < slotEnd && b.end_time > slot
-    })
+    return !isSlotBlocked(blocks, slot, slotEnd)
   })
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { getPublicSlots, isDayClosed, filterBlockedSlots } from '@/lib/schedule-utils'
+import { getPublicSlots, isDayClosed, filterBlockedSlots, isSlotBlocked, type ScheduleBlockLike } from '@/lib/schedule-utils'
 
 export async function GET(request: NextRequest) {
   try {
@@ -93,7 +93,10 @@ export async function POST(request: NextRequest) {
 
   const admin = createAdminClient()
 
-  // Verificar bloqueos
+  const endH = parseInt(start_time.split(':')[0]) + 1
+  const end_time = `${endH.toString().padStart(2, '0')}:00`
+
+  // Verificar bloqueos (misma lógica única que el lado admin)
   const { data: blocks } = await admin
     .from('schedule_blocks')
     .select('all_day, start_time, end_time')
@@ -101,21 +104,9 @@ export async function POST(request: NextRequest) {
     .eq('is_active', true)
     .or(`store_id.eq.${store_id},store_id.is.null`)
 
-  if (blocks && blocks.length > 0) {
-    const isBlocked = blocks.some((b: Record<string, unknown>) => {
-      if (b.all_day) return true
-      if (!b.start_time || !b.end_time) return false
-      const endH = parseInt(start_time.split(':')[0]) + 1
-      const end_time_calc = `${endH.toString().padStart(2, '0')}:00`
-      return String(b.start_time) < end_time_calc && String(b.end_time) > start_time
-    })
-    if (isBlocked) {
-      return NextResponse.json({ error: 'Horario no disponible (bloqueado)' }, { status: 409 })
-    }
+  if (isSlotBlocked((blocks || []) as ScheduleBlockLike[], start_time, end_time)) {
+    return NextResponse.json({ error: 'Horario no disponible (bloqueado)' }, { status: 409 })
   }
-
-  const endH = parseInt(start_time.split(':')[0]) + 1
-  const end_time = `${endH.toString().padStart(2, '0')}:00`
 
   const { data: conflict } = await admin
     .from('appointments')
