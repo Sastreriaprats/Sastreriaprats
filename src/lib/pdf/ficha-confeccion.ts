@@ -207,7 +207,12 @@ function labelForro(v: unknown): string {
   return LABELS_FORRO[String(v).trim()] ?? String(v)
 }
 function labelVueltas(v: unknown): string {
-  return LABELS_VUELTAS[String(v).trim()] ?? String(v)
+  const key = String(v).trim()
+  // Los valores numéricos (3.5/4/4.5/5) son el ANCHO de la vuelta: hay que
+  // anteponer "Con vueltas" para que el taller lo distinga (antes sólo salía
+  // "4 cm" y no quedaba claro que el bajo llevaba vuelta).
+  if (/^[\d.]+$/.test(key)) return `Con vueltas ${LABELS_VUELTAS[key] ?? `${key} cm`}`
+  return LABELS_VUELTAS[key] ?? key
 }
 function labelBragueta(v: unknown): string {
   return LABELS_BRAGUETA[String(v).trim()] ?? String(v)
