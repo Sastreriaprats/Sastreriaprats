@@ -1449,6 +1449,7 @@ export const invoices = pgTable('invoices', {
   saleId: uuid('sale_id').references(() => sales.id, { onDelete: 'set null' }),
   tailoringOrderId: uuid('tailoring_order_id').references(() => tailoringOrders.id, { onDelete: 'set null' }),
   onlineOrderId: uuid('online_order_id'),
+  reservationId: uuid('reservation_id').references(() => productReservations.id, { onDelete: 'set null' }),
   storeId: uuid('store_id').references(() => stores.id, { onDelete: 'set null' }),
   journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id, { onDelete: 'set null' }),
   notes: text('notes'),

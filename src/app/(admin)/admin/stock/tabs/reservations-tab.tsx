@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -10,7 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Loader2, Plus, ChevronLeft, ChevronRight, X, Check, Pencil, Bookmark, Clock, Printer, Euro, Banknote, CreditCard, Smartphone, ArrowRightLeft, Eye, RotateCcw } from 'lucide-react'
+import { Loader2, Plus, ChevronLeft, ChevronRight, X, Check, Pencil, Bookmark, Clock, Printer, Euro, Banknote, CreditCard, Smartphone, ArrowRightLeft, Eye, RotateCcw, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import {
@@ -22,6 +23,7 @@ import {
   fulfillReservationLine,
   addReservationPayment,
 } from '@/actions/reservations'
+import { createInvoiceFromReservationAction } from '@/actions/accounting'
 import { ReservationFormDialog } from '@/components/reservations/reservation-form-dialog'
 import { generateReservationPdf, printReservationPdf, type ReservationTicketData } from '@/components/pos/ticket-pdf'
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
@@ -116,6 +118,7 @@ function getTotalQuantity(r: Reservation): number {
 }
 
 export function ReservationsTab() {
+  const router = useRouter()
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
@@ -147,6 +150,7 @@ export function ReservationsTab() {
   const [paymentSubmitting, setPaymentSubmitting] = useState(false)
 
   const [printingId, setPrintingId] = useState<string | null>(null)
+  const [invoicingId, setInvoicingId] = useState<string | null>(null)
 
   const [actioningLineId, setActioningLineId] = useState<string | null>(null)
 
@@ -380,6 +384,24 @@ export function ReservationsTab() {
       storePhones: storeConfig.phones,
       reason: r.reason,
       notes: r.notes,
+    }
+  }
+
+  const handleGenerateInvoice = async (r: Reservation) => {
+    setInvoicingId(r.id)
+    try {
+      const res = await createInvoiceFromReservationAction({ reservationId: r.id, draft: true })
+      if (!res.success || !res.data) {
+        toast.error('error' in res ? res.error : 'No se pudo generar la factura')
+        return
+      }
+      toast.success(`Borrador ${res.data.invoice_number} creado. Redirigiendo al editor…`)
+      router.push(`/admin/contabilidad?tab=facturas&edit=${res.data.id}`)
+    } catch (err) {
+      console.error('Error generando factura de reserva:', err)
+      toast.error(err instanceof Error ? err.message : 'Error al generar la factura')
+    } finally {
+      setInvoicingId(null)
     }
   }
 
@@ -796,6 +818,18 @@ export function ReservationsTab() {
                     {printingId === viewing.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
                     Imprimir
                   </Button>
+                  {viewing.status !== 'cancelled' && totalNum > 0 && (
+                    <Button
+                      variant="outline"
+                      className="gap-1"
+                      disabled={invoicingId === viewing.id}
+                      title="Generar borrador de factura desde la reserva"
+                      onClick={() => handleGenerateInvoice(viewing)}
+                    >
+                      {invoicingId === viewing.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                      Generar factura
+                    </Button>
+                  )}
                   {canPay && (
                     <Button variant="outline" className="gap-1" onClick={() => { openAddPayment(viewing); setViewing(null) }}>
                       <Euro className="h-4 w-4" /> Añadir pago

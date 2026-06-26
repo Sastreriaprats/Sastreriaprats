@@ -1937,6 +1937,178 @@ export const createInvoiceFromTailoringOrderAction = protectedAction<
   }
 )
 
+// ── Crear factura desde reserva de producto ─────────────────────────────────
+export const createInvoiceFromReservationAction = protectedAction<
+  { reservationId: string; draft?: boolean },
+  { id: string; invoice_number: string; auditEntityId: string; auditDescription: string }
+>(
+  {
+    permission: 'accounting.manage_invoices',
+    auditModule: 'accounting',
+    auditAction: 'create',
+    auditEntity: 'invoice',
+  },
+  async (ctx, { reservationId, draft }) => {
+    const existing = await ctx.adminClient
+      .from('invoices')
+      .select('id, invoice_number')
+      .eq('reservation_id', reservationId)
+      .not('status', 'in', '(cancelled)')
+      .limit(1)
+      .maybeSingle()
+
+    if (existing.data?.id) {
+      const num = (existing.data as { invoice_number: string }).invoice_number
+      return success({
+        id: existing.data.id as string,
+        invoice_number: num,
+        auditEntityId: String(existing.data.id),
+        auditDescription: `Factura ${num}`,
+      })
+    }
+
+    const { data: reservation, error: resError } = await ctx.adminClient
+      .from('product_reservations')
+      .select('id, reservation_number, client_id, store_id')
+      .eq('id', reservationId)
+      .single()
+
+    if (resError || !reservation) return failure('Reserva no encontrada', 'NOT_FOUND')
+
+    // Solo se facturan las líneas que NO están canceladas. Cada una trae el
+    // tipo de IVA del producto para poder desglosar la base imponible.
+    const { data: resLines } = await ctx.adminClient
+      .from('product_reservation_lines')
+      .select(`
+        quantity, unit_price, line_total, status, sort_order,
+        product_variant:product_variants (
+          size, color, variant_sku,
+          product:products ( name, tax_rate )
+        )
+      `)
+      .eq('reservation_id', reservationId)
+      .order('sort_order', { ascending: true })
+
+    const billable = (resLines ?? []).filter((l: any) => l.status !== 'cancelled')
+    if (billable.length === 0) return failure('La reserva no tiene líneas facturables', 'VALIDATION')
+
+    // reserva.unit_price viene CON IVA (PVP). La base imponible de la factura
+    // se obtiene desde line_total para evitar errores acumulados de redondeo,
+    // igual que createInvoiceFromSaleAction.
+    const lines = billable.map((l: any) => {
+      const pv = l.product_variant
+      const prod = pv?.product
+      const name = prod?.name || 'Producto'
+      const variantBits = [pv?.size ? `T.${pv.size}` : null, pv?.color].filter(Boolean).join(' / ')
+      const description = variantBits ? `${name} (${variantBits})` : name
+      const qty = Math.max(1, Number(l.quantity) || 1)
+      const taxRate = Number(prod?.tax_rate) || 21
+      const lineTotal = Number(l.line_total)
+      const unitPriceNoTax = lineTotal / (1 + taxRate / 100) / qty
+      return {
+        description,
+        quantity: qty,
+        unit_price: Number(unitPriceNoTax.toFixed(2)),
+        tax_rate: taxRate,
+        line_total: lineTotal,
+      }
+    })
+
+    let clientName = 'Consumidor final'
+    let clientNif: string | null = null
+    let clientAddress: string | null = null
+    let clientEmail: string | null = null
+    let clientPhone: string | null = null
+    const clientId = (reservation as { client_id?: string }).client_id ?? null
+    if (clientId) {
+      const { data: client } = await ctx.adminClient
+        .from('clients')
+        .select('full_name, company_name, company_nif, document_number, address, postal_code, city, province, country, email, phone')
+        .eq('id', clientId)
+        .single()
+      if (client) {
+        const c = client as { full_name?: string; company_name?: string; company_nif?: string; document_number?: string; address?: string; postal_code?: string; city?: string; province?: string; country?: string; email?: string; phone?: string }
+        clientName = c.full_name || c.company_name || clientName
+        clientNif = c.company_nif || c.document_number || null
+        clientAddress = formatClientAddress(c) || null
+        clientEmail = c.email || null
+        clientPhone = c.phone || null
+      }
+    }
+
+    const invoice_number = await nextInvoiceNumber(ctx.adminClient)
+
+    const subtotal = Number(lines.reduce((s: number, l: any) => s + l.quantity * l.unit_price, 0).toFixed(2))
+    const taxAmount = Number(lines.reduce((s: number, l: any) => s + (l.line_total - l.quantity * l.unit_price), 0).toFixed(2))
+    const total = Number(lines.reduce((s: number, l: any) => s + l.line_total, 0).toFixed(2))
+    const storeId = (reservation as { store_id?: string }).store_id ?? null
+    const today = new Date().toISOString().slice(0, 10)
+    const dueDate = new Date()
+    dueDate.setDate(dueDate.getDate() + 15)
+
+    const { data: inv, error } = await ctx.adminClient
+      .from('invoices')
+      .insert({
+        invoice_number,
+        invoice_series: 'F',
+        invoice_type: 'issued',
+        client_id: clientId,
+        client_name: clientName,
+        client_nif: clientNif,
+        client_address: clientAddress,
+        client_email: clientEmail,
+        client_phone: clientPhone,
+        company_name: 'Sastrería Prats',
+        company_nif: 'B12345678',
+        company_address: 'Madrid, España',
+        invoice_date: today,
+        due_date: dueDate.toISOString().slice(0, 10),
+        subtotal,
+        tax_rate: 21,
+        tax_amount: taxAmount,
+        irpf_rate: 0,
+        irpf_amount: 0,
+        total,
+        status: draft ? 'draft' : 'issued',
+        reservation_id: reservationId,
+        store_id: storeId,
+        created_by: ctx.userId,
+      })
+      .select('id')
+      .single()
+
+    if (error || !inv) {
+      console.error('Error creating invoice from reservation:', error)
+      return failure(error?.message ?? 'Error al crear la factura')
+    }
+
+    const { error: linesError } = await ctx.adminClient
+      .from('invoice_lines')
+      .insert(
+        lines.map((l: any, i: number) => ({
+          invoice_id: inv.id,
+          description: l.description,
+          quantity: l.quantity,
+          unit_price: l.unit_price,
+          tax_rate: l.tax_rate ?? 21,
+          line_total: l.line_total,
+          sort_order: i,
+        }))
+      )
+
+    if (linesError) {
+      console.error('Error creating invoice lines from reservation:', linesError)
+      return failure(linesError.message ?? 'Error al crear las líneas')
+    }
+
+    // En modo draft el asiento se generará al pulsar "Emitir" desde el editor.
+    if (!draft) {
+      createInvoiceJournalEntry(inv.id as string).catch((e) => console.error('Journal entry from reservation invoice:', e))
+    }
+    return success({ id: inv.id as string, invoice_number, auditEntityId: String(inv.id), auditDescription: `Factura ${invoice_number}` })
+  }
+)
+
 // ── Editar factura borrador ───────────────────────────────────────────────────
 export type UpdateInvoiceInput = CreateInvoiceInput & { id: string; conceptOnly?: boolean }
 
