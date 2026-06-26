@@ -186,6 +186,7 @@ function renderProducts(items: AnyRec[] | null): string {
   <td class="muted">${escapeHtml(String(p.sku ?? ''))}</td>
   <td class="right">${p.purchased_units || '—'}</td>
   <td class="right">${p.units || 0}</td>
+  <td class="right">${p.current_stock || '—'}</td>
   <td class="right">${fmtEur(p.revenue as number)}</td>
   <td class="right">${hasCost ? fmtEur(p.unit_cost as number) : '—'}</td>
   <td class="right">${hasCost ? fmtEur(p.margin as number) : '—'}</td>
@@ -194,10 +195,10 @@ function renderProducts(items: AnyRec[] | null): string {
   }).join('')
   return `<h2>Top productos</h2>
 <table>
-  <thead><tr><th>#</th><th>Producto</th><th>SKU</th><th class="right">Compradas</th><th class="right">Vendidas</th><th class="right">Facturación</th><th class="right">Coste ud.</th><th class="right">Margen</th><th class="right">Margen %</th></tr></thead>
+  <thead><tr><th>#</th><th>Producto</th><th>SKU</th><th class="right">Compradas</th><th class="right">Vendidas</th><th class="right">Stock</th><th class="right">Facturación</th><th class="right">Coste ud.</th><th class="right">Margen</th><th class="right">Margen %</th></tr></thead>
   <tbody>${rows}</tbody>
 </table>
-<p class="muted" style="font-size:11px;margin-top:6px">Margen = facturación sin IVA − (uds vendidas × coste). Compradas = unidades pedidas a proveedor en el periodo.</p>`
+<p class="muted" style="font-size:11px;margin-top:6px">Datos históricos totales del producto (no dependen del filtro de fechas). Margen = facturación sin IVA − (uds vendidas × coste). Compradas = Stock actual + Vendidas (stock inicial cargado a mano + recepciones de proveedor).</p>`
 }
 
 function renderTailors(items: AnyRec[] | null): string {

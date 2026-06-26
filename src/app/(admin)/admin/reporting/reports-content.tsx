@@ -55,7 +55,7 @@ type CompareData = {
   changes: { revenue: number; newClients: number; ordersCount: number }
 }
 
-type ProductItem = { product_id: string; name: string; sku: string; units: number; revenue: number; revenue_net: number; unit_cost: number; cogs: number; margin: number; purchased_units: number; purchased_cost: number; breakdown: { size: string; store_id: string; store_name: string; units: number; revenue: number }[] }
+type ProductItem = { product_id: string; name: string; sku: string; units: number; revenue: number; revenue_net: number; unit_cost: number; cogs: number; margin: number; purchased_units: number; purchased_cost: number; current_stock: number; breakdown: { size: string; store_id: string; store_name: string; units: number; revenue: number }[] }
 
 type TailorItem = {
   tailor_id: string; name: string; orders: number; revenue: number
@@ -180,7 +180,7 @@ export function ReportsContent() {
           previous_start: prevStartStr, previous_end: prevEndStr,
           store_id: storeId, channel, tax_mode,
         }),
-        getTopProducts({ start_date: start, end_date: end, store_id: storeId, channel, limit: 50, tax_mode }),
+        getTopProducts({ start_date: start, end_date: end, store_id: storeId, channel, limit: 500, tax_mode }),
         getTailorPerformance({ start_date: start, end_date: end, store_id: storeId, channel, tax_mode }),
         getClientsAnalytics({ start_date: start, end_date: end, store_id: storeId }),
         getClientsAdvancedAnalytics({ start_date: start, end_date: end, store_id: storeId }),
@@ -582,6 +582,14 @@ export function ReportsContent() {
               <TabsContent value="sales"><VentasTab salesData={salesData} timePatternData={timePatternData} storeBreakdown={salesStoreBreakdown} /></TabsContent>
               <TabsContent value="bytype"><TailoringByTypeTab data={tailoringByCat} storeName={activeStoreName} storeBreakdown={tailoringStoreBreakdown} /></TabsContent>
               <TabsContent value="products">
+                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 mb-4 text-xs text-amber-900">
+                  <Layers className="h-4 w-4 shrink-0 mt-0.5" />
+                  <p>
+                    <strong>Histórico total del producto.</strong> Compradas, vendidas y rentabilidad
+                    son de toda la vida del producto: <strong>no</strong> dependen del filtro de fechas ni de tienda de arriba
+                    (sí del modo IVA). El stock inicial se cargó de una vez, por eso se mide siempre completo.
+                  </p>
+                </div>
                 <Input
                   placeholder="Filtrar por producto o SKU..."
                   value={productSearch}

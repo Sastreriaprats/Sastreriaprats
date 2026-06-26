@@ -10,7 +10,7 @@ type Breakdown = { size: string; store_id: string; store_name: string; units: nu
 type ProductItem = {
   product_id: string; name: string; sku: string; units: number; revenue: number
   revenue_net: number; unit_cost: number; cogs: number; margin: number
-  purchased_units: number; purchased_cost: number
+  purchased_units: number; purchased_cost: number; current_stock: number
   breakdown: Breakdown[]
 }
 
@@ -36,31 +36,32 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
     return next
   })
 
-  // Totales del periodo (sobre todo lo que devuelve el informe, no solo el top 10).
+  // Totales históricos (sobre todo lo que devuelve el informe, no solo el top 10).
   const tot = products.reduce(
     (a, p) => ({
       purchasedUnits: a.purchasedUnits + p.purchased_units,
       purchasedCost: a.purchasedCost + p.purchased_cost,
       soldUnits: a.soldUnits + p.units,
+      currentStock: a.currentStock + p.current_stock,
       revenueNet: a.revenueNet + p.revenue_net,
       cogs: a.cogs + p.cogs,
       margin: a.margin + p.margin,
     }),
-    { purchasedUnits: 0, purchasedCost: 0, soldUnits: 0, revenueNet: 0, cogs: 0, margin: 0 },
+    { purchasedUnits: 0, purchasedCost: 0, soldUnits: 0, currentStock: 0, revenueNet: 0, cogs: 0, margin: 0 },
   )
 
   return (
     <div className="space-y-6">
-      {/* KPIs: comprado vs vendido vs margen */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* KPIs: comprado vs vendido vs stock vs margen */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-4 pb-3">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-muted-foreground">Comprado a proveedor</span>
+              <span className="text-xs text-muted-foreground">Comprado (inicial + proveedor)</span>
               <ShoppingCart className="h-4 w-4 text-muted-foreground" />
             </div>
             <p className="text-2xl font-bold">{tot.purchasedUnits} <span className="text-base font-normal text-muted-foreground">uds</span></p>
-            <p className="text-xs text-muted-foreground">{formatCurrency(tot.purchasedCost)} en coste</p>
+            <p className="text-xs text-muted-foreground">{formatCurrency(tot.purchasedCost)} a coste</p>
           </CardContent>
         </Card>
         <Card>
@@ -71,6 +72,16 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
             </div>
             <p className="text-2xl font-bold">{tot.soldUnits} <span className="text-base font-normal text-muted-foreground">uds</span></p>
             <p className="text-xs text-muted-foreground">{formatCurrency(tot.revenueNet)} sin IVA</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4 pb-3">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs text-muted-foreground">Stock actual</span>
+              <Package className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <p className="text-2xl font-bold">{tot.currentStock} <span className="text-base font-normal text-muted-foreground">uds</span></p>
+            <p className="text-xs text-muted-foreground">sin vender · {formatCurrency(tot.currentStock > 0 ? tot.purchasedCost - tot.cogs : 0)} a coste</p>
           </CardContent>
         </Card>
         <Card>
@@ -139,6 +150,7 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
                 <TableHead>Producto</TableHead>
                 <TableHead className="text-right">Compradas</TableHead>
                 <TableHead className="text-right">Vendidas</TableHead>
+                <TableHead className="text-right">Stock</TableHead>
                 <TableHead className="text-right">Facturación</TableHead>
                 <TableHead className="text-right">Coste ud.</TableHead>
                 <TableHead className="text-right">Margen</TableHead>
@@ -168,6 +180,7 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
                       </TableCell>
                       <TableCell className="text-right tabular-nums">{p.purchased_units || <span className="text-muted-foreground">—</span>}</TableCell>
                       <TableCell className="text-right tabular-nums">{p.units}</TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">{p.current_stock || '—'}</TableCell>
                       <TableCell className="text-right font-bold tabular-nums">{formatCurrency(p.revenue)}</TableCell>
                       <TableCell className="text-right tabular-nums text-muted-foreground">{hasCost ? formatCurrency(p.unit_cost) : '—'}</TableCell>
                       <TableCell className={`text-right tabular-nums ${hasCost ? marginClass(mp) : 'text-muted-foreground'}`}>{hasCost ? formatCurrency(p.margin) : '—'}</TableCell>
@@ -176,7 +189,7 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
                     {isOpen && hasDetail && (
                       <TableRow className="bg-muted/30">
                         <TableCell />
-                        <TableCell colSpan={7} className="py-2">
+                        <TableCell colSpan={8} className="py-2">
                           <table className="w-full text-xs">
                             <thead>
                               <tr className="text-muted-foreground">
@@ -206,7 +219,7 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
             </TableBody>
           </Table>
           <p className="text-[11px] text-muted-foreground mt-3">
-            <strong>Compradas</strong>: unidades pedidas a proveedor con fecha de pedido en el periodo (toda la empresa, sin filtro de tienda).
+            <strong>Compradas</strong> = <strong>Stock + Vendidas</strong>: todo el género que ha entrado del producto (stock inicial cargado a mano al darlo de alta + recepciones de proveedor). Se calcula como lo que queda en stock más lo vendido, porque el stock inicial se cargó directo sin dejar registro de compra; mermas o devoluciones a proveedor son un sesgo menor. Valor a coste estimado con el coste actual del producto.
             <strong> Margen</strong> = facturación sin IVA − (uds vendidas × coste del producto); se calcula <strong>siempre sin IVA</strong> aunque la facturación se muestre con IVA. Los productos sin coste registrado aparecen con &laquo;—&raquo; en margen.
           </p>
         </CardContent>

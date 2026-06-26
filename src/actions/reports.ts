@@ -445,41 +445,51 @@ export const getTopProducts = protectedAction<
     unit_cost: number     // coste unitario del producto (cost_price, neto)
     cogs: number          // coste de lo vendido = units × unit_cost
     margin: number        // margen bruto = revenue_net − cogs
-    // ── Compras a proveedor (unidades repuestas en el periodo) ────────────────
-    purchased_units: number  // unidades pedidas a proveedor (order_date en rango)
-    purchased_cost: number   // € de coste de esas compras
+    // ── Entradas de inventario (histórico total) ──────────────────────────────
+    purchased_units: number  // uds que han ENTRADO = stock actual + vendidas (inicial a mano + compras)
+    purchased_cost: number   // valor a coste de esas entradas (purchased_units × unit_cost)
+    current_stock: number    // unidades que quedan hoy en stock
     // Desglose por TALLA y TIENDA dentro del producto (nº6, expandible).
     breakdown: { size: string; store_id: string; store_name: string; units: number; revenue: number }[]
   }[]
 >(
   { permission: 'reports.view', auditModule: 'reports' },
-  async (ctx, { start_date, end_date, store_id, channel = 'all', limit = 10, tax_mode = 'with_tax' }) => {
+  // NOTA: esta pestaña es un análisis HISTÓRICO TOTAL del producto (compradas vs
+  // vendidas vs rentabilidad de toda su vida). Por eso NO aplica el filtro de
+  // fechas ni el de tienda de la página (decisión de producto, jun-2026): el
+  // stock inicial se cargó de una vez en abril/mayo y se quería ver siempre.
+  async (ctx, { channel = 'all', limit = 10, tax_mode = 'with_tax' }) => {
     if (channel === 'tailoring') return success([])
     const net = tax_mode === 'without_tax'
+
     // Agrupamos por PRODUCTO BASE (products.id), no por variante/talla. La línea
     // de venta apunta a la variante (product_variant_id); subimos a su producto
     // (product_variants.product_id -> products) para consolidar todas las tallas
     // de un mismo producto en una sola fila. La `description` incluye la talla
     // (".. T.52"), por eso agrupar por description duplicaba el producto.
-    let q = ctx.adminClient
-      .from('sale_lines')
-      .select('description, sku, quantity, line_total, tax_rate, sales!inner(created_at, status, store_id, stores(name)), product_variants(size, cost_price_override, products(id, name, sku, cost_price))')
-      .gte('sales.created_at', start_date)
-      .lte('sales.created_at', end_date + 'T23:59:59')
-      .eq('sales.status', 'completed')
-    if (store_id) q = q.eq('sales.store_id', store_id)
-    const { data } = await q
-
-    // Excluir cobros pendientes — no son productos vendidos
-    const filteredLines = (data || []).filter(
-      (line: any) => !String(line.description || '').startsWith('Cobro pendiente')
-    )
+    //
+    // Sin filtro de fecha (histórico) las líneas pueden pasar de 1000 → paginamos.
+    const PAGE = 1000
+    const filteredLines: any[] = []
+    for (let from = 0; ; from += PAGE) {
+      const { data } = await ctx.adminClient
+        .from('sale_lines')
+        .select('description, sku, quantity, line_total, tax_rate, sales!inner(status, store_id, stores(name)), product_variants(size, cost_price_override, products(id, name, sku, cost_price))')
+        .eq('sales.status', 'completed')
+        .range(from, from + PAGE - 1)
+      if (!data?.length) break
+      // Excluir cobros pendientes — no son productos vendidos
+      for (const line of data as any[]) {
+        if (!String(line.description || '').startsWith('Cobro pendiente')) filteredLines.push(line)
+      }
+      if (data.length < PAGE) break
+    }
 
     type Bucket = { size: string; store_id: string; store_name: string; units: number; revenue: number }
     type Acc = {
       product_id: string; name: string; sku: string
       units: number; revenue: number; revenueNet: number
-      unitCost: number; purchasedUnits: number; purchasedCost: number
+      unitCost: number; currentStock: number; purchasedUnits: number; purchasedCost: number
       bd: Record<string, Bucket>
     }
     const products: Record<string, Acc> = {}
@@ -502,7 +512,7 @@ export const getTopProducts = protectedAction<
       // Coste unitario: override de la variante si existe, si no el del producto.
       const unitCost = Number(v?.cost_price_override) || Number(p?.cost_price) || 0
 
-      const prod = (products[key] ||= { product_id: (p?.id as string) || '', name, sku, units: 0, revenue: 0, revenueNet: 0, unitCost, purchasedUnits: 0, purchasedCost: 0, bd: {} })
+      const prod = (products[key] ||= { product_id: (p?.id as string) || '', name, sku, units: 0, revenue: 0, revenueNet: 0, unitCost, currentStock: 0, purchasedUnits: 0, purchasedCost: 0, bd: {} })
       if (!prod.unitCost && unitCost) prod.unitCost = unitCost
       prod.units += units
       prod.revenue += revenue
@@ -513,32 +523,43 @@ export const getTopProducts = protectedAction<
       b.revenue += revenue
     }
 
-    // ── Compras a proveedor en el periodo ───────────────────────────────────
-    // Líneas de pedido a proveedor mapeadas a un producto (variante -> producto),
-    // por order_date dentro del rango, excluyendo cancelados. No se filtra por
-    // tienda: los pedidos a proveedor son compra de empresa (destination_store_id
-    // casi siempre nulo). `quantity` está en unidades para producto de boutique.
-    const { data: purchaseLines } = await ctx.adminClient
-      .from('supplier_order_lines')
-      .select('quantity, unit_price, total_price, product_variants!inner(product_id, products(id, name, sku, cost_price)), supplier_orders!inner(order_date, status)')
-      .not('product_variant_id', 'is', null)
-      .gte('supplier_orders.order_date', start_date)
-      .lte('supplier_orders.order_date', end_date)
-      .neq('supplier_orders.status', 'cancelled')
-
-    for (const line of (purchaseLines || []) as any[]) {
-      const v = Array.isArray(line.product_variants) ? line.product_variants[0] : line.product_variants
-      const p = v ? (Array.isArray(v.products) ? v.products[0] : v.products) : null
-      if (!p?.id) continue
-      const key = `prod:${p.id}`
-      const qty = Number(line.quantity) || 0
-      const cost = Number(line.total_price) || (Number(line.unit_price) || 0) * qty
-      // El producto puede no haberse vendido en el periodo: lo damos de alta con
-      // ventas a 0 para que también aparezca "comprado pero no vendido".
-      const prod = (products[key] ||= { product_id: p.id, name: (p.name as string) || '', sku: (p.sku as string) || '', units: 0, revenue: 0, revenueNet: 0, unitCost: Number(p.cost_price) || 0, purchasedUnits: 0, purchasedCost: 0, bd: {} })
-      if (!prod.unitCost) prod.unitCost = Number(p.cost_price) || 0
-      prod.purchasedUnits += qty
-      prod.purchasedCost += cost
+    // ── Entradas de inventario (histórico total) ─────────────────────────────
+    // "Compradas" = todo el género que ha ENTRADO de cada producto (stock inicial
+    // metido a mano al darlo de alta + recepciones de proveedor).
+    //
+    // OJO: el stock inicial se cargó DIRECTO en stock_levels (sin generar un
+    // stock_movement), así que stock_movements NO es fiable para esto. Modelo
+    // robusto por conservación: lo que entró = lo que queda + lo que se vendió.
+    //   compradas = stock_actual + uds_vendidas
+    // No depende de que el movimiento se registrara. (Mermas/devoluciones a
+    // proveedor son un sesgo menor.) Paginamos: stock_levels es grande.
+    const STOCK_PAGE = 1000
+    for (let from = 0; ; from += STOCK_PAGE) {
+      const { data } = await ctx.adminClient
+        .from('stock_levels')
+        .select('quantity, product_variants!inner(product_id, products(id, name, sku, cost_price))')
+        .gt('quantity', 0)
+        .range(from, from + STOCK_PAGE - 1)
+      if (!data?.length) break
+      for (const row of data as any[]) {
+        const v = Array.isArray(row.product_variants) ? row.product_variants[0] : row.product_variants
+        const p = v ? (Array.isArray(v.products) ? v.products[0] : v.products) : null
+        if (!p?.id) continue
+        const key = `prod:${p.id}`
+        const qty = Number(row.quantity) || 0
+        // Producto con stock pero sin ventas: lo damos de alta para que aparezca
+        // como "comprado pero no vendido" (stock muerto).
+        const prod = (products[key] ||= { product_id: p.id, name: (p.name as string) || '', sku: (p.sku as string) || '', units: 0, revenue: 0, revenueNet: 0, unitCost: Number(p.cost_price) || 0, currentStock: 0, purchasedUnits: 0, purchasedCost: 0, bd: {} })
+        if (!prod.unitCost) prod.unitCost = Number(p.cost_price) || 0
+        prod.currentStock += qty
+      }
+      if (data.length < STOCK_PAGE) break
+    }
+    // Compradas = stock actual + vendidas; valor a coste estimado con el coste
+    // actual del producto (no guardamos precio de compra histórico por unidad).
+    for (const prod of Object.values(products)) {
+      prod.purchasedUnits = prod.currentStock + prod.units
+      prod.purchasedCost = prod.purchasedUnits * prod.unitCost
     }
 
     return success(
@@ -552,7 +573,7 @@ export const getTopProducts = protectedAction<
           return {
             product_id: p.product_id, name: p.name, sku: p.sku, units: p.units, revenue: p.revenue,
             revenue_net: p.revenueNet, unit_cost: p.unitCost, cogs, margin: p.revenueNet - cogs,
-            purchased_units: p.purchasedUnits, purchased_cost: p.purchasedCost,
+            purchased_units: p.purchasedUnits, purchased_cost: p.purchasedCost, current_stock: p.currentStock,
             breakdown: Object.values(p.bd).sort((a, b) => b.revenue - a.revenue),
           }
         })
