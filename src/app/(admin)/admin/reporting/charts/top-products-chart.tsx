@@ -1,7 +1,7 @@
 'use client'
 
 import { Fragment, useState } from 'react'
-import { ChevronRight, ShoppingCart, Package, TrendingUp } from 'lucide-react'
+import { ChevronRight, ShoppingCart, Package, TrendingUp, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatCurrency } from '@/lib/utils'
@@ -23,8 +23,11 @@ function marginClass(p: number) {
   return 'text-red-600'
 }
 
+type SortKey = 'name' | 'purchased_units' | 'units' | 'current_stock' | 'revenue' | 'unit_cost' | 'margin' | 'margin_pct'
+
 export function TopProductsChart({ products }: { products: ProductItem[] }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'revenue', dir: 'desc' })
   if (!products.length) return <p className="text-center text-muted-foreground py-12">Sin datos</p>
 
   const top10 = products.slice(0, 10)
@@ -48,6 +51,46 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
       margin: a.margin + p.margin,
     }),
     { purchasedUnits: 0, purchasedCost: 0, soldUnits: 0, currentStock: 0, revenueNet: 0, cogs: 0, margin: 0 },
+  )
+
+  // Orden de la tabla de detalle: clic en cabecera alterna asc/desc.
+  const sortVal = (p: ProductItem, key: SortKey): number | string => {
+    switch (key) {
+      case 'name': return (p.name || '').toLowerCase()
+      case 'purchased_units': return p.purchased_units
+      case 'units': return p.units
+      case 'current_stock': return p.current_stock
+      case 'unit_cost': return p.unit_cost
+      case 'margin': return p.margin
+      case 'margin_pct': return pct(p.margin, p.revenue_net)
+      default: return p.revenue
+    }
+  }
+  const sortedProducts = [...products].sort((a, b) => {
+    const va = sortVal(a, sort.key), vb = sortVal(b, sort.key)
+    const cmp = typeof va === 'string' || typeof vb === 'string'
+      ? String(va).localeCompare(String(vb))
+      : (va as number) - (vb as number)
+    return sort.dir === 'asc' ? cmp : -cmp
+  })
+  const onSort = (key: SortKey) => setSort(prev =>
+    prev.key === key
+      ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+      : { key, dir: key === 'name' ? 'asc' : 'desc' },
+  )
+  const sortHead = (key: SortKey, label: string, align: 'left' | 'right' = 'right') => (
+    <TableHead className={align === 'right' ? 'text-right' : ''}>
+      <button
+        type="button"
+        onClick={() => onSort(key)}
+        className={`inline-flex items-center gap-1 hover:text-foreground transition-colors ${sort.key === key ? 'text-foreground font-semibold' : ''}`}
+      >
+        {label}
+        {sort.key === key
+          ? (sort.dir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)
+          : <ArrowUpDown className="h-3 w-3 opacity-40" />}
+      </button>
+    </TableHead>
   )
 
   return (
@@ -147,18 +190,18 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
             <TableHeader>
               <TableRow>
                 <TableHead>#</TableHead>
-                <TableHead>Producto</TableHead>
-                <TableHead className="text-right">Compradas</TableHead>
-                <TableHead className="text-right">Vendidas</TableHead>
-                <TableHead className="text-right">Stock</TableHead>
-                <TableHead className="text-right">Facturación</TableHead>
-                <TableHead className="text-right">Coste ud.</TableHead>
-                <TableHead className="text-right">Margen</TableHead>
-                <TableHead className="text-right">Margen %</TableHead>
+                {sortHead('name', 'Producto', 'left')}
+                {sortHead('purchased_units', 'Compradas')}
+                {sortHead('units', 'Vendidas')}
+                {sortHead('current_stock', 'Stock')}
+                {sortHead('revenue', 'Facturación')}
+                {sortHead('unit_cost', 'Coste ud.')}
+                {sortHead('margin', 'Margen')}
+                {sortHead('margin_pct', 'Margen %')}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {products.map((p, i) => {
+              {sortedProducts.map((p, i) => {
                 const k = keyOf(p, i)
                 const isOpen = expanded.has(k)
                 const hasDetail = p.breakdown && p.breakdown.length > 0
