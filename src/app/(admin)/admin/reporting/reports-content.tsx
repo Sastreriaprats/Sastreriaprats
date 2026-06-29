@@ -315,6 +315,17 @@ export function ReportsContent() {
 
   const taxLabel = taxMode === 'without_tax' ? 'Sin IVA (base imponible)' : 'Con IVA'
 
+  // Productos filtrados por el buscador (nombre o SKU). Se usa tanto en la tabla
+  // como en la exportación, para que el PDF/Excel descargue SOLO lo filtrado.
+  const filteredProducts = (() => {
+    const q = normalizeSearchTerm(productSearch)
+    if (!q) return topProducts
+    return topProducts.filter(p =>
+      normalizeSearchTerm(p.name || '').includes(q) ||
+      normalizeSearchTerm(p.sku || '').includes(q),
+    )
+  })()
+
   const buildExportPayload = () => ({
     ...dateRange,
     tab: activeTab,
@@ -326,7 +337,7 @@ export function ReportsContent() {
     taxLabel,
     salesData,
     compareData,
-    topProducts,
+    topProducts: filteredProducts,
     tailorData,
     clientsData,
     clientsAdvanced,
@@ -596,16 +607,7 @@ export function ReportsContent() {
                   onChange={(e) => setProductSearch(e.target.value)}
                   className="max-w-sm mb-4"
                 />
-                <TopProductsChart
-                  products={(() => {
-                    const q = normalizeSearchTerm(productSearch)
-                    if (!q) return topProducts
-                    return topProducts.filter(p =>
-                      normalizeSearchTerm(p.name || '').includes(q) ||
-                      normalizeSearchTerm(p.sku || '').includes(q),
-                    )
-                  })()}
-                />
+                <TopProductsChart products={filteredProducts} />
               </TabsContent>
               <TabsContent value="tailors"><TailorTable data={tailorData} /></TabsContent>
               <TabsContent value="clients"><ClientsChart data={clientsData} advanced={clientsAdvanced} showByStore={showStoreBreakdown} /></TabsContent>
