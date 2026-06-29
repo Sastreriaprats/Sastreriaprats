@@ -501,6 +501,10 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
   const [saving, setSaving] = useState(false)
   const [fabricsStock, setFabricsStock] = useState<Array<{ id: string; fabric_code: string | null; name: string }>>([])
   const [tejidoPopoverOpen, setTejidoPopoverOpen] = useState(false)
+  // Texto del buscador de tejido, ENLAZADO al valor actual. Antes el CommandInput
+  // no estaba controlado y su onValueChange vaciaba tejidoStock*/tejidoCatalogo
+  // por el mero hecho de tocar el buscador (bug: el tejido desaparecía de la ficha).
+  const [tejidoSearch, setTejidoSearch] = useState('')
 
   // Selectores buscables para Cortador y Oficial (configuration.cortador /
   // configuration.oficial en el JSONB de la línea — son strings libres, no FK).
@@ -831,7 +835,15 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
               </div>
               <div className="space-y-1">
                 <Label>Tejido</Label>
-                <Popover open={tejidoPopoverOpen} onOpenChange={setTejidoPopoverOpen}>
+                <Popover
+                  open={tejidoPopoverOpen}
+                  onOpenChange={(open) => {
+                    setTejidoPopoverOpen(open)
+                    // Al abrir, el buscador parte del tejido ACTUAL (no vacío) para
+                    // que se vea y para no dispararse un onValueChange en blanco.
+                    if (open) setTejidoSearch(str(cfg.tejidoStockNombre ?? cfg.tejidoCatalogo ?? cfg.tejido))
+                  }}
+                >
                   <PopoverTrigger asChild>
                     <Button
                       type="button"
@@ -850,15 +862,20 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
                     <Command>
                       <CommandInput
                         placeholder="Buscar por código o nombre..."
+                        value={tejidoSearch}
                         onValueChange={(v) => {
-                          // El texto escrito se queda en tejidoCatalogo por si no
-                          // coincide con ningún tejido del stock (texto libre).
-                          setCfg((prev) => ({
-                            ...prev,
-                            tejidoStockId: '',
-                            tejidoStockNombre: '',
-                            tejidoCatalogo: v,
-                          }))
+                          setTejidoSearch(v)
+                          // Texto libre: solo se persiste si NO está vacío. Tocar el
+                          // buscador y dejarlo vacío NO debe borrar el tejido que ya
+                          // tenía (bug Teresa). La selección real va por onSelect.
+                          if (v.trim() !== '') {
+                            setCfg((prev) => ({
+                              ...prev,
+                              tejidoStockId: '',
+                              tejidoStockNombre: '',
+                              tejidoCatalogo: v,
+                            }))
+                          }
                         }}
                       />
                       <CommandList>
@@ -874,12 +891,14 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
                                 key={f.id}
                                 value={`${f.fabric_code ?? ''} ${f.name}`}
                                 onSelect={() => {
+                                  const nombre = `${f.fabric_code ?? ''} — ${f.name}`.trim()
                                   setCfg((prev) => ({
                                     ...prev,
                                     tejidoStockId: f.id,
-                                    tejidoStockNombre: `${f.fabric_code ?? ''} — ${f.name}`.trim(),
+                                    tejidoStockNombre: nombre,
                                     tejidoCatalogo: '',
                                   }))
+                                  setTejidoSearch(nombre)
                                   setTejidoPopoverOpen(false)
                                 }}
                               >

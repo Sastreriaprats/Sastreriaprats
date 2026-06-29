@@ -59,6 +59,9 @@ export interface FichaConfeccionOrder {
     unit_price?: number
     finishing_notes?: string | null
     configuration?: Record<string, unknown>
+    /** Columna canónica del tejido (wizard/edición la persisten aquí). La ficha
+     *  cae a ella cuando configuration.tejido* está vacío. */
+    fabric_description?: string | null
   }> | null
 }
 
@@ -375,7 +378,10 @@ function getFichaFromOrder(order: FichaConfeccionOrder): Record<string, unknown>
   const medidasStr = getMedidasStr(clientMeasValues, medidasPrefix, medidasKeys)
   const prendaLabel = slugToPrendaLabel(prendaSlug)
 
-  const tejidoStr = String(config.tejidoStockNombre || config.tejidoCatalogo || config.tejido || '').trim()
+  // Fallback a la columna canónica `fabric_description` cuando la configuration
+  // no trae tejido (líneas de wizard/edición, o que el buscador vació). El dato
+  // del tejido vive en fabric_description aunque no esté en configuration.
+  const tejidoStr = String(config.tejidoStockNombre || config.tejidoCatalogo || config.tejido || first?.fabric_description || '').trim()
   const metrosVal = config.tejidoMetros || config.metros
   let caracteristicasStr: string
   if (tejidoStr && metrosVal !== undefined && metrosVal !== null && metrosVal !== '') {
@@ -838,6 +844,7 @@ export async function generateFichaConfeccionPDF(order: FichaConfeccionOrder): P
 export type TailoringOrderLine = {
   configuration?: Record<string, unknown>
   garment_types?: { name?: string; code?: string } | null
+  fabric_description?: string | null
 }
 
 function isLineCamiseria(line: TailoringOrderLine): boolean {
@@ -920,7 +927,7 @@ const PUNO_LABELS: Record<string, string> = {
 
 export function buildCamiseriaDocDefinition(
   order: FichaConfeccionOrder,
-  line: { configuration?: Record<string, unknown> },
+  line: { configuration?: Record<string, unknown>; fabric_description?: string | null },
   lineIndex: number,
   fontSizeDelta: number = 0,
   // El talón INFERIOR es la copia de taller del oficial y NUNCA debe mostrar
@@ -1152,7 +1159,9 @@ export function buildCamiseriaDocDefinition(
 
   // Tabla TEJIDO + PRECIO (65% / 35%). En la copia inferior (talón del oficial)
   // el precio NO se muestra: el TEJIDO ocupa todo el ancho.
-  const tejidoStr = String(cfg.tejido ?? '—').trim()
+  // Fallback a la columna canónica `fabric_description` cuando config.tejido está
+  // vacío (mismo criterio que la ficha no-camisa). El tejido vive en esa columna.
+  const tejidoStr = String(cfg.tejido || line.fabric_description || '—').trim()
   const precioLinea = Number(cfg.precio ?? 0)
 
   // Tabla TEJIDO. Superior: 65/35 con bloque PRECIO. Inferior: ancho completo
@@ -1305,7 +1314,7 @@ export function buildCamiseriaDocDefinition(
  */
 export async function generateFichaForLineCamiseria(
   order: FichaConfeccionOrder,
-  line: { configuration?: Record<string, unknown> },
+  line: { configuration?: Record<string, unknown>; fabric_description?: string | null },
   lineIndex: number
 ): Promise<void> {
   const orderNum = (order.order_number || order.id).toString().replace(/\s+/g, '-')
