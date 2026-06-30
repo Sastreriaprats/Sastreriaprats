@@ -9,6 +9,7 @@ import { success, failure } from '@/lib/errors'
 import { createSaleJournalEntry } from '@/actions/accounting-triggers'
 import { normalizeSearchTerm } from '@/lib/utils'
 import { formatClientAddress } from '@/lib/clients/format'
+import { resolveClientIdsForSearch } from '@/lib/server/query-helpers'
 
 /**
  * Lista de empleados que pueden realizar ventas en una tienda.
@@ -541,12 +542,9 @@ export const listTickets = protectedAction<{
     if (clientSearch && clientSearch.trim()) {
       const q = normalizeSearchTerm(clientSearch)
       if (q) {
-        const { data: clients } = await ctx.adminClient
-          .from('clients')
-          .select('id')
-          .ilike('search_text', `%${q}%`)
-          .limit(500)
-        const ids = (clients ?? []).map((c: any) => c.id)
+        // Multi-palabra por nombre de cliente (tokens AND). El nº de ticket
+        // (ticketSearch, más abajo) NO se tokeniza: es un código, va entero.
+        const ids = await resolveClientIdsForSearch(ctx.adminClient, q)
         if (ids.length === 0) return success({ data: [], total: 0, page, pageSize, totalPages: 0 })
         query = query.in('client_id', ids)
       }
@@ -677,12 +675,8 @@ export const listSastreriaTickets = protectedAction<{
     if (clientSearch && clientSearch.trim()) {
       const q = normalizeSearchTerm(clientSearch)
       if (q) {
-        const { data: clients } = await ctx.adminClient
-          .from('clients')
-          .select('id')
-          .ilike('search_text', `%${q}%`)
-          .limit(500)
-        clientIdFilter = (clients ?? []).map((c: any) => c.id)
+        // Multi-palabra por nombre de cliente (tokens AND).
+        clientIdFilter = await resolveClientIdsForSearch(ctx.adminClient, q)
         if (clientIdFilter.length === 0) {
           return success({ data: [], total: 0, page, pageSize, totalPages: 0 })
         }
@@ -1397,17 +1391,16 @@ export const listVouchers = protectedAction<{
       if (codeNorm) query = query.ilike('search_text', `%${codeNorm}%`)
     }
 
+    // Filtro por cliente (multi-palabra, tokens AND). Resolvemos los ids una sola
+    // vez y los reutilizamos en la query de la página y en la de totales, para que
+    // ambas cuadren. El código de vale (codeSearch, arriba) va entero, no se tokeniza.
+    let voucherClientIds: string[] | null = null
     if (clientSearch && clientSearch.trim()) {
       const q = normalizeSearchTerm(clientSearch)
       if (q) {
-        const { data: clients } = await ctx.adminClient
-          .from('clients')
-          .select('id')
-          .ilike('search_text', `%${q}%`)
-          .limit(500)
-        const ids = (clients ?? []).map((c: any) => c.id)
-        if (ids.length === 0) return success({ data: [], total: 0, page, pageSize, totalPages: 0, totals: { originalAmount: 0, remainingAmount: 0 } })
-        query = query.in('client_id', ids)
+        voucherClientIds = await resolveClientIdsForSearch(ctx.adminClient, q)
+        if (voucherClientIds.length === 0) return success({ data: [], total: 0, page, pageSize, totalPages: 0, totals: { originalAmount: 0, remainingAmount: 0 } })
+        query = query.in('client_id', voucherClientIds)
       }
     }
 
@@ -1432,16 +1425,8 @@ export const listVouchers = protectedAction<{
       if (dateFrom) aggQuery = aggQuery.gte('issued_date', dateFrom)
       if (dateTo) aggQuery = aggQuery.lte('issued_date', dateTo)
       if (codeSearch && codeSearch.trim()) aggQuery = aggQuery.ilike('code', `%${codeSearch.trim().toUpperCase()}%`)
-      if (clientSearch && clientSearch.trim()) {
-        const q = clientSearch.trim()
-        const { data: clients } = await ctx.adminClient
-          .from('clients')
-          .select('id')
-          .or(`full_name.ilike.%${q}%,client_code.ilike.%${q}%`)
-          .limit(500)
-        const ids = (clients ?? []).map((c: any) => c.id)
-        if (ids.length > 0) aggQuery = aggQuery.in('client_id', ids)
-      }
+      // Mismos ids de cliente que la query de la página (resueltos arriba con tokens).
+      if (voucherClientIds) aggQuery = aggQuery.in('client_id', voucherClientIds)
       const { data: aggRows } = await aggQuery
       for (const r of aggRows ?? []) {
         totals.originalAmount += Number(r.original_amount ?? 0)

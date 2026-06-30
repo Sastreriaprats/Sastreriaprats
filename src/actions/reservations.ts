@@ -3,6 +3,7 @@
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { normalizeSearchTerm } from '@/lib/utils'
+import { resolveClientIdsForSearch } from '@/lib/server/query-helpers'
 import {
   createReservationSchema,
   updateReservationSchema,
@@ -55,15 +56,13 @@ export const listReservations = protectedAction<ListReservationsInput, ListResul
     // Búsqueda inteligente: por nº de reserva o por cliente (nombre/código/teléfono).
     // Resolvemos primero los IDs de clientes que matchean contra clients.search_text
     // (unaccent + lower), luego construimos un OR sobre reservation_number y client_id.
+    // Multi-palabra por nombre de cliente (tokens AND) vía el helper central, igual
+    // que pedidos/arreglos. El nº de reserva (reservation_number, más abajo) va
+    // entero, no se tokeniza.
     let clientIdsFromSearch: string[] | null = null
     const searchTerm = normalizeSearchTerm(input.search || '')
     if (searchTerm.length > 0) {
-      const { data: matches } = await ctx.adminClient
-        .from('clients')
-        .select('id')
-        .ilike('search_text', `%${searchTerm}%`)
-        .limit(200)
-      clientIdsFromSearch = (matches ?? []).map((c: any) => c.id as string)
+      clientIdsFromSearch = await resolveClientIdsForSearch(ctx.adminClient, searchTerm)
     }
 
     let query = ctx.adminClient
