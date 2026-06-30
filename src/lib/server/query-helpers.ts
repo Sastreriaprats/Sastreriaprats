@@ -233,17 +233,23 @@ async function fuzzyFallback<T>(
  * pre-buscan los ids aquí. Primero por substring (`clients.search_text`) y, si
  * no hay ninguno, fallback difuso (trigram) para tolerar erratas en el nombre.
  * `safeTerm` debe venir ya normalizado/saneado por el caller.
+ *
+ * Multi-palabra: cada token debe estar presente (AND), no la cadena completa.
+ * Así "pablo salvador" encuentra a "Pablo Salvador Polo" aunque el nombre esté
+ * partido entre first_name/last_name, en otro orden o con espaciado distinto.
+ * (Mismo criterio que `queryList` para `search_text`; preserva el unaccent que
+ * ya aplicó `normalizeSearchTerm` en el caller.)
  */
 export async function resolveClientIdsForSearch(
   admin: ReturnType<typeof createAdminClient>,
   safeTerm: string,
 ): Promise<string[]> {
   if (!safeTerm) return []
-  const { data } = await admin
-    .from('clients')
-    .select('id')
-    .ilike('search_text', `%${safeTerm}%`)
-    .limit(500)
+  let query = admin.from('clients').select('id')
+  for (const token of safeTerm.split(/\s+/).filter(Boolean)) {
+    query = query.ilike('search_text', `%${token}%`)
+  }
+  const { data } = await query.limit(500)
   const ids = (data ?? []).map((r: { id: string }) => r.id)
   if (ids.length > 0) return ids
   // Sin coincidencias exactas → reintento difuso (p.ej. "jorje llavona").
