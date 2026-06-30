@@ -69,6 +69,9 @@ export const getSalesReport = protectedAction<
       let salesQuery = ctx.adminClient
         .from('sale_lines')
         .select('quantity, line_total, tax_rate, created_at, sales!inner(store_id, stores(name), status, created_at, sale_type)')
+        // Excluye las líneas de cobro de pedido del TPV (mig 247/248): son sastrería,
+        // no boutique, y ya se cuentan por tailoring_orders/tailoring_order_payments.
+        .is('tailoring_order_id', null)
         .gte('sales.created_at', start_date)
         .lte('sales.created_at', end_date + 'T23:59:59')
         .eq('sales.status', 'completed')
@@ -261,6 +264,8 @@ export const getTailoringByCategory = protectedAction<
       .from('sale_lines')
       .select('quantity, line_total, tax_rate, sales!inner(store_id, stores(name), status, created_at, sale_type)')
       .eq('sales.status', 'completed')
+      // Excluye cobros de pedido del TPV (mig 247/248): sastrería, no boutique.
+      .is('tailoring_order_id', null)
       .in('sales.sale_type', [BOUTIQUE_SALE_TYPE, GIFT_CARD_SALE_TYPE])
       .gte('sales.created_at', start_date)
       .lte('sales.created_at', end_date + 'T23:59:59')
@@ -349,6 +354,9 @@ export const getComparePeriods = protectedAction<
       .select('line_total, tax_rate, sales!inner(status, store_id, created_at)')
       .gte('sales.created_at', minStart).lte('sales.created_at', rangeEnd)
       .eq('sales.status', 'completed')
+      // Excluye cobros de pedido del TPV (mig 247/248): el % de cambio cuadra con el
+      // total de getSalesReport, que también los excluye. Sastrería = tailoring_orders.
+      .is('tailoring_order_id', null)
     if (store_id) saleLinesQ = saleLinesQ.eq('sales.store_id', store_id)
 
     let tailoringQ = ctx.adminClient.from('tailoring_orders')
@@ -738,6 +746,8 @@ export const getSalesByStore = protectedAction<
       .gte('sales.created_at', start_date)
       .lte('sales.created_at', end_date + 'T23:59:59')
       .eq('sales.status', 'completed')
+      // Excluye cobros de pedido del TPV (mig 247/248): sastrería, no boutique.
+      .is('tailoring_order_id', null)
       .in('sales.sale_type', [BOUTIQUE_SALE_TYPE, GIFT_CARD_SALE_TYPE])
     if (store_id) saleLinesQ = saleLinesQ.eq('sales.store_id', store_id)
 
@@ -833,6 +843,9 @@ export const getSalesByEmployee = protectedAction<
       .gte('sales.created_at', start_date)
       .lte('sales.created_at', end_date + 'T23:59:59')
       .eq('sales.status', 'completed')
+      // Excluye cobros de pedido del TPV (mig 247/248): sastrería, no boutique. Aquí
+      // evita además el DOBLE conteo (el cobro ya cuenta en tailoring_total vía pagos).
+      .is('tailoring_order_id', null)
     if (store_id) saleLinesQ = saleLinesQ.eq('sales.store_id', store_id)
 
     // Cobrado por payment_date (fecha real del cobro), no created_at (tecleo).
@@ -1013,6 +1026,9 @@ export const getCommissionsByEmployee = protectedAction<
       .gte('sales.created_at', start_date)
       .lte('sales.created_at', end_date + 'T23:59:59')
       .eq('sales.status', 'completed')
+      // Excluye cobros de pedido del TPV (mig 247/248): un cobro de pedido no es
+      // venta con comisión (hoy inflaba la base "Sin asignar", salesperson_id NULL).
+      .is('tailoring_order_id', null)
 
     if (store_id) query = query.eq('sales.store_id', store_id)
 
