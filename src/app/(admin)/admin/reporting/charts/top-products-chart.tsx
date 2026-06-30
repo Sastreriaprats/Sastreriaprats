@@ -7,11 +7,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { formatCurrency } from '@/lib/utils'
 
 type Breakdown = { size: string; store_id: string; store_name: string; units: number; revenue: number }
+type SizeBreakdown = { size: string; comprado: number; vendido: number; queda: number }
 type ProductItem = {
   product_id: string; name: string; sku: string; units: number; revenue: number
   revenue_net: number; unit_cost: number; cogs: number; margin: number
   purchased_units: number; purchased_cost: number; current_stock: number
   breakdown: Breakdown[]
+  sizeBreakdown: SizeBreakdown[]
 }
 
 const pct = (margin: number, base: number) => (base > 0 ? (margin / base) * 100 : 0)
@@ -204,7 +206,7 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
               {sortedProducts.map((p, i) => {
                 const k = keyOf(p, i)
                 const isOpen = expanded.has(k)
-                const hasDetail = p.breakdown && p.breakdown.length > 0
+                const hasDetail = p.sizeBreakdown && p.sizeBreakdown.length > 0
                 const mp = pct(p.margin, p.revenue_net)
                 const hasCost = p.unit_cost > 0
                 return (
@@ -237,20 +239,26 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
                             <thead>
                               <tr className="text-muted-foreground">
                                 <th className="text-left font-medium pb-1">Talla</th>
-                                <th className="text-left font-medium pb-1">Tienda</th>
-                                <th className="text-right font-medium pb-1">Uds</th>
-                                <th className="text-right font-medium pb-1">Importe</th>
+                                <th className="text-right font-medium pb-1">Comprado</th>
+                                <th className="text-right font-medium pb-1">Vendido</th>
+                                <th className="text-right font-medium pb-1">Queda</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {p.breakdown.map((b, j) => (
+                              {p.sizeBreakdown.map((b, j) => (
                                 <tr key={j}>
                                   <td className="py-0.5 font-mono">{b.size}</td>
-                                  <td className="py-0.5">{b.store_name}</td>
-                                  <td className="py-0.5 text-right">{b.units}</td>
-                                  <td className="py-0.5 text-right">{formatCurrency(b.revenue)}</td>
+                                  <td className="py-0.5 text-right tabular-nums">{b.comprado}</td>
+                                  <td className="py-0.5 text-right tabular-nums">{b.vendido}</td>
+                                  <td className="py-0.5 text-right tabular-nums">{b.queda}</td>
                                 </tr>
                               ))}
+                              <tr className="border-t font-semibold">
+                                <td className="py-0.5">Total</td>
+                                <td className="py-0.5 text-right tabular-nums">{p.sizeBreakdown.reduce((s, b) => s + b.comprado, 0)}</td>
+                                <td className="py-0.5 text-right tabular-nums">{p.sizeBreakdown.reduce((s, b) => s + b.vendido, 0)}</td>
+                                <td className="py-0.5 text-right tabular-nums">{p.sizeBreakdown.reduce((s, b) => s + b.queda, 0)}</td>
+                              </tr>
                             </tbody>
                           </table>
                         </TableCell>

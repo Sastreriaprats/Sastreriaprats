@@ -444,6 +444,24 @@ export const getComparePeriods = protectedAction<
   }
 )
 
+// Orden natural de tallas para el desglose: numéricas por valor (46,48,50…) antes
+// que las de letra; letras por su orden real (XS<S<M<L<XL…); "sin talla" (—) al final.
+const LETTER_SIZE_ORDER = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', '4XL']
+function compareSizes(a: string, b: string): number {
+  const na = Number(a), nb = Number(b)
+  const aNum = a.trim() !== '' && !Number.isNaN(na)
+  const bNum = b.trim() !== '' && !Number.isNaN(nb)
+  if (aNum && bNum) return na - nb
+  if (aNum !== bNum) return aNum ? -1 : 1
+  const ia = LETTER_SIZE_ORDER.indexOf(a.toUpperCase()), ib = LETTER_SIZE_ORDER.indexOf(b.toUpperCase())
+  if (ia !== -1 && ib !== -1) return ia - ib
+  if (ia !== -1) return -1
+  if (ib !== -1) return 1
+  if (a === '—') return 1
+  if (b === '—') return -1
+  return a.localeCompare(b)
+}
+
 export const getTopProducts = protectedAction<
   { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel; limit?: number; tax_mode?: TaxMode },
   {
@@ -459,6 +477,9 @@ export const getTopProducts = protectedAction<
     current_stock: number    // unidades que quedan hoy en stock
     // Desglose por TALLA y TIENDA dentro del producto (nº6, expandible).
     breakdown: { size: string; store_id: string; store_name: string; units: number; revenue: number }[]
+    // Desglose por TALLA (agregando tiendas): comprado/vendido/queda. comprado =
+    // queda + vendido (conservación, igual que el nivel producto). Mejora pedida por Mónica.
+    sizeBreakdown: { size: string; comprado: number; vendido: number; queda: number }[]
   }[]
 >(
   { permission: 'reports.view', auditModule: 'reports' },
@@ -499,6 +520,7 @@ export const getTopProducts = protectedAction<
       units: number; revenue: number; revenueNet: number
       unitCost: number; currentStock: number; purchasedUnits: number; purchasedCost: number
       bd: Record<string, Bucket>
+      stockBySize: Record<string, number>   // queda por talla (quantity), para el desglose
     }
     const products: Record<string, Acc> = {}
     for (const line of filteredLines as any[]) {
@@ -520,7 +542,7 @@ export const getTopProducts = protectedAction<
       // Coste unitario: override de la variante si existe, si no el del producto.
       const unitCost = Number(v?.cost_price_override) || Number(p?.cost_price) || 0
 
-      const prod = (products[key] ||= { product_id: (p?.id as string) || '', name, sku, units: 0, revenue: 0, revenueNet: 0, unitCost, currentStock: 0, purchasedUnits: 0, purchasedCost: 0, bd: {} })
+      const prod = (products[key] ||= { product_id: (p?.id as string) || '', name, sku, units: 0, revenue: 0, revenueNet: 0, unitCost, currentStock: 0, purchasedUnits: 0, purchasedCost: 0, bd: {}, stockBySize: {} })
       if (!prod.unitCost && unitCost) prod.unitCost = unitCost
       prod.units += units
       prod.revenue += revenue
@@ -545,7 +567,7 @@ export const getTopProducts = protectedAction<
     for (let from = 0; ; from += STOCK_PAGE) {
       const { data } = await ctx.adminClient
         .from('stock_levels')
-        .select('quantity, product_variants!inner(product_id, products(id, name, sku, cost_price))')
+        .select('quantity, product_variants!inner(size, product_id, products(id, name, sku, cost_price))')
         .gt('quantity', 0)
         .range(from, from + STOCK_PAGE - 1)
       if (!data?.length) break
@@ -557,9 +579,11 @@ export const getTopProducts = protectedAction<
         const qty = Number(row.quantity) || 0
         // Producto con stock pero sin ventas: lo damos de alta para que aparezca
         // como "comprado pero no vendido" (stock muerto).
-        const prod = (products[key] ||= { product_id: p.id, name: (p.name as string) || '', sku: (p.sku as string) || '', units: 0, revenue: 0, revenueNet: 0, unitCost: Number(p.cost_price) || 0, currentStock: 0, purchasedUnits: 0, purchasedCost: 0, bd: {} })
+        const prod = (products[key] ||= { product_id: p.id, name: (p.name as string) || '', sku: (p.sku as string) || '', units: 0, revenue: 0, revenueNet: 0, unitCost: Number(p.cost_price) || 0, currentStock: 0, purchasedUnits: 0, purchasedCost: 0, bd: {}, stockBySize: {} })
         if (!prod.unitCost) prod.unitCost = Number(p.cost_price) || 0
         prod.currentStock += qty
+        const stSize = (v?.size as string) || '—'
+        prod.stockBySize[stSize] = (prod.stockBySize[stSize] || 0) + qty
       }
       if (data.length < STOCK_PAGE) break
     }
@@ -578,11 +602,23 @@ export const getTopProducts = protectedAction<
         .slice(0, limit)
         .map((p) => {
           const cogs = p.units * p.unitCost
+          // Desglose por TALLA agregando tiendas: vendido (colapsando el bd talla×tienda),
+          // queda (stockBySize), comprado = queda + vendido (conservación). Unión de tallas
+          // vistas en ventas Y en stock (una talla puede tener stock sin ventas o al revés).
+          const vendidoBySize: Record<string, number> = {}
+          for (const b of Object.values(p.bd)) vendidoBySize[b.size] = (vendidoBySize[b.size] || 0) + b.units
+          const sizes = new Set([...Object.keys(vendidoBySize), ...Object.keys(p.stockBySize)])
+          const sizeBreakdown = [...sizes].map((size) => {
+            const vendido = vendidoBySize[size] || 0
+            const queda = p.stockBySize[size] || 0
+            return { size, comprado: queda + vendido, vendido, queda }
+          }).sort((a, b) => compareSizes(a.size, b.size))
           return {
             product_id: p.product_id, name: p.name, sku: p.sku, units: p.units, revenue: p.revenue,
             revenue_net: p.revenueNet, unit_cost: p.unitCost, cogs, margin: p.revenueNet - cogs,
             purchased_units: p.purchasedUnits, purchased_cost: p.purchasedCost, current_stock: p.currentStock,
             breakdown: Object.values(p.bd).sort((a, b) => b.revenue - a.revenue),
+            sizeBreakdown,
           }
         })
     )
