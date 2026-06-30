@@ -60,7 +60,7 @@ export interface CommissionPlan {
 export interface CommissionAssignment {
   id: string
   employee_id: string
-  plan_id: string
+  plan_id: string | null
   is_active: boolean
 }
 
@@ -485,21 +485,21 @@ export async function deleteCommissionPlan(id: string): Promise<{ success?: bool
   }
 }
 
-/** Asigna (o quita, plan_id=null) un plan a un empleado. */
+/**
+ * Cambia el plan de un empleado que YA está en la lista de comisionables.
+ * plan_id=null deja la fila con "sin plan" (sigue en la lista, sin comisión); el
+ * empleado solo se quita de la lista con removeCommissionEmployee.
+ */
 export async function assignCommissionPlan(input: { employee_id: string; plan_id: string | null }): Promise<{ success?: boolean; error?: string }> {
   try {
     const auth = await requireConfigEdit()
     if ('error' in auth) return { error: auth.error }
     const { user, admin } = auth
 
-    if (!input.plan_id) {
-      const { error } = await admin.from('commission_assignments').delete().eq('employee_id', input.employee_id)
-      if (error) return { error: error.message }
-    } else {
-      const { error } = await admin.from('commission_assignments')
-        .upsert({ employee_id: input.employee_id, plan_id: input.plan_id, is_active: true, created_by: user.id, updated_at: new Date().toISOString() }, { onConflict: 'employee_id' })
-      if (error) return { error: error.message }
-    }
+    const { error } = await admin.from('commission_assignments')
+      .upsert({ employee_id: input.employee_id, plan_id: input.plan_id, is_active: true, created_by: user.id, updated_at: new Date().toISOString() }, { onConflict: 'employee_id' })
+    if (error) return { error: error.message }
+
     await admin.rpc('log_audit', {
       p_user_id: user.id, p_action: 'update', p_module: 'config',
       p_entity_type: 'commission_assignment', p_entity_id: input.employee_id,
@@ -511,6 +511,55 @@ export async function assignCommissionPlan(input: { employee_id: string; plan_id
   } catch (err) {
     console.error('[assignCommissionPlan]', err)
     return { error: err instanceof Error ? err.message : 'Error al asignar el plan' }
+  }
+}
+
+/** Añade empleados a la lista de "usuarios que comisionan" (sin plan por defecto). */
+export async function addCommissionEmployees(employeeIds: string[]): Promise<{ success?: boolean; error?: string }> {
+  try {
+    const auth = await requireConfigEdit()
+    if ('error' in auth) return { error: auth.error }
+    const { user, admin } = auth
+    const ids = Array.from(new Set(employeeIds.filter(Boolean)))
+    if (ids.length === 0) return { error: 'No hay empleados que añadir' }
+
+    const rows = ids.map(id => ({ employee_id: id, plan_id: null, is_active: true, created_by: user.id, updated_at: new Date().toISOString() }))
+    // ignoreDuplicates: no pisa el plan de quien ya esté en la lista.
+    const { error } = await admin.from('commission_assignments').upsert(rows, { onConflict: 'employee_id', ignoreDuplicates: true })
+    if (error) return { error: error.message }
+
+    await admin.rpc('log_audit', {
+      p_user_id: user.id, p_action: 'create', p_module: 'config',
+      p_entity_type: 'commission_assignment', p_entity_id: ids[0],
+      p_description: `Añadidos ${ids.length} empleado(s) a comisiones`, p_new_data: { employee_ids: ids },
+    })
+    revalidatePath('/admin/configuracion'); revalidatePath('/admin/reporting')
+    return { success: true }
+  } catch (err) {
+    console.error('[addCommissionEmployees]', err)
+    return { error: err instanceof Error ? err.message : 'Error al añadir empleados' }
+  }
+}
+
+/** Quita un empleado de la lista de comisionables (borra su asignación). */
+export async function removeCommissionEmployee(employeeId: string): Promise<{ success?: boolean; error?: string }> {
+  try {
+    const auth = await requireConfigEdit()
+    if ('error' in auth) return { error: auth.error }
+    const { user, admin } = auth
+    const { error } = await admin.from('commission_assignments').delete().eq('employee_id', employeeId)
+    if (error) return { error: error.message }
+
+    await admin.rpc('log_audit', {
+      p_user_id: user.id, p_action: 'delete', p_module: 'config',
+      p_entity_type: 'commission_assignment', p_entity_id: employeeId,
+      p_description: 'Empleado retirado de comisiones',
+    })
+    revalidatePath('/admin/configuracion'); revalidatePath('/admin/reporting')
+    return { success: true }
+  } catch (err) {
+    console.error('[removeCommissionEmployee]', err)
+    return { error: err instanceof Error ? err.message : 'Error al quitar el empleado' }
   }
 }
 

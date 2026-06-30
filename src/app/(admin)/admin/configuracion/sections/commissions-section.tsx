@@ -12,10 +12,11 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Percent, Plus, Pencil, Trash2, Loader2, Users, Star } from 'lucide-react'
+import { Percent, Plus, Pencil, Trash2, Loader2, Users, Star, UserPlus, X } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   getCommissionConfig, upsertCommissionPlan, deleteCommissionPlan, assignCommissionPlan,
+  addCommissionEmployees, removeCommissionEmployee,
   upsertGroupBonus, deleteGroupBonus,
   type CommissionPlan, type CommissionAssignment, type GroupBonus,
 } from '@/actions/commissions'
@@ -45,6 +46,8 @@ export function CommissionsSection() {
   const [planDraft, setPlanDraft] = useState<CommissionPlan | null>(null)
   const [bonusDraft, setBonusDraft] = useState<GroupBonus | null>(null)
   const [saving, setSaving] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
+  const [addSelection, setAddSelection] = useState<string[]>([])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -105,6 +108,25 @@ export function CommissionsSection() {
     load()
   }
 
+  const addEmployees = async () => {
+    if (addSelection.length === 0) { setAddOpen(false); return }
+    setSaving(true)
+    const res = await addCommissionEmployees(addSelection)
+    setSaving(false)
+    if (res.error) { toast.error(res.error); return }
+    toast.success(addSelection.length === 1 ? 'Empleado añadido' : `${addSelection.length} empleados añadidos`)
+    setAddOpen(false); setAddSelection([])
+    load()
+  }
+
+  const removeEmployee = async (employeeId: string, name: string) => {
+    if (!confirm(`¿Quitar a ${name} de las comisiones?`)) return
+    const res = await removeCommissionEmployee(employeeId)
+    if (res.error) { toast.error(res.error); return }
+    toast.success('Empleado retirado de comisiones')
+    load()
+  }
+
   const saveBonus = async () => {
     if (!bonusDraft) return
     if (bonusDraft.store_ids.length === 0) { toast.error('Selecciona al menos una tienda'); return }
@@ -148,6 +170,12 @@ export function CommissionsSection() {
     if (p.base_sastreria) out.push('Sastrería')
     return out.length ? out.join(' + ') : '—'
   }
+
+  // "Usuarios que comisionan" = empleados con una fila de asignación. El resto
+  // (dados de alta pero que no comisionan) no aparecen hasta que se añaden.
+  const commissionableIds = new Set(config.assignments.map(a => a.employee_id))
+  const commissionables = config.employees.filter(e => commissionableIds.has(e.id))
+  const addableEmployees = config.employees.filter(e => !commissionableIds.has(e.id))
 
   return (
     <div className="space-y-6">
@@ -203,29 +231,45 @@ export function CommissionsSection() {
 
       {/* ── Asignación ─────────────────────────────────────────────────────── */}
       <Card>
-        <CardHeader><CardTitle className="text-base flex items-center gap-2"><Users className="h-4 w-4" /> Asignación por empleado</CardTitle></CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2"><Users className="h-4 w-4" /> Usuarios que comisionan</CardTitle>
+          <Button size="sm" className="gap-1" onClick={() => { setAddSelection([]); setAddOpen(true) }} disabled={addableEmployees.length === 0}>
+            <UserPlus className="h-3 w-3" /> Añadir empleado
+          </Button>
+        </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow><TableHead>Empleado</TableHead><TableHead className="w-64">Plan de comisión</TableHead></TableRow>
-            </TableHeader>
-            <TableBody>
-              {config.employees.map(emp => (
-                <TableRow key={emp.id}>
-                  <TableCell className="font-medium">{emp.full_name}</TableCell>
-                  <TableCell>
-                    <Select value={assignedPlanFor(emp.id) || 'none'} onValueChange={v => changeAssignment(emp.id, v === 'none' ? '' : v)}>
-                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Sin comisión</SelectItem>
-                        {config.plans.filter(p => p.is_active).map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          {commissionables.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4">
+              Ningún usuario comisiona todavía. Pulsa &ldquo;Añadir empleado&rdquo; para incluir a quienes deban comisionar.
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow><TableHead>Empleado</TableHead><TableHead className="w-64">Plan de comisión</TableHead><TableHead className="w-12" /></TableRow>
+              </TableHeader>
+              <TableBody>
+                {commissionables.map(emp => (
+                  <TableRow key={emp.id}>
+                    <TableCell className="font-medium">{emp.full_name}</TableCell>
+                    <TableCell>
+                      <Select value={assignedPlanFor(emp.id) || 'none'} onValueChange={v => changeAssignment(emp.id, v === 'none' ? '' : v)}>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Sin plan</SelectItem>
+                          {config.plans.filter(p => p.is_active).map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button size="icon" variant="ghost" className="h-7 w-7 text-red-600" title="Quitar de comisiones" onClick={() => removeEmployee(emp.id, emp.full_name)}>
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 
@@ -266,6 +310,28 @@ export function CommissionsSection() {
           )}
         </CardContent>
       </Card>
+
+      {/* ── Diálogo: añadir empleados que comisionan ───────────────────────── */}
+      <Dialog open={addOpen} onOpenChange={o => { if (!o) { setAddOpen(false); setAddSelection([]) } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Añadir empleados que comisionan</DialogTitle></DialogHeader>
+          {addableEmployees.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-2">Todos los empleados activos ya están en la lista.</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-2 max-h-72 overflow-y-auto rounded-md border p-2">
+              {addableEmployees.map(emp => (
+                <label key={emp.id} className="flex items-center gap-2 text-sm">
+                  <Checkbox checked={addSelection.includes(emp.id)} onCheckedChange={c => setAddSelection(toggle(addSelection, emp.id, !!c))} /> {emp.full_name}
+                </label>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setAddOpen(false); setAddSelection([]) }}>Cancelar</Button>
+            <Button onClick={addEmployees} disabled={saving || addSelection.length === 0}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : `Añadir${addSelection.length ? ` (${addSelection.length})` : ''}`}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Diálogo de plan ────────────────────────────────────────────────── */}
       <Dialog open={!!planDraft} onOpenChange={o => { if (!o) setPlanDraft(null) }}>
