@@ -267,9 +267,11 @@ export const listSupplierInvoices = protectedAction<
       q = q.eq('status', status)
     }
     if (supplierSearch && supplierSearch.trim()) {
+      // Multi-palabra: cada token (AND) sobre search_text (unaccent: nº factura +
+      // supplier_name, mig 142). El número va incluido → buscar por nº sigue casando.
       const normalized = normalizeSearchTerm(supplierSearch)
-      if (normalized) {
-        q = q.ilike('search_text', `%${normalized}%`)
+      for (const token of normalized.split(/\s+/).filter(Boolean)) {
+        q = q.ilike('search_text', `%${token}%`)
       }
     }
     if (dateFrom) q = q.gte('due_date', dateFrom)

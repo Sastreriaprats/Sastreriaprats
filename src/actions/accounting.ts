@@ -282,7 +282,16 @@ export const getInvoices = protectedAction<
     if (status && status !== 'all') q = q.eq('status', status === 'sent' ? 'issued' : status)
     if (dateFrom) q = q.gte('invoice_date', dateFrom)
     if (dateTo) q = q.lte('invoice_date', dateTo)
-    if (search) q = q.or(`invoice_number.ilike.%${search}%,client_name.ilike.%${search}%`)
+    if (search) {
+      // Multi-palabra: cada token debe aparecer (AND) en search_text (columna
+      // generada unaccent = nº de factura + client_name, mig 246). El nº va
+      // incluido, así que buscar por número sigue casando; y "pablo salvador"
+      // encuentra al cliente esté el nombre como esté (orden/tildes).
+      const normalized = normalizeSearchTerm(search)
+      for (const token of normalized.split(/\s+/).filter(Boolean)) {
+        q = q.ilike('search_text', `%${token}%`)
+      }
+    }
 
     const { data } = await q
     return success((data || []).map((r: Record<string, unknown>) => ({
@@ -356,9 +365,11 @@ export const getEstimates = protectedAction<
 
     if (status && status !== 'all') q = q.eq('status', status)
     if (search) {
+      // Multi-palabra: cada token (AND) sobre search_text (unaccent: nº presupuesto
+      // + client_name, mig 246). El número va incluido → buscar por nº sigue casando.
       const normalized = normalizeSearchTerm(search)
-      if (normalized) {
-        q = q.or(`estimate_number.ilike.%${normalized}%,client_name.ilike.%${normalized}%`)
+      for (const token of normalized.split(/\s+/).filter(Boolean)) {
+        q = q.ilike('search_text', `%${token}%`)
       }
     }
 
