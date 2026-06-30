@@ -1407,6 +1407,20 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
         const lineTotal = round2(unitPrice - discountAmount)
         const sortOrder = line.sort_order ?? i
 
+        // Config ACTUAL de BD de esta línea (estado fresco). Fusionamos la config
+        // entrante DEBAJO para que un guardado de PEDIDO nunca pise las opciones de
+        // ficha (bragueta/pliegues/bolsillos/conf*) que SOLO edita el diálogo de
+        // ficha y que "Editar pedido" no toca. Las claves que ese diálogo SÍ posee
+        // (cortador, oficial, medidas, tejido) llegan en line.configuration y ganan
+        // en el overlay. Si la ficha vació una opción, BD ya la tiene vacía y el
+        // merge la respeta (no la resucita). Defensa en el único punto que escribe
+        // configuration de líneas → cubre el diálogo actual y cualquier caller futuro.
+        const before = line.id ? linesBeforeArr.find((l) => String(l.id) === line.id) : undefined
+        const beforeConfig = (before as { configuration?: Record<string, unknown> } | undefined)?.configuration ?? {}
+        const mergedConfiguration = before
+          ? { ...beforeConfig, ...((line.configuration as Record<string, unknown>) ?? {}) }
+          : line.configuration
+
         const row: Record<string, any> = {
           garment_type_id: line.garment_type_id,
           line_type: line.line_type,
@@ -1425,12 +1439,11 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
           model_name: line.model_name?.toString().trim() || null,
           model_size: line.model_size?.toString().trim() || null,
           finishing_notes: line.finishing_notes?.toString().trim() || null,
-          configuration: withPrendaSlug(line.configuration, gtSlugMap.get(line.garment_type_id)),
+          configuration: withPrendaSlug(mergedConfiguration, gtSlugMap.get(line.garment_type_id)),
           sort_order: sortOrder,
         }
 
         if (line.id) {
-          const before = linesBeforeArr.find((l) => String(l.id) === line.id)
           // Detectar si hubo cambio real comparando campos editables
           let changed = false
           if (before) {

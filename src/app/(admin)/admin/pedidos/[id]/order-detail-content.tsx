@@ -204,6 +204,13 @@ export function OrderDetailContent({ order }: { order: any }) {
       />
 
       <EditOrderDialog
+        // Remonta el diálogo cuando cambia el pedido (su `updated_at` se bumpea en
+        // CADA guardado, incl. el de "Editar ficha"). Así su snapshot interno de
+        // líneas se resincroniza con BD y nunca reenvía una configuration vieja que
+        // pise las opciones de ficha (fix staleness; el merge en updateOrderAction
+        // es la otra mitad de la defensa). El remount ocurre con el diálogo cerrado
+        // (tras el refresh post-guardado), así que no interrumpe ninguna edición.
+        key={String((order as { updated_at?: string })?.updated_at ?? order?.id ?? '')}
         open={showEditDialog}
         onOpenChange={setShowEditDialog}
         order={order}
