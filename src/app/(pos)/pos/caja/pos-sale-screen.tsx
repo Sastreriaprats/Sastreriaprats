@@ -1140,6 +1140,12 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
         product_variant_id: l.product_variant_id,
         reservation_id: l.reservation_id ?? null,
         reservation_line_id: l.reservation_line_id ?? null,
+        // Cobro de PEDIDO de sastrería desde el TPV: marca la línea con su pedido
+        // (mig 247/248) para que los informes la EXCLUYAN de boutique sin duplicar
+        // sastrería (que ya vive en tailoring_order_payments). Se deriva de cobro_ref
+        // (única fuente, cubre las 3 vías: deep-link + panel de cobros). Producto de
+        // boutique y cobros de arreglo → null (NULL = boutique real). No toca sale_type.
+        tailoring_order_id: l.cobro_ref?.entity_type === 'tailoring_order' ? l.cobro_ref.entity_id : null,
         description: l.description,
         sku: l.sku,
         quantity: l.quantity,
