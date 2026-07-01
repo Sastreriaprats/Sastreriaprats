@@ -188,6 +188,16 @@ listBlock([
   [b('Reabrir una sesión cerrada'),t(' (botón "Reabrir"): mientras esté abierta, los nuevos cobros y retiradas de esa tienda se atribuyen a esa sesión, no a una nueva. No se puede reabrir si la tienda ya tiene otra caja abierta.')],
   [b('Borrar una sesión'),t(': solo si está '),b('vacía'),t(' (sin ventas ni retiradas).')],
 ])
+H3('Si la caja te descuadra, arréglalo tú')
+para([t('El efectivo esperado se calcula así: fondo inicial + ventas en efectivo − devoluciones − retiradas. Si la caja te descuadra (o el esperado sale negativo), casi siempre es una '),b('retirada mal puesta'),t('. Para corregirlo tú mismo:')])
+listBlock([
+  'Ve a Contabilidad y abre la sesión de caja del día.',
+  'Busca la retirada en la lista de movimientos y corrígela con el lápiz (cambiar importe o motivo) o bórrala con la papelera.',
+  'El efectivo esperado y el descuadre se recalculan solos. Vuelve al cierre, cuenta el cajón y cuadra.',
+],{ordered:true})
+box({fill:AMBER_BG,border:AMBER_BD,title:'No la edites desde "Movimientos"',items:[
+  {parts:[t('Editar una retirada desde Contabilidad » Movimientos NO corrige el arqueo: solo cambia el apunte contable (y puede meterle IVA sin querer). Una retirada se corrige SIEMPRE desde la sesión de caja, como arriba.')]},
+]})
 H3('Cancelar un pedido')
 para([t('Abre el pedido, pulsa "Estado del pedido", elige "Cancelado" y confirma. Según si el pedido ya se entregó:')])
 listBlock([
