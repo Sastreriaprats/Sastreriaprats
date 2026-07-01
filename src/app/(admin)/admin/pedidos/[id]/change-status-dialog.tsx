@@ -28,7 +28,14 @@ export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus,
   const [notes, setNotes] = useState('')
 
   const allStatuses = getStatusesFor(orderType)
-  const allowedStatuses = allStatuses.filter(s => s !== currentStatus)
+  // El estado a EXCLUIR es el de la PRENDA seleccionada (cuando se aplica a una
+  // concreta); si no, el del pedido. Antes se excluía siempre el del pedido, lo
+  // que ocultaba el estado deseado para una prenda que va por detrás (p.ej. no
+  // dejaba poner "Tejido pedido a fabricante" a una prenda en "Creado" si el
+  // pedido ya figuraba en ese estado por otras prendas más avanzadas).
+  const selectedLine = lineId && lineId !== 'all' ? lines.find((l) => l.id === lineId) : null
+  const referenceStatus = (selectedLine?.status as string | undefined) ?? currentStatus
+  const allowedStatuses = allStatuses.filter(s => s !== referenceStatus)
 
 
   const { execute, isLoading } = useAction(changeOrderStatus, {
