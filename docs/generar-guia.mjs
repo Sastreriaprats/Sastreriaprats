@@ -113,7 +113,7 @@ doc.font(FN).fontSize(14).fillColor(INK).text('Manual práctico por roles',M,doc
 doc.moveDown(2)
 doc.font(FB).fontSize(13).fillColor(NAVY).text('Administrador   ·   Sastre   ·   Vendedor',M,doc.y,{width:CW,align:'center'})
 doc.y=PH-150
-doc.font(FN).fontSize(10).fillColor(MUTE).text('Junio de 2026',M,doc.y,{width:CW,align:'center'})
+doc.font(FN).fontSize(10).fillColor(MUTE).text('Julio de 2026',M,doc.y,{width:CW,align:'center'})
 
 // ════════ INTRO ════════
 H1('Antes de empezar')
@@ -174,6 +174,20 @@ listBlock([
   'Pulsa "Guardar". Queda reflejado en la caja y la contabilidad.',
 ],{ordered:true})
 para([t('Para editar o borrar un movimiento manual, usa los botones de su propia fila en la lista de Movimientos.')])
+H3('Editar o borrar una retirada de efectivo')
+para([t('Una retirada de caja (una extracción de efectivo o un gasto pagado desde el cajón) NO se corrige desde "Movimientos": se corrige en su propia sesión de caja. Ve a '),nav('Contabilidad'),t(', abre la '),b('sesión de caja'),t(' del día y la tienda donde se hizo, y en la lista de movimientos, sobre la retirada, verás dos iconos:')])
+listBlock([
+  [b('Lápiz (editar)'),t(': cambia el importe o el motivo si solo eso estaba mal.')],
+  [b('Papelera (borrar)'),t(': elimina la retirada entera.')],
+])
+para([t('En ambos casos la plataforma '),b('ajusta el arqueo sola'),t(' (efectivo esperado y descuadre), esté la caja abierta o cerrada. Antes de borrar sale un aviso de confirmación.')])
+H3('Corregir, reabrir o borrar una sesión de caja')
+para([t('Desde el detalle de una '),b('sesión de caja'),t(' en '),nav('Contabilidad'),t(' puedes:')])
+listBlock([
+  [b('Editar el arqueo'),t(': corrige el fondo inicial, o el efectivo contado y las notas de cierre (botón "Editar arqueo de caja"). La plataforma recalcula el efectivo esperado y el descuadre.')],
+  [b('Reabrir una sesión cerrada'),t(' (botón "Reabrir"): mientras esté abierta, los nuevos cobros y retiradas de esa tienda se atribuyen a esa sesión, no a una nueva. No se puede reabrir si la tienda ya tiene otra caja abierta.')],
+  [b('Borrar una sesión'),t(': solo si está '),b('vacía'),t(' (sin ventas ni retiradas).')],
+])
 H3('Cancelar un pedido')
 para([t('Abre el pedido, pulsa "Estado del pedido", elige "Cancelado" y confirma. Según si el pedido ya se entregó:')])
 listBlock([
@@ -183,12 +197,23 @@ listBlock([
 box({fill:AMBER_BG,border:AMBER_BD,title:'El aviso que verás en pantalla',items:[
   {parts:[t('Cuando el pedido está entregado y tiene cobros, la plataforma muestra: "Este pedido ya está entregado y tiene cobros registrados. Al cancelarlo NO se reembolsan automáticamente (el cliente ya tiene la prenda). Si quieres devolver el dinero, regístralo a mano como un gasto en la caja (devolución de pedido)."')]},
 ]})
+box({fill:AMBER_BG,border:AMBER_BD,title:'Cancelar es definitivo',items:[
+  {parts:[t('Un pedido cancelado NO se puede reactivar desde la plataforma: es un estado final. Si lo cancelas por error no podrás recuperarlo tú — avísanos y lo reactivamos nosotros. Antes de cancelar, asegúrate.')]},
+]})
 H3('Renumerar o cambiar de tienda un pedido')
 para([t('Abre el pedido y pulsa "Editar pedido". Cambia la tienda y guarda. Si el número ya no encaja con la nueva tienda, la plataforma pregunta automáticamente "¿Renumerar el pedido a la nueva tienda?": elige "Renumerar" (le da el siguiente número libre de esa tienda) o "Mantener número". Si tenía cobros, los apuntes de caja se actualizan solos al número nuevo.')])
 H3('Editar o borrar un cobro')
 listBlock([
   [b('Borrar un cobro'),t(': en la pestaña "Pagos", pulsa la papelera y confirma. El sistema revierte el dinero en la caja (y recalcula el arqueo si la caja ya estaba cerrada).')],
   [b('Editar un cobro'),t(' (importe o método): solo el Administrador. Pulsa el lápiz, cambia y guarda.')],
+])
+H3('Anular o corregir una venta de tienda (ticket)')
+para([t('Las ventas de mostrador se corrigen en '),nav('Tickets'),t('. Abre el ticket y, según lo que falle:')])
+listBlock([
+  [b('Editar los cobros'),t(' (repartir el importe entre métodos sin cambiar el total) o el '),b('cliente y las notas'),t('.')],
+  [b('Editar las líneas'),t(' (precio, descuento, cantidades): solo el Administrador. La plataforma ajusta stock, caja y contabilidad.')],
+  [b('Anular la venta entera'),t(' (solo el Administrador): primero muestra una previsualización de lo que se deshace (stock que vuelve a contar, caja, contabilidad) y, si la venta tenía retiradas ligadas, te deja borrarlas a la vez. Confirma para anular.')],
+  [b('Generar factura'),t(' de la venta si el cliente la pide.')],
 ])
 H3('Anular una devolución hecha por error')
 para([t('Ve a '),nav('Devoluciones'),t(', abre la devolución y pulsa "Anular devolución". La plataforma muestra primero una previsualización de lo que va a deshacer (el vale que se cancela, el stock que vuelve a contar como vendido, la venta que se restaura). Si todo está bien, pulsa "Confirmar anulación".')])
@@ -236,6 +261,8 @@ box({fill:ADMIN_BG,border:ADMIN_BD,title:'Esto lo hace el Administrador',items:[
   {bullet:1,parts:[t('El arqueo y los ajustes manuales de caja (meter gastos/ingresos sueltos).')]},
   {bullet:1,parts:[t('Anular una devolución.')]},
   {bullet:1,parts:[t('Editar un cobro (cambiar su importe o método).')]},
+  {bullet:1,parts:[t('Editar o borrar una retirada de caja, y reabrir/corregir/borrar una sesión de caja.')]},
+  {bullet:1,parts:[t('Anular una venta de tienda o editar sus líneas.')]},
   {bullet:1,parts:[t('Las facturas de proveedor.')]},
   {bullet:1,parts:[t('Ver los informes de ventas.')]},
 ]})
@@ -285,6 +312,8 @@ box({fill:ADMIN_BG,border:ADMIN_BD,title:'Esto lo hace el Administrador',items:[
   {bullet:1,parts:[t('Ajustes manuales de caja (meter gastos/ingresos sueltos).')]},
   {bullet:1,parts:[t('Anular una devolución.')]},
   {bullet:1,parts:[t('Editar o borrar un cobro de una venta.')]},
+  {bullet:1,parts:[t('Editar o borrar una retirada de caja, y reabrir/corregir/borrar una sesión de caja.')]},
+  {bullet:1,parts:[t('Anular una venta de tienda o editar sus líneas.')]},
   {bullet:1,parts:[t('Las facturas de proveedor.')]},
   {bullet:1,parts:[t('Ver los informes de ventas.')]},
 ]})
@@ -306,6 +335,9 @@ const rows=[
   ['Borrar un cobro','si','si','no'],
   ['Editar un cobro (importe / método)','si','no','no'],
   ['Corregir la caja a mano (gasto/ingreso)','si','no','no'],
+  ['Editar / borrar una retirada de caja','si','no','no'],
+  ['Reabrir / corregir / borrar una sesión de caja','si','no','no'],
+  ['Anular una venta / editar sus líneas','si','no','no'],
   ['Anular una devolución','si','no','no'],
   ['Limpiar movimientos de stock huérfanos','si','no','no'],
   ['Desactivar / reactivar un cliente','si','no','no'],
