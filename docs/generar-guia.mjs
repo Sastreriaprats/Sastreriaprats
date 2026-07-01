@@ -149,6 +149,18 @@ listBlock([
   [b('Cambiar el estado del pedido'),t(': pulsa el botón "Estado del pedido", elige el nuevo estado y pulsa "Confirmar cambio". Los estados van de "Creado" a "Entregado al cliente".')],
   [b('Cobros'),t(': en la pestaña "Pagos" registras, editas o borras cobros.')],
 ])
+H3('Elegir el tipo de pedido (importante para las camisas)')
+para([t('Al pulsar "Nuevo producto" eliges primero el TIPO de pedido, y de eso depende lo que puedas rellenar:')])
+listBlock([
+  [b('Pedido de camisería'),t(' — camisas a medida: abre la '),b('Ficha de camisería'),t(' con las medidas (cuello, canesú, largo de manga…), que se cargan solas desde la ficha del cliente.')],
+  [b('Camisería Industrial'),t(' — camisas de fábrica: la '),b('misma ficha de medidas'),t(', pero de fabricación industrial.')],
+  [b('Pedido de cliente artesanal'),t(' — trajes, americanas, pantalones… confeccionados en sastrería o con oficial.')],
+  [b('Pedido de cliente industrial'),t(' — se envía a fábrica con la tela; las medidas van en el campo "Medidas (notas)".')],
+  [b('Pedido a oficial'),t(' — encargo de confección a un oficial externo.')],
+])
+box({fill:AMBER_BG,border:AMBER_BD,title:'Para una camisa con medidas',items:[
+  {parts:[t('Elige "Pedido de camisería" (a medida) o "Camisería Industrial" (fábrica). Si empiezas un pedido normal y añades una prenda "Camisa", NO te saldrá la ficha de medidas: esa ficha solo está en los pedidos de camisería.')]},
+]})
 H3('Registrar un cobro de un pedido')
 listBlock([
   'Abre el pedido y entra en la pestaña "Pagos".',
