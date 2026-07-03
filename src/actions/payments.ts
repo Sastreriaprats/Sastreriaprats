@@ -85,16 +85,10 @@ export const getOrderPayments = protectedAction<{ tailoring_order_id: string }, 
 export const addOrderPayment = protectedAction<AddOrderPaymentInput, OrderPayment>(
   { permission: 'orders.edit', auditAction: 'payment', auditModule: 'orders' },
   async (ctx, input) => {
-    // Bloquear si no hay caja abierta
-    let sessionCheck = ctx.adminClient
-      .from('cash_sessions')
-      .select('id')
-      .eq('status', 'open')
-      .limit(1)
-    if (input.storeId) sessionCheck = sessionCheck.eq('store_id', input.storeId)
-    const { data: openSession } = await sessionCheck.maybeSingle()
-    if (!openSession) return failure('No hay una caja abierta. Abre la caja antes de registrar un cobro.')
-
+    // NOTA: ya NO exigimos caja abierta. rpc_add_order_payment (mig 135) localiza
+    // la sesión por FECHA del pago; si no hay ninguna que cubra la fecha, el cobro
+    // se registra con cash_session_id = NULL (queda en el pedido y en total_paid,
+    // pero sin entrar en el arqueo). Permite cobrar pedidos con la caja cerrada.
     const { data: result, error: rpcError } = await ctx.adminClient.rpc('rpc_add_order_payment', {
       p_tailoring_order_id: input.tailoring_order_id,
       p_payment_date: input.payment_date,
