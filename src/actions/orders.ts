@@ -1687,16 +1687,12 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
     const entregaNum = Number(input.entregaACuenta) || 0
     if (entregaNum > 0 && !input.metodoPago) return failure('Indica el método de pago para la entrega a cuenta.')
 
-    if (entregaNum > 0) {
-      let sessionCheck = ctx.adminClient
-        .from('cash_sessions')
-        .select('id')
-        .eq('status', 'open')
-        .limit(1)
-      if (input.storeId) sessionCheck = sessionCheck.eq('store_id', input.storeId)
-      const { data: openSession } = await sessionCheck.maybeSingle()
-      if (!openSession) return failure('No hay una caja abierta. Abre la caja antes de registrar una entrega a cuenta.')
-    }
+    // NOTA: ya NO exigimos caja abierta para crear el pedido ni para su entrega
+    // a cuenta. El cobro se registra siempre vía rpc_add_order_payment (mig 135),
+    // que localiza la sesión por FECHA del pago; si no hay ninguna que cubra hoy,
+    // el pago queda con cash_session_id = NULL (se guarda en el pedido y en
+    // total_paid, pero no entra en el arqueo de ninguna sesión). Así se pueden
+    // meter pedidos con la caja cerrada sin perder el registro del cobro.
 
     // Mapping de método de pago (UI → BD). Bizum tiene su propia columna
     // total_bizum_sales: NO mapear a 'card'. Si entrega > 0 la validación de
