@@ -9,6 +9,7 @@ import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   ArrowLeft, ShoppingBag, Minus, Plus, Check, Truck, Ruler, Loader2, Heart, ChevronDown,
+  ChevronLeft, ChevronRight, ZoomIn, X,
 } from 'lucide-react'
 import { useCart } from '@/components/providers/cart-provider'
 import { toast } from 'sonner'
@@ -28,6 +29,9 @@ export function ProductContent({ slug }: { slug: string }) {
   const [selectedColor, setSelectedColor] = useState<string | null>(null)
   const [quantity, setQuantity] = useState(1)
   const [activeImage, setActiveImage] = useState(0)
+  const [lightboxOpen, setLightboxOpen] = useState(false)
+  const [isZoomed, setIsZoomed] = useState(false)
+  const [zoomOrigin, setZoomOrigin] = useState({ x: 50, y: 50 })
   const [justAdded, setJustAdded] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [sizeGuideOpen, setSizeGuideOpen] = useState(false)
@@ -69,6 +73,19 @@ export function ProductContent({ slug }: { slug: string }) {
     setSelectedVariant(variant || null)
   }, [product, selectedSize, selectedColor])
 
+  useEffect(() => {
+    if (!lightboxOpen || !product) return
+    const raw = product.images as unknown[] | null
+    const count = raw && raw.length > 0 ? raw.length : (product.main_image_url ? 1 : 0)
+    if (count <= 1) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') setActiveImage((i) => (i - 1 + count) % count)
+      else if (e.key === 'ArrowRight') setActiveImage((i) => (i + 1) % count)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [lightboxOpen, product])
+
   if (isLoading) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 animate-pulse">
@@ -105,6 +122,10 @@ export function ProductContent({ slug }: { slug: string }) {
     : product.main_image_url
       ? [{ url: product.main_image_url as string, alt_text: product.name as string }]
       : []
+
+  const hasMultiple = images.length > 1
+  const goPrev = () => setActiveImage((i) => (i - 1 + images.length) % images.length)
+  const goNext = () => setActiveImage((i) => (i + 1) % images.length)
 
   const variants = product.product_variants as Record<string, unknown>[] | undefined
   const sizes = sortSizeStrings([...new Set(variants?.map((v) => v.size as string).filter(Boolean))])
@@ -181,16 +202,59 @@ export function ProductContent({ slug }: { slug: string }) {
       <div className="grid gap-12 lg:grid-cols-2">
         {/* Gallery */}
         <div>
-          <div className="aspect-[3/4] bg-[#f5f5f5] overflow-hidden mb-3 relative">
+          <div className="aspect-[3/4] bg-[#f5f5f5] overflow-hidden mb-3 relative group">
             {images[activeImage]?.url ? (
-              <Image
-                src={images[activeImage].url}
-                alt={images[activeImage].alt_text || (product.name as string)}
-                fill
-                className="object-cover"
-                sizes="(max-width: 1024px) 100vw, 50vw"
-                priority
-              />
+              <>
+                <button
+                  type="button"
+                  onClick={() => { setIsZoomed(false); setLightboxOpen(true) }}
+                  className="absolute inset-0 z-10 cursor-zoom-in"
+                  aria-label="Ampliar imagen"
+                >
+                  <Image
+                    src={images[activeImage].url}
+                    alt={images[activeImage].alt_text || (product.name as string)}
+                    fill
+                    className="object-cover"
+                    sizes="(max-width: 1024px) 100vw, 50vw"
+                    priority
+                  />
+                </button>
+                <span className="pointer-events-none absolute bottom-3 right-3 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-white/80 text-prats-navy shadow-sm opacity-0 group-hover:opacity-100 transition-opacity">
+                  <ZoomIn className="h-4 w-4" />
+                </span>
+                {hasMultiple && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={goPrev}
+                      aria-label="Imagen anterior"
+                      className="absolute left-3 top-1/2 -translate-y-1/2 z-20 flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-prats-navy shadow-sm hover:bg-white transition-all opacity-0 group-hover:opacity-100"
+                    >
+                      <ChevronLeft className="h-5 w-5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={goNext}
+                      aria-label="Imagen siguiente"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 z-20 flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-prats-navy shadow-sm hover:bg-white transition-all opacity-0 group-hover:opacity-100"
+                    >
+                      <ChevronRight className="h-5 w-5" />
+                    </button>
+                    <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex gap-1.5">
+                      {images.map((_, i) => (
+                        <span
+                          key={i}
+                          className={cn(
+                            'h-1.5 rounded-full transition-all',
+                            i === activeImage ? 'w-5 bg-prats-navy' : 'w-1.5 bg-white/70'
+                          )}
+                        />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </>
             ) : (
               <div className="w-full h-full flex items-center justify-center text-gray-300">
                 <ShoppingBag className="h-16 w-16" />
@@ -397,6 +461,80 @@ export function ProductContent({ slug }: { slug: string }) {
           </div>
         </div>
       </div>
+
+      {lightboxOpen && images[activeImage]?.url && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90"
+          onClick={() => { setLightboxOpen(false); setIsZoomed(false) }}
+        >
+          <button
+            type="button"
+            aria-label="Cerrar"
+            onClick={() => { setLightboxOpen(false); setIsZoomed(false) }}
+            className="absolute top-4 right-4 z-20 flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors"
+          >
+            <X className="h-6 w-6" />
+          </button>
+
+          {hasMultiple && (
+            <>
+              <button
+                type="button"
+                aria-label="Imagen anterior"
+                onClick={(e) => { e.stopPropagation(); setIsZoomed(false); goPrev() }}
+                className="absolute left-3 sm:left-6 top-1/2 -translate-y-1/2 z-20 flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors"
+              >
+                <ChevronLeft className="h-7 w-7" />
+              </button>
+              <button
+                type="button"
+                aria-label="Imagen siguiente"
+                onClick={(e) => { e.stopPropagation(); setIsZoomed(false); goNext() }}
+                className="absolute right-3 sm:right-6 top-1/2 -translate-y-1/2 z-20 flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors"
+              >
+                <ChevronRight className="h-7 w-7" />
+              </button>
+            </>
+          )}
+
+          <div
+            className={cn('relative h-[85vh] w-[92vw] max-w-5xl overflow-hidden', isZoomed ? 'cursor-zoom-out' : 'cursor-zoom-in')}
+            onClick={(e) => e.stopPropagation()}
+            onMouseMove={(e) => {
+              if (!isZoomed) return
+              const r = e.currentTarget.getBoundingClientRect()
+              setZoomOrigin({
+                x: ((e.clientX - r.left) / r.width) * 100,
+                y: ((e.clientY - r.top) / r.height) * 100,
+              })
+            }}
+          >
+            <div
+              className="h-full w-full transition-transform duration-200"
+              onClick={() => setIsZoomed((z) => !z)}
+              style={{
+                transform: isZoomed ? 'scale(2.2)' : 'scale(1)',
+                transformOrigin: `${zoomOrigin.x}% ${zoomOrigin.y}%`,
+              }}
+            >
+              <Image
+                src={images[activeImage].url}
+                alt={images[activeImage].alt_text || (product.name as string)}
+                fill
+                className="object-contain select-none"
+                sizes="92vw"
+                priority
+              />
+            </div>
+          </div>
+
+          {hasMultiple && (
+            <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-20 text-sm text-white/80">
+              {activeImage + 1} / {images.length}
+            </div>
+          )}
+        </div>
+      )}
 
       <SizeGuideDialog
         open={sizeGuideOpen}
