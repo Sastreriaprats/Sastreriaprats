@@ -2,9 +2,10 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { TrendingUp, TrendingDown, Wallet, Receipt, Percent, Hash, Download, Loader2, type LucideIcon } from 'lucide-react'
-import { getTicketData } from '@/actions/ops'
+import { TrendingUp, TrendingDown, Wallet, Receipt, Percent, Hash, Landmark, Download, Loader2, ChevronDown, ChevronRight, type LucideIcon } from 'lucide-react'
+import { getTicketData, getOrderTicketData } from '@/actions/ops'
 import { generateTicketPdf } from '@/components/pos/ticket-pdf'
+import { generateTailoringOrderTicketPdf, type TailoringTicketOrder } from '@/lib/pdf/tailoring-order-ticket'
 import type { AccountingView, MovementRow, LedgerMovement } from '@/lib/ops/types'
 
 export const eur = (n: number) =>
@@ -35,13 +36,16 @@ function KpiCard({ label, value, icon: Icon, tone }: { label: string; value: str
   )
 }
 
-export function Kpis({ view, variant }: { view: AccountingView; variant: 'cash' | 'full' }) {
+export function Kpis({ view, variant, deposited, available }: {
+  view: AccountingView; variant: 'cash' | 'full'; deposited?: number; available?: number
+}) {
   if (variant === 'cash') {
     return (
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <KpiCard label="Facturación en efectivo (base)" value={eur(view.income)} icon={Wallet} tone="green" />
-        <KpiCard label="IVA repercutido efectivo" value={eur(view.ivaRepercutido)} icon={Percent} tone="blue" />
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <KpiCard label="Efectivo cobrado (total)" value={eur(view.income + view.ivaRepercutido)} icon={Wallet} tone="green" />
         <KpiCard label="Nº de cobros en efectivo" value={String(view.salesCount)} icon={Hash} tone="slate" />
+        <KpiCard label="Ingresado al banco (año)" value={eur(deposited ?? 0)} icon={Landmark} tone="blue" />
+        <KpiCard label="Efectivo disponible (neto)" value={eur(available ?? view.income + view.ivaRepercutido)} icon={Receipt} tone="amber" />
       </div>
     )
   }
@@ -108,44 +112,24 @@ export function QuarterTable({ view, variant }: { view: AccountingView; variant:
   )
 }
 
-export function MonthlyTable({ view, variant }: { view: AccountingView; variant: 'cash' | 'full' }) {
-  const cash = variant === 'cash'
-  return (
-    <TableShell>
-      <table className="w-full text-sm">
-        <thead className="bg-slate-50">
-          <tr>
-            <th className={TH}>Mes</th>
-            <th className={THR}>{cash ? 'Ingresos efectivo' : 'Ingresos'}</th>
-            {!cash && <th className={THR}>Gastos</th>}
-            {!cash && <th className={THR}>Resultado</th>}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {view.monthly.map((m, i) => (
-            <tr key={m.month} className="hover:bg-slate-50/60">
-              <td className={`${TD} font-medium text-slate-600`}>{MONTH_LABELS[i]}</td>
-              <td className={TDR}>{eur(m.income)}</td>
-              {!cash && <td className={TDR}>{eur(m.expenses)}</td>}
-              {!cash && <td className={`${TDR} ${m.income - m.expenses >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{eur(m.income - m.expenses)}</td>}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </TableShell>
-  )
-}
-
-function DownloadBtn({ saleId }: { saleId?: string }) {
+export function DownloadBtn({ saleId, orderId, pdfUrl }: { saleId?: string; orderId?: string; pdfUrl?: string }) {
   const [loading, setLoading] = useState(false)
-  if (!saleId) return <span className="text-slate-300">—</span>
+  if (!saleId && !orderId && !pdfUrl) return <span className="text-slate-300">—</span>
   const go = async () => {
     setLoading(true)
     try {
-      const res = await getTicketData(saleId)
-      if (!res.ok) { toast.error('Ticket no disponible'); return }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await generateTicketPdf(res.data as any)
+      if (saleId) {
+        const res = await getTicketData(saleId)
+        if (!res.ok) { toast.error('Ticket no disponible'); return }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await generateTicketPdf(res.data as any)
+      } else if (orderId) {
+        const res = await getOrderTicketData(orderId)
+        if (!res.ok) { toast.error('Pedido no disponible'); return }
+        await generateTailoringOrderTicketPdf(res.data as unknown as TailoringTicketOrder)
+      } else if (pdfUrl) {
+        window.open(pdfUrl, '_blank', 'noopener')
+      }
     } catch {
       toast.error('No se pudo generar el PDF')
     } finally {
@@ -164,6 +148,7 @@ function DownloadBtn({ saleId }: { saleId?: string }) {
   )
 }
 
+// Cobros en efectivo de la capa B: totales con IVA incluido (sin separar base/IVA).
 export function MovementsTable({ rows }: { rows: MovementRow[] }) {
   return (
     <TableShell>
@@ -173,35 +158,195 @@ export function MovementsTable({ rows }: { rows: MovementRow[] }) {
             <th className={TH}>Fecha</th>
             <th className={TH}>Ticket</th>
             <th className={TH}>Método</th>
-            <th className={THR}>Base</th>
-            <th className={THR}>IVA</th>
+            <th className={TH}>Cliente</th>
             <th className={THR}>Total</th>
             <th className={THR}>PDF</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
           {rows.length === 0 ? (
-            <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400">Sin movimientos.</td></tr>
+            <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-400">Sin movimientos.</td></tr>
           ) : rows.map((m, i) => (
             <tr key={i} className="hover:bg-slate-50/60">
               <td className={`${TD} text-slate-500`}>{m.date}</td>
               <td className={`${TD} font-mono text-xs font-medium text-slate-700`}>{m.ref}</td>
               <td className={`${TD} capitalize text-slate-600`}>{m.method}</td>
-              <td className={TDR}>{eur(m.base)}</td>
-              <td className={TDR}>{eur(m.vat)}</td>
+              <td className={`${TD} text-slate-700`}>{m.client ?? <span className="text-slate-300">—</span>}</td>
               <td className={`${TDR} font-semibold`}>{eur(m.total)}</td>
-              <td className={`${TD} text-right`}><DownloadBtn saleId={m.saleId} /></td>
+              <td className={`${TD} text-right`}><DownloadBtn saleId={m.saleId} orderId={m.orderId} pdfUrl={m.pdfUrl} /></td>
             </tr>
           ))}
         </tbody>
       </table>
-      {rows.length >= 1000 && <p className="p-3 text-xs text-slate-400">Mostrando los 1000 más recientes.</p>}
+      {rows.length >= 5000 && <p className="p-3 text-xs text-slate-400">Mostrando los 5000 más recientes.</p>}
     </TableShell>
   )
 }
 
-const TYPE_BADGE: Record<string, string> = {
+// Agrupa movimientos por mes 'YYYY-MM'. Compartido entre la tabla Mensual de B
+// y su hoja de Excel para que nunca diverjan.
+export function groupByMonth<T extends { date: string }>(rows: T[]): Record<string, T[]> {
+  const byMonth: Record<string, T[]> = {}
+  for (const m of rows) {
+    const k = m.date.slice(0, 7)
+    ;(byMonth[k] ??= []).push(m)
+  }
+  return byMonth
+}
+export const monthKey = (year: number, i: number) => `${year}-${String(i + 1).padStart(2, '0')}`
+
+// Mensual de la capa B: cada mes se despliega con el detalle de sus cobros
+// (fecha, ticket, cliente, total con IVA y PDF). Totales sin separar base/IVA.
+export function MonthlyCashTable({ year, rows }: { year: number; rows: MovementRow[] }) {
+  const [openMonth, setOpenMonth] = useState<string | null>(null)
+  const byMonth = groupByMonth(rows)
+  return (
+    <TableShell>
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50">
+          <tr>
+            <th className={TH}>Mes</th>
+            <th className={THR}>Nº cobros</th>
+            <th className={THR}>Efectivo (total)</th>
+            <th className={`${TH} w-8`} />
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {MONTH_LABELS.map((label, i) => {
+            const key = monthKey(year, i)
+            const monthRows = byMonth[key] ?? []
+            const total = monthRows.reduce((s, m) => s + m.total, 0)
+            const isOpen = openMonth === key
+            return [
+              <tr
+                key={key}
+                onClick={() => monthRows.length > 0 && setOpenMonth(isOpen ? null : key)}
+                className={monthRows.length > 0 ? 'cursor-pointer hover:bg-slate-50/60' : ''}
+              >
+                <td className={`${TD} font-medium text-slate-600`}>{label}</td>
+                <td className={`${TDR} text-slate-500`}>{monthRows.length || '—'}</td>
+                <td className={`${TDR} font-semibold`}>{eur(total)}</td>
+                <td className={`${TD} text-slate-400`}>
+                  {monthRows.length > 0 && (isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />)}
+                </td>
+              </tr>,
+              isOpen && (
+                <tr key={`${key}-detail`}>
+                  <td colSpan={4} className="bg-slate-50/70 px-4 pb-4 pt-1">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-left text-[10px] uppercase tracking-wide text-slate-400">
+                          <th className="px-2 py-1.5">Fecha</th>
+                          <th className="px-2 py-1.5">Ticket</th>
+                          <th className="px-2 py-1.5">Método</th>
+                          <th className="px-2 py-1.5">Cliente</th>
+                          <th className="px-2 py-1.5 text-right">Total</th>
+                          <th className="px-2 py-1.5 text-right">PDF</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200/60">
+                        {monthRows.map((m, j) => (
+                          <tr key={j} className="bg-white">
+                            <td className="px-2 py-1.5 text-slate-500">{m.date}</td>
+                            <td className="px-2 py-1.5 font-mono font-medium text-slate-700">{m.ref}</td>
+                            <td className="px-2 py-1.5 capitalize text-slate-600">{m.method}</td>
+                            <td className="px-2 py-1.5 text-slate-700">{m.client ?? '—'}</td>
+                            <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{eur(m.total)}</td>
+                            <td className="px-2 py-1.5 text-right"><DownloadBtn saleId={m.saleId} orderId={m.orderId} pdfUrl={m.pdfUrl} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </td>
+                </tr>
+              ),
+            ]
+          })}
+        </tbody>
+      </table>
+    </TableShell>
+  )
+}
+
+// Mensual del escenario C: cada mes se despliega con todos sus movimientos
+// (tickets, cobros de sastrería, facturas y gastos) con su PDF.
+export function MonthlyFullExpandable({ year, view, rows }: { year: number; view: AccountingView; rows: LedgerMovement[] }) {
+  const [openMonth, setOpenMonth] = useState<string | null>(null)
+  const byMonth = groupByMonth(rows)
+  return (
+    <TableShell>
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50">
+          <tr>
+            <th className={TH}>Mes</th>
+            <th className={THR}>Ingresos</th>
+            <th className={THR}>Gastos</th>
+            <th className={THR}>Resultado</th>
+            <th className={`${TH} w-8`} />
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {view.monthly.map((m, i) => {
+            const key = monthKey(year, i)
+            const monthRows = byMonth[key] ?? []
+            const isOpen = openMonth === key
+            return [
+              <tr
+                key={key}
+                onClick={() => monthRows.length > 0 && setOpenMonth(isOpen ? null : key)}
+                className={monthRows.length > 0 ? 'cursor-pointer hover:bg-slate-50/60' : ''}
+              >
+                <td className={`${TD} font-medium text-slate-600`}>{MONTH_LABELS[i]}</td>
+                <td className={TDR}>{eur(m.income)}</td>
+                <td className={TDR}>{eur(m.expenses)}</td>
+                <td className={`${TDR} ${m.income - m.expenses >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{eur(m.income - m.expenses)}</td>
+                <td className={`${TD} text-slate-400`}>
+                  {monthRows.length > 0 && (isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />)}
+                </td>
+              </tr>,
+              isOpen && (
+                <tr key={`${key}-detail`}>
+                  <td colSpan={5} className="bg-slate-50/70 px-4 pb-4 pt-1">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-left text-[10px] uppercase tracking-wide text-slate-400">
+                          <th className="px-2 py-1.5">Fecha</th>
+                          <th className="px-2 py-1.5">Tipo</th>
+                          <th className="px-2 py-1.5">Concepto</th>
+                          <th className="px-2 py-1.5">Cliente / Proveedor</th>
+                          <th className="px-2 py-1.5 text-right">Total</th>
+                          <th className="px-2 py-1.5 text-right">PDF</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200/60">
+                        {monthRows.map((m2, j) => (
+                          <tr key={j} className="bg-white">
+                            <td className="px-2 py-1.5 text-slate-500">{m2.date}</td>
+                            <td className="px-2 py-1.5">
+                              <span className={`rounded px-1.5 py-0.5 ${TYPE_BADGE[m2.type] ?? 'bg-slate-100 text-slate-600'}`}>{m2.type}</span>
+                            </td>
+                            <td className="px-2 py-1.5 text-slate-700">{m2.concept}</td>
+                            <td className="px-2 py-1.5 text-slate-700">{m2.client ?? '—'}</td>
+                            <td className={`px-2 py-1.5 text-right font-semibold tabular-nums ${m2.total >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{eur(m2.total)}</td>
+                            <td className="px-2 py-1.5 text-right"><DownloadBtn saleId={m2.saleId} orderId={m2.orderId} pdfUrl={m2.pdfUrl} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </td>
+                </tr>
+              ),
+            ]
+          })}
+        </tbody>
+      </table>
+    </TableShell>
+  )
+}
+
+export const TYPE_BADGE: Record<string, string> = {
   Ticket: 'bg-emerald-50 text-emerald-700',
+  'Sastrería': 'bg-violet-50 text-violet-700',
   Factura: 'bg-blue-50 text-blue-700',
   'Factura recibida': 'bg-red-50 text-red-700',
   Compra: 'bg-red-50 text-red-700',
@@ -217,6 +362,7 @@ export function LedgerTable({ rows }: { rows: LedgerMovement[] }) {
             <th className={TH}>Fecha</th>
             <th className={TH}>Tipo</th>
             <th className={TH}>Concepto</th>
+            <th className={TH}>Cliente / Proveedor</th>
             <th className={THR}>Base</th>
             <th className={THR}>IVA</th>
             <th className={THR}>Total</th>
@@ -225,7 +371,7 @@ export function LedgerTable({ rows }: { rows: LedgerMovement[] }) {
         </thead>
         <tbody className="divide-y divide-slate-100">
           {rows.length === 0 ? (
-            <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400">Sin movimientos.</td></tr>
+            <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-400">Sin movimientos.</td></tr>
           ) : rows.map((m, i) => (
             <tr key={i} className="hover:bg-slate-50/60">
               <td className={`${TD} text-slate-500`}>{m.date}</td>
@@ -233,15 +379,16 @@ export function LedgerTable({ rows }: { rows: LedgerMovement[] }) {
                 <span className={`rounded px-1.5 py-0.5 text-xs ${TYPE_BADGE[m.type] ?? 'bg-slate-100 text-slate-600'}`}>{m.type}</span>
               </td>
               <td className={`${TD} text-slate-700`}>{m.concept}</td>
+              <td className={`${TD} text-slate-700`}>{m.client ?? <span className="text-slate-300">—</span>}</td>
               <td className={TDR}>{eur(m.base)}</td>
               <td className={TDR}>{eur(m.vat)}</td>
               <td className={`${TDR} font-semibold ${m.total >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{eur(m.total)}</td>
-              <td className={`${TD} text-right`}><DownloadBtn saleId={m.saleId} /></td>
+              <td className={`${TD} text-right`}><DownloadBtn saleId={m.saleId} orderId={m.orderId} pdfUrl={m.pdfUrl} /></td>
             </tr>
           ))}
         </tbody>
       </table>
-      {rows.length >= 2000 && <p className="p-3 text-xs text-slate-400">Mostrando los 2000 más recientes.</p>}
+      {rows.length >= 5000 && <p className="p-3 text-xs text-slate-400">Mostrando los 5000 más recientes.</p>}
     </TableShell>
   )
 }
