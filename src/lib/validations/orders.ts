@@ -41,7 +41,11 @@ export const tailoringOrderLineSchema = z.object({
 
 export const changeOrderStatusSchema = z.object({
   order_id: z.string().uuid(),
+  // Una prenda concreta (compat) o varias a la vez (multi-selección). Si se
+  // envían `line_ids`, tienen prioridad sobre `line_id`. Si no se envía ninguno,
+  // el cambio aplica a nivel de PEDIDO (propagación forward de todas las prendas).
   line_id: z.string().uuid().optional(),
+  line_ids: z.array(z.string().uuid()).optional(),
   new_status: z.enum(ALL_VISIBLE_STATUSES as [string, ...string[]]),
   notes: z.string().optional(),
 })
