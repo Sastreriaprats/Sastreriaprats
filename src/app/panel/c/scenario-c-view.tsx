@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { getViewC } from '@/actions/ops'
 import type { ViewC, AccountingView } from '@/lib/ops/types'
 import { downloadExcelMulti } from '@/lib/excel/export'
-import { Tabs, Kpis, QuarterTable, MonthlyFullExpandable, LedgerTable, DownloadBtn, TYPE_BADGE, eur, MONTH_LABELS } from '../accounting-ui'
+import { Tabs, Kpis, QuarterTable, MonthlyFullExpandable, LedgerTable, DownloadBtn, TYPE_BADGE, TOTAL_ROW, PageHeader, YearSelect, eur, MONTH_LABELS } from '../accounting-ui'
 
 const thisYear = new Date().getFullYear()
 const n2 = (n: number) => Number((Number(n) || 0).toFixed(2))
@@ -140,17 +140,17 @@ export function ScenarioCView() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-3">
-        <h1 className="text-xl font-semibold text-slate-800">Escenario sin efectivo</h1>
-        <select
+      <PageHeader
+        title="Escenario sin efectivo"
+        subtitle={`Ejercicio ${year} · contabilidad A sin los cobros en efectivo pendientes de ingresar`}
+      >
+        <YearSelect
           value={year}
-          onChange={(e) => { setYear(Number(e.target.value)); setFromDate(''); setToDate('') }}
-          className="ml-auto h-9 rounded-md border px-2 text-sm"
-        >
-          {[thisYear, thisYear - 1, thisYear - 2].map((y) => <option key={y} value={y}>{y}</option>)}
-        </select>
+          years={[thisYear, thisYear - 1, thisYear - 2]}
+          onChange={(y) => { setYear(y); setFromDate(''); setToDate('') }}
+        />
         <Button variant="outline" size="sm" disabled={!data} onClick={onExcel}>Exportar Excel</Button>
-      </div>
+      </PageHeader>
 
       <Tabs
         active={tab}
@@ -172,23 +172,27 @@ export function ScenarioCView() {
             <p className="text-sm font-medium text-slate-700 mb-2">Escenario C (sin efectivo)</p>
             <Kpis view={data.C} variant="full" />
           </div>
-          <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
+          <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-x-auto">
+            <div className="flex items-baseline justify-between border-b border-slate-200 px-4 py-3">
+              <span className="text-sm font-semibold text-prats-navy">Comparativa A · C</span>
+              <span className="text-[11px] uppercase tracking-wider text-slate-400">Ejercicio {year}</span>
+            </div>
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-slate-500">
+              <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                 <tr>
-                  <th className="text-left font-medium px-4 py-2">Métrica</th>
-                  <th className="text-right font-medium px-4 py-2">A (real, íntegra)</th>
-                  <th className="text-right font-medium px-4 py-2">C (sin efectivo)</th>
-                  <th className="text-right font-medium px-4 py-2">Diferencia</th>
+                  <th className="text-left px-4 py-2.5">Métrica</th>
+                  <th className="text-right px-4 py-2.5">A (real, íntegra)</th>
+                  <th className="text-right px-4 py-2.5 bg-slate-100/80">C (sin efectivo)</th>
+                  <th className="text-right px-4 py-2.5">Diferencia</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-slate-100">
                 {METRICS.map(([label, key]) => (
-                  <tr key={key} className="border-t">
-                    <td className="px-4 py-2 font-medium text-slate-700">{label}</td>
-                    <td className="px-4 py-2 text-right">{eur(data.A[key] as number)}</td>
-                    <td className="px-4 py-2 text-right">{eur(data.C[key] as number)}</td>
-                    <td className="px-4 py-2 text-right text-slate-500">{eur((data.A[key] as number) - (data.C[key] as number))}</td>
+                  <tr key={key} className="hover:bg-slate-50/50">
+                    <td className="px-4 py-2.5 font-medium text-slate-700">{label}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">{eur(data.A[key] as number)}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums bg-slate-50/70 font-semibold text-slate-900">{eur(data.C[key] as number)}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-slate-400">{eur((data.A[key] as number) - (data.C[key] as number))}</td>
                   </tr>
                 ))}
               </tbody>
@@ -216,6 +220,7 @@ export function ScenarioCView() {
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <Tabs
+              variant="segmented"
               active={docSide}
               onChange={(k) => setDocSide(k as 'ingresos' | 'gastos')}
               tabs={[
@@ -227,41 +232,41 @@ export function ScenarioCView() {
           </div>
 
           {docSide === 'ingresos' ? (
-            <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
+            <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-slate-500">
+                <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                   <tr>
-                    <th className="text-left font-medium px-3 py-2">Tipo</th>
-                    <th className="text-left font-medium px-3 py-2">Nº</th>
-                    <th className="text-left font-medium px-3 py-2">Cliente</th>
-                    <th className="text-left font-medium px-3 py-2">Fecha</th>
-                    <th className="text-right font-medium px-3 py-2">Total</th>
-                    <th className="text-left font-medium px-3 py-2">Estado</th>
-                    <th className="text-left font-medium px-3 py-2">Pago</th>
-                    <th className="text-right font-medium px-3 py-2">PDF</th>
+                    <th className="text-left px-3 py-3">Tipo</th>
+                    <th className="text-left px-3 py-3">Nº</th>
+                    <th className="text-left px-3 py-3">Cliente</th>
+                    <th className="text-left px-3 py-3">Fecha</th>
+                    <th className="text-right px-3 py-3">Total</th>
+                    <th className="text-left px-3 py-3">Estado</th>
+                    <th className="text-left px-3 py-3">Pago</th>
+                    <th className="text-right px-3 py-3">PDF</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-slate-100">
                   {filteredIncomeDocs.length === 0 ? (
-                    <tr><td colSpan={8} className="px-3 py-6 text-center text-slate-400">Sin documentos de ingreso.</td></tr>
+                    <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-400">Sin documentos de ingreso.</td></tr>
                   ) : filteredIncomeDocs.map((d, i) => (
-                    <tr key={i} className="border-t">
+                    <tr key={i} className="hover:bg-slate-50/50">
                       <td className="px-3 py-2">
                         <span className={`rounded px-1.5 py-0.5 text-xs ${TYPE_BADGE[d.docType] ?? 'bg-slate-100 text-slate-600'}`}>{d.docType}</span>
                       </td>
-                      <td className="px-3 py-2 font-mono text-xs">{d.number}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-slate-700">{d.number}</td>
                       <td className="px-3 py-2">{d.client || <span className="text-slate-300">—</span>}</td>
-                      <td className="px-3 py-2">{d.date}</td>
+                      <td className="px-3 py-2 text-slate-500">{d.date}</td>
                       <td className="px-3 py-2 text-right font-medium tabular-nums">{eur(d.total)}</td>
-                      <td className="px-3 py-2 capitalize">{d.status ?? '—'}</td>
-                      <td className="px-3 py-2 capitalize">{d.method || '—'}</td>
+                      <td className="px-3 py-2 capitalize text-slate-500">{d.status ?? '—'}</td>
+                      <td className="px-3 py-2 capitalize text-slate-500">{d.method || '—'}</td>
                       <td className="px-3 py-2 text-right">
                         <DownloadBtn saleId={d.docType !== 'Factura' ? d.saleId : undefined} orderId={d.docType !== 'Factura' ? d.orderId : undefined} pdfUrl={d.pdfUrl} />
                       </td>
                     </tr>
                   ))}
                   {filteredIncomeDocs.length > 0 && (
-                    <tr className="border-t bg-slate-50 font-semibold text-slate-800">
+                    <tr className={TOTAL_ROW}>
                       <td className="px-3 py-2.5" colSpan={4}>TOTAL ingresos ({filteredIncomeDocs.length} documentos)</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{eur(filteredIncomeDocs.reduce((s, d) => s + d.total, 0))}</td>
                       <td colSpan={3} />
@@ -276,33 +281,33 @@ export function ScenarioCView() {
               </p>
             </div>
           ) : (
-            <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
+            <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-slate-500">
+                <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                   <tr>
-                    <th className="text-left font-medium px-3 py-2">Nº</th>
-                    <th className="text-left font-medium px-3 py-2">Proveedor</th>
-                    <th className="text-left font-medium px-3 py-2">Fecha</th>
-                    <th className="text-right font-medium px-3 py-2">Base</th>
-                    <th className="text-right font-medium px-3 py-2">IVA</th>
-                    <th className="text-right font-medium px-3 py-2">Total</th>
+                    <th className="text-left px-3 py-3">Nº</th>
+                    <th className="text-left px-3 py-3">Proveedor</th>
+                    <th className="text-left px-3 py-3">Fecha</th>
+                    <th className="text-right px-3 py-3">Base</th>
+                    <th className="text-right px-3 py-3">IVA</th>
+                    <th className="text-right px-3 py-3">Total</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-slate-100">
                   {filteredApInvoices.length === 0 ? (
-                    <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-400">Sin facturas de proveedor.</td></tr>
+                    <tr><td colSpan={6} className="px-3 py-8 text-center text-slate-400">Sin facturas de proveedor.</td></tr>
                   ) : filteredApInvoices.map((f, i) => (
-                    <tr key={i} className="border-t">
-                      <td className="px-3 py-2 font-mono text-xs">{f.number}</td>
+                    <tr key={i} className="hover:bg-slate-50/50">
+                      <td className="px-3 py-2 font-mono text-xs text-slate-700">{f.number}</td>
                       <td className="px-3 py-2">{f.supplier}</td>
-                      <td className="px-3 py-2">{f.date}</td>
+                      <td className="px-3 py-2 text-slate-500">{f.date}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{eur(f.base)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{eur(f.vat)}</td>
                       <td className="px-3 py-2 text-right font-medium tabular-nums">{eur(f.total)}</td>
                     </tr>
                   ))}
                   {filteredApInvoices.length > 0 && (
-                    <tr className="border-t bg-slate-50 font-semibold text-slate-800">
+                    <tr className={TOTAL_ROW}>
                       <td className="px-3 py-2.5" colSpan={5}>TOTAL gastos ({filteredApInvoices.length} facturas)</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{eur(filteredApInvoices.reduce((s, f) => s + f.total, 0))}</td>
                     </tr>

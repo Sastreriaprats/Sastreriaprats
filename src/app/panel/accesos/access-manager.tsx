@@ -8,6 +8,7 @@ import {
   listAccessGrants, searchUsers, grantUserScope, revokeUserScope,
 } from '@/actions/ops'
 import type { AccessRow, Scope } from '@/lib/ops/db'
+import { PageHeader } from '../accounting-ui'
 
 type UserAccess = { userId: string; email: string; fullName: string; scopes: Scope[] }
 
@@ -59,9 +60,9 @@ export function AccessManager() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold text-slate-800">Accesos a las vistas internas</h1>
+      <PageHeader title="Accesos" subtitle="Quién puede ver cada vista interna de Tesorería" />
 
-      <div className="rounded-lg border bg-white p-4">
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <p className="text-sm font-medium mb-2">Conceder acceso a un usuario</p>
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por nombre o email…" />
         {results.length > 0 && (
@@ -77,13 +78,13 @@ export function AccessManager() {
         )}
       </div>
 
-      <div className="rounded-lg border bg-white overflow-hidden">
+      <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-slate-500">
+          <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
             <tr>
-              <th className="text-left font-medium px-4 py-2">Usuario</th>
-              <th className="text-left font-medium px-4 py-2">Capas</th>
-              <th className="px-4 py-2" />
+              <th className="text-left px-4 py-3">Usuario</th>
+              <th className="text-left px-4 py-3">Capas</th>
+              <th className="px-4 py-3" />
             </tr>
           </thead>
           <tbody>
@@ -95,7 +96,7 @@ export function AccessManager() {
                 <td className="px-4 py-2">
                   <div className="flex gap-1">
                     {(['B', 'C'] as Scope[]).map((s) => (
-                      <span key={s} className={`px-2 py-0.5 rounded text-xs ${u.scopes.includes(s) ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                      <span key={s} className={`px-2 py-0.5 rounded text-xs ${u.scopes.includes(s) ? 'bg-prats-navy text-white' : 'bg-slate-100 text-slate-400'}`}>
                         {s === 'B' ? 'Efectivo' : 'Escenario'}
                       </span>
                     ))}

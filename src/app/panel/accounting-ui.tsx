@@ -11,27 +11,62 @@ import type { AccountingView, MovementRow, LedgerMovement } from '@/lib/ops/type
 export const eur = (n: number) =>
   `${(Number(n) || 0).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
 
-export const MONTH_LABELS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
-
-const TONES: Record<string, { chip: string; icon: string; value: string }> = {
-  green: { chip: 'bg-emerald-50', icon: 'text-emerald-600', value: 'text-emerald-700' },
-  red: { chip: 'bg-red-50', icon: 'text-red-600', value: 'text-red-700' },
-  amber: { chip: 'bg-amber-50', icon: 'text-amber-600', value: 'text-amber-700' },
-  slate: { chip: 'bg-slate-100', icon: 'text-slate-500', value: 'text-slate-800' },
-  blue: { chip: 'bg-blue-50', icon: 'text-blue-600', value: 'text-blue-700' },
+// Cabecera de página del panel: título + subtítulo del ejercicio + acciones.
+export function PageHeader({ title, subtitle, children }: {
+  title: string; subtitle: string; children?: React.ReactNode
+}) {
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 pb-5">
+      <div>
+        <h1 className="text-[22px] font-semibold tracking-tight text-prats-navy">{title}</h1>
+        <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
+      </div>
+      <div className="flex items-center gap-2">{children}</div>
+    </div>
+  )
 }
 
-function KpiCard({ label, value, icon: Icon, tone }: { label: string; value: string; icon: LucideIcon; tone: keyof typeof TONES }) {
-  const t = TONES[tone]
+// Selector de ejercicio con estilo propio del panel.
+export function YearSelect({ value, years, onChange }: { value: number; years: number[]; onChange: (y: number) => void }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex items-center gap-2">
-        <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${t.chip}`}>
-          <Icon className={`h-4 w-4 ${t.icon}`} />
-        </span>
-        <span className="text-xs font-medium text-slate-500">{label}</span>
+    <label className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm shadow-sm">
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Ejercicio</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="bg-transparent font-medium text-prats-navy outline-none"
+      >
+        {years.map((y) => <option key={y} value={y}>{y}</option>)}
+      </select>
+    </label>
+  )
+}
+
+export const MONTH_LABELS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+
+// Tarjeta de indicador estilo financiero: etiqueta discreta arriba, cifra grande
+// en tinta. `featured` = tarjeta destacada en navy (el dato clave de la vista).
+function KpiCard({ label, value, icon: Icon, featured, negative }: {
+  label: string; value: string; icon: LucideIcon; featured?: boolean; negative?: boolean
+}) {
+  if (featured) {
+    return (
+      <div className="rounded-lg border border-prats-navy bg-prats-navy p-5 shadow-sm">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-white/60">{label}</span>
+          <Icon className="h-4 w-4 text-prats-gold" />
+        </div>
+        <p className="mt-3 text-[26px] font-semibold leading-none text-white">{value}</p>
       </div>
-      <p className={`mt-2 text-2xl font-bold tabular-nums ${t.value}`}>{value}</p>
+    )
+  }
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">{label}</span>
+        <Icon className="h-4 w-4 text-slate-300" />
+      </div>
+      <p className={`mt-3 text-[26px] font-semibold leading-none ${negative ? 'text-red-700' : 'text-slate-900'}`}>{value}</p>
     </div>
   )
 }
@@ -42,30 +77,32 @@ export function Kpis({ view, variant, deposited, available }: {
   if (variant === 'cash') {
     return (
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <KpiCard label="Efectivo cobrado (total)" value={eur(view.income + view.ivaRepercutido)} icon={Wallet} tone="green" />
-        <KpiCard label="Nº de cobros en efectivo" value={String(view.salesCount)} icon={Hash} tone="slate" />
-        <KpiCard label="Ingresado al banco (año)" value={eur(deposited ?? 0)} icon={Landmark} tone="blue" />
-        <KpiCard label="Efectivo disponible (neto)" value={eur(available ?? view.income + view.ivaRepercutido)} icon={Receipt} tone="amber" />
+        <KpiCard label="Efectivo cobrado (total)" value={eur(view.income + view.ivaRepercutido)} icon={Wallet} />
+        <KpiCard label="Nº de cobros" value={String(view.salesCount)} icon={Hash} />
+        <KpiCard label="Ingresado al banco (año)" value={eur(deposited ?? 0)} icon={Landmark} />
+        <KpiCard label="Efectivo disponible (neto)" value={eur(available ?? view.income + view.ivaRepercutido)} icon={Receipt} featured />
       </div>
     )
   }
   return (
     <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-      <KpiCard label="Ingresos (base)" value={eur(view.income)} icon={TrendingUp} tone="green" />
-      <KpiCard label="Gastos (base)" value={eur(view.expenses)} icon={TrendingDown} tone="red" />
-      <KpiCard label="Resultado neto" value={eur(view.profit)} icon={Receipt} tone={view.profit >= 0 ? 'green' : 'red'} />
-      <KpiCard label="IVA a ingresar" value={eur(view.vatToPay)} icon={Percent} tone="amber" />
+      <KpiCard label="Ingresos (base)" value={eur(view.income)} icon={TrendingUp} />
+      <KpiCard label="Gastos (base)" value={eur(view.expenses)} icon={TrendingDown} />
+      <KpiCard label="Resultado neto" value={eur(view.profit)} icon={Receipt} negative={view.profit < 0} featured={view.profit >= 0} />
+      <KpiCard label="IVA a ingresar" value={eur(view.vatToPay)} icon={Percent} />
     </div>
   )
 }
 
 function TableShell({ children }: { children: React.ReactNode }) {
-  return <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">{children}</div>
+  return <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">{children}</div>
 }
-const TH = 'px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500'
+const TH = 'px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500'
 const THR = TH + ' text-right'
 const TD = 'px-4 py-2.5'
 const TDR = TD + ' text-right tabular-nums'
+// Fila de total al estilo contable: doble línea superior
+export const TOTAL_ROW = 'border-t-[3px] border-double border-slate-300 bg-slate-50 font-semibold text-slate-900'
 
 export function QuarterTable({ view, variant }: { view: AccountingView; variant: 'cash' | 'full' }) {
   const cash = variant === 'cash'
@@ -98,7 +135,7 @@ export function QuarterTable({ view, variant }: { view: AccountingView; variant:
               <td className={`${TDR} font-semibold`}>{eur(cash ? q.ivaRepercutido : q.resultado)}</td>
             </tr>
           ))}
-          <tr className="bg-slate-50 font-semibold text-slate-800">
+          <tr className={TOTAL_ROW}>
             <td className={TD} colSpan={2}>TOTAL año</td>
             <td className={TDR}>{eur(tot.bs)}</td>
             <td className={TDR}>{eur(tot.rep)}</td>
@@ -393,20 +430,46 @@ export function LedgerTable({ rows }: { rows: LedgerMovement[] }) {
   )
 }
 
-export function Tabs({ tabs, active, onChange }: { tabs: { key: string; label: string }[]; active: string; onChange: (k: string) => void }) {
+// Pestañas: 'underline' (navegación principal de la página, estilo libro
+// contable) o 'segmented' (conmutador secundario compacto).
+export function Tabs({ tabs, active, onChange, variant = 'underline' }: {
+  tabs: { key: string; label: string }[]; active: string; onChange: (k: string) => void; variant?: 'underline' | 'segmented'
+}) {
+  if (variant === 'segmented') {
+    return (
+      <div className="inline-flex rounded-md border border-slate-200 bg-white p-0.5 shadow-sm">
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => onChange(t.key)}
+            className={`rounded px-3.5 py-1.5 text-sm transition-colors ${
+              active === t.key ? 'bg-prats-navy font-medium text-white' : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+    )
+  }
   return (
-    <div className="inline-flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1">
-      {tabs.map((t) => (
-        <button
-          key={t.key}
-          onClick={() => onChange(t.key)}
-          className={`rounded-lg px-3.5 py-1.5 text-sm transition-colors ${
-            active === t.key ? 'bg-white font-medium text-prats-navy shadow-sm' : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          {t.label}
-        </button>
-      ))}
+    <div className="flex flex-wrap gap-x-6 border-b border-slate-200">
+      {tabs.map((t) => {
+        const isActive = active === t.key
+        return (
+          <button
+            key={t.key}
+            onClick={() => onChange(t.key)}
+            className={`relative -mb-px whitespace-nowrap border-b-2 px-0.5 pb-2.5 pt-1 text-sm transition-colors ${
+              isActive
+                ? 'border-prats-gold font-semibold text-prats-navy'
+                : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
+            }`}
+          >
+            {t.label}
+          </button>
+        )
+      })}
     </div>
   )
 }
