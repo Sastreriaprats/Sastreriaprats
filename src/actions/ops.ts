@@ -20,9 +20,9 @@ const fail = (msg = 'No encontrado') => ({ ok: false as const, error: msg })
 // ---------------------------------------------------------------------------
 // Acceso del viewer (seguro de exponer: [] si no autorizado). Para el menú/UI.
 // ---------------------------------------------------------------------------
-export async function getMyAccess(): Promise<{ scopes: Scope[]; canManage: boolean }> {
+export async function getMyAccess(): Promise<{ scopes: Scope[]; canManage: boolean; userId: string | null }> {
   const a = await getViewerAccess()
-  return { scopes: a.scopes, canManage: a.canManage }
+  return { scopes: a.scopes, canManage: a.canManage, userId: a.userId }
 }
 
 // ===========================================================================
@@ -633,10 +633,40 @@ export async function grantUserScope(userId: string, scope: Scope) {
   } catch { return fail() }
 }
 
+// Nadie puede quitar la capa B (gestión) al ÚLTIMO usuario que la tiene: el
+// módulo quedaría huérfano (solo recuperable por SQL directo).
+async function assertNotLastManager(userId: string) {
+  const rows = await listAccess()
+  const otherManagers = rows.filter((r) => r.scope === 'B' && r.userId !== userId)
+  if (otherManagers.length === 0) throw new Error('last_manager')
+}
+
 export async function revokeUserScope(userId: string, scope: Scope) {
   try {
     await assertCanManage()
+    if (scope === 'B') await assertNotLastManager(userId)
     await revokeAccess(userId, scope)
     return ok(true)
-  } catch { return fail() }
+  } catch (e) {
+    return fail(e instanceof Error && e.message === 'last_manager'
+      ? 'No puedes quitar la capa Efectivo al último gestor'
+      : undefined)
+  }
+}
+
+// Elimina TODO el acceso de un usuario (todas sus capas) de una vez.
+export async function removeUserAccess(userId: string) {
+  try {
+    await assertCanManage()
+    const rows = await listAccess()
+    const scopes = rows.filter((r) => r.userId === userId).map((r) => r.scope)
+    if (scopes.length === 0) return ok(true)
+    if (scopes.includes('B')) await assertNotLastManager(userId)
+    for (const s of scopes) await revokeAccess(userId, s)
+    return ok(true)
+  } catch (e) {
+    return fail(e instanceof Error && e.message === 'last_manager'
+      ? 'No puedes eliminar al último gestor (capa Efectivo)'
+      : undefined)
+  }
 }
