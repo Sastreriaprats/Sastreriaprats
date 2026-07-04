@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { getViewB, addCashEntry, removeCashEntry, createBankDeposit, deleteBankDeposit } from '@/actions/ops'
 import type { ViewB, MovementRow, MovementKind } from '@/lib/ops/types'
 import { downloadExcelMulti } from '@/lib/excel/export'
-import { Tabs, Kpis, QuarterTable, MonthlyCashTable, MovementsTable, eur, groupByMonth, monthKey } from '../accounting-ui'
+import { Tabs, Kpis, QuarterTable, MonthlyCashTable, MovementsTable, eur, groupByMonth, monthKey, PageHeader, YearSelect, TOTAL_ROW } from '../accounting-ui'
 
 const thisYear = new Date().getFullYear()
 const CATS = ['proveedor', 'nomina', 'alquiler', 'venta', 'otro']
@@ -153,17 +153,17 @@ export function LedgerPanel() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-3">
-        <h1 className="text-xl font-semibold text-slate-800">Contabilidad en efectivo</h1>
-        <select
+      <PageHeader
+        title="Contabilidad en efectivo"
+        subtitle={`Ejercicio ${year} · cobros en efectivo, ingresos al banco y control interno de caja`}
+      >
+        <YearSelect
           value={year}
-          onChange={(e) => { setYear(Number(e.target.value)); setShowNew(false); setSelected(new Set()); setOpenDep(null) }}
-          className="ml-auto h-9 rounded-md border px-2 text-sm"
-        >
-          {[thisYear, thisYear - 1, thisYear - 2].map((y) => <option key={y} value={y}>{y}</option>)}
-        </select>
+          years={[thisYear, thisYear - 1, thisYear - 2]}
+          onChange={(y) => { setYear(y); setShowNew(false); setSelected(new Set()); setOpenDep(null) }}
+        />
         <Button variant="outline" size="sm" disabled={!data} onClick={onExcel}>Exportar Excel</Button>
-      </div>
+      </PageHeader>
 
       <Tabs
         active={tab}
@@ -196,10 +196,13 @@ export function LedgerPanel() {
             return (
               <>
                 <Kpis view={v} variant="cash" deposited={data.depositedTotal} available={neto} />
-                <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-                  <div className="border-b px-4 py-3 text-sm font-semibold text-slate-700">Resumen general de efectivo</div>
+                <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+                  <div className="flex items-baseline justify-between border-b border-slate-200 px-4 py-3">
+                    <span className="text-sm font-semibold text-prats-navy">Resumen general de efectivo</span>
+                    <span className="text-[11px] uppercase tracking-wider text-slate-400">Ejercicio {year}</span>
+                  </div>
                   <table className="w-full text-sm">
-                    <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+                    <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                       <tr>
                         <th className="px-4 py-2.5 text-left">Concepto</th>
                         <th className="px-4 py-2.5 text-right">Total</th>
@@ -208,9 +211,9 @@ export function LedgerPanel() {
                     <tbody className="divide-y divide-slate-100">
                       {Row('Cobros por ventas (tickets)', tTotal)}
                       {Row('Cobros manuales (efectivo)', m.inTotal)}
-                      {Row('Total cobros en efectivo', cTotal, 'bg-emerald-50/50 font-semibold text-emerald-800')}
+                      {Row('Total cobros en efectivo', cTotal, TOTAL_ROW)}
                       {Row('Pagos manuales (efectivo)', m.outTotal, 'text-red-700')}
-                      <tr className="bg-slate-800 font-semibold text-white">
+                      <tr className="bg-prats-navy font-semibold text-white">
                         <td className="px-4 py-3">NETO EN EFECTIVO (cobros − pagos)</td>
                         <td className="px-4 py-3 text-right tabular-nums">{eur(neto)}</td>
                       </tr>
@@ -241,16 +244,16 @@ export function LedgerPanel() {
       ) : tab === 'banco' ? (
         <div className="space-y-4">
           {/* Tarjetas + acción */}
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <p className="text-xs text-slate-500">Ingresado al banco en {year}</p>
-              <p className="text-lg font-bold text-blue-700">{eur(yearDepositsTotal)}</p>
+          <div className="flex flex-wrap items-stretch gap-4">
+            <div className="min-w-44 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Ingresado en {year}</p>
+              <p className="mt-2 text-xl font-semibold text-slate-900">{eur(yearDepositsTotal)}</p>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <p className="text-xs text-slate-500">Nº de ingresos</p>
-              <p className="text-lg font-bold">{yearDeposits.length}</p>
+            <div className="min-w-44 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Nº de ingresos</p>
+              <p className="mt-2 text-xl font-semibold text-slate-900">{yearDeposits.length}</p>
             </div>
-            <Button className="ml-auto" onClick={() => { setShowNew((s) => !s); setSelected(new Set()) }}>
+            <Button className="ml-auto self-center" onClick={() => { setShowNew((s) => !s); setSelected(new Set()) }}>
               <Landmark className="mr-1.5 h-4 w-4" />
               {showNew ? 'Cancelar' : 'Nuevo ingreso al banco'}
             </Button>
@@ -258,8 +261,8 @@ export function LedgerPanel() {
 
           {/* Alta de ingreso: selección de cobros */}
           {showNew && (
-            <div className="rounded-xl border border-blue-200 bg-blue-50/30 p-4 shadow-sm">
-              <p className="mb-1 text-sm font-medium text-slate-800">Selecciona los cobros en efectivo que vas a ingresar en el banco</p>
+            <div className="rounded-lg border border-prats-gold/50 bg-prats-beige-light p-4 shadow-sm">
+              <p className="mb-1 text-sm font-semibold text-prats-navy">Selecciona los cobros en efectivo que vas a ingresar en el banco</p>
               <p className="mb-3 text-xs text-slate-500">
                 Cada cobro seleccionado desaparecerá de la contabilidad en efectivo (B) y pasará a contar en el escenario C con su fecha original.
               </p>
@@ -314,7 +317,7 @@ export function LedgerPanel() {
           )}
 
           {/* Lista de depósitos del año */}
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
                 <tr>
@@ -387,7 +390,7 @@ export function LedgerPanel() {
       ) : (
         <div className="space-y-4">
           {/* Alta manual */}
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
             <p className="mb-3 text-sm font-medium">Añadir movimiento manual en efectivo</p>
             <div className="grid grid-cols-2 gap-3 md:grid-cols-7 md:items-end">
               <div>
@@ -430,22 +433,22 @@ export function LedgerPanel() {
 
           {/* Totales */}
           <div className="grid grid-cols-3 gap-4">
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
               <p className="text-xs text-slate-500">Cobros manuales</p>
               <p className="text-lg font-bold text-emerald-700">{eur(data.manual.inTotal)}</p>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
               <p className="text-xs text-slate-500">Pagos manuales</p>
               <p className="text-lg font-bold text-red-700">{eur(data.manual.outTotal)}</p>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
               <p className="text-xs text-slate-500">Neto</p>
               <p className="text-lg font-bold">{eur(data.manual.inTotal - data.manual.outTotal)}</p>
             </div>
           </div>
 
           {/* Tabla */}
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
                 <tr>
