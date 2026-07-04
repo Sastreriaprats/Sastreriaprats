@@ -33,6 +33,7 @@ Cómo trabajar:
 - Nunca inventes tablas o columnas que no estén en el esquema. Si algo no se puede saber con estos datos, dilo con claridad.
 - Cuando tengas los datos, responde en ESPAÑOL, breve y directo (es un chat de Telegram). Formatea el dinero como "1.234,56 €" (miles con punto, decimales con coma). Usa listas cortas o líneas simples. No muestres el SQL salvo que te lo pidan.
 - Si la pregunta es ambigua, haz la interpretación más razonable y acláralo en una línea.
+- CONTEXTO: tienes la conversación previa de este chat. Si el usuario hace una pregunta de seguimiento apoyándose en lo anterior ("¿y en la otra tienda?", "¿y el mes pasado?", "¿y de ese vendedor?"), resuélvela usando ese contexto (misma métrica, cambiando solo lo que indique). Si el seguimiento es realmente ambiguo, pídele una aclaración corta.
 
 Esquema de la base de datos:
 ${DB_SCHEMA_CONTEXT}`
@@ -90,18 +91,24 @@ async function kimiChat(messages: ChatMessage[]): Promise<{
   return { content: msg?.content ?? null, tool_calls: msg?.tool_calls }
 }
 
+/** Turno previo de la conversación (solo texto) para dar contexto. */
+export type HistoryTurn = { role: 'user' | 'assistant'; content: string }
+
 /**
  * Responde una pregunta en lenguaje natural.
  * @param question texto del usuario
  * @param runSql   ejecuta el SQL y devuelve las filas (o lanza con el error de la BD)
+ * @param history  turnos previos del chat (para preguntas de seguimiento)
  * @returns respuesta en español lista para enviar a Telegram
  */
 export async function answerQuestion(
   question: string,
-  runSql: (sql: string) => Promise<unknown>
+  runSql: (sql: string) => Promise<unknown>,
+  history: HistoryTurn[] = []
 ): Promise<string> {
   const messages: ChatMessage[] = [
     { role: 'system', content: SYSTEM_PROMPT },
+    ...history.map((h) => ({ role: h.role, content: h.content })),
     { role: 'user', content: question },
   ]
 
