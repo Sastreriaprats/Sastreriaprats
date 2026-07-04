@@ -3,6 +3,20 @@
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 
+/** Lee todas las páginas (evita el tope silencioso de 1000 filas de Supabase). */
+async function readAllPaged<T = Record<string, unknown>>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null }>,
+): Promise<T[]> {
+  const out: T[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data } = await build(from, from + 999)
+    const batch = data ?? []
+    out.push(...batch)
+    if (batch.length < 1000) break
+  }
+  return out
+}
+
 interface DashboardStats {
   salesToday: number
   salesThisMonth: number
@@ -57,9 +71,14 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
       const lastMonthStart = `${lastMonth.toISOString().slice(0, 7)}-01`
       const todayEnd = `${today}T23:59:59`
 
-      // Queries 1–7 en paralelo (mismo resultado, menos latencia)
+      // Queries en paralelo (mismo resultado, menos latencia).
+      // Ventas = base neta (sin IVA) de TPV (sales) + cobros de sastrería de
+      // backoffice (tailoring_order_payments). Idéntico a Contabilidad
+      // (getAccountingSummary), para que la tarjeta "Ventas mes" cuadre con el
+      // desglose por tienda y con el módulo de Contabilidad al céntimo.
       const [
-        salesRes,
+        salesRows,
+        tailoringPayRows,
         ordersRes,
         clientsTotalRes,
         clientsNewRes,
@@ -68,7 +87,10 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
         supplierRes,
         fittingsRes,
       ] = await Promise.all([
-        admin.from('sales').select('total, created_at').gte('created_at', `${lastMonthStart}T00:00:00`).lte('created_at', todayEnd).eq('status', 'completed'),
+        readAllPaged<{ total?: number; subtotal?: number; tax_amount?: number; total_returned?: number; created_at?: string }>((f, t) =>
+          admin.from('sales').select('total, subtotal, tax_amount, total_returned, created_at').gte('created_at', `${lastMonthStart}T00:00:00`).lte('created_at', todayEnd).in('status', ['completed', 'partially_returned']).order('created_at', { ascending: true }).range(f, t)),
+        readAllPaged((f, t) =>
+          admin.from('tailoring_order_payments').select('amount, payment_date, tailoring_order:tailoring_orders(subtotal, total)').gte('payment_date', lastMonthStart).lte('payment_date', today).order('payment_date', { ascending: true }).range(f, t)),
         admin.from('tailoring_orders').select('id, status, estimated_delivery_date').not('status', 'in', '("delivered","cancelled")'),
         admin.from('clients').select('id', { count: 'exact', head: true }).eq('is_active', true),
         admin.from('clients').select('id', { count: 'exact', head: true }).eq('is_active', true).gte('created_at', `${monthStart}T00:00:00`),
@@ -78,12 +100,31 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
         admin.from('tailoring_fittings').select('id', { count: 'exact', head: true }).eq('scheduled_date', today).eq('status', 'scheduled'),
       ])
 
-      const salesRows = salesRes.data
       const ordersRows = ordersRes.data
       const cashRow = cashRes.data
       const lowStockCount = stockRes.count
       const supplierRows = supplierRes.data
       const fittingsToday = fittingsRes.count
+
+      // Base neta de una venta de TPV: prorratea por la parte no devuelta.
+      const netSaleBase = (r: { total?: number; subtotal?: number; total_returned?: number }) => {
+        const total = Number(r.total) || 0
+        const returned = Number(r.total_returned) || 0
+        const subtotal = Number(r.subtotal) || 0
+        const proportion = total > 0 ? Math.max(0, (total - returned) / total) : 0
+        return (subtotal || total) * proportion
+      }
+      // Base neta de un cobro de sastrería: amount es bruto; prorrateamos por
+      // el ratio base/total del pedido padre (respeta descuentos e IVA propios).
+      const netPayBase = (p: Record<string, unknown>) => {
+        const amount = Number((p as { amount?: number }).amount) || 0
+        const o = ((p as { tailoring_order?: { subtotal?: number; total?: number } }).tailoring_order) || {}
+        const oTotal = Number(o.total) || 0
+        const oSub = Number(o.subtotal) || 0
+        const ratio = oTotal > 0 ? oSub / oTotal : 1
+        return amount * ratio
+      }
+
       let salesToday = 0
       let salesThisMonth = 0
       let salesLastMonth = 0
@@ -91,14 +132,21 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
       let avgTicketCount = 0
       for (const row of salesRows || []) {
         const date = (row.created_at as string).split('T')[0]
-        const t = Number((row as { total?: number }).total) || 0
-        if (date === today) salesToday += t
+        const base = netSaleBase(row)
+        if (date === today) salesToday += base
         if (date >= monthStart) {
-          salesThisMonth += t
-          avgTicketSum += t
+          salesThisMonth += base
+          avgTicketSum += base
           avgTicketCount += 1
         }
-        if (date >= lastMonthStart && date < monthStart) salesLastMonth += t
+        if (date >= lastMonthStart && date < monthStart) salesLastMonth += base
+      }
+      for (const p of tailoringPayRows || []) {
+        const date = ((p as { payment_date?: string }).payment_date as string).split('T')[0]
+        const base = netPayBase(p)
+        if (date === today) salesToday += base
+        if (date >= monthStart) salesThisMonth += base
+        if (date >= lastMonthStart && date < monthStart) salesLastMonth += base
       }
       const monthGrowth = Number.isFinite(salesLastMonth) && salesLastMonth > 0
         ? Number(((salesThisMonth - salesLastMonth) / salesLastMonth * 100).toFixed(2))
@@ -161,13 +209,15 @@ export const getSalesChartData = protectedAction<void, { date: string; label: st
       const today = now.toISOString().split('T')[0]
       const monthStart = `${today.slice(0, 7)}-01`
 
-      const { data: sales } = await admin
-        .from('sales')
-        .select('total, created_at')
-        .gte('created_at', `${monthStart}T00:00:00`)
-        .lte('created_at', `${today}T23:59:59`)
-        .eq('status', 'completed')
-        .order('created_at')
+      // Mismo criterio que la tarjeta "Ventas mes" y Contabilidad: base neta de
+      // TPV (sales) + cobros de sastrería backoffice (tailoring_order_payments),
+      // para que el total del gráfico cuadre con el KPI.
+      const [sales, tailoringPays] = await Promise.all([
+        readAllPaged<{ total?: number; subtotal?: number; total_returned?: number; created_at?: string }>((f, t) =>
+          admin.from('sales').select('total, subtotal, total_returned, created_at').gte('created_at', `${monthStart}T00:00:00`).lte('created_at', `${today}T23:59:59`).in('status', ['completed', 'partially_returned']).order('created_at').range(f, t)),
+        readAllPaged((f, t) =>
+          admin.from('tailoring_order_payments').select('amount, payment_date, tailoring_order:tailoring_orders(subtotal, total)').gte('payment_date', monthStart).lte('payment_date', today).range(f, t)),
+      ])
 
       const dailyMap: Record<string, number> = {}
       const [y, m] = today.split('-').map(Number)
@@ -180,7 +230,22 @@ export const getSalesChartData = protectedAction<void, { date: string; label: st
       for (const sale of sales || []) {
         const day = (sale.created_at as string).split('T')[0]
         if (dailyMap[day] !== undefined) {
-          dailyMap[day] += sale.total || 0
+          const total = Number(sale.total) || 0
+          const returned = Number(sale.total_returned) || 0
+          const subtotal = Number(sale.subtotal) || 0
+          const proportion = total > 0 ? Math.max(0, (total - returned) / total) : 0
+          dailyMap[day] += (subtotal || total) * proportion
+        }
+      }
+      for (const p of tailoringPays || []) {
+        const pr = p as { payment_date?: string; amount?: number; tailoring_order?: { subtotal?: number; total?: number } }
+        const day = (pr.payment_date as string).split('T')[0]
+        if (dailyMap[day] !== undefined) {
+          const amount = Number(pr.amount) || 0
+          const o = pr.tailoring_order || {}
+          const oTotal = Number(o.total) || 0
+          const oSub = Number(o.subtotal) || 0
+          dailyMap[day] += amount * (oTotal > 0 ? oSub / oTotal : 1)
         }
       }
 
