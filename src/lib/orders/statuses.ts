@@ -127,19 +127,21 @@ export interface ForwardPropagation {
 }
 
 /**
- * Regla "forward-only" para propagar el estado general del pedido a sus líneas.
- * El estado general lo conduce el personal; las líneas solo se arrastran hacia
- * adelante, nunca se hacen retroceder.
+ * Clasifica qué líneas deben cambiar al aplicar un estado GENERAL al pedido.
+ * El estado general lo conduce el personal y es BIDIRECCIONAL:
  *
  *  - destino `incident`  → transversal: NO se toca ninguna línea.
  *  - destino `cancelled` → se cancelan todas las líneas que no estén ya
  *                          `delivered` (ni `cancelled`).
- *  - resto               → solo avanzan las líneas estrictamente por detrás
- *                          (índice < índice destino en el pipeline del tipo).
- *                          Las líneas en `incident`/`cancelled` nunca se tocan,
- *                          y las de estado ajeno al pipeline se dejan como están.
+ *  - AVANZAR (destino ≥ estado actual del pedido = mínimo de sus prendas):
+ *      forward-only. Solo avanzan las líneas estrictamente por detrás; las que
+ *      ya están más adelantadas se MANTIENEN (`aheadCount` las cuenta).
+ *  - RETROCEDER (destino < estado actual del pedido): se arrastran TODAS las
+ *      líneas del pipeline hacia atrás al destino, para que el pedido pueda
+ *      volver a un estado anterior. Se dejan intactas las terminales
+ *      (`delivered`/`cancelled`/`incident`) y las de estado ajeno al pipeline.
  */
-export function classifyLinesForForwardPropagation(
+export function classifyLinesForStatusChange(
   targetStatus: string,
   orderType: string | null | undefined,
   lines: { id: string; status: string }[],
@@ -156,14 +158,31 @@ export function classifyLinesForForwardPropagation(
   const idxTarget = getStatusIndex(targetStatus, orderType)
   if (idxTarget < 0) return { toUpdate: [], aheadCount: 0 }
 
+  // Estado ACTUAL del pedido = índice mínimo entre sus prendas vivas del pipeline.
+  // Si el destino queda por debajo, es un RETROCESO explícito.
+  let curMin = Infinity
+  for (const l of lines) {
+    if (NON_PIPELINE_STATUSES.includes(l.status as OrderStatus)) continue
+    const i = getStatusIndex(l.status, orderType)
+    if (i >= 0 && i < curMin) curMin = i
+  }
+  const retreating = idxTarget < curMin
+
   const toUpdate: string[] = []
   let aheadCount = 0
   for (const l of lines) {
     if (NON_PIPELINE_STATUSES.includes(l.status as OrderStatus)) continue // transversales: intactas
+    if (l.status === 'delivered') { aheadCount++; continue }              // entregada: nunca retrocede
     const idxLine = getStatusIndex(l.status, orderType)
     if (idxLine < 0) continue            // estado ajeno al pipeline del tipo: no tocar
-    if (idxLine < idxTarget) toUpdate.push(l.id)
-    else if (idxLine > idxTarget) aheadCount++
+    if (idxLine === idxTarget) continue  // ya está en el destino
+    if (retreating) {
+      toUpdate.push(l.id)                // retroceso: arrastra todas hacia atrás
+    } else if (idxLine < idxTarget) {
+      toUpdate.push(l.id)                // avance: solo las que van por detrás
+    } else {
+      aheadCount++                       // avance: las adelantadas se mantienen
+    }
   }
   return { toUpdate, aheadCount }
 }

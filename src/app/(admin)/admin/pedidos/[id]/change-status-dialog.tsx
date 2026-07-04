@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Loader2, ArrowRight } from 'lucide-react'
@@ -24,30 +25,50 @@ export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus,
 }) {
   const router = useRouter()
   const [newStatus, setNewStatus] = useState('')
-  const [lineId, setLineId] = useState<string>('')
+  // Prendas seleccionadas (multi-selección). Vacío = aplicar a TODO el pedido.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [notes, setNotes] = useState('')
 
-  const allStatuses = getStatusesFor(orderType)
-  // El estado a EXCLUIR es el de la PRENDA seleccionada (cuando se aplica a una
-  // concreta); si no, el del pedido. Antes se excluía siempre el del pedido, lo
-  // que ocultaba el estado deseado para una prenda que va por detrás (p.ej. no
-  // dejaba poner "Tejido pedido a fabricante" a una prenda en "Creado" si el
-  // pedido ya figuraba en ese estado por otras prendas más avanzadas).
-  const selectedLine = lineId && lineId !== 'all' ? lines.find((l) => l.id === lineId) : null
-  const referenceStatus = (selectedLine?.status as string | undefined) ?? currentStatus
-  const allowedStatuses = allStatuses.filter(s => s !== referenceStatus)
+  const multiline = lines.length > 1
+  // "Todo el pedido" cuando no se marca ninguna prenda o se marcan todas: ruta de
+  // propagación forward (y reembolsos en cancelación). Un subconjunto va por la
+  // ruta de prendas concretas (`line_ids`).
+  const wholeOrder = selectedIds.size === 0 || selectedIds.size === lines.length
 
+  const allStatuses = getStatusesFor(orderType)
+  // Estado a EXCLUIR del desplegable: si las prendas afectadas comparten un mismo
+  // estado, se oculta ese (no tiene sentido "cambiar" a donde ya están). Si están
+  // en estados distintos, se muestran todos.
+  const affectedLines = selectedIds.size > 0 ? lines.filter((l) => selectedIds.has(l.id)) : lines
+  const affectedStatuses = new Set(affectedLines.map((l) => l.status as string))
+  const referenceStatus = affectedStatuses.size === 1 ? [...affectedStatuses][0] : null
+  const allowedStatuses = allStatuses.filter((s) => (referenceStatus ? s !== referenceStatus : true))
+
+  const toggleLine = (id: string, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(id); else next.delete(id)
+      return next
+    })
+  }
+  const toggleAll = (checked: boolean) => {
+    setSelectedIds(checked ? new Set(lines.map((l) => l.id)) : new Set())
+  }
 
   const { execute, isLoading } = useAction(changeOrderStatus, {
     onSuccess: (data: any) => {
-      // Cambio por línea individual (no "Todo el pedido"): sin propagación.
-      const isSingleLine = !!lineId && lineId !== 'all'
-      if (isSingleLine) toast.success('Estado actualizado')
-      else statusChangeToast(data?.ahead_lines_count ?? 0)
+      if (!wholeOrder) {
+        toast.success(selectedIds.size === 1 ? 'Estado actualizado' : `Estado actualizado (${selectedIds.size} prendas)`)
+      } else {
+        statusChangeToast(data?.ahead_lines_count ?? 0)
+      }
       onOpenChange(false)
       router.refresh()
     },
   })
+
+  const allChecked = selectedIds.size === lines.length && lines.length > 0
+  const someChecked = selectedIds.size > 0 && !allChecked
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -85,20 +106,37 @@ export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus,
             </div>
           )}
 
-          {lines.length > 1 && (
+          {multiline && (
             <div className="space-y-2">
               <Label>Aplicar a</Label>
-              <Select value={lineId} onValueChange={setLineId}>
-                <SelectTrigger><SelectValue placeholder="Todas las prendas" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas las prendas</SelectItem>
+              <div className="rounded-md border divide-y">
+                <label className="flex items-center gap-2 px-3 py-2 cursor-pointer bg-muted/40">
+                  <Checkbox
+                    checked={allChecked ? true : (someChecked ? 'indeterminate' : false)}
+                    onCheckedChange={(c) => toggleAll(c === true)}
+                  />
+                  <span className="text-sm font-medium">Todas las prendas</span>
+                </label>
+                <div className="max-h-52 overflow-y-auto">
                   {lines.map((l: any, i: number) => (
-                    <SelectItem key={l.id} value={l.id}>
-                      Prenda #{i + 1}: {l.garment_types?.name}
-                    </SelectItem>
+                    <label key={l.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-muted/40">
+                      <Checkbox
+                        checked={selectedIds.has(l.id)}
+                        onCheckedChange={(c) => toggleLine(l.id, c === true)}
+                      />
+                      <span className="text-sm flex-1">Prenda #{i + 1}: {l.garment_types?.name}</span>
+                      <Badge className={`${getOrderStatusColor(l.status)} text-[10px]`} variant="secondary">
+                        {getOrderStatusLabel(l.status)}
+                      </Badge>
+                    </label>
                   ))}
-                </SelectContent>
-              </Select>
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                {wholeOrder
+                  ? 'Se aplicará a todo el pedido (las prendas ya más adelantadas se mantienen).'
+                  : `Se cambiarán ${selectedIds.size} ${selectedIds.size === 1 ? 'prenda' : 'prendas'}.`}
+              </p>
             </div>
           )}
 
@@ -112,7 +150,7 @@ export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus,
           <Button
             onClick={() => execute({
               order_id: orderId,
-              line_id: lineId && lineId !== 'all' ? lineId : undefined,
+              line_ids: wholeOrder ? undefined : [...selectedIds],
               new_status: newStatus,
               notes: notes || undefined,
             })}
