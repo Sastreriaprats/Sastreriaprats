@@ -14,9 +14,9 @@ const HELP = `👋 Soy el asistente de Sastrería Prats. Pregúntame cualquier c
 • Ventas de sastrería de la semana por tienda
 • Top 5 vendedores del mes
 
-Recuerdo el hilo de la conversación: puedes preguntarme cosas de seguimiento ("¿y en la otra tienda?", "¿y el mes pasado?").
+Recuerdo el hilo mientras hablamos, así que puedes preguntar cosas de seguimiento ("¿y en la otra tienda?", "¿y el mes pasado?"). Tras 10 min sin escribir, olvido el tema y empezamos de cero automáticamente.
 
-Comandos: /start ayuda · /id ver el id de este chat · /reset empezar conversación nueva`
+Comandos: /start ayuda · /id ver el id de este chat · /reset empezar tema nuevo ya`
 
 /** Lista blanca de chats que pueden consultar (env, separados por coma) + chat del reporte. */
 function allowedChats(): Set<string> {
@@ -40,21 +40,45 @@ async function runSql(sql: string): Promise<unknown> {
 }
 
 // ── Memoria de conversación por chat ────────────────────────────────────────
-const HISTORY_WINDOW_MIN = 120 // solo contexto de las últimas 2 horas
-const HISTORY_MAX = 16 // últimos 16 mensajes (8 intercambios)
+const HISTORY_MAX = 16 // últimos 16 mensajes (8 intercambios) como tope
+const HISTORY_LOOKBACK_MIN = 180 // no mirar más atrás de 3h (acota la consulta)
+const INACTIVITY_RESET_MIN = 10 // tras 10 min sin escribir, se olvida el hilo
 
-/** Carga los últimos turnos del chat, en orden cronológico. */
+/**
+ * Carga los turnos de la conversación ACTIVA del chat, en orden cronológico.
+ * Reset automático por inactividad: si el último mensaje fue hace más de 10 min,
+ * se empieza tema nuevo (devuelve []). Además corta en cualquier hueco > 10 min,
+ * así que solo se devuelve la sesión contigua más reciente.
+ */
 async function loadHistory(chatId: number): Promise<HistoryTurn[]> {
   const admin = createAdminClient()
-  const since = new Date(Date.now() - HISTORY_WINDOW_MIN * 60000).toISOString()
+  const since = new Date(Date.now() - HISTORY_LOOKBACK_MIN * 60000).toISOString()
   const { data } = await admin
     .from('telegram_chat_history')
-    .select('role, content')
+    .select('role, content, created_at')
     .eq('chat_id', chatId)
     .gte('created_at', since)
     .order('created_at', { ascending: false })
     .limit(HISTORY_MAX)
-  return ((data as HistoryTurn[]) || []).reverse()
+
+  const rows = (data as { role: 'user' | 'assistant'; content: string; created_at: string }[]) || []
+  if (rows.length === 0) return []
+
+  const gapMs = INACTIVITY_RESET_MIN * 60000
+
+  // ¿Inactividad? Si el mensaje más reciente es viejo, tema nuevo.
+  if (Date.now() - new Date(rows[0].created_at).getTime() > gapMs) return []
+
+  // Incluir solo la sesión contigua (huecos <= 10 min entre mensajes).
+  const session = [rows[0]]
+  for (let i = 1; i < rows.length; i++) {
+    const prev = new Date(rows[i - 1].created_at).getTime()
+    const cur = new Date(rows[i].created_at).getTime()
+    if (prev - cur > gapMs) break
+    session.push(rows[i])
+  }
+
+  return session.reverse().map((r) => ({ role: r.role, content: r.content }))
 }
 
 /** Guarda el turno (pregunta del usuario + respuesta del asistente). */
