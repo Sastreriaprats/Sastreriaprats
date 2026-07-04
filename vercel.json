@@ -21,6 +21,14 @@
     {
       "path": "/api/cron/daily-report",
       "schedule": "30 20 * * *"
+    },
+    {
+      "path": "/api/cron/daily-report",
+      "schedule": "30 12 * * *"
+    },
+    {
+      "path": "/api/cron/daily-report",
+      "schedule": "30 13 * * *"
     }
   ],
   "headers": [
