@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -11,12 +11,11 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Badge } from '@/components/ui/badge'
 import { Loader2, Trash2, User, CheckCircle2, XCircle, Globe, Phone, Settings } from 'lucide-react'
 import { toast } from 'sonner'
-import { createClient } from '@/lib/supabase/client'
 import { useAction } from '@/hooks/use-action'
 import { useAuth } from '@/components/providers/auth-provider'
 import { useStores } from '@/hooks/use-cached-queries'
 import { usePermissions } from '@/hooks/use-permissions'
-import { createAppointment, updateAppointment, cancelAppointment, markAttendance } from '@/actions/calendar'
+import { createAppointment, updateAppointment, cancelAppointment, markAttendance, searchClientsForAppointment } from '@/actions/calendar'
 import type { CalendarEvent } from './calendar-content'
 
 const typeOptions = [
@@ -79,7 +78,6 @@ interface AppointmentDialogProps {
 export function AppointmentDialog({
   open, onOpenChange, selectedSlot, selectedEvent, tailors, onSaved,
 }: AppointmentDialogProps) {
-  const supabase = useMemo(() => createClient(), [])
   const { activeStoreId } = useAuth()
   const { data: allStores } = useStores()
   const { can } = usePermissions()
@@ -158,18 +156,17 @@ export function AppointmentDialog({
   }, [form.type, isEditing]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (clientSearch.length < 2) { setClientResults([]); return }
+    if (clientSearch.trim().length < 2) { setClientResults([]); return }
+    let cancelled = false
+    // Mismo buscador que el resto de la app (tokenizado sobre search_text +
+    // fallback difuso, unaccent): encuentra al cliente con multi-palabra, orden
+    // inverso, acentos o typo leve. Antes era un ILIKE contiguo solo sobre full_name.
     const timeout = setTimeout(async () => {
-      const { data } = await supabase
-        .from('clients')
-        .select('id, full_name, phone, client_code')
-        .or(`full_name.ilike.%${clientSearch}%,phone.ilike.%${clientSearch}%,client_code.ilike.%${clientSearch}%`)
-        .eq('is_active', true)
-        .limit(8)
-      if (data) setClientResults(data as { id: string; full_name: string; client_code: string }[])
+      const res = await searchClientsForAppointment({ term: clientSearch })
+      if (!cancelled && res.success) setClientResults(res.data)
     }, 300)
-    return () => clearTimeout(timeout)
-  }, [clientSearch, supabase])
+    return () => { cancelled = true; clearTimeout(timeout) }
+  }, [clientSearch])
 
   const { execute: doCreate, isLoading: isCreating } = useAction(createAppointment, {
     successMessage: 'Cita creada',

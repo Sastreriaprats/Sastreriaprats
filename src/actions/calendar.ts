@@ -3,6 +3,8 @@
 import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { getBusinessHours, isSlotBlocked, type ScheduleBlockLike } from '@/lib/schedule-utils'
+import { resolveClientIdsForSearch } from '@/lib/server/query-helpers'
+import { normalizeSearchTerm } from '@/lib/utils'
 
 /**
  * Devuelve el bloqueo de agenda activo que choca con la franja indicada, o
@@ -134,6 +136,52 @@ export const findNextAppointmentByClient = protectedAction<{ query: string }, {
 
 const CALENDAR_EDIT_PERMISSIONS = ['calendar.edit', 'calendar.update'] as string[]
 const CALENDAR_CANCEL_PERMISSIONS = ['calendar.edit', 'calendar.update', 'calendar.delete'] as string[]
+
+/**
+ * Buscador de cliente del diálogo de cita. Unifica con el buscador CENTRAL:
+ * tokeniza `clients.search_text` (unaccent + AND por token) con fallback difuso,
+ * igual que pedidos/reservas/tickets tras el fix multi-palabra. Antes hacía un
+ * ILIKE contiguo solo sobre full_name → fallaba con typo leve / orden / acentos
+ * (un cliente dado de alta salía como "sin dar de alta"). Gated con el MISMO
+ * permiso que crear cita → no amplía el acceso a clientes.
+ */
+export const searchClientsForAppointment = protectedAction<
+  { term: string },
+  { id: string; full_name: string; client_code: string }[]
+>(
+  { permission: CALENDAR_EDIT_PERMISSIONS, auditModule: 'calendar' },
+  async (ctx, { term }) => {
+    const safe = normalizeSearchTerm(term || '')
+    if (safe.length < 2) return success([])
+    const ids = await resolveClientIdsForSearch(ctx.adminClient, safe)
+    if (ids.length === 0) return success([])
+    // `ids` viene por relevancia (fuzzy: score desc; token: orden BD). Cogemos el
+    // top y PRESERVAMOS ese orden al pintar (el `.in` de PostgREST no lo respeta),
+    // para que un match difuso salga arriba y no lo tape un orden alfabético.
+    const idsTop = ids.slice(0, 30)
+    const { data, error } = await ctx.adminClient
+      .from('clients')
+      .select('id, full_name, client_code')
+      .in('id', idsTop)
+      .eq('is_active', true)
+    if (error) return failure(error.message)
+    const rank = new Map(idsTop.map((id, i) => [id, i]))
+    const rows = (data ?? [])
+      .slice()
+      .sort(
+        (a: { id: string }, b: { id: string }) =>
+          (rank.get(String(a.id)) ?? Number.MAX_SAFE_INTEGER) - (rank.get(String(b.id)) ?? Number.MAX_SAFE_INTEGER),
+      )
+      .slice(0, 8)
+    return success(
+      rows.map((c: { id: string; full_name: string | null; client_code: string | null }) => ({
+        id: String(c.id),
+        full_name: c.full_name ?? '',
+        client_code: c.client_code ?? '',
+      })),
+    )
+  }
+)
 
 export const createAppointment = protectedAction<Record<string, unknown>, unknown>(
   {
