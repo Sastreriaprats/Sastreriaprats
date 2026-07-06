@@ -635,7 +635,11 @@ export const updateSupplierOrderStatusAction = protectedAction<
       for (const line of lines || []) {
         const qtyReceived = toNumber((line as any).quantity_received)
         const qtyOrdered = toNumber((line as any).quantity)
-        const qtyToAddRaw = qtyReceived > 0 ? qtyReceived : qtyOrdered
+        // Opción A: sumar SOLO lo pendiente (lo ya recibido ya está en stock por el
+        // guardado, que ajusta por delta). Idempotente: si la línea ya está completa
+        // (o sobre-recibida), qtyToAdd <= 0 → no vuelve a sumar. Elimina el doble
+        // conteo del caso "guardado parcial + botón" sin depender de stock_updated_at.
+        const qtyToAddRaw = qtyOrdered - qtyReceived
         if (!Number.isInteger(qtyToAddRaw)) {
           stockWarnings += 1
           console.warn('[supplier receipt] cantidad no entera, se omite línea de stock', {
@@ -739,13 +743,17 @@ export const updateSupplierOrderStatusAction = protectedAction<
         if (movementError) return failure(movementError.message || 'Error al registrar movimiento de recepción', 'INTERNAL')
       }
 
+      // El botón marca TODAS las líneas como recibidas del todo (recepción total).
+      // Se fija quantity_received = quantity para que el campo quede coherente con el
+      // stock ya sumado. GREATEST: no se baja una línea sobre-recibida (recibido > pedido).
       for (const line of lines || []) {
         const lineQtyReceived = toNumber((line as any).quantity_received)
-        if (lineQtyReceived > 0) continue
+        const lineQtyOrdered = toNumber((line as any).quantity)
+        if (lineQtyReceived >= lineQtyOrdered) continue
         const { error: updateLineErr } = await ctx.adminClient
           .from('supplier_order_lines')
           .update({
-            quantity_received: (line as any).quantity,
+            quantity_received: lineQtyOrdered,
             is_fully_received: true,
             received_at: new Date().toISOString(),
           })
