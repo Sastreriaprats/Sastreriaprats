@@ -29,12 +29,21 @@ export type QuarterRow = {
   purchasesCount: number
 }
 
+// Tipo de origen de un cobro en efectivo (para depósitos bancarios y PDF)
+export type MovementKind = 'sale' | 'order_payment' | 'invoice' | 'manual'
+
 export type MovementRow = {
-  saleId?: string         // vacío en cobros manuales (sin PDF)
+  kind: MovementKind
+  saleId?: string         // venta TPV → PDF de ticket
+  orderId?: string        // pedido de sastrería → PDF de ticket de pedido
+  paymentId?: string      // id del cobro de sastrería (item de depósito)
+  invoiceId?: string      // id de la factura (item de depósito)
+  pdfUrl?: string         // PDF ya generado (facturas)
   date: string
   ref: string             // nº ticket (CLP) o "Manual"
   concept: string
   method: string
+  client?: string         // nombre del cliente
   base: number
   vat: number
   total: number
@@ -45,10 +54,13 @@ export type LedgerMovement = {
   date: string
   type: string            // 'Ticket' | 'Compra' | 'Gasto'
   concept: string
+  client?: string         // cliente (ingresos) o proveedor (gastos)
   base: number
   vat: number
   total: number           // con signo: + ingreso, − gasto
   saleId?: string
+  orderId?: string        // pedido de sastrería → PDF de ticket de pedido
+  pdfUrl?: string         // PDF ya generado (facturas)
 }
 
 export type AccountingView = {
@@ -68,11 +80,32 @@ export type ManualSummary = {
   outBase: number; outVat: number; outTotal: number // pagos manuales
 }
 
+// --- Depósito bancario de efectivo: mueve cobros concretos de B a C.
+//     Contenido cifrado en aux.deposits / aux.deposit_items.
+export type DepositItemPayload = {
+  kind: Exclude<MovementKind, 'manual'>
+  itemId: string          // sale_id | tailoring_order_payments.id | invoices.id
+  amount: number          // parte en efectivo del cobro (IVA incluido)
+  ref: string             // nº ticket / pedido / factura
+  client?: string
+  date: string            // fecha original del cobro (YYYY-MM-DD)
+}
+export type DepositPayload = { date: string; note: string }
+export type DepositRow = DepositPayload & {
+  id: string
+  createdAt: string
+  total: number
+  items: (DepositItemPayload & { id: string })[]
+}
+
 export type ViewB = {
   view: AccountingView          // contabilidad de los cobros 100% efectivo (tickets)
   movements: MovementRow[]      // todos los cobros en efectivo (tickets)
   entries: CashEntry[]          // movimientos manuales de control (cobros/pagos)
   manual: ManualSummary         // totales de los movimientos manuales
+  deposits: DepositRow[]        // ingresos de efectivo al banco (histórico completo)
+  depositedTotal: number        // cobros del AÑO ya ingresados al banco (fuera de B)
+  depositedCount: number
 }
 
 export type InvoiceLite = {
@@ -82,6 +115,19 @@ export type InvoiceLite = {
   total: number
   status: string
   method: string
+  saleId?: string               // factura de un ticket → dedup en C
+  orderId?: string              // factura de un pedido de sastrería → dedup en C
+  pdfUrl?: string
+}
+
+// Factura recibida de proveedor (gastos del escenario C)
+export type ApInvoiceLite = {
+  number: string
+  supplier: string
+  date: string
+  base: number
+  vat: number
+  total: number
 }
 
 export type ViewC = {
@@ -89,4 +135,5 @@ export type ViewC = {
   C: AccountingView             // A menos el efectivo
   ledger: LedgerMovement[]      // TODOS los movimientos (ingresos no-efectivo + gastos)
   invoices: InvoiceLite[]       // facturas emitidas del año
+  apInvoices: ApInvoiceLite[]   // facturas recibidas de proveedor del año
 }

@@ -63,3 +63,56 @@ export async function deleteEntry(id: string): Promise<void> {
   const admin = createAdminClient()
   await admin.rpc('fn_ops_entry_delete', { p_id: id })
 }
+
+// ---------- deposits (ingresos de efectivo al banco, cifrados) ----------
+
+export type DepositDbRow = {
+  id: string
+  payload: Buffer
+  createdAt: string
+  items: { id: string; payload: Buffer }[]
+}
+
+export async function listDeposits(): Promise<DepositDbRow[]> {
+  const admin = createAdminClient()
+  const { data } = await admin.rpc('fn_ops_deposits_list')
+  return ((data ?? []) as Record<string, unknown>[]).map((x) => ({
+    id: String(x.id),
+    payload: Buffer.from(String(x.payload_b64), 'base64'),
+    createdAt: String(x.created_at),
+    items: ((x.items ?? []) as Record<string, unknown>[]).map((i) => ({
+      id: String(i.id),
+      payload: Buffer.from(String(i.payload_b64), 'base64'),
+    })),
+  }))
+}
+
+// Etiquetas HMAC de todos los cobros ya depositados (para excluirlos de B).
+export async function listDepositTags(): Promise<Set<string>> {
+  const admin = createAdminClient()
+  const { data, error } = await admin.rpc('fn_ops_deposit_tags')
+  if (error) throw new Error('deposit_tags_unavailable')
+  const out = new Set<string>()
+  for (const x of (data ?? []) as Record<string, unknown>[]) out.add(String(x.dedup_b64))
+  return out
+}
+
+export async function insertDeposit(
+  payload: Buffer,
+  createdBy: string | null,
+  items: { payload: Buffer; dedup: Buffer }[],
+): Promise<void> {
+  const admin = createAdminClient()
+  const { error } = await admin.rpc('fn_ops_deposit_create', {
+    p_payload_b64: payload.toString('base64'),
+    p_by: createdBy,
+    p_items: items.map((i) => ({ payload_b64: i.payload.toString('base64'), dedup_b64: i.dedup.toString('base64') })),
+  })
+  if (error) throw new Error(error.message)
+}
+
+export async function deleteDeposit(id: string): Promise<void> {
+  const admin = createAdminClient()
+  const { error } = await admin.rpc('fn_ops_deposit_delete', { p_id: id })
+  if (error) throw new Error(error.message)
+}
