@@ -128,6 +128,17 @@ export function AuthProvider({
         } else {
           setProfile(null)
           setStores([])
+          // Sesión muerta (token caducado o revocado) en una ruta protegida:
+          // sin esto la pantalla sigue pintada desde caché y toda acción
+          // falla con "No autenticado" sin llevar nunca al login (caso
+          // cierre de caja Wellington 07/07/2026).
+          if (event === 'SIGNED_OUT' && typeof window !== 'undefined') {
+            const p = window.location.pathname
+            const isProtected = ['/pos', '/admin', '/vendedor', '/sastre'].some(
+              (r) => p === r || p.startsWith(`${r}/`)
+            )
+            if (isProtected) window.location.href = '/auth/login'
+          }
         }
       }
     )
@@ -149,7 +160,7 @@ export function AuthProvider({
         window.sessionStorage.removeItem(`prats_store_confirmed_${user.id}`)
       }
     }
-    await supabase.auth.signOut()
+    await supabase.auth.signOut({ scope: 'local' })
     setUser(null)
     setSession(null)
     setProfile(null)

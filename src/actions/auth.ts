@@ -301,7 +301,9 @@ export async function logoutAction() {
     })
   }
 
-  await supabase.auth.signOut()
+  // scope 'local': cerrar sesión en un dispositivo no debe matar las sesiones
+  // del mismo usuario en otros dispositivos/pestañas (TPVs compartidos)
+  await supabase.auth.signOut({ scope: 'local' })
   const cookieStore = await cookies()
   cookieStore.delete('x-user-roles')
   redirect('/auth/login')
@@ -310,7 +312,7 @@ export async function logoutAction() {
 /** Cierre de sesión desde el área de cliente: redirige a la home. */
 export async function logoutClientAction() {
   const supabase = await createServerSupabaseClient()
-  await supabase.auth.signOut()
+  await supabase.auth.signOut({ scope: 'local' })
   const cookieStore = await cookies()
   cookieStore.delete('x-user-roles')
   redirect('/')

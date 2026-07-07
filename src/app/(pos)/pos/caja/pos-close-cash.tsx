@@ -47,6 +47,11 @@ export function PosCloseCash({ session, onClosed, onCancel }: {
         closing_breakdown: cashBreakdown,
       })
       if (!result.success) {
+        if (result.code === 'UNAUTHORIZED') {
+          toast.error('Tu sesión ha caducado. Vuelve a iniciar sesión para cerrar la caja.')
+          window.location.href = '/auth/login'
+          return
+        }
         toast.error(result.error ?? 'Error al cerrar la caja')
         return
       }
