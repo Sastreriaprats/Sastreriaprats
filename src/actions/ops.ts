@@ -113,7 +113,7 @@ async function computeYear(year: number) {
     listDepositTags(),
     // Gastos / IVA soportado = FACTURAS RECIBIDAS (ap_supplier_invoices)
     admin.from('ap_supplier_invoices')
-      .select('invoice_number, supplier_name, amount, tax_amount, invoice_date')
+      .select('invoice_number, supplier_name, amount, tax_amount, invoice_date, attachment_url')
       .eq('is_proforma', false)
       .gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`),
     // Mapa venta -> nº de ticket oficial (CLP)
@@ -264,13 +264,15 @@ async function computeYear(year: number) {
     apQ[q].base += base; apQ[q].vat += vat; apQ[q].count += 1
     const supplier = String(x.supplier_name ?? '')
     const num = String(x.invoice_number ?? '')
+    const attachment = typeof x.attachment_url === 'string' && x.attachment_url.trim() ? x.attachment_url.trim() : undefined
     expenseLedger.push({
       date: d.slice(0, 10), type: 'Factura recibida',
       concept: `${supplier} ${num}`.trim() || 'Factura recibida',
       client: supplier || undefined,
       base: r2(base), vat: r2(vat), total: r2(-(base + vat)),
+      apPath: attachment,
     })
-    apInvoices.push({ number: num, supplier, date: d.slice(0, 10), base: r2(base), vat: r2(vat), total: r2(base + vat) })
+    apInvoices.push({ number: num, supplier, date: d.slice(0, 10), base: r2(base), vat: r2(vat), total: r2(base + vat), attachmentPath: attachment })
   }
 
   return {
@@ -284,20 +286,6 @@ function months(year: number, income: Record<string, number>, expenses: Record<s
   for (let m = 1; m <= 12; m++) {
     const key = `${year}-${String(m).padStart(2, '0')}`
     out.push({ month: key, income: r2(income[key] || 0), expenses: r2(expenses[key] || 0) })
-  }
-  return out
-}
-const mergeMonthly = (a: Record<string, number>, b: Record<string, number>) => {
-  const out: Record<string, number> = { ...a }
-  for (const k in b) out[k] = (out[k] || 0) + b[k]
-  return out
-}
-const mergeQ = (a: QMap, b: QMap): QMap => {
-  const out = emptyQ()
-  for (let q = 1; q <= 4; q++) {
-    out[q].base = a[q].base + b[q].base
-    out[q].vat = a[q].vat + b[q].vat
-    out[q].count = a[q].count + b[q].count
   }
   return out
 }
@@ -386,16 +374,8 @@ export async function getViewC(year: number) {
   try {
     await assertScope('C')
     const c = await computeYear(year)
-    const totIncome = c.cash.income + c.noncash.income
-    const totVat = c.cash.vat + c.noncash.vat
-    const totCount = c.cash.count + c.noncash.count
-    const A: AccountingView = {
-      income: r2(totIncome), expenses: r2(c.expenses), profit: r2(totIncome - c.expenses),
-      ivaRepercutido: r2(totVat), ivaSoportado: r2(c.vatPaidSummary), vatToPay: r2(totVat - c.vatPaidSummary),
-      monthly: months(year, mergeMonthly(c.cash.monthly, c.noncash.monthly), c.expMonthly),
-      quarters: buildQuarters(year, mergeQ(c.cash.quarters, c.noncash.quarters), c.apQ),
-      salesCount: totCount,
-    }
+    // La capa A no se calcula ni se devuelve: este panel lo ve el asesor externo
+    // y la respuesta no debe contener la contabilidad íntegra.
     const C: AccountingView = {
       income: r2(c.noncash.income), expenses: r2(c.expenses), profit: r2(c.noncash.income - c.expenses),
       ivaRepercutido: r2(c.noncash.vat), ivaSoportado: r2(c.vatPaidSummary), vatToPay: r2(c.noncash.vat - c.vatPaidSummary),
@@ -427,7 +407,7 @@ export async function getViewC(year: number) {
       pdfUrl: x.pdf_url ? String(x.pdf_url) : undefined,
     }))
 
-    return ok({ A, C, ledger: ledger.slice(0, 5000), invoices, apInvoices: c.apInvoices } as ViewC)
+    return ok({ C, ledger: ledger.slice(0, 5000), invoices, apInvoices: c.apInvoices } as ViewC)
   } catch { return fail() }
 }
 
@@ -479,6 +459,26 @@ export async function getOrderTicketData(orderId: string) {
       .eq('id', orderId).single()
     if (!order) return fail()
     return ok(order as Record<string, unknown>)
+  } catch { return fail() }
+}
+
+// ---------------------------------------------------------------------------
+// PDF adjunto de una factura recibida de proveedor (bucket privado
+// supplier-invoices): signed URL al vuelo, gateado por cualquier capa.
+// ---------------------------------------------------------------------------
+export async function getApInvoicePdfUrl(attachmentPath: string) {
+  try {
+    const a = await getViewerAccess()
+    if (a.scopes.length === 0) return fail()
+    // Retrocompat: filas legacy guardaron la URL pública completa en vez del path.
+    let path = attachmentPath
+    const publicMarker = '/storage/v1/object/public/supplier-invoices/'
+    if (path.includes(publicMarker)) path = path.split(publicMarker)[1]
+    if (!path) return fail()
+    const admin = createAdminClient()
+    const { data, error } = await admin.storage.from('supplier-invoices').createSignedUrl(path, 3600)
+    if (error || !data?.signedUrl) return fail('No se pudo abrir el archivo')
+    return ok({ url: data.signedUrl })
   } catch { return fail() }
 }
 

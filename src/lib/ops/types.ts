@@ -61,6 +61,7 @@ export type LedgerMovement = {
   saleId?: string
   orderId?: string        // pedido de sastrería → PDF de ticket de pedido
   pdfUrl?: string         // PDF ya generado (facturas)
+  apPath?: string         // adjunto de factura recibida (bucket supplier-invoices)
 }
 
 export type AccountingView = {
@@ -128,10 +129,12 @@ export type ApInvoiceLite = {
   base: number
   vat: number
   total: number
+  attachmentPath?: string       // path en el bucket supplier-invoices (PDF adjunto)
 }
 
 export type ViewC = {
-  A: AccountingView             // referencia (real, íntegra)
+  // OJO: la capa A (real, íntegra) NO viaja al cliente a propósito: este panel
+  // lo ve el asesor externo y solo debe conocer el escenario C.
   C: AccountingView             // A menos el efectivo
   ledger: LedgerMovement[]      // TODOS los movimientos (ingresos no-efectivo + gastos)
   invoices: InvoiceLite[]       // facturas emitidas del año

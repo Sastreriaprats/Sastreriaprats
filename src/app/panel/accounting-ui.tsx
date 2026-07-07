@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { TrendingUp, TrendingDown, Wallet, Receipt, Percent, Hash, Landmark, Download, Loader2, ChevronDown, ChevronRight, type LucideIcon } from 'lucide-react'
-import { getTicketData, getOrderTicketData } from '@/actions/ops'
+import { getTicketData, getOrderTicketData, getApInvoicePdfUrl } from '@/actions/ops'
 import { generateTicketPdf } from '@/components/pos/ticket-pdf'
 import { generateTailoringOrderTicketPdf, type TailoringTicketOrder } from '@/lib/pdf/tailoring-order-ticket'
 import type { AccountingView, MovementRow, LedgerMovement } from '@/lib/ops/types'
@@ -149,9 +149,9 @@ export function QuarterTable({ view, variant }: { view: AccountingView; variant:
   )
 }
 
-export function DownloadBtn({ saleId, orderId, pdfUrl }: { saleId?: string; orderId?: string; pdfUrl?: string }) {
+export function DownloadBtn({ saleId, orderId, pdfUrl, apPath }: { saleId?: string; orderId?: string; pdfUrl?: string; apPath?: string }) {
   const [loading, setLoading] = useState(false)
-  if (!saleId && !orderId && !pdfUrl) return <span className="text-slate-300">—</span>
+  if (!saleId && !orderId && !pdfUrl && !apPath) return <span className="text-slate-300">—</span>
   const go = async () => {
     setLoading(true)
     try {
@@ -166,6 +166,10 @@ export function DownloadBtn({ saleId, orderId, pdfUrl }: { saleId?: string; orde
         await generateTailoringOrderTicketPdf(res.data as unknown as TailoringTicketOrder)
       } else if (pdfUrl) {
         window.open(pdfUrl, '_blank', 'noopener')
+      } else if (apPath) {
+        const res = await getApInvoicePdfUrl(apPath)
+        if (!res.ok) { toast.error('PDF no disponible'); return }
+        window.open(res.data.url, '_blank', 'noopener')
       }
     } catch {
       toast.error('No se pudo generar el PDF')
@@ -178,7 +182,7 @@ export function DownloadBtn({ saleId, orderId, pdfUrl }: { saleId?: string; orde
       onClick={go}
       disabled={loading}
       className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-prats-navy disabled:opacity-50"
-      title="Descargar ticket en PDF"
+      title={apPath ? 'Descargar factura del proveedor (PDF)' : 'Descargar ticket en PDF'}
     >
       {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
     </button>
@@ -365,7 +369,7 @@ export function MonthlyFullExpandable({ year, view, rows }: { year: number; view
                             <td className="px-2 py-1.5 text-slate-700">{m2.concept}</td>
                             <td className="px-2 py-1.5 text-slate-700">{m2.client ?? '—'}</td>
                             <td className={`px-2 py-1.5 text-right font-semibold tabular-nums ${m2.total >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{eur(m2.total)}</td>
-                            <td className="px-2 py-1.5 text-right"><DownloadBtn saleId={m2.saleId} orderId={m2.orderId} pdfUrl={m2.pdfUrl} /></td>
+                            <td className="px-2 py-1.5 text-right"><DownloadBtn saleId={m2.saleId} orderId={m2.orderId} pdfUrl={m2.pdfUrl} apPath={m2.apPath} /></td>
                           </tr>
                         ))}
                       </tbody>
@@ -420,7 +424,7 @@ export function LedgerTable({ rows }: { rows: LedgerMovement[] }) {
               <td className={TDR}>{eur(m.base)}</td>
               <td className={TDR}>{eur(m.vat)}</td>
               <td className={`${TDR} font-semibold ${m.total >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{eur(m.total)}</td>
-              <td className={`${TD} text-right`}><DownloadBtn saleId={m.saleId} orderId={m.orderId} pdfUrl={m.pdfUrl} /></td>
+              <td className={`${TD} text-right`}><DownloadBtn saleId={m.saleId} orderId={m.orderId} pdfUrl={m.pdfUrl} apPath={m.apPath} /></td>
             </tr>
           ))}
         </tbody>

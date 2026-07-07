@@ -100,9 +100,8 @@ export function ScenarioCView() {
   const onExcel = async () => {
     if (!data) return
     await downloadExcelMulti([
-      { name: 'Resumen A vs C', rows: METRICS.map(([label, key]) => ({
-        'Métrica': label, 'A (real)': n2(data.A[key] as number), 'C (sin efectivo)': n2(data.C[key] as number),
-        'Diferencia': n2((data.A[key] as number) - (data.C[key] as number)),
+      { name: 'Resumen C', rows: METRICS.map(([label, key]) => ({
+        'Métrica': label, 'Importe': n2(data.C[key] as number),
       })) },
       { name: 'IVA trimestral C', rows: data.C.quarters.map((q) => ({
         Trimestre: q.quarter, Periodo: q.period, 'Base ventas': n2(q.baseSales), 'IVA repercutido': n2(q.ivaRepercutido),
@@ -142,7 +141,7 @@ export function ScenarioCView() {
     <div className="space-y-5">
       <PageHeader
         title="Escenario sin efectivo"
-        subtitle={`Ejercicio ${year} · contabilidad A sin los cobros en efectivo pendientes de ingresar`}
+        subtitle={`Ejercicio ${year} · contabilidad sin los cobros en efectivo pendientes de ingresar`}
       >
         <YearSelect
           value={year}
@@ -174,35 +173,26 @@ export function ScenarioCView() {
           </div>
           <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-x-auto">
             <div className="flex items-baseline justify-between border-b border-slate-200 px-4 py-3">
-              <span className="text-sm font-semibold text-prats-navy">Comparativa A · C</span>
+              <span className="text-sm font-semibold text-prats-navy">Resumen del ejercicio</span>
               <span className="text-[11px] uppercase tracking-wider text-slate-400">Ejercicio {year}</span>
             </div>
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                 <tr>
                   <th className="text-left px-4 py-2.5">Métrica</th>
-                  <th className="text-right px-4 py-2.5">A (real, íntegra)</th>
-                  <th className="text-right px-4 py-2.5 bg-slate-100/80">C (sin efectivo)</th>
-                  <th className="text-right px-4 py-2.5">Diferencia</th>
+                  <th className="text-right px-4 py-2.5">Importe</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {METRICS.map(([label, key]) => (
                   <tr key={key} className="hover:bg-slate-50/50">
                     <td className="px-4 py-2.5 font-medium text-slate-700">{label}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">{eur(data.A[key] as number)}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums bg-slate-50/70 font-semibold text-slate-900">{eur(data.C[key] as number)}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-slate-400">{eur((data.A[key] as number) - (data.C[key] as number))}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-slate-900">{eur(data.C[key] as number)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <p className="text-xs text-slate-400">
-            C = A menos los cobros en efectivo (los cobros en efectivo ya ingresados al banco sí cuentan en C).
-            Solo cambia el lado de ingresos/IVA repercutido; gastos e IVA soportado son los mismos que A.
-            Simulación de gestión: no se almacena ni sustituye a la contabilidad real (A).
-          </p>
         </div>
       ) : tab === 'iva' ? (
         <QuarterTable view={data.C} variant="full" />
@@ -291,11 +281,12 @@ export function ScenarioCView() {
                     <th className="text-right px-3 py-3">Base</th>
                     <th className="text-right px-3 py-3">IVA</th>
                     <th className="text-right px-3 py-3">Total</th>
+                    <th className="text-right px-3 py-3">PDF</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredApInvoices.length === 0 ? (
-                    <tr><td colSpan={6} className="px-3 py-8 text-center text-slate-400">Sin facturas de proveedor.</td></tr>
+                    <tr><td colSpan={7} className="px-3 py-8 text-center text-slate-400">Sin facturas de proveedor.</td></tr>
                   ) : filteredApInvoices.map((f, i) => (
                     <tr key={i} className="hover:bg-slate-50/50">
                       <td className="px-3 py-2 font-mono text-xs text-slate-700">{f.number}</td>
@@ -304,12 +295,14 @@ export function ScenarioCView() {
                       <td className="px-3 py-2 text-right tabular-nums">{eur(f.base)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{eur(f.vat)}</td>
                       <td className="px-3 py-2 text-right font-medium tabular-nums">{eur(f.total)}</td>
+                      <td className="px-3 py-2 text-right"><DownloadBtn apPath={f.attachmentPath} /></td>
                     </tr>
                   ))}
                   {filteredApInvoices.length > 0 && (
                     <tr className={TOTAL_ROW}>
                       <td className="px-3 py-2.5" colSpan={5}>TOTAL gastos ({filteredApInvoices.length} facturas)</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{eur(filteredApInvoices.reduce((s, f) => s + f.total, 0))}</td>
+                      <td />
                     </tr>
                   )}
                 </tbody>
