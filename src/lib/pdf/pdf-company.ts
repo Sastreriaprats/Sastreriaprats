@@ -3,26 +3,26 @@
  */
 
 export const COMPANY = {
-  name: 'Prast, Eugercios y González S.L.',
+  name: 'Prats, Eugercios y González S.L.',
   nif: 'B88391834',
   address: 'Calle Hermanos Pinzón, 4',
   postalCode: '28036',
   city: 'Madrid',
   country: 'España',
   fullAddress: 'Calle Hermanos Pinzón, 4\n28036, Madrid, España',
-  footerLine1: 'Prast, Eugercios y González S.L. · B88391834 · Calle Hermanos Pinzón, 4, 28036, Madrid, España',
+  footerLine1: 'Prats, Eugercios y González S.L. · B88391834 · Calle Hermanos Pinzón, 4, 28036, Madrid, España',
   registroMercantil: 'Inscrita en el Registro Mercantil de Madrid, Tomo 39.266, Sección: 8, Folio: 140, Hoja: M-697.467, Inscripción 1ª',
   phone: '912 401 845',
   email: 'info@sastreriaprats.com',
   web: 'www.sastreriaprats.com',
   payment: {
     form: 'Transferencia bancaria',
-    beneficiary: 'Prast Eugercios y Gonzalez S.L.',
+    beneficiary: 'Prats Eugercios y Gonzalez S.L.',
     bank: 'Santander',
     iban: 'ES20 0049 1921 4929 1018 6941',
     bic: 'BSCHESM',
   },
-  estimateValidity: 'El presente presupuesto tiene una validez de 30 días naturales a partir de la fecha de emisión. Transcurrido dicho plazo sin confirmación por parte del cliente, Prast, Eugercios y González S.L. se reserva el derecho de revisar o modificar las condiciones económicas y los plazos indicados. La aceptación del presupuesto por parte del cliente implicará la conformidad con los conceptos, importes y condiciones reflejadas en el mismo. Cualquier modificación o trabajo adicional no contemplado inicialmente podrá ser objeto de un nuevo presupuesto o ajuste en el importe final.',
+  estimateValidity: 'El presente presupuesto tiene una validez de 30 días naturales a partir de la fecha de emisión. Transcurrido dicho plazo sin confirmación por parte del cliente, Prats, Eugercios y González S.L. se reserva el derecho de revisar o modificar las condiciones económicas y los plazos indicados. La aceptación del presupuesto por parte del cliente implicará la conformidad con los conceptos, importes y condiciones reflejadas en el mismo. Cualquier modificación o trabajo adicional no contemplado inicialmente podrá ser objeto de un nuevo presupuesto o ajuste en el importe final.',
   returnsPolicy: `Sastrería Prats, acepta el cambio o la devolución de sus productos en el plazo máximo de 15 días naturales desde la fecha de compra, siempre que estos no hayan sido ajustados, usados y/o deteriorados. El importe pagado por los artículos se devolverá en un vale con saldo a favor del cliente con una caducidad de 6 meses. Para ello será imprescindible la presentación del tique de compra y, en su caso, resguardo de la operación. Cuando el único documento que se presente para el cambio o devolución sea el tique regalo, se entregará una tarjeta abono, consultar las condiciones que constan en el anverso de la misma, y disponibles en tienda. No se admiten ni cambios ni devoluciones de prendas modificadas y/o personalizadas a petición del cliente, ropa interior y baño.`,
 } as const
 
