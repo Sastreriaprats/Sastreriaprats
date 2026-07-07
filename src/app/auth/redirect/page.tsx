@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getScopesForUser } from '@/lib/ops/db'
 
 // Roles que tienen acceso al panel de administración
 const STAFF_ROLES = [
@@ -53,6 +54,12 @@ export default async function AuthRedirectPage({
   // Si es staff sin destino específico, ir a su panel
   if (isStaff && to === '/') {
     redirect(staffHome)
+  }
+
+  // Sin rol de staff pero con capas de Tesorería (asesor externo): su home es /panel
+  if (!isStaff && (to === '/' || to.startsWith('/mi-cuenta') || to.startsWith('/admin'))) {
+    const scopes = await getScopesForUser(user.id)
+    if (scopes.length > 0) redirect('/panel')
   }
 
   redirect(to)

@@ -2,6 +2,7 @@ import 'server-only'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { getScopesForUser, type Scope } from './db'
 
 // Resolución de acceso a las vistas internas. Gestiona = tener scope 'B'.
@@ -18,6 +19,34 @@ export const getViewerAccess = cache(async (): Promise<ViewerAccess> => {
     return { userId: user.id, scopes, canManage: scopes.includes('B') }
   } catch {
     return { userId: null, scopes: [], canManage: false }
+  }
+})
+
+const STAFF_ROLES = [
+  'administrador', 'sastre_plus', 'vendedor_avanzado', 'vendedor_basico',
+  'super_admin', 'admin', 'accountant', 'tailor', 'salesperson', 'web_manager', 'manager',
+]
+
+/**
+ * ¿El viewer tiene además algún rol de staff del ERP? Para usuarios solo-Tesorería
+ * (asesor externo) se oculta cualquier salida hacia el admin.
+ */
+export const viewerIsStaff = cache(async (): Promise<boolean> => {
+  try {
+    const a = await getViewerAccess()
+    if (!a.userId) return false
+    const admin = createAdminClient()
+    const { data } = await admin
+      .from('user_roles')
+      .select('roles(name)')
+      .eq('user_id', a.userId)
+    const names = (data ?? []).flatMap((ur: { roles?: { name: string } | { name: string }[] | null }) => {
+      if (!ur.roles) return []
+      return Array.isArray(ur.roles) ? ur.roles.map(r => r.name) : [ur.roles.name]
+    })
+    return names.some(n => STAFF_ROLES.includes(n))
+  } catch {
+    return false
   }
 })
 

@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { unstable_cache } from 'next/cache'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getViewerAccess } from '@/lib/ops/access'
 import { AdminLayoutClient } from '@/components/layout/admin-layout-client'
 import { Toaster } from '@/components/ui/sonner'
 import { InstallPrompt } from '@/components/pwa/install-prompt'
@@ -56,7 +57,10 @@ export default async function AdminLayout({
   const roleNames = await getUserRoles(user.id)
 
   if (!roleNames.some((n: string) => STAFF_ROLES.includes(n))) {
-    redirect('/mi-cuenta')
+    // Usuario sin rol de staff pero con acceso a Tesorería (p. ej. asesor externo):
+    // su único destino en la plataforma es /panel.
+    const ops = await getViewerAccess()
+    redirect(ops.scopes.length > 0 ? '/panel' : '/mi-cuenta')
   }
 
   return (

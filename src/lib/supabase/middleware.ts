@@ -222,7 +222,9 @@ export async function updateSession(request: NextRequest) {
     } else if (hasStaffRole) {
       url.pathname = '/admin/dashboard'
     } else {
-      url.pathname = '/mi-cuenta'
+      // Sin rol de staff: si tiene capas de Tesorería (asesor externo), su home es /panel
+      const scopes = await resolvePanelScopes(user.id)
+      url.pathname = scopes.length > 0 ? '/panel' : '/mi-cuenta'
     }
     const redirectRes = NextResponse.redirect(url)
     copySupabaseCookies(redirectRes, supabaseResponse)
