@@ -27,9 +27,11 @@ const TYPE_BADGE: Record<string, { label: string; className: string }> = {
 function buildDetail(m: ProductMovementHistory['movements'][number]): string {
   switch (m.movement_type) {
     case 'sale': {
-      const ticket = m.ticket_number ? `Venta ${m.ticket_number}` : 'Venta'
+      // reference_type='online_order' = venta de la tienda online; 'sale'/null = TPV.
+      const label = m.reference_type === 'online_order' ? 'Venta online' : 'Venta'
+      const ref = m.ticket_number ? `${label} ${m.ticket_number}` : label
       const client = m.client_name || 'Sin cliente'
-      return `${ticket} — ${client}`
+      return `${ref} — ${client}`
     }
     case 'purchase_receipt': {
       const ord = m.supplier_order_number ? `Recepción ${m.supplier_order_number}` : 'Recepción'
@@ -177,7 +179,9 @@ export function ProductHistoryTab({ productId }: { productId: string }) {
                 </TableHeader>
                 <TableBody>
                   {filteredMovements.map((m) => {
-                    const badge = TYPE_BADGE[m.movement_type] ?? { label: m.movement_type, className: 'bg-slate-100 text-slate-700 border-slate-200' }
+                    const badge = (m.movement_type === 'sale' && m.reference_type === 'online_order')
+                      ? { label: 'Venta online', className: 'bg-cyan-100 text-cyan-800 border-cyan-200' }
+                      : (TYPE_BADGE[m.movement_type] ?? { label: m.movement_type, className: 'bg-slate-100 text-slate-700 border-slate-200' })
                     const qtyClass = m.quantity > 0 ? 'text-emerald-700' : m.quantity < 0 ? 'text-red-700' : ''
                     const sign = m.quantity > 0 ? '+' : ''
                     return (

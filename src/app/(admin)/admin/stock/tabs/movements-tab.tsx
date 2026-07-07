@@ -117,7 +117,7 @@ export function MovementsTab() {
               return (
                 <TableRow key={m.id}>
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDateTime(m.created_at)}</TableCell>
-                  <TableCell><Badge variant="outline" className="text-xs gap-1"><Icon className={`h-3 w-3 ${isPositive ? 'text-green-600' : 'text-red-600'}`} />{movementTypeLabels[m.movement_type] || m.movement_type}</Badge></TableCell>
+                  <TableCell><Badge variant="outline" className="text-xs gap-1"><Icon className={`h-3 w-3 ${isPositive ? 'text-green-600' : 'text-red-600'}`} />{m.movement_type === 'sale' && m.reference_type === 'online_order' ? 'Venta online' : (movementTypeLabels[m.movement_type] || m.movement_type)}</Badge></TableCell>
                   <TableCell>
                     <p className="text-sm font-medium">{m.product_variants?.products?.name}</p>
                     <p className="text-xs text-muted-foreground font-mono">{m.product_variants?.variant_sku}</p>
