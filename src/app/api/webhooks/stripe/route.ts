@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
             if (!line.variant_id) continue
             const { data: sl } = await admin
               .from('stock_levels')
-              .select('id, quantity, warehouse_id')
+              .select('id, quantity, warehouse_id, warehouses ( store_id )')
               .eq('product_variant_id', line.variant_id)
               .limit(1)
               .single()
@@ -120,6 +120,11 @@ export async function POST(request: NextRequest) {
                 quantity: -line.quantity,
                 stock_before: sl.quantity,
                 stock_after: newQty,
+                // Enlace al pedido online (mismo patrón que el TPV con 'sale') para
+                // que la lista de movimientos resuelva el cliente.
+                reference_type: 'online_order',
+                reference_id: order.id,
+                store_id: (sl.warehouses as { store_id?: string } | null)?.store_id ?? null,
                 reason: `Pedido online ${orderNumber}`,
               })
             }
@@ -167,7 +172,7 @@ export async function POST(request: NextRequest) {
             if (!line.variant_id) continue
             const { data: sl } = await admin
               .from('stock_levels')
-              .select('id, quantity, warehouse_id')
+              .select('id, quantity, warehouse_id, warehouses ( store_id )')
               .eq('product_variant_id', line.variant_id)
               .limit(1)
               .single()
@@ -182,6 +187,11 @@ export async function POST(request: NextRequest) {
                 quantity: -line.quantity,
                 stock_before: sl.quantity,
                 stock_after: newQty,
+                // Enlace al pedido online (mismo patrón que el TPV con 'sale') para
+                // que la lista de movimientos resuelva el cliente.
+                reference_type: 'online_order',
+                reference_id: orderId,
+                store_id: (sl.warehouses as { store_id?: string } | null)?.store_id ?? null,
                 reason: `Pedido online ${orderNumber}`,
               })
             }

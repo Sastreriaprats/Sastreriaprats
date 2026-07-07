@@ -2650,13 +2650,17 @@ export const getProductMovementHistory = protectedAction<{ productId: string }, 
 
     const saleIds = [...new Set(movements.filter(m => m.reference_type === 'sale' && m.reference_id).map(m => m.reference_id as string))]
     const supplierOrderIds = [...new Set(movements.filter(m => m.reference_type === 'supplier_order' && m.reference_id).map(m => m.reference_id as string))]
+    const onlineOrderIds = [...new Set(movements.filter(m => m.reference_type === 'online_order' && m.reference_id).map(m => m.reference_id as string))]
 
-    const [salesRes, supplierOrdersRes, allVariantsRes] = await Promise.all([
+    const [salesRes, supplierOrdersRes, onlineOrdersRes, allVariantsRes] = await Promise.all([
       saleIds.length > 0
         ? ctx.adminClient.from('sales').select('id, ticket_number, client_id, clients(full_name)').in('id', saleIds)
         : Promise.resolve({ data: [] as any[] }),
       supplierOrderIds.length > 0
         ? ctx.adminClient.from('supplier_orders').select('id, order_number, supplier_id, suppliers(name)').in('id', supplierOrderIds)
+        : Promise.resolve({ data: [] as any[] }),
+      onlineOrderIds.length > 0
+        ? ctx.adminClient.from('online_orders').select('id, order_number, client_id, clients(full_name)').in('id', onlineOrderIds)
         : Promise.resolve({ data: [] as any[] }),
       ctx.adminClient.from('product_variants').select('id, variant_sku, size, color').eq('product_id', productId),
     ])
@@ -2675,11 +2679,21 @@ export const getProductMovementHistory = protectedAction<{ productId: string }, 
         supplier_name: (o.suppliers as any)?.name ?? null,
       }
     }
+    // Ventas online: el cliente sale del pedido online (online_orders.client_id),
+    // igual que el TPV lo saca de sales.client_id.
+    const onlineOrdersMap: Record<string, { order_number: string; client_name: string | null }> = {}
+    for (const o of (onlineOrdersRes.data ?? []) as any[]) {
+      onlineOrdersMap[o.id] = {
+        order_number: o.order_number,
+        client_name: (o.clients as any)?.full_name ?? null,
+      }
+    }
 
     const enriched: ProductMovementHistoryRow[] = movements.map((m) => {
       const pv = m.product_variants as any
       const sale = m.reference_type === 'sale' && m.reference_id ? salesMap[m.reference_id] : null
       const order = m.reference_type === 'supplier_order' && m.reference_id ? ordersMap[m.reference_id] : null
+      const online = m.reference_type === 'online_order' && m.reference_id ? onlineOrdersMap[m.reference_id] : null
       return {
         id: m.id,
         created_at: m.created_at,
@@ -2698,8 +2712,8 @@ export const getProductMovementHistory = protectedAction<{ productId: string }, 
         color_hex: pv?.color_hex ?? null,
         warehouse_name: (m.warehouses as any)?.name ?? null,
         user_name: (m.profiles as any)?.full_name ?? null,
-        ticket_number: sale?.ticket_number ?? null,
-        client_name: sale?.client_name ?? null,
+        ticket_number: sale?.ticket_number ?? online?.order_number ?? null,
+        client_name: sale?.client_name ?? online?.client_name ?? null,
         supplier_order_number: order?.order_number ?? null,
         supplier_name: order?.supplier_name ?? null,
       }
