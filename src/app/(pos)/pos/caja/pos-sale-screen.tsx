@@ -143,6 +143,8 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const [clientSearching, setClientSearching] = useState(false)
   const [paymentAmountInput, setPaymentAmountInput] = useState('')
   const [saleNotes, setSaleNotes] = useState('')
+  // Fecha de la venta ('' = hoy). Para ventas ATRASADAS: la RPC la asigna a la caja de ese día (mig 253)
+  const [saleDate, setSaleDate] = useState('')
   const [leaveAsPending, setLeaveAsPending] = useState(false)
   const [nextPaymentDate, setNextPaymentDate] = useState('')
   const [wantPartialPayment, setWantPartialPayment] = useState(false)
@@ -818,6 +820,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
     setSaleType('boutique')
     setSaleWithoutClient(false)
     setSaleNotes('')
+    setSaleDate('')
     setVoucherCodeInput('')
     setVoucherInfo(null)
     setResidualVouchers([])
@@ -1139,6 +1142,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
         notes: [saleWithoutClient ? 'Venta sin cliente' : null, saleNotes.trim() || null]
           .filter(Boolean).join(' — ') || null,
         salesperson_id: salespersonId,
+        sale_date: saleDate || null,
       },
       lines: ticketLines.map(l => ({
         product_variant_id: l.product_variant_id,
@@ -1610,7 +1614,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
           </button>
           <button
             type="button"
-            onClick={() => { setTicketLines([]); setPayments([]); setSaleNotes(''); toast.success('Ticket anulado'); }}
+            onClick={() => { setTicketLines([]); setPayments([]); setSaleNotes(''); setSaleDate(''); toast.success('Ticket anulado'); }}
             className="flex flex-col items-center justify-center gap-0.5 min-w-[4rem] py-2 text-rose-300 hover:text-rose-200 hover:bg-white/5 rounded transition-colors"
           >
             <X className="h-5 w-5" />
@@ -2050,6 +2054,23 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
             </div>
           )}
 
+          <div className="px-6 pb-3 space-y-1.5">
+            <Label className="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+              <CalendarClock className="h-4 w-4" /> Fecha de la venta
+            </Label>
+            <DatePickerPopover
+              value={saleDate}
+              onChange={setSaleDate}
+              max={new Date().toISOString().split('T')[0]}
+              placeholder="Hoy"
+            />
+            {saleDate && saleDate !== new Date().toISOString().split('T')[0] && (
+              <p className="text-xs text-amber-700">
+                Venta atrasada: se registrará con fecha {saleDate.split('-').reverse().join('/')} y se sumará
+                a la caja de ese día. Tiene que existir una caja (abierta o cerrada) de esa fecha en esta tienda.
+              </p>
+            )}
+          </div>
           <div className="px-6 pb-4 space-y-1.5">
             <Label className="text-sm font-medium text-slate-700">Observaciones (nota interna, no sale en el ticket)</Label>
             <Textarea

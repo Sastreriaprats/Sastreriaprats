@@ -25,6 +25,11 @@ export const createSaleSchema = z.object({
   notes: z.string().optional().nullable(),
   /** Quién realiza la venta (empleado). Si no se envía, se usa el usuario actual. */
   salesperson_id: z.string().uuid().optional().nullable(),
+  /**
+   * Fecha de la venta (YYYY-MM-DD), solo para registrar ventas ATRASADAS: la
+   * RPC la asigna a la caja de ese día (mig 253). Vacío/null = hoy.
+   */
+  sale_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha de venta inválida').optional().nullable(),
 })
 
 export const createGiftCardSchema = z.object({

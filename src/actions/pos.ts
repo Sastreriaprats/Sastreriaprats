@@ -310,7 +310,11 @@ export const createSale = protectedAction<{
       salesperson_name = p?.full_name ?? null
     }
 
-    const auditDescription = `Venta #${result.ticket_number} · Cliente: ${result.client_name} · Total: ${Number(result.total).toFixed(2)}€`
+    // Si la venta se registró con fecha atrasada (mig 253), dejarlo visible en Seguimiento
+    const saleDate = parsedSale.data.sale_date
+    const isRetro = !!saleDate && saleDate !== new Date().toISOString().split('T')[0]
+    const retroSuffix = isRetro ? ` · Registrada con fecha ${saleDate.split('-').reverse().join('/')}` : ''
+    const auditDescription = `Venta #${result.ticket_number} · Cliente: ${result.client_name} · Total: ${Number(result.total).toFixed(2)}€${retroSuffix}`
 
     return success({
       ...result,
