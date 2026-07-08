@@ -28,7 +28,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, FileDown, Receipt, ChevronLeft, ChevronRight, FileText, Gift, Trash2, AlertTriangle, Pencil, X, CreditCard, Plus, Package, Scissors, ExternalLink } from 'lucide-react'
+import { Loader2, FileDown, Receipt, ChevronLeft, ChevronRight, FileText, Gift, Trash2, AlertTriangle, Pencil, X, CreditCard, Plus, Package, Scissors, ExternalLink, StickyNote } from 'lucide-react'
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils'
 import { listTickets, listSastreriaTickets, getSaleForTicket, previewSaleDeletion, deleteSaleCompletely, updateSaleClientNotes, updateSalePayments, previewSaleEdit, editSaleLines, searchProductsForPos } from '@/actions/pos'
 import { PaymentHistory } from '@/components/payments/payment-history'
@@ -690,8 +690,14 @@ export function TicketsContent() {
                           <span className="text-muted-foreground">—</span>
                         )}
                       </TableCell>
-                      <TableCell className="max-w-[200px] truncate text-sm" title={row.products_summary}>
-                        {row.products_summary}
+                      <TableCell className="max-w-[200px] text-sm">
+                        <div className="truncate" title={row.products_summary}>{row.products_summary}</div>
+                        {row.notes && (
+                          <div className="flex items-center gap-1 text-xs text-amber-700 truncate" title={row.notes}>
+                            <StickyNote className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{row.notes}</span>
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell className="font-medium">
                         {row.total_returned > 0 ? (

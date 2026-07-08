@@ -528,7 +528,7 @@ export const listTickets = protectedAction<{
   async (ctx, { page = 1, pageSize = 20, clientSearch, dateFrom, dateTo, productSearch, ticketSearch, scope = 'all' }) => {
     let query = ctx.adminClient
       .from('sales')
-      .select('id, ticket_number, created_at, total, total_returned, payment_method, status, client_id, stores(name), profiles!sales_salesperson_id_fkey(full_name)', { count: 'exact' })
+      .select('id, ticket_number, created_at, total, total_returned, payment_method, status, client_id, notes, stores(name), profiles!sales_salesperson_id_fkey(full_name)', { count: 'exact' })
       .order('created_at', { ascending: false })
 
     // Pestaña Tienda: deja fuera las ventas de sastrería (señal/pago final), que
@@ -634,6 +634,7 @@ export const listTickets = protectedAction<{
       client_code: s.client_id ? (clientsMap[s.client_id]?.client_code ?? '') : null,
       products_summary: (linesBySale[s.id] ?? []).slice(0, 3).join(' · ') || '—',
       salesperson_name: (s.profiles as any)?.full_name ?? null,
+      notes: s.notes ?? null,
     }))
 
     return success({

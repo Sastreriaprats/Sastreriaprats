@@ -19,6 +19,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -141,6 +142,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const [clientSearchResults, setClientSearchResults] = useState<any[]>([])
   const [clientSearching, setClientSearching] = useState(false)
   const [paymentAmountInput, setPaymentAmountInput] = useState('')
+  const [saleNotes, setSaleNotes] = useState('')
   const [leaveAsPending, setLeaveAsPending] = useState(false)
   const [nextPaymentDate, setNextPaymentDate] = useState('')
   const [wantPartialPayment, setWantPartialPayment] = useState(false)
@@ -815,6 +817,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
     setShowPayment(false)
     setSaleType('boutique')
     setSaleWithoutClient(false)
+    setSaleNotes('')
     setVoucherCodeInput('')
     setVoucherInfo(null)
     setResidualVouchers([])
@@ -1133,7 +1136,8 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
         discount_percentage: globalDiscount,
         discount_code: discountCodeApplied || null,
         is_tax_free: isTaxFree,
-        notes: saleWithoutClient ? 'Venta sin cliente' : null,
+        notes: [saleWithoutClient ? 'Venta sin cliente' : null, saleNotes.trim() || null]
+          .filter(Boolean).join(' — ') || null,
         salesperson_id: salespersonId,
       },
       lines: ticketLines.map(l => ({
@@ -1606,7 +1610,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
           </button>
           <button
             type="button"
-            onClick={() => { setTicketLines([]); setPayments([]); toast.success('Ticket anulado'); }}
+            onClick={() => { setTicketLines([]); setPayments([]); setSaleNotes(''); toast.success('Ticket anulado'); }}
             className="flex flex-col items-center justify-center gap-0.5 min-w-[4rem] py-2 text-rose-300 hover:text-rose-200 hover:bg-white/5 rounded transition-colors"
           >
             <X className="h-5 w-5" />
@@ -2046,6 +2050,16 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
             </div>
           )}
 
+          <div className="px-6 pb-4 space-y-1.5">
+            <Label className="text-sm font-medium text-slate-700">Observaciones (nota interna, no sale en el ticket)</Label>
+            <Textarea
+              rows={2}
+              value={saleNotes}
+              onChange={(e) => setSaleNotes(e.target.value)}
+              placeholder="Ej.: regalo, encargo especial…"
+              className="border-slate-300 rounded-lg text-sm"
+            />
+          </div>
           <DialogFooter className="border-t bg-slate-50 px-6 py-4 flex-row justify-between">
             <Button variant="outline" className="rounded-lg border-slate-300" onClick={() => { setPayments([]); setShowPayment(false) }}>
               Cancelar
