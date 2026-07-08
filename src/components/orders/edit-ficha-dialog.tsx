@@ -651,8 +651,11 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
       const editedFabricId = isEdited
         ? (cfg.tejidoStockId ? String(cfg.tejidoStockId) : null)
         : (l.fabric_id ?? null)
+      // OJO: cadena con || (no ??): estas claves suelen existir como '' (cadena
+      // vacía, que NO es nullish), y con ?? un tejidoStockNombre='' cortaba la
+      // cadena y borraba fabric_description aunque tejidoCatalogo tuviera valor.
       const editedFabricDescription = isEdited
-        ? String(cfg.tejidoStockNombre ?? cfg.tejidoCatalogo ?? cfg.tejido ?? '') || null
+        ? String(cfg.tejidoStockNombre || cfg.tejidoCatalogo || cfg.tejido || '').trim() || null
         : (l.fabric_description ?? null)
       return {
         id: l.id,

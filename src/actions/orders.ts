@@ -1452,13 +1452,16 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
           material_cost: Number(line.material_cost ?? 0),
           labor_cost: Number(line.labor_cost ?? 0),
           factory_cost: Number(line.factory_cost ?? 0),
-          fabric_id: line.fabric_id || null,
-          fabric_description: line.fabric_description?.toString().trim() || null,
-          fabric_meters: line.fabric_meters ?? null,
-          supplier_id: line.supplier_id || null,
-          model_name: line.model_name?.toString().trim() || null,
-          model_size: line.model_size?.toString().trim() || null,
-          finishing_notes: line.finishing_notes?.toString().trim() || null,
+          // Escalares descriptivos: si el caller NO manda el campo (undefined) se
+          // conserva el valor actual de BD — mismo criterio defensivo que el merge
+          // de configuration. Solo un valor explícito (aunque sea null/'') lo cambia.
+          fabric_id: line.fabric_id !== undefined ? (line.fabric_id || null) : ((before as any)?.fabric_id ?? null),
+          fabric_description: line.fabric_description !== undefined ? (line.fabric_description?.toString().trim() || null) : ((before as any)?.fabric_description ?? null),
+          fabric_meters: line.fabric_meters !== undefined ? (line.fabric_meters ?? null) : ((before as any)?.fabric_meters ?? null),
+          supplier_id: line.supplier_id !== undefined ? (line.supplier_id || null) : ((before as any)?.supplier_id ?? null),
+          model_name: line.model_name !== undefined ? (line.model_name?.toString().trim() || null) : ((before as any)?.model_name ?? null),
+          model_size: line.model_size !== undefined ? (line.model_size?.toString().trim() || null) : ((before as any)?.model_size ?? null),
+          finishing_notes: line.finishing_notes !== undefined ? (line.finishing_notes?.toString().trim() || null) : ((before as any)?.finishing_notes ?? null),
           configuration: withPrendaSlug(mergedConfiguration, gtSlugMap.get(line.garment_type_id)),
           sort_order: sortOrder,
         }
