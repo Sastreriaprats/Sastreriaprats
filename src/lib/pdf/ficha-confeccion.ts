@@ -5,6 +5,7 @@
 
 import type { Content } from 'pdfmake'
 import { getOrderStatusLabel } from '@/lib/utils'
+import { getLineRef, getLineRefSuffix, type RefLine } from '@/lib/orders/line-refs'
 
 /** Tipo del documento para pdfmake (no exportado por @types/pdfmake). */
 interface PdfDocDefinition {
@@ -505,8 +506,11 @@ function cellStack(label: string, value: string): Content {
   }
 }
 
-function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
+// talonRef: referencia por prenda (p.ej. "PIN-2026-0178-AMER-TRJ1"); sin ella
+// se imprime el número de pedido a secas (comportamiento histórico).
+function buildDocDefinition(order: FichaConfeccionOrder, talonRef?: string): PdfDocDefinition {
   const client = order.clients
+  const talonNum = talonRef?.trim() || String(order.order_number ?? '—')
   const ficha = getFichaFromOrder(order) as Record<string, unknown>
   const hoy = new Date().toLocaleDateString('es-ES', {
     day: '2-digit',
@@ -546,7 +550,7 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
       widths: ['35%', '30%', '35%'],
       body: [
         [
-          { text: `Nº talón: ${order.order_number ?? '—'}`, ...labelStyle },
+          { text: `Nº talón: ${talonNum}`, ...labelStyle },
           {
             text: 'FICHA DE CONFECCIÓN',
             alignment: 'center',
@@ -697,7 +701,7 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
       table: {
         widths: ['25%', '75%'],
         body: [
-          [cellLabel('Nº talón:'), cellValue(String(order.order_number ?? '—'))],
+          [cellLabel('Nº talón:'), cellValue(talonNum)],
           [cellLabel('Fecha emisión:'), cellValue(hoy)],
         ],
       },
@@ -780,7 +784,7 @@ function buildDocDefinition(order: FichaConfeccionOrder): PdfDocDefinition {
           {
             stack: [
               { text: 'Talón de cobro', bold: true, alignment: 'center', fontSize: 13, margin: [4, 8, 4, 12] },
-              { text: `Nº talón: ${String(order.order_number ?? '—')}`, bold: true, fontSize: 11, margin: [6, 6, 6, 6] },
+              { text: `Nº talón: ${talonNum}`, bold: true, fontSize: 11, margin: [6, 6, 6, 6] },
               { text: `Cliente: ${getClientName(order)}`, margin: [6, 6] },
               { text: `Oficial: ${oficialStr || ' '}`, margin: [6, 6] },
               { text: `Prenda: ${prendaLabel || '—'}`, margin: [6, 6] },
@@ -834,14 +838,22 @@ export async function generateFichaConfeccionPDF(order: FichaConfeccionOrder): P
     pdfMake.addVirtualFileSystem(vfs)
   }
 
-  const docDef = buildDocDefinition(order)
+  // Referencia por prenda (boleta) de la única línea que imprime esta variante.
+  const allLines = (order.tailoring_order_lines ?? []) as unknown as RefLine[]
+  const talonRef = allLines.length > 0
+    ? getLineRef(order.order_number || order.id, allLines, allLines[0])
+    : undefined
+  const docDef = buildDocDefinition(order, talonRef)
   const pdf = pdfMake.createPdf(docDef as Parameters<typeof pdfMake.createPdf>[0])
-  const fileName = `ficha-confeccion-${(order.order_number || order.id).toString().replace(/\s+/g, '-')}.pdf`
+  const fileName = `ficha-confeccion-${(talonRef || order.order_number || order.id).toString().replace(/\s+/g, '-')}.pdf`
   await pdf.download(fileName)
 }
 
 /** Tipo de línea para identificar prenda en el nombre de archivo */
 export type TailoringOrderLine = {
+  id?: string | null
+  sort_order?: number | null
+  created_at?: string | null
   configuration?: Record<string, unknown>
   garment_types?: { name?: string; code?: string } | null
   fabric_description?: string | null
@@ -882,9 +894,16 @@ export async function generateFichaForLine(
     ...order,
     tailoring_order_lines: [line as any],
   }
+  // Referencia por prenda calculada sobre TODAS las líneas del pedido (el
+  // caller pasa el pedido completo); si no se puede derivar, número a secas.
+  const allLines = (order.tailoring_order_lines ?? []) as unknown as RefLine[]
+  const refSuffix = getLineRefSuffix(allLines, line as unknown as RefLine)
+  const talonRef = refSuffix ? `${order.order_number || order.id}-${refSuffix}` : undefined
   const prendaName = getPrendaNameForLine(line)
   const orderNum = (order.order_number || order.id).toString().replace(/\s+/g, '-')
-  const fileName = `ficha-${orderNum}-${prendaName}.pdf`
+  const fileName = refSuffix
+    ? `ficha-${orderNum}-${refSuffix}.pdf`
+    : `ficha-${orderNum}-${prendaName}.pdf`
 
   const pdfMake = (await import('pdfmake/build/pdfmake')).default
   const vfsModule = await import('pdfmake/build/vfs_fonts')
@@ -893,7 +912,7 @@ export async function generateFichaForLine(
     pdfMake.addVirtualFileSystem(vfs)
   }
 
-  const docDef = buildDocDefinition(orderWithSingleLine)
+  const docDef = buildDocDefinition(orderWithSingleLine, talonRef)
   const pdf = pdfMake.createPdf(docDef as Parameters<typeof pdfMake.createPdf>[0])
   await pdf.download(fileName)
 }
@@ -933,7 +952,10 @@ export function buildCamiseriaDocDefinition(
   // El talón INFERIOR es la copia de taller del oficial y NUNCA debe mostrar
   // importes (Precio / Entregado a cuenta). Solo la ficha SUPERIOR los lleva.
   // Mismo criterio que el talón de sastrería (ver talonLeftStack más arriba).
-  showPrecio: boolean = true
+  showPrecio: boolean = true,
+  // Referencia por prenda (boleta), p.ej. "PIN-2026-0178-CAM2"; sin ella se
+  // imprime el número de pedido a secas (comportamiento histórico).
+  talonRef?: string
 ): PdfDocDefinition {
   const cfg = line.configuration ?? {}
   const client = order.clients
@@ -942,7 +964,7 @@ export function buildCamiseriaDocDefinition(
   const tel = String(client?.phone ?? '—').trim()
   const email = String(client?.email ?? '—').trim()
   const fechaCompromiso = formatDate(order.estimated_delivery_date ?? cfg.fechaCompromiso)
-  const orderNum = String(order.order_number ?? order.id ?? '—')
+  const orderNum = talonRef?.trim() || String(order.order_number ?? order.id ?? '—')
   // El "entregado a cuenta" puede venir guardado en la propia línea (pedidos de
   // camisería creados desde el asistente, que no registran un pago contable) o,
   // si no, del pago real registrado en el pedido.
@@ -1314,11 +1336,19 @@ export function buildCamiseriaDocDefinition(
  */
 export async function generateFichaForLineCamiseria(
   order: FichaConfeccionOrder,
-  line: { configuration?: Record<string, unknown>; fabric_description?: string | null },
+  line: TailoringOrderLine,
   lineIndex: number
 ): Promise<void> {
   const orderNum = (order.order_number || order.id).toString().replace(/\s+/g, '-')
-  const fileName = `ficha-${orderNum}-camisa-${lineIndex + 1}.pdf`
+  // Referencia por prenda (boleta): "PIN-2026-0178-CAM2". Fallback al índice
+  // histórico si la línea no está entre las del pedido (p.ej. ficha sintética
+  // del wizard de admin, que aún no tiene pedido).
+  const allLines = (order.tailoring_order_lines ?? []) as unknown as RefLine[]
+  const refSuffix = getLineRefSuffix(allLines, line as unknown as RefLine)
+  const talonRef = refSuffix ? `${order.order_number || order.id}-${refSuffix}` : undefined
+  const fileName = refSuffix
+    ? `ficha-${orderNum}-${refSuffix}.pdf`
+    : `ficha-${orderNum}-camisa-${lineIndex + 1}.pdf`
 
   const pdfMake = (await import('pdfmake/build/pdfmake')).default
   const vfsModule = await import('pdfmake/build/vfs_fonts')
@@ -1327,8 +1357,8 @@ export async function generateFichaForLineCamiseria(
     pdfMake.addVirtualFileSystem(vfs)
   }
 
-  const contentTop: Content[] = buildCamiseriaDocDefinition(order, line, lineIndex, 0, true).content as Content[]
-  const contentBottom = buildCamiseriaDocDefinition(order, line, lineIndex, -1, false).content as Content[]
+  const contentTop: Content[] = buildCamiseriaDocDefinition(order, line, lineIndex, 0, true, talonRef).content as Content[]
+  const contentBottom = buildCamiseriaDocDefinition(order, line, lineIndex, -1, false, talonRef).content as Content[]
 
   const docDef: PdfDocDefinition = {
     pageSize: 'A4',

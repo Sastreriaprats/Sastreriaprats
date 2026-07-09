@@ -14,7 +14,8 @@ import { LinePhotosViewer } from '@/components/orders/line-photos-viewer'
 import { getOrderLinePhotosBatch } from '@/actions/order-line-photos'
 import { usePermissions } from '@/hooks/use-permissions'
 import { toast } from 'sonner'
-import { getLineGroup, type LineGroup } from '@/lib/orders/line-groups'
+import { getLineGroup, getLineName, type LineGroup } from '@/lib/orders/line-groups'
+import { buildLineRefSuffixes, sortLinesForDisplay } from '@/lib/orders/line-refs'
 
 const LOCKED_STATUSES = new Set(['delivered', 'cancelled'])
 
@@ -22,7 +23,12 @@ export function OrderGarmentsTab({ order }: { order: any }) {
   const router = useRouter()
   const { can } = usePermissions()
   const canViewCosts = can('orders.view_costs')
-  const lines = order.tailoring_order_lines || []
+  // Orden estable + agrupado: las prendas de un mismo traje/chaqué salen
+  // consecutivas (chaqueta → chaleco → pantalón) en vez de en el orden
+  // arbitrario que devuelva la BD.
+  const lines: any[] = sortLinesForDisplay<any>(order.tailoring_order_lines || [])
+  // Referencia por prenda (misma que imprime la boleta): PIN-…-AMER-TRJ1
+  const lineRefs = buildLineRefSuffixes(lines)
   const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null)
   const [editingLine, setEditingLine] = useState<any | null>(null)
 
@@ -59,9 +65,12 @@ export function OrderGarmentsTab({ order }: { order: any }) {
       {lines.map((line: any, idx: number) => {
         const group = getLineGroup(line)
         const canPrintFicha = group !== 'complementos'
+        // getLineName muestra el vínculo de conjunto ("Americana — Traje 1");
+        // el nombre pelado del garment_type perdía esa relación.
         const displayName = group === 'complementos'
           ? (line.configuration?.product_name || 'Complemento')
-          : line.garment_types?.name
+          : (getLineName(line) || line.garment_types?.name)
+        const lineRef = lineRefs.get(String(line.id)) ?? null
         const badgeLabel = group === 'complementos'
           ? 'Boutique'
           : (line.line_type === 'artesanal' ? 'Artesanal' : 'Industrial')
@@ -72,6 +81,11 @@ export function OrderGarmentsTab({ order }: { order: any }) {
               <CardTitle className="text-base flex items-center gap-2">
                 <span className="text-muted-foreground text-sm">#{idx + 1}</span>
                 {displayName}
+                {lineRef && (
+                  <span className="font-mono text-xs font-normal text-muted-foreground bg-muted rounded px-1.5 py-0.5">
+                    {order.order_number}-{lineRef}
+                  </span>
+                )}
                 <Badge variant="outline" className="text-xs">{badgeLabel}</Badge>
               </CardTitle>
               <div className="flex items-center gap-2">

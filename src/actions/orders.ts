@@ -293,7 +293,8 @@ export const getOrder = protectedAction<string, any>(
       storeId
         ? admin.from('stores').select('id, name, code').eq('id', storeId).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
-      admin.from('tailoring_order_lines').select('*').eq('tailoring_order_id', orderId),
+      admin.from('tailoring_order_lines').select('*').eq('tailoring_order_id', orderId)
+        .order('sort_order', { ascending: true }).order('created_at', { ascending: true }),
       admin.from('tailoring_order_state_history').select('id, from_status, to_status, description, notes, changed_by_name, changed_at').eq('tailoring_order_id', orderId).order('changed_at', { ascending: false }),
       admin.from('tailoring_fittings').select('id, fitting_number, scheduled_date, scheduled_time, status, adjustments_needed').eq('tailoring_order_id', orderId).order('scheduled_date', { ascending: true }),
     ])

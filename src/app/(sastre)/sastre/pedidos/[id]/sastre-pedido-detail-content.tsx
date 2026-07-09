@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { formatCurrency, formatDate, getOrderStatusLabel } from '@/lib/utils'
 import { getStatusesFor } from '@/lib/orders/statuses'
 import { getLineGroup, getLineName, type LineGroup } from '@/lib/orders/line-groups'
+import { buildLineRefSuffixes, sortLinesForDisplay } from '@/lib/orders/line-refs'
 import { PaymentHistory } from '@/components/payments/payment-history'
 import { getOrder, markLineDelivered, updateOrderStatus } from '@/actions/orders'
 import { getAlterationsByOrder, updateAlterationStatus } from '@/actions/alterations'
@@ -80,7 +81,12 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
     if (res?.success && res?.data) setOrder(res.data)
   }
 
-  const lines: any[] = order?.tailoring_order_lines ?? []
+  // Orden estable + agrupado: las prendas de un mismo traje/chaqué salen
+  // consecutivas (chaqueta → chaleco → pantalón) aunque la BD las devuelva
+  // desordenadas o el sort_order haya quedado intercalado por ediciones.
+  const lines: any[] = sortLinesForDisplay<any>(order?.tailoring_order_lines ?? [])
+  // Referencia por prenda (la misma que imprime la boleta): PIN-…-AMER-TRJ1
+  const lineRefs = buildLineRefSuffixes(lines)
 
   // Fotos por prenda (signed URLs) — 1 sola llamada batch, no N+1.
   const lineIdsKey = lines.map((l: { id: string }) => l.id).filter(Boolean).join(',')
@@ -272,7 +278,14 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
                   <div key={line.id} className="border-b border-white/[0.06] last:border-b-0">
                   <div className="flex items-center justify-between py-3">
                     <span className="mr-2" aria-hidden>👕</span>
-                    <span className="text-white flex-1 min-w-0">{getLineName(line)}</span>
+                    <span className="text-white flex-1 min-w-0">
+                      {getLineName(line)}
+                      {lineRefs.get(String(line.id)) && (
+                        <span className="ml-2 font-mono text-[11px] text-white/45 bg-white/[0.06] border border-white/10 rounded px-1.5 py-0.5">
+                          {order.order_number}-{lineRefs.get(String(line.id))}
+                        </span>
+                      )}
+                    </span>
                     <span className={`w-2 h-2 rounded-full shrink-0 ml-2 ${LINE_STATUS_COLORS[line.status] || 'bg-gray-400'}`} />
                     <select
                       value={line.status || 'created'}
@@ -337,7 +350,14 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
                     <div key={line.id} className="border-b border-white/[0.06] last:border-b-0">
                     <div className="flex items-center justify-between py-3">
                       <span className="mr-2" aria-hidden>👕</span>
-                      <span className="text-white flex-1 min-w-0">{getLineName(line)}</span>
+                      <span className="text-white flex-1 min-w-0">
+                        {getLineName(line)}
+                        {lineRefs.get(String(line.id)) && (
+                          <span className="ml-2 font-mono text-[11px] text-white/45 bg-white/[0.06] border border-white/10 rounded px-1.5 py-0.5">
+                            {order.order_number}-{lineRefs.get(String(line.id))}
+                          </span>
+                        )}
+                      </span>
                       <span className={`w-2 h-2 rounded-full shrink-0 ml-2 ${LINE_STATUS_COLORS[line.status] || 'bg-gray-400'}`} />
                       <select
                         value={line.status || 'created'}
