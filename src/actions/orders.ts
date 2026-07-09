@@ -1994,7 +1994,19 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
       // El método ya está garantizado por la validación de arriba (línea ~1134).
       if (!paymentMethodDb) return failure('Falta el método de pago de la entrega a cuenta.')
 
-      const today = new Date().toISOString().split('T')[0]
+      // Fecha del cobro: la "Fecha cobro" elegida en la ficha (viaja en
+      // fichaCommon; en el flujo legacy, en input.fechaCobro); si falta, la
+      // fecha de emisión del pedido; último recurso, hoy. Antes se forzaba
+      // SIEMPRE hoy y la fecha elegida se ignoraba (caso PIN-2026-0271:
+      // pedido emitido el 07/07 cuyo cobro quedó registrado el 09/07).
+      // rpc_add_order_payment (mig 135) vincula el cobro a la caja de esa fecha.
+      const isIsoDate = (s: unknown): s is string =>
+        typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s)
+      const fc = input.fichaCommon as Record<string, unknown> | undefined
+      const paymentDate = isIsoDate(fc?.fechaCobro) ? fc.fechaCobro
+        : isIsoDate(input.fechaCobro) ? input.fechaCobro
+        : isIsoDate(fc?.fechaEmision) ? fc.fechaEmision
+        : new Date().toISOString().split('T')[0]
 
       // Delegar TODO el registro contable del cobro en la RPC canónica
       // rpc_add_order_payment (mig 135). Beneficios frente al inline antiguo:
@@ -2006,7 +2018,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
       //   - Vincula a la sesión por fecha de pago, no por "open actual".
       const { error: rpcError } = await ctx.adminClient.rpc('rpc_add_order_payment', {
         p_tailoring_order_id: order.id,
-        p_payment_date: today,
+        p_payment_date: paymentDate,
         p_payment_method: paymentMethodDb,
         p_amount: entrega,
         p_reference: `Entrega a cuenta - ${orderNumber}`,
