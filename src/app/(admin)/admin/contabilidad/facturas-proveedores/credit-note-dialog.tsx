@@ -1,14 +1,15 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Loader2 } from 'lucide-react'
+import { FileText, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { createSupplierInvoiceAction, type ApSupplierInvoiceRow } from '@/actions/supplier-invoices'
+import { createClient as createSupabaseClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/utils'
 
 function todayStr() {
@@ -34,6 +35,10 @@ export function CreditNoteDialog({ invoice, open, onOpenChange, onCreated }: {
   const [total, setTotal] = useState('')
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
+  const [attachmentPath, setAttachmentPath] = useState('')
+  const [attachmentName, setAttachmentName] = useState<string | null>(null)
+  const [attachmentUploading, setAttachmentUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (invoice && open) {
@@ -43,8 +48,41 @@ export function CreditNoteDialog({ invoice, open, onOpenChange, onCreated }: {
       setIva(String(-Number(invoice.tax_amount || 0)))
       setTotal(String(-Number(invoice.total_amount || 0)))
       setReason('')
+      setAttachmentPath('')
+      setAttachmentName(null)
+      if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }, [invoice, open])
+
+  // Mismo patrón que el formulario de facturas: bucket privado, se guarda el
+  // path y al abrir el PDF se genera una signed URL al vuelo.
+  const uploadAttachment = async (file: File) => {
+    if (!file.type.includes('pdf') && !file.name.toLowerCase().endsWith('.pdf')) {
+      toast.error('Solo se admiten archivos PDF')
+      return
+    }
+    const supabase = createSupabaseClient()
+    const folder = invoice?.supplier_id || 'sin-proveedor'
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const path = `${folder}/${Date.now()}_${safeName}`
+    setAttachmentUploading(true)
+    try {
+      const { error } = await supabase.storage
+        .from('supplier-invoices')
+        .upload(path, file, { contentType: 'application/pdf', upsert: false })
+      if (error) {
+        toast.error(`No se pudo subir el PDF: ${error.message}`)
+        return
+      }
+      setAttachmentPath(path)
+      setAttachmentName(file.name)
+      toast.success('PDF adjuntado')
+    } catch (err) {
+      toast.error(`Error inesperado al subir: ${err instanceof Error ? err.message : 'desconocido'}`)
+    } finally {
+      setAttachmentUploading(false)
+    }
+  }
 
   if (!invoice) return null
 
@@ -71,6 +109,7 @@ export function CreditNoteDialog({ invoice, open, onOpenChange, onCreated }: {
       is_rectifying: true,
       rectifies_invoice_id: invoice.id,
       rectification_reason: reason.trim(),
+      attachment_url: attachmentPath || null,
     })
     setSaving(false)
     if (r.success) {
@@ -126,11 +165,49 @@ export function CreditNoteDialog({ invoice, open, onOpenChange, onCreated }: {
             <Textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ej.: Devolución de mercancía defectuosa" />
             <p className="text-xs text-muted-foreground">{reason.trim().length} caracteres (mínimo 10)</p>
           </div>
+
+          <div className="space-y-1">
+            <Label>Adjuntar abono (PDF)</Label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/pdf,.pdf"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0]
+                if (file) await uploadAttachment(file)
+              }}
+            />
+            {attachmentPath ? (
+              <div className="flex items-center gap-2 rounded-md border p-2 text-sm">
+                <FileText className="h-4 w-4 text-red-600 shrink-0" />
+                <span className="flex-1 truncate" title={attachmentName || attachmentPath}>{attachmentName || 'PDF adjunto'}</span>
+                <Button
+                  type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-red-600"
+                  disabled={attachmentUploading}
+                  onClick={() => { setAttachmentPath(''); setAttachmentName(null); if (fileInputRef.current) fileInputRef.current.value = '' }}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ) : (
+              <Button
+                type="button" variant="outline" size="sm" className="gap-1.5"
+                disabled={attachmentUploading}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {attachmentUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                Subir PDF del abono
+              </Button>
+            )}
+            <p className="text-xs text-muted-foreground">Opcional: también puedes adjuntarlo después desde Editar.</p>
+          </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancelar</Button>
-          <Button onClick={handleSubmit} disabled={saving} className="bg-prats-navy hover:bg-prats-navy-light">
-            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null} Emitir abono
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving || attachmentUploading}>Cancelar</Button>
+          <Button onClick={handleSubmit} disabled={saving || attachmentUploading} className="bg-prats-navy hover:bg-prats-navy-light">
+            {(saving || attachmentUploading) ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            {attachmentUploading ? 'Subiendo PDF…' : 'Emitir abono'}
           </Button>
         </DialogFooter>
       </DialogContent>

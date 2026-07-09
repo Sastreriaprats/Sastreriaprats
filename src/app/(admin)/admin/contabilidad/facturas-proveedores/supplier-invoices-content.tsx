@@ -607,7 +607,15 @@ export function SupplierInvoicesContent() {
       toast.error('La fecha de vencimiento no puede ser anterior a la fecha de factura')
       return
     }
-    if (totalNum <= 0) {
+    // Un abono (rectificativa recibida) lleva el total en negativo; la factura
+    // normal, en positivo. Sin esta rama era imposible editar un abono (p. ej.
+    // para adjuntarle el PDF): el guardado moría aquí con "mayor que 0".
+    if (editingIsRectifying) {
+      if (totalNum >= 0) {
+        toast.error('El total de un abono debe ser negativo')
+        return
+      }
+    } else if (totalNum <= 0) {
       toast.error('El total debe ser mayor que 0')
       return
     }
@@ -628,14 +636,15 @@ export function SupplierInvoicesContent() {
         }
       })
       .filter((l) => l.base > 0)
-    if (cleanedLines.length === 0) {
+    if (!editingIsRectifying && cleanedLines.length === 0) {
       toast.error('Añade al menos una línea con base imponible mayor que 0')
       return
     }
 
     // Si la usuaria activó plazos múltiples, validar que las cuotas cuadren.
+    // Un abono no genera cuotas (igual que en el alta).
     let installmentsPayload: Array<{ amount: number; due_date: string }> | undefined
-    if (splitPayment) {
+    if (splitPayment && !editingIsRectifying) {
       const cleaned = installments
         .map((it) => ({
           amount: parseFloat(String(it.amount).replace(',', '.')) || 0,
@@ -674,7 +683,10 @@ export function SupplierInvoicesContent() {
       attachment_url: form.attachment_url.trim() || null,
       delivery_note_ids: selectedDeliveryNoteIds,
       installments: installmentsPayload,
-      lines: cleanedLines,
+      // Abono: sin líneas normalizadas (todas son negativas y el saneado las
+      // filtraría); el servidor usa el modo legacy con amount/tax_amount de
+      // cabecera, que aquí viajan en negativo.
+      lines: editingIsRectifying ? undefined : cleanedLines,
       is_proforma: form.is_proforma,
     }
 
@@ -1502,8 +1514,12 @@ export function SupplierInvoicesContent() {
                   <p className="text-xs text-muted-foreground mt-0.5">
                     Activa esto si la factura se paga en varias cuotas (1 plazo por defecto).
                   </p>
+                  {editingIsRectifying && (
+                    <p className="text-xs text-rose-600">No disponible: esta factura es un abono.</p>
+                  )}
                 </div>
                 <Switch
+                  disabled={editingIsRectifying}
                   checked={splitPayment}
                   onCheckedChange={(checked) => {
                     setSplitPayment(checked)

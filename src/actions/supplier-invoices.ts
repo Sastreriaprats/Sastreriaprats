@@ -806,8 +806,10 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
     const explicitInstallments = (rest.installments ?? [])
       .filter((it) => Number(it.amount) > 0 && it.due_date)
     // Una proforma no genera cuotas. Al convertirla en factura real (quitar el
-    // flag) este mismo update sí las generará.
-    const installments = rest.is_proforma
+    // flag) este mismo update sí las generará. Un abono tampoco (igual que en
+    // el alta): sin esta rama, editar un abono fabricaba una cuota NEGATIVA
+    // vía buildInstallments que contaminaba los KPIs de vencimientos.
+    const installments = rest.is_proforma || isRectifying
       ? []
       : explicitInstallments.length > 0
         ? explicitInstallments.map((it, idx) => ({
