@@ -21,6 +21,7 @@ const PURCHASE_TYPE_META: Record<string, { label: string; color: string }> = {
   boutique: { label: 'Boutique', color: '#1e3a5f' },
   gift_cards: { label: 'Tarjetas', color: '#f59e0b' },
   sastreria: { label: 'Sastrería', color: '#c084fc' },
+  online: { label: 'Online', color: '#0ea5e9' },
 }
 
 // Mapas locales eliminados. La fuente de verdad vive en

@@ -1732,7 +1732,7 @@ export const getClientsAnalytics = protectedAction<
     // procede). Antes esto consultaba clients.total_spent > 0, que es un
     // histórico acumulativo y no se mantiene desde tailoring_orders → daba 0
     // aunque hubiera tráfico en el periodo.
-    const [salesRes, tailoringRes] = await Promise.all([
+    const [salesRes, tailoringRes, onlineRes] = await Promise.all([
       (() => {
         let q = ctx.adminClient
           .from('sales')
@@ -1755,6 +1755,19 @@ export const getClientsAnalytics = protectedAction<
         if (store_id) q = q.eq('store_id', store_id)
         return q
       })(),
+      // Tienda ONLINE: sin esta fuente, un cliente que solo compró en la web
+      // salía como "sin compra" (caso Neil Straker / Lorenzo Giannantonio).
+      // Los pedidos online no tienen tienda física → solo cuentan en modo
+      // "Todas" (con filtro de tienda quedan fuera, como el resto de fuentes).
+      store_id
+        ? Promise.resolve({ data: [] as any[] })
+        : ctx.adminClient
+            .from('online_orders')
+            .select('client_id, created_at, status')
+            .not('client_id', 'is', null)
+            .neq('status', 'cancelled')
+            .gte('created_at', start_date)
+            .lte('created_at', end_date + 'T23:59:59'),
     ])
 
     const uniqueIds = new Set<string>()
@@ -1783,6 +1796,12 @@ export const getClientsAnalytics = protectedAction<
       addType(r.client_id, 'sastreria')
       if (!store_id && r.order_date) ensureDayStore(madridDateKey(r.order_date + 'T12:00:00'), r.store_id, r.stores?.name).set.add(r.client_id)
     }
+    for (const r of (onlineRes.data ?? []) as any[]) {
+      if (!r.client_id) continue
+      uniqueIds.add(r.client_id)
+      addType(r.client_id, 'online')
+      if (!store_id && r.created_at) ensureDayStore(madridDateKey(r.created_at), 'online', 'Tienda Online').set.add(r.client_id)
+    }
     const clientsWithPurchases = uniqueIds.size
 
     let dailyUniqueByStore: { store_id: string; store_name: string; byDay: { day: string; count: number }[] }[] | undefined
@@ -1805,7 +1824,7 @@ export const getClientsAnalytics = protectedAction<
 
     const sources: Record<string, number> = {}
     const sourcesDetailMap: Record<string, { id: string; name: string; types: string[] }[]> = {}
-    const TYPE_ORDER = ['boutique', 'gift_cards', 'sastreria']
+    const TYPE_ORDER = ['boutique', 'gift_cards', 'sastreria', 'online']
     for (const c of newClientsRes.data || []) {
       const src = (c.source as string) || 'unknown'
       sources[src] = (sources[src] || 0) + 1
