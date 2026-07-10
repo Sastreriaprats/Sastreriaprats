@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -16,14 +16,21 @@ import { changeOrderStatus } from '@/actions/orders'
 import { getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
 import { getStatusesFor } from '@/lib/orders/statuses'
 import { statusChangeToast } from '@/lib/orders/status-toast'
+import { getLineName } from '@/lib/orders/line-groups'
+import { buildLineRefSuffixes, sortLinesForDisplay } from '@/lib/orders/line-refs'
 
-export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus, lines, orderType = 'artesanal', totalPaid = 0 }: {
+export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus, lines: rawLines, orderType = 'artesanal', totalPaid = 0 }: {
   open: boolean; onOpenChange: (open: boolean) => void
   orderId: string; currentStatus: string; lines: any[]
   orderType?: string
   totalPaid?: number
 }) {
   const router = useRouter()
+  // MISMO orden y numeración que la pestaña Prendas (agrupado por traje): antes
+  // este diálogo numeraba el array crudo y "Prenda #12" aquí no era la #12 de
+  // la pestaña. La ref (AMER-TRJ2…) identifica la prenda sin ambigüedad.
+  const lines = useMemo(() => sortLinesForDisplay<any>(rawLines ?? []), [rawLines])
+  const lineRefs = useMemo(() => buildLineRefSuffixes(rawLines ?? []), [rawLines])
   const [newStatus, setNewStatus] = useState('')
   // Prendas seleccionadas (multi-selección). Vacío = aplicar a TODO el pedido.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -124,7 +131,14 @@ export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus,
                         checked={selectedIds.has(l.id)}
                         onCheckedChange={(c) => toggleLine(l.id, c === true)}
                       />
-                      <span className="text-sm flex-1">Prenda #{i + 1}: {l.garment_types?.name}</span>
+                      <span className="text-sm flex-1">
+                        Prenda #{i + 1}: {getLineName(l) || l.garment_types?.name}
+                        {lineRefs.get(String(l.id)) && (
+                          <span className="ml-1.5 font-mono text-[10px] text-muted-foreground bg-muted rounded px-1 py-0.5">
+                            {lineRefs.get(String(l.id))}
+                          </span>
+                        )}
+                      </span>
                       <Badge className={`${getOrderStatusColor(l.status)} text-[10px]`} variant="secondary">
                         {getOrderStatusLabel(l.status)}
                       </Badge>

@@ -1450,6 +1450,27 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
           ? { ...beforeConfig, ...((line.configuration as Record<string, unknown>) ?? {}) }
           : line.configuration
 
+        // Boleta = tarjeta: la ficha de confección imprime el tejido desde
+        // configuration (tejidoStockNombre → tejidoCatalogo → tejido). Si
+        // "Editar pedido" cambia el TEJIDO registrado (fabric_description
+        // explícito distinto del que dice la ficha), sincronizamos la config
+        // para que la boleta no siga imprimiendo el antiguo (caso
+        // PIN-2026-0238 AMER-TRJ2: registrada VITALE, boleta LOROPIANA).
+        // El guardado de ficha envía fabric_description YA derivado de su
+        // config (94a6461): en ese flujo coinciden y esto no toca nada.
+        if (
+          line.fabric_description !== undefined &&
+          String(line.fabric_description ?? '').trim() &&
+          mergedConfiguration && typeof mergedConfiguration === 'object'
+        ) {
+          const cfg = mergedConfiguration as Record<string, unknown>
+          const incomingFabric = String(line.fabric_description).trim()
+          const cfgTejido = [cfg.tejidoStockNombre, cfg.tejidoCatalogo, cfg.tejido]
+            .map((v) => String(v ?? '').trim())
+            .find(Boolean) ?? ''
+          if (cfgTejido !== incomingFabric) cfg.tejidoStockNombre = incomingFabric
+        }
+
         const row: Record<string, any> = {
           garment_type_id: line.garment_type_id,
           line_type: line.line_type,
