@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { buildLineRefSuffixes, sortLinesForDisplay } from '@/lib/orders/line-refs'
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
@@ -156,8 +157,19 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
   const [internalNotes, setInternalNotes] = useState<string>(order?.internal_notes ?? '')
   const [clientNotes, setClientNotes] = useState<string>(order?.client_notes ?? '')
 
+  // Referencia por prenda (la misma que imprime la boleta: AMER-TRJ1…) para
+  // identificar cada fila. Calculada sobre las líneas ORIGINALES (con id).
+  const lineRefs = useMemo(
+    () => buildLineRefSuffixes(order?.tailoring_order_lines ?? []),
+    [order?.tailoring_order_lines],
+  )
+
+  // Las filas se abren en orden lógico (prendas de un mismo traje juntas,
+  // chaqueta → chaleco → pantalón). Al guardar, sort_order se reescribe por
+  // índice (línea ~574), así que este orden se PERSISTE: editar+guardar
+  // normaliza pedidos antiguos cuyo sort_order quedó intercalado.
   const [lines, setLines] = useState<EditableLine[]>(() =>
-    (order?.tailoring_order_lines ?? []).map((l: any, idx: number) => ({
+    sortLinesForDisplay<any>(order?.tailoring_order_lines ?? []).map((l: any, idx: number) => ({
       id: l.id,
       garment_type_id: l.garment_type_id,
       line_type: l.line_type,
@@ -795,6 +807,14 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                     {lines.map((l) => (
                       <TableRow key={l._key}>
                         <TableCell>
+                          {l.id && lineRefs.get(String(l.id)) && (
+                            <div
+                              className="mb-1 font-mono text-[10px] leading-none text-muted-foreground truncate"
+                              title={String((l.configuration as Record<string, unknown> | undefined)?.prendaLabel ?? '')}
+                            >
+                              {order?.order_number}-{lineRefs.get(String(l.id))}
+                            </div>
+                          )}
                           <Select value={l.garment_type_id} onValueChange={(v) => updateLine(l._key, 'garment_type_id', v)}>
                             <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                             <SelectContent>
