@@ -81,7 +81,7 @@ export function PosSummaryContent() {
             .eq('cash_session_id', sess.id)
             .order('created_at', { ascending: false }),
           supabase.from('manual_transactions')
-            .select('id, type, amount, total, description, category, created_at')
+            .select('id, type, amount, total, description, category, created_at, sale_id, sale_payment_id, tailoring_order_payment_id, product_reservation_payment_id')
             .eq('cash_session_id', sess.id)
             .order('created_at', { ascending: false }),
           // Devoluciones de la sesión: filtrar por tienda y por rango temporal de la caja
@@ -157,7 +157,18 @@ export function PosSummaryContent() {
           profiles: null,
         }))
 
-        const manualRows: SessionMovement[] = (manualTxRes.data ?? []).map((m: any) => {
+        // ESPEJOS internos de caja: cada venta/cobro genera una fila gemela en
+        // manual_transactions (contabilidad interna). En este listado la venta
+        // ya sale como fila propia, así que su espejo se OCULTA — mostrarlo
+        // duplicaba visualmente cada cobro y el resumen "sumaba" el doble de
+        // lo vendido (caso Mónica, Wellington 7-9 jul; los KPIs de arriba
+        // siempre fueron correctos). FK desde migs 208/209; el texto cubre
+        // espejos antiguos sin FK. La apertura de caja y los ingresos/gastos
+        // manuales de verdad se siguen mostrando.
+        const isMirror = (m: any) =>
+          m.sale_id || m.sale_payment_id || m.tailoring_order_payment_id || m.product_reservation_payment_id ||
+          /^(venta tpv|pago pedido|pago reserva|cobro venta)\b/i.test(String(m.description ?? '').trim())
+        const manualRows: SessionMovement[] = (manualTxRes.data ?? []).filter((m: any) => !isMirror(m)).map((m: any) => {
           const isExpense = m.type === 'expense'
           const amount = Number(m.total ?? m.amount ?? 0)
           return {
@@ -215,7 +226,10 @@ export function PosSummaryContent() {
   )
 
   const uniqueClients = new Set(sales.filter((s: any) => s.clients).map((s: any) => s.clients.full_name)).size
-  const avgTicket = sales.length > 0 ? (session.total_sales || 0) / sales.length : 0
+  // Ticket medio sobre VENTAS reales, no sobre todos los movimientos del listado
+  // (cobros de pedido/reserva, manuales y devoluciones no son tickets).
+  const salesCount = sales.filter((s: any) => s.kind === 'sale').length
+  const avgTicket = salesCount > 0 ? (session.total_sales || 0) / salesCount : 0
 
   const handlePrintTicket = async (sale: any) => {
     setPrintingId(sale.id)
