@@ -1419,6 +1419,14 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
       }
 
       // UPDATE / INSERT
+      // Costes (material/obra/fábrica): getOrder los REDACTA a null para quien no
+      // tiene orders.view_costs (panel sastre), así que su diálogo de edición los
+      // enviaba como 0 y los machacaba al guardar (caso PIN-2026-0258: una edición
+      // de notas internas borró 1.006,23 € de costes). Regla: solo un usuario CON
+      // permiso de costes puede cambiarlos; para el resto se conservan los de BD.
+      const canEditCosts = await checkUserPermission(ctx.userId, 'orders.view_costs')
+      const costFrom = (incoming: number | undefined, beforeVal: unknown): number =>
+        canEditCosts && incoming !== undefined ? (Number(incoming) || 0) : (Number(beforeVal ?? 0) || 0)
       const gtSlugMap = await buildGarmentSlugMap(admin, incomingLines.map((l: any) => l.garment_type_id))
       for (let i = 0; i < incomingLines.length; i++) {
         const line = incomingLines[i]
@@ -1450,9 +1458,9 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
           discount_amount: discountAmount,
           line_total: lineTotal,
           tax_rate: Number(line.tax_rate ?? 21),
-          material_cost: Number(line.material_cost ?? 0),
-          labor_cost: Number(line.labor_cost ?? 0),
-          factory_cost: Number(line.factory_cost ?? 0),
+          material_cost: costFrom(line.material_cost, (before as any)?.material_cost),
+          labor_cost: costFrom(line.labor_cost, (before as any)?.labor_cost),
+          factory_cost: costFrom(line.factory_cost, (before as any)?.factory_cost),
           // Escalares descriptivos: si el caller NO manda el campo (undefined) se
           // conserva el valor actual de BD — mismo criterio defensivo que el merge
           // de configuration. Solo un valor explícito (aunque sea null/'') lo cambia.

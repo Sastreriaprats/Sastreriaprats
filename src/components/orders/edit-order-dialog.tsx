@@ -566,9 +566,12 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
         unit_price: l.unit_price,
         discount_percentage: l.discount_percentage,
         tax_rate: l.tax_rate,
-        material_cost: l.material_cost,
-        labor_cost: l.labor_cost,
-        factory_cost: l.factory_cost,
+        // Sin permiso de costes, getOrder los redacta a null y este diálogo los
+        // tendría como 0: NO se envían (undefined) y el servidor conserva los de
+        // BD. Con permiso, viajan tal cual (0 explícito incluido).
+        ...(canViewCosts
+          ? { material_cost: l.material_cost, labor_cost: l.labor_cost, factory_cost: l.factory_cost }
+          : {}),
         fabric_id: l.fabric_id || null,
         fabric_description: l.fabric_description || null,
         fabric_meters: l.fabric_meters ?? null,
