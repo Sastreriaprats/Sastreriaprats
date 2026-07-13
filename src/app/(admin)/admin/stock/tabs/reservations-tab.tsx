@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Loader2, Plus, ChevronLeft, ChevronRight, X, Check, Pencil, Bookmark, Clock, Printer, Euro, Banknote, CreditCard, Smartphone, ArrowRightLeft, Eye, RotateCcw, FileText } from 'lucide-react'
 import { toast } from 'sonner'
@@ -127,6 +128,9 @@ export function ReservationsTab() {
   const [status, setStatus] = useState<string>('all')
   const [onlyPending, setOnlyPending] = useState(false)
   const [search, setSearch] = useState('')
+  // Filtro por rango de fechas de creación de la reserva (petición Mónica)
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
 
   const [creating, setCreating] = useState(false)
   const [viewing, setViewing] = useState<Reservation | null>(null)
@@ -161,6 +165,8 @@ export function ReservationsTab() {
         status: status as any,
         onlyPending: onlyPending || undefined,
         search: search.trim() || undefined,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
         page,
         pageSize: PAGE_SIZE,
       })
@@ -179,7 +185,7 @@ export function ReservationsTab() {
     } finally {
       setLoading(false)
     }
-  }, [page, status, onlyPending, search])
+  }, [page, status, onlyPending, search, dateFrom, dateTo])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -455,6 +461,21 @@ export function ReservationsTab() {
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(0) }}
           />
+          <div className="flex items-center gap-1.5">
+            <Label className="text-sm text-muted-foreground shrink-0">Desde</Label>
+            <div className="w-40">
+              <DatePickerPopover value={dateFrom} onChange={(d) => { setDateFrom(d); setPage(0) }} max={dateTo || undefined} />
+            </div>
+            <Label className="text-sm text-muted-foreground shrink-0">Hasta</Label>
+            <div className="w-40">
+              <DatePickerPopover value={dateTo} onChange={(d) => { setDateTo(d); setPage(0) }} min={dateFrom || undefined} />
+            </div>
+            {(dateFrom || dateTo) && (
+              <Button variant="ghost" size="sm" className="h-8 px-2 text-muted-foreground" onClick={() => { setDateFrom(''); setDateTo(''); setPage(0) }}>
+                Limpiar
+              </Button>
+            )}
+          </div>
         </div>
         <Button className="gap-1" onClick={() => setCreating(true)}>
           <Plus className="h-4 w-4" /> Nueva reserva

@@ -77,6 +77,8 @@ export const listReservations = protectedAction<ListReservationsInput, ListResul
     }
     if (input.clientId) query = query.eq('client_id', input.clientId)
     if (input.storeId) query = query.eq('store_id', input.storeId)
+    if (input.dateFrom) query = query.gte('created_at', input.dateFrom)
+    if (input.dateTo) query = query.lte('created_at', input.dateTo + 'T23:59:59')
 
     if (input.productVariantId) {
       const { data: linesMatch } = await ctx.adminClient

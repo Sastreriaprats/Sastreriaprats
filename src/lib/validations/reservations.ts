@@ -79,6 +79,9 @@ export const listReservationsSchema = z.object({
   storeId: z.string().uuid().optional(),
   onlyPending: z.boolean().optional(),
   search: z.string().optional(),
+  /** Rango de fechas de CREACIÓN de la reserva (YYYY-MM-DD, inclusivo). */
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   page: z.number().int().min(0).default(0),
   pageSize: z.number().int().min(1).max(200).default(20),
 })
