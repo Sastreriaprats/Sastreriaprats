@@ -8,6 +8,7 @@ export const metadata: Metadata = {
   title: 'Servicios de sastrería — Sastrería Prats',
   description:
     'Sastrería artesanal, Made to Measure y Ready to Wear. Descubre nuestros tres servicios de moda masculina en Madrid.',
+  alternates: { canonical: '/sastreria' },
   openGraph: {
     title: 'Servicios — Sastrería Prats',
     description: 'Artesanal · Made to Measure · Ready to Wear',
@@ -20,24 +21,24 @@ const SERVICES = [
     title: 'Sastrería Artesanal',
     text: 'Guiados por Joaquín Fernández Prats, en nuestro taller se elaboran artesanalmente cada una de las prendas. El proceso comienza con una conversación para comprender al cliente, seguida de una toma de medidas exhaustiva. A partir de ahí, se traza el patrón a mano, se corta el tejido seleccionado y se realiza una primera prueba hilvanada. Tras sucesivos ajustes — cada uno más fino que el anterior — la prenda adquiere su forma definitiva. Un traje verdaderamente a medida que solo las manos expertas pueden crear.',
     image:
-      'https://sastreriaprats.myshopify.com/cdn/shop/files/RAYA_BEIGE-4_52e6b747-132d-4b7f-80fc-fd7238eb6d1c.jpg?v=1748424021&width=640',
-    imageAlt: 'Sastrería artesanal — detalle de tejido',
+      'https://fvjdqazfgjspxmwlvkpg.supabase.co/storage/v1/object/public/product-images/web/traje-a-medida-artesanal-madrid-tejido-raya-beige.jpg',
+    imageAlt: 'Traje a medida de sastrería artesanal en Madrid — detalle de tejido a rayas beige',
   },
   {
     tag: 'MADE TO MEASURE',
     title: 'Made to Measure',
     text: 'Tras la toma de medidas, el patrón se ajusta digitalmente y se envía a un plotter antes de confeccionar en taller. La prenda llega a la sastrería, el cliente se la prueba y se realizan los ajustes finales necesarios. Es la opción ideal para quienes buscan introducirse en el mundo de la medida con plazos más cortos o un presupuesto más ajustado, sin renunciar a un resultado personalizado y de calidad.',
     image:
-      'https://sastreriaprats.myshopify.com/cdn/shop/files/IMG_0620.jpg?v=1748365135&width=640',
-    imageAlt: 'Made to Measure — proceso de confección',
+      'https://fvjdqazfgjspxmwlvkpg.supabase.co/storage/v1/object/public/product-images/web/made-to-measure-traje-personalizado-madrid.jpg',
+    imageAlt: 'Confección de traje personalizado Made to Measure en Sastrería Prats, Madrid',
   },
   {
     tag: 'READY TO WEAR',
     title: 'Ready to Wear',
     text: 'Bajo la marca PRATS, ofrecemos una colección de prendas y complementos de esencia atemporal. Confeccionadas con los mismos tejidos que utilizamos en la sastrería artesanal y con producción nacional, cada pieza mantiene nuestra exigencia de calidad. La colección se complementa con una selección de marcas italianas e inglesas de prestigio, creando un armario masculino completo donde tradición y estilo contemporáneo conviven.',
     image:
-      'https://sastreriaprats.myshopify.com/cdn/shop/files/SS25_CAMISA-LINO-CUELLO-VISTA-NEGRA_1.jpg?v=1748364985&width=640',
-    imageAlt: 'Ready to Wear — colección PRATS',
+      'https://fvjdqazfgjspxmwlvkpg.supabase.co/storage/v1/object/public/product-images/web/camisa-lino-hombre-ready-to-wear-prats.jpg',
+    imageAlt: 'Camisa de lino para hombre de la colección Ready to Wear de PRATS',
   },
 ]
 
@@ -47,8 +48,8 @@ export default function SastreriaPage() {
       {/* HERO */}
       <section className="relative h-screen overflow-hidden group">
         <Image
-          src="https://sastreriaprats.myshopify.com/cdn/shop/files/recursos_taller_-3.jpg?v=1718892989&width=2000"
-          alt="Taller de sastrería Prats"
+          src="https://fvjdqazfgjspxmwlvkpg.supabase.co/storage/v1/object/public/product-images/web/taller-sastreria-a-medida-madrid-prats.jpg"
+          alt="Taller de sastrería a medida de Sastrería Prats en Madrid"
           fill
           className="object-cover object-center transition-transform duration-1000 group-hover:scale-105"
           sizes="100vw"

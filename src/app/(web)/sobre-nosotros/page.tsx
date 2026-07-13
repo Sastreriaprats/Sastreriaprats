@@ -14,6 +14,7 @@ export const metadata: Metadata = {
   title: 'Sobre nosotros — Sastrería Prats',
   description:
     'Descubre la historia de Sastrería Prats: desde los primeros pasos de Joaquín Fernández Prats hasta la marca PRATS. Auténtico e Imperfecto.',
+  alternates: { canonical: '/sobre-nosotros' },
   openGraph: {
     title: 'Sobre nosotros — Sastrería Prats',
     description: 'Tres generaciones de sastrería artesanal en Madrid.',
@@ -33,32 +34,32 @@ const TIMELINE: TimelineItem[] = [
     year: '1978',
     text: 'Con apenas dos años, el pequeño Joaquín ya comenzaba a jugar con las telas y patrones que sus padres, oficiales de sastrería, tenían en casa. Seguro no imaginaba que lo que por entonces parecía simplemente un juego, en realidad eran sus primeros pasos en un camino que mucho más adelante le convertiría en el sastre de una buena parte de los hombres más influyentes de España.',
     image:
-      'https://sastreriaprats.myshopify.com/cdn/shop/files/Scan_0007.jpg?v=1731077624&width=1200',
-    imageAlt: 'Joaquín de niño',
+      'https://fvjdqazfgjspxmwlvkpg.supabase.co/storage/v1/object/public/product-images/web/sastreria-prats-joaquin-fernandez-prats-infancia.jpg',
+    imageAlt: 'Joaquín Fernández Prats de niño entre telas y patrones de sastrería, 1978',
     layout: 'text-image',
   },
   {
     year: '1995',
     text: 'Como toda ayuda en casa era bienvenida y los estudios no eran su fuerte, al iniciar su adolescencia Joaquín empezó a echar a sus padres con los encargos que recibían de los sastres para los que trabajaban. Con 16 años empezó a trabajar fuera de casa como aprendiz en diversas sastrerías, compatibilizándolo poco después con sus estudios en la Escuela Superior de Sastrería "La Confianza"… Y así, año tras año, sus manos fueron poco a poco descubriendo las técnicas y secretos que sólo los verdaderos artesanos conocen.',
     image:
-      'https://sastreriaprats.myshopify.com/cdn/shop/files/Scan_0004.jpg?v=1731077636&width=1200',
-    imageAlt: 'Joaquín como aprendiz de sastre',
+      'https://fvjdqazfgjspxmwlvkpg.supabase.co/storage/v1/object/public/product-images/web/sastreria-prats-joaquin-aprendiz-sastre-madrid.jpg',
+    imageAlt: 'Joaquín Fernández Prats como aprendiz de sastre en Madrid, años 90',
     layout: 'image-text',
   },
   {
     year: '2019',
     text: 'Y por fin, con la maestría y confianza que dan más de 3 décadas en el oficio, Joaquín cumple su sueño y abre su propia sastrería en la zona más exclusiva del madrileño barrio de Chamartín. Un espacio de dos plantas que cuenta con un taller en el que se confeccionan las prendas artesanales. Gracias a la extraordinaria cartera de clientes construida a lo largo de los años, su local se convierte desde el inicio en uno de los templos de la sastrería en España. Pocos meses después abre un segundo espacio en la capital.',
     image:
-      'https://sastreriaprats.myshopify.com/cdn/shop/files/Sin_titulo-3_de2eb28f-8b92-404d-8735-f88ad458c76b.jpg?v=1731078358&width=1200',
-    imageAlt: 'Sastrería Prats en Chamartín, Madrid',
+      'https://fvjdqazfgjspxmwlvkpg.supabase.co/storage/v1/object/public/product-images/web/sastreria-prats-tienda-chamartin-madrid.jpg',
+    imageAlt: 'Tienda de Sastrería Prats en el barrio de Chamartín, Madrid',
     layout: 'text-image',
   },
   {
     year: '2025',
     text: 'Tras años de sólido crecimiento, Joaquín da un nuevo salto. Lo que había nacido 6 años antes como «Sastrería Fernández Prats» se convierte en PRATS, una marca de moda masculina donde conviven las prendas artesanales de la sastrería clásica junto a una colección prêt-à-porter de estilo atemporal. Un puro reflejo de la forma que tiene Joaquín, no sólo de ver la moda masculina, sino de ser. Auténtico e imperfecto.',
     image:
-      'https://sastreriaprats.myshopify.com/cdn/shop/files/bolsa.jpg?v=1738690195&width=1200',
-    imageAlt: 'Bolsa PRATS — Auténtico e Imperfecto',
+      'https://fvjdqazfgjspxmwlvkpg.supabase.co/storage/v1/object/public/product-images/web/prats-moda-masculina-madrid-autentico-imperfecto.jpg',
+    imageAlt: 'Bolsa de PRATS, marca de moda masculina en Madrid — Auténtico e Imperfecto',
     layout: 'image-text',
   },
 ]

@@ -52,7 +52,7 @@ export type HomeContent = {
 const DEFAULT_HERO: HomeHero = {
   title_es: 'SASTRERÍA PRATS',
   subtitle_es: 'Madrid · Est. 1985',
-  image_url: 'https://www.sastreriaprats.com/cdn/shop/files/AW25_-_DIEGO_MARTIN-191.jpg?v=1762421411&width=2000',
+  image_url: 'https://fvjdqazfgjspxmwlvkpg.supabase.co/storage/v1/object/public/product-images/web/sastreria-prats-madrid-coleccion-aw25.jpg',
   video_url: '',
   button1_label: 'DESCUBRIR COLECCIÓN',
   button1_url: '/boutique',
@@ -67,9 +67,9 @@ const DEFAULT_EDITORIAL_STRIP: HomeEditorialStrip = {
 const DEFAULT_CATEGORIES: HomeCategories = {
   title_es: 'Categorías',
   blocks: [
-    { title_es: 'Sastrería a Medida', image_url: 'https://www.sastreriaprats.com/cdn/shop/files/recursos_taller_-3.jpg?v=1718892989&width=1200', link_url: '/sastreria' },
-    { title_es: 'Boutique', image_url: 'https://www.sastreriaprats.com/cdn/shop/files/recursos_taller_-6.jpg?v=1718892990&width=1200', link_url: '/boutique' },
-    { title_es: 'Cita Previa', image_url: 'https://www.sastreriaprats.com/cdn/shop/files/AW25_-_DIEGO_MARTIN-191.jpg?v=1762421411&width=800', link_url: '/reservar' },
+    { title_es: 'Sastrería a Medida', image_url: 'https://fvjdqazfgjspxmwlvkpg.supabase.co/storage/v1/object/public/product-images/web/taller-sastreria-a-medida-madrid-prats.jpg', link_url: '/sastreria' },
+    { title_es: 'Boutique', image_url: 'https://fvjdqazfgjspxmwlvkpg.supabase.co/storage/v1/object/public/product-images/web/boutique-moda-masculina-madrid-prats.jpg', link_url: '/boutique' },
+    { title_es: 'Cita Previa', image_url: 'https://fvjdqazfgjspxmwlvkpg.supabase.co/storage/v1/object/public/product-images/web/sastreria-prats-madrid-coleccion-aw25.jpg', link_url: '/reservar' },
   ],
 }
 
@@ -78,7 +78,7 @@ const DEFAULT_FEATURED: HomeFeatured = { title_es: 'SELECCIÓN' }
 const DEFAULT_EDITORIAL_DOUBLE: HomeEditorialDouble = {
   title_es: 'Arte hecho prenda',
   content_es: 'Cada pieza nace en nuestro taller de Madrid. Descubre la sastrería a medida y la colección de boutique.',
-  image_url: 'https://www.sastreriaprats.com/cdn/shop/files/recursos_taller_-3.jpg?v=1718892989&width=1200',
+  image_url: 'https://fvjdqazfgjspxmwlvkpg.supabase.co/storage/v1/object/public/product-images/web/taller-sastreria-a-medida-madrid-prats.jpg',
   button_label: 'DESCUBRIR',
   button_url: '/sastreria',
 }
@@ -86,8 +86,8 @@ const DEFAULT_EDITORIAL_DOUBLE: HomeEditorialDouble = {
 const DEFAULT_STORES: HomeStores = {
   title_es: 'NUESTRAS TIENDAS',
   blocks: [
-    { title_es: 'Hermanos Pinzón', content_es: 'Calle Hermanos Pinzón, 4 - 28036 Madrid', image_url: 'https://www.sastreriaprats.com/cdn/shop/files/MENINA_-_PRATS_389bd184-3fe5-4fa5-a9f0-0d28a69d5626.jpg?v=1718899181&width=1200', link_url: 'https://maps.app.goo.gl/Vf8puqTToyqvTirq5' },
-    { title_es: 'Wellington', content_es: 'Calle Velázquez, 8 - 28001 Madrid', image_url: 'https://www.sastreriaprats.com/cdn/shop/files/DIEGO_PRATS-76.jpg?v=1718899328&width=1200', link_url: 'https://maps.app.goo.gl/Cd36bN32ctpTmtub8' },
+    { title_es: 'Hermanos Pinzón', content_es: 'Calle Hermanos Pinzón, 4 - 28036 Madrid', image_url: 'https://fvjdqazfgjspxmwlvkpg.supabase.co/storage/v1/object/public/product-images/web/sastreria-prats-tienda-hermanos-pinzon-madrid.jpg', link_url: 'https://maps.app.goo.gl/Vf8puqTToyqvTirq5' },
+    { title_es: 'Wellington', content_es: 'Calle Velázquez, 8 - 28001 Madrid', image_url: 'https://fvjdqazfgjspxmwlvkpg.supabase.co/storage/v1/object/public/product-images/web/sastreria-prats-tienda-wellington-velazquez-madrid.jpg', link_url: 'https://maps.app.goo.gl/Cd36bN32ctpTmtub8' },
   ],
 }
 
