@@ -4,6 +4,7 @@
 // y le devolvemos las filas; itera hasta poder responder en español.
 
 import { DB_SCHEMA_CONTEXT } from './schema-context'
+import { fanOutError } from './sql-guards'
 
 const KIMI_BASE = process.env.KIMI_API_BASE || 'https://api.moonshot.ai/v1'
 const KIMI_MODEL = process.env.KIMI_MODEL || 'kimi-k2.6'
@@ -129,6 +130,8 @@ export async function answerQuestion(
         const args = JSON.parse(call.function.arguments || '{}')
         const sql = String(args.sql || '')
         if (!sql) throw new Error('Falta el parámetro sql')
+        const guardError = fanOutError(sql)
+        if (guardError) throw new Error(guardError)
         const rows = await runSql(sql)
         const json = JSON.stringify(rows)
         toolResult = json.length > 12000 ? json.slice(0, 12000) + '…(truncado)' : json

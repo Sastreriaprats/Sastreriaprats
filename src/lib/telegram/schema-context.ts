@@ -15,6 +15,24 @@ Base de datos PostgreSQL (Supabase) de "Sastrería Prats". Reglas de negocio y t
   - "hoy" = (created_at AT TIME ZONE 'Europe/Madrid')::date = (now() AT TIME ZONE 'Europe/Madrid')::date
 - Importes: las columnas *total*, *amount* incluyen IVA. La BASE sin IVA de una venta = total - tax_amount.
 - Formatea nombres legibles; los ids son uuid.
+- ⚠️ REGLA CRÍTICA ANTI-INFLADO (fan-out): NUNCA sumes columnas de la CABECERA de "sales"
+  (total, subtotal, tax_amount, discount_amount, amount_paid, total_returned) en una consulta
+  que haga JOIN con "sale_lines" (o cualquier tabla hija 1-N): el JOIN repite la fila de la
+  venta una vez por cada línea y el SUM sale multiplicado. OJO: count(DISTINCT sa.id) daría
+  los tickets bien, lo que disimula que el importe está inflado.
+  Para combinar importes de ventas con datos de líneas (nº de productos, unidades), agrega las
+  líneas en una CTE por sale_id y únela después. Patrón canónico (ventas + tickets + productos por día):
+    WITH lineas AS (
+      SELECT sale_id, SUM(quantity) AS productos FROM sale_lines GROUP BY sale_id
+    )
+    SELECT (sa.created_at AT TIME ZONE 'Europe/Madrid')::date AS dia,
+           COUNT(*) AS tickets,
+           SUM(sa.total) AS total_ventas,
+           COALESCE(SUM(l.productos), 0) AS productos
+    FROM sales sa
+    LEFT JOIN lineas l ON l.sale_id = sa.id
+    WHERE sa.status <> 'voided'
+    GROUP BY 1 ORDER BY 1
 
 ## Tiendas: tabla "stores"
 - id (uuid), code (varchar): 'PIN'=Hermanos Pinzón, 'WEL'=Wellington, 'WEB'=Tienda Online.
@@ -43,6 +61,7 @@ Tabla "cash_withdrawals": cash_session_id, amount, reason, withdrawn_at (retirad
 
 ## Líneas de venta: tabla "sale_lines"
 - sale_id -> sales.id, product_variant_id, description, sku, quantity, unit_price, tax_rate (default 21), line_total (con IVA), quantity_returned.
+- Relación 1-N con sales: aplica la REGLA CRÍTICA ANTI-INFLADO de arriba (nunca SUM de columnas de sales con JOIN directo a esta tabla).
 
 ## Cobros de venta: tabla "sale_payments"
 - sale_id -> sales.id, payment_method, amount, cash_session_id, created_at.
