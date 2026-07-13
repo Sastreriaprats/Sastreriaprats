@@ -106,6 +106,12 @@ export function ScenarioCView() {
     () => (data?.apInvoices ?? []).filter((f) => f.retentionAmount !== 0).sort((a, b) => a.date.localeCompare(b.date)),
     [data],
   )
+  // Retenciones a ingresar por trimestre (índice 0..3 = T1..T4)
+  const retentionsByQuarter = useMemo(() => {
+    const arr = [0, 0, 0, 0]
+    for (const f of retentionInvoices) arr[quarterOf(f.date) - 1] += f.retentionAmount
+    return arr.map(n2)
+  }, [retentionInvoices])
 
   const onExcel = async () => {
     if (!data) return
@@ -113,9 +119,10 @@ export function ScenarioCView() {
       { name: 'Resumen C', rows: METRICS.map(([label, key]) => ({
         'Métrica': label, 'Importe': n2(data.C[key] as number),
       })) },
-      { name: 'IVA trimestral C', rows: data.C.quarters.map((q) => ({
+      { name: 'IVA trimestral C', rows: data.C.quarters.map((q, i) => ({
         Trimestre: q.quarter, Periodo: q.period, 'Base ventas': n2(q.baseSales), 'IVA repercutido': n2(q.ivaRepercutido),
-        'Base compras': n2(q.basePurchases), 'IVA soportado': n2(q.ivaSoportado), Resultado: n2(q.resultado),
+        'Base compras': n2(q.basePurchases), 'IVA soportado': n2(q.ivaSoportado), 'Resultado IVA': n2(q.resultado),
+        'Retenciones': n2(retentionsByQuarter[i]), 'Total a liquidar': n2(q.resultado + retentionsByQuarter[i]),
       })) },
       { name: 'IVA soportado por tipo', rows: [1, 2, 3, 4].flatMap((q) =>
         data.vatByRate
@@ -221,7 +228,7 @@ export function ScenarioCView() {
         </div>
       ) : tab === 'iva' ? (
         <div className="space-y-5">
-          <QuarterTable view={data.C} variant="full" />
+          <QuarterTable view={data.C} variant="full" retentions={retentionsByQuarter} />
           <VatByRateTable rows={data.vatByRate} />
         </div>
       ) : tab === 'retenciones' ? (

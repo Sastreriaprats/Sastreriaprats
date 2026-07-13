@@ -104,11 +104,17 @@ const TDR = TD + ' text-right tabular-nums'
 // Fila de total al estilo contable: doble línea superior
 export const TOTAL_ROW = 'border-t-[3px] border-double border-slate-300 bg-slate-50 font-semibold text-slate-900'
 
-export function QuarterTable({ view, variant }: { view: AccountingView; variant: 'cash' | 'full' }) {
+// `retentions` (opcional, solo variant 'full'): retenciones de IRPF a ingresar
+// por trimestre (índice 0..3 = T1..T4). Añade las columnas Retenciones y
+// Total a liquidar (resultado de IVA + retenciones = lo que se paga a Hacienda).
+export function QuarterTable({ view, variant, retentions }: { view: AccountingView; variant: 'cash' | 'full'; retentions?: number[] }) {
   const cash = variant === 'cash'
-  const tot = view.quarters.reduce((a, q) => ({
+  const hasRet = !cash && retentions !== undefined
+  const retQ = (i: number) => retentions?.[i] ?? 0
+  const tot = view.quarters.reduce((a, q, i) => ({
     bs: a.bs + q.baseSales, rep: a.rep + q.ivaRepercutido, bp: a.bp + q.basePurchases, sop: a.sop + q.ivaSoportado,
-  }), { bs: 0, rep: 0, bp: 0, sop: 0 })
+    ret: a.ret + retQ(i),
+  }), { bs: 0, rep: 0, bp: 0, sop: 0, ret: 0 })
   return (
     <TableShell>
       <table className="w-full text-sm">
@@ -120,11 +126,13 @@ export function QuarterTable({ view, variant }: { view: AccountingView; variant:
             <th className={THR}>IVA repercutido</th>
             {!cash && <th className={THR}>Base compras</th>}
             {!cash && <th className={THR}>IVA soportado</th>}
-            <th className={THR}>{cash ? 'IVA efectivo' : 'Resultado'}</th>
+            <th className={THR}>{cash ? 'IVA efectivo' : hasRet ? 'Resultado IVA' : 'Resultado'}</th>
+            {hasRet && <th className={THR}>Retenciones</th>}
+            {hasRet && <th className={THR}>Total a liquidar</th>}
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {view.quarters.map((q) => (
+          {view.quarters.map((q, i) => (
             <tr key={q.quarter} className="hover:bg-slate-50/60">
               <td className={`${TD} font-semibold text-slate-700`}>{q.quarter}</td>
               <td className={`${TD} text-slate-500`}>{q.period}</td>
@@ -132,7 +140,9 @@ export function QuarterTable({ view, variant }: { view: AccountingView; variant:
               <td className={TDR}>{eur(q.ivaRepercutido)}</td>
               {!cash && <td className={TDR}>{eur(q.basePurchases)}</td>}
               {!cash && <td className={TDR}>{eur(q.ivaSoportado)}</td>}
-              <td className={`${TDR} font-semibold`}>{eur(cash ? q.ivaRepercutido : q.resultado)}</td>
+              <td className={`${TDR} ${hasRet ? '' : 'font-semibold'}`}>{eur(cash ? q.ivaRepercutido : q.resultado)}</td>
+              {hasRet && <td className={TDR}>{eur(retQ(i))}</td>}
+              {hasRet && <td className={`${TDR} font-semibold`}>{eur(q.resultado + retQ(i))}</td>}
             </tr>
           ))}
           <tr className={TOTAL_ROW}>
@@ -142,9 +152,17 @@ export function QuarterTable({ view, variant }: { view: AccountingView; variant:
             {!cash && <td className={TDR}>{eur(tot.bp)}</td>}
             {!cash && <td className={TDR}>{eur(tot.sop)}</td>}
             <td className={TDR}>{eur(cash ? tot.rep : tot.rep - tot.sop)}</td>
+            {hasRet && <td className={TDR}>{eur(tot.ret)}</td>}
+            {hasRet && <td className={TDR}>{eur(tot.rep - tot.sop + tot.ret)}</td>}
           </tr>
         </tbody>
       </table>
+      {hasRet && (
+        <p className="border-t p-3 text-xs text-slate-400">
+          Total a liquidar = resultado de IVA (modelo 303) + retenciones de IRPF de facturas recibidas (modelos 111/115).
+          Las retenciones se pagan siempre, aunque el IVA del trimestre salga a compensar.
+        </p>
+      )}
     </TableShell>
   )
 }
