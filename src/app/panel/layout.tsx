@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { ArrowLeft, Landmark } from 'lucide-react'
 import { getViewerAccess, viewerIsStaff } from '@/lib/ops/access'
 import { PanelNav } from './panel-nav'
+import { PanelLogoutButton } from './panel-logout-button'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,15 +28,18 @@ export default async function PanelLayout({ children }: { children: React.ReactN
             </div>
           </div>
           <PanelNav showB={a.scopes.includes('B')} showC={a.scopes.includes('C')} canManage={a.canManage} />
-          {isStaff && (
-            <Link
-              href="/admin/dashboard"
-              className="ml-auto flex items-center gap-1.5 self-center rounded-md border border-white/15 px-3 py-1.5 text-sm text-white/70 transition-colors hover:border-white/30 hover:text-white"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              Volver
-            </Link>
-          )}
+          <div className="ml-auto flex items-center gap-2 self-center">
+            {isStaff && (
+              <Link
+                href="/admin/dashboard"
+                className="flex items-center gap-1.5 rounded-md border border-white/15 px-3 py-1.5 text-sm text-white/70 transition-colors hover:border-white/30 hover:text-white"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Volver
+              </Link>
+            )}
+            <PanelLogoutButton />
+          </div>
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>
