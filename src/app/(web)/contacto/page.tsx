@@ -7,6 +7,7 @@ export const metadata: Metadata = {
   title: 'Contacto',
   description:
     'Contacta con Sastrería Prats. Reserva tu cita para trajes a medida, camisas a medida o consulta en nuestra boutique en Madrid.',
+  alternates: { canonical: '/contacto' },
 }
 
 export default function ContactoPage() {

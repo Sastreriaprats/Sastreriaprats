@@ -34,11 +34,12 @@ export const metadata: Metadata = {
   creator: 'Sastrería Prats',
   publisher: 'Sastrería Prats',
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://sastreriaprats.com'),
-  alternates: {
-    canonical: '/',
-    // Cuando se publique la versión en inglés, descomenta:
-    // languages: { 'es-ES': '/', 'en-US': '/en', 'x-default': '/' },
-  },
+  // OJO: NO declarar `alternates.canonical` aquí. El layout raíz se hereda en
+  // TODAS las páginas que no definan el suyo, y un canonical '/' global le decía
+  // a Google que boutique, productos y servicios eran duplicados de la home.
+  // Cada página declara su propio canonical en su `metadata`/`generateMetadata`.
+  // Cuando se publique la versión en inglés, añade languages por página:
+  // alternates: { languages: { 'es-ES': '/', 'en-US': '/en', 'x-default': '/' } },
   openGraph: {
     type: 'website',
     locale: 'es_ES',

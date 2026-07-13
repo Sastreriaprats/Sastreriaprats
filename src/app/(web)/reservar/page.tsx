@@ -8,6 +8,7 @@ import { CalendarDays, LogIn, UserPlus } from 'lucide-react'
 export const metadata: Metadata = {
   title: 'Reservar cita — Sastrería Prats',
   description: 'Reserva tu cita en Sastrería Prats. Hermanos Pinzón o Wellington. Trajes a medida, camisería y boutique en Madrid.',
+  alternates: { canonical: '/reservar' },
 }
 
 export const dynamic = 'force-dynamic'

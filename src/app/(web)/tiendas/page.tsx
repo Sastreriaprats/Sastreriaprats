@@ -8,6 +8,7 @@ export const revalidate = 3600
 export const metadata: Metadata = {
   title: 'Nuestras tiendas — Sastrería Prats',
   description: 'Visítanos en nuestras boutiques de Madrid: Hermanos Pinzón y Wellington.',
+  alternates: { canonical: '/tiendas' },
 }
 
 type StoreInfo = {

@@ -10,10 +10,16 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     const res = await fetch(`${baseUrl}/api/public/catalog/${slug}`, { next: { revalidate: 60 } })
     if (!res.ok) return { title: 'Producto no encontrado' }
     const product = await res.json()
+    const title = `${product.name} — Sastrería Prats`
+    const description = product.description?.slice(0, 160) || `${product.name} en Sastrería Prats.`
     return {
-      title: `${product.name} — Sastrería Prats`,
-      description: product.description?.slice(0, 160) || `${product.name} en Sastrería Prats.`,
+      title,
+      description,
+      alternates: { canonical: `/boutique/${slug}` },
       openGraph: {
+        title,
+        description,
+        url: `/boutique/${slug}`,
         images: product.main_image_url ? [product.main_image_url] : [],
       },
     }

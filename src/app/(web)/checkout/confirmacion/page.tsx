@@ -1,7 +1,13 @@
+import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { CheckCircle, ShoppingBag, ArrowRight } from 'lucide-react'
 import { ClearCartOnConfirm } from './clear-cart-on-confirm'
+
+export const metadata: Metadata = {
+  title: 'Pedido confirmado — Sastrería Prats',
+  robots: { index: false, follow: true },
+}
 
 export default async function ConfirmationPage({
   searchParams,

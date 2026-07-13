@@ -11,6 +11,7 @@ export const revalidate = 3600
 export const metadata: Metadata = {
   title: 'Sastrería Prats — Madrid · Sastrería a medida y boutique',
   description: 'Sastrería de lujo en Madrid desde 1985. Trajes a medida, americanas y colección boutique.',
+  alternates: { canonical: '/' },
   openGraph: {
     title: 'Sastrería Prats — Madrid',
     description: 'Sastrería de lujo en Madrid desde 1985.',

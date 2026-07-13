@@ -10,6 +10,7 @@ export const metadata: Metadata = {
   title: 'Blog',
   description: 'Noticias, consejos y novedades de Sastrería Prats — sastrería de lujo en Madrid.',
   alternates: {
+    canonical: '/blog',
     types: {
       'application/rss+xml': '/feed.xml',
     },
