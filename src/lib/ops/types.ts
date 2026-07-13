@@ -128,8 +128,18 @@ export type ApInvoiceLite = {
   date: string
   base: number
   vat: number
-  total: number
+  retentionRate: number         // % de retención IRPF (15 profesionales, 19 alquileres…)
+  retentionAmount: number       // importe retenido (se ingresa a Hacienda, no al proveedor)
+  total: number                 // total del documento: base + IVA − retención
   attachmentPath?: string       // path en el bucket supplier-invoices (PDF adjunto)
+}
+
+// Desglose del IVA soportado por tipo impositivo. byQuarter[0..3] = T1..T4.
+export type VatRateRow = {
+  rate: number                  // 21 | 10 | 4 | 0…
+  byQuarter: { base: number; vat: number }[]
+  base: number                  // total año
+  vat: number
 }
 
 export type ViewC = {
@@ -139,4 +149,5 @@ export type ViewC = {
   ledger: LedgerMovement[]      // TODOS los movimientos (ingresos no-efectivo + gastos)
   invoices: InvoiceLite[]       // facturas emitidas del año
   apInvoices: ApInvoiceLite[]   // facturas recibidas de proveedor del año
+  vatByRate: VatRateRow[]       // IVA soportado desglosado por tipo impositivo
 }

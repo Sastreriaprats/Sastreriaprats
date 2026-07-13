@@ -10,7 +10,7 @@ import {
 } from '@/lib/ops/db'
 import type {
   CashEntryPayload, CashEntry, AccountingView, MonthPoint, QuarterRow, MovementRow, LedgerMovement, ViewB, ViewC,
-  MovementKind, DepositPayload, DepositItemPayload, DepositRow, ApInvoiceLite,
+  MovementKind, DepositPayload, DepositItemPayload, DepositRow, ApInvoiceLite, VatRateRow,
 } from '@/lib/ops/types'
 
 const r2 = (n: number) => Math.round(n * 100) / 100
@@ -100,22 +100,42 @@ async function readCashFractions(admin: ReturnType<typeof createAdminClient>, st
 // Etiqueta HMAC estable de un cobro (misma que aux.deposit_items.dedup_tag).
 const depositKey = (kind: MovementKind, id: string) => dedupTag(`${kind}:${id}`).toString('base64')
 
+// Líneas (base + tipo de IVA) de las facturas recibidas del año, para el
+// desglose del IVA soportado por tipo impositivo.
+async function readApInvoiceLines(admin: ReturnType<typeof createAdminClient>, year: number) {
+  const out: Record<string, unknown>[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data } = await admin.from('ap_supplier_invoice_lines')
+      .select('supplier_invoice_id, base, tax_rate, tax_amount, ap_supplier_invoices!inner(invoice_date, is_proforma)')
+      .eq('ap_supplier_invoices.is_proforma', false)
+      .gte('ap_supplier_invoices.invoice_date', `${year}-01-01`)
+      .lte('ap_supplier_invoices.invoice_date', `${year}-12-31`)
+      .order('id', { ascending: true })
+      .range(from, from + 999)
+    const b = (data ?? []) as Record<string, unknown>[]
+    out.push(...b)
+    if (b.length < 1000) break
+  }
+  return out
+}
+
 async function computeYear(year: number) {
   const admin = createAdminClient()
   const start = `${year}-01-01`, end = `${year}-12-31T23:59:59`
   // Lecturas independientes en paralelo. `deposited` = cobros ya ingresados al
   // banco: salen de B y pasan a C (A = B + C se mantiene). Si esa lectura falla,
   // computeYear falla entero: mejor sin datos que contar doble en B.
-  const [sales, cashFrac, tailoringPayments, deposited, { data: apInv }, { data: clpRows }, { data: stInv }] = await Promise.all([
+  const [sales, cashFrac, tailoringPayments, deposited, { data: apInv }, apLines, { data: clpRows }, { data: stInv }] = await Promise.all([
     readAllSales(admin, start, end),
     readCashFractions(admin, start, end),
     readAllTailoringPayments(admin, year),
     listDepositTags(),
     // Gastos / IVA soportado = FACTURAS RECIBIDAS (ap_supplier_invoices)
     admin.from('ap_supplier_invoices')
-      .select('invoice_number, supplier_name, amount, tax_amount, invoice_date, attachment_url')
+      .select('id, invoice_number, supplier_name, amount, tax_amount, retention_rate, retention_amount, invoice_date, attachment_url')
       .eq('is_proforma', false)
       .gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`),
+    readApInvoiceLines(admin, year),
     // Mapa venta -> nº de ticket oficial (CLP)
     admin.from('cash_internal_tickets')
       .select('sale_id, ref').eq('source', 'sale').eq('year', year),
@@ -252,9 +272,29 @@ async function computeYear(year: number) {
   let expenses = 0, vatPaidSummary = 0
   const expMonthly: Record<string, number> = {}
   const apQ = emptyQ()
+
+  // Desglose del IVA soportado por tipo impositivo. Las facturas CON líneas
+  // aportan base y tipo reales por línea; las de solo cabecera derivan el tipo
+  // de vat/base aproximándolo al tipo español más cercano (0/4/10/21).
+  const rateAgg: Record<number, { base: number[]; vat: number[] }> = {}
+  const addRate = (rate: number, q: number, base: number, vat: number) => {
+    const r = (rateAgg[rate] ??= { base: [0, 0, 0, 0], vat: [0, 0, 0, 0] })
+    r.base[q - 1] += base
+    r.vat[q - 1] += vat
+  }
+  const invoicesWithLines = new Set(apLines.map((l) => String(l.supplier_invoice_id)))
+  for (const l of apLines) {
+    const inv = l.ap_supplier_invoices as Record<string, unknown> | null
+    const d = String(inv?.invoice_date ?? '')
+    const q = Math.ceil(Number(d.slice(5, 7)) / 3)
+    if (q >= 1 && q <= 4) addRate(Number(l.tax_rate) || 0, q, Number(l.base) || 0, Number(l.tax_amount) || 0)
+  }
+
   for (const x of (apInv ?? []) as Record<string, unknown>[]) {
     const base = Number(x.amount) || 0
     const vat = Number(x.tax_amount) || 0
+    const retRate = Number(x.retention_rate) || 0
+    const ret = Number(x.retention_amount) || 0
     const d = String(x.invoice_date)
     const m = d.slice(0, 7)
     const q = Math.ceil(Number(d.slice(5, 7)) / 3)
@@ -262,22 +302,42 @@ async function computeYear(year: number) {
     vatPaidSummary += vat
     expMonthly[m] = (expMonthly[m] || 0) + base
     apQ[q].base += base; apQ[q].vat += vat; apQ[q].count += 1
+    if (!invoicesWithLines.has(String(x.id))) {
+      const raw = base !== 0 ? (vat / base) * 100 : 0
+      const rate = [0, 4, 10, 21].reduce((best, r) => (Math.abs(r - raw) < Math.abs(best - raw) ? r : best), 0)
+      addRate(rate, q, base, vat)
+    }
     const supplier = String(x.supplier_name ?? '')
     const num = String(x.invoice_number ?? '')
     const attachment = typeof x.attachment_url === 'string' && x.attachment_url.trim() ? x.attachment_url.trim() : undefined
+    // Total del DOCUMENTO: la retención se resta del pago al proveedor
+    // (se ingresa a Hacienda por el 111/115), no cambia base ni IVA.
+    const docTotal = base + vat - ret
     expenseLedger.push({
       date: d.slice(0, 10), type: 'Factura recibida',
       concept: `${supplier} ${num}`.trim() || 'Factura recibida',
       client: supplier || undefined,
-      base: r2(base), vat: r2(vat), total: r2(-(base + vat)),
+      base: r2(base), vat: r2(vat), total: r2(-docTotal),
       apPath: attachment,
     })
-    apInvoices.push({ number: num, supplier, date: d.slice(0, 10), base: r2(base), vat: r2(vat), total: r2(base + vat), attachmentPath: attachment })
+    apInvoices.push({
+      number: num, supplier, date: d.slice(0, 10), base: r2(base), vat: r2(vat),
+      retentionRate: r2(retRate), retentionAmount: r2(ret), total: r2(docTotal), attachmentPath: attachment,
+    })
   }
+
+  const vatByRate: VatRateRow[] = Object.entries(rateAgg)
+    .map(([rate, v]) => ({
+      rate: Number(rate),
+      byQuarter: v.base.map((b, i) => ({ base: r2(b), vat: r2(v.vat[i]) })),
+      base: r2(v.base.reduce((s, n) => s + n, 0)),
+      vat: r2(v.vat.reduce((s, n) => s + n, 0)),
+    }))
+    .sort((a, b) => b.rate - a.rate)
 
   return {
     cash, noncash, expenses, vatPaidSummary, expMonthly, apQ, cashMoves, incomeLedger, expenseLedger, apInvoices,
-    depositedYearTotal, depositedYearCount,
+    vatByRate, depositedYearTotal, depositedYearCount,
   }
 }
 
@@ -407,7 +467,7 @@ export async function getViewC(year: number) {
       pdfUrl: x.pdf_url ? String(x.pdf_url) : undefined,
     }))
 
-    return ok({ C, ledger: ledger.slice(0, 5000), invoices, apInvoices: c.apInvoices } as ViewC)
+    return ok({ C, ledger: ledger.slice(0, 5000), invoices, apInvoices: c.apInvoices, vatByRate: c.vatByRate } as ViewC)
   } catch { return fail() }
 }
 
