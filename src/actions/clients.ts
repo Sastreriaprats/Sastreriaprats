@@ -12,8 +12,9 @@ type ClientAggregates = { spent: number; pending: number; count: number }
 
 /**
  * Calcula en vivo los totales por cliente sumando pedidos de confección
- * (`tailoring_orders`) y ventas POS completadas (`sales`). Las columnas
- * homónimas en `clients` están sin trigger y permanecen a 0.
+ * (`tailoring_orders`), ventas POS completadas (`sales`) y pedidos de la
+ * tienda online no cancelados (`online_orders`). Las columnas homónimas en
+ * `clients` están sin trigger y permanecen a 0.
  */
 async function computeClientAggregates(
   admin: AdminClient,
@@ -22,7 +23,7 @@ async function computeClientAggregates(
   const map = new Map<string, ClientAggregates>()
   if (clientIds.length === 0) return map
 
-  const [ordersRes, salesRes] = await Promise.all([
+  const [ordersRes, salesRes, onlineRes] = await Promise.all([
     admin
       .from('tailoring_orders')
       .select('client_id, total_paid, total_pending')
@@ -33,6 +34,14 @@ async function computeClientAggregates(
       .select('client_id, total, total_returned, status')
       .in('client_id', clientIds)
       .in('status', ['completed', 'partially_returned', 'fully_returned']),
+    // Tienda ONLINE: sin esta fuente, un cliente que solo compró en la web
+    // salía con Total gastado 0 y Nº compras 0 (caso Neil Straker/Lorenzo
+    // Giannantonio). Misma familia de 3 fuentes que el informe de clientes.
+    admin
+      .from('online_orders')
+      .select('client_id, total, status')
+      .in('client_id', clientIds)
+      .neq('status', 'cancelled'),
   ])
 
   for (const o of (ordersRes.data ?? []) as Array<Record<string, unknown>>) {
@@ -51,6 +60,14 @@ async function computeClientAggregates(
     const total = Number(s.total) || 0
     const returned = Number(s.total_returned) || 0
     cur.spent += Math.max(0, total - returned)
+    cur.count += 1
+    map.set(id, cur)
+  }
+  for (const o of (onlineRes.data ?? []) as Array<Record<string, unknown>>) {
+    const id = String(o.client_id || '')
+    if (!id) continue
+    const cur = map.get(id) ?? { spent: 0, pending: 0, count: 0 }
+    cur.spent += Number(o.total) || 0
     cur.count += 1
     map.set(id, cur)
   }
@@ -362,6 +379,28 @@ const buildCompanyPayload = (clientId: string, d: ClientCompanyInput) => ({
   notes: s(d.notes),
   is_default: !!d.is_default,
 })
+
+/**
+ * Pedidos de la tienda online de un cliente, para la pestaña Ventas de su
+ * ficha. Vía adminClient con permiso clients.view: la RLS de online_orders
+ * exige cms.manage_online_orders y dejaría la pestaña vacía en silencio para
+ * el personal sin ese permiso, mientras los KPIs de cabecera (servidor) sí
+ * cuentan las compras web — quien puede ver la ficha debe ver sus compras.
+ */
+export const getClientOnlineOrders = protectedAction<{ clientId: string }, any[]>(
+  { permission: 'clients.view', auditModule: 'clients' },
+  async (ctx, { clientId }) => {
+    if (!clientId) return failure('Falta el cliente', 'VALIDATION')
+    const { data, error } = await ctx.adminClient
+      .from('online_orders')
+      .select('id, order_number, total, payment_method, status, created_at')
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false })
+      .limit(100)
+    if (error) return failure(error.message)
+    return success(data ?? [])
+  }
+)
 
 export const listClientCompanies = protectedAction<{ clientId: string }, any[]>(
   { permission: 'clients.view', auditModule: 'clients' },
