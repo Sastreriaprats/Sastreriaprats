@@ -27,11 +27,11 @@ function buildNavItems(categories: WebCategory[]): NavItem[] {
     { label: 'Ver todo', href: '/boutique' },
     ...categories.map(c => ({
       label: c.name,
-      href: `/boutique?category=${c.slug}`,
+      href: `/boutique/categoria/${c.slug}`,
       children: c.children?.length
         ? c.children.map(sub => ({
             label: sub.name,
-            href: `/boutique?category=${sub.slug}`,
+            href: `/boutique/categoria/${sub.slug}`,
           }))
         : undefined,
     })),
@@ -84,7 +84,7 @@ function AnnouncementBar({ text }: { text?: string }) {
       {(() => {
         const text = slides[current]
         const linkMap: [RegExp, string][] = [
-          [/nueva colección/i, '/boutique?category=nueva-coleccion'],
+          [/nueva colección/i, '/boutique/categoria/nueva-coleccion'],
           [/otoño.*invierno|primavera.*verano|colección/i, '/boutique'],
           [/reserv/i, '/reservar'],
           [/envío/i, '/aviso-legal'],

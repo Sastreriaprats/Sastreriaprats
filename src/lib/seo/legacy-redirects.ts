@@ -42,12 +42,12 @@ export const legacyShopifyRedirects: Redirect[] = [
   { source: '/pages/contacto', destination: '/contacto', permanent: true },
   { source: '/pages/bespoke', destination: '/sastreria', permanent: true },
   { source: '/pages/medida-artesanal', destination: '/sastreria', permanent: true },
-  { source: '/pages/ceremonia', destination: '/boutique?category=ceremonia', permanent: true },
-  { source: '/pages/camiseria', destination: '/boutique?category=camisas', permanent: true },
+  { source: '/pages/ceremonia', destination: '/boutique/categoria/ceremonia', permanent: true },
+  { source: '/pages/camiseria', destination: '/boutique/categoria/camisas', permanent: true },
   { source: '/pages/trunk-shows', destination: '/blog', permanent: true },
-  { source: '/pages/guia-de-tallas-teba', destination: '/boutique?category=tebas', permanent: true },
-  { source: '/pages/tallas-pijama', destination: '/boutique?category=pijamas', permanent: true },
-  { source: '/pages/tallas-polera', destination: '/boutique?category=poleras', permanent: true },
+  { source: '/pages/guia-de-tallas-teba', destination: '/boutique/categoria/tebas', permanent: true },
+  { source: '/pages/tallas-pijama', destination: '/boutique/categoria/pijamas', permanent: true },
+  { source: '/pages/tallas-polera', destination: '/boutique/categoria/poleras', permanent: true },
   { source: '/pages/data-sharing-opt-out', destination: '/privacidad', permanent: true },
   { source: '/pages/traje-ast2f-luka', destination: '/boutique', permanent: true },
 
@@ -60,20 +60,20 @@ export const legacyShopifyRedirects: Redirect[] = [
   // ---- Colecciones que coinciden exactamente ----
   ...MATCHING_COLLECTIONS.map((slug): Redirect => ({
     source: `/collections/${slug}`,
-    destination: `/boutique?category=${slug}`,
+    destination: `/boutique/categoria/${slug}`,
     permanent: true,
   })),
 
   // ---- Colecciones renombradas/fusionadas ----
   ...Object.entries(REMAPPED_COLLECTIONS).map(([from, to]): Redirect => ({
     source: `/collections/${from}`,
-    destination: `/boutique?category=${to}`,
+    destination: `/boutique/categoria/${to}`,
     permanent: true,
   })),
 
   // ---- Rutas de colección anidadas concretas ----
-  { source: '/collections/tebas-1/teba', destination: '/boutique?category=tebas', permanent: true },
-  { source: '/collections/gabardinas/products/:slug*', destination: '/boutique?category=gabardinas', permanent: true },
+  { source: '/collections/tebas-1/teba', destination: '/boutique/categoria/tebas', permanent: true },
+  { source: '/collections/gabardinas/products/:slug*', destination: '/boutique/categoria/gabardinas', permanent: true },
 
   // ---- Índice de colecciones y blog ----
   { source: '/collections', destination: '/boutique', permanent: true },

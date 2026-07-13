@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { Search, Loader2, ShoppingBag, Heart, ChevronDown } from 'lucide-react'
@@ -8,18 +8,33 @@ import { PratsSpinner } from '@/components/ui/prats-spinner'
 import { trackAddToCart } from '@/lib/analytics/events'
 import { useCart } from '@/components/providers/cart-provider'
 import { toast } from 'sonner'
-import { useSearchParams } from 'next/navigation'
 
-export function CatalogContent() {
+export type CatalogInitialData = {
+  products: Record<string, unknown>[]
+  total: number
+  totalPages: number
+}
+
+// `category` llega como prop desde la ruta (/boutique/categoria/[slug]), no de
+// useSearchParams: leer searchParams aquí forzaba render solo-cliente y dejaba
+// el grid fuera del HTML inicial (malo para SEO). `initialData` permite que la
+// página de categoría lo sirva ya renderizado desde el servidor.
+export function CatalogContent({
+  category = '',
+  initialData,
+}: {
+  category?: string
+  initialData?: CatalogInitialData
+} = {}) {
   const { addItem } = useCart()
-  const searchParams = useSearchParams()
-  const categoryParam = searchParams.get('category') || ''
+  const categoryParam = category
 
-  const [products, setProducts] = useState<Record<string, unknown>[]>([])
-  const [total, setTotal] = useState(0)
+  const [products, setProducts] = useState<Record<string, unknown>[]>(initialData?.products ?? [])
+  const [total, setTotal] = useState(initialData?.total ?? 0)
   const [page, setPage] = useState(1)
-  const [totalPages, setTotalPages] = useState(1)
-  const [isLoading, setIsLoading] = useState(true)
+  const [totalPages, setTotalPages] = useState(initialData?.totalPages ?? 1)
+  const [isLoading, setIsLoading] = useState(!initialData)
+  const skipFirstFetch = useRef(!!initialData)
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState('name')
   const [showSort, setShowSort] = useState(false)
@@ -42,19 +57,19 @@ export function CatalogContent() {
     if (search) params.set('search', search)
     if (categoryParam) params.set('category', categoryParam)
 
-    const url = `/api/public/catalog?${params}`
-    // TEMP: quitar estos 2 logs cuando confirmes que el filtro por categoría funciona
-    console.log('[CatalogContent] categoryParam =', JSON.stringify(categoryParam), '| fetch URL =', url)
-    const res = await fetch(url)
+    const res = await fetch(`/api/public/catalog?${params}`)
     const data = await res.json()
-    console.log('[CatalogContent] response total =', data.total, '| first 2 products =', (data.products ?? []).slice(0, 2).map((p: any) => ({ id: p.id, name: p.name, slug: p.slug ?? p.web_slug })))
     setProducts(data.products || [])
     setTotal(data.total || 0)
     setTotalPages(data.totalPages || 1)
     setIsLoading(false)
   }, [page, sort, search, categoryParam])
 
-  useEffect(() => { fetchProducts() }, [fetchProducts])
+  useEffect(() => {
+    // Con datos del servidor, el primer fetch de cliente sobra (mismo resultado).
+    if (skipFirstFetch.current) { skipFirstFetch.current = false; return }
+    fetchProducts()
+  }, [fetchProducts])
 
   // Reset page when category changes
   useEffect(() => { setPage(1) }, [categoryParam])

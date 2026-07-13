@@ -77,8 +77,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     console.error('[sitemap] products:', err)
   }
 
-  // Categorías visibles en web (URL filtrada del catálogo: /boutique?category=<slug>).
-  // Útil para que Google indexe páginas de categoría con sus listados.
+  // Categorías visibles en web, con ruta propia: /boutique/categoria/<slug>.
   let categoryEntries: MetadataRoute.Sitemap = []
   try {
     const { data: categories } = await admin
@@ -90,7 +89,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     categoryEntries = (categories || [])
       .filter((c) => typeof c.slug === 'string' && c.slug.length > 0)
       .map((c) => ({
-        url: `${BASE_URL}/boutique?category=${encodeURIComponent(c.slug)}`,
+        url: `${BASE_URL}/boutique/categoria/${encodeURIComponent(c.slug)}`,
         lastModified: c.updated_at ? new Date(c.updated_at) : now,
         changeFrequency: 'weekly' as const,
         // Categorías padre prioridad mayor que subcategorías.
