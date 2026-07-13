@@ -1,7 +1,6 @@
 {
   "framework": "nextjs",
   "regions": ["cdg1"],
-  "_crons_nota": "Los crons se disparan desde pg_cron+pg_net en Supabase (jobs 'cron-*'), no desde Vercel: la env var CRON_SECRET no existe en este proyecto de Vercel y sin ella los disparos de Vercel Cron llegan sin Authorization (401). Ver src/lib/cron-auth.ts.",
   "headers": [
     {
       "source": "/(.*)",
