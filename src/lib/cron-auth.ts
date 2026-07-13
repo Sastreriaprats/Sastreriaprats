@@ -21,10 +21,12 @@ import { createHash } from 'crypto'
 export function isAuthorizedCron(authHeader: string | null): boolean {
   if (!authHeader) return false
 
-  const envSecret = process.env.CRON_SECRET
+  // trim(): la env var de Vercel puede llevar whitespace pegado (el token de prod
+  // tiene un \n final); el secreto canónico se deriva siempre del valor limpio.
+  const envSecret = (process.env.CRON_SECRET || '').trim()
   if (envSecret && authHeader === `Bearer ${envSecret}`) return true
 
-  const botToken = process.env.TELEGRAM_BOT_TOKEN
+  const botToken = (process.env.TELEGRAM_BOT_TOKEN || '').trim()
   if (botToken) {
     const derived = createHash('sha256').update(`cron-auth:${botToken}`).digest('hex')
     if (authHeader === `Bearer ${derived}`) return true
