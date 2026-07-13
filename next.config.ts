@@ -61,6 +61,15 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       { source: '/admin', destination: '/admin/dashboard', permanent: false },
+      // URL antigua de categoría por query → ruta propia. A nivel de edge para
+      // que sea un 308 HTTP real: dentro de la página, el streaming ya ha
+      // enviado el status 200 cuando permanentRedirect() llega a ejecutarse.
+      {
+        source: '/boutique',
+        has: [{ type: 'query', key: 'category', value: '(?<slug>.+)' }],
+        destination: '/boutique/categoria/:slug',
+        permanent: true,
+      },
       // Redirecciones 301 de las URLs antiguas de Shopify (ver src/lib/seo/legacy-redirects.ts)
       ...legacyShopifyRedirects,
     ]

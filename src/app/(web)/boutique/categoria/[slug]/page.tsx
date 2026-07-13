@@ -46,7 +46,10 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params
   const category = await getCategory(slug)
-  if (!category) return { title: 'Categoría no encontrada' }
+  // notFound() aquí (y no solo en la página): generateMetadata corre antes del
+  // primer flush del streaming, así el 404 llega con status HTTP real y no
+  // como soft-404 (shell 200 + UI de "no encontrado").
+  if (!category) notFound()
 
   const title = `${category.name} — Boutique | Sastrería Prats`
   const description = `${category.name} de la colección de moda masculina de Sastrería Prats. Calidad artesanal y marcas de prestigio en Madrid, con envío online.`
