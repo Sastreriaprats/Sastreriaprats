@@ -31,7 +31,8 @@ import {
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { ArrowLeft, Loader2, Truck, FileText, Trash2, AlertTriangle, Check, Pencil, Plus, Search } from 'lucide-react'
+import { ArrowLeft, Loader2, Truck, FileText, Trash2, AlertTriangle, Check, Pencil, Plus, Search, Printer } from 'lucide-react'
+import { buildReceivedLabelsUrl } from '@/lib/utils/received-labels'
 import { toast } from 'sonner'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import {
@@ -146,6 +147,7 @@ export function PedidoDetailContent({
   // Reception dialog
   const [receptionOpen, setReceptionOpen] = useState(false)
   const [receptionLines, setReceptionLines] = useState<SupplierOrderLineForReceipt[]>([])
+  const [printLabelsUrl, setPrintLabelsUrl] = useState<string | null>(null)
   const [receptionLinesLoading, setReceptionLinesLoading] = useState(false)
   const [receptionSubmitting, setReceptionSubmitting] = useState(false)
   const [receptionLineState, setReceptionLineState] = useState<
@@ -427,6 +429,8 @@ export function PedidoDetailContent({
       } else {
         toast.success('Recepción registrada correctamente.')
       }
+      const labelsUrl = buildReceivedLabelsUrl(receptionLines, lines)
+      if (labelsUrl) setPrintLabelsUrl(labelsUrl)
       router.refresh()
     } else {
       toast.error((res as any)?.error || 'Error al registrar la recepción')
@@ -766,7 +770,10 @@ export function PedidoDetailContent({
                 )}
                 {lines.length > 0 && (
                   <TableRow className="border-t-2">
-                    <TableCell colSpan={7} className="text-right font-medium">Total</TableCell>
+                    <TableCell colSpan={3} className="text-right font-medium">Total</TableCell>
+                    <TableCell className="text-right font-bold">{lines.reduce((s, l) => s + (Number(l.quantity) || 0), 0)}</TableCell>
+                    <TableCell className="text-right font-bold">{lines.reduce((s, l) => s + (Number(l.quantity_received) || 0), 0)}</TableCell>
+                    <TableCell colSpan={2} />
                     <TableCell className="text-right font-bold">{formatCurrency(order.total ?? total)}</TableCell>
                     <TableCell />
                   </TableRow>
@@ -951,6 +958,31 @@ export function PedidoDetailContent({
             <Button onClick={submitReception} disabled={receptionSubmitting || receptionLinesLoading}>
               {receptionSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Confirmar recepción
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIÁLOGO IMPRIMIR ETIQUETAS DE LO RECIBIDO */}
+      <Dialog open={printLabelsUrl !== null} onOpenChange={(open) => { if (!open) setPrintLabelsUrl(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Printer className="h-5 w-5" /> Recepción registrada
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            ¿Quieres que te saque las etiquetas con código de barras de todas las prendas recibidas? Se imprimirá una etiqueta por unidad directamente.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPrintLabelsUrl(null)}>Ahora no</Button>
+            <Button
+              onClick={() => {
+                if (printLabelsUrl) window.open(printLabelsUrl, '_blank')
+                setPrintLabelsUrl(null)
+              }}
+            >
+              <Printer className="h-4 w-4 mr-2" /> Sí, imprimir etiquetas
             </Button>
           </DialogFooter>
         </DialogContent>

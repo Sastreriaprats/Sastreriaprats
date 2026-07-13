@@ -27,6 +27,7 @@ import { searchSupplierFabrics, searchSupplierProducts } from '@/actions/supplie
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { createSupplierDeliveryNote, uploadSupplierDeliveryNoteAttachment, upsertSupplierDeliveryNoteForOrder, getSupplierDeliveryNote } from '@/actions/delivery-notes'
 import { useActiveStore } from '@/hooks/use-store'
+import { buildReceivedLabelsUrl } from '@/lib/utils/received-labels'
 import { SIZE_TEMPLATES, variantSkuFromSize } from '@/lib/constants-sizes'
 import { sortBySize } from '@/lib/utils/sort-sizes'
 import { Badge } from '@/components/ui/badge'
@@ -43,7 +44,7 @@ import {
 import {
   ArrowLeft, User, Phone, Mail, MapPin, CreditCard, Truck,
   AlertTriangle, ShoppingBag, Plus, Loader2, FileText, Package, Trash2,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, Printer,
 } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -81,6 +82,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
   const [receptionLinesLoading, setReceptionLinesLoading] = useState(false)
   const [receptionSubmitting, setReceptionSubmitting] = useState(false)
   const [receptionLineState, setReceptionLineState] = useState<Record<string, { selected: boolean; quantityReceived: string }>>({})
+  const [printLabelsUrl, setPrintLabelsUrl] = useState<string | null>(null)
   const [newDeliveryOpen, setNewDeliveryOpen] = useState(false)
   const [creatingDelivery, setCreatingDelivery] = useState(false)
   const [uploadingOrderPdfId, setUploadingOrderPdfId] = useState<string | null>(null)
@@ -677,71 +679,61 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                               Marcar recibido
                             </Button>
                           ) : null}
-                          {o.supplier_delivery_notes?.[0] ? (
-                            <div className="flex gap-1">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="text-xs"
-                                onClick={() => {
-                                  const note = o.supplier_delivery_notes[0]
-                                  const params = new URLSearchParams({ tab: 'proveedor' })
-                                  if (note.id) params.set('id', note.id)
-                                  if (note.supplier_reference) params.set('ref', note.supplier_reference)
-                                  router.push(`/admin/almacen/albaranes?${params.toString()}`)
-                                }}
-                              >
-                                <FileText className="h-3 w-3 mr-1" /> Ver albarán
-                              </Button>
-                              {o.supplier_delivery_notes?.[0]?.attachment_url && (
+                          <div className="flex gap-1">
+                            {o.supplier_delivery_notes?.[0] && (
+                              <>
                                 <Button
                                   variant="outline"
                                   size="sm"
                                   className="text-xs"
-                                  onClick={() => window.open(o.supplier_delivery_notes[0].attachment_url, '_blank')}
+                                  onClick={() => {
+                                    const notes = o.supplier_delivery_notes
+                                    const params = new URLSearchParams({ tab: 'proveedor' })
+                                    if (notes[0].id) params.set('id', notes[0].id)
+                                    if (notes.length === 1 && notes[0].supplier_reference) params.set('ref', notes[0].supplier_reference)
+                                    router.push(`/admin/almacen/albaranes?${params.toString()}`)
+                                  }}
                                 >
-                                  Ver PDF
+                                  <FileText className="h-3 w-3 mr-1" />
+                                  {o.supplier_delivery_notes.length > 1 ? `Ver albaranes (${o.supplier_delivery_notes.length})` : 'Ver albarán'}
                                 </Button>
-                              )}
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="text-xs"
-                                disabled={uploadingOrderPdfId !== null}
-                                onClick={() => requestUploadFromOrder(o.id)}
-                              >
-                                {uploadingOrderPdfId === o.id ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <FileText className="h-3 w-3 mr-1" />}
-                                {o.supplier_delivery_notes?.[0]?.attachment_url ? 'Reemplazar PDF' : 'Subir albarán PDF'}
-                              </Button>
-                            </div>
-                          ) : (
-                            <div className="flex gap-1">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="text-xs"
-                                disabled={uploadingOrderPdfId !== null}
-                                onClick={() => requestUploadFromOrder(o.id)}
-                              >
-                                {uploadingOrderPdfId === o.id ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <FileText className="h-3 w-3 mr-1" />}
-                                Subir albarán PDF
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="text-xs"
-                                onClick={() => {
-                                  const today = new Date().toISOString().slice(0, 10)
-                                  setDeliveryOrderId(o.id)
-                                  setNewDeliveryForm({ supplier_reference: '', delivery_date: today, notes: '' })
-                                  setDeliveryFile(null)
-                                  setNewDeliveryOpen(true)
-                                }}
-                              >
-                                Registrar albarán recibido
-                              </Button>
-                            </div>
-                          )}
+                                {o.supplier_delivery_notes?.[0]?.attachment_url && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="text-xs"
+                                    onClick={() => window.open(o.supplier_delivery_notes[0].attachment_url, '_blank')}
+                                  >
+                                    Ver PDF
+                                  </Button>
+                                )}
+                              </>
+                            )}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-xs"
+                              disabled={uploadingOrderPdfId !== null}
+                              onClick={() => requestUploadFromOrder(o.id)}
+                            >
+                              {uploadingOrderPdfId === o.id ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <FileText className="h-3 w-3 mr-1" />}
+                              {o.supplier_delivery_notes?.[0]?.attachment_url ? 'Reemplazar PDF' : 'Subir albarán PDF'}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-xs"
+                              onClick={() => {
+                                const today = new Date().toISOString().slice(0, 10)
+                                setDeliveryOrderId(o.id)
+                                setNewDeliveryForm({ supplier_reference: '', delivery_date: today, notes: '' })
+                                setDeliveryFile(null)
+                                setNewDeliveryOpen(true)
+                              }}
+                            >
+                              Registrar albarán recibido
+                            </Button>
+                          </div>
                           {can('suppliers.create_order') && (
                           <Button
                             variant="ghost"
@@ -2111,10 +2103,12 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                   if ((res.data as any)?.stock_warnings > 0) {
                     toast.warning('Algunas líneas no actualizaron stock (tejido/producto no encontrado o sin variante).')
                   }
+                  const labelsUrl = buildReceivedLabelsUrl(receptionLines, linesToSend)
                   setReceptionDialogOpen(false)
                   setReceptionOrderId(null)
                   setReceptionLines([])
                   setReceptionLineState({})
+                  if (labelsUrl) setPrintLabelsUrl(labelsUrl)
                   router.refresh()
                 } else {
                   toast.error((res as any)?.error ?? 'No se pudo registrar la recepción')
@@ -2123,6 +2117,30 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
             >
               {receptionSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Confirmar recepción
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={printLabelsUrl !== null} onOpenChange={(open) => { if (!open) setPrintLabelsUrl(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Printer className="h-5 w-5" /> Recepción registrada
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            ¿Quieres que te saque las etiquetas con código de barras de todas las prendas recibidas? Se imprimirá una etiqueta por unidad directamente.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPrintLabelsUrl(null)}>Ahora no</Button>
+            <Button
+              onClick={() => {
+                if (printLabelsUrl) window.open(printLabelsUrl, '_blank')
+                setPrintLabelsUrl(null)
+              }}
+            >
+              <Printer className="h-4 w-4 mr-2" /> Sí, imprimir etiquetas
             </Button>
           </DialogFooter>
         </DialogContent>

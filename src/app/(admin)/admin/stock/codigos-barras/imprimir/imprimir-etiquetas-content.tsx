@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -21,11 +21,12 @@ type VariantForLabel = {
   price_with_tax?: number
 }
 
-export function ImprimirEtiquetasContent({ variantIdsParam, legacyIdsParam }: { variantIdsParam: string; legacyIdsParam?: string }) {
+export function ImprimirEtiquetasContent({ variantIdsParam, legacyIdsParam, qtysParam, autoprint }: { variantIdsParam: string; legacyIdsParam?: string; qtysParam?: string; autoprint?: boolean }) {
   const router = useRouter()
   const [variants, setVariants] = useState<VariantForLabel[]>([])
   const [loading, setLoading] = useState(true)
   const [quantities, setQuantities] = useState<Record<string, number>>({})
+  const autoprintFired = useRef(false)
 
   const variantIds = variantIdsParam ? variantIdsParam.split(',').map((s) => s.trim()).filter(Boolean) : []
 
@@ -34,19 +35,37 @@ export function ImprimirEtiquetasContent({ variantIdsParam, legacyIdsParam }: { 
       setLoading(false)
       return
     }
+    const qtyByVariantId: Record<string, number> = {}
+    if (qtysParam) {
+      const qtys = qtysParam.split(',').map((s) => parseInt(s.trim(), 10))
+      variantIds.forEach((id, i) => {
+        const q = qtys[i]
+        if (Number.isFinite(q) && q >= 1) qtyByVariantId[id] = Math.min(999, q)
+      })
+    }
     getVariantsByIdsForLabels(variantIds)
       .then((result) => {
         if (result.success && result.data) {
           const list = result.data
           setVariants(list)
           const initial: Record<string, number> = {}
-          list.forEach((v) => { initial[v.id] = 1 })
+          list.forEach((v) => { initial[v.id] = qtyByVariantId[v.id] ?? 1 })
           setQuantities(initial)
         }
         setLoading(false)
       })
       .catch(() => setLoading(false))
   }, [variantIdsParam])
+
+  // Autoprint (flujo de recepción de pedido a proveedor): lanzar la impresión
+  // en cuanto las etiquetas estén renderizadas. jsbarcode se carga en diferido
+  // dentro de cada etiqueta, por eso el pequeño margen antes de imprimir.
+  useEffect(() => {
+    if (!autoprint || loading || !variants.length || autoprintFired.current) return
+    autoprintFired.current = true
+    const t = setTimeout(() => window.print(), 800)
+    return () => clearTimeout(t)
+  }, [autoprint, loading, variants.length])
 
   const setQuantity = (variantId: string, value: number) => {
     const n = Math.max(1, Math.min(999, Math.floor(value)))

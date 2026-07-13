@@ -781,6 +781,7 @@ export type SupplierOrderLineForReceipt = {
   supplier_order_id: string
   fabric_id: string | null
   product_id: string | null
+  product_variant_id: string | null
   description: string
   reference: string | null
   quantity: number
@@ -806,6 +807,7 @@ export const getSupplierOrderLines = protectedAction<
       supplier_order_id: row.supplier_order_id,
       fabric_id: row.fabric_id ?? null,
       product_id: row.product_id ?? null,
+      product_variant_id: row.product_variant_id ?? null,
       description: row.description ?? '',
       reference: row.reference ?? null,
       quantity: toNumber(row.quantity),
