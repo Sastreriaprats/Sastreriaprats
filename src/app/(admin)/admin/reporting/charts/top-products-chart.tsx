@@ -250,14 +250,15 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
                                   <td className="py-0.5 font-mono">{b.size}</td>
                                   <td className="py-0.5 text-right tabular-nums">{b.comprado}</td>
                                   <td className="py-0.5 text-right tabular-nums">{b.vendido}</td>
-                                  <td className="py-0.5 text-right tabular-nums">{b.queda}</td>
+                                  {/* Talla agotada resaltada en rojo (petición Mónica/Isma) */}
+                                  <td className={`py-0.5 text-right tabular-nums ${b.queda === 0 ? 'text-red-600 font-semibold' : ''}`}>{b.queda}</td>
                                 </tr>
                               ))}
                               <tr className="border-t font-semibold">
                                 <td className="py-0.5">Total</td>
                                 <td className="py-0.5 text-right tabular-nums">{p.sizeBreakdown.reduce((s, b) => s + b.comprado, 0)}</td>
                                 <td className="py-0.5 text-right tabular-nums">{p.sizeBreakdown.reduce((s, b) => s + b.vendido, 0)}</td>
-                                <td className="py-0.5 text-right tabular-nums">{p.sizeBreakdown.reduce((s, b) => s + b.queda, 0)}</td>
+                                <td className={`py-0.5 text-right tabular-nums ${p.sizeBreakdown.reduce((s, b) => s + b.queda, 0) === 0 ? 'text-red-600' : ''}`}>{p.sizeBreakdown.reduce((s, b) => s + b.queda, 0)}</td>
                               </tr>
                             </tbody>
                           </table>
