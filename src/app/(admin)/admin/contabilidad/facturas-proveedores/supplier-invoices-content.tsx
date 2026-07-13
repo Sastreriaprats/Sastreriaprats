@@ -962,7 +962,7 @@ export function SupplierInvoicesContent() {
           </SelectContent>
         </Select>
         <Input
-          placeholder="Buscar por proveedor..."
+          placeholder="Proveedor, nº o importe..."
           className="w-48"
           value={supplierSearch}
           onChange={(e) => setSupplierSearch(e.target.value)}

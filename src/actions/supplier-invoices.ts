@@ -267,11 +267,26 @@ export const listSupplierInvoices = protectedAction<
       q = q.eq('status', status)
     }
     if (supplierSearch && supplierSearch.trim()) {
-      // Multi-palabra: cada token (AND) sobre search_text (unaccent: nº factura +
-      // supplier_name, mig 142). El número va incluido → buscar por nº sigue casando.
-      const normalized = normalizeSearchTerm(supplierSearch)
-      for (const token of normalized.split(/\s+/).filter(Boolean)) {
-        q = q.ilike('search_text', `%${token}%`)
+      // Si el término completo es un número (admite "15,20", "15.20", "1.520,00" o "15 €"),
+      // se busca también por importe total, además de por nº factura/proveedor.
+      let amountTerm = supplierSearch.trim().replace(/[€\s]/g, '')
+      if (amountTerm.includes(',')) amountTerm = amountTerm.replace(/\./g, '').replace(',', '.')
+      if (/^\d+(\.\d{1,2})?$/.test(amountTerm)) {
+        const n = Number(amountTerm)
+        if (amountTerm.includes('.')) {
+          // Con decimales: importe exacto (o coincidencia en nº factura).
+          q = q.or(`total_amount.eq.${n},search_text.ilike.%${amountTerm}%`)
+        } else {
+          // Entero: cualquier total n,xx (15 encuentra 15,20) o nº factura que lo contenga.
+          q = q.or(`and(total_amount.gte.${n},total_amount.lt.${n + 1}),search_text.ilike.%${amountTerm}%`)
+        }
+      } else {
+        // Multi-palabra: cada token (AND) sobre search_text (unaccent: nº factura +
+        // supplier_name, mig 142). El número va incluido → buscar por nº sigue casando.
+        const normalized = normalizeSearchTerm(supplierSearch)
+        for (const token of normalized.split(/\s+/).filter(Boolean)) {
+          q = q.ilike('search_text', `%${token}%`)
+        }
       }
     }
     if (dateFrom) q = q.gte('due_date', dateFrom)
