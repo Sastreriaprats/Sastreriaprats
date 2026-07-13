@@ -1,36 +1,7 @@
 {
   "framework": "nextjs",
   "regions": ["cdg1"],
-  "crons": [
-    {
-      "path": "/api/cron/reminders",
-      "schedule": "0 7 * * *"
-    },
-    {
-      "path": "/api/cron/alerts",
-      "schedule": "0 8 * * *"
-    },
-    {
-      "path": "/api/cron/weekly-report",
-      "schedule": "0 9 * * 1"
-    },
-    {
-      "path": "/api/cron/daily-report",
-      "schedule": "30 19 * * *"
-    },
-    {
-      "path": "/api/cron/daily-report",
-      "schedule": "30 20 * * *"
-    },
-    {
-      "path": "/api/cron/daily-report",
-      "schedule": "30 12 * * *"
-    },
-    {
-      "path": "/api/cron/daily-report",
-      "schedule": "30 13 * * *"
-    }
-  ],
+  "_crons_nota": "Los crons se disparan desde pg_cron+pg_net en Supabase (jobs 'cron-*'), no desde Vercel: la env var CRON_SECRET no existe en este proyecto de Vercel y sin ella los disparos de Vercel Cron llegan sin Authorization (401). Ver src/lib/cron-auth.ts.",
   "headers": [
     {
       "source": "/(.*)",
