@@ -99,10 +99,12 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
         admin.from('stock_levels').select('id', { count: 'exact', head: true }).not('min_stock', 'is', null).lte('available', 0),
         admin.from('supplier_due_dates').select('amount, due_date').eq('is_paid', false),
         admin.from('tailoring_fittings').select('id', { count: 'exact', head: true }).eq('scheduled_date', today).eq('status', 'scheduled'),
-        // Ventas de la tienda online, vía sus facturas serie W (mismo criterio
-        // que Contabilidad; subtotal ya es base sin IVA).
+        // Facturas emitidas que son ingreso por sí mismas: tienda online (serie
+        // W) + sueltas; excluidas las ligadas a ticket/pedido/reserva (ya
+        // contadas por sus cobros). Mismo criterio que Contabilidad; subtotal
+        // ya es base sin IVA.
         readAllPaged<{ subtotal?: number; invoice_date?: string }>((f, t) =>
-          admin.from('invoices').select('subtotal, invoice_date').eq('invoice_type', 'issued').not('online_order_id', 'is', null).not('status', 'in', '(draft,cancelled)').gte('invoice_date', lastMonthStart).lte('invoice_date', today).order('invoice_date', { ascending: true }).range(f, t)),
+          admin.from('invoices').select('subtotal, invoice_date').eq('invoice_type', 'issued').is('sale_id', null).is('tailoring_order_id', null).is('reservation_id', null).not('status', 'in', '(draft,cancelled)').gte('invoice_date', lastMonthStart).lte('invoice_date', today).order('invoice_date', { ascending: true }).range(f, t)),
       ])
 
       const ordersRows = ordersRes.data
@@ -230,7 +232,7 @@ export const getSalesChartData = protectedAction<void, { date: string; label: st
         readAllPaged((f, t) =>
           admin.from('tailoring_order_payments').select('amount, payment_date, tailoring_order:tailoring_orders(subtotal, total)').gte('payment_date', monthStart).lte('payment_date', today).range(f, t)),
         readAllPaged<{ subtotal?: number; invoice_date?: string }>((f, t) =>
-          admin.from('invoices').select('subtotal, invoice_date').eq('invoice_type', 'issued').not('online_order_id', 'is', null).not('status', 'in', '(draft,cancelled)').gte('invoice_date', monthStart).lte('invoice_date', today).order('invoice_date').range(f, t)),
+          admin.from('invoices').select('subtotal, invoice_date').eq('invoice_type', 'issued').is('sale_id', null).is('tailoring_order_id', null).is('reservation_id', null).not('status', 'in', '(draft,cancelled)').gte('invoice_date', monthStart).lte('invoice_date', today).order('invoice_date').range(f, t)),
       ])
 
       const dailyMap: Record<string, number> = {}
