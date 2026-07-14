@@ -398,6 +398,19 @@ export function ClientMeasurementsTab({ clientId }: { clientId: string }) {
                         </div>
                       </div>
                     ))}
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                        Comentarios / Acabado
+                      </p>
+                      <Textarea
+                        rows={2}
+                        value={values[valueKey(prefix, 'comentarios')] ?? ''}
+                        onChange={(e) => set(valueKey(prefix, 'comentarios'), e.target.value)}
+                        disabled={!canEdit}
+                        className="text-sm"
+                        placeholder="Cómo quiere el cliente esta prenda (acabados, preferencias…)"
+                      />
+                    </div>
                   </CardContent>
                 </Card>
               )

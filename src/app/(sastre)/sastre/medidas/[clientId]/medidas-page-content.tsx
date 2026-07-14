@@ -318,7 +318,9 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
         for (const code of editableCodes) edited[code] = String(values[valueKey('camiseria', code)] ?? '')
         const tallaVal = values[valueKey('camiseria', 'talla')]
         edited.talla = tallaVal !== undefined ? String(tallaVal) : String(loadedCamisaRef.current.talla ?? '')
-        camisaChanged = [...editableCodes, 'talla'].some(
+        const comentariosVal = values[valueKey('camiseria', 'comentarios')]
+        edited.comentarios = comentariosVal !== undefined ? String(comentariosVal) : String(loadedCamisaRef.current.comentarios ?? '')
+        camisaChanged = [...editableCodes, 'talla', 'comentarios'].some(
           (code) => String(edited[code] ?? '') !== String(loadedCamisaRef.current[code] ?? '')
         )
         camisaSavePayload = { ...loadedCamisaRef.current, ...edited }
@@ -501,6 +503,17 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
                         })}
                       </div>
                     </div>
+                    {/* Comentarios / Acabado */}
+                    <div>
+                      <h3 className="text-xs font-semibold text-[#c9a96e] uppercase tracking-[0.2em] mb-4 pb-2 border-b border-[#c9a96e]/15">Comentarios / Acabado</h3>
+                      <textarea
+                        rows={3}
+                        value={String(values[valueKey('camiseria', 'comentarios')] ?? '')}
+                        onChange={(e) => setValue(valueKey('camiseria', 'comentarios'), e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl border border-white/20 bg-white/[0.07] text-white text-base placeholder:text-white/30 focus:outline-none focus:border-[#c9a96e] focus:ring-1 focus:ring-[#c9a96e]/30 transition-all touch-manipulation resize-none"
+                        placeholder="Cómo quiere el cliente esta prenda (acabados, preferencias…)"
+                      />
+                    </div>
                     {/* Imprimir ficha */}
                     <div className="pt-2">
                       <Button
@@ -569,7 +582,20 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
                         if (b === 'Configuración técnica') return -1
                         return 0
                       })
-                      return groupEntries.map(([groupName, groupFields]) => (
+                      const comentariosKey = valueKey(groupPrefix, 'comentarios')
+                      const comentariosBlock = (
+                        <div key="__comentarios__">
+                          <h3 className="text-xs font-semibold text-[#c9a96e] uppercase tracking-[0.2em] mb-4 pb-2 border-b border-[#c9a96e]/15">Comentarios / Acabado</h3>
+                          <textarea
+                            rows={3}
+                            value={String(values[comentariosKey] ?? '')}
+                            onChange={(e) => setValue(comentariosKey, e.target.value)}
+                            className="w-full px-4 py-3 rounded-xl border border-white/20 bg-white/[0.07] text-white text-base placeholder:text-white/30 focus:outline-none focus:border-[#c9a96e] focus:ring-1 focus:ring-[#c9a96e]/30 transition-all touch-manipulation resize-none"
+                            placeholder="Cómo quiere el cliente esta prenda (acabados, preferencias…)"
+                          />
+                        </div>
+                      )
+                      return [...groupEntries.map(([groupName, groupFields]) => (
                         <div key={groupName}>
                           {groupName !== '__default__' && (
                             <h3 className="text-xs font-semibold text-[#c9a96e] uppercase tracking-[0.2em] mb-4 pb-2 border-b border-[#c9a96e]/15">{groupName}</h3>
@@ -619,7 +645,7 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
                             })}
                           </div>
                         </div>
-                      ))
+                      )), comentariosBlock]
                     })()}
                   </>
                 ))}

@@ -365,6 +365,21 @@ export function ClientCamiseriaTab({ clientId }: { clientId: string }) {
               )
             })
           )}
+          <Card>
+            <CardContent className="pt-4 space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-prats-navy">
+                Comentarios / Acabado
+              </p>
+              <Textarea
+                rows={2}
+                value={values['comentarios'] ?? ''}
+                onChange={(e) => set('comentarios', e.target.value)}
+                disabled={!canEdit}
+                className="text-sm"
+                placeholder="Cómo quiere el cliente esta prenda (acabados, preferencias…)"
+              />
+            </CardContent>
+          </Card>
         </div>
 
         <div className="space-y-3">
