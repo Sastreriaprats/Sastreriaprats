@@ -59,7 +59,7 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
     const start = `${fromDate}T00:00:00`
     const end = `${toDate}T23:59:59`
 
-    const [sales, purchasesRaw, invoicesRes, tailoringPayments, storesRes, pendOrdersRows, pendSalesRows, pendDueRows] = await Promise.all([
+    const [sales, purchasesRaw, invoicesRes, tailoringPayments, storesRes, pendOrdersRows, pendSalesRows, pendDueRows, onlineInvoices] = await Promise.all([
       // Ventas de TPV (boutique + TPV + sastrería-POS). Paginado: sin esto, un año
       // con >1000 tickets se truncaba silenciosamente e infravaloraba ingresos.
       readAllPaged((f, t) => ctx.adminClient.from('sales').select('total, total_returned, subtotal, tax_amount, created_at, store_id').gte('created_at', start).lte('created_at', end).in('status', ['completed', 'partially_returned']).order('created_at', { ascending: true }).range(f, t)),
@@ -84,6 +84,11 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
       readAllPaged((f, t) => ctx.adminClient.from('sales').select('total, amount_paid').in('payment_status', ['pending', 'partial']).range(f, t)),
       // Previsión: gastos de proveedor por pagar (cuotas de vencimiento sin pagar).
       readAllPaged((f, t) => ctx.adminClient.from('ap_supplier_invoice_due_dates').select('amount, is_paid').eq('is_paid', false).range(f, t)),
+      // Ventas de la TIENDA ONLINE, vía sus facturas serie W (online_order_id):
+      // no están en `sales` (el webhook no crea ticket) ni en cobros de sastrería,
+      // así que no hay doble conteo. subtotal/tax_amount de la factura ya vienen
+      // como base sin IVA + IVA. Fecha contable: invoice_date (= fecha de pago).
+      readAllPaged((f, t) => ctx.adminClient.from('invoices').select('subtotal, tax_amount, invoice_date').eq('invoice_type', 'issued').not('online_order_id', 'is', null).not('status', 'in', '(draft,cancelled)').gte('invoice_date', fromDate).lte('invoice_date', toDate).order('invoice_date', { ascending: true }).range(f, t)),
     ])
 
     // Excluimos proformas (no son facturas reales).
@@ -117,12 +122,17 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
       return { netBase: base, netVat: amount - base }
     }
 
+    const onlineBase = onlineInvoices.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).subtotal) || 0), 0)
+    const onlineVat = onlineInvoices.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).tax_amount) || 0), 0)
+
     const income =
       sales.reduce((s: number, x: Record<string, unknown>) => s + netSale(x).netBase, 0) +
-      tailoringPayments.reduce((s: number, p: Record<string, unknown>) => s + netTailoringPayment(p).netBase, 0)
+      tailoringPayments.reduce((s: number, p: Record<string, unknown>) => s + netTailoringPayment(p).netBase, 0) +
+      onlineBase
     const vatCollected =
       sales.reduce((s: number, x: Record<string, unknown>) => s + netSale(x).netVat, 0) +
-      tailoringPayments.reduce((s: number, p: Record<string, unknown>) => s + netTailoringPayment(p).netVat, 0)
+      tailoringPayments.reduce((s: number, p: Record<string, unknown>) => s + netTailoringPayment(p).netVat, 0) +
+      onlineVat
     const expenses = purchases.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).amount) || 0), 0)
     const vatPaid = purchases.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).tax_amount) || 0), 0)
 
@@ -152,6 +162,14 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
         const key = d.slice(0, 7)
         if (!byMonth[key]) byMonth[key] = { income: 0, expenses: 0 }
         byMonth[key].income += netTailoringPayment(p).netBase
+      }
+    }
+    for (const x of onlineInvoices) {
+      const d = (x as any).invoice_date
+      if (d) {
+        const key = String(d).slice(0, 7)
+        if (!byMonth[key]) byMonth[key] = { income: 0, expenses: 0 }
+        byMonth[key].income += Number((x as any).subtotal) || 0
       }
     }
     for (const x of purchases) {
@@ -206,11 +224,15 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
       const sid = (x as any).store_id ? String((x as any).store_id) : NO_STORE
       bucket(sid).expenses += Number((x as any).amount) || 0
     }
+    // La tienda online no es una tienda física: fila virtual propia (solo si
+    // tuvo ventas en el rango) para no mezclarla con "Sin asignar".
+    const ONLINE_STORE = '__online__'
+    if (onlineBase > 0) bucket(ONLINE_STORE).income += onlineBase
 
     const r2 = (n: number) => Math.round(n * 100) / 100
     const byStore: StoreBreakdownRow[] = [...buckets.entries()].map(([key, v]) => ({
       storeId: key === NO_STORE ? null : key,
-      storeName: key === NO_STORE ? 'Sin asignar' : (storeName.get(key) ?? 'Tienda'),
+      storeName: key === NO_STORE ? 'Sin asignar' : key === ONLINE_STORE ? 'Tienda online' : (storeName.get(key) ?? 'Tienda'),
       income: r2(v.income),
       expenses: r2(v.expenses),
       profit: r2(v.income - v.expenses),
@@ -660,7 +682,7 @@ export const getVatQuarterly = protectedAction<
     // discriminado y que daban "IVA soportado = 0").
     // Sin filtro de status: el IVA soportado se contabiliza al RECIBIR la
     // factura, independientemente del estado de pago.
-    const [salesRes, purchasesRes, tailoringPaymentsRes] = await Promise.all([
+    const [salesRes, purchasesRes, tailoringPaymentsRes, onlineInvoicesRes] = await Promise.all([
       ctx.adminClient.from('sales').select('total, total_returned, subtotal, tax_amount, created_at').gte('created_at', yearStart).lte('created_at', yearEnd).in('status', ['completed', 'partially_returned']),
       ctx.adminClient.from('ap_supplier_invoices').select('amount, tax_amount, invoice_date').eq('is_proforma', false).gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`),
       // Cobros de sastrería (backoffice): mismo criterio que el Resumen. amount
@@ -668,10 +690,14 @@ export const getVatQuarterly = protectedAction<
       // payment_date. No se solapan con `sales` ni con `invoices` (que aquí no
       // se suman), por lo que no hay doble conteo.
       ctx.adminClient.from('tailoring_order_payments').select('amount, payment_date, tailoring_order:tailoring_orders(subtotal, total)').gte('payment_date', `${year}-01-01`).lte('payment_date', `${year}-12-31`),
+      // Ventas online vía facturas serie W (mismo criterio que el Resumen): no
+      // están en `sales` ni en cobros de sastrería → sin doble conteo.
+      ctx.adminClient.from('invoices').select('subtotal, tax_amount, invoice_date').eq('invoice_type', 'issued').not('online_order_id', 'is', null).not('status', 'in', '(draft,cancelled)').gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`),
     ])
     const sales = (salesRes.data || []) as Array<{ total?: number; total_returned?: number; subtotal?: number; tax_amount?: number; created_at?: string }>
     const purchases = (purchasesRes.data || []) as Array<{ amount?: number; tax_amount?: number; invoice_date?: string }>
     const tailoringPayments = (tailoringPaymentsRes.data || []) as Array<{ amount?: number; payment_date?: string; tailoring_order?: { subtotal?: number; total?: number } }>
+    const onlineInvoices = (onlineInvoicesRes.data || []) as Array<{ subtotal?: number; tax_amount?: number; invoice_date?: string }>
 
     const quarterFromMonth = (m: number) => Math.ceil(m / 3) as 1 | 2 | 3 | 4
     const byQuarter: Record<number, {
@@ -710,6 +736,15 @@ export const getVatQuarterly = protectedAction<
         const base = amount * ratio
         byQuarter[q].baseSales += base
         byQuarter[q].ivaRepercutido += amount - base
+        byQuarter[q].salesCount += 1
+      }
+    }
+    for (const x of onlineInvoices) {
+      const d = x.invoice_date
+      if (d) {
+        const q = quarterFromMonth(Number(String(d).slice(5, 7)))
+        byQuarter[q].baseSales += Number(x.subtotal) || 0
+        byQuarter[q].ivaRepercutido += Number(x.tax_amount) || 0
         byQuarter[q].salesCount += 1
       }
     }

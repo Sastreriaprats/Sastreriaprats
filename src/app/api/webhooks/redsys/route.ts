@@ -3,7 +3,7 @@
 // Verifica la firma con HMAC_SHA256_V1 antes de tocar nada.
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { createOnlineOrderJournalEntry } from '@/actions/accounting-triggers'
+import { createOnlineOrderJournalEntry, createOnlineOrderInvoice } from '@/actions/accounting-triggers'
 import { sendOrderConfirmation } from '@/lib/email/transactional'
 import { notifyNewOnlineOrder } from '@/lib/notifications/create-notification'
 import {
@@ -112,6 +112,12 @@ export async function POST(request: NextRequest) {
     }
 
     await createOnlineOrderJournalEntry(order.id).catch(() => {})
+
+    // Factura serie W automática (control en Contabilidad y escenario C).
+    // Si falla no bloquea el pedido: se puede regenerar con el backfill.
+    await createOnlineOrderInvoice(order.id)
+      .then((r) => { if (!r.ok) console.error('[redsys webhook] factura W:', r.error) })
+      .catch((e) => console.error('[redsys webhook] factura W:', e))
 
     try {
       await notifyNewOnlineOrder(pending.order_number, Number(pending.total) || 0)

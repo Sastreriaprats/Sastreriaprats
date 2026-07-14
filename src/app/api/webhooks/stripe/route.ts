@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { createOnlineOrderJournalEntry } from '@/actions/accounting-triggers'
+import { createOnlineOrderJournalEntry, createOnlineOrderInvoice } from '@/actions/accounting-triggers'
 import { sendOrderConfirmation } from '@/lib/email/transactional'
 import { notifyNewOnlineOrder } from '@/lib/notifications/create-notification'
 import Stripe from 'stripe'
@@ -87,6 +87,11 @@ export async function POST(request: NextRequest) {
 
           await createOnlineOrderJournalEntry(order.id).catch(() => {})
 
+          // Factura serie W automática (control en Contabilidad y escenario C).
+          await createOnlineOrderInvoice(order.id)
+            .then((r) => { if (!r.ok) console.error('[Stripe webhook] factura W:', r.error) })
+            .catch((e) => console.error('[Stripe webhook] factura W:', e))
+
           try {
             await notifyNewOnlineOrder(orderNumber, total)
           } catch (e) {
@@ -155,6 +160,11 @@ export async function POST(request: NextRequest) {
           }).eq('id', orderId)
 
           await createOnlineOrderJournalEntry(orderId).catch(() => {})
+
+          // Factura serie W automática (control en Contabilidad y escenario C).
+          await createOnlineOrderInvoice(orderId)
+            .then((r) => { if (!r.ok) console.error('[Stripe webhook] factura W:', r.error) })
+            .catch((e) => console.error('[Stripe webhook] factura W:', e))
 
           try {
             const sessionTotal = (session.amount_total || 0) / 100

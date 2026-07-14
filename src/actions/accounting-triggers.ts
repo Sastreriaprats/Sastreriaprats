@@ -1,6 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
+import { toCountryCode, countryName } from '@/lib/countries'
 
 /** Cuentas usadas en asientos automáticos. Código -> { name, level, account_type } */
 const REQUIRED_ACCOUNTS: Record<string, { name: string; level: number; account_type: string }> = {
@@ -220,6 +221,208 @@ export async function createOnlineOrderJournalEntry(onlineOrderId: string): Prom
     ])
 
     return { ok: true }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Error desconocido'
+    return { ok: false, error: msg }
+  }
+}
+
+/**
+ * Emite la factura de un pedido online pagado (serie W, W2026-0001…).
+ * La llaman los webhooks de Redsys/Stripe al confirmar el cobro (y el backfill).
+ *
+ * - Idempotente: si ya existe factura vigente para el pedido, la devuelve
+ *   (los webhooks reintentan; además la protege el índice único parcial
+ *   uq_invoices_online_order_active de la mig 257).
+ * - invoice_date = fecha de pago (relevante para el backfill y el IVA).
+ * - NO crea asiento de factura: el pedido online ya tiene su asiento
+ *   (reference_type='online_order', creado por createOnlineOrderJournalEntry);
+ *   un asiento de la factura duplicaría ventas/IVA en el libro diario.
+ * - client_country (ISO-2) para el control nacional/UE/extra-UE (OSS).
+ * - Contabilidad A la suma vía online_order_id; el escenario C la recoge por
+ *   su criterio de facturas emitidas sin sale_id/tailoring_order_id.
+ */
+export async function createOnlineOrderInvoice(onlineOrderId: string): Promise<{ ok: boolean; invoiceNumber?: string; error?: string; skipped?: boolean }> {
+  try {
+    const admin = createAdminClient()
+    const db: AnyClient = admin
+
+    const { data: order, error: orderError } = await admin
+      .from('online_orders')
+      .select('id, order_number, status, subtotal, tax_amount, shipping_cost, total, client_id, shipping_address, paid_at, created_at')
+      .eq('id', onlineOrderId)
+      .single()
+    if (orderError || !order) return { ok: false, error: 'Pedido online no encontrado' }
+
+    const o = order as {
+      order_number?: string; status?: string; subtotal?: number; tax_amount?: number
+      shipping_cost?: number; total?: number; client_id?: string | null
+      shipping_address?: Record<string, unknown> | null; paid_at?: string | null; created_at?: string | null
+    }
+    if (!['paid', 'shipped', 'delivered'].includes(String(o.status))) {
+      return { ok: true, skipped: true } // no facturamos pedidos no cobrados/cancelados
+    }
+
+    const existing = await admin
+      .from('invoices')
+      .select('id, invoice_number')
+      .eq('online_order_id', onlineOrderId)
+      .neq('status', 'cancelled')
+      .limit(1)
+      .maybeSingle()
+    if (existing.data?.id) {
+      return { ok: true, invoiceNumber: String((existing.data as { invoice_number?: string }).invoice_number ?? ''), skipped: true }
+    }
+
+    const { data: rawLines } = await admin
+      .from('online_order_lines')
+      .select('product_name, variant_sku, quantity, total')
+      .eq('order_id', onlineOrderId)
+      .order('created_at', { ascending: true })
+    const orderLines = (rawLines ?? []) as Array<{ product_name?: string; variant_sku?: string; quantity?: number; total?: number }>
+    if (orderLines.length === 0) return { ok: false, error: 'El pedido online no tiene líneas' }
+
+    const shipping = Number(o.shipping_cost) || 0
+    const orderTotal = Number(o.total) || 0
+    const linesTotal = orderLines.reduce((s, l) => s + (Number(l.total) || 0), 0)
+    // total = (líneas − descuento) + envío → descuento implícito si no cuadra.
+    const discount = Math.round((linesTotal + shipping - orderTotal) * 100) / 100
+
+    // invoice_lines: unit_price es base SIN IVA; line_total CON IVA (mismo
+    // criterio que createInvoiceFromSaleAction, convertido vía line_total).
+    type InvLine = { description: string; quantity: number; unit_price: number; tax_rate: number; line_total: number }
+    const TAX = 21
+    const invLines: InvLine[] = orderLines.map((l) => {
+      const qty = Math.max(1, Number(l.quantity) || 1)
+      const lineTotal = Number(l.total) || 0
+      const sku = l.variant_sku ? ` (${l.variant_sku})` : ''
+      return {
+        description: `${l.product_name || 'Producto'}${sku}`,
+        quantity: qty,
+        unit_price: Number((lineTotal / (1 + TAX / 100) / qty).toFixed(2)),
+        tax_rate: TAX,
+        line_total: lineTotal,
+      }
+    })
+    if (discount > 0.005) {
+      invLines.push({
+        description: 'Descuento',
+        quantity: 1,
+        unit_price: -Number((discount / (1 + TAX / 100)).toFixed(2)),
+        tax_rate: TAX,
+        line_total: -discount,
+      })
+    }
+    if (shipping > 0.005) {
+      invLines.push({
+        description: 'Gastos de envío',
+        quantity: 1,
+        unit_price: Number((shipping / (1 + TAX / 100)).toFixed(2)),
+        tax_rate: TAX,
+        line_total: shipping,
+      })
+    }
+
+    // Totales de la factura desde el total real cobrado (IVA español incluido;
+    // el tratamiento OSS/exportación queda pendiente de la gestoría).
+    const subtotal = Math.round((orderTotal / (1 + TAX / 100)) * 100) / 100
+    const taxAmount = Math.round((orderTotal - subtotal) * 100) / 100
+
+    // Datos del comprador: la dirección del pedido es la fiscalmente relevante;
+    // el NIF (si existe) viene de la ficha de cliente.
+    const addr = (o.shipping_address ?? {}) as Record<string, unknown>
+    const first = String(addr.first_name ?? '').trim()
+    const last = String(addr.last_name ?? '').trim()
+    let clientName = [first, last].filter(Boolean).join(' ')
+    let clientNif: string | null = null
+    if (o.client_id) {
+      const { data: client } = await admin
+        .from('clients')
+        .select('full_name, company_name, company_nif, document_number')
+        .eq('id', o.client_id)
+        .maybeSingle()
+      const c = (client ?? {}) as { full_name?: string; company_name?: string; company_nif?: string; document_number?: string }
+      clientName = clientName || c.full_name || c.company_name || ''
+      clientNif = c.company_nif || c.document_number || null
+    }
+    clientName = clientName || 'Cliente tienda online'
+    const clientCountry = toCountryCode(String(addr.country ?? ''))
+    const addressParts = [
+      String(addr.address ?? '').trim(),
+      [String(addr.postal_code ?? '').trim(), String(addr.city ?? '').trim()].filter(Boolean).join(' '),
+      String(addr.province ?? '').trim(),
+      clientCountry ? countryName(clientCountry) : '',
+    ].filter(Boolean)
+
+    const paidDate = String(o.paid_at ?? o.created_at ?? new Date().toISOString()).slice(0, 10)
+    const seriesYear = Number(paidDate.slice(0, 4))
+
+    // Numeración serie W del año del pago: máximo + 1 (nunca count+1, ver
+    // nextSeriesNumber en accounting.ts). Reintento ante carrera de webhooks:
+    // si chocan dos inserciones, la segunda recalcula el número.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { data: lastRow } = await admin
+        .from('invoices')
+        .select('invoice_number')
+        .like('invoice_number', `W${seriesYear}-%`)
+        .order('invoice_number', { ascending: false })
+        .limit(1)
+      const last = (lastRow?.[0] as { invoice_number?: string } | undefined)?.invoice_number
+      const lastSeq = last ? parseInt(last.split('-')[1], 10) || 0 : 0
+      const invoiceNumber = `W${seriesYear}-${String(lastSeq + 1).padStart(4, '0')}`
+
+      const { data: inv, error } = await db
+        .from('invoices')
+        .insert({
+          invoice_number: invoiceNumber,
+          invoice_series: 'W',
+          invoice_type: 'issued',
+          client_id: o.client_id ?? null,
+          client_name: clientName,
+          client_nif: clientNif,
+          client_address: addressParts.join(', ') || null,
+          client_email: String(addr.email ?? '') || null,
+          client_phone: String(addr.phone ?? '') || null,
+          client_country: clientCountry,
+          payment_method: 'card',
+          company_name: 'Sastrería Prats',
+          company_nif: 'B12345678',
+          company_address: 'Madrid, España',
+          invoice_date: paidDate,
+          due_date: paidDate,
+          subtotal,
+          tax_rate: TAX,
+          tax_amount: taxAmount,
+          irpf_rate: 0,
+          irpf_amount: 0,
+          total: orderTotal,
+          status: 'issued',
+          online_order_id: onlineOrderId,
+          notes: `Pedido online ${o.order_number ?? ''}`.trim(),
+        })
+        .select('id')
+        .single()
+
+      if (error) {
+        const msg = String(error.message ?? '')
+        if (error.code === '23505' && msg.includes('uq_invoices_online_order_active')) {
+          return { ok: true, skipped: true } // otro webhook la creó a la vez
+        }
+        if (error.code === '23505') continue // choque de numeración: recalcular
+        return { ok: false, error: msg }
+      }
+
+      const { error: linesError } = await db.from('invoice_lines').insert(
+        invLines.map((l, i) => ({ invoice_id: inv.id, ...l, sort_order: i }))
+      )
+      if (linesError) {
+        // No dejamos una factura sin líneas: se retira la cabecera y se reporta.
+        await db.from('invoices').delete().eq('id', inv.id)
+        return { ok: false, error: linesError.message }
+      }
+      return { ok: true, invoiceNumber }
+    }
+    return { ok: false, error: 'No se pudo asignar número de serie W (conflictos repetidos)' }
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Error desconocido'
     return { ok: false, error: msg }
