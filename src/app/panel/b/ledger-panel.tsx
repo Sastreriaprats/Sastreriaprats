@@ -92,6 +92,11 @@ export function LedgerPanel() {
     })
   }
 
+  const allSelected = depositable.length > 0 && depositable.every((m) => selected.has(itemKey(m)))
+  const toggleAll = () => {
+    setSelected(allSelected ? new Set() : new Set(depositable.map((m) => itemKey(m))))
+  }
+
   const onCreateDeposit = async () => {
     if (selected.size === 0) { toast.error('Selecciona al menos un cobro'); return }
     if (!depDate) { toast.error('Fecha del ingreso obligatoria'); return }
@@ -284,7 +289,17 @@ export function LedgerPanel() {
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
                     <tr>
-                      <th className="w-8 px-3 py-2" />
+                      <th className="w-8 px-3 py-2">
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          ref={(el) => { if (el) el.indeterminate = !allSelected && selected.size > 0 }}
+                          onChange={toggleAll}
+                          disabled={depositable.length === 0}
+                          className="h-4 w-4 cursor-pointer accent-blue-600"
+                          title="Seleccionar todos"
+                        />
+                      </th>
                       <th className="px-3 py-2 text-left">Fecha</th>
                       <th className="px-3 py-2 text-left">Ticket</th>
                       <th className="px-3 py-2 text-left">Cliente</th>
