@@ -113,8 +113,27 @@ export function ScenarioCView() {
     return arr.map(n2)
   }, [retentionInvoices])
 
+  // Con el filtro Desde/Hasta activo se exporta SOLO el detalle del rango
+  // (movimientos y facturas); sin filtro, el informe anual completo.
   const onExcel = async () => {
     if (!data) return
+    const detailSheets = [
+      { name: 'Movimientos', rows: filteredLedger.map((m) => ({
+        Fecha: m.date, Tipo: m.type, Concepto: m.concept, 'Cliente/Proveedor': m.client ?? '',
+        Base: n2(m.base), IVA: n2(m.vat), Total: n2(m.total),
+      })) },
+      { name: 'Facturas ingresos', rows: filteredIncomeDocs.map((d) => ({
+        Tipo: d.docType, 'Nº': d.number, Cliente: d.client, Fecha: d.date, Total: n2(d.total), Estado: d.status ?? '', Pago: d.method ?? '',
+      })) },
+      { name: 'Facturas gastos', rows: filteredApInvoices.map((f) => ({
+        'Nº': f.number, Proveedor: f.supplier, Fecha: f.date, Base: n2(f.base), IVA: n2(f.vat),
+        'Retención': n2(f.retentionAmount), Total: n2(f.total),
+      })) },
+    ]
+    if (fromDate || toDate) {
+      await downloadExcelMulti(detailSheets, `escenario-c-${fromDate || 'inicio'}-a-${toDate || 'fin'}`)
+      return
+    }
     await downloadExcelMulti([
       { name: 'Resumen C', rows: METRICS.map(([label, key]) => ({
         'Métrica': label, 'Importe': n2(data.C[key] as number),
@@ -140,17 +159,7 @@ export function ScenarioCView() {
       { name: 'Mensual C', rows: data.C.monthly.map((m, i) => ({
         Mes: MONTH_LABELS[i], Ingresos: n2(m.income), Gastos: n2(m.expenses), Resultado: n2(m.income - m.expenses),
       })) },
-      { name: 'Movimientos', rows: data.ledger.map((m) => ({
-        Fecha: m.date, Tipo: m.type, Concepto: m.concept, 'Cliente/Proveedor': m.client ?? '',
-        Base: n2(m.base), IVA: n2(m.vat), Total: n2(m.total),
-      })) },
-      { name: 'Facturas ingresos', rows: incomeDocs.map((d) => ({
-        Tipo: d.docType, 'Nº': d.number, Cliente: d.client, Fecha: d.date, Total: n2(d.total), Estado: d.status ?? '', Pago: d.method ?? '',
-      })) },
-      { name: 'Facturas gastos', rows: data.apInvoices.map((f) => ({
-        'Nº': f.number, Proveedor: f.supplier, Fecha: f.date, Base: n2(f.base), IVA: n2(f.vat),
-        'Retención': n2(f.retentionAmount), Total: n2(f.total),
-      })) },
+      ...detailSheets,
     ], `escenario-c-${year}`)
   }
 
@@ -179,7 +188,15 @@ export function ScenarioCView() {
           years={[thisYear, thisYear - 1, thisYear - 2]}
           onChange={(y) => { setYear(y); setFromDate(''); setToDate('') }}
         />
-        <Button variant="outline" size="sm" disabled={!data} onClick={onExcel}>Exportar Excel</Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!data}
+          onClick={onExcel}
+          title={fromDate || toDate ? 'Exporta solo los movimientos y facturas del rango filtrado' : 'Exporta el informe anual completo'}
+        >
+          {fromDate || toDate ? 'Exportar Excel (filtro)' : 'Exportar Excel'}
+        </Button>
       </PageHeader>
 
       <Tabs
