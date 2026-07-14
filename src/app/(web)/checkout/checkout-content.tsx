@@ -8,7 +8,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2, Lock, ShoppingBag, Truck, Store, AlertCircle, Tag, X } from 'lucide-react'
+import { COUNTRY_CODES, countryName, sortByCountryName, toCountryCode } from '@/lib/countries'
 import { AcceptedCards } from './accepted-cards'
 import { useCart } from '@/components/providers/cart-provider'
 import { toast } from 'sonner'
@@ -52,11 +54,25 @@ export function CheckoutContent() {
     code: string; discount_type: string; discount_value: number; discount_amount: number; free_shipping?: boolean; description: string | null
   } | null>(null)
 
-  const freeShippingByAmount = subtotal >= 500
+  // Envío por zona: países disponibles + tarifa del servidor (la cifra que
+  // vale la recalcula igualmente /api/public/checkout; esto es solo UX).
+  // La tarifa guarda la clave país|subtotal para la que se pidió: si cambian,
+  // cuenta como "calculando" hasta que llegue la nueva (sin resets síncronos).
+  const [countryOptions, setCountryOptions] = useState<string[] | null>(null)
+  const [quoteResult, setQuoteResult] = useState<{
+    key: string; available: boolean; shipping_cost?: number; free_shipping_threshold?: number | null
+  } | null>(null)
+
   const isStorePickup = deliveryMethod === 'store'
   const freeShippingByCoupon = !!appliedDiscount?.free_shipping
-  const shippingCost = isStorePickup || freeShippingByAmount || freeShippingByCoupon ? 0 : 9.90
-  const freeShipping = shippingCost === 0
+  const quoteKey = `${form.country || 'ES'}|${subtotal}`
+  const shippingQuote = quoteResult?.key === quoteKey ? quoteResult : null
+  const shippingPending = !isStorePickup && shippingQuote === null
+  const shippingUnavailable = !isStorePickup && shippingQuote?.available === false
+  const shippingCost = isStorePickup || freeShippingByCoupon
+    ? 0
+    : (shippingQuote?.available ? shippingQuote.shipping_cost ?? 0 : 0)
+  const freeShipping = !shippingPending && !shippingUnavailable && shippingCost === 0
   const discountAmount = appliedDiscount?.discount_amount || 0
   const afterDiscount = subtotal - discountAmount
   const taxAmount = Math.round(afterDiscount * 0.21 * 100) / 100
@@ -65,6 +81,38 @@ export function CheckoutContent() {
   useEffect(() => {
     if (subtotal > 0) trackBeginCheckout(subtotal)
   }, [subtotal])
+
+  // Países con zona de envío activa (si hay zona catch-all, todos).
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/public/shipping')
+      .then(res => res.json())
+      .then((data: { countries?: string[]; has_default?: boolean }) => {
+        if (cancelled) return
+        const list = data.has_default ? COUNTRY_CODES : (data.countries?.length ? data.countries : ['ES'])
+        setCountryOptions(sortByCountryName(list))
+      })
+      .catch(() => { if (!cancelled) setCountryOptions(['ES']) })
+    return () => { cancelled = true }
+  }, [])
+
+  // Tarifa de envío según país y subtotal.
+  useEffect(() => {
+    if (isStorePickup) return
+    let cancelled = false
+    const country = form.country || 'ES'
+    const key = `${country}|${subtotal}`
+    fetch(`/api/public/shipping?country=${encodeURIComponent(country)}&subtotal=${subtotal}`)
+      .then(res => res.json())
+      .then((quote: { available: boolean; shipping_cost?: number; free_shipping_threshold?: number | null }) => {
+        if (!cancelled) setQuoteResult({ ...quote, key })
+      })
+      .catch(() => {
+        // Sin tarifa no dejamos pagar (el botón queda en "Calculando…"):
+        // mejor bloquear que enseñar un total que el servidor no va a cobrar.
+      })
+    return () => { cancelled = true }
+  }, [form.country, subtotal, isStorePickup])
 
   useEffect(() => {
     let cancelled = false
@@ -80,14 +128,15 @@ export function CheckoutContent() {
               city: p.shipping_city ?? '',
               postal_code: p.shipping_postal_code ?? '',
               province: p.shipping_province ?? '',
-              country: p.shipping_country ?? 'ES',
+              // El perfil guarda el país en texto libre ("España") → a ISO-2.
+              country: toCountryCode(p.shipping_country) ?? 'ES',
             }
           : {
               address: p.address ?? '',
               city: p.city ?? '',
               postal_code: p.postal_code ?? '',
               province: p.province ?? '',
-              country: p.country ?? 'ES',
+              country: toCountryCode(p.country) ?? 'ES',
             }
         setClientProfile(p)
         setForm(prev => ({
@@ -143,6 +192,14 @@ export function CheckoutContent() {
     if (deliveryMethod === 'home') {
       if (!form.address?.trim() || !form.city?.trim() || !form.postal_code?.trim()) {
         toast.error('Falta información de envío. Complétala arriba o añádela en Mi perfil.')
+        return
+      }
+      if (shippingUnavailable) {
+        toast.error(`De momento no hacemos envíos a ${countryName(form.country)}.`)
+        return
+      }
+      if (shippingPending) {
+        toast.error('Calculando el envío, un momento…')
         return
       }
     }
@@ -335,6 +392,38 @@ export function CheckoutContent() {
                   />
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label className="text-xs" htmlFor="checkout-country">País *</Label>
+                  <Select
+                    value={form.country || 'ES'}
+                    onValueChange={v => setForm(p => ({ ...p, country: v }))}
+                  >
+                    <SelectTrigger id="checkout-country" className="h-11">
+                      <SelectValue placeholder="Selecciona país" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-72">
+                      {(countryOptions ?? ['ES']).map(code => (
+                        <SelectItem key={code} value={code}>{countryName(code)}</SelectItem>
+                      ))}
+                      {/* Si el país del perfil no está entre los disponibles, lo mostramos
+                          igualmente para no dejar el selector vacío (el aviso de abajo explica). */}
+                      {form.country && countryOptions && !countryOptions.includes(form.country) && (
+                        <SelectItem value={form.country}>{countryName(form.country)}</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              {shippingUnavailable && (
+                <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0 text-amber-600" />
+                  <p>
+                    De momento no hacemos envíos a <strong>{countryName(form.country)}</strong>.
+                    Escríbenos y lo miramos, o elige &ldquo;Recoger en tienda&rdquo;.
+                  </p>
+                </div>
+              )}
             </div>
           </section>
           )}
@@ -415,8 +504,19 @@ export function CheckoutContent() {
                 <span className="text-gray-500">
                   Envío{freeShippingByCoupon ? ' (cupón)' : ''}
                 </span>
-                <span>{freeShipping ? 'Gratuito' : formatPrice(shippingCost)}</span>
+                <span>
+                  {shippingUnavailable
+                    ? 'No disponible'
+                    : shippingPending
+                      ? 'Calculando…'
+                      : freeShipping ? 'Gratuito' : formatPrice(shippingCost)}
+                </span>
               </div>
+              {!isStorePickup && !freeShipping && shippingQuote?.available && shippingQuote.free_shipping_threshold != null && (
+                <p className="text-xs text-gray-400">
+                  Envío gratuito a partir de {formatPrice(shippingQuote.free_shipping_threshold)}
+                </p>
+              )}
               <div className="flex justify-between">
                 <span className="text-gray-500">IVA (21%)</span>
                 <span>{formatPrice(taxAmount)}</span>
@@ -457,7 +557,7 @@ export function CheckoutContent() {
             <Button
               size="lg"
               className="w-full mt-4 h-14 bg-prats-navy hover:bg-prats-navy-light text-sm tracking-wide uppercase"
-              disabled={isProcessing || !acceptedTerms}
+              disabled={isProcessing || !acceptedTerms || shippingPending || shippingUnavailable}
               onClick={handlePay}
             >
               {isProcessing ? (

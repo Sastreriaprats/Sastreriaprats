@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { Button } from '@/components/ui/button'
@@ -13,7 +14,22 @@ export function CartContent() {
   const formatPrice = (p: number) =>
     new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(p)
 
-  const freeShipping = subtotal >= 500
+  // Referencia nacional (ES); el importe final por país se calcula en el checkout.
+  const [esQuote, setEsQuote] = useState<{
+    available: boolean; shipping_cost?: number; free_shipping_threshold?: number | null
+  } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch(`/api/public/shipping?country=ES&subtotal=${subtotal}`)
+      .then(res => res.json())
+      .then(q => { if (!cancelled) setEsQuote(q) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [subtotal])
+
+  const freeShipping = esQuote?.available === true && esQuote.shipping_cost === 0
+  const threshold = esQuote?.available ? esQuote.free_shipping_threshold : null
 
   if (items.length === 0) {
     return (
@@ -105,8 +121,10 @@ export function CartContent() {
                 <span className="font-bold text-prats-navy">{formatPrice(subtotal)}</span>
               </div>
             </div>
-            {!freeShipping && (
-              <p className="text-xs text-gray-400 mt-3">Envío gratuito a partir de 500€</p>
+            {!freeShipping && threshold != null && (
+              <p className="text-xs text-gray-400 mt-3">
+                Envío gratuito a partir de {formatPrice(threshold)}
+              </p>
             )}
             <Link href="/checkout">
               <Button

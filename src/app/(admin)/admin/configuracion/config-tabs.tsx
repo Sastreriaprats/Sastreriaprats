@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/components/providers/auth-provider'
-import { Users, Shield, Store, Settings, Shirt, UserCog, Target, Layers, CalendarDays, Ruler, Percent } from 'lucide-react'
+import { Users, Shield, Store, Settings, Shirt, UserCog, Target, Layers, CalendarDays, Ruler, Percent, Truck } from 'lucide-react'
 import { UsersSection } from './sections/users-section'
 import { RolesSection } from './sections/roles-section'
 import { StoresSection } from './sections/stores-section'
@@ -15,6 +15,7 @@ import { CommissionsSection } from './sections/commissions-section'
 import { CollectionsSection } from './sections/collections-section'
 import { SeasonsSection } from './sections/seasons-section'
 import { SizeGuidesSection } from './sections/size-guides-section'
+import { ShippingSection } from './sections/shipping-section'
 
 // Cada pestaña acepta cualquiera de los posibles códigos de permiso que puedan existir
 // según la migración activa (001 usa nombres distintos a 010).
@@ -53,6 +54,12 @@ const ALL_TABS = [
     value: 'commissions',
     label: 'Comisiones',
     icon: Percent,
+    perms: ['config.edit', 'config.view', 'config.access'],
+  },
+  {
+    value: 'shipping',
+    label: 'Envíos',
+    icon: Truck,
     perms: ['config.edit', 'config.view', 'config.access'],
   },
   {
@@ -145,6 +152,7 @@ export function ConfigTabs({ activeTab }: { activeTab: string }) {
         <TabsContent value="store-employees"><StoreEmployeesSection /></TabsContent>
         <TabsContent value="goals"><GoalsSection /></TabsContent>
         <TabsContent value="commissions"><CommissionsSection /></TabsContent>
+        <TabsContent value="shipping"><ShippingSection /></TabsContent>
         <TabsContent value="garments"><GarmentTypesSection /></TabsContent>
         <TabsContent value="collections"><CollectionsSection /></TabsContent>
         <TabsContent value="seasons"><SeasonsSection /></TabsContent>

@@ -3,6 +3,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import Stripe from 'stripe'
 import { isRateLimited } from '@/lib/rate-limit'
 import { generateRedsysOrder } from '@/lib/payments/redsys'
+import { computeShipping } from '@/lib/shipping'
+import { countryName } from '@/lib/countries'
 
 function getStripe() {
   return new Stripe(process.env.STRIPE_SECRET_KEY!, {
@@ -18,7 +20,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { items, customer, payment_method, shipping_cost, discount_code, discount_amount: clientDiscount, locale } = body
+    const { items, customer, payment_method, delivery_method, discount_code, locale } = body
 
     if (!items?.length || !customer?.email) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
@@ -62,9 +64,12 @@ export async function POST(request: NextRequest) {
     })
   }
 
-  // Validar y aplicar descuento
+  // Validar y aplicar descuento (el incremento de usos se hace DESPUÉS de
+  // confirmar que hay zona de envío para el país — si no, devolveríamos 400
+  // habiendo consumido un uso del cupón).
   let validatedDiscount = 0
   let couponFreeShipping = false
+  let couponToConsume: { id: string; current_uses: number } | null = null
   if (discount_code) {
     const { data: dc } = await admin
       .from('discount_codes')
@@ -84,20 +89,37 @@ export async function POST(request: NextRequest) {
           validatedDiscount = Math.min(parseFloat(dc.discount_value), subtotal)
         }
         couponFreeShipping = !!dc.free_shipping
-        // Incrementar usos
-        await admin
-          .from('discount_codes')
-          .update({ current_uses: (dc.current_uses || 0) + 1, updated_at: new Date().toISOString() })
-          .eq('id', dc.id)
+        couponToConsume = { id: dc.id, current_uses: dc.current_uses || 0 }
       }
     }
+  }
+
+  // Envío AUTORITATIVO server-side según país/zona. Se IGNORA cualquier
+  // shipping_cost que mande el cliente (antes se confiaba en él — hueco cerrado).
+  const quote = await computeShipping(admin, {
+    countryCode: customer.country,
+    subtotal,
+    deliveryMethod: delivery_method,
+    couponFreeShipping,
+  })
+  if (!quote.available) {
+    return NextResponse.json(
+      { error: `De momento no hacemos envíos a ${countryName(customer.country || '')}. Contáctanos y lo miramos.` },
+      { status: 400 }
+    )
+  }
+  const effectiveShipping = quote.shipping_cost
+
+  if (couponToConsume) {
+    await admin
+      .from('discount_codes')
+      .update({ current_uses: couponToConsume.current_uses + 1, updated_at: new Date().toISOString() })
+      .eq('id', couponToConsume.id)
   }
 
   const afterDiscount = subtotal - validatedDiscount
   // afterDiscount ya incluye IVA (unit_price = price_with_tax). Extraemos el IVA contenido.
   const taxAmount = Math.round((afterDiscount - afterDiscount / 1.21) * 100) / 100
-  // Si el cupón aplica envío gratuito, anulamos el shipping_cost recibido del cliente.
-  const effectiveShipping = couponFreeShipping ? 0 : (shipping_cost || 0)
   const total = afterDiscount + effectiveShipping
 
   let clientId: string | null = null
