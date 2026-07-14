@@ -64,6 +64,39 @@ export async function POST(request: NextRequest) {
     })
   }
 
+  // Validación de stock AUTORITATIVA server-side. Hasta ahora la única barrera
+  // era que la web ocultase el producto agotado: el descuento del webhook
+  // registra la sobreventa pero no la bloquea. Se agrupa por variante por si
+  // el carrito trae la misma variante en más de una línea.
+  const requestedByVariant = new Map<string, { name: string; quantity: number }>()
+  for (const line of orderLines) {
+    const prev = requestedByVariant.get(line.variant_id)
+    requestedByVariant.set(line.variant_id, {
+      name: line.product_name,
+      quantity: (prev?.quantity || 0) + line.quantity,
+    })
+  }
+  for (const [variantId, req] of requestedByVariant) {
+    const { data: levels } = await admin
+      .from('stock_levels')
+      .select('available')
+      .eq('product_variant_id', variantId)
+    const available = (levels || []).reduce(
+      (sum, l) => sum + Math.max(0, Number((l as { available: number | null }).available) || 0),
+      0,
+    )
+    if (available < req.quantity) {
+      return NextResponse.json(
+        {
+          error: available <= 0
+            ? `"${req.name}" ya no está disponible. Retíralo del carrito para continuar.`
+            : `Solo quedan ${available} unidades de "${req.name}" y el carrito lleva ${req.quantity}.`,
+        },
+        { status: 400 }
+      )
+    }
+  }
+
   // Validar y aplicar descuento (el incremento de usos se hace DESPUÉS de
   // confirmar que hay zona de envío para el país — si no, devolveríamos 400
   // habiendo consumido un uso del cupón).
