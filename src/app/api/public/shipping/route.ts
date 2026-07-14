@@ -9,7 +9,9 @@ import { computeShipping, getShippingCountries } from '@/lib/shipping'
  *
  *   - Sin parámetros                → { countries: string[], has_default: boolean }
  *     (países con zona activa; has_default = existe catch-all → se envía a todo el mundo)
- *   - ?country=FR&subtotal=123.45   → { available, shipping_cost, zone_name, free_shipping_threshold }
+ *   - ?country=FR&subtotal=123.45&postal=07001
+ *                                   → { available, shipping_cost, zone_name, free_shipping_threshold }
+ *     (postal es opcional: activa las subzonas por prefijo de CP, ej. Baleares)
  */
 export async function GET(request: NextRequest) {
   try {
@@ -28,7 +30,8 @@ export async function GET(request: NextRequest) {
     }
 
     const subtotal = parseFloat(searchParams.get('subtotal') || '0') || 0
-    const quote = await computeShipping(admin, { countryCode: country, subtotal })
+    const postalCode = (searchParams.get('postal') || '').trim().slice(0, 16)
+    const quote = await computeShipping(admin, { countryCode: country, subtotal, postalCode })
     return NextResponse.json(quote)
   } catch (err) {
     console.error('[shipping-quote]', err)

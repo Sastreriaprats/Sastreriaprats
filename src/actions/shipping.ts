@@ -13,6 +13,8 @@ export interface ShippingZoneRow {
   is_default: boolean
   sort_order: number
   countries: string[]
+  /** Prefijos de CP a los que se limita la zona (NULL = países enteros). */
+  postal_prefixes: string[] | null
 }
 
 export interface UpsertShippingZoneInput {
@@ -23,7 +25,11 @@ export interface UpsertShippingZoneInput {
   is_active: boolean
   is_default: boolean
   countries: string[]
+  postal_prefixes?: string[] | null
 }
+
+/** Un prefijo contiene al otro → las dos subzonas pisarían los mismos CP. */
+const prefixesOverlap = (a: string, b: string) => a.startsWith(b) || b.startsWith(a)
 
 export const listShippingZones = protectedAction<void, ShippingZoneRow[]>(
   { permission: 'config.edit', auditModule: 'shipping' },
@@ -34,19 +40,27 @@ export const listShippingZones = protectedAction<void, ShippingZoneRow[]>(
         .select('*')
         .order('sort_order', { ascending: true })
         .order('created_at', { ascending: true }),
-      ctx.adminClient.from('shipping_zone_countries').select('zone_id, country_code'),
+      ctx.adminClient.from('shipping_zone_countries').select('zone_id, country_code, postal_prefixes'),
     ])
     if (error) return failure(error.message)
     if (mapError) return failure(mapError.message)
 
     const byZone = new Map<string, string[]>()
+    const prefixesByZone = new Map<string, string[] | null>()
     for (const m of mappings ?? []) {
       const list = byZone.get(m.zone_id) ?? []
       list.push(m.country_code)
       byZone.set(m.zone_id, list)
+      // Los prefijos se guardan por fila pero la UI los edita a nivel de zona
+      // (todas las filas de una zona llevan el mismo array).
+      if (!prefixesByZone.has(m.zone_id)) prefixesByZone.set(m.zone_id, m.postal_prefixes ?? null)
     }
     return success(
-      (zones ?? []).map(z => ({ ...z, countries: (byZone.get(z.id) ?? []).sort() })) as ShippingZoneRow[]
+      (zones ?? []).map(z => ({
+        ...z,
+        countries: (byZone.get(z.id) ?? []).sort(),
+        postal_prefixes: prefixesByZone.get(z.id) ?? null,
+      })) as ShippingZoneRow[]
     )
   },
 )
@@ -74,19 +88,51 @@ export const upsertShippingZone = protectedAction<UpsertShippingZoneInput, Shipp
       return failure('Asigna al menos un país (o marca la zona como "Resto de países")')
     }
 
-    // Un país no puede estar en dos zonas: comprobación amistosa antes del
-    // constraint UNIQUE (que sigue guardando la espalda ante carreras).
+    // Prefijos de CP (subzonas): normalizados como en computeShipping
+    // (mayúsculas, sin espacios ni guiones). Vacío → NULL = país entero.
+    const prefixes = [...new Set(
+      (input.postal_prefixes ?? []).map(p => p.toUpperCase().replace(/[\s-]/g, '')).filter(Boolean)
+    )]
+    const badPrefix = prefixes.filter(p => !/^[A-Z0-9]{1,8}$/.test(p))
+    if (badPrefix.length) {
+      return failure(`Prefijo de código postal no válido: ${badPrefix.join(', ')} (solo letras/números, máx. 8)`)
+    }
+    if (prefixes.length && input.is_default) {
+      return failure('La zona "Resto de países" no puede limitarse por código postal')
+    }
+    const postalPrefixes = prefixes.length ? prefixes : null
+
+    // Reglas por país: solo UNA zona "país entero" por país; las subzonas por
+    // CP pueden repetir país, pero sin prefijos que se pisen entre zonas.
+    // Comprobación amistosa antes del índice único (que sigue guardando la
+    // espalda ante carreras).
     if (countries.length) {
       const { data: taken } = await ctx.adminClient
         .from('shipping_zone_countries')
-        .select('country_code, zone_id, shipping_zones(name)')
+        .select('country_code, zone_id, postal_prefixes, shipping_zones(name)')
         .in('country_code', countries)
-      const conflicts = (taken ?? []).filter(t => t.zone_id !== input.id)
-      if (conflicts.length) {
-        const detail = conflicts
-          .map(c => `${c.country_code} (${(c.shipping_zones as unknown as { name?: string } | null)?.name ?? 'otra zona'})`)
-          .join(', ')
-        return failure(`Estos países ya están asignados a otra zona: ${detail}`)
+      const others = (taken ?? []).filter(t => t.zone_id !== input.id)
+      const zoneName = (t: typeof others[number]) =>
+        (t.shipping_zones as unknown as { name?: string } | null)?.name ?? 'otra zona'
+
+      if (!postalPrefixes) {
+        const conflicts = others.filter(t => t.postal_prefixes == null)
+        if (conflicts.length) {
+          const detail = conflicts.map(c => `${c.country_code} (${zoneName(c)})`).join(', ')
+          return failure(`Estos países ya están asignados enteros a otra zona: ${detail}. Para diferenciar por código postal, pon prefijos de CP en una de las dos zonas.`)
+        }
+      } else {
+        const conflicts = others.filter(t =>
+          (t.postal_prefixes as string[] | null)?.some(existing =>
+            prefixes.some(p => prefixesOverlap(p, existing.toUpperCase().replace(/[\s-]/g, '')))
+          )
+        )
+        if (conflicts.length) {
+          const detail = conflicts
+            .map(c => `${c.country_code} CP ${(c.postal_prefixes as string[]).join('/')} (${zoneName(c)})`)
+            .join(', ')
+          return failure(`Estos prefijos de CP se solapan con otra zona: ${detail}`)
+        }
       }
     }
 
@@ -131,9 +177,9 @@ export const upsertShippingZone = protectedAction<UpsertShippingZoneInput, Shipp
     if (countries.length) {
       const { error: insError } = await ctx.adminClient
         .from('shipping_zone_countries')
-        .insert(countries.map(country_code => ({ zone_id: zoneId, country_code })))
+        .insert(countries.map(country_code => ({ zone_id: zoneId, country_code, postal_prefixes: postalPrefixes })))
       if (insError) {
-        if (insError.code === '23505') return failure('Algún país ya está asignado a otra zona')
+        if (insError.code === '23505') return failure('Algún país ya está asignado entero a otra zona')
         return failure(insError.message)
       }
     }
@@ -146,8 +192,9 @@ export const upsertShippingZone = protectedAction<UpsertShippingZoneInput, Shipp
     if (readError) return failure(readError.message)
 
     return success({
-      ...(saved as Omit<ShippingZoneRow, 'countries'>),
+      ...(saved as Omit<ShippingZoneRow, 'countries' | 'postal_prefixes'>),
       countries,
+      postal_prefixes: postalPrefixes,
       auditEntityId: String(zoneId),
       auditDescription: `Zona de envío ${name}`,
     } as ShippingZoneRow)

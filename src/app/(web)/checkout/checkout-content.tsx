@@ -65,7 +65,8 @@ export function CheckoutContent() {
 
   const isStorePickup = deliveryMethod === 'store'
   const freeShippingByCoupon = !!appliedDiscount?.free_shipping
-  const quoteKey = `${form.country || 'ES'}|${subtotal}`
+  // El CP entra en la clave: hay subzonas por prefijo postal (Baleares, Madrid…).
+  const quoteKey = `${form.country || 'ES'}|${form.postal_code.trim()}|${subtotal}`
   const shippingQuote = quoteResult?.key === quoteKey ? quoteResult : null
   const shippingPending = !isStorePickup && shippingQuote === null
   const shippingUnavailable = !isStorePickup && shippingQuote?.available === false
@@ -96,23 +97,27 @@ export function CheckoutContent() {
     return () => { cancelled = true }
   }, [])
 
-  // Tarifa de envío según país y subtotal.
+  // Tarifa de envío según país, CP y subtotal. Pequeño debounce: el CP se
+  // teclea carácter a carácter y no queremos una petición por pulsación.
   useEffect(() => {
     if (isStorePickup) return
     let cancelled = false
     const country = form.country || 'ES'
-    const key = `${country}|${subtotal}`
-    fetch(`/api/public/shipping?country=${encodeURIComponent(country)}&subtotal=${subtotal}`)
-      .then(res => res.json())
-      .then((quote: { available: boolean; shipping_cost?: number; free_shipping_threshold?: number | null }) => {
-        if (!cancelled) setQuoteResult({ ...quote, key })
-      })
-      .catch(() => {
-        // Sin tarifa no dejamos pagar (el botón queda en "Calculando…"):
-        // mejor bloquear que enseñar un total que el servidor no va a cobrar.
-      })
-    return () => { cancelled = true }
-  }, [form.country, subtotal, isStorePickup])
+    const postal = form.postal_code.trim()
+    const key = `${country}|${postal}|${subtotal}`
+    const timer = setTimeout(() => {
+      fetch(`/api/public/shipping?country=${encodeURIComponent(country)}&subtotal=${subtotal}&postal=${encodeURIComponent(postal)}`)
+        .then(res => res.json())
+        .then((quote: { available: boolean; shipping_cost?: number; free_shipping_threshold?: number | null }) => {
+          if (!cancelled) setQuoteResult({ ...quote, key })
+        })
+        .catch(() => {
+          // Sin tarifa no dejamos pagar (el botón queda en "Calculando…"):
+          // mejor bloquear que enseñar un total que el servidor no va a cobrar.
+        })
+    }, 350)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [form.country, form.postal_code, subtotal, isStorePickup])
 
   useEffect(() => {
     let cancelled = false

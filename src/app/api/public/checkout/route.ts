@@ -99,6 +99,7 @@ export async function POST(request: NextRequest) {
   const quote = await computeShipping(admin, {
     countryCode: customer.country,
     subtotal,
+    postalCode: customer.postal_code,
     deliveryMethod: delivery_method,
     couponFreeShipping,
   })

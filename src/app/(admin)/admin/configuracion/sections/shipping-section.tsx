@@ -33,11 +33,12 @@ type Draft = {
   is_active: boolean
   is_default: boolean
   countries: string[]
+  postal_prefixes: string
 }
 
 const emptyDraft = (): Draft => ({
   name: '', shipping_cost: '', free_shipping_threshold: '',
-  is_active: true, is_default: false, countries: [],
+  is_active: true, is_default: false, countries: [], postal_prefixes: '',
 })
 
 const toDraft = (z: ShippingZoneRow): Draft => ({
@@ -48,6 +49,7 @@ const toDraft = (z: ShippingZoneRow): Draft => ({
   is_active: z.is_active,
   is_default: z.is_default,
   countries: z.countries,
+  postal_prefixes: (z.postal_prefixes ?? []).join(', '),
 })
 
 export function ShippingSection() {
@@ -89,6 +91,7 @@ export function ShippingSection() {
     if (threshold != null && (Number.isNaN(threshold) || threshold <= 0)) {
       toast.error('El umbral de envío gratis debe ser mayor que 0, o déjalo vacío'); return
     }
+    const prefixes = draft.postal_prefixes.split(',').map(p => p.trim()).filter(Boolean)
     setSaving(true)
     const res = await upsertShippingZone({
       id: draft.id,
@@ -98,6 +101,7 @@ export function ShippingSection() {
       is_active: draft.is_active,
       is_default: draft.is_default,
       countries: draft.countries,
+      postal_prefixes: prefixes.length ? prefixes : null,
     })
     setSaving(false)
     if (!res.success) { toast.error(res.error); return }
@@ -141,6 +145,8 @@ export function ShippingSection() {
       <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
         La tienda online solo permite comprar con envío a los países asignados a una zona <strong>activa</strong>.
         Cada zona tiene su coste y, opcionalmente, un umbral de <strong>envío gratis</strong> (vacío = nunca gratis).
+        Un mismo país puede dividirse en varias zonas por <strong>prefijo de código postal</strong> (ej.: Baleares = España
+        con CP 07, Madrid = CP 28); la zona del país sin prefijos cubre el resto.
         La zona marcada como <strong>&ldquo;Resto de países&rdquo;</strong> cubre cualquier país sin zona propia
         (si no existe, a esos países no se vende). <strong>Antes de activar zonas internacionales, confirma con la
         gestoría el IVA/OSS y que el TPV acepte tarjetas extranjeras.</strong>
@@ -191,6 +197,9 @@ export function ShippingSection() {
                         : z.countries.length <= 4
                           ? z.countries.map(c => countryName(c)).join(', ') || '—'
                           : `${z.countries.slice(0, 3).map(c => countryName(c)).join(', ')} y ${z.countries.length - 3} más`}
+                      {(z.postal_prefixes?.length ?? 0) > 0 && (
+                        <span className="ml-1 whitespace-nowrap">(CP {z.postal_prefixes!.join(', ')})</span>
+                      )}
                     </TableCell>
                     <TableCell>{z.is_active ? <Badge>Activa</Badge> : <Badge variant="outline">Inactiva</Badge>}</TableCell>
                     <TableCell className="text-right">
@@ -284,6 +293,21 @@ export function ShippingSection() {
                   </p>
                 )}
               </div>
+              {!draft.is_default && (
+                <div className="space-y-1.5">
+                  <Label>Limitar a códigos postales (opcional)</Label>
+                  <Input
+                    value={draft.postal_prefixes}
+                    onChange={e => setDraft({ ...draft, postal_prefixes: e.target.value })}
+                    placeholder="Ej.: 07 (Baleares) — varios separados por comas"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Prefijos de CP separados por comas: la zona solo aplica a los códigos postales que empiecen así
+                    (07 = Baleares, 28 = Madrid, 35 y 38 = Canarias). Vacío = el país entero. Así un mismo país puede
+                    tener varias tarifas; la zona sin prefijos cubre el resto del país.
+                  </p>
+                </div>
+              )}
               <label className="flex items-center gap-2 text-sm">
                 <Checkbox checked={draft.is_active} onCheckedChange={c => setDraft({ ...draft, is_active: !!c })} /> Zona activa
               </label>
