@@ -3,6 +3,7 @@
 // Verifica la firma con HMAC_SHA256_V1 antes de tocar nada.
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { deductOnlineOrderStock } from '@/lib/stock/online-order-stock'
 import { createOnlineOrderJournalEntry, createOnlineOrderInvoice } from '@/actions/accounting-triggers'
 import { sendOrderConfirmation } from '@/lib/email/transactional'
 import { notifyNewOnlineOrder } from '@/lib/notifications/create-notification'
@@ -128,28 +129,11 @@ export async function POST(request: NextRequest) {
     // Decremento de stock (mismo patrón que el webhook Stripe).
     for (const line of orderLines) {
       if (!line.variant_id) continue
-      const { data: sl } = await admin
-        .from('stock_levels')
-        .select('id, quantity, warehouse_id, warehouses ( store_id )')
-        .eq('product_variant_id', line.variant_id)
-        .limit(1)
-        .single()
-      if (!sl) continue
-      const newQty = Math.max(0, sl.quantity - line.quantity)
-      await admin.from('stock_levels').update({ quantity: newQty }).eq('id', sl.id)
-      await admin.from('stock_movements').insert({
-        product_variant_id: line.variant_id,
-        warehouse_id: sl.warehouse_id,
-        movement_type: 'sale',
-        quantity: -line.quantity,
-        stock_before: sl.quantity,
-        stock_after: newQty,
-        // Enlace al pedido online: la lista de movimientos resuelve el cliente por
-        // reference_type/reference_id (mismo patrón que el TPV con 'sale').
-        reference_type: 'online_order',
-        reference_id: order.id,
-        store_id: (sl.warehouses as { store_id?: string } | null)?.store_id ?? null,
-        reason: `Pedido online ${pending.order_number}`,
+      await deductOnlineOrderStock(admin, {
+        variantId: line.variant_id,
+        quantity: line.quantity,
+        orderId: order.id,
+        orderNumber: pending.order_number,
       })
     }
 

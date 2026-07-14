@@ -308,16 +308,29 @@ export const updateOnlineOrderStatusAction = protectedAction<
  */
 async function restoreStockForLine(
   admin: AdminClient,
-  line: { id: string; variant_id: string | null; quantity: number },
+  line: { id: string; order_id: string; variant_id: string | null; quantity: number },
   reason: string,
 ): Promise<{ restored: boolean }> {
   if (!line.variant_id || line.quantity <= 0) return { restored: false }
-  const { data: sl } = await admin
+  // Repone al almacén del que salió la venta (movimiento 'sale' del pedido);
+  // si no hay rastro, al de mayor stock. Antes cogía una fila arbitraria con
+  // limit(1) y podía devolver la unidad a un almacén del que nunca salió.
+  const { data: saleMov } = await admin
+    .from('stock_movements')
+    .select('warehouse_id')
+    .eq('reference_type', 'online_order')
+    .eq('reference_id', line.order_id)
+    .eq('product_variant_id', line.variant_id)
+    .eq('movement_type', 'sale')
+    .order('quantity', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+  const { data: levels } = await admin
     .from('stock_levels')
     .select('id, quantity, warehouse_id')
     .eq('product_variant_id', line.variant_id)
-    .limit(1)
-    .maybeSingle()
+    .order('quantity', { ascending: false })
+  const sl = (levels || []).find((l: any) => l.warehouse_id === (saleMov as any)?.warehouse_id) ?? (levels || [])[0]
   if (!sl) return { restored: false }
   const newQty = (Number(sl.quantity) || 0) + Number(line.quantity)
   await admin
@@ -378,6 +391,7 @@ export const cancelOnlineOrderLineAction = protectedAction<
         ctx.adminClient,
         {
           id: (line as any).id,
+          order_id: (line as any).order_id,
           variant_id: (line as any).variant_id,
           quantity: Number((line as any).quantity || 0),
         },
@@ -445,7 +459,7 @@ export const cancelOnlineOrderAction = protectedAction<
         if (l.status === 'cancelled' || l.stock_restored) continue
         const r = await restoreStockForLine(
           ctx.adminClient,
-          { id: l.id, variant_id: l.variant_id, quantity: Number(l.quantity || 0) },
+          { id: l.id, order_id: orderId, variant_id: l.variant_id, quantity: Number(l.quantity || 0) },
           `Cancelación pedido online ${(order as any).order_number}`,
         )
         if (r.restored) {
