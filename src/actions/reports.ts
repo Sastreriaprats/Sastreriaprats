@@ -622,12 +622,14 @@ export const getTopProducts = protectedAction<
           const sizeBreakdown = [...sizes].map((size) => {
             const vendido = vendidoBySize[size] || 0
             const queda = p.stockBySize[size] || 0
-            return { size, comprado: queda + vendido, vendido, queda }
+            // En modo periodo "comprado" (conservación histórica) no aplica:
+            // se devuelve 0 para que ni la UI ni los exports muestren un dato falso.
+            return { size, comprado: byPeriod ? 0 : queda + vendido, vendido, queda }
           }).sort((a, b) => compareSizes(a.size, b.size))
           return {
             product_id: p.product_id, name: p.name, sku: p.sku, units: p.units, revenue: p.revenue,
             revenue_net: p.revenueNet, unit_cost: p.unitCost, cogs, margin: p.revenueNet - cogs,
-            purchased_units: p.purchasedUnits, purchased_cost: p.purchasedCost, current_stock: p.currentStock,
+            purchased_units: byPeriod ? 0 : p.purchasedUnits, purchased_cost: byPeriod ? 0 : p.purchasedCost, current_stock: p.currentStock,
             breakdown: Object.values(p.bd).sort((a, b) => b.revenue - a.revenue),
             sizeBreakdown,
           }
