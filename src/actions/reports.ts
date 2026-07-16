@@ -569,6 +569,25 @@ export const getTopProducts = protectedAction<
       }
       if (data.length < STOCK_PAGE) break
     }
+    // ── Catálogo completo (productos a cero) ─────────────────────────────────
+    // Un producto sin ventas Y sin stock (agotado sin vender, o nunca movido) no
+    // aparece en ninguna de las dos pasadas anteriores. Isma quiere ver TODAS
+    // las prendas aunque estén a cero: tercera pasada por el catálogo activo,
+    // que da de alta las que falten con todo a 0.
+    for (let from = 0; ; from += PAGE) {
+      const { data } = await ctx.adminClient
+        .from('products')
+        .select('id, name, sku, cost_price')
+        .eq('is_active', true)
+        .range(from, from + PAGE - 1)
+      if (!data?.length) break
+      for (const p of data as any[]) {
+        const prod = (products[`prod:${p.id}`] ||= { product_id: p.id as string, name: (p.name as string) || '', sku: (p.sku as string) || '', units: 0, revenue: 0, revenueNet: 0, unitCost: Number(p.cost_price) || 0, currentStock: 0, purchasedUnits: 0, purchasedCost: 0, bd: {}, stockBySize: {} })
+        if (!prod.unitCost) prod.unitCost = Number(p.cost_price) || 0
+      }
+      if (data.length < PAGE) break
+    }
+
     // Compradas = stock actual + vendidas; valor a coste estimado con el coste
     // actual del producto (no guardamos precio de compra histórico por unidad).
     for (const prod of Object.values(products)) {
@@ -579,8 +598,9 @@ export const getTopProducts = protectedAction<
     return success(
       Object.values(products)
         // Ordenamos por facturación (vendidos arriba); los comprados-no-vendidos
-        // (revenue 0) caen al final pero siguen visibles dentro del límite.
-        .sort((a, b) => b.revenue - a.revenue || b.purchasedCost - a.purchasedCost)
+        // (revenue 0) caen al final pero siguen visibles dentro del límite, y
+        // los que están a cero total cierran la lista en orden alfabético.
+        .sort((a, b) => b.revenue - a.revenue || b.purchasedCost - a.purchasedCost || a.name.localeCompare(b.name))
         .slice(0, limit)
         .map((p) => {
           const cogs = p.units * p.unitCost

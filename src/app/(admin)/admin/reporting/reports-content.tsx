@@ -180,7 +180,9 @@ export function ReportsContent() {
           previous_start: prevStartStr, previous_end: prevEndStr,
           store_id: storeId, channel, tax_mode,
         }),
-        getTopProducts({ start_date: start, end_date: end, store_id: storeId, channel, limit: 500, tax_mode }),
+        // limit alto: el informe incluye TODO el catálogo, también prendas a cero
+        // (petición de Isma) — con 500 los no-vendidos quedaban cortados.
+        getTopProducts({ start_date: start, end_date: end, store_id: storeId, channel, limit: 5000, tax_mode }),
         getTailorPerformance({ start_date: start, end_date: end, store_id: storeId, channel, tax_mode }),
         getClientsAnalytics({ start_date: start, end_date: end, store_id: storeId }),
         getClientsAdvancedAnalytics({ start_date: start, end_date: end, store_id: storeId }),
