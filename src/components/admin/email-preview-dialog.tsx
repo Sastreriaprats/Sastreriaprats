@@ -42,6 +42,8 @@ export function EmailPreviewDialog({
   html,
   loading,
   campaignId,
+  footnote,
+  emptyMessage,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -51,6 +53,10 @@ export function EmailPreviewDialog({
   loading?: boolean
   /** Si se indica, se muestra también la pestaña de destinatarios de esa campaña. */
   campaignId?: string
+  /** Nota bajo el iframe. undefined = texto por defecto (tokens ficticios); null = sin nota. */
+  footnote?: string | null
+  /** Texto cuando no hay html que mostrar. */
+  emptyMessage?: string
 }) {
   const [viewport, setViewport] = useState<Viewport>('desktop')
 
@@ -125,15 +131,17 @@ export function EmailPreviewDialog({
             />
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center text-muted-foreground py-16">
+          <div className="flex flex-col items-center justify-center text-muted-foreground py-16 px-6 text-center">
             <Mail className="h-6 w-6 mb-2" />
-            <p className="text-sm">No hay contenido para previsualizar.</p>
+            <p className="text-sm">{emptyMessage || 'No hay contenido para previsualizar.'}</p>
           </div>
         )}
       </div>
-      <p className="text-xs text-muted-foreground text-center">
-        Los enlaces de baja / confirmación usan tokens ficticios solo para esta vista. No tocan la base de datos.
-      </p>
+      {footnote !== null && (
+        <p className="text-xs text-muted-foreground text-center">
+          {footnote ?? 'Los enlaces de baja / confirmación usan tokens ficticios solo para esta vista. No tocan la base de datos.'}
+        </p>
+      )}
     </div>
   )
 

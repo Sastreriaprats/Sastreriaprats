@@ -64,6 +64,15 @@ export async function POST(request: NextRequest) {
 
     if (apiKey && fromEmail) {
       const teamSubject = `[Sastrería Prats] Nueva solicitud de contacto de ${name.trim()}`
+      const teamHtml = `
+              <h2>Nueva solicitud de contacto</h2>
+              <p><strong>Nombre:</strong> ${escapeHtml(name.trim())}</p>
+              <p><strong>Email:</strong> ${escapeHtml(email.trim())}</p>
+              ${phone ? `<p><strong>Teléfono:</strong> ${escapeHtml(phone)}</p>` : ''}
+              ${service ? `<p><strong>Servicio:</strong> ${escapeHtml(service)}</p>` : ''}
+              ${preferredDate ? `<p><strong>Fecha preferida:</strong> ${escapeHtml(formatPreferredDate(preferredDate))}</p>` : ''}
+              ${message ? `<p><strong>Mensaje:</strong><br/>${escapeHtml(message).replace(/\n/g, '<br/>')}</p>` : ''}
+            `
       try {
         const res = await fetch('https://api.resend.com/emails', {
           method: 'POST',
@@ -75,21 +84,14 @@ export async function POST(request: NextRequest) {
             from: fromEmail,
             to: TEAM_EMAIL,
             subject: teamSubject,
-            html: `
-              <h2>Nueva solicitud de contacto</h2>
-              <p><strong>Nombre:</strong> ${escapeHtml(name.trim())}</p>
-              <p><strong>Email:</strong> ${escapeHtml(email.trim())}</p>
-              ${phone ? `<p><strong>Teléfono:</strong> ${escapeHtml(phone)}</p>` : ''}
-              ${service ? `<p><strong>Servicio:</strong> ${escapeHtml(service)}</p>` : ''}
-              ${preferredDate ? `<p><strong>Fecha preferida:</strong> ${escapeHtml(formatPreferredDate(preferredDate))}</p>` : ''}
-              ${message ? `<p><strong>Mensaje:</strong><br/>${escapeHtml(message).replace(/\n/g, '<br/>')}</p>` : ''}
-            `,
+            html: teamHtml,
           }),
         })
         const data = res.ok ? await res.json().catch(() => null) : null
         await admin.from('email_logs').insert({
           recipient_email: TEAM_EMAIL,
           subject: teamSubject,
+          body_html: teamHtml,
           email_type: 'transactional',
           status: res.ok ? 'sent' : 'failed',
           sent_at: new Date().toISOString(),
@@ -101,6 +103,7 @@ export async function POST(request: NextRequest) {
         await admin.from('email_logs').insert({
           recipient_email: TEAM_EMAIL,
           subject: teamSubject,
+          body_html: teamHtml,
           email_type: 'transactional',
           status: 'failed',
           error_message: e instanceof Error ? e.message : 'Unknown error',

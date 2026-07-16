@@ -492,8 +492,8 @@ export const sendCampaign = protectedAction<
           }
         }
 
+        let html: string | undefined
         try {
-          let html: string
           if (isStructured && template) {
             html = composeNewsletterEmail({
               template: template as NewsletterTemplate,
@@ -532,6 +532,7 @@ export const sendCampaign = protectedAction<
             recipient_email: recipient.email,
             client_id: clientId,
             subject: campaign.subject,
+            body_html: html,
             email_type: 'campaign',
             status: 'sent',
             sent_at: new Date().toISOString(),
@@ -546,6 +547,7 @@ export const sendCampaign = protectedAction<
             recipient_email: recipient.email,
             client_id: clientId,
             subject: campaign.subject,
+            body_html: html ?? null,
             email_type: 'campaign',
             status: 'failed',
             error_message: errMsg,
@@ -581,9 +583,14 @@ export const getEmailLogs = protectedAction<
 >(
   { permission: 'emails.view', auditModule: 'emails' },
   async (ctx, { page = 1, campaign_id, client_id }) => {
+    // Columnas explícitas: body_html se excluye a propósito (puede pesar
+    // decenas de KB por fila); se carga bajo demanda con getEmailLogDetail.
     let query = ctx.adminClient
       .from('email_logs')
-      .select('*, email_campaigns(name)', { count: 'exact' })
+      .select(
+        'id, campaign_id, client_id, recipient_email, subject, email_type, status, error_message, sent_at, opened_at, clicked_at, email_campaigns(name)',
+        { count: 'exact' }
+      )
       .order('sent_at', { ascending: false })
 
     if (campaign_id) query = query.eq('campaign_id', campaign_id)
@@ -594,6 +601,25 @@ export const getEmailLogs = protectedAction<
 
     const { data, count } = await query
     return success({ logs: data || [], total: count || 0, page })
+  }
+)
+
+/**
+ * Detalle de un envío individual del historial, incluido el HTML tal cual
+ * se envió (email_logs.body_html, snapshot desde jul-2026). Para logs de
+ * campaña anteriores a esa fecha body_html es null y el caller puede caer
+ * a previewCampaignEmail con el campaign_id devuelto.
+ */
+export const getEmailLogDetail = protectedAction<string, Record<string, unknown>>(
+  { permission: 'emails.view', auditModule: 'emails' },
+  async (ctx, logId) => {
+    const { data } = await ctx.adminClient
+      .from('email_logs')
+      .select('id, campaign_id, recipient_email, subject, body_html, email_type, status, error_message, sent_at, email_campaigns(name)')
+      .eq('id', logId)
+      .maybeSingle()
+    if (!data) return failure('Envío no encontrado')
+    return success(data)
   }
 )
 

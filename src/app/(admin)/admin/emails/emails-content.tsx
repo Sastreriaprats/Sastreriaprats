@@ -38,6 +38,7 @@ import {
   getSegmentCounts,
   previewCampaignContent,
   previewCampaignEmail,
+  getEmailLogDetail,
 } from '@/actions/emails'
 import { formatDate, formatDateTime } from '@/lib/utils'
 import { TemplateContentEditorDialog, type TemplateForEditor } from '@/components/admin/template-content-editor-dialog'
@@ -210,6 +211,9 @@ export function EmailsContent() {
     subject?: string
     title: string
     campaignId?: string
+    /** Nota al pie del diálogo: undefined = default (tokens ficticios), null = sin nota. */
+    footnote?: string | null
+    emptyMessage?: string
   }>({ open: false, loading: false, title: 'Vista previa del email' })
 
   type CampaignFormLike = { subject: string; segment: string; template_id: string; body_html: string }
@@ -252,6 +256,59 @@ export function EmailsContent() {
       toast.error((!res.success && res.error) || 'No se pudo generar la vista previa')
       setPreviewState((p) => ({ ...p, open: false, loading: false, campaignId: undefined }))
     }
+  }
+
+  /**
+   * Vista previa de un envío individual del historial. Muestra el HTML tal
+   * cual se envió (email_logs.body_html, snapshot desde jul-2026). Si el log
+   * es anterior y pertenece a una campaña, regenera la previa desde la
+   * campaña; si es transaccional antiguo, no hay contenido que mostrar.
+   */
+  const openLogPreview = async (log: LogEntry) => {
+    const recipient = (log.recipient_email as string) || ''
+    setPreviewState({
+      open: true,
+      loading: true,
+      title: `Email enviado — ${recipient}`,
+    })
+    const res = await getEmailLogDetail(log.id as string)
+    if (!res.success || !res.data) {
+      toast.error((!res.success && res.error) || 'No se pudo cargar el envío')
+      setPreviewState((p) => ({ ...p, open: false, loading: false }))
+      return
+    }
+    const d = res.data
+    if (d.body_html) {
+      setPreviewState((p) => ({
+        ...p,
+        loading: false,
+        html: d.body_html as string,
+        subject: (d.subject as string) || undefined,
+        footnote: 'Copia exacta del email enviado. Ojo: los enlaces (incluida la baja) son reales; no los pulses desde aquí.',
+      }))
+      return
+    }
+    if (d.campaign_id) {
+      const prev = await previewCampaignEmail({ campaignId: d.campaign_id as string })
+      if (prev.success && prev.data) {
+        setPreviewState((p) => ({
+          ...p,
+          loading: false,
+          html: prev.data!.html,
+          subject: prev.data!.subject,
+          footnote: 'Envío anterior a jul-2026: no se guardó la copia exacta. Se muestra la campaña regenerada con datos genéricos.',
+        }))
+        return
+      }
+    }
+    setPreviewState((p) => ({
+      ...p,
+      loading: false,
+      html: undefined,
+      subject: (d.subject as string) || undefined,
+      emptyMessage: 'Este envío es anterior a jul-2026 y no se guardó su contenido. Los emails nuevos sí guardan copia exacta.',
+      footnote: null,
+    }))
   }
 
   /** Abre el dialog "sin código" para editar nombre/asunto/estado. */
@@ -914,15 +971,20 @@ export function EmailsContent() {
                     <TableHead>Tipo</TableHead>
                     <TableHead>Estado</TableHead>
                     <TableHead>Fecha</TableHead>
+                    <TableHead className="w-10" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {logs.logs.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">Sin envíos registrados</TableCell>
+                      <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">Sin envíos registrados</TableCell>
                     </TableRow>
                   ) : logs.logs.map((l) => (
-                    <TableRow key={l.id as string}>
+                    <TableRow
+                      key={l.id as string}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => openLogPreview(l)}
+                    >
                       <TableCell>
                         <p className="text-sm">{l.recipient_email as string}</p>
                       </TableCell>
@@ -948,6 +1010,9 @@ export function EmailsContent() {
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {formatDateTime(l.sent_at as string)}
+                      </TableCell>
+                      <TableCell>
+                        <Eye className="h-4 w-4 text-muted-foreground" aria-label="Ver email enviado" />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -1383,6 +1448,8 @@ export function EmailsContent() {
         subject={previewState.subject}
         loading={previewState.loading}
         campaignId={previewState.campaignId}
+        footnote={previewState.footnote}
+        emptyMessage={previewState.emptyMessage}
       />
     </div>
   )

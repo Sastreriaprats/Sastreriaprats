@@ -126,6 +126,7 @@ async function sendFromTemplate(
     await admin.from('email_logs').insert({
       recipient_email: to,
       subject,
+      body_html: html,
       status: 'sent',
       email_type: 'transactional',
       sent_at: new Date().toISOString(),
@@ -137,6 +138,7 @@ async function sendFromTemplate(
       await admin.from('email_logs').insert({
         recipient_email: to,
         subject,
+        body_html: html,
         status: 'failed',
         email_type: 'transactional',
         error_message: errMsg,
