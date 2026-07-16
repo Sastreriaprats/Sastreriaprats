@@ -112,7 +112,10 @@ export type ViewB = {
 export type InvoiceLite = {
   number: string
   client: string
+  nif?: string                  // NIF del cliente (para el 347)
   date: string
+  base: number                  // base imponible (subtotal)
+  vat: number                   // cuota de IVA
   total: number
   status: string
   method: string
@@ -125,12 +128,15 @@ export type InvoiceLite = {
 export type ApInvoiceLite = {
   number: string
   supplier: string
+  cif?: string                  // NIF/CIF del proveedor (para 347/349 e intracomunitarias)
   date: string
   base: number
   vat: number
+  vatRate: number | null        // tipo de IVA del documento; null = varios tipos en líneas
   retentionRate: number         // % de retención IRPF (15 profesionales, 19 alquileres…)
   retentionAmount: number       // importe retenido (se ingresa a Hacienda, no al proveedor)
   total: number                 // total del documento: base + IVA − retención
+  isIntraEU: boolean            // proveedor intracomunitario (CIF-IVA de otro país UE)
   attachmentPath?: string       // path en el bucket supplier-invoices (PDF adjunto)
 }
 

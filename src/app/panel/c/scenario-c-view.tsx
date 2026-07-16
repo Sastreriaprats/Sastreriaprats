@@ -27,6 +27,8 @@ type IncomeDoc = {
   number: string
   client: string
   date: string
+  base: number
+  vat: number
   total: number
   status?: string
   method?: string
@@ -35,12 +37,30 @@ type IncomeDoc = {
   pdfUrl?: string
 }
 
+// Agregado anual por tercero (cliente o proveedor) para el modelo 347/349
+type ThirdPartyRow = {
+  name: string
+  nif?: string
+  byQuarter: [number, number, number, number]
+  total: number
+  count: number
+  extra: number                 // clientes: cobros sin factura · proveedores: retenido
+}
+
+// Umbral del modelo 347: operaciones anuales con un tercero > 3.005,06 €
+const THRESHOLD_347 = 3005.06
+
 const inRange = (date: string, from: string, to: string) =>
   (!from || date >= from) && (!to || date <= to)
 
 const quarterOf = (date: string) => Math.ceil(Number(date.slice(5, 7)) / 3)
 const qPeriod = (year: number, q: number) => `${String((q - 1) * 3 + 1).padStart(2, '0')}/${year} – ${String(q * 3).padStart(2, '0')}/${year}`
 const pct = (n: number) => `${Number(n) % 1 === 0 ? Number(n) : (Number(n) || 0).toLocaleString('es-ES')} %`
+// Tipo de IVA efectivo de un documento (cociente cuota/base → tipo español más cercano)
+const effRate = (base: number, vat: number) => {
+  const raw = base > 0 ? (vat / base) * 100 : 0
+  return [0, 4, 10, 21].reduce((best, r) => (Math.abs(r - raw) < Math.abs(best - raw) ? r : best), 0)
+}
 
 export function ScenarioCView() {
   const [year, setYear] = useState(thisYear)
@@ -68,7 +88,8 @@ export function ScenarioCView() {
     const billedSales = new Set(data.invoices.filter((f) => f.saleId).map((f) => f.saleId))
     const billedOrders = new Set(data.invoices.filter((f) => f.orderId).map((f) => f.orderId))
     const docs: IncomeDoc[] = data.invoices.map((f) => ({
-      docType: 'Factura', number: f.number, client: f.client, date: f.date, total: f.total,
+      docType: 'Factura', number: f.number, client: f.client, date: f.date,
+      base: f.base, vat: f.vat, total: f.total,
       status: f.status, method: f.method, saleId: f.saleId, orderId: f.orderId, pdfUrl: f.pdfUrl,
     }))
     for (const m of data.ledger) {
@@ -81,6 +102,8 @@ export function ScenarioCView() {
         number: m.concept.replace(/^(Ticket|Sastrería)\s+/, ''),
         client: m.client ?? '',
         date: m.date,
+        base: m.base,
+        vat: m.vat,
         total: m.total,
         saleId: m.saleId,
         orderId: m.orderId,
@@ -101,6 +124,9 @@ export function ScenarioCView() {
     () => (data?.apInvoices ?? []).filter((f) => inRange(f.date, fromDate, toDate)).sort((a, b) => b.date.localeCompare(a.date)),
     [data, fromDate, toDate],
   )
+  // Facturas recibidas partidas: nacionales/resto vs intracomunitarias (CIF-IVA de otro país UE)
+  const apDomestic = useMemo(() => filteredApInvoices.filter((f) => !f.isIntraEU), [filteredApInvoices])
+  const apIntraEU = useMemo(() => filteredApInvoices.filter((f) => f.isIntraEU), [filteredApInvoices])
   // Facturas recibidas con retención de IRPF (alquileres 19%, profesionales 15%…)
   const retentionInvoices = useMemo(
     () => (data?.apInvoices ?? []).filter((f) => f.retentionAmount !== 0).sort((a, b) => a.date.localeCompare(b.date)),
@@ -113,6 +139,76 @@ export function ScenarioCView() {
     return arr.map(n2)
   }, [retentionInvoices])
 
+  // --- Agregados anuales por tercero (pestaña Clientes · modelos 347/349) ---
+  // CLIENTES: facturado (facturas emitidas, IVA incluido) por trimestre; los
+  // cobros del escenario sin factura (tickets/sastrería) van aparte en `extra`.
+  const clients347 = useMemo<ThirdPartyRow[]>(() => {
+    if (!data) return []
+    const map = new Map<string, ThirdPartyRow>()
+    const rowFor = (key: string, name: string, nif?: string) => {
+      let row = map.get(key)
+      if (!row) { row = { name, nif, byQuarter: [0, 0, 0, 0], total: 0, count: 0, extra: 0 }; map.set(key, row) }
+      if (!row.nif && nif) row.nif = nif
+      return row
+    }
+    for (const f of data.invoices) {
+      const name = f.client.trim() || '(sin nombre)'
+      const row = rowFor((f.nif || name).toUpperCase(), name, f.nif)
+      const q = quarterOf(f.date)
+      if (q >= 1 && q <= 4) row.byQuarter[q - 1] = n2(row.byQuarter[q - 1] + f.total)
+      row.total = n2(row.total + f.total)
+      row.count += 1
+    }
+    for (const d of incomeDocs) {
+      if (d.docType === 'Factura' || !d.client.trim()) continue
+      const name = d.client.trim()
+      const row = rowFor(name.toUpperCase(), name)
+      row.extra = n2(row.extra + d.total)
+    }
+    return [...map.values()].sort((a, b) => (b.total + b.extra) - (a.total + a.extra))
+  }, [data, incomeDocs])
+
+  // PROVEEDORES nacionales/resto (347): volumen anual base+IVA por trimestre;
+  // `extra` = IRPF retenido (esas operaciones se declaran por el 190/180, no el 347).
+  const suppliers347 = useMemo<ThirdPartyRow[]>(() => {
+    if (!data) return []
+    const map = new Map<string, ThirdPartyRow>()
+    for (const f of data.apInvoices) {
+      if (f.isIntraEU) continue
+      const name = f.supplier.trim() || '(sin nombre)'
+      const key = (f.cif || name).toUpperCase()
+      let row = map.get(key)
+      if (!row) { row = { name, nif: f.cif, byQuarter: [0, 0, 0, 0], total: 0, count: 0, extra: 0 }; map.set(key, row) }
+      if (!row.nif && f.cif) row.nif = f.cif
+      const amount = f.base + f.vat
+      const q = quarterOf(f.date)
+      if (q >= 1 && q <= 4) row.byQuarter[q - 1] = n2(row.byQuarter[q - 1] + amount)
+      row.total = n2(row.total + amount)
+      row.extra = n2(row.extra + f.retentionAmount)
+      row.count += 1
+    }
+    return [...map.values()].sort((a, b) => b.total - a.total)
+  }, [data])
+
+  // PROVEEDORES intracomunitarios (349): se declaran por BASE imponible.
+  const suppliersIntra = useMemo<ThirdPartyRow[]>(() => {
+    if (!data) return []
+    const map = new Map<string, ThirdPartyRow>()
+    for (const f of data.apInvoices) {
+      if (!f.isIntraEU) continue
+      const name = f.supplier.trim() || '(sin nombre)'
+      const key = (f.cif || name).toUpperCase()
+      let row = map.get(key)
+      if (!row) { row = { name, nif: f.cif, byQuarter: [0, 0, 0, 0], total: 0, count: 0, extra: 0 }; map.set(key, row) }
+      if (!row.nif && f.cif) row.nif = f.cif
+      const q = quarterOf(f.date)
+      if (q >= 1 && q <= 4) row.byQuarter[q - 1] = n2(row.byQuarter[q - 1] + f.base)
+      row.total = n2(row.total + f.base)
+      row.count += 1
+    }
+    return [...map.values()].sort((a, b) => b.total - a.total)
+  }, [data])
+
   // Con el filtro Desde/Hasta activo se exporta SOLO el detalle del rango
   // (movimientos y facturas); sin filtro, el informe anual completo.
   const onExcel = async () => {
@@ -123,11 +219,18 @@ export function ScenarioCView() {
         Base: n2(m.base), IVA: n2(m.vat), Total: n2(m.total),
       })) },
       { name: 'Facturas ingresos', rows: filteredIncomeDocs.map((d) => ({
-        Tipo: d.docType, 'Nº': d.number, Cliente: d.client, Fecha: d.date, Total: n2(d.total), Estado: d.status ?? '', Pago: d.method ?? '',
+        Tipo: d.docType, 'Nº': d.number, Cliente: d.client, Fecha: d.date,
+        Base: n2(d.base), 'Tipo IVA %': effRate(d.base, d.vat), IVA: n2(d.vat), 'Retención': 0,
+        Total: n2(d.total), Estado: d.status ?? '', Pago: d.method ?? '',
       })) },
-      { name: 'Facturas gastos', rows: filteredApInvoices.map((f) => ({
-        'Nº': f.number, Proveedor: f.supplier, Fecha: f.date, Base: n2(f.base), IVA: n2(f.vat),
-        'Retención': n2(f.retentionAmount), Total: n2(f.total),
+      { name: 'Facturas gastos', rows: apDomestic.map((f) => ({
+        'Nº': f.number, Proveedor: f.supplier, CIF: f.cif ?? '', Fecha: f.date,
+        Base: n2(f.base), 'Tipo IVA %': f.vatRate ?? 'varios', IVA: n2(f.vat),
+        'Tipo retención %': n2(f.retentionRate), 'Retención': n2(f.retentionAmount), Total: n2(f.total),
+      })) },
+      { name: 'Facturas intracomunitarias', rows: apIntraEU.map((f) => ({
+        'Nº': f.number, Proveedor: f.supplier, 'NIF-IVA': f.cif ?? '', Fecha: f.date,
+        Base: n2(f.base), IVA: n2(f.vat), Total: n2(f.total),
       })) },
     ]
     if (fromDate || toDate) {
@@ -158,6 +261,20 @@ export function ScenarioCView() {
       })) },
       { name: 'Mensual C', rows: data.C.monthly.map((m, i) => ({
         Mes: MONTH_LABELS[i], Ingresos: n2(m.income), Gastos: n2(m.expenses), Resultado: n2(m.income - m.expenses),
+      })) },
+      { name: '347 Clientes', rows: clients347.map((r) => ({
+        Cliente: r.name, NIF: r.nif ?? '', T1: n2(r.byQuarter[0]), T2: n2(r.byQuarter[1]), T3: n2(r.byQuarter[2]), T4: n2(r.byQuarter[3]),
+        'Facturado año': n2(r.total), 'Nº facturas': r.count, 'Cobros sin factura': n2(r.extra),
+        'Supera 3.005,06': r.total > THRESHOLD_347 ? 'SÍ' : '',
+      })) },
+      { name: '347 Proveedores', rows: suppliers347.map((r) => ({
+        Proveedor: r.name, CIF: r.nif ?? '', T1: n2(r.byQuarter[0]), T2: n2(r.byQuarter[1]), T3: n2(r.byQuarter[2]), T4: n2(r.byQuarter[3]),
+        'Total año (con IVA)': n2(r.total), 'Nº facturas': r.count, 'IRPF retenido': n2(r.extra),
+        'Supera 3.005,06': r.total > THRESHOLD_347 ? 'SÍ' : '',
+      })) },
+      { name: '349 Intracomunitarias', rows: suppliersIntra.map((r) => ({
+        Proveedor: r.name, 'NIF-IVA': r.nif ?? '', T1: n2(r.byQuarter[0]), T2: n2(r.byQuarter[1]), T3: n2(r.byQuarter[2]), T4: n2(r.byQuarter[3]),
+        'Base año': n2(r.total), 'Nº facturas': r.count,
       })) },
       ...detailSheets,
     ], `escenario-c-${year}`)
@@ -209,6 +326,7 @@ export function ScenarioCView() {
           { key: 'mensual', label: 'Mensual' },
           { key: 'movimientos', label: 'Movimientos' },
           { key: 'facturas', label: 'Facturas' },
+          { key: 'terceros', label: 'Clientes · 347' },
         ]}
       />
 
@@ -260,7 +378,7 @@ export function ScenarioCView() {
           {DateRange}
           <LedgerTable rows={filteredLedger} />
         </div>
-      ) : (
+      ) : tab === 'facturas' ? (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <Tabs
@@ -284,6 +402,9 @@ export function ScenarioCView() {
                     <th className="text-left px-3 py-3">Nº</th>
                     <th className="text-left px-3 py-3">Cliente</th>
                     <th className="text-left px-3 py-3">Fecha</th>
+                    <th className="text-right px-3 py-3">Base</th>
+                    <th className="text-right px-3 py-3">IVA</th>
+                    <th className="text-right px-3 py-3">Retención</th>
                     <th className="text-right px-3 py-3">Total</th>
                     <th className="text-left px-3 py-3">Estado</th>
                     <th className="text-left px-3 py-3">Pago</th>
@@ -292,7 +413,7 @@ export function ScenarioCView() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredIncomeDocs.length === 0 ? (
-                    <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-400">Sin documentos de ingreso.</td></tr>
+                    <tr><td colSpan={11} className="px-3 py-8 text-center text-slate-400">Sin documentos de ingreso.</td></tr>
                   ) : filteredIncomeDocs.map((d, i) => (
                     <tr key={i} className="hover:bg-slate-50/50">
                       <td className="px-3 py-2">
@@ -301,6 +422,11 @@ export function ScenarioCView() {
                       <td className="px-3 py-2 font-mono text-xs text-slate-700">{d.number}</td>
                       <td className="px-3 py-2">{d.client || <span className="text-slate-300">—</span>}</td>
                       <td className="px-3 py-2 text-slate-500">{d.date}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{eur(d.base)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {eur(d.vat)} <span className="text-[10px] text-slate-400">({pct(effRate(d.base, d.vat))})</span>
+                      </td>
+                      <td className="px-3 py-2 text-right text-slate-300">—</td>
                       <td className="px-3 py-2 text-right font-medium tabular-nums">{eur(d.total)}</td>
                       <td className="px-3 py-2 capitalize text-slate-500">{d.status ?? '—'}</td>
                       <td className="px-3 py-2 capitalize text-slate-500">{d.method || '—'}</td>
@@ -312,6 +438,9 @@ export function ScenarioCView() {
                   {filteredIncomeDocs.length > 0 && (
                     <tr className={TOTAL_ROW}>
                       <td className="px-3 py-2.5" colSpan={4}>TOTAL ingresos ({filteredIncomeDocs.length} documentos)</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">{eur(filteredIncomeDocs.reduce((s, d) => s + d.base, 0))}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">{eur(filteredIncomeDocs.reduce((s, d) => s + d.vat, 0))}</td>
+                      <td className="px-3 py-2.5 text-right text-slate-400">—</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{eur(filteredIncomeDocs.reduce((s, d) => s + d.total, 0))}</td>
                       <td colSpan={3} />
                     </tr>
@@ -319,63 +448,271 @@ export function ScenarioCView() {
                 </tbody>
               </table>
               <p className="border-t p-3 text-xs text-slate-400">
-                Tickets y facturas del escenario C. Si un ticket o pedido tiene factura emitida, solo figura la factura (sin duplicar).
-                El total suma los documentos listados: puede no coincidir con el Resumen C, porque las facturas se listan por su total
-                completo aunque se cobraran en efectivo.
+                Tickets y facturas del escenario C, desglosados en base imponible + IVA (con su tipo). Las facturas emitidas no llevan
+                retención de IRPF (actividad no sujeta), por eso la columna va vacía. Si un ticket o pedido tiene factura emitida, solo
+                figura la factura (sin duplicar). El total suma los documentos listados: puede no coincidir con el Resumen C, porque
+                las facturas se listan por su total completo aunque se cobraran en efectivo.
               </p>
             </div>
           ) : (
-            <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                  <tr>
-                    <th className="text-left px-3 py-3">Nº</th>
-                    <th className="text-left px-3 py-3">Proveedor</th>
-                    <th className="text-left px-3 py-3">Fecha</th>
-                    <th className="text-right px-3 py-3">Base</th>
-                    <th className="text-right px-3 py-3">IVA</th>
-                    <th className="text-right px-3 py-3">Retención</th>
-                    <th className="text-right px-3 py-3">Total</th>
-                    <th className="text-right px-3 py-3">PDF</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredApInvoices.length === 0 ? (
-                    <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-400">Sin facturas de proveedor.</td></tr>
-                  ) : filteredApInvoices.map((f, i) => (
-                    <tr key={i} className="hover:bg-slate-50/50">
-                      <td className="px-3 py-2 font-mono text-xs text-slate-700">{f.number}</td>
-                      <td className="px-3 py-2">{f.supplier}</td>
-                      <td className="px-3 py-2 text-slate-500">{f.date}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{eur(f.base)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{eur(f.vat)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">
-                        {f.retentionAmount !== 0
-                          ? <span className="text-amber-700">−{eur(f.retentionAmount)} <span className="text-[10px] text-amber-600/80">({pct(f.retentionRate)})</span></span>
-                          : <span className="text-slate-300">—</span>}
-                      </td>
-                      <td className="px-3 py-2 text-right font-medium tabular-nums">{eur(f.total)}</td>
-                      <td className="px-3 py-2 text-right"><DownloadBtn apPath={f.attachmentPath} /></td>
-                    </tr>
-                  ))}
-                  {filteredApInvoices.length > 0 && (
-                    <tr className={TOTAL_ROW}>
-                      <td className="px-3 py-2.5" colSpan={5}>TOTAL gastos ({filteredApInvoices.length} facturas)</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums">{eur(filteredApInvoices.reduce((s, f) => s + f.retentionAmount, 0))}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums">{eur(filteredApInvoices.reduce((s, f) => s + f.total, 0))}</td>
-                      <td />
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-              <p className="border-t p-3 text-xs text-slate-400">
-                Todas las facturas recibidas de proveedor del año (sin proformas). El total es el importe del documento
-                (base + IVA − retención); las retenciones se detallan en su pestaña.
-              </p>
+            <div className="space-y-5">
+              <ApInvoicesCard
+                title="Facturas recibidas · nacionales y resto"
+                tag={`${apDomestic.length} facturas`}
+                rows={apDomestic}
+                footnote="Facturas recibidas de proveedores nacionales (y de fuera de la UE) del año, sin proformas. El total es el importe
+                del documento (base + IVA − retención); las retenciones se detallan en su pestaña. El tipo de IVA sale de las líneas de la
+                factura; en las registradas sin desglose se deriva del cociente IVA/base."
+              />
+              <ApInvoicesCard
+                title="Facturas intracomunitarias (UE)"
+                tag={`${apIntraEU.length} facturas`}
+                rows={apIntraEU}
+                intra
+                footnote="Proveedores con NIF-IVA de otro país de la UE (adquisiciones intracomunitarias). Llegan sin IVA (inversión del
+                sujeto pasivo: el IVA se autorrepercute y deduce a la vez en el 303) y se declaran en el modelo 349, no en el 347."
+              />
             </div>
           )}
         </div>
+      ) : (
+        <ThirdPartiesTab year={year} clients={clients347} suppliers={suppliers347} intra={suppliersIntra} />
       )}
+    </div>
+  )
+}
+
+// Tabla de facturas recibidas de proveedor (gastos), con desglose base / tipo de
+// IVA / IVA / retención / total. `intra` = variante intracomunitaria (sin columna
+// de retención: esas facturas llegan sin IVA ni IRPF).
+function ApInvoicesCard({ title, tag, rows, footnote, intra = false }: {
+  title: string
+  tag: string
+  rows: ApInvoiceLite[]
+  footnote: string
+  intra?: boolean
+}) {
+  const cols = intra ? 8 : 9
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-x-auto">
+      <div className="flex items-baseline justify-between border-b border-slate-200 px-4 py-3">
+        <span className="text-sm font-semibold text-prats-navy">{title}</span>
+        <span className="text-[11px] uppercase tracking-wider text-slate-400">{tag}</span>
+      </div>
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          <tr>
+            <th className="text-left px-3 py-3">Nº</th>
+            <th className="text-left px-3 py-3">Proveedor</th>
+            <th className="text-left px-3 py-3">Fecha</th>
+            <th className="text-right px-3 py-3">Base</th>
+            <th className="text-right px-3 py-3">Tipo IVA</th>
+            <th className="text-right px-3 py-3">IVA</th>
+            {!intra && <th className="text-right px-3 py-3">Retención</th>}
+            <th className="text-right px-3 py-3">Total</th>
+            <th className="text-right px-3 py-3">PDF</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {rows.length === 0 ? (
+            <tr><td colSpan={cols} className="px-3 py-8 text-center text-slate-400">Sin facturas.</td></tr>
+          ) : rows.map((f, i) => (
+            <tr key={i} className="hover:bg-slate-50/50">
+              <td className="px-3 py-2 font-mono text-xs text-slate-700">{f.number}</td>
+              <td className="px-3 py-2">
+                {f.supplier}
+                {intra && f.cif && <span className="ml-1.5 text-[10px] font-mono text-slate-400">{f.cif}</span>}
+              </td>
+              <td className="px-3 py-2 text-slate-500">{f.date}</td>
+              <td className="px-3 py-2 text-right tabular-nums">{eur(f.base)}</td>
+              <td className="px-3 py-2 text-right text-slate-500">{f.vatRate === null ? 'varios' : pct(f.vatRate)}</td>
+              <td className="px-3 py-2 text-right tabular-nums">{eur(f.vat)}</td>
+              {!intra && (
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {f.retentionAmount !== 0
+                    ? <span className="text-amber-700">−{eur(f.retentionAmount)} <span className="text-[10px] text-amber-600/80">({pct(f.retentionRate)})</span></span>
+                    : <span className="text-slate-300">—</span>}
+                </td>
+              )}
+              <td className="px-3 py-2 text-right font-medium tabular-nums">{eur(f.total)}</td>
+              <td className="px-3 py-2 text-right"><DownloadBtn apPath={f.attachmentPath} /></td>
+            </tr>
+          ))}
+          {rows.length > 0 && (
+            <tr className={TOTAL_ROW}>
+              <td className="px-3 py-2.5" colSpan={3}>TOTAL ({rows.length} facturas)</td>
+              <td className="px-3 py-2.5 text-right tabular-nums">{eur(rows.reduce((s, f) => s + f.base, 0))}</td>
+              <td />
+              <td className="px-3 py-2.5 text-right tabular-nums">{eur(rows.reduce((s, f) => s + f.vat, 0))}</td>
+              {!intra && (
+                <td className="px-3 py-2.5 text-right tabular-nums">{eur(rows.reduce((s, f) => s + f.retentionAmount, 0))}</td>
+              )}
+              <td className="px-3 py-2.5 text-right tabular-nums">{eur(rows.reduce((s, f) => s + f.total, 0))}</td>
+              <td />
+            </tr>
+          )}
+        </tbody>
+      </table>
+      <p className="border-t p-3 text-xs text-slate-400">{footnote}</p>
+    </div>
+  )
+}
+
+// Pestaña Clientes · 347: cuánto se ha facturado/cobrado a cada cliente y cuánto
+// ha facturado cada proveedor en el año, con desglose trimestral (el 347 se
+// declara por trimestres) y marca sobre los que superan los 3.005,06 €.
+function ThirdPartiesTab({ year, clients, suppliers, intra }: {
+  year: number
+  clients: ThirdPartyRow[]
+  suppliers: ThirdPartyRow[]
+  intra: ThirdPartyRow[]
+}) {
+  const [side, setSide] = useState<'clientes' | 'proveedores'>('clientes')
+  const [query, setQuery] = useState('')
+  const q = query.trim().toLowerCase()
+  const match = (r: ThirdPartyRow) =>
+    !q || r.name.toLowerCase().includes(q) || (r.nif ?? '').toLowerCase().includes(q)
+
+  const over347 = (side === 'clientes' ? clients : suppliers).filter((r) => r.total > THRESHOLD_347).length
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Tabs
+          variant="segmented"
+          active={side}
+          onChange={(k) => setSide(k as 'clientes' | 'proveedores')}
+          tabs={[
+            { key: 'clientes', label: 'Clientes' },
+            { key: 'proveedores', label: 'Proveedores' },
+          ]}
+        />
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-slate-500">
+            <span className="font-semibold text-prats-navy">{over347}</span> superan el umbral del 347 ({eur(THRESHOLD_347)})
+          </span>
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar por nombre o NIF…"
+            className="h-8 w-56"
+          />
+        </div>
+      </div>
+
+      {side === 'clientes' ? (
+        <ThirdPartyTable
+          title="Facturación por cliente"
+          tag={`Ejercicio ${year}`}
+          nameLabel="Cliente"
+          totalLabel="Facturado año"
+          extraLabel="Cobros sin factura"
+          rows={clients.filter(match)}
+          footnote="Facturado = facturas emitidas del año (IVA incluido, criterio del 347), con su desglose por trimestre. «Cobros sin
+          factura» son los tickets y cobros de sastrería del escenario C sin factura asociada: no van al 347, pero sirven para ver el
+          volumen real por cliente. En dorado, los clientes que superan los 3.005,06 € facturados (declarables en el 347)."
+        />
+      ) : (
+        <div className="space-y-5">
+          <ThirdPartyTable
+            title="Compras por proveedor · nacionales y resto (347)"
+            tag={`Ejercicio ${year}`}
+            nameLabel="Proveedor"
+            totalLabel="Total año (con IVA)"
+            extraLabel="IRPF retenido"
+            rows={suppliers.filter(match)}
+            footnote="Volumen anual por proveedor: base + IVA de sus facturas recibidas (criterio del 347), por trimestre. En dorado, los
+            que superan los 3.005,06 €. Ojo: las operaciones con retención de IRPF (profesionales, alquileres) ya se declaran en los
+            modelos 190/180 y no se incluyen en el 347."
+          />
+          <ThirdPartyTable
+            title="Proveedores intracomunitarios (349)"
+            tag={`Ejercicio ${year}`}
+            nameLabel="Proveedor"
+            totalLabel="Base año"
+            rows={intra.filter(match)}
+            noThreshold
+            footnote="Adquisiciones intracomunitarias por proveedor, en BASE imponible (criterio del modelo 349, que no tiene umbral
+            mínimo). Estas operaciones van al 349, no al 347."
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Tabla genérica de agregado anual por tercero con desglose trimestral.
+function ThirdPartyTable({ title, tag, nameLabel, totalLabel, extraLabel, rows, footnote, noThreshold = false }: {
+  title: string
+  tag: string
+  nameLabel: string
+  totalLabel: string
+  extraLabel?: string
+  rows: ThirdPartyRow[]
+  footnote: string
+  noThreshold?: boolean
+}) {
+  const cols = 8 + (extraLabel ? 1 : 0)
+  const sum = (fn: (r: ThirdPartyRow) => number) => rows.reduce((s, r) => s + fn(r), 0)
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-x-auto">
+      <div className="flex items-baseline justify-between border-b border-slate-200 px-4 py-3">
+        <span className="text-sm font-semibold text-prats-navy">{title}</span>
+        <span className="text-[11px] uppercase tracking-wider text-slate-400">{tag}</span>
+      </div>
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          <tr>
+            <th className="text-left px-3 py-3">{nameLabel}</th>
+            <th className="text-left px-3 py-3">NIF</th>
+            <th className="text-right px-3 py-3">T1</th>
+            <th className="text-right px-3 py-3">T2</th>
+            <th className="text-right px-3 py-3">T3</th>
+            <th className="text-right px-3 py-3">T4</th>
+            <th className="text-right px-3 py-3">{totalLabel}</th>
+            {extraLabel && <th className="text-right px-3 py-3">{extraLabel}</th>}
+            <th className="text-right px-3 py-3">Nº docs</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {rows.length === 0 ? (
+            <tr><td colSpan={cols} className="px-3 py-8 text-center text-slate-400">Sin registros.</td></tr>
+          ) : rows.map((r, i) => {
+            const over = !noThreshold && r.total > THRESHOLD_347
+            return (
+              <tr key={i} className={over ? 'bg-prats-gold/5 hover:bg-prats-gold/10' : 'hover:bg-slate-50/50'}>
+                <td className="px-3 py-2 font-medium text-slate-700">
+                  {r.name}
+                  {over && (
+                    <span className="ml-1.5 rounded bg-prats-gold/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-prats-gold">347</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 font-mono text-xs text-slate-500">{r.nif ?? <span className="text-slate-300">—</span>}</td>
+                {r.byQuarter.map((v, j) => (
+                  <td key={j} className="px-3 py-2 text-right tabular-nums text-slate-600">{v !== 0 ? eur(v) : <span className="text-slate-300">—</span>}</td>
+                ))}
+                <td className="px-3 py-2 text-right font-semibold tabular-nums">{r.total !== 0 ? eur(r.total) : <span className="text-slate-300">—</span>}</td>
+                {extraLabel && (
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-500">{r.extra !== 0 ? eur(r.extra) : <span className="text-slate-300">—</span>}</td>
+                )}
+                <td className="px-3 py-2 text-right tabular-nums text-slate-500">{r.count || '—'}</td>
+              </tr>
+            )
+          })}
+          {rows.length > 0 && (
+            <tr className={TOTAL_ROW}>
+              <td className="px-3 py-2.5" colSpan={2}>TOTAL ({rows.length})</td>
+              {[0, 1, 2, 3].map((j) => (
+                <td key={j} className="px-3 py-2.5 text-right tabular-nums">{eur(sum((r) => r.byQuarter[j]))}</td>
+              ))}
+              <td className="px-3 py-2.5 text-right tabular-nums">{eur(sum((r) => r.total))}</td>
+              {extraLabel && <td className="px-3 py-2.5 text-right tabular-nums">{eur(sum((r) => r.extra))}</td>}
+              <td className="px-3 py-2.5 text-right tabular-nums">{sum((r) => r.count)}</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+      <p className="border-t p-3 text-xs text-slate-400">{footnote}</p>
     </div>
   )
 }
