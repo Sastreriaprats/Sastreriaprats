@@ -368,7 +368,7 @@ export function CheckoutContent() {
                   className="h-11"
                 />
               </div>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <Label className="text-xs" htmlFor="checkout-city">Ciudad *</Label>
                   <Input
@@ -387,6 +387,8 @@ export function CheckoutContent() {
                     className="h-11"
                   />
                 </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <Label className="text-xs" htmlFor="checkout-province">Provincia</Label>
                   <Input
@@ -396,8 +398,6 @@ export function CheckoutContent() {
                     className="h-11"
                   />
                 </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <Label className="text-xs" htmlFor="checkout-country">País *</Label>
                   <Select
