@@ -169,6 +169,13 @@ async function computeYear(year: number) {
   const cashMoves: MovementRow[] = []
   const incomeLedger: LedgerMovement[] = []
   let depositedYearTotal = 0, depositedYearCount = 0
+  // Cobros 100% en efectivo SIN ingresar al banco: sus documentos (facturas
+  // ligadas) NO pueden figurar en el escenario C. Solo se excluye lo que se
+  // sabe seguro que es efectivo puro; lo mixto/desconocido se queda en C.
+  const cashOnlySaleIds = new Set<string>()
+  const ordersSeen = new Set<string>()      // pedidos con algún cobro este año
+  const ordersWithC = new Set<string>()     // pedidos con algún cobro que pertenece a C
+  const cashOnlyInvoiceIds = new Set<string>()
 
   // ¿Está este cobro en efectivo ya ingresado al banco? Si sí, lo acumula como
   // depositado (pasa a C). El guard de size evita HMACs cuando no hay depósitos.
@@ -220,6 +227,8 @@ async function computeYear(year: number) {
     if (ncBase > 0.0001) {
       addIncome(false, ncBase, ncVat, month, q)
       incomeLedger.push({ date: created.slice(0, 10), type: 'Ticket', concept: `Ticket ${ref}`, client, base: r2(ncBase), vat: r2(ncVat), total: r2(ncBase + ncVat), saleId: sid })
+    } else if (cashBase > 0.0001) {
+      cashOnlySaleIds.add(sid)
     }
   }
 
@@ -246,6 +255,10 @@ async function computeYear(year: number) {
     const num = String((order as any).order_number ?? '')
     const concept = num ? `Sastrería ${num}` : 'Cobro sastrería'
     const orderId = String((order as any).id ?? '') || undefined
+    if (orderId) {
+      ordersSeen.add(orderId)
+      if (!isCash) ordersWithC.add(orderId)
+    }
     if (isCash) {
       cashMoves.push({ kind: 'order_payment', paymentId: pid, orderId, date: d.slice(0, 10), ref: num, concept, method: 'efectivo', client, base: r2(base), vat: r2(vat), total: r2(base + vat) })
     } else {
@@ -272,6 +285,7 @@ async function computeYear(year: number) {
     addIncome(isCash, base, tax, month, q)
     const num = String(x.invoice_number ?? '')
     if (isCash) {
+      cashOnlyInvoiceIds.add(iid)
       cashMoves.push({ kind: 'invoice', invoiceId: iid, pdfUrl, date: d.slice(0, 10), ref: num, concept: `Factura ${num}`, method: 'efectivo', client, base: r2(base), vat: r2(tax), total: r2(base + tax) })
     } else {
       incomeLedger.push({ date: d.slice(0, 10), type: 'Factura', concept: `Factura ${num}`, client, base: r2(base), vat: r2(tax), total: r2(base + tax), pdfUrl })
@@ -362,6 +376,7 @@ async function computeYear(year: number) {
   return {
     cash, noncash, expenses, vatPaidSummary, expMonthly, apQ, cashMoves, incomeLedger, expenseLedger, apInvoices,
     vatByRate, depositedYearTotal, depositedYearCount,
+    cashOnlySaleIds, ordersSeen, ordersWithC, cashOnlyInvoiceIds,
   }
 }
 
@@ -474,29 +489,49 @@ export async function getViewC(year: number) {
 
     // Facturas emitidas del año (documentos fiscales; se ven en C)
     const { data: inv } = await admin.from('invoices')
-      .select('invoice_number, client_name, client_nif, invoice_date, subtotal, tax_amount, total, status, payment_method, sale_id, tailoring_order_id, pdf_url')
+      .select('id, invoice_number, client_name, client_nif, invoice_date, subtotal, tax_amount, total, status, payment_method, sale_id, tailoring_order_id, pdf_url')
       .eq('invoice_type', 'issued')
       .gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`)
       .not('status', 'in', '(draft,cancelled)')
       .order('invoice_date', { ascending: false })
-    const invoices = ((inv ?? []) as Record<string, unknown>[]).map((x) => {
-      const total = Number(x.total) || 0
-      const vat = Number(x.tax_amount) || 0
-      return {
-        number: String(x.invoice_number ?? ''),
-        client: String(x.client_name ?? ''),
-        nif: String(x.client_nif ?? '').trim() || undefined,
-        date: String(x.invoice_date ?? ''),
-        base: r2(Number(x.subtotal) || (total - vat)),
-        vat: r2(vat),
-        total,
-        status: String(x.status ?? ''),
-        method: String(x.payment_method ?? ''),
-        saleId: x.sale_id ? String(x.sale_id) : undefined,
-        orderId: x.tailoring_order_id ? String(x.tailoring_order_id) : undefined,
-        pdfUrl: x.pdf_url ? String(x.pdf_url) : undefined,
+    // En C NO puede figurar nada cobrado en efectivo: fuera las facturas cuyo
+    // cobro es 100% efectivo sin ingresar al banco (venta efectiva, pedido con
+    // todos los cobros en efectivo, o factura suelta cobrada en efectivo). Lo
+    // mixto se queda (su parte no-efectivo pertenece a C) y lo desconocido
+    // (p.ej. cobros de otro año) también, por prudencia.
+    const isCashOnly = (x: Record<string, unknown>) => {
+      if (x.sale_id) return c.cashOnlySaleIds.has(String(x.sale_id))
+      if (x.tailoring_order_id) {
+        const oid = String(x.tailoring_order_id)
+        return c.ordersSeen.has(oid) && !c.ordersWithC.has(oid)
       }
-    })
+      return c.cashOnlyInvoiceIds.has(String(x.id))
+    }
+    // El método de pago tampoco puede delatar efectivo: se vacía si lo menciona.
+    const cleanMethod = (m: unknown) => {
+      const s = String(m ?? '')
+      return /cash|efectivo|mixed|mixto/i.test(s) ? '' : s
+    }
+    const invoices = ((inv ?? []) as Record<string, unknown>[])
+      .filter((x) => !isCashOnly(x))
+      .map((x) => {
+        const total = Number(x.total) || 0
+        const vat = Number(x.tax_amount) || 0
+        return {
+          number: String(x.invoice_number ?? ''),
+          client: String(x.client_name ?? ''),
+          nif: String(x.client_nif ?? '').trim() || undefined,
+          date: String(x.invoice_date ?? ''),
+          base: r2(Number(x.subtotal) || (total - vat)),
+          vat: r2(vat),
+          total,
+          status: String(x.status ?? ''),
+          method: cleanMethod(x.payment_method),
+          saleId: x.sale_id ? String(x.sale_id) : undefined,
+          orderId: x.tailoring_order_id ? String(x.tailoring_order_id) : undefined,
+          pdfUrl: x.pdf_url ? String(x.pdf_url) : undefined,
+        }
+      })
 
     return ok({ C, ledger: ledger.slice(0, 5000), invoices, apInvoices: c.apInvoices, vatByRate: c.vatByRate } as ViewC)
   } catch { return fail() }

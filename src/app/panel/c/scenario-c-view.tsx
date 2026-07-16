@@ -450,8 +450,8 @@ export function ScenarioCView() {
               <p className="border-t p-3 text-xs text-slate-400">
                 Tickets y facturas del escenario C, desglosados en base imponible + IVA (con su tipo). Las facturas emitidas no llevan
                 retención de IRPF (actividad no sujeta), por eso la columna va vacía. Si un ticket o pedido tiene factura emitida, solo
-                figura la factura (sin duplicar). El total suma los documentos listados: puede no coincidir con el Resumen C, porque
-                las facturas se listan por su total completo aunque se cobraran en efectivo.
+                figura la factura (sin duplicar). El total suma los documentos listados por su importe completo: puede desviarse
+                ligeramente del Resumen C con documentos de cobro parcial.
               </p>
             </div>
           ) : (
