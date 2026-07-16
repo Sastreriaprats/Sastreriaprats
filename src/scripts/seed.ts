@@ -43,8 +43,8 @@ async function seed() {
   const { data: existingStores } = await supabase.from('stores').select('id').limit(1)
   if (!existingStores?.length) {
     await supabase.from('stores').insert([
-      { code: 'PRATS-SER', name: 'Prats Serrano', address: 'Calle de Serrano 82, Madrid', phone: '+34 91 435 6789', is_main: true },
-      { code: 'PRATS-VEL', name: 'Prats Velázquez', address: 'Calle de Velázquez 54, Madrid', phone: '+34 91 578 1234', is_main: false },
+      { code: 'PRATS-PIN', name: 'Hermanos Pinzón', address: 'Calle Hermanos Pinzón, 4 - 28036 Madrid', phone: '+34 912 401 845', is_main: true },
+      { code: 'PRATS-WEL', name: 'Wellington', address: 'Calle Velázquez, 8 - 28001 Madrid', phone: '+34 671 35 34 65', is_main: false },
     ])
     console.log('✅ 2 tiendas creadas')
   }
@@ -174,7 +174,7 @@ async function seed() {
   const { data: existingClients } = await supabase.from('clients').select('id').limit(1)
   if (!existingClients?.length) {
     const clients = [
-      { client_code: 'CLI-001', first_name: 'Carlos', last_name: 'García López', email: 'carlos.garcia@email.com', phone: '+34600111222', category: 'vip', address: 'Calle Serrano 45', city: 'Madrid', postal_code: '28001', province: 'Madrid', source: 'referral', is_active: true },
+      { client_code: 'CLI-001', first_name: 'Carlos', last_name: 'García López', email: 'carlos.garcia@email.com', phone: '+34600111222', category: 'vip', address: 'Calle Alcalá 45', city: 'Madrid', postal_code: '28001', province: 'Madrid', source: 'referral', is_active: true },
       { client_code: 'CLI-002', first_name: 'Miguel', last_name: 'Fernández Ruiz', email: 'miguel.fernandez@email.com', phone: '+34600333444', category: 'premium', address: 'Paseo de la Castellana 120', city: 'Madrid', postal_code: '28046', province: 'Madrid', source: 'walk_in', is_active: true },
       { client_code: 'CLI-003', first_name: 'Alejandro', last_name: 'Martínez Sánchez', email: 'alejandro.martinez@email.com', phone: '+34600555666', category: 'standard', address: 'Calle Velázquez 30', city: 'Madrid', postal_code: '28006', province: 'Madrid', source: 'web', is_active: true },
       { client_code: 'CLI-004', first_name: 'David', last_name: 'López Hernández', email: 'david.lopez@email.com', phone: '+34600777888', category: 'standard', address: 'Gran Vía 50', city: 'Madrid', postal_code: '28013', province: 'Madrid', source: 'web', is_active: true },

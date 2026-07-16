@@ -101,7 +101,7 @@ ${filtersLine ? `<p class="meta">${escapeHtml(filtersLine)}</p>` : ''}
 
 ${section}
 
-<div class="footer">Sastrería Prats · Calle de Serrano 82, Madrid · Informe generado automáticamente</div>
+<div class="footer">Sastrería Prats · Calle Hermanos Pinzón, 4 - 28036 Madrid · Informe generado automáticamente</div>
 </body></html>`
 
   return new NextResponse(html, {
