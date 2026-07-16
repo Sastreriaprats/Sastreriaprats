@@ -123,6 +123,9 @@ export function ReportsContent() {
   const [compareData, setCompareData] = useState<CompareData | null>(null)
   const [topProducts, setTopProducts] = useState<ProductItem[]>([])
   const [productSearch, setProductSearch] = useState('')
+  // Modo de la pestaña Productos: histórico total del producto (por defecto) o
+  // acotado al periodo/tienda del filtro superior (petición Mónica: temporadas).
+  const [productScope, setProductScope] = useState<'historic' | 'period'>('historic')
   const [tailorData, setTailorData] = useState<TailorItem[]>([])
   const [clientsData, setClientsData] = useState<ClientsData | null>(null)
   const [clientsAdvanced, setClientsAdvanced] = useState<ClientsAdvancedAnalytics | null>(null)
@@ -182,7 +185,7 @@ export function ReportsContent() {
         }),
         // limit alto: el informe incluye TODO el catálogo, también prendas a cero
         // (petición de Isma) — con 500 los no-vendidos quedaban cortados.
-        getTopProducts({ start_date: start, end_date: end, store_id: storeId, channel, limit: 5000, tax_mode }),
+        getTopProducts({ start_date: start, end_date: end, store_id: storeId, channel, limit: 5000, tax_mode, scope: productScope }),
         getTailorPerformance({ start_date: start, end_date: end, store_id: storeId, channel, tax_mode }),
         getClientsAnalytics({ start_date: start, end_date: end, store_id: storeId }),
         getClientsAdvancedAnalytics({ start_date: start, end_date: end, store_id: storeId }),
@@ -214,7 +217,7 @@ export function ReportsContent() {
     } finally {
       setIsLoading(false)
     }
-  }, [dateRange, groupBy, storeFilter, channelFilter, taxMode])
+  }, [dateRange, groupBy, storeFilter, channelFilter, taxMode, productScope])
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
@@ -595,21 +598,52 @@ export function ReportsContent() {
               <TabsContent value="sales"><VentasTab salesData={salesData} timePatternData={timePatternData} storeBreakdown={salesStoreBreakdown} /></TabsContent>
               <TabsContent value="bytype"><TailoringByTypeTab data={tailoringByCat} storeName={activeStoreName} storeBreakdown={tailoringStoreBreakdown} /></TabsContent>
               <TabsContent value="products">
-                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 mb-4 text-xs text-amber-900">
-                  <Layers className="h-4 w-4 shrink-0 mt-0.5" />
-                  <p>
-                    <strong>Histórico total del producto.</strong> Compradas, vendidas y rentabilidad
-                    son de toda la vida del producto: <strong>no</strong> dependen del filtro de fechas ni de tienda de arriba
-                    (sí del modo IVA). El stock inicial se cargó de una vez, por eso se mide siempre completo.
-                  </p>
+                {/* Alcance del informe: toda la vida del producto o el periodo del
+                    filtro superior (petición Mónica: revisar la temporada al cerrarla). */}
+                <div className="inline-flex rounded-lg border p-0.5 mb-3">
+                  <button
+                    type="button"
+                    onClick={() => setProductScope('historic')}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${productScope === 'historic' ? 'bg-prats-navy text-white' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    Histórico total
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setProductScope('period')}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${productScope === 'period' ? 'bg-prats-navy text-white' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    Periodo del filtro
+                  </button>
                 </div>
+                {productScope === 'historic' ? (
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 mb-4 text-xs text-amber-900">
+                    <Layers className="h-4 w-4 shrink-0 mt-0.5" />
+                    <p>
+                      <strong>Histórico total del producto.</strong> Compradas, vendidas y rentabilidad
+                      son de toda la vida del producto: <strong>no</strong> dependen del filtro de fechas ni de tienda de arriba
+                      (sí del modo IVA). El stock inicial se cargó de una vez, por eso se mide siempre completo.
+                      Cambia a &laquo;Periodo del filtro&raquo; para acotar las ventas a las fechas de arriba.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 mb-4 text-xs text-sky-900">
+                    <Layers className="h-4 w-4 shrink-0 mt-0.5" />
+                    <p>
+                      <strong>Periodo del filtro.</strong> Vendidas, facturación y margen son SOLO las ventas
+                      entre {dateRange.start} y {dateRange.end}{storeFilter !== 'all' ? ` en ${activeStoreName}` : ''} (ideal para
+                      revisar una temporada). El catálogo completo sigue listado &mdash;lo no vendido en el periodo sale a cero&mdash;,
+                      el <strong>stock es el actual de hoy</strong> y &laquo;Compradas&raquo; se oculta (no hay registro de entradas por periodo).
+                    </p>
+                  </div>
+                )}
                 <Input
                   placeholder="Filtrar por producto o SKU..."
                   value={productSearch}
                   onChange={(e) => setProductSearch(e.target.value)}
                   className="max-w-sm mb-4"
                 />
-                <TopProductsChart products={filteredProducts} />
+                <TopProductsChart products={filteredProducts} periodMode={productScope === 'period'} />
               </TabsContent>
               <TabsContent value="tailors"><TailorTable data={tailorData} /></TabsContent>
               <TabsContent value="clients"><ClientsChart data={clientsData} advanced={clientsAdvanced} showByStore={showStoreBreakdown} /></TabsContent>

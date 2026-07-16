@@ -445,7 +445,7 @@ export const getComparePeriods = protectedAction<
 )
 
 export const getTopProducts = protectedAction<
-  { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel; limit?: number; tax_mode?: TaxMode },
+  { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel; limit?: number; tax_mode?: TaxMode; scope?: 'historic' | 'period' },
   {
     product_id: string; name: string; sku: string; units: number; revenue: number
     // ── Rentabilidad ──────────────────────────────────────────────────────────
@@ -465,13 +465,18 @@ export const getTopProducts = protectedAction<
   }[]
 >(
   { permission: 'reports.view', auditModule: 'reports' },
-  // NOTA: esta pestaña es un análisis HISTÓRICO TOTAL del producto (compradas vs
-  // vendidas vs rentabilidad de toda su vida). Por eso NO aplica el filtro de
-  // fechas ni el de tienda de la página (decisión de producto, jun-2026): el
-  // stock inicial se cargó de una vez en abril/mayo y se quería ver siempre.
-  async (ctx, { channel = 'all', limit = 10, tax_mode = 'with_tax' }) => {
+  // NOTA: por defecto ('historic') esta pestaña es un análisis HISTÓRICO TOTAL
+  // del producto (compradas vs vendidas vs rentabilidad de toda su vida): NO
+  // aplica el filtro de fechas ni el de tienda de la página (decisión de
+  // producto, jun-2026; el stock inicial se cargó de una vez en abril/mayo).
+  // Con scope='period' (petición Mónica, jul-2026: cierre de temporada) las
+  // VENTAS sí se acotan al rango de fechas y tienda del filtro; el stock sigue
+  // siendo el actual y "compradas" no aplica (no hay registro fiable de
+  // entradas por periodo).
+  async (ctx, { start_date, end_date, store_id, channel = 'all', limit = 10, tax_mode = 'with_tax', scope = 'historic' }) => {
     if (channel === 'tailoring') return success([])
     const net = tax_mode === 'without_tax'
+    const byPeriod = scope === 'period'
 
     // Agrupamos por PRODUCTO BASE (products.id), no por variante/talla. La línea
     // de venta apunta a la variante (product_variant_id); subimos a su producto
@@ -483,11 +488,15 @@ export const getTopProducts = protectedAction<
     const PAGE = 1000
     const filteredLines: any[] = []
     for (let from = 0; ; from += PAGE) {
-      const { data } = await ctx.adminClient
+      let q = ctx.adminClient
         .from('sale_lines')
-        .select('description, sku, quantity, line_total, tax_rate, sales!inner(status, store_id, stores(name)), product_variants(size, cost_price_override, products(id, name, sku, cost_price))')
+        .select('description, sku, quantity, line_total, tax_rate, sales!inner(status, store_id, created_at, stores(name)), product_variants(size, cost_price_override, products(id, name, sku, cost_price))')
         .eq('sales.status', 'completed')
-        .range(from, from + PAGE - 1)
+      if (byPeriod) {
+        q = q.gte('sales.created_at', `${start_date}T00:00:00`).lte('sales.created_at', `${end_date}T23:59:59`)
+        if (store_id) q = q.eq('sales.store_id', store_id)
+      }
+      const { data } = await q.range(from, from + PAGE - 1)
       if (!data?.length) break
       // Excluir cobros pendientes — no son productos vendidos
       for (const line of data as any[]) {

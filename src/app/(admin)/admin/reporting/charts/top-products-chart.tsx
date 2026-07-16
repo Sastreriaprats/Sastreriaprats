@@ -28,7 +28,10 @@ function marginClass(p: number) {
 
 type SortKey = 'name' | 'purchased_units' | 'units' | 'current_stock' | 'revenue' | 'unit_cost' | 'margin' | 'margin_pct'
 
-export function TopProductsChart({ products }: { products: ProductItem[] }) {
+// periodMode: las ventas vienen acotadas al periodo del filtro → "Compradas"
+// (modelo de conservación histórico) no aplica y se oculta; el stock sigue
+// siendo el actual de hoy.
+export function TopProductsChart({ products, periodMode = false }: { products: ProductItem[]; periodMode?: boolean }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'revenue', dir: 'desc' })
   if (!products.length) return <p className="text-center text-muted-foreground py-12">Sin datos</p>
@@ -105,22 +108,24 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
 
   return (
     <div className="space-y-6">
-      {/* KPIs: comprado vs vendido vs stock vs margen */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* KPIs: comprado vs vendido vs stock vs margen (en modo periodo, sin "Comprado") */}
+      <div className={`grid grid-cols-2 gap-4 ${periodMode ? 'lg:grid-cols-3' : 'lg:grid-cols-4'}`}>
+        {!periodMode && (
+          <Card>
+            <CardContent className="pt-4 pb-3">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-muted-foreground">Comprado (inicial + proveedor)</span>
+                <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <p className="text-2xl font-bold">{tot.purchasedUnits} <span className="text-base font-normal text-muted-foreground">uds</span></p>
+              <p className="text-xs text-muted-foreground">{formatCurrency(tot.purchasedCost)} a coste</p>
+            </CardContent>
+          </Card>
+        )}
         <Card>
           <CardContent className="pt-4 pb-3">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-muted-foreground">Comprado (inicial + proveedor)</span>
-              <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-            </div>
-            <p className="text-2xl font-bold">{tot.purchasedUnits} <span className="text-base font-normal text-muted-foreground">uds</span></p>
-            <p className="text-xs text-muted-foreground">{formatCurrency(tot.purchasedCost)} a coste</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4 pb-3">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-muted-foreground">Vendido</span>
+              <span className="text-xs text-muted-foreground">{periodMode ? 'Vendido en el periodo' : 'Vendido'}</span>
               <Package className="h-4 w-4 text-muted-foreground" />
             </div>
             <p className="text-2xl font-bold">{tot.soldUnits} <span className="text-base font-normal text-muted-foreground">uds</span></p>
@@ -130,11 +135,13 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
         <Card>
           <CardContent className="pt-4 pb-3">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-muted-foreground">Stock actual</span>
+              <span className="text-xs text-muted-foreground">{periodMode ? 'Stock actual (hoy)' : 'Stock actual'}</span>
               <Package className="h-4 w-4 text-muted-foreground" />
             </div>
             <p className="text-2xl font-bold">{tot.currentStock} <span className="text-base font-normal text-muted-foreground">uds</span></p>
-            <p className="text-xs text-muted-foreground">sin vender · {formatCurrency(tot.currentStock > 0 ? tot.purchasedCost - tot.cogs : 0)} a coste</p>
+            <p className="text-xs text-muted-foreground">
+              sin vender{!periodMode && <> · {formatCurrency(tot.currentStock > 0 ? tot.purchasedCost - tot.cogs : 0)} a coste</>}
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -231,7 +238,7 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
               <TableRow>
                 <TableHead>#</TableHead>
                 {sortHead('name', 'Producto', 'left')}
-                {sortHead('purchased_units', 'Compradas')}
+                {!periodMode && sortHead('purchased_units', 'Compradas')}
                 {sortHead('units', 'Vendidas')}
                 {sortHead('current_stock', 'Stock')}
                 {sortHead('revenue', 'Facturación')}
@@ -261,7 +268,7 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
                         </p>
                         {p.sku && <p className="text-xs text-muted-foreground font-mono ml-[18px]">{p.sku}</p>}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">{p.purchased_units || <span className="text-muted-foreground">—</span>}</TableCell>
+                      {!periodMode && <TableCell className="text-right tabular-nums">{p.purchased_units || <span className="text-muted-foreground">—</span>}</TableCell>}
                       <TableCell className="text-right tabular-nums">{p.units}</TableCell>
                       <TableCell className="text-right tabular-nums text-muted-foreground">{p.current_stock || '—'}</TableCell>
                       <TableCell className="text-right font-bold tabular-nums">{formatCurrency(p.revenue)}</TableCell>
@@ -272,12 +279,12 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
                     {isOpen && hasDetail && (
                       <TableRow className="bg-muted/30">
                         <TableCell />
-                        <TableCell colSpan={8} className="py-2">
+                        <TableCell colSpan={periodMode ? 7 : 8} className="py-2">
                           <table className="w-full text-xs">
                             <thead>
                               <tr className="text-muted-foreground">
                                 <th className="text-left font-medium pb-1">Talla</th>
-                                <th className="text-right font-medium pb-1">Comprado</th>
+                                {!periodMode && <th className="text-right font-medium pb-1">Comprado</th>}
                                 <th className="text-right font-medium pb-1">Vendido</th>
                                 <th className="text-right font-medium pb-1">Queda</th>
                               </tr>
@@ -286,7 +293,7 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
                               {p.sizeBreakdown.map((b, j) => (
                                 <tr key={j}>
                                   <td className="py-0.5 font-mono">{b.size}</td>
-                                  <td className="py-0.5 text-right tabular-nums">{b.comprado}</td>
+                                  {!periodMode && <td className="py-0.5 text-right tabular-nums">{b.comprado}</td>}
                                   <td className="py-0.5 text-right tabular-nums">{b.vendido}</td>
                                   {/* Talla agotada resaltada en rojo (petición Mónica/Isma) */}
                                   <td className={`py-0.5 text-right tabular-nums ${b.queda === 0 ? 'text-red-600 font-semibold' : ''}`}>{b.queda}</td>
@@ -294,7 +301,7 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
                               ))}
                               <tr className="border-t font-semibold">
                                 <td className="py-0.5">Total</td>
-                                <td className="py-0.5 text-right tabular-nums">{p.sizeBreakdown.reduce((s, b) => s + b.comprado, 0)}</td>
+                                {!periodMode && <td className="py-0.5 text-right tabular-nums">{p.sizeBreakdown.reduce((s, b) => s + b.comprado, 0)}</td>}
                                 <td className="py-0.5 text-right tabular-nums">{p.sizeBreakdown.reduce((s, b) => s + b.vendido, 0)}</td>
                                 <td className={`py-0.5 text-right tabular-nums ${p.sizeBreakdown.reduce((s, b) => s + b.queda, 0) === 0 ? 'text-red-600' : ''}`}>{p.sizeBreakdown.reduce((s, b) => s + b.queda, 0)}</td>
                               </tr>
@@ -309,7 +316,12 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
             </TableBody>
           </Table>
           <p className="text-[11px] text-muted-foreground mt-3">
-            <strong>Compradas</strong> = <strong>Stock + Vendidas</strong>: todo el género que ha entrado del producto (stock inicial cargado a mano al darlo de alta + recepciones de proveedor). Se calcula como lo que queda en stock más lo vendido, porque el stock inicial se cargó directo sin dejar registro de compra; mermas o devoluciones a proveedor son un sesgo menor. Valor a coste estimado con el coste actual del producto.
+            {!periodMode && (
+              <><strong>Compradas</strong> = <strong>Stock + Vendidas</strong>: todo el género que ha entrado del producto (stock inicial cargado a mano al darlo de alta + recepciones de proveedor). Se calcula como lo que queda en stock más lo vendido, porque el stock inicial se cargó directo sin dejar registro de compra; mermas o devoluciones a proveedor son un sesgo menor. Valor a coste estimado con el coste actual del producto.</>
+            )}
+            {periodMode && (
+              <><strong>Vendidas y facturación</strong> son solo las del periodo y tienda del filtro superior; <strong>Stock</strong> es el actual de hoy (no el que había al cierre del periodo).</>
+            )}
             <strong> Margen</strong> = facturación sin IVA − (uds vendidas × coste del producto); se calcula <strong>siempre sin IVA</strong> aunque la facturación se muestre con IVA. Los productos sin coste registrado aparecen con &laquo;—&raquo; en margen.
           </p>
         </CardContent>
