@@ -31,6 +31,48 @@ export const BOUTIQUE_SALE_TYPE = 'boutique' as const
  */
 export const GIFT_CARD_SALE_TYPE = 'gift_card' as const
 
+// Orden natural de tallas para el desglose: numéricas por valor (46,48,50…) antes
+// que las de letra; letras por su orden real (XS<S<M<L<XL…); "sin talla" (—) al final.
+const LETTER_SIZE_ORDER = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', '4XL']
+export function compareSizes(a: string, b: string): number {
+  const na = Number(a), nb = Number(b)
+  const aNum = a.trim() !== '' && !Number.isNaN(na)
+  const bNum = b.trim() !== '' && !Number.isNaN(nb)
+  if (aNum && bNum) return na - nb
+  if (aNum !== bNum) return aNum ? -1 : 1
+  const ia = LETTER_SIZE_ORDER.indexOf(a.toUpperCase()), ib = LETTER_SIZE_ORDER.indexOf(b.toUpperCase())
+  if (ia !== -1 && ib !== -1) return ia - ib
+  if (ia !== -1) return -1
+  if (ib !== -1) return 1
+  if (a === '—') return 1
+  if (b === '—') return -1
+  return a.localeCompare(b)
+}
+
+/** Fila del desglose por talla de un producto (lo devuelve getTopProducts). */
+export type SizeBreakdownRow = { size: string; comprado: number; vendido: number; queda: number }
+
+/**
+ * Agrega los `sizeBreakdown` de varios productos en un total por TALLA
+ * (más vendidas primero; a igualdad, orden natural de talla). Lo comparten la
+ * tarjeta "Unidades vendidas por talla" de Informes→Productos y sus exports
+ * PDF/Excel, para que los tres muestren exactamente el mismo dato.
+ */
+export function aggregateSizeTotals(
+  products: { sizeBreakdown?: SizeBreakdownRow[] | null }[],
+): SizeBreakdownRow[] {
+  const acc: Record<string, SizeBreakdownRow> = {}
+  for (const p of products) {
+    for (const b of p.sizeBreakdown || []) {
+      const s = (acc[b.size] ||= { size: b.size, comprado: 0, vendido: 0, queda: 0 })
+      s.comprado += b.comprado
+      s.vendido += b.vendido
+      s.queda += b.queda
+    }
+  }
+  return Object.values(acc).sort((a, b) => b.vendido - a.vendido || compareSizes(a.size, b.size))
+}
+
 /** Bucket acumulado por tienda. */
 export type StoreBucket = { store_name: string; total: number }
 

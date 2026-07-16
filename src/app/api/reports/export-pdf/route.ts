@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { checkUserPermission } from '@/actions/auth'
+import { aggregateSizeTotals, type SizeBreakdownRow } from '@/lib/reports/dimensions'
 
 type AnyRec = Record<string, unknown>
 
@@ -193,11 +194,28 @@ function renderProducts(items: AnyRec[] | null): string {
   <td class="right">${hasCost && Number(p.revenue_net) > 0 ? `${marginPct.toFixed(1)}%` : '—'}</td>
 </tr>`
   }).join('')
+  // Agregado por talla de los productos exportados (mismo dato que la tarjeta
+  // "Unidades vendidas por talla" de la web; respeta el filtro del buscador).
+  const sizeTotals = aggregateSizeTotals(items as { sizeBreakdown?: SizeBreakdownRow[] }[])
+  const sizeRows = sizeTotals.map(s => `
+<tr>
+  <td>${escapeHtml(s.size)}</td>
+  <td class="right">${s.comprado}</td>
+  <td class="right">${s.vendido}</td>
+  <td class="right">${s.queda}</td>
+</tr>`).join('')
+  const sizeSection = sizeTotals.length ? `
+<h2>Unidades por talla (productos exportados)</h2>
+<table>
+  <thead><tr><th>Talla</th><th class="right">Compradas</th><th class="right">Vendidas</th><th class="right">Stock</th></tr></thead>
+  <tbody>${sizeRows}</tbody>
+</table>` : ''
   return `<h2>Top productos</h2>
 <table>
   <thead><tr><th>#</th><th>Producto</th><th>SKU</th><th class="right">Compradas</th><th class="right">Vendidas</th><th class="right">Stock</th><th class="right">Facturación</th><th class="right">Coste ud.</th><th class="right">Margen</th><th class="right">Margen %</th></tr></thead>
   <tbody>${rows}</tbody>
 </table>
+${sizeSection}
 <p class="muted" style="font-size:11px;margin-top:6px">Datos históricos totales del producto (no dependen del filtro de fechas). Margen = facturación sin IVA − (uds vendidas × coste). Compradas = Stock actual + Vendidas (stock inicial cargado a mano + recepciones de proveedor).</p>`
 }
 

@@ -5,6 +5,7 @@ import { ChevronRight, ShoppingCart, Package, TrendingUp, ArrowUp, ArrowDown, Ar
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatCurrency } from '@/lib/utils'
+import { aggregateSizeTotals } from '@/lib/reports/dimensions'
 
 type Breakdown = { size: string; store_id: string; store_name: string; units: number; revenue: number }
 type SizeBreakdown = { size: string; comprado: number; vendido: number; queda: number }
@@ -80,6 +81,13 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
       ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
       : { key, dir: key === 'name' ? 'asc' : 'desc' },
   )
+  // Agregado por TALLA de TODOS los productos listados (no solo el top 10):
+  // como respeta el buscador de arriba, filtrar por "pantalon" da el top de
+  // tallas de pantalón. Sin filtro se mezclan tallajes de prendas distintas.
+  const sizeTotals = aggregateSizeTotals(products).filter(s => s.vendido > 0)
+  const maxSizeUnits = Math.max(...sizeTotals.map(s => s.vendido), 1)
+  const totalSizeUnits = sizeTotals.reduce((s, x) => s + x.vendido, 0)
+
   const sortHead = (key: SortKey, label: string, align: 'left' | 'right' = 'right') => (
     <TableHead className={align === 'right' ? 'text-right' : ''}>
       <button
@@ -148,9 +156,9 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
             <div className="space-y-3">
               {top10.map((p, i) => (
                 <div key={keyOf(p, i)}>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="font-medium truncate max-w-[200px]">{p.name}</span>
-                    <span className="text-muted-foreground">{formatCurrency(p.revenue)}</span>
+                  <div className="flex justify-between items-baseline gap-3 text-sm mb-1">
+                    <span className="font-medium">{p.name}</span>
+                    <span className="text-muted-foreground shrink-0 whitespace-nowrap">{formatCurrency(p.revenue)}</span>
                   </div>
                   <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
                     <div className="h-full bg-prats-navy rounded-full transition-all" style={{ width: `${maxRevenue > 0 ? (p.revenue / maxRevenue) * 100 : 0}%` }} />
@@ -170,9 +178,9 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
                 const maxAbs = Math.max(...products.filter(x => x.units > 0).map(x => Math.abs(x.margin)), 1)
                 return (
                   <div key={keyOf(p, i)}>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="font-medium truncate max-w-[170px]">{p.name}</span>
-                      <span className={marginClass(mp)}>{formatCurrency(p.margin)} · {mp.toFixed(0)}%</span>
+                    <div className="flex justify-between items-baseline gap-3 text-sm mb-1">
+                      <span className="font-medium">{p.name}</span>
+                      <span className={`${marginClass(mp)} shrink-0 whitespace-nowrap`}>{formatCurrency(p.margin)} · {mp.toFixed(0)}%</span>
                     </div>
                     <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
                       <div className={`h-full rounded-full transition-all ${p.margin >= 0 ? 'bg-emerald-500' : 'bg-red-500'}`} style={{ width: `${(Math.abs(p.margin) / maxAbs) * 100}%` }} />
@@ -181,6 +189,36 @@ export function TopProductsChart({ products }: { products: ProductItem[] }) {
                 )
               })}
             </div>
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader><CardTitle className="text-base">Unidades vendidas por talla</CardTitle></CardHeader>
+          <CardContent>
+            {sizeTotals.length === 0 ? (
+              <p className="text-center text-muted-foreground py-6 text-sm">Sin ventas con talla</p>
+            ) : (
+              <div className="grid gap-x-8 gap-y-3 md:grid-cols-2">
+                {sizeTotals.map((s) => (
+                  <div key={s.size}>
+                    <div className="flex justify-between text-sm mb-1">
+                      <span className="font-medium font-mono">{s.size}</span>
+                      <span className="text-muted-foreground">
+                        <span className="font-semibold text-foreground tabular-nums">{s.vendido} uds</span>
+                        {' '}· {totalSizeUnits > 0 ? ((s.vendido / totalSizeUnits) * 100).toFixed(0) : 0}%
+                        {' '}· <span className={s.queda === 0 ? 'text-red-600 font-semibold' : ''}>quedan {s.queda}</span>
+                      </span>
+                    </div>
+                    <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-prats-navy rounded-full transition-all" style={{ width: `${(s.vendido / maxSizeUnits) * 100}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="text-[11px] text-muted-foreground mt-3">
+              Suma de <strong>todos los productos listados</strong> (respeta el buscador de arriba): filtra por &laquo;pantalon&raquo;, &laquo;camisa&raquo;&hellip; para ver el top de tallas de esa prenda. Sin filtro se mezclan tallajes de prendas distintas.
+            </p>
           </CardContent>
         </Card>
       </div>

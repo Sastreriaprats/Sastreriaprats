@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { checkUserPermission } from '@/actions/auth'
+import { aggregateSizeTotals, type SizeBreakdownRow } from '@/lib/reports/dimensions'
 
 type AnyRec = Record<string, unknown>
 type Row = (string | number)[]
@@ -116,6 +117,16 @@ function sectionProducts(rows: Row[], items: AnyRec[] | null) {
       Number(p.unit_cost) > 0 && Number(p.revenue_net) > 0 ? `${marginPct.toFixed(1)}%` : '—',
     ])
   })
+
+  // Agregado por talla de los productos exportados (mismo dato que la tarjeta
+  // "Unidades vendidas por talla" de la web; respeta el filtro del buscador).
+  const sizeTotals = aggregateSizeTotals(items as { sizeBreakdown?: SizeBreakdownRow[] }[])
+  if (sizeTotals.length) {
+    rows.push([])
+    rows.push(['UNIDADES POR TALLA (productos exportados)'])
+    rows.push(['Talla', 'Uds compradas', 'Uds vendidas', 'Stock'])
+    for (const s of sizeTotals) rows.push([s.size, num(s.comprado), num(s.vendido), num(s.queda)])
+  }
 }
 
 function sectionTailors(rows: Row[], items: AnyRec[] | null) {

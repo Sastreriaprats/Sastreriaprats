@@ -3,7 +3,7 @@
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { checkUserExplicitPermission } from '@/actions/auth'
 import { success, failure } from '@/lib/errors'
-import { BOUTIQUE_SALE_TYPE, GIFT_CARD_SALE_TYPE, accumulateByStore } from '@/lib/reports/dimensions'
+import { BOUTIQUE_SALE_TYPE, GIFT_CARD_SALE_TYPE, accumulateByStore, compareSizes } from '@/lib/reports/dimensions'
 
 export type ReportChannel = 'all' | 'boutique' | 'tailoring'
 export type TaxMode = 'with_tax' | 'without_tax'
@@ -443,24 +443,6 @@ export const getComparePeriods = protectedAction<
     })
   }
 )
-
-// Orden natural de tallas para el desglose: numéricas por valor (46,48,50…) antes
-// que las de letra; letras por su orden real (XS<S<M<L<XL…); "sin talla" (—) al final.
-const LETTER_SIZE_ORDER = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', '4XL']
-function compareSizes(a: string, b: string): number {
-  const na = Number(a), nb = Number(b)
-  const aNum = a.trim() !== '' && !Number.isNaN(na)
-  const bNum = b.trim() !== '' && !Number.isNaN(nb)
-  if (aNum && bNum) return na - nb
-  if (aNum !== bNum) return aNum ? -1 : 1
-  const ia = LETTER_SIZE_ORDER.indexOf(a.toUpperCase()), ib = LETTER_SIZE_ORDER.indexOf(b.toUpperCase())
-  if (ia !== -1 && ib !== -1) return ia - ib
-  if (ia !== -1) return -1
-  if (ib !== -1) return 1
-  if (a === '—') return 1
-  if (b === '—') return -1
-  return a.localeCompare(b)
-}
 
 export const getTopProducts = protectedAction<
   { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel; limit?: number; tax_mode?: TaxMode },
