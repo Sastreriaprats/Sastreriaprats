@@ -12,9 +12,10 @@ type ClientAggregates = { spent: number; pending: number; count: number }
 
 /**
  * Calcula en vivo los totales por cliente sumando pedidos de confección
- * (`tailoring_orders`), ventas POS completadas (`sales`) y pedidos de la
- * tienda online no cancelados (`online_orders`). Las columnas homónimas en
- * `clients` están sin trigger y permanecen a 0.
+ * (`tailoring_orders`), ventas POS completadas (`sales`), pedidos de la
+ * tienda online no cancelados (`online_orders`) y el pendiente de reservas
+ * vivas (`product_reservations` active/pending_stock). Las columnas
+ * homónimas en `clients` están sin trigger y permanecen a 0.
  */
 async function computeClientAggregates(
   admin: AdminClient,
@@ -23,7 +24,7 @@ async function computeClientAggregates(
   const map = new Map<string, ClientAggregates>()
   if (clientIds.length === 0) return map
 
-  const [ordersRes, salesRes, onlineRes] = await Promise.all([
+  const [ordersRes, salesRes, onlineRes, reservationsRes] = await Promise.all([
     admin
       .from('tailoring_orders')
       .select('client_id, total_paid, total_pending')
@@ -42,6 +43,14 @@ async function computeClientAggregates(
       .select('client_id, total, status')
       .in('client_id', clientIds)
       .neq('status', 'cancelled'),
+    // Reservas vivas: lo no cobrado también es deuda del cliente. Las
+    // fulfilled se excluyen (su importe ya entra por la venta que las
+    // cumplió) y cancelled/expired ya no deben nada.
+    admin
+      .from('product_reservations')
+      .select('client_id, total, total_paid')
+      .in('client_id', clientIds)
+      .in('status', ['active', 'pending_stock']),
   ])
 
   for (const o of (ordersRes.data ?? []) as Array<Record<string, unknown>>) {
@@ -61,6 +70,13 @@ async function computeClientAggregates(
     const returned = Number(s.total_returned) || 0
     cur.spent += Math.max(0, total - returned)
     cur.count += 1
+    map.set(id, cur)
+  }
+  for (const r of (reservationsRes.data ?? []) as Array<Record<string, unknown>>) {
+    const id = String(r.client_id || '')
+    if (!id) continue
+    const cur = map.get(id) ?? { spent: 0, pending: 0, count: 0 }
+    cur.pending += Math.max(0, (Number(r.total) || 0) - (Number(r.total_paid) || 0))
     map.set(id, cur)
   }
   for (const o of (onlineRes.data ?? []) as Array<Record<string, unknown>>) {
