@@ -517,7 +517,9 @@ export function ReservationsTab() {
               const paidNum = Number(r.total_paid)
               const pendingNum = Math.max(0, totalNum - paidNum)
               const canEdit = r.status === 'active' || r.status === 'pending_stock'
-              const canPay  = canEdit && pendingNum > 0
+              // Una reserva cumplida puede quedar con pendiente (p.ej. si se
+              // eliminó el ticket de la recogida) → debe poder cobrarse aquí
+              const canPay  = (canEdit || r.status === 'fulfilled') && pendingNum > 0
               const activeLines = (r.lines || []).filter((l) => l.status !== 'cancelled')
               return (
                 <TableRow
@@ -710,7 +712,8 @@ export function ReservationsTab() {
             const allLines = viewing.lines || []
             const payments = viewing.payments || []
             const canEdit = viewing.status === 'active' || viewing.status === 'pending_stock'
-            const canPay  = canEdit && pendingNum > 0
+            // Ver comentario en la lista: cumplida con pendiente debe poder cobrarse
+            const canPay  = (canEdit || viewing.status === 'fulfilled') && pendingNum > 0
             return (
               <>
                 <DialogHeader>

@@ -14,7 +14,7 @@ type ClientAggregates = { spent: number; pending: number; count: number }
  * Calcula en vivo los totales por cliente sumando pedidos de confección
  * (`tailoring_orders`), ventas POS completadas (`sales`), pedidos de la
  * tienda online no cancelados (`online_orders`) y el pendiente de reservas
- * vivas (`product_reservations` active/pending_stock). Las columnas
+ * no canceladas (`product_reservations`). Las columnas
  * homónimas en `clients` están sin trigger y permanecen a 0.
  */
 async function computeClientAggregates(
@@ -43,14 +43,15 @@ async function computeClientAggregates(
       .select('client_id, total, status')
       .in('client_id', clientIds)
       .neq('status', 'cancelled'),
-    // Reservas vivas: lo no cobrado también es deuda del cliente. Las
-    // fulfilled se excluyen (su importe ya entra por la venta que las
-    // cumplió) y cancelled/expired ya no deben nada.
+    // Reservas: lo no cobrado también es deuda del cliente. En las fulfilled
+    // el pendiente es normalmente 0 (el cobro entra por la venta que las
+    // cumplió), pero si esa venta se eliminó puede quedar deuda real (caso
+    // RSV-2026-0044). cancelled/expired ya no deben nada.
     admin
       .from('product_reservations')
       .select('client_id, total, total_paid')
       .in('client_id', clientIds)
-      .in('status', ['active', 'pending_stock']),
+      .in('status', ['active', 'pending_stock', 'fulfilled']),
   ])
 
   for (const o of (ordersRes.data ?? []) as Array<Record<string, unknown>>) {
