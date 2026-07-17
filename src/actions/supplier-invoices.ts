@@ -744,6 +744,47 @@ export const createSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
   }
 )
 
+/**
+ * Actualiza SOLO las notas de una factura de proveedor. A diferencia del update
+ * completo, funciona también con facturas pagadas: las notas no afectan a
+ * importes, cuotas ni contabilidad, así que no hay motivo para bloquearlas.
+ */
+export const updateSupplierInvoiceNotesAction = protectedAction<{ id: string; notes: string | null; attachment_url?: string | null }, { auditEntityId: string; auditDescription: string }>(
+  {
+    permission: PERMISSION,
+    auditModule: 'accounting',
+    auditAction: 'update',
+    auditEntity: 'supplier_invoice',
+  },
+  async (ctx, input) => {
+    const { data: current, error: readErr } = await ctx.adminClient
+      .from(TABLE)
+      .select('invoice_number, supplier_name')
+      .eq('id', input.id)
+      .maybeSingle()
+    if (readErr) return failure(readErr.message)
+    if (!current) return failure('La factura no existe', 'NOT_FOUND')
+
+    const { error } = await ctx.adminClient
+      .from(TABLE)
+      .update({
+        notes: input.notes?.trim() || null,
+        // El adjunto también es inocuo (no toca importes): solo se actualiza si viaja.
+        ...(input.attachment_url !== undefined
+          ? { attachment_url: input.attachment_url?.trim() || null }
+          : {}),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', input.id)
+    if (error) return failure(error.message)
+
+    return success({
+      auditEntityId: input.id,
+      auditDescription: `Notas de factura ${(current as any).invoice_number}${(current as any).supplier_name ? ` · ${(current as any).supplier_name}` : ''}`,
+    })
+  }
+)
+
 export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInput & { id: string }, { auditEntityId: string; auditDescription: string }>(
   {
     permission: PERMISSION,

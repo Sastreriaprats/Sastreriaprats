@@ -76,6 +76,7 @@ import {
   listSupplierInvoices,
   createSupplierInvoiceAction,
   updateSupplierInvoiceAction,
+  updateSupplierInvoiceNotesAction,
   deleteSupplierInvoiceAction,
   importSupplierInvoicesCsvAction,
   listSuppliersForInvoice,
@@ -205,6 +206,8 @@ export function SupplierInvoicesContent() {
   // Proforma: si la fila en edición es un abono, el flag proforma se deshabilita
   // (son excluyentes). `hideProformas` oculta las proformas de la lista (off por defecto).
   const [editingIsRectifying, setEditingIsRectifying] = useState(false)
+  // Factura pagada: el diálogo se abre en modo lectura con solo notas/PDF editables.
+  const [editingIsPaid, setEditingIsPaid] = useState(false)
   const [hideProformas, setHideProformas] = useState(false)
 
   const [form, setForm] = useState({
@@ -432,6 +435,7 @@ export function SupplierInvoicesContent() {
   const openCreate = () => {
     setEditingId(null)
     setEditingIsRectifying(false)
+    setEditingIsPaid(false)
     setForm({
       supplier_id: '',
       supplier_name: '',
@@ -462,6 +466,7 @@ export function SupplierInvoicesContent() {
   const openEdit = async (row: ApSupplierInvoiceRow) => {
     setEditingId(row.id)
     setEditingIsRectifying(row.is_rectifying === true)
+    setEditingIsPaid(row.status === 'pagada')
     // Reconstruir el IVA % real a partir de los importes guardados (los datos
     // de la factura solo guardan los importes, no el porcentaje).
     const reconstructedTaxRate = row.amount > 0
@@ -606,6 +611,25 @@ export function SupplierInvoicesContent() {
   }, [selectedDeliveryNoteIds.length, selectedDeliveryNotesTotal, lines.length])
 
   const handleSave = async () => {
+    // Factura pagada: solo notas y PDF adjunto son editables (el resto de campos
+    // viaja bloqueado en la UI y el update completo del servidor la rechazaría).
+    if (editingId && editingIsPaid) {
+      setSaving(true)
+      const r = await updateSupplierInvoiceNotesAction({
+        id: editingId,
+        notes: form.notes.trim() || null,
+        attachment_url: form.attachment_url.trim() || null,
+      })
+      if (r.success) {
+        toast.success('Notas actualizadas')
+        setDialogOpen(false)
+        loadList()
+      } else {
+        toast.error(r.error)
+      }
+      setSaving(false)
+      return
+    }
     if (!form.supplier_id && !form.supplier_name.trim()) {
       toast.error('Selecciona un proveedor')
       return
@@ -1127,8 +1151,7 @@ export function SupplierInvoicesContent() {
                           variant="ghost"
                           className="h-8"
                           onClick={() => openEdit(row)}
-                          disabled={row.status === 'pagada'}
-                          title={row.status === 'pagada' ? 'Factura pagada (bloqueada)' : 'Editar factura'}
+                          title={row.status === 'pagada' ? 'Ver factura / editar notas (pagada: importes bloqueados)' : 'Editar factura'}
                         >
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
@@ -1243,6 +1266,15 @@ export function SupplierInvoicesContent() {
             <DialogTitle>{editingId ? 'Editar factura proveedor' : 'Nueva factura proveedor'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
+            {editingIsPaid && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                Factura pagada: los importes y cuotas están bloqueados, pero puedes
+                ver todo y editar las notas y el PDF adjunto.
+              </div>
+            )}
+            {/* Los campos contables van dentro del fieldset: con la factura pagada
+                quedan todos deshabilitados de golpe; notas y adjunto quedan fuera. */}
+            <fieldset disabled={editingIsPaid} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2 sm:col-span-1">
                 <Label>Proveedor *</Label>
@@ -1675,6 +1707,7 @@ export function SupplierInvoicesContent() {
                 </ul>
               </div>
             )}
+            </fieldset>
             <div>
               <Label>Notas</Label>
               <Textarea
