@@ -6,8 +6,9 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import { Printer, Pencil, Loader2 } from 'lucide-react'
+import { Printer, Pencil, Loader2, Copy } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
+import { duplicateOrderLineAction } from '@/actions/orders'
 import { generateFichaForLine, generateFichaForLineCamiseria } from '@/lib/pdf/ficha-confeccion'
 import { EditFichaDialog } from '@/components/orders/edit-ficha-dialog'
 import { LineStatusChip } from '@/components/orders/line-status-chip'
@@ -35,6 +36,19 @@ export function OrderGarmentsTab({ order }: { order: any }) {
   const lineRefs = buildLineRefSuffixes(lines)
   const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null)
   const [editingLine, setEditingLine] = useState<any | null>(null)
+  const [duplicatingLineId, setDuplicatingLineId] = useState<string | null>(null)
+
+  const handleDuplicateLine = async (line: any) => {
+    setDuplicatingLineId(line.id)
+    const res = await duplicateOrderLineAction({ orderId: order.id, lineId: line.id })
+    setDuplicatingLineId(null)
+    if (res.success) {
+      toast.success('Prenda duplicada')
+      router.refresh()
+    } else {
+      toast.error((res as { error?: string })?.error || 'No se pudo duplicar la prenda')
+    }
+  }
 
   // Fotos por prenda (signed URLs) — 1 sola llamada batch, no N+1.
   const lineIdsKey = lines.map((l: { id: string }) => l.id).filter(Boolean).join(',')
@@ -123,6 +137,19 @@ export function OrderGarmentsTab({ order }: { order: any }) {
                   >
                     <Pencil className="h-3.5 w-3.5" />
                     Editar ficha
+                  </Button>
+                )}
+                {canEdit && can('orders.edit') && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1 h-8"
+                    disabled={duplicatingLineId === line.id}
+                    onClick={() => handleDuplicateLine(line)}
+                    title="Duplicar esta prenda dentro del pedido"
+                  >
+                    {duplicatingLineId === line.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
+                    Duplicar
                   </Button>
                 )}
               </div>

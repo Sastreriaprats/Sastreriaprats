@@ -10,11 +10,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import Link from 'next/link'
 import {
   ArrowLeft, User, Phone, Shirt, History,
-  Calendar, CreditCard, AlertTriangle, ExternalLink, Check, Loader2, X,
+  Calendar, CreditCard, AlertTriangle, ExternalLink, Check, Loader2, X, Copy,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { usePermissions } from '@/hooks/use-permissions'
-import { updateOrderPaymentDate } from '@/actions/orders'
+import { updateOrderPaymentDate, duplicateOrderAction } from '@/actions/orders'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
 import { OrderGarmentsTab } from './tabs/order-garments-tab'
 import { OrderHistoryTab } from './tabs/order-history-tab'
@@ -31,6 +35,21 @@ export function OrderDetailContent({ order }: { order: any }) {
   const canViewCosts = can('orders.view_costs')
   const [showStatusDialog, setShowStatusDialog] = useState(false)
   const [showEditDialog, setShowEditDialog] = useState(false)
+  const [showDuplicateDialog, setShowDuplicateDialog] = useState(false)
+  const [duplicating, setDuplicating] = useState(false)
+
+  async function handleDuplicate() {
+    setDuplicating(true)
+    const res = await duplicateOrderAction(order.id)
+    setDuplicating(false)
+    setShowDuplicateDialog(false)
+    if (res.success && res.data) {
+      toast.success(`Pedido ${res.data.orderNumber} creado como copia`)
+      router.push(`/admin/pedidos/${res.data.orderId}`)
+    } else {
+      toast.error((res as { error?: string })?.error || 'Error al duplicar el pedido')
+    }
+  }
 
   // Fecha de pago editable manualmente.
   const [paymentDate, setPaymentDate] = useState<string | null>(order.payment_date ?? null)
@@ -135,6 +154,11 @@ export function OrderDetailContent({ order }: { order: any }) {
           </div>
         </div>
         <div className="flex gap-2">
+          {can('orders.create') && (
+            <Button onClick={() => setShowDuplicateDialog(true)} variant="outline" className="gap-1">
+              <Copy className="h-4 w-4" /> Duplicar
+            </Button>
+          )}
           {can('orders.edit') && canEditOrder && (
             <Button onClick={() => setShowEditDialog(true)} variant="outline" className="gap-1">
               <Pencil className="h-4 w-4" /> Editar pedido
@@ -212,6 +236,26 @@ export function OrderDetailContent({ order }: { order: any }) {
         orderType={order.order_type}
         totalPaid={order.total_paid}
       />
+
+      <AlertDialog open={showDuplicateDialog} onOpenChange={setShowDuplicateDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Duplicar el pedido {order.order_number}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se creará un pedido nuevo con las mismas prendas, medidas, configuración y
+              precios — sin cobros, sin firmas y con todas las prendas en estado inicial.
+              El tejido de las prendas se descontará del stock como en un pedido nuevo.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={duplicating}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction disabled={duplicating} onClick={(e) => { e.preventDefault(); handleDuplicate() }}>
+              {duplicating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Sí, duplicar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <EditOrderDialog
         // Remonta el diálogo cuando cambia el pedido (su `updated_at` se bumpea en

@@ -1677,6 +1677,281 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
 
 // ─── Nueva venta (ficha) ────────────────────────────────────────────────────
 
+// ─── Duplicar pedidos y prendas ──────────────────────────────────────────────
+
+/** Campos de línea que se COPIAN al duplicar (el resto se resetea). */
+function cloneLineForDuplicate(l: Record<string, any>, targetOrderId: string, sortOrder: number) {
+  return {
+    tailoring_order_id: targetOrderId,
+    garment_type_id: l.garment_type_id,
+    line_type: l.line_type,
+    measurement_id: l.measurement_id ?? null,
+    configuration: l.configuration ?? {},
+    fabric_id: l.fabric_id ?? null,
+    fabric_description: l.fabric_description ?? null,
+    fabric_meters: l.fabric_meters ?? null,
+    supplier_id: l.supplier_id ?? null,
+    unit_price: l.unit_price,
+    is_gift: l.is_gift === true,
+    discount_percentage: l.discount_percentage ?? 0,
+    discount_amount: l.discount_amount ?? 0,
+    tax_rate: l.tax_rate ?? 21,
+    line_total: l.line_total,
+    material_cost: l.material_cost ?? 0,
+    labor_cost: l.labor_cost ?? 0,
+    factory_cost: l.factory_cost ?? 0,
+    model_name: l.model_name ?? null,
+    model_size: l.model_size ?? null,
+    finishing_notes: l.finishing_notes ?? null,
+    sort_order: sortOrder,
+    official_id: l.official_id ?? null,
+    // RESET: status='created' (default), delivered_at/by, finished_at,
+    // settlement_id, photos, supplier_order_id — nada de eso se copia.
+    status: 'created',
+  }
+}
+
+/**
+ * Duplica un pedido completo: nuevo número, mismas prendas/medidas/configuración
+ * y costes, SIN cobros, firmas, estados avanzados ni fechas de entrega. Descuenta
+ * tejido como cualquier pedido nuevo (la prenda duplicada consumirá tela real).
+ * No envía email al cliente. Todo en servidor: los datos de UI llegan redactados
+ * (costes a null sin orders.view_costs) y la copia los perdería.
+ */
+export const duplicateOrderAction = protectedAction<string, { orderId: string; orderNumber: string }>(
+  {
+    permission: 'orders.create',
+    auditModule: 'orders',
+    auditAction: 'create',
+    auditEntity: 'tailoring_order',
+    revalidate: ['/admin/pedidos', '/sastre/pedidos'],
+  },
+  async (ctx, sourceOrderId) => {
+    if (!sourceOrderId?.trim()) return failure('ID del pedido obligatorio', 'VALIDATION')
+    const admin = ctx.adminClient
+
+    const { data: src, error: srcErr } = await admin
+      .from('tailoring_orders')
+      .select('*')
+      .eq('id', sourceOrderId.trim())
+      .single()
+    if (srcErr || !src) return failure('Pedido no encontrado', 'NOT_FOUND')
+
+    const { data: srcLines, error: linesErr } = await admin
+      .from('tailoring_order_lines')
+      .select('*')
+      .eq('tailoring_order_id', sourceOrderId.trim())
+      .order('sort_order')
+    if (linesErr) return failure(linesErr.message)
+
+    const { data: store } = await admin
+      .from('stores').select('order_prefix').eq('id', (src as any).store_id).single()
+    const prefix = (store as any)?.order_prefix || 'ORD'
+    const orderNumber = await getNextNumber('tailoring_orders', 'order_number', prefix)
+
+    const { data: newOrder, error: orderErr } = await admin
+      .from('tailoring_orders')
+      .insert({
+        // COPIA
+        client_id: (src as any).client_id,
+        order_type: (src as any).order_type,
+        recipient_type: (src as any).recipient_type,
+        recipient_name: (src as any).recipient_name,
+        official_id: (src as any).official_id,
+        store_id: (src as any).store_id,
+        delivery_method: (src as any).delivery_method,
+        delivery_address: (src as any).delivery_address,
+        delivery_city: (src as any).delivery_city,
+        delivery_postal_code: (src as any).delivery_postal_code,
+        discount_percentage: (src as any).discount_percentage,
+        subtotal: (src as any).subtotal,
+        discount_amount: (src as any).discount_amount,
+        tax_amount: (src as any).tax_amount,
+        total: (src as any).total,
+        total_material_cost: (src as any).total_material_cost,
+        total_labor_cost: (src as any).total_labor_cost,
+        total_factory_cost: (src as any).total_factory_cost,
+        total_cost: (src as any).total_cost,
+        internal_notes: (src as any).internal_notes,
+        client_notes: (src as any).client_notes,
+        // RESET / NUEVO (total_pending es columna generada: no se incluye)
+        status: 'created',
+        order_number: orderNumber,
+        estimated_delivery_date: null,
+        actual_delivery_date: null,
+        payment_date: null,
+        total_paid: 0,
+        signature_url: null,
+        signed_at: null,
+        parent_order_id: (src as any).id, // trazabilidad hacia el original
+        invoice_id: null,
+        created_by: ctx.userId,
+      })
+      .select('id, order_number, client_id')
+      .single()
+    if (orderErr || !newOrder) return failure(orderErr?.message ?? 'Error al duplicar el pedido')
+
+    const linesToInsert = ((srcLines ?? []) as any[]).map((l, idx) =>
+      cloneLineForDuplicate(l, (newOrder as any).id, l.sort_order ?? idx))
+    if (linesToInsert.length > 0) {
+      const { error: insErr } = await admin.from('tailoring_order_lines').insert(linesToInsert)
+      if (insErr) return failure(insErr.message)
+    }
+
+    // Descontar tejido como cualquier pedido nuevo (no bloqueante)
+    const fabricUsage = new Map<string, number>()
+    for (const l of linesToInsert) {
+      const meters = Number(l.fabric_meters) || 0
+      if (l.fabric_id && meters > 0) fabricUsage.set(l.fabric_id, (fabricUsage.get(l.fabric_id) || 0) + meters)
+    }
+    if (fabricUsage.size > 0) {
+      await applyFabricStockDelta(admin, fabricUsage, { orderId: (newOrder as any).id, userId: ctx.userId })
+    }
+
+    await admin.from('tailoring_order_state_history').insert({
+      tailoring_order_id: (newOrder as any).id,
+      to_status: 'created',
+      changed_by: ctx.userId,
+      changed_by_name: ctx.userName,
+      notes: `Duplicado del pedido ${(src as any).order_number}`,
+    })
+
+    let clientName = 'Sin cliente'
+    if ((newOrder as any).client_id) {
+      const { data: client } = await admin
+        .from('clients').select('full_name, first_name, last_name')
+        .eq('id', (newOrder as any).client_id).single()
+      if (client) clientName = (client as any).full_name || [(client as any).first_name, (client as any).last_name].filter(Boolean).join(' ') || 'Sin nombre'
+    }
+
+    return success({
+      orderId: (newOrder as any).id,
+      orderNumber,
+      auditEntityId: (newOrder as any).id,
+      auditDescription: `Pedido ${orderNumber} duplicado de ${(src as any).order_number} · Cliente: ${clientName}`,
+    } as { orderId: string; orderNumber: string })
+  }
+)
+
+/**
+ * Duplica UNA prenda dentro del mismo pedido. La copia nace en 'created', con
+ * la etiqueta renombrada («… (copia)») para que la ref de talón derivada
+ * (line-refs.ts) no coincida con la original, y la cabecera se recalcula con
+ * la fórmula canónica (PVP IVA-incluido).
+ */
+export const duplicateOrderLineAction = protectedAction<
+  { orderId: string; lineId: string },
+  { newLineId: string }
+>(
+  {
+    permission: 'orders.edit',
+    auditModule: 'orders',
+    auditAction: 'update',
+    auditEntity: 'tailoring_order',
+    revalidate: ['/admin/pedidos', '/sastre/pedidos'],
+  },
+  async (ctx, { orderId, lineId }) => {
+    const admin = ctx.adminClient
+
+    const { data: order, error: ordErr } = await admin
+      .from('tailoring_orders')
+      .select('id, order_number, status, discount_percentage')
+      .eq('id', orderId)
+      .single()
+    if (ordErr || !order) return failure('Pedido no encontrado', 'NOT_FOUND')
+    if ((order as any).status === 'cancelled') return failure('El pedido está cancelado', 'VALIDATION')
+
+    // Añadir una prenda cambia importes: bloqueado con factura vigente (mismo
+    // criterio que updateOrderAction; el pago ya no bloquea).
+    const { data: vigentInvoices } = await admin
+      .from('invoices')
+      .select('id')
+      .eq('tailoring_order_id', orderId)
+      .not('status', 'in', '(draft,cancelled)')
+      .limit(1)
+    if ((vigentInvoices?.length ?? 0) > 0) {
+      return failure('El pedido tiene una factura vigente: anúlala antes de añadir prendas', 'VALIDATION')
+    }
+
+    const { data: line, error: lineErr } = await admin
+      .from('tailoring_order_lines')
+      .select('*')
+      .eq('id', lineId)
+      .eq('tailoring_order_id', orderId)
+      .single()
+    if (lineErr || !line) return failure('Prenda no encontrada en este pedido', 'NOT_FOUND')
+
+    const { data: maxSortRow } = await admin
+      .from('tailoring_order_lines')
+      .select('sort_order')
+      .eq('tailoring_order_id', orderId)
+      .order('sort_order', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const nextSort = ((maxSortRow as any)?.sort_order ?? 0) + 1
+
+    const clone = cloneLineForDuplicate(line as any, orderId, nextSort)
+    // Renombrar la etiqueta: line-refs deriva la ref de talón del prendaLabel y
+    // dos prendas con el mismo label recibirían la MISMA ref (AMER-TRJ1).
+    const cfg = { ...(clone.configuration as Record<string, unknown>) }
+    if (typeof cfg.prendaLabel === 'string' && cfg.prendaLabel.trim()) {
+      cfg.prendaLabel = `${cfg.prendaLabel} (copia)`
+    }
+    clone.configuration = cfg
+
+    const { data: newLine, error: insErr } = await admin
+      .from('tailoring_order_lines')
+      .insert(clone)
+      .select('id')
+      .single()
+    if (insErr || !newLine) return failure(insErr?.message ?? 'Error al duplicar la prenda')
+
+    // Recalcular cabecera (fórmula canónica de updateOrderAction: PVP IVA incl.)
+    const { data: finalLines } = await admin
+      .from('tailoring_order_lines')
+      .select('line_total, tax_rate')
+      .eq('tailoring_order_id', orderId)
+    const discountPct = Number((order as any).discount_percentage) || 0
+    const subtotalLines = ((finalLines ?? []) as any[]).reduce((s, l) => s + Number(l.line_total || 0), 0)
+    const total = round2(subtotalLines * (1 - discountPct / 100))
+    const discountAmount = round2(subtotalLines - total)
+    let taxAmount = 0
+    for (const l of (finalLines ?? []) as any[]) {
+      const lt = Number(l.line_total || 0)
+      const tr = Number(l.tax_rate ?? 21)
+      taxAmount += lt * (1 - discountPct / 100) * tr / (100 + tr)
+    }
+    taxAmount = round2(taxAmount)
+    const { error: updErr } = await admin
+      .from('tailoring_orders')
+      .update({
+        subtotal: round2(total - taxAmount),
+        discount_amount: discountAmount,
+        tax_amount: taxAmount,
+        total,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', orderId)
+    if (updErr) return failure(updErr.message)
+
+    const label = (cfg.prendaLabel as string) || 'Prenda'
+    await admin.from('tailoring_order_state_history').insert({
+      tailoring_order_id: orderId,
+      from_status: (order as any).status,
+      to_status: (order as any).status,
+      changed_by: ctx.userId,
+      changed_by_name: ctx.userName,
+      notes: `Prenda duplicada: ${label}`,
+    })
+
+    return success({
+      newLineId: (newLine as any).id,
+      auditEntityId: orderId,
+      auditDescription: `Prenda duplicada (${label}) en pedido ${(order as any).order_number}`,
+    } as { newLineId: string })
+  }
+)
+
 export interface PrendaLineaInput {
   slug: string
   label: string
