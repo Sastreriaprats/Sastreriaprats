@@ -108,7 +108,17 @@ export function CobrosContent({ basePath = '/admin' }: { basePath?: string }) {
     if (row.entity_type === 'tailoring_order') {
       router.push(basePath === '/sastre' ? `/sastre/pedidos/${row.id}` : `/admin/pedidos/${row.id}?tab=payments`)
     } else {
-      router.push(`/admin/ventas/${row.id}`)
+      // Las ventas no tienen página de detalle propia (/admin/ventas/[id] no
+      // existe — navegar ahí daba 404): se gestionan inline con el mismo diálogo
+      // del botón "Cobrar". En sastre, el cobro va por caja TPV.
+      if (basePath === '/sastre') {
+        setCobroToCajaRow(row)
+        setCobroToCajaAmount(String(row.total_pending))
+        setCobroToCajaOpen(true)
+      } else {
+        setSelectedRow(row)
+        setDialogOpen(true)
+      }
     }
   }
 
