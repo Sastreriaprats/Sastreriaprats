@@ -2,6 +2,7 @@
 
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
+import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
 
 /** Lee todas las páginas (evita el tope silencioso de 1000 filas de Supabase). */
 async function readAllPaged<T = Record<string, unknown>>(
@@ -87,9 +88,10 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
         supplierRes,
         fittingsRes,
         onlineInvRows,
+        cobroBaseBySale,
       ] = await Promise.all([
-        readAllPaged<{ total?: number; subtotal?: number; tax_amount?: number; total_returned?: number; created_at?: string }>((f, t) =>
-          admin.from('sales').select('total, subtotal, tax_amount, total_returned, created_at').gte('created_at', `${lastMonthStart}T00:00:00`).lte('created_at', todayEnd).in('status', ['completed', 'partially_returned']).order('created_at', { ascending: true }).range(f, t)),
+        readAllPaged<{ id?: string; total?: number; subtotal?: number; tax_amount?: number; total_returned?: number; created_at?: string }>((f, t) =>
+          admin.from('sales').select('id, total, subtotal, tax_amount, total_returned, created_at').gte('created_at', `${lastMonthStart}T00:00:00`).lte('created_at', todayEnd).in('status', ['completed', 'partially_returned']).order('created_at', { ascending: true }).range(f, t)),
         readAllPaged((f, t) =>
           admin.from('tailoring_order_payments').select('amount, payment_date, tailoring_order:tailoring_orders(subtotal, total)').gte('payment_date', lastMonthStart).lte('payment_date', today).order('payment_date', { ascending: true }).range(f, t)),
         admin.from('tailoring_orders').select('id, status, estimated_delivery_date').not('status', 'in', '("delivered","cancelled")'),
@@ -105,6 +107,9 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
         // ya es base sin IVA.
         readAllPaged<{ subtotal?: number; invoice_date?: string }>((f, t) =>
           admin.from('invoices').select('subtotal, invoice_date').eq('invoice_type', 'issued').is('sale_id', null).is('tailoring_order_id', null).is('reservation_id', null).not('status', 'in', '(draft,cancelled)').gte('invoice_date', lastMonthStart).lte('invoice_date', today).order('invoice_date', { ascending: true }).range(f, t)),
+        // Cobros de pedido embebidos en tickets: se restan a la venta para no
+        // duplicar el total con tailoring_order_payments (mismo criterio que Contabilidad).
+        loadPedidoCobroBaseBySale(admin, `${lastMonthStart}T00:00:00`, todayEnd),
       ])
 
       const ordersRows = ordersRes.data
@@ -114,12 +119,14 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
       const fittingsToday = fittingsRes.count
 
       // Base neta de una venta de TPV: prorratea por la parte no devuelta.
-      const netSaleBase = (r: { total?: number; subtotal?: number; total_returned?: number }) => {
+      const netSaleBase = (r: { id?: string; total?: number; subtotal?: number; total_returned?: number }) => {
         const total = Number(r.total) || 0
         const returned = Number(r.total_returned) || 0
         const subtotal = Number(r.subtotal) || 0
         const proportion = total > 0 ? Math.max(0, (total - returned) / total) : 0
-        return (subtotal || total) * proportion
+        // Resta cobros de pedido embebidos (contados vía sastrería): evita duplicar el total.
+        const cobro = cobroBaseBySale.get(String(r.id)) || 0
+        return Math.max(0, (subtotal || total) - cobro) * proportion
       }
       // Base neta de un cobro de sastrería: amount es bruto; prorrateamos por
       // el ratio base/total del pedido padre (respeta descuentos e IVA propios).
@@ -226,13 +233,14 @@ export const getSalesChartData = protectedAction<void, { date: string; label: st
       // Mismo criterio que la tarjeta "Ventas mes" y Contabilidad: base neta de
       // TPV (sales) + cobros de sastrería backoffice (tailoring_order_payments),
       // para que el total del gráfico cuadre con el KPI.
-      const [sales, tailoringPays, onlineInvs] = await Promise.all([
-        readAllPaged<{ total?: number; subtotal?: number; total_returned?: number; created_at?: string }>((f, t) =>
-          admin.from('sales').select('total, subtotal, total_returned, created_at').gte('created_at', `${monthStart}T00:00:00`).lte('created_at', `${today}T23:59:59`).in('status', ['completed', 'partially_returned']).order('created_at').range(f, t)),
+      const [sales, tailoringPays, onlineInvs, cobroBaseBySale] = await Promise.all([
+        readAllPaged<{ id?: string; total?: number; subtotal?: number; total_returned?: number; created_at?: string }>((f, t) =>
+          admin.from('sales').select('id, total, subtotal, total_returned, created_at').gte('created_at', `${monthStart}T00:00:00`).lte('created_at', `${today}T23:59:59`).in('status', ['completed', 'partially_returned']).order('created_at').range(f, t)),
         readAllPaged((f, t) =>
           admin.from('tailoring_order_payments').select('amount, payment_date, tailoring_order:tailoring_orders(subtotal, total)').gte('payment_date', monthStart).lte('payment_date', today).range(f, t)),
         readAllPaged<{ subtotal?: number; invoice_date?: string }>((f, t) =>
           admin.from('invoices').select('subtotal, invoice_date').eq('invoice_type', 'issued').is('sale_id', null).is('tailoring_order_id', null).is('reservation_id', null).not('status', 'in', '(draft,cancelled)').gte('invoice_date', monthStart).lte('invoice_date', today).order('invoice_date').range(f, t)),
+        loadPedidoCobroBaseBySale(admin, `${monthStart}T00:00:00`, `${today}T23:59:59`),
       ])
 
       const dailyMap: Record<string, number> = {}
@@ -250,7 +258,8 @@ export const getSalesChartData = protectedAction<void, { date: string; label: st
           const returned = Number(sale.total_returned) || 0
           const subtotal = Number(sale.subtotal) || 0
           const proportion = total > 0 ? Math.max(0, (total - returned) / total) : 0
-          dailyMap[day] += (subtotal || total) * proportion
+          const cobro = cobroBaseBySale.get(String(sale.id)) || 0
+          dailyMap[day] += Math.max(0, (subtotal || total) - cobro) * proportion
         }
       }
       for (const p of tailoringPays || []) {

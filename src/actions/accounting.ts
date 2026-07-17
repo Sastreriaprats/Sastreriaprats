@@ -8,6 +8,7 @@ import { generateEstimatePdf } from '@/lib/pdf/estimate-pdf'
 import { sendEstimateEmail } from '@/lib/email/transactional'
 import { createInvoiceJournalEntry, reverseInvoiceJournalEntry } from '@/actions/accounting-triggers'
 import { formatClientAddress } from '@/lib/clients/format'
+import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
 
 /** Una fila del desglose por tienda. storeId null → gastos sin tienda asignada. */
 export type StoreBreakdownRow = {
@@ -59,10 +60,10 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
     const start = `${fromDate}T00:00:00`
     const end = `${toDate}T23:59:59`
 
-    const [sales, purchasesRaw, invoicesRes, tailoringPayments, storesRes, pendOrdersRows, pendSalesRows, pendDueRows, otherInvoices] = await Promise.all([
+    const [sales, purchasesRaw, invoicesRes, tailoringPayments, storesRes, pendOrdersRows, pendSalesRows, pendDueRows, otherInvoices, cobroBaseBySale] = await Promise.all([
       // Ventas de TPV (boutique + TPV + sastrería-POS). Paginado: sin esto, un año
       // con >1000 tickets se truncaba silenciosamente e infravaloraba ingresos.
-      readAllPaged((f, t) => ctx.adminClient.from('sales').select('total, total_returned, subtotal, tax_amount, created_at, store_id').gte('created_at', start).lte('created_at', end).in('status', ['completed', 'partially_returned']).order('created_at', { ascending: true }).range(f, t)),
+      readAllPaged((f, t) => ctx.adminClient.from('sales').select('id, total, total_returned, subtotal, tax_amount, created_at, store_id').gte('created_at', start).lte('created_at', end).in('status', ['completed', 'partially_returned']).order('created_at', { ascending: true }).range(f, t)),
       // Gastos = facturas de proveedor recibidas (ap_supplier_invoices), por fecha
       // de factura. Es el documento contable del gasto (no los pedidos a proveedor,
       // que son operativos/de stock y solaparían con las facturas). amount es la
@@ -92,6 +93,9 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
       // subtotal/tax_amount ya vienen como base sin IVA + IVA. Fecha contable:
       // invoice_date. Mismo criterio que el escenario C (computeYear en ops.ts).
       readAllPaged((f, t) => ctx.adminClient.from('invoices').select('subtotal, tax_amount, invoice_date, online_order_id, store_id').eq('invoice_type', 'issued').is('sale_id', null).is('tailoring_order_id', null).is('reservation_id', null).not('status', 'in', '(draft,cancelled)').gte('invoice_date', fromDate).lte('invoice_date', toDate).order('invoice_date', { ascending: true }).range(f, t)),
+      // Base de cobros de pedido de sastrería embebidos en tickets: se resta al
+      // ticket (netSale) para no duplicar el total con `tailoring_order_payments`.
+      loadPedidoCobroBaseBySale(ctx.adminClient, start, end),
     ])
 
     // Excluimos proformas (no son facturas reales).
@@ -106,8 +110,12 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
       const subtotal = Number((x as any).subtotal) || 0
       const tax = Number((x as any).tax_amount) || 0
       const proportion = total > 0 ? Math.max(0, (total - returned) / total) : 0
+      // Resta la base de líneas que son cobro de un pedido de sastrería: ese
+      // dinero ya se cuenta como ingreso vía tailoringPayments. Evita duplicar el
+      // total. El IVA no se toca (esas líneas van al 0%).
+      const cobroPedido = cobroBaseBySale.get(String((x as any).id)) || 0
       return {
-        netBase: (subtotal || total) * proportion,
+        netBase: Math.max(0, (subtotal || total) - cobroPedido) * proportion,
         netVat: tax * proportion,
       }
     }

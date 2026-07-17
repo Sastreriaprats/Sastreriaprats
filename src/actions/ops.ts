@@ -1,6 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
+import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
 import { getViewerAccess, assertScope, assertCanManage, type ViewerAccess } from '@/lib/ops/access'
 import { seal, open, dedupTag } from '@/lib/ops/crypto'
 import {
@@ -137,10 +138,13 @@ async function computeYear(year: number) {
   // Lecturas independientes en paralelo. `deposited` = cobros ya ingresados al
   // banco: salen de B y pasan a C (A = B + C se mantiene). Si esa lectura falla,
   // computeYear falla entero: mejor sin datos que contar doble en B.
-  const [sales, cashFrac, tailoringPayments, deposited, { data: apInv }, apLines, { data: clpRows }, { data: stInv }] = await Promise.all([
+  const [sales, cashFrac, tailoringPayments, cobroBaseBySale, deposited, { data: apInv }, apLines, { data: clpRows }, { data: stInv }] = await Promise.all([
     readAllSales(admin, start, end),
     readCashFractions(admin, start, end),
     readAllTailoringPayments(admin, year),
+    // Base de cobros de pedido embebidos en tickets: se resta al ticket para no
+    // duplicar el total (el pedido ya la cuenta en el bucle de sastrería).
+    loadPedidoCobroBaseBySale(admin, start, end),
     listDepositTags(),
     // Gastos / IVA soportado = FACTURAS RECIBIDAS (ap_supplier_invoices)
     admin.from('ap_supplier_invoices')
@@ -203,7 +207,11 @@ async function computeYear(year: number) {
     const subtotal = Number(x.subtotal) || 0
     const tax = Number(x.tax_amount) || 0
     const prop = total > 0 ? Math.max(0, (total - returned) / total) : 0
-    const base = (subtotal || total) * prop
+    // Resta la base de líneas que son cobro de un pedido de sastrería: ese dinero
+    // se cuenta como ingreso por el lado del pedido (bucle de abajo). Solo queda
+    // la parte de boutique. El IVA no se toca (esas líneas van al 0%).
+    const cobroPedido = cobroBaseBySale.get(String(x.id)) || 0
+    const base = Math.max(0, (subtotal || total) - cobroPedido) * prop
     const vat = tax * prop
     const created = String(x.created_at)
     const month = created.slice(0, 7)

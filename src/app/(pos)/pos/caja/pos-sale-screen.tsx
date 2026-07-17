@@ -521,7 +521,9 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
       quantity: 1,
       unit_price: 0,
       discount_percentage: 0,
-      tax_rate: 0,
+      // Por defecto 21% (tipo general): casi todo lo que se mete a mano es producto
+      // o servicio sujeto. El cajero puede bajarlo si el artículo va exento.
+      tax_rate: 21,
       cost_price: 0,
     }])
   }
