@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import {
   ArrowLeft, MapPin, Loader2, Truck, Pencil, X as XIcon, Ban,
-  PackageCheck, Save, RotateCcw, ShoppingBag,
+  PackageCheck, Save, RotateCcw, ShoppingBag, History,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -685,6 +685,35 @@ export function AdminOrderDetailContent() {
               </CardContent>
             </Card>
           )}
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <History className="h-4 w-4" /> Historial
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {(order.events ?? []).length === 0 ? (
+                <p className="text-sm text-muted-foreground">Sin eventos registrados.</p>
+              ) : (
+                <ol className="space-y-4">
+                  {order.events.map((ev, i) => (
+                    <li key={ev.id} className="relative pl-5">
+                      {i < order.events.length - 1 && (
+                        <span className="absolute left-[4px] top-4 -bottom-4 w-px bg-border" aria-hidden />
+                      )}
+                      <span className="absolute left-0 top-1.5 h-2.5 w-2.5 rounded-full border-2 border-primary bg-background" aria-hidden />
+                      <p className="text-xs text-muted-foreground">{formatDateTime(ev.at)}</p>
+                      <p className="text-sm leading-snug">{ev.text}</p>
+                      {ev.user && (
+                        <p className="text-xs text-muted-foreground">por {ev.user}</p>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </div>
 

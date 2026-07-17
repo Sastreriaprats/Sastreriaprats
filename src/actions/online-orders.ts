@@ -114,6 +114,13 @@ export interface OnlineOrderLineRow {
   stock_restored: boolean
 }
 
+export interface OnlineOrderEvent {
+  id: string
+  at: string
+  text: string
+  user: string | null
+}
+
 export interface OnlineOrderDetail {
   id: string
   order_number: string
@@ -134,6 +141,7 @@ export interface OnlineOrderDetail {
   cancellation_reason: string | null
   notes: string | null
   lines: OnlineOrderLineRow[]
+  events: OnlineOrderEvent[]
   client?: { id?: string; email: string; first_name: string | null; last_name: string | null; phone: string | null }
 }
 
@@ -170,6 +178,51 @@ export const getOnlineOrderDetail = protectedAction<string, OnlineOrderDetail | 
         .single()
       if (c) client = c as OnlineOrderDetail['client']
     }
+    // Línea temporal: hitos propios del pedido + acciones de audit_logs.
+    // Los webhooks de pago crean el pedido fuera del wrapper de auditoría,
+    // así que "creado" y "pagado" se derivan de los timestamps de la tabla.
+    const { data: audits } = await admin
+      .from('audit_logs')
+      .select('id, action, description, user_full_name, new_data, created_at')
+      .eq('entity_id', orderId)
+      .in('entity_type', ['online_order', 'online_order_line'])
+      .order('created_at', { ascending: true })
+    const rec = order as Record<string, any>
+    const events: OnlineOrderEvent[] = [
+      { id: 'created', at: rec.created_at, text: 'Pedido creado', user: null },
+    ]
+    if (rec.paid_at) {
+      events.push({
+        id: 'paid',
+        at: rec.paid_at,
+        text: `Pago confirmado${rec.payment_method ? ` (${rec.payment_method})` : ''}`,
+        user: null,
+      })
+    }
+    // Hitos con timestamp propio pero sin rastro en audit (pedidos históricos
+    // anteriores a la auditoría, o cambios hechos directamente en BD).
+    const auditedStatuses = new Set(
+      (audits || []).map((a: any) => (a.new_data as Record<string, unknown> | null)?.status).filter(Boolean)
+    )
+    if (rec.shipped_at && !auditedStatuses.has('shipped')) {
+      events.push({ id: 'shipped', at: rec.shipped_at, text: 'Pedido enviado', user: null })
+    }
+    if (rec.delivered_at && !auditedStatuses.has('delivered')) {
+      events.push({ id: 'delivered', at: rec.delivered_at, text: 'Pedido entregado', user: null })
+    }
+    if (rec.cancelled_at && !auditedStatuses.has('cancelled')) {
+      events.push({ id: 'cancelled', at: rec.cancelled_at, text: 'Pedido cancelado', user: null })
+    }
+    for (const a of (audits || []) as any[]) {
+      events.push({
+        id: a.id,
+        at: a.created_at,
+        text: a.description || (a.action === 'state_change' ? 'Cambio de estado' : 'Actualización'),
+        user: a.user_full_name ?? null,
+      })
+    }
+    events.sort((x, y) => String(x.at).localeCompare(String(y.at)))
+
     const linesNorm: OnlineOrderLineRow[] = (lines || []).map((l: any) => ({
       id: l.id,
       order_id: l.order_id,
@@ -187,6 +240,7 @@ export const getOnlineOrderDetail = protectedAction<string, OnlineOrderDetail | 
     return success({
       ...(order as Record<string, unknown>),
       lines: linesNorm,
+      events,
       client,
     } as OnlineOrderDetail)
   }
