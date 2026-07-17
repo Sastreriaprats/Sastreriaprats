@@ -39,6 +39,7 @@ type EditableLine = {
   garment_type_id: string
   line_type: 'artesanal' | 'industrial'
   unit_price: number
+  is_gift: boolean
   discount_percentage: number
   tax_rate: number
   material_cost: number
@@ -174,6 +175,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
       garment_type_id: l.garment_type_id,
       line_type: l.line_type,
       unit_price: Number(l.unit_price ?? 0),
+      is_gift: l.is_gift === true,
       discount_percentage: Number(l.discount_percentage ?? 0),
       tax_rate: Number(l.tax_rate ?? 21),
       material_cost: Number(l.material_cost ?? 0),
@@ -439,6 +441,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
         garment_type_id: defaultGarmentId,
         line_type: orderType,
         unit_price: 0,
+        is_gift: false,
         discount_percentage: 0,
         tax_rate: 21,
         material_cost: 0,
@@ -468,6 +471,8 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
     setLines((prev) => prev.map((l) => {
       if (l._key !== key) return l
       const next = { ...l, [field]: value }
+      // Marcar regalo pone el PVP a 0 (y el total del diálogo lo refleja al momento).
+      if (field === 'is_gift' && value === true) next.unit_price = 0
       // Al cambiar el tipo de prenda, fusionamos las medidas del cliente
       // correspondientes. Las medidas del nuevo garment ganan; otras claves
       // del configuration (opciones, tejido, etc.) se preservan.
@@ -563,7 +568,8 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
         id: l.id,
         garment_type_id: l.garment_type_id,
         line_type: l.line_type,
-        unit_price: l.unit_price,
+        unit_price: l.is_gift ? 0 : l.unit_price,
+        is_gift: l.is_gift,
         discount_percentage: l.discount_percentage,
         tax_rate: l.tax_rate,
         // Sin permiso de costes, getOrder los redacta a null y este diálogo los
@@ -834,8 +840,15 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                           </Select>
                         </TableCell>
                         <TableCell>
-                          <Input className="h-8 text-xs" type="number" min={0} step={0.01} disabled={priceLocked}
-                            value={l.unit_price} onChange={(e) => updateLine(l._key, 'unit_price', parseFloat(e.target.value) || 0)} />
+                          <Input className="h-8 text-xs" type="number" min={0} step={0.01} disabled={priceLocked || l.is_gift}
+                            value={l.is_gift ? '' : l.unit_price} placeholder={l.is_gift ? 'Regalo' : undefined}
+                            onChange={(e) => updateLine(l._key, 'unit_price', parseFloat(e.target.value) || 0)} />
+                          <label className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground cursor-pointer select-none whitespace-nowrap">
+                            <input type="checkbox" className="h-3 w-3 accent-primary" disabled={priceLocked}
+                              checked={l.is_gift}
+                              onChange={(e) => updateLine(l._key, 'is_gift', e.target.checked)} />
+                            Regalo
+                          </label>
                         </TableCell>
                         <TableCell>
                           <Input className="h-8 text-xs" type="number" min={0} max={100} step={0.01} disabled={priceLocked}

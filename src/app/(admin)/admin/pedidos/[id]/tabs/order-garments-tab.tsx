@@ -91,6 +91,9 @@ export function OrderGarmentsTab({ order }: { order: any }) {
                   </span>
                 )}
                 <Badge variant="outline" className="text-xs">{badgeLabel}</Badge>
+                {line.is_gift && (
+                  <Badge className="text-xs bg-amber-100 text-amber-800 border-amber-300" variant="outline">Regalo</Badge>
+                )}
               </CardTitle>
               <div className="flex items-center gap-2">
                 <LineStatusChip
@@ -258,7 +261,7 @@ export function OrderGarmentsTab({ order }: { order: any }) {
 
             <Separator />
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
-              <div><span className="text-muted-foreground block text-xs">PVP</span><span className="font-medium">{formatCurrency(line.unit_price)}</span></div>
+              <div><span className="text-muted-foreground block text-xs">PVP</span><span className="font-medium">{line.is_gift ? <span className="text-amber-700">Regalo</span> : formatCurrency(line.unit_price)}</span></div>
               {line.discount_percentage > 0 && <div><span className="text-muted-foreground block text-xs">Dto.</span>-{line.discount_percentage}%</div>}
               {canViewCosts && (() => {
                 const material = Number(line.material_cost) || 0

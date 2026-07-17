@@ -46,7 +46,7 @@ const SELECT_ORDERS = `
   created_at,
   clients ( id, full_name, phone, email, category ),
   stores ( name, code ),
-  tailoring_order_lines ( id, sort_order, configuration, garment_types ( name ) )
+  tailoring_order_lines ( id, sort_order, configuration, is_gift, garment_types ( name ) )
 `
 
 /** Devuelve el siguiente número de talón (solo el número, ej. 46). */
@@ -385,6 +385,12 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
     for (const line of linesInput) {
       const parsed = tailoringOrderLineSchema.safeParse(line)
       if (!parsed.success) return failure(`Línea inválida: ${parsed.error.issues[0].message}`, 'VALIDATION')
+      // Un 0 € solo es válido si la prenda es regalo (evita pedidos a 0 por
+      // error de tecleo); un regalo, a su vez, siempre va a 0.
+      if (!line.is_gift && Number(line.unit_price) <= 0) {
+        return failure('Hay una prenda sin precio: indica el PVP o márcala como regalo', 'VALIDATION')
+      }
+      if (line.is_gift) line.unit_price = 0
     }
 
     const { data: store } = await ctx.adminClient
@@ -1095,6 +1101,7 @@ export interface UpdateOrderInput {
     garment_type_id: string
     line_type: 'artesanal' | 'industrial'
     unit_price: number
+    is_gift?: boolean
     discount_percentage?: number
     tax_rate?: number
     material_cost?: number
@@ -1119,7 +1126,7 @@ const HEADER_EDITABLE_FIELDS = [
 ] as const
 
 const LINE_EDITABLE_FIELDS = [
-  'garment_type_id', 'line_type', 'unit_price', 'discount_percentage', 'tax_rate',
+  'garment_type_id', 'line_type', 'unit_price', 'is_gift', 'discount_percentage', 'tax_rate',
   'material_cost', 'labor_cost', 'factory_cost',
   'fabric_id', 'fabric_description', 'fabric_meters', 'supplier_id',
   'model_name', 'model_size', 'finishing_notes', 'configuration', 'sort_order',
@@ -1674,6 +1681,8 @@ export interface PrendaLineaInput {
   slug: string
   label: string
   precio: number
+  /** Prenda regalada: se guarda a 0 € con is_gift=true (mig 261). */
+  regalo?: boolean
   oficial: string
   configuration: Record<string, unknown>
   /** Coste estimado opcional (material + mano de obra) — se guarda en material_cost de la línea. */
@@ -1695,9 +1704,10 @@ export interface CreateFichaOrderInput {
   /** Cada elemento es una línea de camisa; la configuration se guarda completa. */
   camisas: Array<{
     precio: number
+    regalo?: boolean
     [key: string]: unknown
   }>
-  complementos: Array<{ product_variant_id: string; nombre: string; cantidad: number; precio: number; cost_price?: number }>
+  complementos: Array<{ product_variant_id: string; nombre: string; cantidad: number; precio: number; regalo?: boolean; cost_price?: number }>
   entregaACuenta: number
   /** Método de pago cuando entregaACuenta > 0 (efectivo, tarjeta, transferencia, bizum). */
   metodoPago?: 'efectivo' | 'tarjeta' | 'transferencia' | 'bizum'
@@ -1750,6 +1760,24 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
     const entregaNum = Number(input.entregaACuenta) || 0
     if (entregaNum > 0 && !input.metodoPago) return failure('Indica el método de pago para la entrega a cuenta.')
 
+    // Un pedido a 0 € solo es válido si es regalo (evita 0 por error de tecleo,
+    // como los wipes de precios ya sufridos). Validación en SERVIDOR: la de la
+    // UI se puede saltar.
+    const totalInputs =
+      (input.prendasSastreria?.reduce((s, p) => s + (Number(p.precio) || 0), 0) ?? (Number(input.precioPrenda) || 0)) +
+      (input.camisas || []).reduce((s, c) => s + (Number(c.precio) || 0), 0) +
+      (input.complementos || []).reduce((s, c) => s + (Number(c.precio) || 0) * Math.max(1, Number(c.cantidad) || 1), 0)
+    const hayRegalo =
+      (input.prendasSastreria || []).some((p) => p.regalo === true) ||
+      (input.camisas || []).some((c) => c.regalo === true) ||
+      (input.complementos || []).some((c) => c.regalo === true)
+    const hayItems =
+      (input.prendasSastreria?.length ?? 0) > 0 || (input.camisas?.length ?? 0) > 0 ||
+      (input.complementos?.length ?? 0) > 0 || input.prendasSastreria === undefined
+    if (totalInputs <= 0 && !hayRegalo && hayItems) {
+      return failure('El total es 0 €: indica el precio o marca las prendas como regalo', 'VALIDATION')
+    }
+
     // NOTA: ya NO exigimos caja abierta para crear el pedido ni para su entrega
     // a cuenta. El cobro se registra siempre vía rpc_add_order_payment (mig 135),
     // que localiza la sesión por FECHA del pago; si no hay ninguna que cubra hoy,
@@ -1793,6 +1821,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
       line_type: 'artesanal' | 'industrial'
       unit_price: number
       line_total: number
+      is_gift: boolean
       material_cost: number
       finishing_notes: string | null
       configuration: Record<string, unknown>
@@ -1831,8 +1860,9 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
           tailoring_order_id: order.id,
           garment_type_id: gtId,
           line_type: orderTypeDb,
-          unit_price: Number(prendaInput.precio) || 0,
-          line_total: Number(prendaInput.precio) || 0,
+          unit_price: prendaInput.regalo ? 0 : Number(prendaInput.precio) || 0,
+          line_total: prendaInput.regalo ? 0 : Number(prendaInput.precio) || 0,
+          is_gift: prendaInput.regalo === true,
           material_cost: Number(prendaInput.coste) || 0,
           finishing_notes: (input.notas || '').trim() || null,
           configuration: {
@@ -1864,6 +1894,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
         line_type: orderTypeDb,
         unit_price: Number(input.precioPrenda) || 0,
         line_total: Number(input.precioPrenda) || 0,
+        is_gift: false,
         material_cost: 0,
         finishing_notes: (input.notas || '').trim() || null,
         configuration: mainConfig,
@@ -1873,15 +1904,17 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
     // Si prendasSastreria === [] (solo camisería), no se crea línea artesanal
 
     for (const camisa of input.camisas || []) {
-      const precio = Number(camisa.precio) || 0
+      const esRegalo = camisa.regalo === true
+      const precio = esRegalo ? 0 : Number(camisa.precio) || 0
       subtotalLines += precio
-      const { precio: _p, coste: _c, ...config } = camisa as { precio: number; coste?: number; [k: string]: unknown }
+      const { precio: _p, coste: _c, regalo: _r, ...config } = camisa as { precio: number; coste?: number; regalo?: boolean; [k: string]: unknown }
       linesToInsert.push({
         tailoring_order_id: order.id,
         garment_type_id: camiseriaGarmentTypeId,
         line_type: 'industrial',
         unit_price: precio,
         line_total: precio,
+        is_gift: esRegalo,
         material_cost: Number((camisa as { coste?: number }).coste) || 0,
         finishing_notes: null,
         configuration: { ...config, tipo: 'camiseria' },
@@ -1908,7 +1941,8 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
     }
 
     for (const comp of input.complementos || []) {
-      const precio = Number(comp.precio) || 0
+      const esRegalo = comp.regalo === true
+      const precio = esRegalo ? 0 : Number(comp.precio) || 0
       const cantidad = Math.max(1, Math.floor(Number(comp.cantidad) || 1))
       const unitCost = typeof comp.cost_price === 'number' && comp.cost_price > 0
         ? Number(comp.cost_price)
@@ -1920,6 +1954,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
           line_type: 'industrial',
           unit_price: precio,
           line_total: precio,
+          is_gift: esRegalo,
           material_cost: unitCost,
           finishing_notes: null,
           configuration: { product_variant_id: comp.product_variant_id, product_name: comp.nombre },
@@ -1962,6 +1997,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
         line_type: l.line_type,
         unit_price: l.unit_price,
         line_total: l.line_total,
+        is_gift: l.is_gift,
         material_cost: cfgCoste ?? l.material_cost ?? 0,
         finishing_notes: l.finishing_notes,
         configuration: l.configuration,

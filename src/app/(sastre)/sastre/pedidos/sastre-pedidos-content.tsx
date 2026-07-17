@@ -111,7 +111,19 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
                         {o.clients?.full_name ?? o.client_id ?? '—'}
                       </TableCell>
                       <TableCell className="text-white/70">{formatDate(o.order_date)}</TableCell>
-                      <TableCell className="text-white">{formatCurrency(o.total)}</TableCell>
+                      <TableCell className="text-white">
+                        {formatCurrency(o.total)}
+                        {(() => {
+                          const ls = o.tailoring_order_lines || []
+                          const gifts = ls.filter((l: any) => l.is_gift === true).length
+                          if (gifts === 0) return null
+                          return (
+                            <span className="ml-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full border border-amber-400/50 text-amber-300">
+                              {gifts === ls.length ? 'Regalo' : 'Incl. regalo'}
+                            </span>
+                          )
+                        })()}
+                      </TableCell>
                       <TableCell>
                         <span className={(o.total_pending ?? 0) > 0 ? 'text-amber-400 font-medium' : 'text-green-400'}>
                           {formatCurrency(o.total_pending ?? 0)}

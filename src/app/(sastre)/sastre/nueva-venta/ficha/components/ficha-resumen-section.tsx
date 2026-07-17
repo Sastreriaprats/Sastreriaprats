@@ -19,12 +19,14 @@ interface Props {
   setMetodoPago: (v: MetodoPago) => void
   submitting: boolean
   onSubmit: () => void
+  /** Hay prendas marcadas como regalo: permite crear el pedido con total 0 €. */
+  hasGifts?: boolean
 }
 
 export function FichaResumenSection({
   precioConfeccion, totalCamisas, totalComplementos, total, pendiente,
   entregaACuenta, setEntregaACuenta, metodoPago, setMetodoPago,
-  submitting, onSubmit,
+  submitting, onSubmit, hasGifts = false,
 }: Props) {
   return (
     <section className="rounded-xl border border-[#c9a96e]/30 bg-[#0d1629] p-5 space-y-3">
@@ -50,7 +52,7 @@ export function FichaResumenSection({
         )}
         <div className="flex justify-between font-semibold text-white pt-2 border-t border-[#c9a96e]/20">
           <span>TOTAL:</span>
-          <span>{total.toFixed(2)} €</span>
+          <span>{total.toFixed(2)} €{hasGifts && <span className="ml-1.5 text-[#c9a96e] text-sm font-normal">· incluye regalo</span>}</span>
         </div>
       </dl>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -75,7 +77,7 @@ export function FichaResumenSection({
         </div>
       </div>
       <p className="text-white/80">Pendiente: <strong className="text-white">{pendiente.toFixed(2)} €</strong></p>
-      <Button type="button" className="w-full min-h-[48px] bg-[#c9a96e]/20 border border-[#c9a96e]/40 text-[#c9a96e] hover:bg-[#c9a96e]/30" onClick={onSubmit} disabled={submitting || total <= 0}>
+      <Button type="button" className="w-full min-h-[48px] bg-[#c9a96e]/20 border border-[#c9a96e]/40 text-[#c9a96e] hover:bg-[#c9a96e]/30" onClick={onSubmit} disabled={submitting || (total <= 0 && !hasGifts)}>
         {submitting ? 'Creando pedido...' : 'Crear pedido y descargar ficha'}
       </Button>
     </section>

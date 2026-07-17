@@ -305,7 +305,7 @@ function add15WorkingDays(from: Date): string {
 
 // TejidoInput movido a ./components/ficha-camisa-section.tsx
 
-interface CartItem { id: string; slug: string; label: string; precio: number; coste?: number }
+interface CartItem { id: string; slug: string; label: string; precio: number; coste?: number; regalo?: boolean }
 
 function getCartItemDisplayLabel(item: CartItem, allItems: CartItem[]): string {
   const sameType = allItems.filter(c => c.slug === item.slug)
@@ -880,7 +880,7 @@ export function NuevaVentaFichaClient({
   // ── Build functions ───────────────────────────────────────────────────────
   const buildPrendasSastreria = () => {
     if (cartItems.length === 0) return []
-    const result: Array<{ slug: string; label: string; precio: number; oficial: string; configuration: Record<string, unknown>; coste?: number }> = []
+    const result: Array<{ slug: string; label: string; precio: number; regalo?: boolean; oficial: string; configuration: Record<string, unknown>; coste?: number }> = []
     for (const item of cartItems) {
       const sections = getSubSections(item.slug, item.label)
       const itemDisplayLabel = getCartItemDisplayLabel(item, cartItems)
@@ -901,6 +901,9 @@ export function NuevaVentaFichaClient({
           slug: sp.slug,
           label: lineLabel,
           precio: idx === 0 ? item.precio : 0,
+          // El regalo marca TODAS las sub-líneas del ítem (americana+pantalón del
+          // traje regalado): así el badge y la ficha lo muestran en cada prenda.
+          regalo: item.regalo === true,
           // El coste estimado solo se aplica a la primera sub-prenda (la que recoge el importe)
           coste: idx === 0 ? (Number(item.coste) || 0) : 0,
           oficial: oficiales[key] ?? '',
@@ -1045,7 +1048,13 @@ export function NuevaVentaFichaClient({
   // ── Submit ────────────────────────────────────────────────────────────────
   const handleCreateOrder = async () => {
     if (!clientId || !defaultStoreId) { toast.error('Faltan cliente o tienda.'); return }
-    if (total <= 0) { toast.error('El total debe ser mayor que 0.'); return }
+    const hayRegalos = cartItems.some(c => c.regalo === true)
+    if (total <= 0 && !hayRegalos) { toast.error('El total debe ser mayor que 0 (o marca las prendas como regalo).'); return }
+    // Con regalos marcados, las prendas NO regalo siguen necesitando precio.
+    if (cartItems.some(c => !c.regalo && (Number(c.precio) || 0) <= 0)) {
+      toast.error('Hay prendas sin precio: indica el PVP o márcalas como regalo.')
+      return
+    }
     const entrega = Number(entregaACuenta) || 0
     if (entrega > 0 && !metodoPago) { toast.error('Indica el método de pago para la entrega a cuenta.'); return }
     setSubmitting(true)
@@ -1176,11 +1185,23 @@ export function NuevaVentaFichaClient({
                   <span className="text-white flex-1 min-w-0 font-medium pt-2">{getCartItemDisplayLabel(item, cartItems)}</span>
                   <div className="flex flex-col gap-1">
                     <Input
-                      type="number" min={0} step={0.01} placeholder="PVP"
-                      className="w-28 h-9 bg-white/[0.07] border-white/20 text-white text-sm"
-                      value={item.precio || ''}
+                      type="number" min={0} step={0.01} placeholder={item.regalo ? 'Regalo' : 'PVP'}
+                      disabled={item.regalo === true}
+                      className="w-28 h-9 bg-white/[0.07] border-white/20 text-white text-sm disabled:opacity-50"
+                      value={item.regalo ? '' : (item.precio || '')}
                       onChange={e => setCartItems(prev => prev.map(c => c.id === item.id ? { ...c, precio: parseFloat(e.target.value) || 0 } : c))}
                     />
+                    <label className="flex items-center gap-1.5 text-[11px] text-white/60 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={item.regalo === true}
+                        onChange={e => setCartItems(prev => prev.map(c => c.id === item.id
+                          ? { ...c, regalo: e.target.checked, precio: e.target.checked ? 0 : c.precio }
+                          : c))}
+                        className="h-3.5 w-3.5 accent-[#c9a96e]"
+                      />
+                      Regalo (0 €)
+                    </label>
                     <Input
                       type="number" min={0} step={0.01} placeholder="Opcional"
                       title="Coste estimado (material + mano de obra)"
@@ -1474,6 +1495,7 @@ export function NuevaVentaFichaClient({
           totalComplementos={totalComplementos}
           total={total}
           pendiente={pendiente}
+          hasGifts={cartItems.some(c => c.regalo === true)}
           entregaACuenta={entregaACuenta}
           setEntregaACuenta={setEntregaACuenta}
           metodoPago={metodoPago}

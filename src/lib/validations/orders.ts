@@ -29,6 +29,9 @@ export const tailoringOrderLineSchema = z.object({
   fabric_meters: z.number().optional().nullable(),
   supplier_id: z.string().uuid().optional().nullable(),
   unit_price: z.number().min(0),
+  // Prenda regalo: permite PVP 0 de forma intencionada (mig 261). Debe estar
+  // declarado aquí: zod hace strip de las claves desconocidas y se perdería.
+  is_gift: z.boolean().default(false),
   discount_percentage: z.number().min(0).max(100).default(0),
   tax_rate: z.number().default(21),
   material_cost: z.number().default(0),

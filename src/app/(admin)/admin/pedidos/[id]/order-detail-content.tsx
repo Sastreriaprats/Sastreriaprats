@@ -74,6 +74,16 @@ export function OrderDetailContent({ order }: { order: any }) {
             <h1 className="text-2xl font-bold font-mono">{order.order_number}</h1>
             <Badge className={`${getOrderStatusColor(order.status)}`}>{getOrderStatusLabel(order.status)}</Badge>
             <Badge variant="outline">{order.order_type === 'artesanal' ? 'Artesanal' : 'Industrial'}</Badge>
+            {(() => {
+              const orderLines = order.tailoring_order_lines || []
+              const gifts = orderLines.filter((l: any) => l.is_gift === true).length
+              if (gifts === 0) return null
+              return (
+                <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300">
+                  {gifts === orderLines.length ? 'Regalo' : 'Incluye regalo'}
+                </Badge>
+              )
+            })()}
             {isOverdue && <Badge variant="destructive" className="gap-1"><AlertTriangle className="h-3 w-3" /> Retrasado</Badge>}
           </div>
           <div className="flex items-center gap-4 text-sm text-muted-foreground mt-1 flex-wrap">

@@ -548,7 +548,19 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                           <TableCell className="text-sm">{formatDate(order.order_date || order.created_at)}</TableCell>
                           <TableCell className={`text-sm ${isOverdue ? 'text-red-600 font-medium' : ''}`}>{formatDate(order.estimated_delivery_date)}</TableCell>
                           <TableCell className="text-sm">{order.payment_date ? formatDate(order.payment_date) : '—'}</TableCell>
-                          <TableCell className="font-medium">{formatCurrency(order.total)}</TableCell>
+                          <TableCell className="font-medium">
+                            {formatCurrency(order.total)}
+                            {(() => {
+                              const orderLines = order.tailoring_order_lines || []
+                              const gifts = orderLines.filter((l: any) => l.is_gift === true).length
+                              if (gifts === 0) return null
+                              return (
+                                <Badge variant="outline" className="ml-1.5 text-[10px] bg-amber-100 text-amber-800 border-amber-300">
+                                  {gifts === orderLines.length ? 'Regalo' : 'Incluye regalo'}
+                                </Badge>
+                              )
+                            })()}
+                          </TableCell>
                           <TableCell>{formatCurrency(order.total_paid)}</TableCell>
                           <TableCell>
                             <span className={order.total_pending > 0 ? 'text-amber-600 font-medium' : 'text-green-600'}>

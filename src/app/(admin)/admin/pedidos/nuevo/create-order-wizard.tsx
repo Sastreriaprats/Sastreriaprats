@@ -46,6 +46,7 @@ interface OrderLine {
   fabric_meters: number
   supplier_id: string | null
   unit_price: number
+  is_gift?: boolean
   discount_percentage: number
   tax_rate: number
   material_cost: number
@@ -200,6 +201,7 @@ export function CreateOrderWizard({
   })
   /** El usuario introduce siempre el PVP (con IVA). Al añadir la línea se convierte a sin IVA internamente. */
   const [lineFormPvpConIva, setLineFormPvpConIva] = useState<number>(0)
+  const [lineFormRegalo, setLineFormRegalo] = useState(false)
 
   const [lineOfficialSearch, setLineOfficialSearch] = useState('')
   const [lineOfficialResults, setLineOfficialResults] = useState<any[]>([])
@@ -448,8 +450,8 @@ export function CreateOrderWizard({
   const addLine = (keepOpen = false) => {
     const garment = garmentTypes.find((g: any) => g.id === lineForm.garment_type_id)
     if (!garment) { toast.error('Selecciona un tipo de prenda'); return }
-    const pvpConIva = lineFormPvpConIva || 0
-    if (pvpConIva <= 0) { toast.error('Indica el PVP (precio con IVA)'); return }
+    const pvpConIva = lineFormRegalo ? 0 : (lineFormPvpConIva || 0)
+    if (pvpConIva <= 0 && !lineFormRegalo) { toast.error('Indica el PVP (precio con IVA) o marca la prenda como regalo'); return }
     const currentGarmentId = lineForm.garment_type_id
     // Para líneas de Camisería, el documento oficial lee precio/obs desde la
     // configuración: los guardamos aquí para que coincidan creación y descarga.
@@ -468,6 +470,7 @@ export function CreateOrderWizard({
       fabric_meters: lineForm.fabric_meters || 0,
       supplier_id: lineForm.supplier_id || null,
       unit_price: pvpConIva,
+      is_gift: lineFormRegalo,
       discount_percentage: lineForm.discount_percentage || 0,
       tax_rate: lineForm.tax_rate || 21,
       material_cost: lineForm.material_cost || 0,
@@ -482,6 +485,7 @@ export function CreateOrderWizard({
     }])
     if (!keepOpen) setShowAddLine(false)
     setLineFormPvpConIva(0)
+    setLineFormRegalo(false)
     setLineForm({
       garment_type_id: keepOpen ? currentGarmentId : '',
       line_type: orderType === 'artesanal' || orderType === 'industrial' ? orderType : 'artesanal',
@@ -571,6 +575,7 @@ export function CreateOrderWizard({
         fabric_meters: l.fabric_meters || null,
         supplier_id: l.supplier_id,
         unit_price: l.unit_price,
+        is_gift: l.is_gift ?? false,
         discount_percentage: l.discount_percentage,
         tax_rate: l.tax_rate,
         material_cost: l.material_cost,
@@ -1042,7 +1047,7 @@ export function CreateOrderWizard({
                       {line.model_name && <p className="text-sm text-muted-foreground">Modelo: {line.model_name} {line.model_size && `(${line.model_size})`}</p>}
                     </div>
                     <div className="text-right">
-                      <p className="font-medium">PVP {formatCurrency(line.unit_price)}</p>
+                      <p className="font-medium">{line.is_gift ? <span className="text-amber-600">Regalo</span> : <>PVP {formatCurrency(line.unit_price)}</>}</p>
                       <Button variant="ghost" size="sm" className="text-destructive" onClick={() => removeLine(idx)}><Trash2 className="h-3 w-3 mr-1" /> Quitar</Button>
                     </div>
                   </div>
@@ -1230,8 +1235,12 @@ export function CreateOrderWizard({
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>PVP (con IVA) *</Label>
-                    <Input type="number" step="0.01" min={0} value={lineFormPvpConIva || ''} onChange={(e) => setLineFormPvpConIva(parseFloat(e.target.value) || 0)} placeholder="Ej: 121,00 €" />
-                    <p className="text-xs text-muted-foreground">Precio final que paga el cliente (IVA {lineForm.tax_rate ?? 21}% incluido)</p>
+                    <Input type="number" step="0.01" min={0} disabled={lineFormRegalo} value={lineFormRegalo ? '' : (lineFormPvpConIva || '')} onChange={(e) => setLineFormPvpConIva(parseFloat(e.target.value) || 0)} placeholder={lineFormRegalo ? 'Regalo (0 €)' : 'Ej: 121,00 €'} />
+                    <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+                      <input type="checkbox" checked={lineFormRegalo} onChange={(e) => setLineFormRegalo(e.target.checked)} className="h-3.5 w-3.5 accent-primary" />
+                      Es un regalo (sin precio)
+                    </label>
+                    {!lineFormRegalo && <p className="text-xs text-muted-foreground">Precio final que paga el cliente (IVA {lineForm.tax_rate ?? 21}% incluido)</p>}
                   </div>
                   <div className="space-y-2">
                     <Label>Descuento línea (%)</Label>

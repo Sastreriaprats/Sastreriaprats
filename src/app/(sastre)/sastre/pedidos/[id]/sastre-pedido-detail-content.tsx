@@ -229,7 +229,19 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
           </div>
           <div>
             <p className="text-white/40 text-xs uppercase tracking-wide">Total</p>
-            <p className="text-white">{formatCurrency(order.total)}</p>
+            <p className="text-white">
+              {formatCurrency(order.total)}
+              {(() => {
+                const ls = order.tailoring_order_lines || []
+                const gifts = ls.filter((l: any) => l.is_gift === true).length
+                if (gifts === 0) return null
+                return (
+                  <span className="ml-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full border border-amber-400/50 text-amber-300 align-middle">
+                    {gifts === ls.length ? 'Regalo' : 'Incl. regalo'}
+                  </span>
+                )
+              })()}
+            </p>
           </div>
           <div>
             <p className="text-white/40 text-xs uppercase tracking-wide">Pagado</p>

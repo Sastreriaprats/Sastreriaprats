@@ -539,6 +539,10 @@ function buildDocDefinition(order: FichaConfeccionOrder, talonRef?: string): Pdf
   const total = Number(order.total ?? 0)
   const totalPaid = Number(order.total_paid ?? 0)
   const totalPending = Number(order.total_pending ?? 0)
+  // Pedido/prenda regalo (mig 261): el bloque de precios muestra "REGALO" en
+  // vez de 0.00 € para que no parezca un precio sin rellenar.
+  const orderLinesForGift = (order as { tailoring_order_lines?: Array<{ is_gift?: boolean }> }).tailoring_order_lines ?? []
+  const allGift = orderLinesForGift.length > 0 && orderLinesForGift.every((l) => l.is_gift === true)
 
   const content: Content[] = []
 
@@ -676,9 +680,9 @@ function buildDocDefinition(order: FichaConfeccionOrder, talonRef?: string): Pdf
       widths: ['25%', '25%', '25%', '25%'],
       body: [
         [
-          cellStack('Precio:', `${total.toFixed(2)} €`),
+          cellStack('Precio:', allGift ? 'REGALO' : `${total.toFixed(2)} €`),
           cellStack('Entrega:', `${totalPaid.toFixed(2)} €`),
-          cellStack('Pendiente:', `${totalPending.toFixed(2)} €`),
+          cellStack('Pendiente:', allGift ? '—' : `${totalPending.toFixed(2)} €`),
           cellStack('Fecha cobro:', formatDate(ficha.fechaCobro)),
         ],
       ],
@@ -1205,7 +1209,10 @@ export function buildCamiseriaDocDefinition(
               {
                 stack: [
                   { text: 'PRECIO', fontSize: fs7, color: LABEL_COLOR },
-                  { text: `${precioLinea.toFixed(2)} €`, fontSize: fs9 + 2, bold: true, ...valueStyle },
+                  {
+                    text: (line as { is_gift?: boolean }).is_gift ? 'REGALO' : `${precioLinea.toFixed(2)} €`,
+                    fontSize: fs9 + 2, bold: true, ...valueStyle,
+                  },
                   { text: 'ENTREGADO A CUENTA', fontSize: fs7, color: LABEL_COLOR, margin: [0, 6, 0, 0] },
                   { text: `${totalPaid.toFixed(2)} €`, fontSize: fs9, ...valueStyle },
                 ],
