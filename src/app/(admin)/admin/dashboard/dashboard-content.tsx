@@ -567,7 +567,7 @@ export function DashboardContent() {
                 <CardTitle className="text-base flex items-center gap-2">
                   <BadgeEuro className="h-4 w-4 text-prats-navy" /> Ventas por vendedor · {new Date().toLocaleDateString('es-ES', { month: 'long' })}
                 </CardTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">Base de cálculo para comisiones. Haz clic en un vendedor para ver su desglose.</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Vendido sin IVA (base de comisiones, devoluciones descontadas). Haz clic en un vendedor para ver su desglose.</p>
               </div>
               <Button variant="ghost" size="sm" className="gap-1 text-xs shrink-0" onClick={() => router.push('/admin/reporting?tab=employees')}>
                 Ver informe completo <ArrowRight className="h-3 w-3" />

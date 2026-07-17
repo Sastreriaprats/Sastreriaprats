@@ -2,6 +2,7 @@
 
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { fetchEmployeeBilledLines } from '@/lib/reports/employee-billing'
 
 export interface VendorTodaySaleRow {
   id: string
@@ -60,22 +61,11 @@ export async function getVendorDashboardStats(
     const tomorrow = new Date(year, month - 1, day + 1)
     const tomorrowStart = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}T00:00:00`
 
-    // Ventas del propio vendedor (subtotal, sin IVA) — mes, año y hoy en paralelo.
-    const [monthSalesRes, yearSalesRes, todaySalesRes] = await Promise.all([
-      admin
-        .from('sales')
-        .select('subtotal')
-        .eq('salesperson_id', user.id)
-        .eq('status', 'completed')
-        .gte('created_at', monthStart)
-        .lt('created_at', nextMonthStart),
-      admin
-        .from('sales')
-        .select('subtotal')
-        .eq('salesperson_id', user.id)
-        .eq('status', 'completed')
-        .gte('created_at', yearStart)
-        .lt('created_at', nextYearStart),
+    // "Mis ventas" con la definición canónica (employee-billing.ts): atribución
+    // por línea, sin IVA, sin cobros de pedido, neteando devoluciones. Así el
+    // vendedor ve LA MISMA cifra que el admin en la ficha y el informe.
+    const [billedLines, todaySalesRes] = await Promise.all([
+      fetchEmployeeBilledLines(admin, { userId: user.id, from: yearStart, to: nextYearStart }),
       admin
         .from('sales')
         .select('id, ticket_number, created_at, total, payment_method, status, clients(full_name)')
@@ -86,15 +76,23 @@ export async function getVendorDashboardStats(
         .order('created_at', { ascending: false }),
     ])
 
-    if (monthSalesRes.error) return { error: monthSalesRes.error.message }
-    if (yearSalesRes.error) return { error: yearSalesRes.error.message }
     if (todaySalesRes.error) return { error: todaySalesRes.error.message }
 
-    const sumSubtotal = (rows: { subtotal: number | string | null }[] | null) =>
-      (rows || []).reduce((acc, r) => acc + (Number(r.subtotal) || 0), 0)
-
-    const employeeMonthSales = sumSubtotal(monthSalesRes.data)
-    const employeeYearSales = sumSubtotal(yearSalesRes.data)
+    // Mes en hora de Madrid (los created_at son UTC).
+    const madridMonth = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit',
+    })
+    const currentMonthKey = madridMonth.format(now)
+    let employeeMonthSales = 0
+    let employeeYearSales = 0
+    for (const l of billedLines) {
+      employeeYearSales += l.amount_net
+      if (madridMonth.format(new Date(l.created_at)) === currentMonthKey) {
+        employeeMonthSales += l.amount_net
+      }
+    }
+    employeeMonthSales = Math.round(employeeMonthSales * 100) / 100
+    employeeYearSales = Math.round(employeeYearSales * 100) / 100
 
     const todaySales: VendorTodaySaleRow[] = ((todaySalesRes.data ?? []) as any[]).map((s) => ({
       id: s.id,

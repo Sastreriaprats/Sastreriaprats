@@ -4,6 +4,7 @@ import { protectedAction } from '@/lib/server/action-wrapper'
 import { checkUserExplicitPermission } from '@/actions/auth'
 import { success, failure } from '@/lib/errors'
 import { BOUTIQUE_SALE_TYPE, GIFT_CARD_SALE_TYPE, accumulateByStore, compareSizes } from '@/lib/reports/dimensions'
+import { fetchEmployeeBilledLines } from '@/lib/reports/employee-billing'
 
 export type ReportChannel = 'all' | 'boutique' | 'tailoring'
 export type TaxMode = 'with_tax' | 'without_tax'
@@ -888,13 +889,19 @@ export const getSalesByEmployee = protectedAction<
 
     let saleLinesQ = ctx.adminClient
       .from('sale_lines')
-      .select('sale_id, line_total, tax_rate, sales!inner(salesperson_id, status, store_id, stores(name), created_at, sale_type)')
+      // Atribución por LÍNEA (salesperson_id de la línea, criterio canónico de
+      // employee-billing.ts): en tickets mixtos reserva+directo cada línea va a
+      // su vendedor real, no todo el ticket a quien reservó (cabecera).
+      .select('sale_id, line_total, tax_rate, quantity, quantity_returned, salesperson_id, sales!inner(salesperson_id, status, store_id, stores(name), created_at, sale_type, is_tax_free)')
       .gte('sales.created_at', start_date)
       .lte('sales.created_at', end_date + 'T23:59:59')
-      .eq('sales.status', 'completed')
+      // Netear devoluciones: una devolución parcial ya no borra el ticket entero
+      // de las cifras del vendedor (se descuenta solo la parte devuelta).
+      .in('sales.status', ['completed', 'partially_returned'])
       // Excluye cobros de pedido del TPV (mig 247/248): sastrería, no boutique. Aquí
       // evita además el DOBLE conteo (el cobro ya cuenta en tailoring_total vía pagos).
       .is('tailoring_order_id', null)
+      .limit(20000)
     if (store_id) saleLinesQ = saleLinesQ.eq('sales.store_id', store_id)
 
     // Cobrado por payment_date (fecha real del cobro), no created_at (tecleo).
@@ -942,13 +949,22 @@ export const getSalesByEmployee = protectedAction<
       return employees[id]
     }
 
+    // Importe efectivo de una línea: neteo de devoluciones + con/sin IVA
+    // (tax-free: el PVP ya no lleva IVA, no se divide).
+    const lineAmount = (line: any): number => {
+      const qty = Number(line.quantity) || 1
+      const qtyRet = Math.min(Math.max(Number(line.quantity_returned) || 0, 0), qty)
+      const gross = ((line.line_total as number) || 0) * (qty > 0 ? (qty - qtyRet) / qty : 1)
+      if (!net) return gross
+      return (line.sales as any)?.is_tax_free ? gross : lineNet(gross, line.tax_rate)
+    }
+
     for (const line of saleLinesRes.data || []) {
       const sale = line.sales as any
-      const empId = sale?.salesperson_id || 'unknown'
+      const empId = (line as any).salesperson_id || sale?.salesperson_id || 'unknown'
       const e = ensure(empId)
       if (line.sale_id) e.saleIds.add(String(line.sale_id))
-      const lt = (line.line_total as number) || 0
-      const amount = net ? lineNet(lt, (line as any).tax_rate) : lt
+      const amount = lineAmount(line)
       e.pos_total += amount
       // Boutique = producto de tienda (sale_type 'boutique'); Tarjetas = saldo
       // (sale_type 'gift_card'). Separadas con la misma definición que dimensions.ts;
@@ -1011,7 +1027,7 @@ export const getSalesByEmployee = protectedAction<
     let byStore: { store_id: string; store_name: string; boutique: number; gift_cards: number; tailoring: number; total: number }[] | undefined
     if (!store_id) {
       const lines = (saleLinesRes.data || []) as any[]
-      const pickLine = (l: any) => ({ storeId: l.sales?.store_id, storeName: l.sales?.stores?.name, value: net ? lineNet((l.line_total as number) || 0, l.tax_rate) : ((l.line_total as number) || 0) })
+      const pickLine = (l: any) => ({ storeId: l.sales?.store_id, storeName: l.sales?.stores?.name, value: lineAmount(l) })
       const boutiqueByStore = accumulateByStore(lines.filter((l) => l.sales?.sale_type === BOUTIQUE_SALE_TYPE), pickLine)
       const giftByStore = accumulateByStore(lines.filter((l) => l.sales?.sale_type === GIFT_CARD_SALE_TYPE), pickLine)
       const tailByStore = accumulateByStore((paymentsRes.data || []) as any[], (p: any) => ({
@@ -1069,20 +1085,18 @@ export const getCommissionsByEmployee = protectedAction<
 >(
   { permission: 'reports.view', auditModule: 'reports' },
   async (ctx, { start_date, end_date, store_id }) => {
-    let query = ctx.adminClient
-      .from('sale_lines')
-      .select('sale_id, line_total, salesperson_id, reservation_line_id, sales!inner(status, store_id, created_at)')
-      .gte('sales.created_at', start_date)
-      .lte('sales.created_at', end_date + 'T23:59:59')
-      .eq('sales.status', 'completed')
-      // Excluye cobros de pedido del TPV (mig 247/248): un cobro de pedido no es
-      // venta con comisión (hoy inflaba la base "Sin asignar", salesperson_id NULL).
-      .is('tailoring_order_id', null)
-
-    if (store_id) query = query.eq('sales.store_id', store_id)
-
-    const { data, error } = await query
-    if (error) return failure(error.message || 'Error al consultar comisiones', 'INTERNAL')
+    // Definición canónica (employee-billing.ts): sin IVA, sin cobros de pedido,
+    // neteando devoluciones y paginado (sin tope de 1000 filas).
+    let lines: Awaited<ReturnType<typeof fetchEmployeeBilledLines>>
+    try {
+      lines = await fetchEmployeeBilledLines(ctx.adminClient, {
+        from: start_date,
+        to: end_date + 'T23:59:59',
+        storeId: store_id || undefined,
+      })
+    } catch (e) {
+      return failure(e instanceof Error ? e.message : 'Error al consultar comisiones', 'INTERNAL')
+    }
 
     const byEmployee: Record<string, {
       lines_total: number
@@ -1092,8 +1106,8 @@ export const getCommissionsByEmployee = protectedAction<
       saleIds: Set<string>
     }> = {}
 
-    for (const line of data || []) {
-      const empId = (line.salesperson_id as string | null) || 'unknown'
+    for (const line of lines) {
+      const empId = line.salesperson_id
       if (!byEmployee[empId]) {
         byEmployee[empId] = {
           lines_total: 0,
@@ -1103,11 +1117,11 @@ export const getCommissionsByEmployee = protectedAction<
           saleIds: new Set(),
         }
       }
-      const amount = Number(line.line_total) || 0
+      const amount = line.amount_net
       byEmployee[empId].lines_total += amount
       byEmployee[empId].lines_count += 1
-      if (line.sale_id) byEmployee[empId].saleIds.add(String(line.sale_id))
-      if (line.reservation_line_id) byEmployee[empId].from_reservation_total += amount
+      byEmployee[empId].saleIds.add(line.sale_id)
+      if (line.from_reservation) byEmployee[empId].from_reservation_total += amount
       else byEmployee[empId].direct_total += amount
     }
 
@@ -1917,6 +1931,10 @@ export const getUserSalesSummary = protectedAction<
     ytd: { total: number; sales_count: number }
     all_time: { total: number; sales_count: number }
     current_month: { year: number; month: number; label: string }
+    /** Tiendas presentes en el histórico (columnas del desglose). */
+    stores: Array<{ id: string; name: string }>
+    /** Total histórico por tienda (sin IVA). */
+    by_store: Record<string, number>
     recent_sales: Array<{
       sale_id: string
       ticket_number: string
@@ -1926,7 +1944,15 @@ export const getUserSalesSummary = protectedAction<
       client_name: string | null
       store_name: string | null
     }>
-    by_month: Array<{ year: number; month: number; label: string; total: number; sales_count: number }>
+    by_month: Array<{
+      year: number; month: number; label: string; total: number; sales_count: number
+      /** Desglose del mes por tienda (sin IVA). */
+      by_store: Record<string, number>
+      /** Sastrería cobrada en backoffice ese mes (sin IVA) — serie separada, no comisionable. */
+      tailoring_collected: number
+    }>
+    /** Total histórico de sastrería cobrada en backoffice (sin IVA). */
+    tailoring_backoffice_total: number
   }
 >(
   { permission: 'reports.view', auditModule: 'reports' },
@@ -1940,18 +1966,25 @@ export const getUserSalesSummary = protectedAction<
       .eq('id', user_id)
       .maybeSingle()
 
-    // Traer TODAS las líneas asignadas a este vendedor (completed).
-    // Para una sastrería con miles de ventas al año, esto es manejable.
-    const { data: lines, error: linesErr } = await ctx.adminClient
-      .from('sale_lines')
-      .select(`
-        sale_id,
-        line_total,
-        sales!inner(id, ticket_number, total, status, created_at, store_id, client_id)
-      `)
-      .eq('salesperson_id', user_id)
-      .eq('sales.status', 'completed')
-    if (linesErr) return failure(linesErr.message || 'Error al consultar ventas', 'INTERNAL')
+    // Definición canónica (src/lib/reports/employee-billing.ts): atribución por
+    // línea, SIN IVA, sin cobros de pedido, neteando devoluciones. Paginado en
+    // bucle: el select plano anterior se truncaba al tope de 1000 filas de
+    // Supabase en cuanto el vendedor superaba 1000 líneas históricas.
+    let lines: Awaited<ReturnType<typeof fetchEmployeeBilledLines>>
+    try {
+      lines = await fetchEmployeeBilledLines(ctx.adminClient, { userId: user_id })
+    } catch (e) {
+      return failure(e instanceof Error ? e.message : 'Error al consultar ventas', 'INTERNAL')
+    }
+
+    // Sastrería cobrada en backoffice (serie separada, no comisionable):
+    // atribuida a quien registró el cobro, por payment_date (fecha real).
+    const { data: tailoringPayments, error: tpErr } = await ctx.adminClient
+      .from('tailoring_order_payments')
+      .select('amount, payment_date')
+      .eq('created_by', user_id)
+      .limit(20000)
+    if (tpErr) return failure(tpErr.message || 'Error al consultar cobros de sastrería', 'INTERNAL')
 
     // Agregar por venta
     type SaleAgg = {
@@ -1960,26 +1993,25 @@ export const getUserSalesSummary = protectedAction<
       sale_total: number
       created_at: string
       store_id: string | null
+      store_name: string | null
       client_id: string | null
       lines_total_for_user: number
     }
     const bySale = new Map<string, SaleAgg>()
-    for (const l of (lines ?? []) as any[]) {
-      const s = l.sales
-      if (!s?.id) continue
-      const existing = bySale.get(s.id)
-      const lineAmount = Number(l.line_total) || 0
+    for (const l of lines) {
+      const existing = bySale.get(l.sale_id)
       if (existing) {
-        existing.lines_total_for_user += lineAmount
+        existing.lines_total_for_user += l.amount_net
       } else {
-        bySale.set(s.id, {
-          sale_id: s.id,
-          ticket_number: s.ticket_number,
-          sale_total: Number(s.total) || 0,
-          created_at: s.created_at,
-          store_id: s.store_id ?? null,
-          client_id: s.client_id ?? null,
-          lines_total_for_user: lineAmount,
+        bySale.set(l.sale_id, {
+          sale_id: l.sale_id,
+          ticket_number: l.ticket_number,
+          sale_total: l.sale_total,
+          created_at: l.created_at,
+          store_id: l.store_id,
+          store_name: l.store_name,
+          client_id: l.client_id,
+          lines_total_for_user: l.amount_net,
         })
       }
     }
@@ -1999,7 +2031,22 @@ export const getUserSalesSummary = protectedAction<
     let mtdTotal = 0, mtdCount = 0
     let ytdTotal = 0, ytdCount = 0
     let allTotal = 0
-    const byMonth = new Map<string, { year: number; month: number; total: number; sales_count: number }>()
+    const byMonth = new Map<string, {
+      year: number; month: number; total: number; sales_count: number
+      by_store: Record<string, number>; tailoring_collected: number
+    }>()
+    const byStoreTotal: Record<string, number> = {}
+    const storeNameById = new Map<string, string>()
+
+    const ensureMonth = (y: number, mo0: number) => {
+      const key = `${y}-${mo0}` // formato existente: month 0-based
+      let bm = byMonth.get(key)
+      if (!bm) {
+        bm = { year: y, month: mo0, total: 0, sales_count: 0, by_store: {}, tailoring_collected: 0 }
+        byMonth.set(key, bm)
+      }
+      return bm
+    }
 
     for (const s of sales) {
       const amount = s.lines_total_for_user
@@ -2009,60 +2056,78 @@ export const getUserSalesSummary = protectedAction<
       if (mk === nowMonthKey) { mtdTotal += amount; mtdCount += 1 }
 
       const [y, mo] = mk.split('-').map(Number)
-      const key = `${y}-${mo - 1}` // formato existente: month 0-based
-      const bm = byMonth.get(key)
-      if (bm) { bm.total += amount; bm.sales_count += 1 }
-      else byMonth.set(key, { year: y, month: mo - 1, total: amount, sales_count: 1 })
+      const bm = ensureMonth(y, mo - 1)
+      bm.total += amount
+      bm.sales_count += 1
+      const sKey = s.store_id ?? 'none'
+      bm.by_store[sKey] = (bm.by_store[sKey] || 0) + amount
+      byStoreTotal[sKey] = (byStoreTotal[sKey] || 0) + amount
+      if (s.store_id && s.store_name) storeNameById.set(s.store_id, s.store_name)
     }
 
-    // Nombres de tienda y cliente para las ventas recientes
-    const recent = sales.slice(0, recent_limit)
-    const storeIds = [...new Set(recent.map((s) => s.store_id).filter(Boolean) as string[])]
-    const clientIds = [...new Set(recent.map((s) => s.client_id).filter(Boolean) as string[])]
+    // Serie separada: sastrería cobrada en backoffice, sin IVA (21% por defecto,
+    // mismo criterio que el informe Por empleado), agrupada por payment_date.
+    let tailoringBackofficeTotal = 0
+    for (const p of (tailoringPayments ?? []) as any[]) {
+      const date = String(p.payment_date || '')
+      if (!/^\d{4}-\d{2}/.test(date)) continue
+      const amt = (Number(p.amount) || 0) / (1 + DEFAULT_TAX_RATE / 100)
+      tailoringBackofficeTotal += amt
+      const y = Number(date.slice(0, 4))
+      const mo = Number(date.slice(5, 7))
+      ensureMonth(y, mo - 1).tailoring_collected += amt
+    }
 
-    const [storesRes, clientsRes] = await Promise.all([
-      storeIds.length > 0
-        ? ctx.adminClient.from('stores').select('id, name').in('id', storeIds)
-        : Promise.resolve({ data: [] as any[] }),
-      clientIds.length > 0
-        ? ctx.adminClient.from('clients').select('id, first_name, last_name, company_name').in('id', clientIds)
-        : Promise.resolve({ data: [] as any[] }),
-    ])
-    const storeNameById = new Map<string, string>()
-    for (const s of (storesRes.data as any[]) ?? []) storeNameById.set(s.id, s.name)
+    // Nombres de cliente para las ventas recientes (la tienda ya viene embebida)
+    const recent = sales.slice(0, recent_limit)
+    const clientIds = [...new Set(recent.map((s) => s.client_id).filter(Boolean) as string[])]
+    const { data: clientsData } = clientIds.length > 0
+      ? await ctx.adminClient.from('clients').select('id, first_name, last_name, company_name').in('id', clientIds)
+      : { data: [] as any[] }
     const clientNameById = new Map<string, string>()
-    for (const c of (clientsRes.data as any[]) ?? []) {
+    for (const c of (clientsData as any[]) ?? []) {
       const name = c.company_name || [c.first_name, c.last_name].filter(Boolean).join(' ') || null
       clientNameById.set(c.id, name ?? '—')
     }
 
     const monthLabels = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
 
+    const round2 = (n: number) => Math.round(n * 100) / 100
+    const storesList = [...storeNameById.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => (byStoreTotal[b.id] || 0) - (byStoreTotal[a.id] || 0))
+    if (byStoreTotal['none']) storesList.push({ id: 'none', name: 'Sin tienda' })
+
     return success({
       user: profile
         ? { id: (profile as any).id, full_name: (profile as any).full_name, email: (profile as any).email }
         : null,
-      mtd: { total: Math.round(mtdTotal * 100) / 100, sales_count: mtdCount },
-      ytd: { total: Math.round(ytdTotal * 100) / 100, sales_count: ytdCount },
-      all_time: { total: Math.round(allTotal * 100) / 100, sales_count: sales.length },
+      mtd: { total: round2(mtdTotal), sales_count: mtdCount },
+      ytd: { total: round2(ytdTotal), sales_count: ytdCount },
+      all_time: { total: round2(allTotal), sales_count: sales.length },
       current_month: { year: currentYearNum, month: currentMonthNum, label: `${monthLabels[currentMonthNum]} ${currentYearNum}` },
+      stores: storesList,
+      by_store: Object.fromEntries(Object.entries(byStoreTotal).map(([k, v]) => [k, round2(v)])),
       recent_sales: recent.map((s) => ({
         sale_id: s.sale_id,
         ticket_number: s.ticket_number,
         created_at: s.created_at,
         sale_total: s.sale_total,
-        lines_total_for_user: Math.round(s.lines_total_for_user * 100) / 100,
+        lines_total_for_user: round2(s.lines_total_for_user),
         client_name: s.client_id ? (clientNameById.get(s.client_id) ?? null) : null,
-        store_name: s.store_id ? (storeNameById.get(s.store_id) ?? null) : null,
+        store_name: s.store_name,
       })),
+      // Historial COMPLETO (antes se capaba a 12 meses); la UI pagina por año.
       by_month: [...byMonth.values()]
         .sort((a, b) => (b.year - a.year) || (b.month - a.month))
-        .slice(0, 12)
         .map((b) => ({
           ...b,
           label: `${monthLabels[b.month]} ${b.year}`,
-          total: Math.round(b.total * 100) / 100,
+          total: round2(b.total),
+          by_store: Object.fromEntries(Object.entries(b.by_store).map(([k, v]) => [k, round2(v)])),
+          tailoring_collected: round2(b.tailoring_collected),
         })),
+      tailoring_backoffice_total: round2(tailoringBackofficeTotal),
     })
   }
 )

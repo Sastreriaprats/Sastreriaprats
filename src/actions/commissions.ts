@@ -124,7 +124,10 @@ export const getEmployeeCommissions = protectedAction<
         .select('salesperson_id, total, tax_amount, sale_type, created_at')
         .eq('status', 'completed')
         .gte('created_at', start_date)
-        .lte('created_at', end_date + 'T23:59:59'),
+        .lte('created_at', end_date + 'T23:59:59')
+        // Sin límite explícito, Supabase trunca a 1000 filas en silencio y la
+        // base de comisiones se quedaría corta en meses con >1000 ventas.
+        .limit(20000),
       admin.from('employee_monthly_goals')
         .select('employee_id, goal_type, target_amount, year, month')
         .in('year', years.length ? years : [0]),
