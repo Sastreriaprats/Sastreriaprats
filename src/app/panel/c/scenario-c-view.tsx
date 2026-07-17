@@ -56,10 +56,18 @@ const inRange = (date: string, from: string, to: string) =>
 const quarterOf = (date: string) => Math.ceil(Number(date.slice(5, 7)) / 3)
 const qPeriod = (year: number, q: number) => `${String((q - 1) * 3 + 1).padStart(2, '0')}/${year} – ${String(q * 3).padStart(2, '0')}/${year}`
 const pct = (n: number) => `${Number(n) % 1 === 0 ? Number(n) : (Number(n) || 0).toLocaleString('es-ES')} %`
-// Tipo de IVA efectivo de un documento (cociente cuota/base → tipo español más cercano)
-const effRate = (base: number, vat: number) => {
+// Tipo de IVA de un documento emitido. Solo devuelve un número cuando TODO el
+// documento va a un único tipo legal (cociente cuota/base ≈ 0/4/10/21). Si mezcla
+// tipos —p.ej. un ticket con arreglos al 21% y cobros de pedido de sastrería al 0%—
+// el cociente cae en un valor intermedio que no es ningún tipo real, y se devuelve
+// null para pintar "mixto" en vez de inventar un 10% o un 0% engañoso.
+const docRate = (base: number, vat: number): number | null => {
   const raw = base > 0 ? (vat / base) * 100 : 0
-  return [0, 4, 10, 21].reduce((best, r) => (Math.abs(r - raw) < Math.abs(best - raw) ? r : best), 0)
+  return [0, 4, 10, 21].find((r) => Math.abs(r - raw) < 0.5) ?? null
+}
+const rateLabel = (base: number, vat: number) => {
+  const r = docRate(base, vat)
+  return r === null ? 'mixto' : pct(r)
 }
 
 export function ScenarioCView() {
@@ -220,7 +228,7 @@ export function ScenarioCView() {
       })) },
       { name: 'Facturas ingresos', rows: filteredIncomeDocs.map((d) => ({
         Tipo: d.docType, 'Nº': d.number, Cliente: d.client, Fecha: d.date,
-        Base: n2(d.base), 'Tipo IVA %': effRate(d.base, d.vat), IVA: n2(d.vat), 'Retención': 0,
+        Base: n2(d.base), 'Tipo IVA %': docRate(d.base, d.vat) ?? 'mixto', IVA: n2(d.vat), 'Retención': 0,
         Total: n2(d.total), Estado: d.status ?? '', Pago: d.method ?? '',
       })) },
       { name: 'Facturas gastos', rows: apDomestic.map((f) => ({
@@ -424,7 +432,7 @@ export function ScenarioCView() {
                       <td className="px-3 py-2 text-slate-500">{d.date}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{eur(d.base)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">
-                        {eur(d.vat)} <span className="text-[10px] text-slate-400">({pct(effRate(d.base, d.vat))})</span>
+                        {eur(d.vat)} <span className="text-[10px] text-slate-400">({rateLabel(d.base, d.vat)})</span>
                       </td>
                       <td className="px-3 py-2 text-right text-slate-300">—</td>
                       <td className="px-3 py-2 text-right font-medium tabular-nums">{eur(d.total)}</td>
