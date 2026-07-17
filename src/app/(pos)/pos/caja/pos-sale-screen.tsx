@@ -352,12 +352,18 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
       .then((result) => {
         if (cancelled) return
         if (result.success && result.data && result.data.length > 0) {
-          setClientPendingDebt(result.data.map((r) => ({
-            entity_type: r.entity_type,
-            entity_id: r.id,
-            reference: r.reference,
-            total_pending: r.total_pending,
-          })))
+          // Las reservas con deuda se excluyen del banner de cobro: su cobro va
+          // por rpc_add_reservation_payment (pestaña Reservas), no como línea de
+          // cobro del ticket (rpc_create_sale solo procesa order/sale). El aviso
+          // púrpura de reservas del TPV ya cubre la señal.
+          setClientPendingDebt(result.data
+            .filter((r) => r.entity_type !== 'reservation')
+            .map((r) => ({
+              entity_type: r.entity_type as 'tailoring_order' | 'sale',
+              entity_id: r.id,
+              reference: r.reference,
+              total_pending: r.total_pending,
+            })))
         } else {
           setClientPendingDebt([])
         }

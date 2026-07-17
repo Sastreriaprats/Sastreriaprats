@@ -130,7 +130,12 @@ export function ReservationsTab() {
 
   const [status, setStatus] = useState<string>('all')
   const [onlyPending, setOnlyPending] = useState(false)
-  const [search, setSearch] = useState('')
+  // ?rsearch= permite deep-link con el buscador precargado (p.ej. desde Cobros
+  // pendientes: fila de reserva → esta pestaña filtrada por su número).
+  const [search, setSearch] = useState(() => {
+    if (typeof window === 'undefined') return ''
+    return new URLSearchParams(window.location.search).get('rsearch') || ''
+  })
   // Filtro por rango de fechas de creación de la reserva (petición Mónica)
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')

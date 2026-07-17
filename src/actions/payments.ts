@@ -414,7 +414,7 @@ export const updateSalePayment = protectedAction<
 
 export interface PendingPaymentRow {
   id: string
-  entity_type: 'tailoring_order' | 'sale'
+  entity_type: 'tailoring_order' | 'sale' | 'reservation'
   reference: string
   client_name: string
   client_id: string
@@ -430,7 +430,7 @@ export interface PendingPaymentRow {
 }
 
 export const getPendingPayments = protectedAction<
-  { type?: 'all' | 'orders' | 'sales'; search?: string },
+  { type?: 'all' | 'orders' | 'sales' | 'reservations'; search?: string },
   PendingPaymentRow[]
 >(
   { permission: ['orders.view', 'sales.view'] },
@@ -565,6 +565,59 @@ export const getPendingPayments = protectedAction<
         }
       }
 
+      // Reservas con deuda (mig 263): activas, pendientes de stock o entregadas
+      // sin cobro completo. La deuda de recogidas por TPV vive en la VENTA (ya
+      // listada arriba); aquí solo asoma la deuda de cabecera de la reserva.
+      if (type === 'all' || type === 'reservations') {
+        let query = ctx.adminClient
+          .from('product_reservations')
+          .select('id, reservation_number, total, total_paid, status, created_at, client_id, clients(id, full_name), stores(id, name)')
+          .in('status', ['active', 'pending_stock', 'fulfilled'])
+          .gt('total', 0)
+          .order('created_at', { ascending: false })
+          .limit(500)
+
+        if (searchTerm) {
+          if (clientIds.length > 0) {
+            query = query.or(`reservation_number.ilike.%${searchTerm}%,client_id.in.(${clientIds.join(',')})`)
+          } else {
+            query = query.ilike('reservation_number', `%${searchTerm}%`)
+          }
+        }
+
+        const { data: reservations, error: resErr } = await query
+        if (resErr) {
+          console.error('[getPendingPayments] reservations:', resErr)
+        } else {
+          for (const r of reservations ?? []) {
+            const total = Number(r.total)
+            const paid = Number(r.total_paid ?? 0)
+            const pending = Math.round((total - paid) * 100) / 100
+            if (pending <= 0) continue
+            const client = Array.isArray(r.clients) ? r.clients[0] : r.clients
+            const store = Array.isArray(r.stores) ? r.stores[0] : r.stores
+            const created = new Date(r.created_at)
+            const days = Math.floor((today.getTime() - created.getTime()) / (1000 * 60 * 60 * 24))
+            rows.push({
+              id: r.id,
+              entity_type: 'reservation',
+              reference: r.reservation_number ?? r.id.slice(0, 8),
+              client_name: client?.full_name ?? '—',
+              client_id: client?.id ?? '',
+              total,
+              total_paid: paid,
+              total_pending: pending,
+              last_payment_date: null,
+              next_payment_date: null,
+              created_at: r.created_at,
+              days_since_creation: days,
+              store_id: store?.id ?? null,
+              store_name: store?.name ?? null,
+            })
+          }
+        }
+      }
+
       // Orden único: más reciente primero (por created_at)
       rows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
@@ -664,6 +717,44 @@ export const getClientPendingDebt = protectedAction<
           last_payment_date: lastSalePay?.created_at ?? null,
           next_payment_date: lastSalePay?.next_payment_date ?? null,
           created_at: s.created_at,
+          days_since_creation: days,
+          store_id: store?.id ?? null,
+          store_name: store?.name ?? null,
+        })
+      }
+
+      // Reservas del cliente con deuda (incluidas las fulfilled sin cobro
+      // completo, mig 263) — mismo criterio que el agregado de la ficha.
+      const { data: reservations } = await ctx.adminClient
+        .from('product_reservations')
+        .select('id, reservation_number, total, total_paid, status, created_at, client_id, clients(id, full_name), stores(id, name)')
+        .eq('client_id', client_id)
+        .in('status', ['active', 'pending_stock', 'fulfilled'])
+        .gt('total', 0)
+        .order('created_at', { ascending: false })
+        .limit(50)
+
+      for (const r of reservations ?? []) {
+        const total = Number(r.total)
+        const paid = Number(r.total_paid ?? 0)
+        const pending = Math.round((total - paid) * 100) / 100
+        if (pending <= 0) continue
+        const client = Array.isArray(r.clients) ? r.clients[0] : r.clients
+        const store = Array.isArray(r.stores) ? r.stores[0] : r.stores
+        const created = new Date(r.created_at)
+        const days = Math.floor((today.getTime() - created.getTime()) / (1000 * 60 * 60 * 24))
+        rows.push({
+          id: r.id,
+          entity_type: 'reservation',
+          reference: r.reservation_number ?? r.id.slice(0, 8),
+          client_name: client?.full_name ?? '—',
+          client_id: client?.id ?? '',
+          total,
+          total_paid: paid,
+          total_pending: pending,
+          last_payment_date: null,
+          next_payment_date: null,
+          created_at: r.created_at,
           days_since_creation: days,
           store_id: store?.id ?? null,
           store_name: store?.name ?? null,

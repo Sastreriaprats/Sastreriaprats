@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import {
   CircleDollarSign, Search, Loader2, Scissors, ShoppingBag,
-  RefreshCw, AlertCircle, Clock,
+  RefreshCw, AlertCircle, Clock, BookmarkCheck, ExternalLink,
 } from 'lucide-react'
 import { formatCurrency, formatDate, cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -43,7 +43,7 @@ function KpiCard({ label, value, sub, icon: Icon, color = 'text-foreground' }: {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-type FilterType = 'all' | 'orders' | 'sales'
+type FilterType = 'all' | 'orders' | 'sales' | 'reservations'
 type SortOrder = 'recent_first' | 'oldest_first'
 
 export function CobrosContent({ basePath = '/admin' }: { basePath?: string }) {
@@ -98,15 +98,24 @@ export function CobrosContent({ basePath = '/admin' }: { basePath?: string }) {
   // ─── KPIs (sobre los datos filtrados mostrados) ───────────────────────────────
   const orderRows = displayedRows.filter((r) => r.entity_type === 'tailoring_order')
   const saleRows = displayedRows.filter((r) => r.entity_type === 'sale')
+  const reservationRows = displayedRows.filter((r) => r.entity_type === 'reservation')
 
   const totalPendingOrders = orderRows.reduce((s, r) => s + r.total_pending, 0)
   const totalPendingSales = saleRows.reduce((s, r) => s + r.total_pending, 0)
+  const totalPendingReservations = reservationRows.reduce((s, r) => s + r.total_pending, 0)
   const uniqueClients = new Set(displayedRows.map((r) => r.client_id).filter(Boolean)).size
 
   // ─── Helpers ────────────────────────────────────────────────────────────────
   function navigateToEntity(row: PendingPaymentRow) {
     if (row.entity_type === 'tailoring_order') {
       router.push(basePath === '/sastre' ? `/sastre/pedidos/${row.id}` : `/admin/pedidos/${row.id}?tab=payments`)
+    } else if (row.entity_type === 'reservation') {
+      // Las reservas se gestionan (y cobran) en su pestaña; rsearch la deja filtrada.
+      if (basePath === '/sastre') {
+        toast.info(`Reserva ${row.reference}: gestiónala desde el panel de administración`)
+      } else {
+        router.push(`/admin/pedidos?tab=reservations&rsearch=${encodeURIComponent(row.reference)}`)
+      }
     } else {
       // Las ventas no tienen página de detalle propia (/admin/ventas/[id] no
       // existe — navegar ahí daba 404): se gestionan inline con el mismo diálogo
@@ -186,7 +195,7 @@ export function CobrosContent({ basePath = '/admin' }: { basePath?: string }) {
       </div>
 
       {/* KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
           label="Pendiente pedidos"
           value={formatCurrency(totalPendingOrders)}
@@ -199,6 +208,13 @@ export function CobrosContent({ basePath = '/admin' }: { basePath?: string }) {
           value={formatCurrency(totalPendingSales)}
           sub={`${saleRows.length} venta${saleRows.length !== 1 ? 's' : ''}`}
           icon={ShoppingBag}
+          color="text-amber-600"
+        />
+        <KpiCard
+          label="Pendiente reservas"
+          value={formatCurrency(totalPendingReservations)}
+          sub={`${reservationRows.length} reserva${reservationRows.length !== 1 ? 's' : ''}`}
+          icon={BookmarkCheck}
           color="text-amber-600"
         />
         <KpiCard
@@ -229,6 +245,7 @@ export function CobrosContent({ basePath = '/admin' }: { basePath?: string }) {
               <SelectItem value="all">Todos</SelectItem>
               <SelectItem value="orders">Solo pedidos</SelectItem>
               <SelectItem value="sales">Solo ventas</SelectItem>
+              <SelectItem value="reservations">Solo reservas</SelectItem>
             </SelectContent>
           </Select>
           <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as SortOrder)}>
@@ -306,6 +323,10 @@ export function CobrosContent({ basePath = '/admin' }: { basePath?: string }) {
                       <Badge variant="outline" className="gap-1 text-xs">
                         <Scissors className="h-3 w-3" />Pedido
                       </Badge>
+                    ) : row.entity_type === 'reservation' ? (
+                      <Badge variant="outline" className="gap-1 text-xs">
+                        <BookmarkCheck className="h-3 w-3" />Reserva
+                      </Badge>
                     ) : (
                       <Badge variant="outline" className="gap-1 text-xs">
                         <ShoppingBag className="h-3 w-3" />Venta
@@ -342,7 +363,20 @@ export function CobrosContent({ basePath = '/admin' }: { basePath?: string }) {
                     {row.days_since_creation}d
                   </TableCell>
                   <TableCell className="w-32 shrink-0" onClick={(e) => e.stopPropagation()}>
-                    {basePath === '/sastre' ? (
+                    {row.entity_type === 'reservation' ? (
+                      basePath === '/sastre' ? null : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 text-xs gap-1.5"
+                          onClick={() => navigateToEntity(row)}
+                          title="El cobro de reservas se registra desde su pestaña"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          Ver reserva
+                        </Button>
+                      )
+                    ) : basePath === '/sastre' ? (
                       <Button
                         variant="default"
                         size="sm"
@@ -385,7 +419,7 @@ export function CobrosContent({ basePath = '/admin' }: { basePath?: string }) {
               </span>
             </DialogTitle>
           </DialogHeader>
-          {selectedRow && (
+          {selectedRow && selectedRow.entity_type !== 'reservation' && (
             <PaymentHistory
               entityType={selectedRow.entity_type}
               entityId={selectedRow.id}
