@@ -8,13 +8,25 @@ import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { sendWelcomeEmail } from '@/lib/email/transactional'
 import { buildAuditDiff } from '@/lib/audit'
 
-type ClientAggregates = { spent: number; pending: number; count: number }
+type ClientAggregates = {
+  spent: number
+  pending: number
+  pendingOrders: number
+  pendingSales: number
+  pendingReservations: number
+  count: number
+}
+
+const EMPTY_AGGREGATES: ClientAggregates = {
+  spent: 0, pending: 0, pendingOrders: 0, pendingSales: 0, pendingReservations: 0, count: 0,
+}
 
 /**
  * Calcula en vivo los totales por cliente sumando pedidos de confección
  * (`tailoring_orders`), ventas POS completadas (`sales`), pedidos de la
- * tienda online no cancelados (`online_orders`) y el pendiente de reservas
- * no canceladas (`product_reservations`). Las columnas
+ * tienda online no cancelados (`online_orders`), el pendiente de reservas
+ * no canceladas (`product_reservations`) y el de tickets a plazos (`sales`
+ * con payment_status pending/partial). Las columnas
  * homónimas en `clients` están sin trigger y permanecen a 0.
  */
 async function computeClientAggregates(
@@ -32,7 +44,7 @@ async function computeClientAggregates(
       .neq('status', 'cancelled'),
     admin
       .from('sales')
-      .select('client_id, total, total_returned, status')
+      .select('client_id, total, total_returned, status, amount_paid, payment_status')
       .in('client_id', clientIds)
       .in('status', ['completed', 'partially_returned', 'fully_returned']),
     // Tienda ONLINE: sin esta fuente, un cliente que solo compró en la web
@@ -57,33 +69,45 @@ async function computeClientAggregates(
   for (const o of (ordersRes.data ?? []) as Array<Record<string, unknown>>) {
     const id = String(o.client_id || '')
     if (!id) continue
-    const cur = map.get(id) ?? { spent: 0, pending: 0, count: 0 }
+    const cur = map.get(id) ?? { ...EMPTY_AGGREGATES }
+    const orderPending = Number(o.total_pending) || 0
     cur.spent += Number(o.total_paid) || 0
-    cur.pending += Number(o.total_pending) || 0
+    cur.pending += orderPending
+    cur.pendingOrders += orderPending
     cur.count += 1
     map.set(id, cur)
   }
   for (const s of (salesRes.data ?? []) as Array<Record<string, unknown>>) {
     const id = String(s.client_id || '')
     if (!id) continue
-    const cur = map.get(id) ?? { spent: 0, pending: 0, count: 0 }
+    const cur = map.get(id) ?? { ...EMPTY_AGGREGATES }
     const total = Number(s.total) || 0
     const returned = Number(s.total_returned) || 0
     cur.spent += Math.max(0, total - returned)
     cur.count += 1
+    // Tickets a plazos: lo no cobrado de una venta también es deuda del
+    // cliente (mismo criterio que Cobros pendientes). En las devueltas por
+    // completo ya no queda nada que reclamar.
+    if ((s.payment_status === 'pending' || s.payment_status === 'partial') && s.status !== 'fully_returned') {
+      const salePending = Math.max(0, total - returned - (Number(s.amount_paid) || 0))
+      cur.pending += salePending
+      cur.pendingSales += salePending
+    }
     map.set(id, cur)
   }
   for (const r of (reservationsRes.data ?? []) as Array<Record<string, unknown>>) {
     const id = String(r.client_id || '')
     if (!id) continue
-    const cur = map.get(id) ?? { spent: 0, pending: 0, count: 0 }
-    cur.pending += Math.max(0, (Number(r.total) || 0) - (Number(r.total_paid) || 0))
+    const cur = map.get(id) ?? { ...EMPTY_AGGREGATES }
+    const reservationPending = Math.max(0, (Number(r.total) || 0) - (Number(r.total_paid) || 0))
+    cur.pending += reservationPending
+    cur.pendingReservations += reservationPending
     map.set(id, cur)
   }
   for (const o of (onlineRes.data ?? []) as Array<Record<string, unknown>>) {
     const id = String(o.client_id || '')
     if (!id) continue
-    const cur = map.get(id) ?? { spent: 0, pending: 0, count: 0 }
+    const cur = map.get(id) ?? { ...EMPTY_AGGREGATES }
     cur.spent += Number(o.total) || 0
     cur.count += 1
     map.set(id, cur)
@@ -96,11 +120,14 @@ function applyAggregates<T extends Record<string, unknown>>(
   client: T,
   agg: ClientAggregates | undefined,
 ): T {
-  const a = agg ?? { spent: 0, pending: 0, count: 0 }
+  const a = agg ?? EMPTY_AGGREGATES
   return {
     ...client,
     total_spent: a.spent,
     total_pending: a.pending,
+    total_pending_orders: a.pendingOrders,
+    total_pending_sales: a.pendingSales,
+    total_pending_reservations: a.pendingReservations,
     purchase_count: a.count,
     average_ticket: a.count > 0 ? a.spent / a.count : 0,
   }

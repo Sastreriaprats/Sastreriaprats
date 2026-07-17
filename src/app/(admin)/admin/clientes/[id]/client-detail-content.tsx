@@ -186,6 +186,15 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
             <p className={`text-xl font-bold ${client.total_pending > 0 ? 'text-amber-600' : ''}`}>
               {formatCurrency(client.total_pending)}
             </p>
+            {client.total_pending > 0 && (
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {[
+                  Number(client.total_pending_orders) > 0 && `Pedidos ${formatCurrency(client.total_pending_orders)}`,
+                  Number(client.total_pending_sales) > 0 && `Tickets ${formatCurrency(client.total_pending_sales)}`,
+                  Number(client.total_pending_reservations) > 0 && `Reservas ${formatCurrency(client.total_pending_reservations)}`,
+                ].filter(Boolean).join(' · ')}
+              </p>
+            )}
           </CardContent>
         </Card>
         <Card>

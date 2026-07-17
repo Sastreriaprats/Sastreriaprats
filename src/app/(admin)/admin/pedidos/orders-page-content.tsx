@@ -18,13 +18,14 @@ import {
 } from '@/components/ui/alert-dialog'
 import {
   Plus, Search, MoreHorizontal, Eye, Trash2, ChevronLeft, ChevronRight,
-  LayoutList, Kanban, ArrowUpDown, AlertTriangle, SlidersHorizontal, X, Loader2, Download,
+  LayoutList, Kanban, ArrowUpDown, AlertTriangle, SlidersHorizontal, X, Loader2, Download, CircleDollarSign,
 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useList } from '@/hooks/use-list'
 import { usePermissions } from '@/hooks/use-permissions'
 import { listOrders, deleteOrder } from '@/actions/orders'
 import { listReservations } from '@/actions/reservations'
+import { getClientPendingDebt, type PendingPaymentRow } from '@/actions/payments'
 import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel, summarizeOrderGarments, normalizeSearchTerm } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
@@ -71,6 +72,8 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
   const [supplierOrders, setSupplierOrders] = useState<any[]>([])
   const [loadingSupplier, setLoadingSupplier] = useState(false)
   const [orderToDelete, setOrderToDelete] = useState<{ id: string; order_number: string } | null>(null)
+  // Deuda total unificada (encargos + tickets + reservas) del cliente buscado
+  const [clientDebt, setClientDebt] = useState<{ clientId: string; clientName: string; rows: PendingPaymentRow[] } | null>(null)
   const [deletingOrder, setDeletingOrder] = useState(false)
   const [exporting, setExporting] = useState(false)
 
@@ -170,6 +173,26 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
     const cancelled = statusCountsFromApi['cancelled'] ?? 0
     return Math.max(0, allCount - delivered - cancelled)
   }, [statusCountsFromApi, totalAll])
+
+  // Si la búsqueda deja un único cliente en el listado, se carga su deuda
+  // total unificada (encargos + tickets + reservas) y se muestra en un banner:
+  // así se ve todo lo que debe sin ir a la pestaña Reservas ni a Cobros.
+  useEffect(() => {
+    if (isLoading) return
+    const ids = new Set(orders.map((o: any) => o.clients?.id).filter(Boolean))
+    if (search.trim().length < 2 || ids.size !== 1) {
+      setClientDebt(null)
+      return
+    }
+    const clientId = String([...ids][0])
+    let cancelled = false
+    getClientPendingDebt({ client_id: clientId }).then((res) => {
+      if (cancelled || !res.success) return
+      const clientName = orders[0]?.clients?.full_name ?? ''
+      setClientDebt({ clientId, clientName, rows: res.data })
+    })
+    return () => { cancelled = true }
+  }, [isLoading, search, orders])
 
   const applyStatus = (v: string) => {
     setStatusFilter(v)
@@ -473,6 +496,41 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
               </div>
             )}
           </div>
+
+          {clientDebt && clientDebt.rows.length > 0 && (() => {
+            const parts = ([
+              ['tailoring_order', 'Encargos'],
+              ['sale', 'Tickets'],
+              ['reservation', 'Reservas'],
+            ] as const).map(([type, label]) => {
+              const rows = clientDebt.rows.filter((r) => r.entity_type === type)
+              return { label, count: rows.length, amount: rows.reduce((s, r) => s + r.total_pending, 0) }
+            }).filter((p) => p.amount > 0)
+            const totalDebt = parts.reduce((s, p) => s + p.amount, 0)
+            if (totalDebt <= 0) return null
+            return (
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-1 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm">
+                <span className="flex items-center gap-1.5 font-medium">
+                  <CircleDollarSign className="h-4 w-4 text-amber-600" />
+                  {clientDebt.clientName} debe en total
+                  <span className="font-bold text-amber-700">{formatCurrency(totalDebt)}</span>
+                </span>
+                {parts.map((p) => (
+                  <span key={p.label} className="text-muted-foreground">
+                    {p.label}: <span className="font-medium text-foreground">{formatCurrency(p.amount)}</span> ({p.count})
+                  </span>
+                ))}
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="h-auto p-0 text-sm"
+                  onClick={() => router.push(`/admin/clientes/${clientDebt.clientId}`)}
+                >
+                  Ver ficha del cliente
+                </Button>
+              </div>
+            )
+          })()}
 
           {view === 'pipeline' ? (
             <OrdersPipeline orders={orders} isLoading={isLoading} onRefresh={refresh} />
