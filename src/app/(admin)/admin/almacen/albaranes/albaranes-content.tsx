@@ -10,8 +10,9 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { DatePickerPopover } from '@/components/ui/date-picker-popover'
-import { Eye, FileText, Plus, RefreshCw, Upload, CheckCircle2, Ban, Truck, Info } from 'lucide-react'
+import { Eye, FileText, Plus, RefreshCw, Upload, CheckCircle2, Ban, Truck, Info, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { Textarea } from '@/components/ui/textarea'
 import {
   getDeliveryNotes,
   getDeliveryNote,
@@ -20,6 +21,8 @@ import {
   getSupplierDeliveryNotes,
   markSupplierDeliveryNoteReceived,
   uploadSupplierDeliveryNoteAttachment,
+  cancelSupplierDeliveryNote,
+  deleteSupplierDeliveryNote,
 } from '@/actions/delivery-notes'
 import { generateDeliveryNotePdf } from '@/lib/delivery-note-pdf'
 import { formatDate } from '@/lib/utils'
@@ -45,6 +48,7 @@ const supplierStatusLabels: Record<string, string> = {
   pendiente: 'Pendiente',
   recibido: 'Recibido',
   incidencia: 'Incidencia',
+  anulado: 'Anulado',
 }
 
 export function AlbaranesContent() {
@@ -75,6 +79,12 @@ export function AlbaranesContent() {
   const [loadingSupplier, setLoadingSupplier] = useState(false)
   const [cancelTargetId, setCancelTargetId] = useState<string | null>(null)
   const [cancellingId, setCancellingId] = useState<string | null>(null)
+  // Anulación/borrado de albaranes de PROVEEDOR (mig 262)
+  const [supplierCancelTarget, setSupplierCancelTarget] = useState<{ id: string; ref: string; received: boolean } | null>(null)
+  const [supplierCancelReason, setSupplierCancelReason] = useState('')
+  const [supplierCancelBusy, setSupplierCancelBusy] = useState(false)
+  const [supplierDeleteTarget, setSupplierDeleteTarget] = useState<{ id: string; ref: string } | null>(null)
+  const [supplierDeleteBusy, setSupplierDeleteBusy] = useState(false)
 
   const loadOwn = useCallback(async () => {
     setLoadingOwn(true)
@@ -305,7 +315,7 @@ export function AlbaranesContent() {
                     <TableCell className="text-sm">{row.created_by_name || 'Sistema'}</TableCell>
                     <TableCell>{row.delivery_date ? formatDate(row.delivery_date) : '-'}</TableCell>
                     <TableCell>
-                      <Badge variant={row.status === 'recibido' ? 'default' : row.status === 'incidencia' ? 'destructive' : 'secondary'}>
+                      <Badge variant={row.status === 'recibido' ? 'default' : row.status === 'incidencia' || row.status === 'anulado' ? 'destructive' : 'secondary'}>
                         {supplierStatusLabels[row.status] || row.status}
                       </Badge>
                     </TableCell>
@@ -332,7 +342,7 @@ export function AlbaranesContent() {
                         >
                           <Eye className="h-3 w-3" /> Ver PDF
                         </Button>
-                        {row.status !== 'recibido' && (
+                        {row.status !== 'recibido' && row.status !== 'anulado' && (
                           <Button
                             size="sm"
                             className="gap-1"
@@ -341,10 +351,35 @@ export function AlbaranesContent() {
                               if (r.success) {
                                 toast.success('Marcado como recibido')
                                 loadSupplier()
+                              } else {
+                                toast.error(r.error || 'No se pudo marcar recibido')
                               }
                             }}
                           >
                             <CheckCircle2 className="h-3 w-3" /> Marcar recibido
+                          </Button>
+                        )}
+                        {row.status !== 'anulado' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1"
+                            onClick={() => {
+                              setSupplierCancelReason('')
+                              setSupplierCancelTarget({ id: row.id, ref: row.supplier_reference || row.id, received: row.status === 'recibido' })
+                            }}
+                          >
+                            <Ban className="h-3 w-3" /> Anular
+                          </Button>
+                        )}
+                        {row.status === 'pendiente' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1 text-red-600 hover:text-red-700"
+                            onClick={() => setSupplierDeleteTarget({ id: row.id, ref: row.supplier_reference || row.id })}
+                          >
+                            <Trash2 className="h-3 w-3" /> Eliminar
                           </Button>
                         )}
                       </div>
@@ -389,6 +424,77 @@ export function AlbaranesContent() {
               }}
             >
               Sí, cancelar albarán
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Anular albarán de PROVEEDOR (revierte stock si estaba recibido) */}
+      <AlertDialog open={!!supplierCancelTarget} onOpenChange={(open) => !open && setSupplierCancelTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Anular albarán {supplierCancelTarget?.ref}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {supplierCancelTarget?.received
+                ? 'El albarán está recibido: al anularlo se REVERTIRÁ el stock que sumó su recepción. Si está vinculado a una factura o parte del género ya se vendió, la anulación se bloqueará con un aviso.'
+                : 'El albarán quedará anulado (se conserva el registro con quién y cuándo).'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="py-1">
+            <Textarea
+              placeholder="Motivo de la anulación (opcional)"
+              value={supplierCancelReason}
+              onChange={(e) => setSupplierCancelReason(e.target.value)}
+              rows={2}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={supplierCancelBusy}>No, volver</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={supplierCancelBusy}
+              onClick={async () => {
+                if (!supplierCancelTarget) return
+                setSupplierCancelBusy(true)
+                const r = await cancelSupplierDeliveryNote({ id: supplierCancelTarget.id, reason: supplierCancelReason })
+                setSupplierCancelBusy(false)
+                setSupplierCancelTarget(null)
+                if (r.success) { toast.success('Albarán anulado'); loadSupplier() }
+                else toast.error(r.error || 'No se pudo anular el albarán')
+              }}
+            >
+              Sí, anular
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Eliminar albarán de PROVEEDOR (solo pendientes sin stock) */}
+      <AlertDialog open={!!supplierDeleteTarget} onOpenChange={(open) => !open && setSupplierDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar albarán {supplierDeleteTarget?.ref}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se borrará definitivamente. Solo es posible con albaranes pendientes que no
+              hayan aplicado stock ni estén en ninguna factura; en otro caso usa «Anular».
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={supplierDeleteBusy}>No, volver</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={supplierDeleteBusy}
+              onClick={async () => {
+                if (!supplierDeleteTarget) return
+                setSupplierDeleteBusy(true)
+                const r = await deleteSupplierDeliveryNote(supplierDeleteTarget.id)
+                setSupplierDeleteBusy(false)
+                setSupplierDeleteTarget(null)
+                if (r.success) { toast.success('Albarán eliminado'); loadSupplier() }
+                else toast.error(r.error || 'No se pudo eliminar el albarán')
+              }}
+            >
+              Sí, eliminar
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

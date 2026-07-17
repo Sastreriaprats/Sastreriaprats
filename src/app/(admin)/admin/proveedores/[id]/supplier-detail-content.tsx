@@ -915,8 +915,8 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                       <TableCell className="font-mono text-xs">{n.order_number || '-'}</TableCell>
                       <TableCell className="text-sm">{n.delivery_date ? formatDate(n.delivery_date) : '-'}</TableCell>
                       <TableCell>
-                        <Badge variant={n.status === 'recibido' ? 'default' : n.status === 'incidencia' ? 'destructive' : 'secondary'}>
-                          {n.status === 'recibido' ? 'Recibido' : n.status === 'incidencia' ? 'Incidencia' : 'Pendiente'}
+                        <Badge variant={n.status === 'recibido' ? 'default' : n.status === 'incidencia' || n.status === 'anulado' ? 'destructive' : 'secondary'}>
+                          {n.status === 'recibido' ? 'Recibido' : n.status === 'incidencia' ? 'Incidencia' : n.status === 'anulado' ? 'Anulado' : 'Pendiente'}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-sm">{formatDate(n.created_at)}</TableCell>

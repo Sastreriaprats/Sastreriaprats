@@ -818,6 +818,74 @@ export const updateSupplierDeliveryNote = protectedAction<{ id: string; data: Pa
   }
 )
 
+/**
+ * ANULA un albarán de proveedor conservando el registro (status='anulado').
+ * Atómico vía rpc_cancel_supplier_delivery_note (mig 262): revierte el stock
+ * recibido, borra sus stock_movements (cero huérfanos) y aborta con mensaje
+ * legible si está vinculado a factura o si revertir dejaría stock negativo.
+ */
+export const cancelSupplierDeliveryNote = protectedAction<
+  { id: string; reason?: string },
+  { cancelled: boolean }
+>(
+  {
+    permission: 'suppliers.create_order',
+    auditModule: 'suppliers',
+    auditAction: 'state_change',
+    auditEntity: 'supplier_delivery_note',
+    revalidate: ['/admin/almacen/albaranes', '/admin/proveedores', '/admin/contabilidad/facturas-proveedores'],
+  },
+  async (ctx, { id, reason }) => {
+    if (!id?.trim()) return failure('ID del albarán obligatorio', 'VALIDATION')
+    const { data: result, error: rpcError } = await ctx.adminClient.rpc('rpc_cancel_supplier_delivery_note', {
+      p_note_id: id.trim(),
+      p_user_id: ctx.userId,
+      p_reason: reason?.trim() || null,
+    })
+    if (rpcError) return failure(rpcError.message || 'Error al anular el albarán')
+
+    const r = result as { supplier_reference?: string; movements_deleted?: number; reverted?: unknown[] }
+    return success({
+      cancelled: true,
+      auditEntityId: id.trim(),
+      auditDescription: `Anulado albarán de proveedor ${r?.supplier_reference || id.trim()}${(r?.reverted?.length ?? 0) > 0 ? ` (stock revertido: ${r?.reverted?.length} variante(s), ${r?.movements_deleted ?? 0} movimiento(s) eliminados)` : ''}`,
+      auditOldData: { supplier_reference: r?.supplier_reference, reverted: r?.reverted, movements_deleted: r?.movements_deleted },
+    } as { cancelled: boolean })
+  }
+)
+
+/**
+ * BORRA físicamente un albarán de proveedor. Solo 'pendiente' sin stock
+ * aplicado, sin movimientos y sin factura (guards en la RPC, mig 262).
+ */
+export const deleteSupplierDeliveryNote = protectedAction<
+  string,
+  { deleted: boolean }
+>(
+  {
+    permission: 'suppliers.create_order',
+    auditModule: 'suppliers',
+    auditAction: 'delete',
+    auditEntity: 'supplier_delivery_note',
+    revalidate: ['/admin/almacen/albaranes', '/admin/proveedores'],
+  },
+  async (ctx, id) => {
+    if (!id?.trim()) return failure('ID del albarán obligatorio', 'VALIDATION')
+    const { data: result, error: rpcError } = await ctx.adminClient.rpc('rpc_delete_supplier_delivery_note', {
+      p_note_id: id.trim(),
+      p_user_id: ctx.userId,
+    })
+    if (rpcError) return failure(rpcError.message || 'Error al borrar el albarán')
+
+    const r = result as { supplier_reference?: string }
+    return success({
+      deleted: true,
+      auditEntityId: id.trim(),
+      auditDescription: `Borrado albarán de proveedor ${r?.supplier_reference || id.trim()} (pendiente, sin stock aplicado)`,
+    } as { deleted: boolean })
+  }
+)
+
 export const markSupplierDeliveryNoteReceived = protectedAction<
   string,
   { id: string; stock_warnings: number; stock_update_skipped: boolean; auditEntityId: string; auditDescription: string }
@@ -832,10 +900,16 @@ export const markSupplierDeliveryNoteReceived = protectedAction<
   async (ctx, id) => {
     const { data: note, error: noteErr } = await ctx.adminClient
       .from('supplier_delivery_notes')
-      .select('id, store_id, supplier_id, supplier_order_id, stock_updated_at, supplier_reference')
+      .select('id, store_id, supplier_id, supplier_order_id, stock_updated_at, supplier_reference, status')
       .eq('id', id)
       .single()
     if (noteErr || !note) return failure('Albarán de proveedor no encontrado', 'NOT_FOUND')
+
+    // Un albarán anulado no puede resucitarse marcándolo recibido: su stock ya
+    // se revirtió al anular (mig 262) y volver a recibirlo lo duplicaría.
+    if ((note as any).status === 'anulado') {
+      return failure('El albarán está anulado y no puede marcarse como recibido', 'CONFLICT')
+    }
 
     if ((note as any).stock_updated_at) {
       const { error: statusErr } = await ctx.adminClient

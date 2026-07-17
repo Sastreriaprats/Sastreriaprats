@@ -391,6 +391,8 @@ export const listUnlinkedDeliveryNotesForSupplier = protectedAction<
         lines:supplier_delivery_note_lines(quantity_ordered, quantity_received, unit_price)
       `)
       .eq('supplier_id', supplierId.trim())
+      // Un albarán anulado (mig 262) no es facturable.
+      .neq('status', 'anulado')
       .order('delivery_date', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: false })
       .limit(200)
@@ -553,13 +555,16 @@ async function validateDeliveryNoteLink(
 
   const { data: notes } = await adminClient
     .from('supplier_delivery_notes')
-    .select('id, supplier_id')
+    .select('id, supplier_id, status')
     .in('id', deliveryNoteIds)
-  const byId = new Map<string, string | null>((notes || []).map((n: any) => [String(n.id), n.supplier_id ? String(n.supplier_id) : null]))
+  const byId = new Map<string, { supplier: string | null; status: string | null }>(
+    (notes || []).map((n: any) => [String(n.id), { supplier: n.supplier_id ? String(n.supplier_id) : null, status: n.status ?? null }]),
+  )
   for (const id of deliveryNoteIds) {
-    const owner = byId.get(id)
-    if (!owner) return `Albarán ${id} no encontrado`
-    if (owner !== supplierId) return 'Todos los albaranes deben pertenecer al proveedor seleccionado'
+    const note = byId.get(id)
+    if (!note?.supplier) return `Albarán ${id} no encontrado`
+    if (note.supplier !== supplierId) return 'Todos los albaranes deben pertenecer al proveedor seleccionado'
+    if (note.status === 'anulado') return 'Uno de los albaranes está anulado y no puede facturarse'
   }
 
   const { data: links } = await adminClient
