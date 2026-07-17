@@ -1138,14 +1138,19 @@ export const getTailoringOrderLinesForInvoice = protectedAction<
         (l as any).model_name ? ` (${(l as any).model_name})` : '',
       ].filter(Boolean)
       const description = parts.join(' – ').trim() || 'Línea de pedido'
-      const unitPrice = Number((l as any).unit_price ?? 0)
       const qty = 1
       const taxRate = Number((l as any).tax_rate ?? 21)
-      const lineTotal = Number((l as any).line_total ?? unitPrice * qty * (1 + taxRate / 100))
+      // Los precios del pedido son PVP (IVA incluido): line_total/unit_price se
+      // teclean con IVA (modelo canónico de createFichaOrder/updateOrderAction).
+      // Los consumidores (diálogos de factura/presupuesto y recalculateInvoiceTotals)
+      // esperan una BASE imponible y añaden el IVA encima, así que hay que extraerlo
+      // aquí — mismo patrón que createInvoiceFromSaleAction/FromReservationAction.
+      const lineTotal = Number((l as any).line_total ?? (l as any).unit_price ?? 0)
+      const unitPriceNoTax = Number((lineTotal / (1 + taxRate / 100)).toFixed(2))
       return {
         description,
         quantity: qty,
-        unit_price: unitPrice,
+        unit_price: unitPriceNoTax,
         tax_rate: taxRate,
         line_total: lineTotal,
       }

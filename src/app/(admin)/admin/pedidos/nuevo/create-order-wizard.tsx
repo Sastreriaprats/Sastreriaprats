@@ -428,14 +428,20 @@ export function CreateOrderWizard({
     }
   }, [orderType, step])
 
-  const subtotal = lines.reduce((sum, l) => {
+  // Las líneas llevan PVP (IVA incluido), modelo canónico del resto de rutas:
+  // el total es la suma de PVP tras descuentos y el IVA se extrae del PVP.
+  const pvpAfterLineDiscounts = lines.reduce((sum, l) => {
     const lineDiscount = l.unit_price * (l.discount_percentage / 100)
     return sum + (l.unit_price - lineDiscount)
   }, 0)
-  const orderDiscount = subtotal * (discountPercentage / 100)
-  const taxableAmount = subtotal - orderDiscount
-  const taxAmount = taxableAmount * 0.21
-  const total = taxableAmount + taxAmount
+  const orderDiscount = pvpAfterLineDiscounts * (discountPercentage / 100)
+  const total = pvpAfterLineDiscounts - orderDiscount
+  const taxAmount = lines.reduce((sum, l) => {
+    const afterDiscounts = l.unit_price * (1 - l.discount_percentage / 100) * (1 - discountPercentage / 100)
+    const tr = l.tax_rate || 21
+    return sum + afterDiscounts * tr / (100 + tr)
+  }, 0)
+  const subtotal = total - taxAmount
   const totalCost = lines.reduce((sum, l) => sum + l.material_cost + l.labor_cost + l.factory_cost, 0)
   const margin = total > 0 ? ((total - totalCost) / total * 100) : 0
 
@@ -444,8 +450,6 @@ export function CreateOrderWizard({
     if (!garment) { toast.error('Selecciona un tipo de prenda'); return }
     const pvpConIva = lineFormPvpConIva || 0
     if (pvpConIva <= 0) { toast.error('Indica el PVP (precio con IVA)'); return }
-    const taxRate = (lineForm.tax_rate ?? 21) / 100
-    const priceSinIva = Math.round((pvpConIva / (1 + taxRate)) * 100) / 100
     const currentGarmentId = lineForm.garment_type_id
     // Para líneas de Camisería, el documento oficial lee precio/obs desde la
     // configuración: los guardamos aquí para que coincidan creación y descarga.
@@ -463,7 +467,7 @@ export function CreateOrderWizard({
       fabric_description: lineForm.fabric_description || '',
       fabric_meters: lineForm.fabric_meters || 0,
       supplier_id: lineForm.supplier_id || null,
-      unit_price: priceSinIva,
+      unit_price: pvpConIva,
       discount_percentage: lineForm.discount_percentage || 0,
       tax_rate: lineForm.tax_rate || 21,
       material_cost: lineForm.material_cost || 0,
@@ -581,8 +585,6 @@ export function CreateOrderWizard({
         const camiseriaType = garmentTypes.find((g: any) => g.name === 'Camisería')
         if (!camiseriaType) return []
         const pvpConIva = camiseriaPvpConIva || 0
-        const taxRate = 21 / 100
-        const priceSinIva = Math.round((pvpConIva / (1 + taxRate)) * 100) / 100
         const observaciones = [camiseriaObservaciones, camiseriaEntregado ? `Entregado a cuenta: ${camiseriaEntregado}` : ''].filter(Boolean).join('\n') || null
         const entregadoNum = Number(camiseriaEntregado) || 0
         // El documento oficial (ficha pdfmake) lee precio/obs/entregado desde la
@@ -599,7 +601,7 @@ export function CreateOrderWizard({
           fabric_description: '',
           fabric_meters: null,
           supplier_id: null,
-          unit_price: priceSinIva,
+          unit_price: pvpConIva,
           discount_percentage: 0,
           tax_rate: 21,
           material_cost: 0,
@@ -1040,7 +1042,7 @@ export function CreateOrderWizard({
                       {line.model_name && <p className="text-sm text-muted-foreground">Modelo: {line.model_name} {line.model_size && `(${line.model_size})`}</p>}
                     </div>
                     <div className="text-right">
-                      <p className="font-medium">PVP {formatCurrency(Math.round(line.unit_price * (1 + (line.tax_rate || 21) / 100) * 100) / 100)}</p>
+                      <p className="font-medium">PVP {formatCurrency(line.unit_price)}</p>
                       <Button variant="ghost" size="sm" className="text-destructive" onClick={() => removeLine(idx)}><Trash2 className="h-3 w-3 mr-1" /> Quitar</Button>
                     </div>
                   </div>

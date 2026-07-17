@@ -395,18 +395,28 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
 
     const initialStatus: OrderStatus = 'created'
 
-    let subtotal = 0
+    // Modelo canónico: unit_price/line_total son PVP (IVA incluido), igual que
+    // createFichaOrder y updateOrderAction. La cabecera extrae el IVA del PVP
+    // (misma fórmula que el recálculo de updateOrderAction).
+    let subtotalLines = 0
     const processedLines = linesInput.map((line: any, idx: number) => {
       const lineDiscount = line.unit_price * (line.discount_percentage || 0) / 100
       const lineTotal = line.unit_price - lineDiscount
-      subtotal += lineTotal
+      subtotalLines += lineTotal
       return { ...line, discount_amount: lineDiscount, line_total: lineTotal, sort_order: idx }
     })
 
-    const orderDiscount = subtotal * (parsedOrder.data.discount_percentage || 0) / 100
-    const taxableAmount = subtotal - orderDiscount
-    const taxAmount = taxableAmount * 0.21
-    const total = taxableAmount + taxAmount
+    const discountPct = parsedOrder.data.discount_percentage || 0
+    const total = Math.round(subtotalLines * (1 - discountPct / 100) * 100) / 100
+    const orderDiscount = Math.round((subtotalLines - total) * 100) / 100
+    let taxAmount = 0
+    for (const line of processedLines) {
+      const tr = Number(line.tax_rate ?? 21)
+      const ltAfter = Number(line.line_total || 0) * (1 - discountPct / 100)
+      taxAmount += ltAfter * tr / (100 + tr)
+    }
+    taxAmount = Math.round(taxAmount * 100) / 100
+    const subtotal = Math.round((total - taxAmount) * 100) / 100
 
     const { data: order, error: orderError } = await ctx.adminClient
       .from('tailoring_orders')
