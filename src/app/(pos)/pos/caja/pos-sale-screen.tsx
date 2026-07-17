@@ -674,7 +674,10 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
         quantity: 1,
         unit_price: Number(a.sale_price),
         discount_percentage: 0,
-        tax_rate: 0,
+        // Los arreglos son un servicio de sastrería → 21% (a diferencia de los cobros
+        // de pedido de sastrería pendientes, que van al 0% porque su IVA se declara
+        // por el lado del pedido). El sale_price es IVA incluido, la cuota se extrae al cobrar.
+        tax_rate: 21,
         cost_price: 0,
         cobro_ref: { entity_type: 'alteration' as const, entity_id: a.id },
       }))
