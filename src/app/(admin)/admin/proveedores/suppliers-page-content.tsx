@@ -118,7 +118,7 @@ export function SuppliersPageContent() {
   const {
     data: suppliers, total, totalPages, page, setPage,
     search, setSearch, sortBy, toggleSort, isLoading, pageSize, refresh,
-  } = useList(listSuppliers, { pageSize: 25, defaultSort: 'name', defaultOrder: 'asc' })
+  } = useList(listSuppliers, { pageSize: 25, defaultSort: 'name', defaultOrder: 'asc', syncUrl: true })
 
   const { execute: createSupplier, isLoading: isCreating } = useAction(createSupplierAction, {
     successMessage: 'Proveedor creado correctamente',

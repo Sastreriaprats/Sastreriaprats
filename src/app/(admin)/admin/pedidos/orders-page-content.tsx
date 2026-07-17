@@ -156,6 +156,10 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
     defaultFilters: initialStatus === 'overdue'
       ? { status: 'overdue', ...(subTypeFilter !== 'all' ? { order_type: subTypeFilter } : {}) }
       : (subTypeFilter !== 'all' ? { order_type: subTypeFilter } : {}),
+    // Página/búsqueda/filtros en la URL: al volver del detalle se restauran.
+    // El rango de fechas (order_date {gte,lte}) no es serializable y queda fuera.
+    syncUrl: true,
+    urlFilterKeys: ['status', 'order_type'],
   })
 
   // Contador de pedidos de sastrería activos (excluye delivered y cancelled)
@@ -169,12 +173,9 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
 
   const applyStatus = (v: string) => {
     setStatusFilter(v)
+    // El hook (syncUrl) ya refleja `status` en la URL; el replace manual de antes
+    // pisaba el resto de la query (page/search).
     setFilters(prev => ({ ...prev, ...(v !== 'all' ? { status: v } : { status: undefined }) }))
-    if (v === 'overdue') {
-      router.replace('/admin/pedidos?status=overdue', { scroll: false })
-    } else {
-      router.replace('/admin/pedidos', { scroll: false })
-    }
   }
 
   const applySubType = (v: 'all' | 'artesanal' | 'industrial') => {
@@ -205,7 +206,6 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
     setDateFrom('')
     setDateTo('')
     setFilters({})
-    router.replace('/admin/pedidos', { scroll: false })
   }
 
   // Exporta a Excel todos los pedidos de sastrería que cumplen los filtros

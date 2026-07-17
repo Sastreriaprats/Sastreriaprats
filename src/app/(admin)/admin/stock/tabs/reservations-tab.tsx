@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { usePageParam } from '@/hooks/use-page-param'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -122,7 +123,9 @@ export function ReservationsTab() {
   const router = useRouter()
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(0)
+  // Página 0-based persistida en la URL. Clave propia 'rpage': este tab se monta
+  // en /admin/stock (donde products-tab usa 'page') y en /admin/pedidos (useList).
+  const [page, setPage] = usePageParam('rpage', 0)
   const [loading, setLoading] = useState(true)
 
   const [status, setStatus] = useState<string>('all')

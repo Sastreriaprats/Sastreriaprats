@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useCallback } from 'react'
+import { usePageParam } from '@/hooks/use-page-param'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -99,7 +100,8 @@ const getEntityTypeLabel = (log: LogRow) => log.entity_type_display ?? ENTITY_LA
 export function AuditoriaContent() {
   const [logs, setLogs] = useState<LogRow[]>([])
   const [count, setCount] = useState(0)
-  const [page, setPage] = useState(1)
+  // Página persistida en la URL: volver atrás desde otra pantalla la conserva.
+  const [page, setPage] = usePageParam()
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { usePageParam } from '@/hooks/use-page-param'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -54,7 +55,8 @@ export function TransfersTab() {
   const userStoreIds = new Set(stores.map((s) => s.storeId))
   const [transfers, setTransfers] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [page, setPage] = useState(0)
+  // Página 0-based persistida en la URL (clave propia: los tabs de /admin/stock comparten query).
+  const [page, setPage] = usePageParam('tpage', 0)
   const [total, setTotal] = useState(0)
   const [statusFilter, setStatusFilter] = useState('all')
   const [actioningId, setActioningId] = useState<string | null>(null)

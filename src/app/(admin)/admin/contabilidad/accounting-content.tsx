@@ -553,15 +553,38 @@ const PAYMENT_METHOD_PRESETS = ['Efectivo', 'Tarjeta', 'Transferencia', 'Bizum',
 const PAYMENT_METHOD_OTHER = 'Otro'
 
 export function InvoicesTab({ editId, onEditConsumed }: { editId: string | null; onEditConsumed: () => void }) {
+  const filterParams = useSearchParams()
+  const filterRouter = useRouter()
+  const filterPathname = usePathname()
   const [rows, setRows] = useState<InvoiceRow[]>([])
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [status, setStatus] = useState('all')
-  const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>('this_month')
-  const [customDateFrom, setCustomDateFrom] = useState('')
-  const [customDateTo, setCustomDateTo] = useState('')
+  // Filtros persistidos en la URL (claves con prefijo f- para no chocar con
+  // ?edit= ni con otros tabs): al navegar fuera y volver se restauran.
+  const [search, setSearch] = useState(() => filterParams.get('fsearch') || '')
+  const [status, setStatus] = useState(() => filterParams.get('fstatus') || 'all')
+  const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>(
+    () => (filterParams.get('fpreset') as DateRangePreset) || 'this_month',
+  )
+  const [customDateFrom, setCustomDateFrom] = useState(() => filterParams.get('ffrom') || '')
+  const [customDateTo, setCustomDateTo] = useState(() => filterParams.get('fto') || '')
   const dateFrom = dateRangePreset === 'custom' ? customDateFrom : getDateRangeForPreset(dateRangePreset).from
   const dateTo   = dateRangePreset === 'custom' ? customDateTo   : getDateRangeForPreset(dateRangePreset).to
+
+  useEffect(() => {
+    // window.location.search como base viva: preserva ?edit= y demás params.
+    const params = new URLSearchParams(window.location.search)
+    const setOrDel = (k: string, v: string, def: string) => {
+      if (v && v !== def) params.set(k, v)
+      else params.delete(k)
+    }
+    setOrDel('fsearch', search, '')
+    setOrDel('fstatus', status, 'all')
+    setOrDel('fpreset', dateRangePreset, 'this_month')
+    setOrDel('ffrom', dateRangePreset === 'custom' ? customDateFrom : '', '')
+    setOrDel('fto', dateRangePreset === 'custom' ? customDateTo : '', '')
+    const qs = params.toString()
+    filterRouter.replace(`${filterPathname}${qs ? `?${qs}` : ''}`, { scroll: false })
+  }, [search, status, dateRangePreset, customDateFrom, customDateTo, filterRouter, filterPathname])
   const [dialogOpen, setDialogOpen] = useState(false)
   const [selectedClient, setSelectedClient] = useState<ClientForInvoice | null>(null)
   const [billTo, setBillTo] = useState<'client' | string>('client')

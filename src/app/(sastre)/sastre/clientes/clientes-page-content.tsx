@@ -29,6 +29,7 @@ export function ClientesPageContent({ sastreName }: { sastreName: string }) {
     pageSize: 50,
     defaultSort: 'full_name',
     defaultOrder: 'asc',
+    syncUrl: true,
   })
 
   return (

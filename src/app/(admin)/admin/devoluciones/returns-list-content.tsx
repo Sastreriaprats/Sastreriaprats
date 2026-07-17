@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -27,14 +27,20 @@ export function ReturnsListContent() {
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
   const [stores, setStores] = useState<{ id: string; name: string }[]>([])
-  const [typeFilter, setTypeFilter] = useState('all')
-  const [storeFilter, setStoreFilter] = useState('all')
-  const [voucherFilter, setVoucherFilter] = useState('all')
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
+  // Espejos de los filtros persistidos en la URL (syncUrl del useList).
+  const searchParams = useSearchParams()
+  const [typeFilter, setTypeFilter] = useState(() => searchParams.get('return_type') || 'all')
+  const [storeFilter, setStoreFilter] = useState(() => searchParams.get('store_id') || 'all')
+  const [voucherFilter, setVoucherFilter] = useState(() => searchParams.get('voucher_status') || 'all')
+  const [from, setFrom] = useState(() => searchParams.get('from') || '')
+  const [to, setTo] = useState(() => searchParams.get('to') || '')
 
   const { data: returns, total, totalPages, page, setPage, search, setSearch, filters, setFilters, isLoading, pageSize } =
-    useList<ReturnRow>(listReturns, { pageSize: 25, defaultSort: 'created_at', defaultOrder: 'desc' })
+    useList<ReturnRow>(listReturns, {
+      pageSize: 25, defaultSort: 'created_at', defaultOrder: 'desc',
+      syncUrl: true,
+      urlFilterKeys: ['return_type', 'voucher_status', 'store_id', 'from', 'to'],
+    })
 
   useEffect(() => {
     supabase.from('stores').select('id, name').order('name').then(({ data }) => setStores(data ?? []))

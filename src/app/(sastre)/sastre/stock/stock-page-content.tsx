@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import { Search } from 'lucide-react'
 import { useList } from '@/hooks/use-list'
 import { listProductsForSastre } from '@/actions/products'
@@ -27,7 +28,13 @@ function getStockTotal(product: Record<string, unknown>): number {
 }
 
 export function StockPageContent({ sastreName }: { sastreName: string }) {
-  const [activeTab, setActiveTab] = useState<TabKey>(TAB_TELAS)
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  // Tab persistido en la URL para que al volver de otra pantalla se conserve.
+  const [activeTab, setActiveTab] = useState<TabKey>(
+    () => (searchParams.get('tab') === TAB_BOUTIQUE ? TAB_BOUTIQUE : TAB_TELAS),
+  )
 
   const {
     data: products,
@@ -40,12 +47,21 @@ export function StockPageContent({ sastreName }: { sastreName: string }) {
     pageSize: 50,
     defaultSort: 'name',
     defaultOrder: 'asc',
-    defaultFilters: { product_type: PRODUCT_TYPE_TELAS },
+    defaultFilters: {
+      product_type: searchParams.get('tab') === TAB_BOUTIQUE ? PRODUCT_TYPE_BOUTIQUE : PRODUCT_TYPE_TELAS,
+    },
+    syncUrl: true,
   })
 
-  useEffect(() => {
-    setFilters(activeTab === TAB_TELAS ? { product_type: PRODUCT_TYPE_TELAS } : { product_type: PRODUCT_TYPE_BOUTIQUE })
-  }, [activeTab, setFilters])
+  const changeTab = (tab: TabKey) => {
+    setActiveTab(tab)
+    setFilters({ product_type: tab === TAB_TELAS ? PRODUCT_TYPE_TELAS : PRODUCT_TYPE_BOUTIQUE })
+    const params = new URLSearchParams(searchParams.toString())
+    if (tab === TAB_BOUTIQUE) params.set('tab', TAB_BOUTIQUE)
+    else params.delete('tab')
+    const qs = params.toString()
+    router.replace(`${pathname}${qs ? `?${qs}` : ''}`, { scroll: false })
+  }
 
   return (
     <div
@@ -59,7 +75,7 @@ export function StockPageContent({ sastreName }: { sastreName: string }) {
           <div className="flex gap-2 flex-wrap">
             <button
               type="button"
-              onClick={() => setActiveTab(TAB_TELAS)}
+              onClick={() => changeTab(TAB_TELAS)}
               className={`px-5 h-12 rounded-xl font-serif text-lg transition-all touch-manipulation ${
                 activeTab === TAB_TELAS
                   ? 'bg-transparent text-white font-medium border-2 border-white/70'
@@ -70,7 +86,7 @@ export function StockPageContent({ sastreName }: { sastreName: string }) {
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab(TAB_BOUTIQUE)}
+              onClick={() => changeTab(TAB_BOUTIQUE)}
               className={`px-5 h-12 rounded-xl font-serif text-lg transition-all touch-manipulation ${
                 activeTab === TAB_BOUTIQUE
                   ? 'bg-transparent text-white font-medium border-2 border-white/70'

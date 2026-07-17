@@ -141,9 +141,17 @@ export function useList<T>(
   }, [fetchData, options.autoFetch])
 
   const isFirstRender = useRef(true)
+  // Cambios de search/filters que vienen del sync con la URL (atrás/adelante):
+  // NO deben resetear la página, porque la URL ya trae la página correcta y el
+  // reset la pisaría a 1 justo después de restaurarla.
+  const syncingFromUrl = useRef(false)
   useEffect(() => {
     if (isFirstRender.current) {
       isFirstRender.current = false
+      return
+    }
+    if (syncingFromUrl.current) {
+      syncingFromUrl.current = false
       return
     }
     // Solo resetear el state de página, sin actualizar URL (ya lo hace setSearch/setFilters)
@@ -156,7 +164,10 @@ export function useList<T>(
     const urlPage = parseInt(searchParams.get('page') || '1')
     const urlSearch = searchParams.get('search') || ''
     if (!isNaN(urlPage) && urlPage !== page) setPageState(urlPage)
-    if (urlSearch !== search) setSearchState(urlSearch)
+    if (urlSearch !== search) {
+      syncingFromUrl.current = true
+      setSearchState(urlSearch)
+    }
 
     const keys = filterKeysRef.current
     if (keys && keys.length > 0) {
@@ -170,7 +181,10 @@ export function useList<T>(
           changed = true
         }
       }
-      if (changed) setFiltersState(merged)
+      if (changed) {
+        syncingFromUrl.current = true
+        setFiltersState(merged)
+      }
     }
   }, [searchParams])
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { usePageParam } from '@/hooks/use-page-param'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -32,7 +33,8 @@ export function MovementsTab() {
   const canReverse = can('stock_movements.reverse')
   const [movements, setMovements] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [page, setPage] = useState(0)
+  // Página 0-based persistida en la URL (clave propia: los tabs de /admin/stock comparten query).
+  const [page, setPage] = usePageParam('mpage', 0)
   const [total, setTotal] = useState(0)
   const [typeFilter, setTypeFilter] = useState('all')
   const [revTarget, setRevTarget] = useState<any | null>(null)

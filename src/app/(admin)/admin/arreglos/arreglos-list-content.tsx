@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { Input } from '@/components/ui/input'
@@ -57,11 +57,14 @@ export function ArreglosListContent({ basePath = '/admin' }: { basePath?: string
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
   const [stores, setStores] = useState<{ id: string; name: string }[]>([])
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [typeFilter, setTypeFilter] = useState('all')
-  const [storeFilter, setStoreFilter] = useState('all')
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
+  // Espejos de los filtros persistidos en la URL (syncUrl del useList): al
+  // volver de un detalle, los controles reflejan el filtro restaurado.
+  const searchParams = useSearchParams()
+  const [statusFilter, setStatusFilter] = useState(() => searchParams.get('status') || 'all')
+  const [typeFilter, setTypeFilter] = useState(() => searchParams.get('alteration_type') || 'all')
+  const [storeFilter, setStoreFilter] = useState(() => searchParams.get('store_id') || 'all')
+  const [from, setFrom] = useState(() => searchParams.get('from') || '')
+  const [to, setTo] = useState(() => searchParams.get('to') || '')
   const [createOpen, setCreateOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
 
@@ -72,6 +75,8 @@ export function ArreglosListContent({ basePath = '/admin' }: { basePath?: string
     pageSize: 25,
     defaultSort: 'alteration_date',
     defaultOrder: 'desc',
+    syncUrl: true,
+    urlFilterKeys: ['status', 'alteration_type', 'store_id', 'from', 'to'],
   })
 
   useEffect(() => {

@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { usePageParam } from '@/hooks/use-page-param'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -66,7 +67,8 @@ export function VouchersContent() {
   const [data, setData] = useState<any[]>([])
   const [total, setTotal] = useState(0)
   const [totals, setTotals] = useState({ originalAmount: 0, remainingAmount: 0 })
-  const [page, setPage] = useState(1)
+  // Página persistida en la URL: volver atrás desde otra pantalla la conserva.
+  const [page, setPage] = usePageParam()
   const [pageSize] = useState(25)
   const [totalPages, setTotalPages] = useState(0)
   const [loading, setLoading] = useState(true)

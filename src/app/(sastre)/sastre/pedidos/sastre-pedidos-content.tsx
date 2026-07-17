@@ -32,6 +32,7 @@ export function SastrePedidosContent({ sastreName }: { sastreName: string }) {
     defaultSort: 'created_at',
     defaultOrder: 'desc',
     defaultFilters: {},
+    syncUrl: true,
   })
 
   const SortHeader = ({ field, children }: { field: string; children: React.ReactNode }) => (

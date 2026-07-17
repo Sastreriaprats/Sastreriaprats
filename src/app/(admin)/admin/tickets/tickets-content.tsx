@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useState, useEffect, useCallback } from 'react'
+import { usePageParam } from '@/hooks/use-page-param'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -106,7 +107,8 @@ export function TicketsContent() {
   const [view, setView] = useState<'tienda' | 'sastreria'>('tienda')
   const [data, setData] = useState<any[]>([])
   const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
+  // Página persistida en la URL: volver atrás desde otra pantalla la conserva.
+  const [page, setPage] = usePageParam()
   const [pageSize] = useState(20)
   const [totalPages, setTotalPages] = useState(0)
   const [loading, setLoading] = useState(true)

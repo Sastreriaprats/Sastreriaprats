@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -38,12 +38,18 @@ const categoryColors: Record<string, string> = {
 
 export function ClientsPageContent({ basePath = '/admin' }: { basePath?: string }) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { can } = usePermissions()
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
-  const [categoryFilter, setCategoryFilter] = useState('all')
-  const [statusFilter, setStatusFilter] = useState('all')
+  // Espejos de los filtros persistidos en la URL (syncUrl): al volver de un
+  // detalle, los Selects deben reflejar el filtro restaurado.
+  const [categoryFilter, setCategoryFilter] = useState(() => searchParams.get('category') || 'all')
+  const [statusFilter, setStatusFilter] = useState(() => {
+    const v = searchParams.get('is_active')
+    return v === 'true' ? 'active' : v === 'false' ? 'inactive' : 'all'
+  })
   const [exporting, setExporting] = useState(false)
 
   const {
@@ -54,6 +60,8 @@ export function ClientsPageContent({ basePath = '/admin' }: { basePath?: string 
     pageSize: 25,
     defaultSort: 'full_name',
     defaultOrder: 'asc',
+    syncUrl: true,
+    urlFilterKeys: ['category', 'is_active'],
   })
 
   const applyCategory = (value: string) => {

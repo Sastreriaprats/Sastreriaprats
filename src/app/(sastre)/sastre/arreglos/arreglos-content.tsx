@@ -65,6 +65,7 @@ export function ArreglosContent({ sastreName }: { sastreName: string }) {
     defaultSort: 'alteration_date',
     defaultOrder: 'desc',
     defaultFilters: {},
+    syncUrl: true,
   })
 
   // Búsqueda ahora es server-side via params.search del useList.

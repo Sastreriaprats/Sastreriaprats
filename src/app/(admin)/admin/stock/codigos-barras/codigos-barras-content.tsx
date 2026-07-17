@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { usePageParam } from '@/hooks/use-page-param'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
@@ -42,7 +43,8 @@ export function CodigosBarrasContent() {
   const [filter, setFilter] = useState<FilterBarcode>('all')
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [page, setPage] = useState(1)
+  // Página persistida en la URL (ruta propia, clave 'page' sin colisión).
+  const [page, setPage] = usePageParam()
   const [products, setProducts] = useState<ProductGroup[]>([])
   const [total, setTotal] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
