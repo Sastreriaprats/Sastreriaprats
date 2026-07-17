@@ -20,6 +20,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, Cartes
 import { useAuth } from '@/components/providers/auth-provider'
 import { getSalesReport, getComparePeriods, getTopProducts, getTailorPerformance, getClientsAnalytics, getClientsAdvancedAnalytics, getSalesByStore, getSalesByEmployee, getSalesByTimePattern, getExpensesReport, getExpensesComparison, getTailoringByCategory, type ReportChannel, type TaxMode, type ClientsAdvancedAnalytics, type TailoringCategoryRow } from '@/actions/reports'
 import { getStoresList } from '@/actions/config'
+import { listCategories } from '@/actions/categories'
 import { getEmployeeCommissions, type EmployeeCommission, type GroupBonusResult } from '@/actions/commissions'
 import { SalesChart } from './charts/sales-chart'
 import { TopProductsChart } from './charts/top-products-chart'
@@ -55,7 +56,9 @@ type CompareData = {
   changes: { revenue: number; newClients: number; ordersCount: number }
 }
 
-type ProductItem = { product_id: string; name: string; sku: string; units: number; revenue: number; revenue_net: number; unit_cost: number; cogs: number; margin: number; purchased_units: number; purchased_cost: number; current_stock: number; breakdown: { size: string; store_id: string; store_name: string; units: number; revenue: number }[]; sizeBreakdown: { size: string; comprado: number; vendido: number; queda: number }[] }
+type ProductItem = { product_id: string; name: string; sku: string; category_id?: string | null; units: number; revenue: number; revenue_net: number; unit_cost: number; cogs: number; margin: number; purchased_units: number; purchased_cost: number; current_stock: number; breakdown: { size: string; store_id: string; store_name: string; units: number; revenue: number }[]; sizeBreakdown: { size: string; comprado: number; vendido: number; queda: number }[] }
+
+type ReportCategory = { id: string; name: string; parent_id: string | null; level?: number }
 
 type TailorItem = {
   tailor_id: string; name: string; orders: number; revenue: number
@@ -123,6 +126,9 @@ export function ReportsContent() {
   const [compareData, setCompareData] = useState<CompareData | null>(null)
   const [topProducts, setTopProducts] = useState<ProductItem[]>([])
   const [productSearch, setProductSearch] = useState('')
+  // Filtro por categoría de producto (jerárquico: incluye subcategorías).
+  const [productCategories, setProductCategories] = useState<ReportCategory[]>([])
+  const [productCategoryFilter, setProductCategoryFilter] = useState<string>('all')
   // Modo de la pestaña Productos: histórico total del producto (por defecto) o
   // acotado al periodo/tienda del filtro superior (petición Mónica: temporadas).
   const [productScope, setProductScope] = useState<'historic' | 'period'>('historic')
@@ -155,6 +161,11 @@ export function ReportsContent() {
     getStoresList().then(res => {
       if (!alive) return
       if (res.data) setStores(res.data.map(s => ({ id: s.id, name: s.display_name || s.name })))
+    })
+    listCategories().then(res => {
+      if (!alive || !res.success) return
+      setProductCategories((res.data as unknown as Array<{ id: string; name: string; parent_id: string | null; level?: number }>)
+        .map(c => ({ id: c.id, name: c.name, parent_id: c.parent_id ?? null, level: c.level })))
     })
     return () => { alive = false }
   }, [])
@@ -320,15 +331,42 @@ export function ReportsContent() {
 
   const taxLabel = taxMode === 'without_tax' ? 'Sin IVA (base imponible)' : 'Con IVA'
 
-  // Productos filtrados por el buscador (nombre o SKU). Se usa tanto en la tabla
+  // Productos filtrados por el buscador y la categoría. Se usa tanto en la tabla
   // como en la exportación, para que el PDF/Excel descargue SOLO lo filtrado.
+  // Búsqueda multi-palabra: cada token debe aparecer (AND), sin acentos — mismo
+  // criterio que los buscadores de servidor (queryList sobre search_text).
   const filteredProducts = (() => {
-    const q = normalizeSearchTerm(productSearch)
-    if (!q) return topProducts
-    return topProducts.filter(p =>
-      normalizeSearchTerm(p.name || '').includes(q) ||
-      normalizeSearchTerm(p.sku || '').includes(q),
-    )
+    const tokens = normalizeSearchTerm(productSearch).split(/\s+/).filter(Boolean)
+    // Conjunto de categorías admitidas = seleccionada + todas sus descendientes.
+    let allowedCats: Set<string> | null = null
+    if (productCategoryFilter !== 'all') {
+      if (productCategoryFilter === 'none') {
+        allowedCats = new Set() // marcador: solo sin categoría
+      } else {
+        allowedCats = new Set([productCategoryFilter])
+        let grew = true
+        while (grew) {
+          grew = false
+          for (const c of productCategories) {
+            if (c.parent_id && allowedCats.has(c.parent_id) && !allowedCats.has(c.id)) {
+              allowedCats.add(c.id)
+              grew = true
+            }
+          }
+        }
+      }
+    }
+    return topProducts.filter(p => {
+      if (tokens.length > 0) {
+        const hay = normalizeSearchTerm(`${p.name || ''} ${p.sku || ''}`)
+        if (!tokens.every(t => hay.includes(t))) return false
+      }
+      if (allowedCats !== null) {
+        if (productCategoryFilter === 'none') return !p.category_id
+        return !!p.category_id && allowedCats.has(p.category_id)
+      }
+      return true
+    })
   })()
 
   const buildExportPayload = () => ({
@@ -637,12 +675,33 @@ export function ReportsContent() {
                     </p>
                   </div>
                 )}
-                <Input
-                  placeholder="Filtrar por producto o SKU..."
-                  value={productSearch}
-                  onChange={(e) => setProductSearch(e.target.value)}
-                  className="max-w-sm mb-4"
-                />
+                <div className="flex flex-wrap items-center gap-2 mb-4">
+                  <Input
+                    placeholder="Buscar producto (varias palabras) o SKU..."
+                    value={productSearch}
+                    onChange={(e) => setProductSearch(e.target.value)}
+                    className="max-w-sm"
+                  />
+                  <Select value={productCategoryFilter} onValueChange={setProductCategoryFilter}>
+                    <SelectTrigger className="w-56">
+                      <SelectValue placeholder="Categoría" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todas las categorías</SelectItem>
+                      <SelectItem value="none">Sin categoría</SelectItem>
+                      {productCategories.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {`${' '.repeat((c.level ?? 0) * 3)}${c.name}`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {(productSearch || productCategoryFilter !== 'all') && (
+                    <span className="text-xs text-muted-foreground">
+                      {filteredProducts.length} producto{filteredProducts.length !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
                 <TopProductsChart products={filteredProducts} periodMode={productScope === 'period'} />
               </TabsContent>
               <TabsContent value="tailors"><TailorTable data={tailorData} /></TabsContent>

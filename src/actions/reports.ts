@@ -448,7 +448,7 @@ export const getComparePeriods = protectedAction<
 export const getTopProducts = protectedAction<
   { start_date: string; end_date: string; store_id?: string; channel?: ReportChannel; limit?: number; tax_mode?: TaxMode; scope?: 'historic' | 'period' },
   {
-    product_id: string; name: string; sku: string; units: number; revenue: number
+    product_id: string; name: string; sku: string; category_id: string | null; units: number; revenue: number
     // ── Rentabilidad ──────────────────────────────────────────────────────────
     revenue_net: number   // facturación SIEMPRE sin IVA (base del margen)
     unit_cost: number     // coste unitario del producto (cost_price, neto)
@@ -491,7 +491,7 @@ export const getTopProducts = protectedAction<
     for (let from = 0; ; from += PAGE) {
       let q = ctx.adminClient
         .from('sale_lines')
-        .select('description, sku, quantity, line_total, tax_rate, sales!inner(status, store_id, created_at, stores(name)), product_variants(size, cost_price_override, products(id, name, sku, cost_price))')
+        .select('description, sku, quantity, line_total, tax_rate, sales!inner(status, store_id, created_at, stores(name)), product_variants(size, cost_price_override, products(id, name, sku, cost_price, category_id))')
         .eq('sales.status', 'completed')
       if (byPeriod) {
         q = q.gte('sales.created_at', `${start_date}T00:00:00`).lte('sales.created_at', `${end_date}T23:59:59`)
@@ -508,7 +508,7 @@ export const getTopProducts = protectedAction<
 
     type Bucket = { size: string; store_id: string; store_name: string; units: number; revenue: number }
     type Acc = {
-      product_id: string; name: string; sku: string
+      product_id: string; name: string; sku: string; categoryId: string | null
       units: number; revenue: number; revenueNet: number
       unitCost: number; currentStock: number; purchasedUnits: number; purchasedCost: number
       bd: Record<string, Bucket>
@@ -534,7 +534,7 @@ export const getTopProducts = protectedAction<
       // Coste unitario: override de la variante si existe, si no el del producto.
       const unitCost = Number(v?.cost_price_override) || Number(p?.cost_price) || 0
 
-      const prod = (products[key] ||= { product_id: (p?.id as string) || '', name, sku, units: 0, revenue: 0, revenueNet: 0, unitCost, currentStock: 0, purchasedUnits: 0, purchasedCost: 0, bd: {}, stockBySize: {} })
+      const prod = (products[key] ||= { product_id: (p?.id as string) || '', name, sku, categoryId: (p?.category_id as string) ?? null, units: 0, revenue: 0, revenueNet: 0, unitCost, currentStock: 0, purchasedUnits: 0, purchasedCost: 0, bd: {}, stockBySize: {} })
       if (!prod.unitCost && unitCost) prod.unitCost = unitCost
       prod.units += units
       prod.revenue += revenue
@@ -559,7 +559,7 @@ export const getTopProducts = protectedAction<
     for (let from = 0; ; from += STOCK_PAGE) {
       const { data } = await ctx.adminClient
         .from('stock_levels')
-        .select('quantity, product_variants!inner(size, product_id, products(id, name, sku, cost_price))')
+        .select('quantity, product_variants!inner(size, product_id, products(id, name, sku, cost_price, category_id))')
         .gt('quantity', 0)
         .range(from, from + STOCK_PAGE - 1)
       if (!data?.length) break
@@ -571,8 +571,9 @@ export const getTopProducts = protectedAction<
         const qty = Number(row.quantity) || 0
         // Producto con stock pero sin ventas: lo damos de alta para que aparezca
         // como "comprado pero no vendido" (stock muerto).
-        const prod = (products[key] ||= { product_id: p.id, name: (p.name as string) || '', sku: (p.sku as string) || '', units: 0, revenue: 0, revenueNet: 0, unitCost: Number(p.cost_price) || 0, currentStock: 0, purchasedUnits: 0, purchasedCost: 0, bd: {}, stockBySize: {} })
+        const prod = (products[key] ||= { product_id: p.id, name: (p.name as string) || '', sku: (p.sku as string) || '', categoryId: (p.category_id as string) ?? null, units: 0, revenue: 0, revenueNet: 0, unitCost: Number(p.cost_price) || 0, currentStock: 0, purchasedUnits: 0, purchasedCost: 0, bd: {}, stockBySize: {} })
         if (!prod.unitCost) prod.unitCost = Number(p.cost_price) || 0
+        if (!prod.categoryId && p.category_id) prod.categoryId = p.category_id
         prod.currentStock += qty
         const stSize = (v?.size as string) || '—'
         prod.stockBySize[stSize] = (prod.stockBySize[stSize] || 0) + qty
@@ -587,13 +588,14 @@ export const getTopProducts = protectedAction<
     for (let from = 0; ; from += PAGE) {
       const { data } = await ctx.adminClient
         .from('products')
-        .select('id, name, sku, cost_price')
+        .select('id, name, sku, cost_price, category_id')
         .eq('is_active', true)
         .range(from, from + PAGE - 1)
       if (!data?.length) break
       for (const p of data as any[]) {
-        const prod = (products[`prod:${p.id}`] ||= { product_id: p.id as string, name: (p.name as string) || '', sku: (p.sku as string) || '', units: 0, revenue: 0, revenueNet: 0, unitCost: Number(p.cost_price) || 0, currentStock: 0, purchasedUnits: 0, purchasedCost: 0, bd: {}, stockBySize: {} })
+        const prod = (products[`prod:${p.id}`] ||= { product_id: p.id as string, name: (p.name as string) || '', sku: (p.sku as string) || '', categoryId: (p.category_id as string) ?? null, units: 0, revenue: 0, revenueNet: 0, unitCost: Number(p.cost_price) || 0, currentStock: 0, purchasedUnits: 0, purchasedCost: 0, bd: {}, stockBySize: {} })
         if (!prod.unitCost) prod.unitCost = Number(p.cost_price) || 0
+        if (!prod.categoryId && p.category_id) prod.categoryId = p.category_id
       }
       if (data.length < PAGE) break
     }
@@ -628,7 +630,7 @@ export const getTopProducts = protectedAction<
             return { size, comprado: byPeriod ? 0 : queda + vendido, vendido, queda }
           }).sort((a, b) => compareSizes(a.size, b.size))
           return {
-            product_id: p.product_id, name: p.name, sku: p.sku, units: p.units, revenue: p.revenue,
+            product_id: p.product_id, name: p.name, sku: p.sku, category_id: p.categoryId, units: p.units, revenue: p.revenue,
             revenue_net: p.revenueNet, unit_cost: p.unitCost, cogs, margin: p.revenueNet - cogs,
             purchased_units: byPeriod ? 0 : p.purchasedUnits, purchased_cost: byPeriod ? 0 : p.purchasedCost, current_stock: p.currentStock,
             breakdown: Object.values(p.bd).sort((a, b) => b.revenue - a.revenue),

@@ -10,7 +10,7 @@ import { aggregateSizeTotals } from '@/lib/reports/dimensions'
 type Breakdown = { size: string; store_id: string; store_name: string; units: number; revenue: number }
 type SizeBreakdown = { size: string; comprado: number; vendido: number; queda: number }
 type ProductItem = {
-  product_id: string; name: string; sku: string; units: number; revenue: number
+  product_id: string; name: string; sku: string; category_id?: string | null; units: number; revenue: number
   revenue_net: number; unit_cost: number; cogs: number; margin: number
   purchased_units: number; purchased_cost: number; current_stock: number
   breakdown: Breakdown[]
