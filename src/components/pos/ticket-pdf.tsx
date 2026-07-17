@@ -290,7 +290,19 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
   const payLabel = PAYMENT_LABELS[data.sale.payment_method] || data.sale.payment_method
   const discountAmount = data.sale.discount_amount ?? 0
   const tax = data.sale.tax_amount ?? 0
-  const totalArticles = data.lines.reduce((acc, l) => acc + (l.quantity || 1), 0)
+  // Separa las líneas que son COBRO de un pedido/deuda (van al 0%: su IVA se
+  // declara en el pedido) de la venta real de este ticket. Así el bloque
+  // "Subtotal + IVA 21%" cuadra con la venta de boutique y los cobros se listan
+  // aparte, sin mezclarse en el IVA. El TOTAL sigue siendo la suma de todo.
+  const isCobroLine = (d: string) => /^(cobro pendiente|pedido sastrería)\s*-\s*/i.test((d || '').trim())
+  const lineTotalOf = (l: TicketLinePayload) =>
+    l.line_total ?? (l.unit_price * l.quantity * (1 - (l.discount_percentage || 0) / 100))
+  const saleLines = data.lines.filter((l) => !isCobroLine(l.description))
+  const cobroLines = data.lines.filter((l) => isCobroLine(l.description))
+  const cobroSum = cobroLines.reduce((acc, l) => acc + lineTotalOf(l), 0)
+  const saleSubtotal = Math.max(0, (data.sale.subtotal ?? 0) - cobroSum)
+  const saleTotal = saleSubtotal + tax
+  const totalArticles = saleLines.reduce((acc, l) => acc + (l.quantity || 1), 0)
   const giftMode = data.giftMode === true
   const logoT0 = nowMs()
   const logoBase64 = await getLogoBase64Client()
@@ -382,7 +394,7 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
     },
   ]
 
-  for (const line of data.lines) {
+  for (const line of saleLines) {
     // unit_price YA es PVP (IVA incluido), no multiplicar por taxMultiplier
     const unitPriceWithTax = line.unit_price
     const lineTotalWithTax = line.line_total
@@ -444,32 +456,72 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
       margin: [0, 0, 0, 8] as [number, number, number, number],
     },
   )
-  if (!giftMode) {
+  // Bloque de la VENTA (boutique): subtotal + IVA. Solo si hay artículos de venta.
+  if (!giftMode && saleLines.length > 0) {
     content.push({
       columns: [
         { text: 'Subtotal:', fontSize: FONT_BODY },
-        { text: fmt(data.sale.subtotal), fontSize: FONT_BODY, alignment: 'right' },
+        { text: fmt(saleSubtotal), fontSize: FONT_BODY, alignment: 'right' },
       ],
       margin: [0, 0, 0, 2] as [number, number, number, number],
     })
+    if (discountAmount > 0) {
+      content.push({
+        columns: [
+          { text: 'Descuento:', fontSize: FONT_BODY },
+          { text: '-' + fmt(discountAmount), fontSize: FONT_BODY, alignment: 'right' },
+        ],
+        margin: [0, 0, 0, 2] as [number, number, number, number],
+      })
+    }
+    if (!data.sale.is_tax_free && tax > 0) {
+      content.push({
+        columns: [
+          { text: 'IVA 21%:', fontSize: FONT_BODY },
+          { text: fmt(tax), fontSize: FONT_BODY, alignment: 'right' },
+        ],
+        margin: [0, 0, 0, 2] as [number, number, number, number],
+      })
+    }
+    // Si además hay cobros, cerramos la venta con su total para que se lea claro.
+    if (cobroLines.length > 0) {
+      content.push({
+        columns: [
+          { text: 'Total venta:', fontSize: FONT_BODY, bold: true },
+          { text: fmt(saleTotal), fontSize: FONT_BODY, bold: true, alignment: 'right' },
+        ],
+        margin: [0, 0, 0, 2] as [number, number, number, number],
+      })
+    }
   }
-  if (!giftMode && discountAmount > 0) {
+  // Sección aparte: COBROS de pedidos/deudas incluidos en este ticket. No llevan
+  // IVA aquí (se declara en el pedido); solo se cobran a través de la caja.
+  if (!giftMode && cobroLines.length > 0) {
     content.push({
-      columns: [
-        { text: 'Descuento:', fontSize: FONT_BODY },
-        { text: '-' + fmt(discountAmount), fontSize: FONT_BODY, alignment: 'right' },
-      ],
-      margin: [0, 0, 0, 2] as [number, number, number, number],
+      canvas: [{ type: 'line', x1: 0, y1: 0, x2: W_PT - 2 * MARGIN_PT, y2: 0, lineWidth: 0.5 }],
+      margin: [0, 4, 0, 4] as [number, number, number, number],
     })
-  }
-  if (!giftMode && !data.sale.is_tax_free && tax > 0) {
     content.push({
-      columns: [
-        { text: 'IVA 21%:', fontSize: FONT_BODY },
-        { text: fmt(tax), fontSize: FONT_BODY, alignment: 'right' },
-      ],
-      margin: [0, 0, 0, 2] as [number, number, number, number],
+      text: 'Cobros a cuenta de pedidos',
+      fontSize: FONT_BODY,
+      bold: true,
+      margin: [0, 0, 0, 1] as [number, number, number, number],
     })
+    content.push({
+      text: 'IVA facturado en el pedido',
+      fontSize: FONT_SMALL,
+      color: '#555',
+      margin: [0, 0, 0, 3] as [number, number, number, number],
+    })
+    for (const line of cobroLines) {
+      content.push({
+        columns: [
+          { text: line.description, fontSize: FONT_SMALL },
+          { text: fmt(lineTotalOf(line)), fontSize: FONT_SMALL, alignment: 'right' },
+        ],
+        margin: [0, 0, 0, 2] as [number, number, number, number],
+      })
+    }
   }
   if (!giftMode) {
     content.push({
@@ -480,13 +532,15 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
       margin: [0, 4, 0, 2] as [number, number, number, number],
     })
   }
-  content.push(
-    {
-      text: `Artículos: ${totalArticles}`,
-      fontSize: FONT_BODY,
-      margin: [0, giftMode ? 4 : 0, 0, 2] as [number, number, number, number],
-    },
-  )
+  if (giftMode || totalArticles > 0) {
+    content.push(
+      {
+        text: `Artículos: ${totalArticles}`,
+        fontSize: FONT_BODY,
+        margin: [0, giftMode ? 4 : 0, 0, 2] as [number, number, number, number],
+      },
+    )
+  }
   if (!giftMode) {
     content.push({
       text: `Pago: ${payLabel}`,
