@@ -7,9 +7,10 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Printer, Pencil, Loader2 } from 'lucide-react'
-import { formatCurrency, getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
+import { formatCurrency } from '@/lib/utils'
 import { generateFichaForLine, generateFichaForLineCamiseria } from '@/lib/pdf/ficha-confeccion'
 import { EditFichaDialog } from '@/components/orders/edit-ficha-dialog'
+import { LineStatusChip } from '@/components/orders/line-status-chip'
 import { LinePhotosViewer } from '@/components/orders/line-photos-viewer'
 import { getOrderLinePhotosBatch } from '@/actions/order-line-photos'
 import { usePermissions } from '@/hooks/use-permissions'
@@ -21,8 +22,11 @@ const LOCKED_STATUSES = new Set(['delivered', 'cancelled'])
 
 export function OrderGarmentsTab({ order }: { order: any }) {
   const router = useRouter()
-  const { can } = usePermissions()
+  const { can, isAdmin } = usePermissions()
   const canViewCosts = can('orders.view_costs')
+  // Mismo gating que el botón "Estado del pedido" de la cabecera: con el pedido
+  // entregado/cancelado solo el admin puede seguir cambiando estados.
+  const canChangeStatus = can('orders.edit') && (isAdmin || !LOCKED_STATUSES.has(order?.status))
   // Orden estable + agrupado: las prendas de un mismo traje/chaqué salen
   // consecutivas (chaqueta → chaleco → pantalón) en vez de en el orden
   // arbitrario que devuelva la BD.
@@ -89,7 +93,12 @@ export function OrderGarmentsTab({ order }: { order: any }) {
                 <Badge variant="outline" className="text-xs">{badgeLabel}</Badge>
               </CardTitle>
               <div className="flex items-center gap-2">
-                <Badge className={`text-xs ${getOrderStatusColor(line.status)}`}>{getOrderStatusLabel(line.status)}</Badge>
+                <LineStatusChip
+                  orderId={order.id}
+                  line={line}
+                  orderType={order.order_type}
+                  disabled={!canChangeStatus}
+                />
                 {canPrintFicha && (
                   <Button
                     size="sm"
