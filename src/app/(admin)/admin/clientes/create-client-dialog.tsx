@@ -74,6 +74,7 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess, onSuccessWit
   const [form, setForm] = useState({
     first_name: '', last_name: '', email: '', phone: '', phone_secondary: '',
     date_of_birth: '', gender: 'male' as 'male' | 'female',
+    salutation: 'sr' as 'sr' | 'sra' | 'none',
     birth_day: '', birth_month: '', birth_year: '',
     client_type: 'individual', category: 'standard',
     document_type: 'DNI', document_number: '',
@@ -104,7 +105,7 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess, onSuccessWit
 
   const resetForm = () => setForm({
     first_name: '', last_name: '', email: '', phone: '', phone_secondary: '',
-    date_of_birth: '', gender: 'male', birth_day: '', birth_month: '', birth_year: '',
+    date_of_birth: '', gender: 'male', salutation: 'sr', birth_day: '', birth_month: '', birth_year: '',
     client_type: 'individual', category: 'standard',
     document_type: 'DNI', document_number: '', company_name: '', company_nif: '',
     address: '', city: 'Madrid', postal_code: '', province: 'Madrid', country: 'España',
@@ -203,6 +204,16 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess, onSuccessWit
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-2"><Label>Tratamiento</Label>
+                <Select value={form.salutation} onValueChange={(v) => set('salutation', v)}>
+                  <SelectTrigger className="w-full min-w-0"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="sr">Sr.</SelectItem>
+                    <SelectItem value="sra">Sra.</SelectItem>
+                    <SelectItem value="none">Sin especificar</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-2"><Label>Nacionalidad</Label>
                 <Select value={form.nationality} onValueChange={(v) => set('nationality', v)}>
                   <SelectTrigger className="w-full min-w-0"><SelectValue placeholder="Nacionalidad" /></SelectTrigger>
@@ -289,7 +300,7 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess, onSuccessWit
             const dateOfBirth = form.date_of_birth && String(form.date_of_birth).length === 10 && /^\d{4}-\d{2}-\d{2}$/.test(form.date_of_birth)
               ? form.date_of_birth
               : null
-            execute({ ...form, date_of_birth: dateOfBirth })
+            execute({ ...form, date_of_birth: dateOfBirth, salutation: form.salutation === 'none' ? null : form.salutation })
           }} disabled={isLoading || !form.first_name || !form.last_name || !form.source || !form.phone}
             className="bg-prats-navy hover:bg-prats-navy-light">
             {isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creando...</> : 'Crear cliente'}

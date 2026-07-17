@@ -40,7 +40,17 @@ export function ClientDataTab({ client }: { client: any }) {
         <Card>
           <CardHeader><CardTitle className="text-base">Datos personales</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-[110px_1fr_1fr] gap-4">
+              <div className="space-y-2"><Label>Tratamiento</Label>
+                <Select value={form.salutation || 'none'} onValueChange={(v) => set('salutation', v === 'none' ? null : v)} disabled={!canEdit}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="sr">Sr.</SelectItem>
+                    <SelectItem value="sra">Sra.</SelectItem>
+                    <SelectItem value="none">—</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-2"><Label>Nombre</Label><Input value={form.first_name || ''} onChange={(e) => set('first_name', e.target.value)} disabled={!canEdit} /></div>
               <div className="space-y-2"><Label>Apellidos</Label><Input value={form.last_name || ''} onChange={(e) => set('last_name', e.target.value)} disabled={!canEdit} /></div>
             </div>

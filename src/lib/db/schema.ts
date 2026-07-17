@@ -324,6 +324,7 @@ export const clients = pgTable('clients', {
   phoneSecondary: text('phone_secondary'),
   dateOfBirth: date('date_of_birth'),
   gender: genderTypeEnum('gender').default('unspecified'),
+  salutation: text('salutation'), // 'sr' | 'sra' | null — tratamiento para saludos de email
   nationality: text('nationality'),
   documentType: text('document_type').default('DNI'),
   documentNumber: text('document_number'),

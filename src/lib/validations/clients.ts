@@ -11,6 +11,7 @@ export const createClientSchema = z.object({
   phone_secondary: z.string().nullable().optional(),
   date_of_birth: z.string().nullable().optional(),
   gender: z.enum(['male', 'female', 'other', 'unspecified']).nullable().optional(),
+  salutation: z.enum(['sr', 'sra']).nullable().optional(),
   client_type: z.enum(['individual', 'company']).nullable().optional(),
   category: z.enum(['standard', 'vip', 'premium', 'gold', 'ambassador']).nullable().optional(),
   document_type: z.enum(['DNI', 'NIE', 'NIF', 'CIF', 'passport', 'other']).nullable().optional(),
