@@ -6,6 +6,7 @@ import { normalizeSearchTerm } from '@/lib/utils'
 import { generateInvoicePdf } from '@/lib/pdf/invoice-pdf'
 import { generateEstimatePdf } from '@/lib/pdf/estimate-pdf'
 import { sendEstimateEmail } from '@/lib/email/transactional'
+import { formalGreeting } from '@/lib/email/greeting'
 import { createInvoiceJournalEntry, reverseInvoiceJournalEntry } from '@/actions/accounting-triggers'
 import { formatClientAddress } from '@/lib/clients/format'
 import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
@@ -2803,7 +2804,7 @@ export const sendEstimateAction = protectedAction<{ estimateId: string }, { audi
   async (ctx, { estimateId }) => {
     const { data: est } = await ctx.adminClient
       .from('estimates')
-      .select('id, status, estimate_number, client_name, client_email, total, valid_until, pdf_url, company_name')
+      .select('id, status, estimate_number, client_id, client_name, client_email, total, valid_until, pdf_url, company_name')
       .eq('id', estimateId)
       .single()
 
@@ -2832,10 +2833,30 @@ export const sendEstimateAction = protectedAction<{ estimateId: string }, { audi
       : '-'
     const companyName = String((est as { company_name?: string }).company_name ?? 'Sastrería Prats')
 
+    // Tratamiento del cliente (Sr/Sra) si el presupuesto está ligado a un cliente
+    let greeting: string | null = null
+    let clientName = String((est as { client_name?: string }).client_name ?? '')
+    const estClientId = (est as { client_id?: string }).client_id
+    if (estClientId) {
+      const { data: cli } = await ctx.adminClient
+        .from('clients')
+        .select('salutation, first_name, last_name, full_name')
+        .eq('id', estClientId)
+        .maybeSingle()
+      if (cli) {
+        const g = formalGreeting(cli as { salutation?: string | null; first_name?: string | null; last_name?: string | null; full_name?: string | null })
+        if (g.greeting) {
+          greeting = g.greeting
+          clientName = g.name
+        }
+      }
+    }
+
     try {
       await sendEstimateEmail({
         to: email,
-        clientName: String((est as { client_name?: string }).client_name ?? ''),
+        clientName,
+        greeting,
         estimateNumber: String((est as { estimate_number?: string }).estimate_number ?? ''),
         total,
         validUntil,

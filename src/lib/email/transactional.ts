@@ -153,13 +153,15 @@ async function sendFromTemplate(
 export async function sendEstimateEmail(params: {
   to: string
   clientName: string
+  /** Saludo personalizado ("Estimado Sr.") — si falta, manda el de la plantilla. */
+  greeting?: string | null
   estimateNumber: string
   total: number
   validUntil: string
   pdfUrl: string | null
   companyName: string
 }) {
-  const { to, clientName, estimateNumber, total, validUntil, pdfUrl, companyName } = params
+  const { to, clientName, greeting, estimateNumber, total, validUntil, pdfUrl, companyName } = params
   const totalStr = total.toFixed(2).replace('.', ',')
   const ctaBlock = pdfUrl
     ? `<tr><td align="center" style="padding:8px 16px 32px;">
@@ -179,12 +181,13 @@ export async function sendEstimateEmail(params: {
     valid_until: validUntil,
     company_name: companyName,
     cta_html: ctaBlock,
+    ...(greeting ? { greeting } : {}),
   }, {
     subject: `Presupuesto ${estimateNumber} de ${companyName}`,
     bodyHtml: `
       <tr><td align="center" style="padding:0 60px 32px;">
         <h2 style="margin:0 0 12px;font-size:18px;font-weight:bold;color:#1a2942;">Presupuesto {{estimate_number}}</h2>
-        <p style="margin:0 0 12px;font-size:13px;color:#555555;">Estimado/a {{client_name}},</p>
+        <p style="margin:0 0 12px;font-size:13px;color:#555555;">${greeting ?? 'Estimado/a'} {{client_name}},</p>
         <p style="margin:0 0 20px;font-size:13px;line-height:1.6;color:#555555;">Le enviamos el presupuesto <strong style="color:#1a2942;">{{estimate_number}}</strong> por un importe de <strong>{{total}}</strong>, válido hasta <strong>{{valid_until}}</strong>.</p>
       </td></tr>
       {{cta_html}}
@@ -255,7 +258,8 @@ export async function sendShippingConfirmation(order: {
 }
 
 export async function sendFittingReminder(fitting: {
-  client_name: string; client_email: string; date: string; time: string; store_name: string; order_number?: string
+  client_name: string; client_email: string; greeting?: string | null
+  date: string; time: string; store_name: string; order_number?: string
 }) {
   const orderRow = fitting.order_number
     ? `<tr><td style="font-size:12px;color:#7c3aed;padding:6px 0;">Pedido</td><td style="font-size:13px;font-weight:bold;color:#1a2942;text-align:right;">${escapeHtml(fitting.order_number)}</td></tr>`
@@ -266,12 +270,13 @@ export async function sendFittingReminder(fitting: {
     time: fitting.time,
     store_name: fitting.store_name,
     order_row: orderRow,
+    ...(fitting.greeting ? { greeting: fitting.greeting } : {}),
   }, {
     subject: `Recordatorio: prueba mañana a las {{time}}`,
     bodyHtml: `
       <tr><td align="center" style="padding:0 60px 24px;">
         <h2 style="margin:0 0 12px;font-size:18px;font-weight:bold;color:#1a2942;">Recordatorio de prueba</h2>
-        <p style="margin:0 0 12px;font-size:14px;color:#555555;">Estimado/a {{client_name}},</p>
+        <p style="margin:0 0 12px;font-size:14px;color:#555555;">${fitting.greeting ?? 'Estimado/a'} {{client_name}},</p>
         <p style="margin:0 0 20px;font-size:13px;line-height:1.6;color:#555555;">Le recordamos que tiene una prueba programada en nuestra tienda:</p>
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f3ff;border:1px solid #c4b5fd;border-radius:6px;">
           <tr><td style="padding:16px 20px;">
@@ -287,6 +292,85 @@ export async function sendFittingReminder(fitting: {
       </td></tr>
     `,
   })
+}
+
+/**
+ * Recordatorio de cita (24h antes o mismo día). Sustituye al HTML plano que
+ * montaba el cron de reminders: ahora pasa por el layout corporativo
+ * (logo + footer) y su plantilla es editable en BD como las demás.
+ * `greeting` viene de formalGreeting() — si es null, manda el saludo
+ * editable de la plantilla ("Estimado/a").
+ */
+export async function sendAppointmentReminder(appt: {
+  client_email: string
+  client_name: string
+  greeting?: string | null
+  title: string
+  date: string
+  time: string
+  store_name: string
+  variant: '24h' | '2h'
+}) {
+  const detailsCard = `
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f0e8;border-radius:6px;">
+          <tr><td style="padding:16px 20px;">
+            <p style="margin:0 0 8px;font-size:11px;letter-spacing:1.5px;color:#888888;text-transform:uppercase;">Su cita</p>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr><td style="font-size:12px;color:#888888;padding:6px 0;">Motivo</td><td style="font-size:13px;font-weight:bold;color:#1a2942;text-align:right;">{{appointment_title}}</td></tr>
+              <tr><td style="font-size:12px;color:#888888;padding:6px 0;">Fecha</td><td style="font-size:13px;font-weight:bold;color:#1a2942;text-align:right;">{{date}}</td></tr>
+              <tr><td style="font-size:12px;color:#888888;padding:6px 0;">Hora</td><td style="font-size:13px;font-weight:bold;color:#1a2942;text-align:right;">{{time}}</td></tr>
+              {{store_row}}
+            </table>
+          </td></tr>
+        </table>`
+  const phoneBlock = `
+      <tr><td align="center" style="padding:0 60px 24px;">
+        <p style="margin:0 0 8px;font-size:12px;letter-spacing:1px;color:#888888;text-transform:uppercase;">Para modificar o cancelar su cita</p>
+        <p style="margin:0;font-size:16px;font-weight:bold;color:#1a2942;">${COMPANY_PHONE}</p>
+      </td></tr>`
+  const storeRow = appt.store_name.trim()
+    ? `<tr><td style="font-size:12px;color:#888888;padding:6px 0;">Tienda</td><td style="font-size:13px;font-weight:bold;color:#1a2942;text-align:right;">${escapeHtml(appt.store_name.trim())}</td></tr>`
+    : ''
+  const vars: Vars = {
+    client_name: appt.client_name,
+    appointment_title: appt.title,
+    date: appt.date,
+    time: appt.time,
+    store_name: appt.store_name,
+    store_row: storeRow,
+    ...(appt.greeting ? { greeting: appt.greeting } : {}),
+  }
+  const greetingFallback = appt.greeting ?? 'Estimado/a'
+
+  if (appt.variant === '24h') {
+    await sendFromTemplate('appointment_reminder', appt.client_email, vars, {
+      subject: `Recordatorio: {{appointment_title}} mañana a las {{time}}`,
+      bodyHtml: `
+      <tr><td align="center" style="padding:0 60px 24px;">
+        <h2 style="margin:0 0 12px;font-size:18px;font-weight:bold;color:#1a2942;">Recordatorio de cita</h2>
+        <p style="margin:0 0 12px;font-size:14px;color:#555555;">${greetingFallback} {{client_name}},</p>
+        <p style="margin:0 0 20px;font-size:13px;line-height:1.6;color:#555555;">Le recordamos que mañana tiene una cita programada en nuestra tienda:</p>
+        ${detailsCard}
+        <p style="margin:20px 0 0;font-size:13px;color:#555555;">Le esperamos.</p>
+      </td></tr>
+      ${phoneBlock}
+    `,
+    })
+  } else {
+    await sendFromTemplate('appointment_reminder_2h', appt.client_email, vars, {
+      subject: `Su cita es en 2 horas — {{time}}`,
+      bodyHtml: `
+      <tr><td align="center" style="padding:0 60px 24px;">
+        <h2 style="margin:0 0 12px;font-size:18px;font-weight:bold;color:#1a2942;">Su cita es hoy</h2>
+        <p style="margin:0 0 12px;font-size:14px;color:#555555;">${greetingFallback} {{client_name}},</p>
+        <p style="margin:0 0 20px;font-size:13px;line-height:1.6;color:#555555;">Le recordamos que su cita es hoy a las <strong style="color:#1a2942;">{{time}}</strong>:</p>
+        ${detailsCard}
+        <p style="margin:20px 0 0;font-size:13px;color:#555555;">Le esperamos.</p>
+      </td></tr>
+      ${phoneBlock}
+    `,
+    })
+  }
 }
 
 export async function sendTailoringStatusUpdate(order: {

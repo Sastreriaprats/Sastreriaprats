@@ -1,6 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { isAuthorizedCron } from '@/lib/cron-auth'
+import { sendAppointmentReminder } from '@/lib/email/transactional'
+import { formalGreeting } from '@/lib/email/greeting'
+
+// "2026-07-18" → "18 de julio de 2026". Mediodía UTC para que el día no
+// se desplace formatee donde formatee el servidor.
+function formatApptDate(dateStr: string): string {
+  try {
+    return new Intl.DateTimeFormat('es-ES', {
+      day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Madrid',
+    }).format(new Date(`${dateStr}T12:00:00Z`))
+  } catch {
+    return dateStr
+  }
+}
+
+type ApptClient = {
+  email?: string | null
+  full_name?: string | null
+  first_name?: string | null
+  last_name?: string | null
+  salutation?: string | null
+}
 
 export async function GET(request: NextRequest) {
   if (!isAuthorizedCron(request.headers.get('authorization'))) {
@@ -17,64 +39,30 @@ export async function GET(request: NextRequest) {
 
   const { data: tomorrowAppts } = await admin
     .from('appointments')
-    .select('id, title, date, start_time, client_id, clients(email, full_name), stores(name)')
+    .select('id, title, date, start_time, client_id, clients(email, full_name, first_name, last_name, salutation), stores(name)')
     .eq('date', tomorrow)
     .eq('status', 'scheduled')
     .eq('reminder_sent_24h', false)
 
   for (const appt of tomorrowAppts || []) {
-    const client = appt.clients as unknown as Record<string, unknown> | null
+    const client = appt.clients as unknown as ApptClient | null
     if (client?.email) {
-      const subject = `Recordatorio: ${appt.title} mañana a las ${String(appt.start_time).slice(0, 5)}`
-      const store = appt.stores as unknown as Record<string, unknown> | null
-      const html = `
-              <h2>Recordatorio de cita</h2>
-              <p>Estimado/a ${client.full_name},</p>
-              <p>Le recordamos que tiene una cita programada:</p>
-              <ul>
-                <li><strong>${appt.title}</strong></li>
-                <li>Fecha: ${appt.date}</li>
-                <li>Hora: ${String(appt.start_time).slice(0, 5)}</li>
-                <li>Tienda: ${store?.name || ''}</li>
-              </ul>
-              <p>Le esperamos. Sastrería Prats.</p>
-            `
+      const store = appt.stores as unknown as { name?: string } | null
+      const { greeting, name } = formalGreeting(client)
       try {
-        const res = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            from: process.env.RESEND_FROM_EMAIL || 'Sastrería Prats <noreply@sastreriaprats.com>',
-            to: client.email,
-            subject,
-            html,
-          }),
+        await sendAppointmentReminder({
+          client_email: client.email,
+          client_name: name,
+          greeting,
+          title: String(appt.title ?? 'Cita'),
+          date: formatApptDate(String(appt.date)),
+          time: String(appt.start_time).slice(0, 5),
+          store_name: store?.name || '',
+          variant: '24h',
         })
-        const data = res.ok ? await res.json().catch(() => null) : null
-        await admin.from('email_logs').insert({
-          recipient_email: client.email as string,
-          subject,
-          body_html: html,
-          email_type: 'transactional',
-          status: res.ok ? 'sent' : 'failed',
-          sent_at: new Date().toISOString(),
-          resend_id: (data as { id?: string } | null)?.id ?? null,
-          ...(res.ok ? {} : { error_message: `HTTP ${res.status}` }),
-        })
-        if (res.ok) sent24h++
+        sent24h++
       } catch (e) {
         console.error('[Reminder 24h] Error sending email:', e)
-        await admin.from('email_logs').insert({
-          recipient_email: client.email as string,
-          subject,
-          body_html: html,
-          email_type: 'transactional',
-          status: 'failed',
-          error_message: e instanceof Error ? e.message : 'Unknown error',
-        })
       }
 
       await admin.from('appointments').update({ reminder_sent_24h: true }).eq('id', appt.id)
@@ -88,7 +76,7 @@ export async function GET(request: NextRequest) {
 
   const { data: soonAppts } = await admin
     .from('appointments')
-    .select('id, title, start_time, client_id, clients(email, full_name, phone)')
+    .select('id, title, date, start_time, client_id, clients(email, full_name, first_name, last_name, salutation), stores(name)')
     .eq('date', today)
     .eq('status', 'scheduled')
     .eq('reminder_sent_2h', false)
@@ -96,46 +84,24 @@ export async function GET(request: NextRequest) {
     .lt('start_time', timeTo)
 
   for (const appt of soonAppts || []) {
-    const client = appt.clients as unknown as Record<string, unknown> | null
+    const client = appt.clients as unknown as ApptClient | null
     if (client?.email) {
-      const subject = `Su cita es en 2 horas — ${String(appt.start_time).slice(0, 5)}`
-      const html = `<p>Le recordamos que su cita "${appt.title}" es hoy a las ${String(appt.start_time).slice(0, 5)}. ¡Le esperamos!</p>`
+      const store = appt.stores as unknown as { name?: string } | null
+      const { greeting, name } = formalGreeting(client)
       try {
-        const res = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            from: process.env.RESEND_FROM_EMAIL || 'Sastrería Prats <noreply@sastreriaprats.com>',
-            to: client.email,
-            subject,
-            html,
-          }),
+        await sendAppointmentReminder({
+          client_email: client.email,
+          client_name: name,
+          greeting,
+          title: String(appt.title ?? 'Cita'),
+          date: formatApptDate(String(appt.date)),
+          time: String(appt.start_time).slice(0, 5),
+          store_name: store?.name || '',
+          variant: '2h',
         })
-        const data = res.ok ? await res.json().catch(() => null) : null
-        await admin.from('email_logs').insert({
-          recipient_email: client.email as string,
-          subject,
-          body_html: html,
-          email_type: 'transactional',
-          status: res.ok ? 'sent' : 'failed',
-          sent_at: new Date().toISOString(),
-          resend_id: (data as { id?: string } | null)?.id ?? null,
-          ...(res.ok ? {} : { error_message: `HTTP ${res.status}` }),
-        })
-        if (res.ok) sent2h++
+        sent2h++
       } catch (e) {
         console.error('[Reminder 2h] Error sending email:', e)
-        await admin.from('email_logs').insert({
-          recipient_email: client.email as string,
-          subject,
-          body_html: html,
-          email_type: 'transactional',
-          status: 'failed',
-          error_message: e instanceof Error ? e.message : 'Unknown error',
-        })
       }
 
       await admin.from('appointments').update({ reminder_sent_2h: true }).eq('id', appt.id)
