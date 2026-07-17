@@ -40,7 +40,13 @@ export function AuditSection() {
 
       if (filters.module !== 'all') query = query.eq('module', filters.module)
       if (filters.action !== 'all') query = query.eq('action', filters.action)
-      if (filters.search) query = query.or(`user_email.ilike.%${filters.search}%,description.ilike.%${filters.search}%,entity_display.ilike.%${filters.search}%`)
+      if (filters.search) {
+        // AND por token, cada token en cualquiera de los 3 campos (sin exigir orden)
+        const words = filters.search.trim().replace(/[(),]/g, ' ').split(/\s+/).filter(Boolean)
+        for (const w of words) {
+          query = query.or(`user_email.ilike.%${w}%,description.ilike.%${w}%,entity_display.ilike.%${w}%`)
+        }
+      }
 
       const { data, count } = await query
       if (data) setLogs(data)

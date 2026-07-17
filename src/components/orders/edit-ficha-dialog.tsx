@@ -22,6 +22,7 @@ import { addOrderLinePhoto, removeOrderLinePhoto, getOrderLinePhotoUrls } from '
 import { usePermissions } from '@/hooks/use-permissions'
 import { useFileDropzone } from '@/hooks/use-file-dropzone'
 import { createClient } from '@/lib/supabase/client'
+import { fuzzyFilterSort } from '@/lib/utils'
 
 type OfficialOption = { id: string; name: string; specialty?: string | null }
 
@@ -602,48 +603,63 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
     return () => { cancelled = true }
   }, [open])
 
-  // Búsqueda de cortadores (debounce 300ms cuando hay término; inmediato cuando
-  // está vacío para mostrar la lista por defecto al abrir el Popover).
+  // Búsqueda de cortadores: catálogo pequeño → se carga una vez al abrir el
+  // Popover y se filtra en cliente con fuzzyFilterSort (multi-palabra, sin
+  // acentos, tolerante a erratas) — mismo criterio que edit-order-dialog.
+  const [allCortadores, setAllCortadores] = useState<OfficialOption[] | null>(null)
   useEffect(() => {
     if (!cortadorPopoverOpen) return
     const term = cortadorSearch.trim()
+    let cancelled = false
     const timeout = setTimeout(async () => {
       setIsSearchingCortador(true)
-      const sb = createClient()
-      let q = sb.from('officials')
-        .select('id, name, specialty')
-        .ilike('specialty', '%Cortador%')
-        .eq('is_active', true)
-        .order('name')
-        .limit(10)
-      if (term) q = q.ilike('name', `%${term}%`)
-      const { data } = await q
-      if (data) setCortadorResults(data as OfficialOption[])
-      setIsSearchingCortador(false)
+      let pool = allCortadores
+      if (!pool) {
+        const sb = createClient()
+        const { data } = await sb.from('officials')
+          .select('id, name, specialty')
+          .ilike('specialty', '%Cortador%')
+          .eq('is_active', true)
+          .order('name')
+          .limit(200)
+        pool = (data ?? []) as OfficialOption[]
+        if (!cancelled) setAllCortadores(pool)
+      }
+      if (!cancelled) {
+        setCortadorResults(fuzzyFilterSort(pool, term, (o) => o.name || '').slice(0, 10))
+        setIsSearchingCortador(false)
+      }
     }, term ? 300 : 0)
-    return () => clearTimeout(timeout)
-  }, [cortadorPopoverOpen, cortadorSearch])
+    return () => { cancelled = true; clearTimeout(timeout) }
+  }, [cortadorPopoverOpen, cortadorSearch, allCortadores])
 
   // Búsqueda de oficiales (mismo patrón, excluyendo cortadores).
+  const [allOficiales, setAllOficiales] = useState<OfficialOption[] | null>(null)
   useEffect(() => {
     if (!oficialPopoverOpen) return
     const term = oficialSearch.trim()
+    let cancelled = false
     const timeout = setTimeout(async () => {
       setIsSearchingOficial(true)
-      const sb = createClient()
-      let q = sb.from('officials')
-        .select('id, name, specialty')
-        .not('specialty', 'ilike', '%Cortador%')
-        .eq('is_active', true)
-        .order('name')
-        .limit(10)
-      if (term) q = q.ilike('name', `%${term}%`)
-      const { data } = await q
-      if (data) setOficialResults(data as OfficialOption[])
-      setIsSearchingOficial(false)
+      let pool = allOficiales
+      if (!pool) {
+        const sb = createClient()
+        const { data } = await sb.from('officials')
+          .select('id, name, specialty')
+          .not('specialty', 'ilike', '%Cortador%')
+          .eq('is_active', true)
+          .order('name')
+          .limit(200)
+        pool = (data ?? []) as OfficialOption[]
+        if (!cancelled) setAllOficiales(pool)
+      }
+      if (!cancelled) {
+        setOficialResults(fuzzyFilterSort(pool, term, (o) => o.name || '').slice(0, 10))
+        setIsSearchingOficial(false)
+      }
     }, term ? 300 : 0)
-    return () => clearTimeout(timeout)
-  }, [oficialPopoverOpen, oficialSearch])
+    return () => { cancelled = true; clearTimeout(timeout) }
+  }, [oficialPopoverOpen, oficialSearch, allOficiales])
 
   const set = <T,>(field: string, value: T) => setCfg((prev) => ({ ...prev, [field]: value }))
   const str = (v: unknown) => (v === null || v === undefined ? '' : String(v))

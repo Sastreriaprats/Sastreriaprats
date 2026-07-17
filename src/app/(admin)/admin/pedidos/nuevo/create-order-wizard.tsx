@@ -28,10 +28,10 @@ import { useGarmentTypes } from '@/hooks/use-cached-queries'
 import { useAuth } from '@/components/providers/auth-provider'
 import { usePermissions } from '@/hooks/use-permissions'
 import { createOrderAction } from '@/actions/orders'
-import { getClientMeasurements } from '@/actions/clients'
+import { getClientMeasurements, listClients } from '@/actions/clients'
 import { listSuppliers, createSupplierOrderAction } from '@/actions/suppliers'
 import { listFabricsBySupplier } from '@/actions/fabrics'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, fuzzyFilterSort } from '@/lib/utils'
 import { generateFichaForLineCamiseria } from '@/lib/pdf/ficha-confeccion'
 
 type OrderType = 'artesanal' | 'industrial' | 'proveedor' | 'oficial' | 'camiseria' | 'camiseria_industrial'
@@ -269,15 +269,14 @@ export function CreateOrderWizard({
     if (clientSearch.length < 2) { setClientResults([]); return }
     const t = setTimeout(async () => {
       setIsSearchingClient(true)
-      const { data } = await supabase.from('clients')
-        .select('id, client_code, full_name, email, phone, category, discount_percentage')
-        .or(`full_name.ilike.%${clientSearch}%,email.ilike.%${clientSearch}%,phone.ilike.%${clientSearch}%,client_code.ilike.%${clientSearch}%`)
-        .eq('is_active', true).limit(10)
-      if (data) setClientResults(data)
+      // listClients = buscador inteligente central (tokens AND sin acentos sobre
+      // search_text + fallback difuso), en vez de la vieja query ilike de navegador.
+      const res = await listClients({ search: clientSearch, pageSize: 10 })
+      if (res.success) setClientResults(res.data.data as any[])
       setIsSearchingClient(false)
     }, 300)
     return () => clearTimeout(t)
-  }, [clientSearch, supabase])
+  }, [clientSearch])
 
   useEffect(() => {
     if (orderType !== 'proveedor' || supplierSearch.length < 2) {
@@ -355,19 +354,34 @@ export function CreateOrderWizard({
     })
   }, [selectedSupplier?.id, supabase])
 
+  // Oficiales: catálogo pequeño → se carga una vez y se filtra en cliente con
+  // fuzzyFilterSort (multi-palabra, sin acentos, tolerante a erratas), en vez
+  // de un ilike de patrón único desde el navegador.
+  const [allOfficials, setAllOfficials] = useState<any[] | null>(null)
   useEffect(() => {
     if (officialSearch.length < 2) { setOfficialResults([]); return }
+    let cancelled = false
     const t = setTimeout(async () => {
       setIsSearchingOfficial(true)
-      const { data } = await supabase.from('officials')
-        .select('id, name, phone, email, specialty')
-        .or(`name.ilike.%${officialSearch}%,email.ilike.%${officialSearch}%,phone.ilike.%${officialSearch}%`)
-        .eq('is_active', true).limit(10)
-      if (data) setOfficialResults(data)
-      setIsSearchingOfficial(false)
+      let pool = allOfficials
+      if (!pool) {
+        const { data } = await supabase.from('officials')
+          .select('id, name, phone, email, specialty')
+          .eq('is_active', true)
+          .order('name')
+          .limit(500)
+        pool = data ?? []
+        if (!cancelled) setAllOfficials(pool)
+      }
+      if (!cancelled) {
+        setOfficialResults(
+          fuzzyFilterSort(pool, officialSearch, (o: any) => `${o.name || ''} ${o.email || ''} ${o.phone || ''}`).slice(0, 10),
+        )
+        setIsSearchingOfficial(false)
+      }
     }, 300)
-    return () => clearTimeout(t)
-  }, [officialSearch, supabase])
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [officialSearch, supabase, allOfficials])
 
   useEffect(() => {
     if (parentOrderSearch.length < 2) { setParentOrderResults([]); return }

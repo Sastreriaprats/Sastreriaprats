@@ -78,9 +78,10 @@ export const listFabrics = protectedAction<
       query = query.lte('created_at', `${params.createdTo.trim()}T23:59:59.999`)
     }
     if (params.search?.trim()) {
-      const normalized = normalizeSearchTerm(params.search)
-      if (normalized) {
-        query = query.ilike('search_text', `%${normalized}%`)
+      // Tokens AND sobre search_text (unaccent): "lana azul" encuentra
+      // "Lana fría azul marino" aunque las palabras no vayan seguidas.
+      for (const token of normalizeSearchTerm(params.search).split(/\s+/).filter(Boolean)) {
+        query = query.ilike('search_text', `%${token}%`)
       }
     }
     const limit = Math.min(params.limit ?? 200, 500)

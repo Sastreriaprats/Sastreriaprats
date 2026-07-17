@@ -555,13 +555,12 @@ export const listTickets = protectedAction<{
     }
 
     if (productSearch && productSearch.trim()) {
-      const q = normalizeSearchTerm(productSearch)
-      if (q) {
-        const { data: lines } = await ctx.adminClient
-          .from('sale_lines')
-          .select('sale_id')
-          .ilike('description', `%${q}%`)
-          .limit(1000)
+      const tokens = normalizeSearchTerm(productSearch).split(/\s+/).filter(Boolean)
+      if (tokens.length > 0) {
+        // Tokens AND sobre la descripción de línea (multi-palabra, sin exigir orden)
+        let linesQ = ctx.adminClient.from('sale_lines').select('sale_id')
+        for (const t of tokens) linesQ = linesQ.ilike('description', `%${t}%`)
+        const { data: lines } = await linesQ.limit(1000)
         const ids = [...new Set((lines ?? []).map((l: any) => l.sale_id))]
         if (ids.length === 0) return success({ data: [], total: 0, page, pageSize, totalPages: 0 })
         query = query.in('id', ids)
@@ -1242,47 +1241,67 @@ export const searchProductsForPos = protectedAction<{
 
     if (!warehouse) return success([])
 
-    // Intentar RPC primero (más eficiente), fallback a query directa
-    const { data: rpcData, error: rpcError } = await ctx.adminClient.rpc('search_pos_products', {
-      p_query: q, p_warehouse_id: warehouse.id, p_limit: 20,
-    })
-
-    if (!rpcError && Array.isArray(rpcData) && rpcData.length >= 0) {
-      return success(rpcData)
-    }
-
-    // Fallback: búsqueda directa con queries de Supabase
-    const pattern = `%${q}%`
-    const { data: variants, error } = await ctx.adminClient
+    // Búsqueda inteligente en dos pasadas (sustituye a la vieja RPC
+    // search_pos_products, que hacía ILIKE de un patrón único sin unaccent y
+    // no encontraba "cinturon" → "Cinturón" ni "americana lana"):
+    //   (a) CÓDIGO: el término entero (sin espacios) contra variant_sku/barcode.
+    //   (b) TEXTO: tokens AND sin acentos sobre products.search_text (mig 142)
+    //       + brand, mismo criterio que queryList.
+    const SELECT = `
+      id, variant_sku, size, color, barcode, price_override, is_active,
+      products!inner (id, sku, name, base_price, price_with_tax, tax_rate, main_image_url, product_type, brand, cost_price),
+      stock_levels!inner (quantity, available, warehouse_id)
+    `
+    const baseQuery = () => ctx.adminClient
       .from('product_variants')
-      .select(`
-        id, variant_sku, size, color, barcode, price_override, is_active,
-        products!inner (id, sku, name, base_price, price_with_tax, tax_rate, main_image_url, product_type, brand, cost_price),
-        stock_levels!inner (quantity, available, warehouse_id)
-      `)
+      .select(SELECT)
       .eq('is_active', true)
       .eq('stock_levels.warehouse_id', warehouse.id)
-      .or(`variant_sku.ilike.${pattern},barcode.ilike.${pattern},products.name.ilike.${pattern},products.sku.ilike.${pattern},products.brand.ilike.${pattern}`)
-      .limit(20)
 
-    if (error) {
-      console.error('[searchProductsForPos] fallback error:', error.message)
-      return success([])
+    const results: any[] = []
+    const seen = new Set<string>()
+    const pushAll = (rows: any[] | null) => {
+      for (const v of rows || []) {
+        if (seen.has(v.id)) continue
+        seen.add(v.id)
+        results.push({
+          id: v.id,
+          variant_sku: v.variant_sku,
+          size: v.size,
+          color: v.color,
+          barcode: v.barcode,
+          price_override: v.price_override,
+          is_active: v.is_active,
+          products: v.products,
+          stock_levels: v.stock_levels,
+        })
+      }
     }
 
-    // Transformar al formato esperado por el frontend
-    const results = (variants || []).map((v: any) => ({
-      id: v.id,
-      variant_sku: v.variant_sku,
-      size: v.size,
-      color: v.color,
-      barcode: v.barcode,
-      price_override: v.price_override,
-      is_active: v.is_active,
-      products: v.products,
-      stock_levels: v.stock_levels,
-    }))
-    return success(results)
+    // (a) Código: solo con término de una sola palabra (los códigos no llevan espacios)
+    if (!/\s/.test(q)) {
+      const { data: byCode, error: codeErr } = await baseQuery()
+        .or(`variant_sku.ilike.%${q}%,barcode.ilike.%${q}%`)
+        .limit(20)
+      if (codeErr) console.error('[searchProductsForPos] code search:', codeErr.message)
+      pushAll(byCode)
+    }
+
+    // (b) Texto tokenizado (AND por token, sin acentos)
+    if (results.length < 20) {
+      const tokens = normalizeSearchTerm(q).split(/\s+/).filter(Boolean)
+      if (tokens.length > 0) {
+        let tq = baseQuery()
+        for (const t of tokens) {
+          tq = tq.or(`search_text.ilike.%${t}%,brand.ilike.%${t}%`, { referencedTable: 'products' })
+        }
+        const { data: byText, error: textErr } = await tq.limit(20)
+        if (textErr) console.error('[searchProductsForPos] text search:', textErr.message)
+        pushAll(byText)
+      }
+    }
+
+    return success(results.slice(0, 20))
   }
 )
 

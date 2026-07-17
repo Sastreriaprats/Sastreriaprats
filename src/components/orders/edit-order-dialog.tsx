@@ -534,15 +534,15 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
   }, [])
 
   const filteredFabrics = useMemo(() => {
-    const term = fabricSearch.trim().toLowerCase()
+    const term = fabricSearch.trim()
     if (!term) return fabrics.slice(0, 50)
-    return fabrics
-      .filter((f) =>
-        (f.name || '').toLowerCase().includes(term) ||
-        (f.fabric_code || '').toLowerCase().includes(term) ||
-        (f.composition || '').toLowerCase().includes(term) ||
-        (f.color_name || '').toLowerCase().includes(term),
-      )
+    // Multi-palabra sin acentos y tolerante a erratas (mismo criterio que el
+    // combobox de cortador/oficial de este mismo diálogo).
+    return fuzzyFilterSort(
+      fabrics,
+      term,
+      (f) => `${f.name || ''} ${f.fabric_code || ''} ${f.composition || ''} ${f.color_name || ''}`,
+    )
       .slice(0, 50)
   }, [fabrics, fabricSearch])
 

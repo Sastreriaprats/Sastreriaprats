@@ -25,7 +25,7 @@ import { useList } from '@/hooks/use-list'
 import { usePermissions } from '@/hooks/use-permissions'
 import { listOrders, deleteOrder } from '@/actions/orders'
 import { listReservations } from '@/actions/reservations'
-import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel, summarizeOrderGarments } from '@/lib/utils'
+import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel, summarizeOrderGarments, normalizeSearchTerm } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { OrdersPipeline } from './orders-pipeline'
@@ -259,15 +259,14 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
 
   const statusCounts = statusCountsFromApi ?? {}
 
-  // Pedidos a proveedor filtrados por búsqueda (client-side)
+  // Pedidos a proveedor filtrados por búsqueda (client-side, multi-palabra sin acentos)
   const filteredSupplierOrders = useMemo(() => {
-    const q = supplierSearch.trim().toLowerCase()
-    if (!q) return supplierOrders
-    return supplierOrders.filter((so: any) =>
-      so.order_number?.toLowerCase().includes(q) ||
-      so.suppliers?.name?.toLowerCase().includes(q) ||
-      so.tailoring_orders?.order_number?.toLowerCase().includes(q),
-    )
+    const tokens = normalizeSearchTerm(supplierSearch).split(/\s+/).filter(Boolean)
+    if (tokens.length === 0) return supplierOrders
+    return supplierOrders.filter((so: any) => {
+      const hay = normalizeSearchTerm(`${so.order_number ?? ''} ${so.suppliers?.name ?? ''} ${so.tailoring_orders?.order_number ?? ''}`)
+      return tokens.every((t) => hay.includes(t))
+    })
   }, [supplierOrders, supplierSearch])
 
   const tabBadge = (n: number | null, isActive: boolean) => {

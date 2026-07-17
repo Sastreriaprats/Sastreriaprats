@@ -3,6 +3,7 @@
 import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { serializeForServerAction } from '@/lib/server/serialize'
+import { normalizeSearchTerm } from '@/lib/utils'
 import {
   SUPPLIER_PAYMENT_METHOD_LABEL,
   type SupplierPaymentMethod,
@@ -582,7 +583,8 @@ export const listSupplierVencimientos = protectedAction<
       .limit(1000)
     if (cuotasErr) return failure(cuotasErr.message)
 
-    const term = (search ?? '').trim().toLowerCase()
+    // Tokens AND sin acentos: "mainetti factura 22" encuentra sin exigir orden.
+    const searchTokens = normalizeSearchTerm((search ?? '').trim()).split(/\s+/).filter(Boolean)
     const todayStr = today()
 
     // 2. Contar cuotas por factura para mostrar "Cuota 1 de N"
@@ -614,11 +616,10 @@ export const listSupplierVencimientos = protectedAction<
       const inv = c.invoice
       if (!inv) continue
 
-      // Filtro de búsqueda (por proveedor o nº factura)
-      if (term) {
-        const name = String(inv.supplier_name ?? '').toLowerCase()
-        const num = String(inv.invoice_number ?? '').toLowerCase()
-        if (!name.includes(term) && !num.includes(term)) continue
+      // Filtro de búsqueda (por proveedor o nº factura): multi-palabra sin acentos
+      if (searchTokens.length > 0) {
+        const hay = normalizeSearchTerm(`${inv.supplier_name ?? ''} ${inv.invoice_number ?? ''}`)
+        if (!searchTokens.every((t) => hay.includes(t))) continue
       }
 
       const due = String(c.due_date ?? '')

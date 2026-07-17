@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { normalizeSearchTerm } from '@/lib/utils'
 
 // El catálogo público debe reflejar los cambios del admin de forma inmediata
 // (subir/cambiar imágenes, ajustar precios, marcar productos como visibles).
@@ -101,8 +102,13 @@ export async function GET(request: NextRequest) {
 
   if (categoryIds && categoryIds.length > 0) query = query.in('category_id', categoryIds)
   if (search) {
-    const s = sanitizeSearchPattern(search)
-    query = query.or(`name.ilike.%${s}%,brand.ilike.%${s}%,description.ilike.%${s}%`)
+    // Multi-palabra sin acentos: cada token debe aparecer (AND) en search_text
+    // (name+sku+barcode, unaccent — mig 142), brand o description. Antes era un
+    // patrón único contiguo: "americana lana" no encontraba "Americana de lana".
+    const tokens = normalizeSearchTerm(sanitizeSearchPattern(search)).split(/\s+/).filter(Boolean)
+    for (const t of tokens) {
+      query = query.or(`search_text.ilike.%${t}%,brand.ilike.%${t}%,description.ilike.%${t}%`)
+    }
   }
   if (minPrice) query = query.gte('price_with_tax', parseFloat(minPrice))
   if (maxPrice) query = query.lte('price_with_tax', parseFloat(maxPrice))

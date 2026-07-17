@@ -96,10 +96,15 @@ export const findNextAppointmentByClient = protectedAction<{ query: string }, {
     const term = (query || '').trim()
     if (!term) return success({ appointment: null, hasPastOnly: false })
 
+    // Cliente por el patrón inteligente central (tokens AND sin acentos +
+    // fallback difuso), en vez de un ilike contiguo sobre full_name.
+    const clientIds = await resolveClientIdsForSearch(ctx.adminClient, normalizeSearchTerm(term))
+    if (clientIds.length === 0) return success({ appointment: null, hasPastOnly: false })
+
     const { data, error } = await ctx.adminClient
       .from('appointments')
       .select('id, type, title, date, start_time, status, clients!inner(id, full_name)')
-      .ilike('clients.full_name', `%${term}%`)
+      .in('client_id', clientIds)
       .neq('status', 'cancelled')
       .order('date', { ascending: true })
       .order('start_time', { ascending: true })

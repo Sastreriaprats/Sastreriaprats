@@ -4,6 +4,8 @@ import { revalidatePath } from 'next/cache'
 import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { serializeForServerAction } from '@/lib/server/serialize'
+import { resolveClientIdsForSearch } from '@/lib/server/query-helpers'
+import { normalizeSearchTerm } from '@/lib/utils'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -440,15 +442,11 @@ export const getPendingPayments = protectedAction<
       const today = new Date()
       const searchTerm = (search ?? '').trim()
 
-      // Búsqueda por cliente: obtener IDs de clientes que coincidan por nombre/apellido
+      // Búsqueda por cliente: patrón inteligente central (tokens AND sin acentos
+      // sobre clients.search_text + fallback difuso), como pedidos/arreglos/etc.
       let clientIds: string[] = []
       if (searchTerm.length >= 2) {
-        const { data: clients } = await ctx.adminClient
-          .from('clients')
-          .select('id')
-          .or(`full_name.ilike.%${searchTerm}%,first_name.ilike.%${searchTerm}%,last_name.ilike.%${searchTerm}%`)
-          .limit(200)
-        clientIds = (clients ?? []).map((c: { id: string }) => c.id)
+        clientIds = await resolveClientIdsForSearch(ctx.adminClient, normalizeSearchTerm(searchTerm))
       }
 
       if (type === 'all' || type === 'orders') {

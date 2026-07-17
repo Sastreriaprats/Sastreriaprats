@@ -2102,7 +2102,8 @@ export const listStockByWarehouse = protectedAction<{ warehouseId?: string; sear
 
       const variantMap = Object.fromEntries(variantsData.map((v: any) => [v.id, v]))
       const productMap = Object.fromEntries(productsData.map((p: any) => [p.id, p]))
-      const s = search?.toLowerCase() ?? ''
+      // Multi-palabra sin acentos (AND por token)
+      const searchTokens = normalizeSearchTerm(search ?? '').split(/\s+/).filter(Boolean)
 
       const rows: any[] = []
       for (const sl of slData) {
@@ -2110,9 +2111,9 @@ export const listStockByWarehouse = protectedAction<{ warehouseId?: string; sear
         if (!v) continue
         const p = productMap[v.product_id]
         if (!p) continue
-        if (s) {
-          const haystack = `${p.name} ${p.sku} ${v.variant_sku}`.toLowerCase()
-          if (!haystack.includes(s)) continue
+        if (searchTokens.length > 0) {
+          const haystack = normalizeSearchTerm(`${p.name} ${p.sku} ${v.variant_sku}`)
+          if (!searchTokens.every((t) => haystack.includes(t))) continue
         }
         const qty = Number(sl.quantity) || 0
         const res = Number(sl.reserved) || 0

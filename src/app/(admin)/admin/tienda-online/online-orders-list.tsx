@@ -15,7 +15,7 @@ import {
   Loader2, RefreshCw, Eye, Pencil, Search, X,
 } from 'lucide-react'
 import { getOnlineOrdersList, type OnlineOrderRow } from '@/actions/online-orders'
-import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { formatCurrency, formatDateTime, normalizeSearchTerm } from '@/lib/utils'
 import { PaymentMethodBadge } from '@/components/ui/payment-method-badge'
 
 const STATUS_LABELS: Record<string, string> = {
@@ -58,13 +58,14 @@ export function OnlineOrdersList() {
     return orders.filter((o) => {
       if (statusFilter !== 'all' && o.status !== statusFilter) return false
       if (search.trim()) {
-        const s = search.trim().toLowerCase()
-        const hay = [
+        // Multi-palabra sin acentos (AND por token)
+        const tokens = normalizeSearchTerm(search).split(/\s+/).filter(Boolean)
+        const hay = normalizeSearchTerm([
           o.order_number,
           o.client_name ?? '',
           o.client_email ?? '',
-        ].join(' ').toLowerCase()
-        if (!hay.includes(s)) return false
+        ].join(' '))
+        if (!tokens.every((t) => hay.includes(t))) return false
       }
       return true
     })

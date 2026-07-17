@@ -2,6 +2,7 @@
 
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
+import { normalizeSearchTerm } from '@/lib/utils'
 import { renderTemplate, sendEmail } from '@/lib/email/send'
 import { generateOptInToken } from '@/lib/newsletter/tokens'
 import {
@@ -693,7 +694,13 @@ export const listNewsletterSubscribers = protectedAction<
       { count: 'exact' }
     )
     query = applyStatus(query)
-    if (search) query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`)
+    // Tokens AND sin acentos: search_text (clients, mig 142) cubre el nombre
+    // normalizado; email se busca tal cual por token.
+    if (search) {
+      for (const t of normalizeSearchTerm(search).split(/\s+/).filter(Boolean)) {
+        query = query.or(`search_text.ilike.%${t}%,email.ilike.%${t}%`)
+      }
+    }
     query = query
       .order('unsubscribed_at', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: false })

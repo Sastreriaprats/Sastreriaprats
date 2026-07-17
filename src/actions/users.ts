@@ -566,14 +566,15 @@ export async function getAuditLogs(filters: {
         .replace(/[(),]/g, ' ')
         .split(/\s+/)
         .filter(Boolean)
-      if (words.length > 0) {
-        const pattern = `%${words.join('%')}%`
+      // AND por token, cada token en cualquiera de los 4 campos: "luis cobo"
+      // casa "COBO, Luis" sin exigir orden (antes se unían con % y sí lo exigía).
+      for (const w of words) {
         q = q.or(
           [
-            `description.ilike.${pattern}`,
-            `entity_display.ilike.${pattern}`,
-            `user_full_name.ilike.${pattern}`,
-            `user_email.ilike.${pattern}`,
+            `description.ilike.%${w}%`,
+            `entity_display.ilike.%${w}%`,
+            `user_full_name.ilike.%${w}%`,
+            `user_email.ilike.%${w}%`,
           ].join(',')
         )
       }
