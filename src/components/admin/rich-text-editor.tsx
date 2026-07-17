@@ -20,6 +20,7 @@ import Link from '@tiptap/extension-link'
 import { useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { useFileDropzone } from '@/hooks/use-file-dropzone'
 import {
   Bold, Italic, Heading1, Heading2, Heading3,
   List, ListOrdered, Quote, Code, Link as LinkIcon,
@@ -220,6 +221,22 @@ export function RichTextEditor({
     }
   }, [value, editor])
 
+  const { dragging, dropzoneProps } = useFileDropzone({
+    onFiles: (files) => {
+      if (!onImageUpload || !editor) return
+      const img = files.find((f) => f.type.startsWith('image/'))
+      if (!img) return
+      void (async () => {
+        try {
+          const url = await onImageUpload(img)
+          if (url) editor.chain().focus().setImage({ src: url, alt: img.name }).run()
+        } catch (err) {
+          console.error('[rich-text-editor] image drop upload failed:', err)
+        }
+      })()
+    },
+  })
+
   if (!editor) {
     return (
       <div
@@ -230,9 +247,20 @@ export function RichTextEditor({
   }
 
   return (
-    <div className="rounded-md border bg-background overflow-hidden">
+    <div
+      {...(onImageUpload ? dropzoneProps : {})}
+      className={cn(
+        'rounded-md border bg-background overflow-hidden transition-shadow',
+        dragging && 'ring-2 ring-prats-navy ring-offset-2',
+      )}
+    >
       <Toolbar editor={editor} onImageUpload={onImageUpload} />
       <EditorContent editor={editor} />
+      {dragging && onImageUpload && (
+        <p className="border-t bg-prats-navy/5 px-4 py-1.5 text-xs text-prats-navy">
+          Suelta la imagen para insertarla
+        </p>
+      )}
     </div>
   )
 }

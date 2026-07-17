@@ -49,6 +49,7 @@ import {
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { toast } from 'sonner'
 import { usePermissions } from '@/hooks/use-permissions'
+import { useFileDropzone } from '@/hooks/use-file-dropzone'
 import {
   getSupplierPendingAp,
   type SupplierVencimientoRow,
@@ -128,6 +129,9 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
   const [uploadingDeliveryNoteId, setUploadingDeliveryNoteId] = useState<string | null>(null)
   const [deliveryOrderId, setDeliveryOrderId] = useState<string>('')
   const [deliveryFile, setDeliveryFile] = useState<File | null>(null)
+  const { dragging: draggingDeliveryPdf, dropzoneProps: deliveryPdfDropzoneProps } = useFileDropzone({
+    onFiles: (files) => setDeliveryFile(files[0]),
+  })
   const [selectedDeliveryNoteId, setSelectedDeliveryNoteId] = useState<string | null>(null)
   const selectedDeliveryNoteIdRef = useRef<string | null>(null)
   const [uploadedNoteUrls, setUploadedNoteUrls] = useState<Record<string, string>>({})
@@ -1846,14 +1850,20 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                 placeholder="Observaciones de recepción"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="delivery-pdf">PDF albarán (opcional)</Label>
+            <div
+              {...deliveryPdfDropzoneProps}
+              className={`space-y-2 rounded-md transition-shadow ${draggingDeliveryPdf ? 'ring-2 ring-prats-navy ring-offset-2' : ''}`}
+            >
+              <Label htmlFor="delivery-pdf">PDF albarán (opcional){draggingDeliveryPdf ? ' — suelta aquí' : ''}</Label>
               <Input
                 id="delivery-pdf"
                 type="file"
                 accept="application/pdf"
                 onChange={(e) => setDeliveryFile(e.target.files?.[0] || null)}
               />
+              {deliveryFile && (
+                <p className="text-xs text-muted-foreground truncate">{deliveryFile.name}</p>
+              )}
             </div>
           </div>
           <DialogFooter>

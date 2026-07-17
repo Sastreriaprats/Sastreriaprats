@@ -16,6 +16,7 @@ import {
   type HomeSectionForAdmin,
 } from '@/actions/cms'
 import { toast } from 'sonner'
+import { useFileDropzone } from '@/hooks/use-file-dropzone'
 
 const SECTION_CONFIG: Record<string, { label: string; description: string; hidden?: boolean }> = {
   hero: {
@@ -65,19 +66,28 @@ function ImageField({
 }) {
   const [uploading, setUploading] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+  const processFile = async (file: File) => {
     setUploading(true)
     const url = await onUpload(file)
     setUploading(false)
     if (url) onChange(url)
-    e.target.value = ''
   }
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (file) processFile(file)
+  }
+  const { dragging, dropzoneProps } = useFileDropzone({
+    onFiles: (files) => processFile(files[0]),
+    disabled: disabled || uploading,
+  })
   return (
     <div className="space-y-1">
       <Label>{label}</Label>
-      <div className="flex gap-2">
+      <div
+        {...dropzoneProps}
+        className={`flex gap-2 rounded-md transition-shadow ${dragging ? 'ring-2 ring-prats-navy ring-offset-2' : ''}`}
+      >
         <Input
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -260,11 +270,7 @@ function HeroForm({
   const [uploadingVideo, setUploadingVideo] = useState(false)
   const videoInputRef = useRef<HTMLInputElement>(null)
 
-  const handleVideoFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
-
+  const processVideoFile = async (file: File) => {
     if (!file.type.startsWith('video/')) {
       toast.error('El archivo no es un vídeo válido.')
       return
@@ -297,6 +303,17 @@ function HeroForm({
     }
   }
 
+  const handleVideoFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (file) processVideoFile(file)
+  }
+
+  const { dragging: draggingVideo, dropzoneProps: videoDropzoneProps } = useFileDropzone({
+    onFiles: (files) => processVideoFile(files[0]),
+    disabled: saving || uploadingVideo,
+  })
+
   const isExternalVideo = (url: string) =>
     /youtube\.com|youtu\.be|vimeo\.com/i.test(url)
   const youtubeEmbed = (url: string): string | null => {
@@ -321,7 +338,10 @@ function HeroForm({
       <ImageField value={image_url} onChange={setImageUrl} onUpload={onUpload} label="Imagen de fondo (se usa si no hay vídeo, y como poster del vídeo)" />
       <div className="space-y-1">
         <Label>Vídeo de fondo (opcional, tiene prioridad sobre la imagen)</Label>
-        <div className="flex gap-2">
+        <div
+          {...videoDropzoneProps}
+          className={`flex gap-2 rounded-md transition-shadow ${draggingVideo ? 'ring-2 ring-prats-navy ring-offset-2' : ''}`}
+        >
           <Input
             value={video_url}
             onChange={(e) => setVideoUrl(e.target.value)}

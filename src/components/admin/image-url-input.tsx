@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Upload, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
+import { useFileDropzone } from '@/hooks/use-file-dropzone'
 
 type Props = {
   value: string
@@ -33,10 +34,7 @@ export function ImageUrlInput({
 
   const handlePickFile = () => fileInputRef.current?.click()
 
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
+  const processFile = async (file: File) => {
     setUploading(true)
     try {
       const url = await onUpload(file)
@@ -50,8 +48,22 @@ export function ImageUrlInput({
     }
   }
 
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (file) processFile(file)
+  }
+
+  const { dragging, dropzoneProps } = useFileDropzone({
+    onFiles: (files) => processFile(files[0]),
+    disabled: uploading,
+  })
+
   return (
-    <div className="space-y-2">
+    <div
+      {...dropzoneProps}
+      className={`space-y-2 rounded-md transition-shadow ${dragging ? 'ring-2 ring-prats-navy ring-offset-2' : ''}`}
+    >
       <div className="flex gap-2">
         <Input
           value={value}

@@ -20,6 +20,7 @@ import { updateOrderAction } from '@/actions/orders'
 import { listActiveFabricsForFicha } from '@/actions/fabrics'
 import { addOrderLinePhoto, removeOrderLinePhoto, getOrderLinePhotoUrls } from '@/actions/order-line-photos'
 import { usePermissions } from '@/hooks/use-permissions'
+import { useFileDropzone } from '@/hooks/use-file-dropzone'
 import { createClient } from '@/lib/supabase/client'
 
 type OfficialOption = { id: string; name: string; specialty?: string | null }
@@ -564,6 +565,15 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
       setPhotoBusy(false)
     }
   }
+  const { dragging: draggingPhoto, dropzoneProps: photoDropzoneProps } = useFileDropzone({
+    onFiles: (files) => {
+      const img = files.find((f) => f.type.startsWith('image/'))
+      if (!img) { toast.error('Solo se admiten imágenes'); return }
+      if (photos.length >= 2) { toast.error('Máximo 2 fotos por prenda'); return }
+      void handleAddPhoto(img)
+    },
+    disabled: photoBusy || !canEditPhotos,
+  })
 
   // Cargar las fotos ya subidas (signed URLs) al abrir el dialog.
   useEffect(() => {
@@ -951,11 +961,14 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
               ))}
               {canEditPhotos && photos.length < 2 && (
                 <label
-                  className={`flex flex-col items-center justify-center h-40 rounded-md border border-dashed cursor-pointer text-xs text-muted-foreground hover:bg-muted/40 ${photoBusy ? 'opacity-50 pointer-events-none' : ''}`}
+                  {...photoDropzoneProps}
+                  className={`flex flex-col items-center justify-center h-40 rounded-md border border-dashed cursor-pointer text-xs text-muted-foreground transition-colors ${
+                    draggingPhoto ? 'border-prats-navy bg-prats-navy/5 text-prats-navy' : 'hover:bg-muted/40'
+                  } ${photoBusy ? 'opacity-50 pointer-events-none' : ''}`}
                 >
                   {photoBusy
                     ? <Loader2 className="h-5 w-5 animate-spin" />
-                    : <><ImagePlus className="h-5 w-5 mb-1" /><span>Subir foto</span></>}
+                    : <><ImagePlus className="h-5 w-5 mb-1" /><span>{draggingPhoto ? 'Suelta la foto aquí' : 'Subir foto'}</span></>}
                   <input
                     type="file"
                     accept="image/jpeg,image/png,image/webp"

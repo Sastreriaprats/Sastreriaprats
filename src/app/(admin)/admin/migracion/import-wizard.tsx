@@ -15,6 +15,7 @@ import {
 import { toast } from 'sonner'
 import { importClients, importProducts, importOrders, importMeasurements } from '@/actions/migration'
 import { useAuth } from '@/components/providers/auth-provider'
+import { useFileDropzone } from '@/hooks/use-file-dropzone'
 import { cn } from '@/lib/utils'
 
 const targetFields: Record<string, { field: string; label: string; required?: boolean }[]> = {
@@ -125,10 +126,7 @@ export function ImportWizard({ entityType, onClose }: { entityType: string; onCl
 
   const fields = targetFields[entityType] || []
 
-  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
+  const processCsvFile = useCallback((file: File) => {
     const reader = new FileReader()
     reader.onload = (evt) => {
       const text = evt.target?.result as string
@@ -170,6 +168,16 @@ export function ImportWizard({ entityType, onClose }: { entityType: string; onCl
     }
     reader.readAsText(file, 'UTF-8')
   }, [fields])
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (file) processCsvFile(file)
+  }
+
+  const { dragging: draggingCsv, dropzoneProps: csvDropzoneProps } = useFileDropzone({
+    onFiles: (files) => processCsvFile(files[0]),
+  })
 
   const handleImport = async () => {
     setIsImporting(true)
@@ -268,15 +276,20 @@ export function ImportWizard({ entityType, onClose }: { entityType: string; onCl
 
       {/* STEP 1: Upload */}
       {currentStep === 'upload' && (
-        <Card>
+        <Card
+          {...csvDropzoneProps}
+          className={draggingCsv ? 'ring-2 ring-prats-navy ring-offset-2 transition-shadow' : 'transition-shadow'}
+        >
           <CardContent className="pt-8 pb-8">
             <div className="text-center max-w-md mx-auto">
-              <div className="h-16 w-16 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
-                <Upload className="h-8 w-8 text-gray-400" />
+              <div className={`h-16 w-16 rounded-2xl flex items-center justify-center mx-auto mb-4 transition-colors ${draggingCsv ? 'bg-prats-navy/10' : 'bg-gray-100'}`}>
+                <Upload className={`h-8 w-8 ${draggingCsv ? 'text-prats-navy' : 'text-gray-400'}`} />
               </div>
-              <h2 className="text-lg font-semibold text-prats-navy mb-2">Sube tu archivo CSV</h2>
+              <h2 className="text-lg font-semibold text-prats-navy mb-2">
+                {draggingCsv ? 'Suelta el archivo aquí' : 'Sube tu archivo CSV'}
+              </h2>
               <p className="text-sm text-muted-foreground mb-6">
-                Formatos aceptados: CSV, TSV. Delimitadores: coma, punto y coma, tabulador. Codificación: UTF-8.
+                Formatos aceptados: CSV, TSV. Delimitadores: coma, punto y coma, tabulador. Codificación: UTF-8. También puedes arrastrar el archivo aquí.
               </p>
               <label className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-prats-navy text-white cursor-pointer hover:bg-prats-navy/90 transition-colors">
                 <FileSpreadsheet className="h-4 w-4" /> Seleccionar archivo

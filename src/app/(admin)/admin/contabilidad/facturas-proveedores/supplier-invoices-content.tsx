@@ -70,6 +70,7 @@ import { downloadExcel } from '@/lib/excel/export'
 import { toast } from 'sonner'
 import Papa from 'papaparse'
 import { usePermissions } from '@/hooks/use-permissions'
+import { useFileDropzone } from '@/hooks/use-file-dropzone'
 import {
   getSupplierInvoicesKpis,
   listSupplierInvoices,
@@ -369,6 +370,16 @@ export function SupplierInvoicesContent() {
     setAttachmentName(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
+
+  const { dragging: draggingInvoicePdf, dropzoneProps: invoicePdfDropzoneProps } = useFileDropzone({
+    onFiles: (files) => { void uploadInvoiceAttachment(files[0]) },
+    disabled: attachmentUploading,
+  })
+
+  const { dragging: draggingImportCsv, dropzoneProps: importCsvDropzoneProps } = useFileDropzone({
+    onFiles: (files) => setImportFile(files[0]),
+    disabled: importing,
+  })
 
   const handleExportExcel = async () => {
     if (rows.length === 0) {
@@ -1672,8 +1683,11 @@ export function SupplierInvoicesContent() {
                 rows={2}
               />
             </div>
-            <div>
-              <Label>Adjuntar factura (PDF)</Label>
+            <div
+              {...invoicePdfDropzoneProps}
+              className={`rounded-md transition-shadow ${draggingInvoicePdf ? 'ring-2 ring-prats-navy ring-offset-2' : ''}`}
+            >
+              <Label>Adjuntar factura (PDF){draggingInvoicePdf ? ' — suelta el PDF aquí' : ''}</Label>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -1826,12 +1840,18 @@ export function SupplierInvoicesContent() {
           <p className="text-sm text-muted-foreground">
             Formato: proveedor, cif, numero_factura, fecha_factura, fecha_vencimiento, base, iva, total, notas
           </p>
-          <div>
+          <div
+            {...importCsvDropzoneProps}
+            className={`rounded-md transition-shadow ${draggingImportCsv ? 'ring-2 ring-prats-navy ring-offset-2' : ''}`}
+          >
             <Input
               type="file"
               accept=".csv"
               onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
             />
+            {importFile && (
+              <p className="mt-1 text-xs text-muted-foreground truncate">{importFile.name}</p>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setImportOpen(false)}>Cancelar</Button>

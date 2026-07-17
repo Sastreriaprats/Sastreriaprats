@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { FileText, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
+import { useFileDropzone } from '@/hooks/use-file-dropzone'
 import { createSupplierInvoiceAction, type ApSupplierInvoiceRow } from '@/actions/supplier-invoices'
 import { createClient as createSupabaseClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/utils'
@@ -83,6 +84,11 @@ export function CreditNoteDialog({ invoice, open, onOpenChange, onCreated }: {
       setAttachmentUploading(false)
     }
   }
+
+  const { dragging: draggingAttachment, dropzoneProps: attachmentDropzoneProps } = useFileDropzone({
+    onFiles: (files) => { void uploadAttachment(files[0]) },
+    disabled: attachmentUploading,
+  })
 
   if (!invoice) return null
 
@@ -166,8 +172,11 @@ export function CreditNoteDialog({ invoice, open, onOpenChange, onCreated }: {
             <p className="text-xs text-muted-foreground">{reason.trim().length} caracteres (mínimo 10)</p>
           </div>
 
-          <div className="space-y-1">
-            <Label>Adjuntar abono (PDF)</Label>
+          <div
+            {...attachmentDropzoneProps}
+            className={`space-y-1 rounded-md transition-shadow ${draggingAttachment ? 'ring-2 ring-prats-navy ring-offset-2' : ''}`}
+          >
+            <Label>Adjuntar abono (PDF){draggingAttachment ? ' — suelta el PDF aquí' : ''}</Label>
             <input
               ref={fileInputRef}
               type="file"

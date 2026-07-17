@@ -30,6 +30,7 @@ import { ArrowLeft, Plus, Loader2, X, ImagePlus, Sparkles, Star, Eye, EyeOff } f
 import { toast } from 'sonner'
 import { useAction } from '@/hooks/use-action'
 import { usePermissions } from '@/hooks/use-permissions'
+import { useFileDropzone } from '@/hooks/use-file-dropzone'
 import { SupplierCombobox } from '@/components/admin/supplier-combobox'
 import { createProductAction, updateProductAction, createVariantAction, updateVariantAction, deleteVariantAction, adjustStock, listPhysicalWarehouses, generateProductSkuAction } from '@/actions/products'
 import { listCollectionNames } from '@/actions/product-taxonomies'
@@ -599,9 +600,7 @@ export function ProductForm({
 
   const removeTag = (tag: string) => setWeb((w) => ({ ...w, web_tags: w.web_tags.filter((t) => t !== tag) }))
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || [])
-    e.target.value = ''
+  const processImageFiles = (files: File[]) => {
     if (!files.length) return
 
     const currentTotal = images.length + uploadingImages.length
@@ -640,6 +639,24 @@ export function ProductForm({
       })()
     }
   }
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    e.target.value = ''
+    processImageFiles(files)
+  }
+
+  const { dragging: draggingImages, dropzoneProps: imagesDropzoneProps } = useFileDropzone({
+    onFiles: (files) => {
+      const images = files.filter((f) => f.type.startsWith('image/'))
+      if (images.length === 0) {
+        toast.error('Solo se admiten imágenes (JPG, PNG o WebP)')
+        return
+      }
+      processImageFiles(images)
+    },
+    disabled: isUploadingImage,
+  })
 
   const removeImage = (url: string) => {
     if (url.startsWith('blob:')) {
@@ -1218,9 +1235,14 @@ export function ProductForm({
                     </div>
                   ))}
                   {images.length + uploadingImages.length < 5 && (
-                    <label className="aspect-square rounded-lg border-2 border-dashed border-gray-200 flex flex-col items-center justify-center cursor-pointer hover:border-gray-400 transition-colors bg-gray-50">
+                    <label
+                      {...imagesDropzoneProps}
+                      className={`aspect-square rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors bg-gray-50 ${
+                        draggingImages ? 'border-prats-navy bg-prats-navy/5' : 'border-gray-200 hover:border-gray-400'
+                      }`}
+                    >
                       <ImagePlus className="h-5 w-5 text-gray-400 mb-1" />
-                      <span className="text-xs text-gray-400">Añadir</span>
+                      <span className="text-xs text-gray-400">{draggingImages ? 'Suelta aquí' : 'Añadir'}</span>
                       <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={handleImageUpload} />
                     </label>
                   )}
