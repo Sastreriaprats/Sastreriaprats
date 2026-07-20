@@ -1116,6 +1116,8 @@ export interface UpdateOrderInput {
     finishing_notes?: string | null
     configuration?: Record<string, unknown>
     sort_order?: number
+    /** Lo envía el diálogo pero se IGNORA: la FK la resuelve el trigger
+     *  trg_resolve_line_official_id desde configuration.oficial (mig 227). */
     official_id?: string | null
   }>
 }
@@ -1126,12 +1128,15 @@ const HEADER_EDITABLE_FIELDS = [
   'discount_percentage', 'internal_notes', 'client_notes',
 ] as const
 
+// Campos que updateOrderAction escribe en el row y compara para detectar
+// cambios. official_id NO está: lo resuelve el trigger de BD desde
+// configuration.oficial (compararlo contra un row que no lo trae marcaba
+// SIEMPRE como modificada cualquier línea con la FK poblada).
 const LINE_EDITABLE_FIELDS = [
   'garment_type_id', 'line_type', 'unit_price', 'is_gift', 'discount_percentage', 'tax_rate',
   'material_cost', 'labor_cost', 'factory_cost',
   'fabric_id', 'fabric_description', 'fabric_meters', 'supplier_id',
   'model_name', 'model_size', 'finishing_notes', 'configuration', 'sort_order',
-  'official_id',
 ] as const
 
 /**
@@ -1514,10 +1519,11 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
           model_size: line.model_size !== undefined ? (line.model_size?.toString().trim() || null) : ((before as any)?.model_size ?? null),
           finishing_notes: line.finishing_notes !== undefined ? (line.finishing_notes?.toString().trim() || null) : ((before as any)?.finishing_notes ?? null),
           configuration: withPrendaSlug(mergedConfiguration, gtSlugMap.get(line.garment_type_id)),
-          // Igual que is_gift: el row no escribía official_id, así que asignar
-          // oficial en «Editar pedido» solo quedaba como texto en configuration
-          // y la FK seguía vacía (el motor de comisiones R9 la necesita).
-          official_id: line.official_id !== undefined ? (line.official_id || null) : ((before as any)?.official_id ?? null),
+          // official_id NO se escribe aquí a propósito: la fuente de verdad del
+          // oficial es el TEXTO configuration.oficial y la FK es un espejo que
+          // resuelve el trigger trg_resolve_line_official_id (mig 227) en BD.
+          // Escribirla desde el cliente crearía un segundo escritor y drift
+          // texto↔FK cuando el texto no cambia.
           sort_order: sortOrder,
         }
 
