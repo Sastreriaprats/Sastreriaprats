@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import Link from 'next/link'
 import {
   ArrowLeft, User, Phone, Shirt, History,
-  Calendar, CreditCard, AlertTriangle, ExternalLink, Check, Loader2, X, Copy,
+  Calendar, CreditCard, AlertTriangle, ExternalLink, Check, Loader2, X, Copy, StickyNote,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { usePermissions } from '@/hooks/use-permissions'
@@ -152,6 +152,12 @@ export function OrderDetailContent({ order }: { order: any }) {
               </Link>
             )}
           </div>
+          {order.internal_notes && (
+            <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 max-w-2xl">
+              <StickyNote className="h-4 w-4 mt-0.5 shrink-0" />
+              <p className="whitespace-pre-wrap">{order.internal_notes}</p>
+            </div>
+          )}
         </div>
         <div className="flex gap-2">
           {can('orders.create') && (

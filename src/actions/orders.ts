@@ -43,6 +43,7 @@ function withPrendaSlug(configuration: unknown, slug: string | undefined): Recor
 const SELECT_ORDERS = `
   id, order_number, order_type, status, order_date,
   estimated_delivery_date, payment_date, total, total_paid, total_pending,
+  internal_notes,
   created_at,
   clients ( id, full_name, phone, email, category ),
   stores ( name, code ),

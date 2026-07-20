@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
-import { Loader2, AlertTriangle } from 'lucide-react'
+import { Loader2, AlertTriangle, StickyNote } from 'lucide-react'
 import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel, summarizeOrderGarments } from '@/lib/utils'
 import { TAILORING_PIPELINE_STATUSES } from '@/lib/orders/statuses'
 
@@ -42,7 +42,14 @@ export function OrdersPipeline({ orders, isLoading, onRefresh }: {
                     <CardContent className="p-3">
                       <div className="flex items-center justify-between mb-1">
                         <span className="font-mono text-xs font-medium">{order.order_number}</span>
-                        {isOverdue && <AlertTriangle className="h-3 w-3 text-red-500" />}
+                        <span className="flex items-center gap-1">
+                          {order.internal_notes && (
+                            <span title={order.internal_notes} className="cursor-help" onClick={(e) => e.stopPropagation()}>
+                              <StickyNote className="h-3 w-3 text-amber-600" />
+                            </span>
+                          )}
+                          {isOverdue && <AlertTriangle className="h-3 w-3 text-red-500" />}
+                        </span>
                       </div>
                       <p className="text-sm font-medium truncate">{order.clients?.full_name}</p>
                       <p className="text-xs text-muted-foreground truncate" title={summarizeOrderGarments(order.tailoring_order_lines)}>

@@ -19,6 +19,7 @@ import {
 import {
   Plus, Search, MoreHorizontal, Eye, Trash2, ChevronLeft, ChevronRight,
   LayoutList, Kanban, ArrowUpDown, AlertTriangle, SlidersHorizontal, X, Loader2, Download, CircleDollarSign,
+  StickyNote,
 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useList } from '@/hooks/use-list'
@@ -590,6 +591,11 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                             <div className="flex items-center gap-1">
                               {order.order_number}
                               {isOverdue && <AlertTriangle className="h-3 w-3 text-red-500" />}
+                              {order.internal_notes && (
+                                <span title={order.internal_notes} className="cursor-help">
+                                  <StickyNote className="h-3.5 w-3.5 text-amber-600" />
+                                </span>
+                              )}
                             </div>
                           </TableCell>
                           <TableCell>
