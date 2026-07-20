@@ -40,6 +40,7 @@ const orderStatuses = ALL_VISIBLE_STATUSES
 const supplierOrderStatusLabels: Record<string, string> = {
   draft: 'Borrador', sent: 'Enviado', confirmed: 'Confirmado',
   partially_received: 'Parcial', received: 'Recibido', incident: 'Incidencia', cancelled: 'Cancelado',
+  closed: 'Zanjado',
 }
 
 type TabValue = 'tailoring' | 'supplier' | 'reservations' | 'online'

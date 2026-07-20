@@ -62,11 +62,13 @@ import {
 const orderStatusLabels: Record<string, string> = {
   draft: 'Borrador', sent: 'Enviado', confirmed: 'Confirmado',
   partially_received: 'Parcial', received: 'Recibido', incident: 'Incidencia', cancelled: 'Cancelado',
+  closed: 'Zanjado',
 }
 const orderStatusColors: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-700', sent: 'bg-blue-100 text-blue-700', confirmed: 'bg-blue-100 text-blue-700',
   partially_received: 'bg-orange-100 text-orange-700', received: 'bg-green-100 text-green-700',
   incident: 'bg-red-100 text-red-700', cancelled: 'bg-red-100 text-red-700',
+  closed: 'bg-slate-200 text-slate-700',
 }
 const fabricStatusLabels: Record<string, string> = { active: 'Disponible', seasonal: 'Temporada', out_of_stock: 'Agotado', discontinued: 'Descatalogado' }
 const fabricStatusColors: Record<string, string> = { active: 'bg-green-100 text-green-700', seasonal: 'bg-blue-100 text-blue-700', out_of_stock: 'bg-red-100 text-red-700', discontinued: 'bg-gray-100 text-gray-700' }

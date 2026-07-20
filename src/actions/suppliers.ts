@@ -588,7 +588,7 @@ export const updateSupplierOrderStatusAction = protectedAction<
     const supplierStatusEs: Record<string, string> = {
       draft: 'Borrador', sent: 'Enviado', confirmed: 'Confirmado',
       partially_received: 'Recibido parcial', received: 'Recibido',
-      incident: 'Incidencia', cancelled: 'Cancelado',
+      incident: 'Incidencia', cancelled: 'Cancelado', closed: 'Zanjado',
     }
     const auditDescription = `Pedido proveedor ${orderNum}: ${supplierStatusEs[prevStatus ?? ''] ?? prevStatus ?? '—'} → ${supplierStatusEs[status] ?? status}`
     const auditEnvelope = {
@@ -772,6 +772,101 @@ export const updateSupplierOrderStatusAction = protectedAction<
     }
 
     return success({ ...order, ...auditEnvelope })
+  }
+)
+
+/**
+ * Zanja un pedido recibido parcialmente: el proveedor confirma que no servirá
+ * el resto. No toca stock (lo recibido ya entró vía recepción; lo pendiente no
+ * entra nunca) y conserva las cantidades pedida/recibida como registro del
+ * nivel de servicio. Asienta la compra por el valor realmente servido.
+ * El estado 'closed' no está en SUPPLIER_ORDER_STATUSES a propósito: solo se
+ * llega aquí, nunca por el desplegable genérico de estados.
+ */
+export const closeSupplierOrderAction = protectedAction<
+  { supplierOrderId: string },
+  { id: string; status: string; auditEntityId: string; auditDescription: string }
+>(
+  {
+    permission: 'suppliers.create_order',
+    auditModule: 'suppliers',
+    auditAction: 'state_change',
+    auditEntity: 'supplier_order',
+    revalidate: ['/admin/proveedores'],
+  },
+  async (ctx, { supplierOrderId }) => {
+    if (!supplierOrderId?.trim()) return failure('Pedido obligatorio', 'VALIDATION')
+
+    const { data: order, error: orderErr } = await ctx.adminClient
+      .from('supplier_orders')
+      .select('id, order_number, status, subtotal, tax_amount, total, internal_notes, stock_updated_at, actual_delivery_date')
+      .eq('id', supplierOrderId)
+      .single()
+    if (orderErr || !order) return failure('Pedido no encontrado', 'NOT_FOUND')
+
+    const prevStatus = (order as any).status as string
+    if (prevStatus !== 'partially_received') {
+      return failure('Solo se puede zanjar un pedido recibido parcialmente', 'VALIDATION')
+    }
+
+    const { data: lines, error: linesErr } = await ctx.adminClient
+      .from('supplier_order_lines')
+      .select('id, description, reference, quantity, quantity_received, unit, unit_price')
+      .eq('supplier_order_id', supplierOrderId)
+    if (linesErr) return failure(linesErr.message || 'Error al cargar líneas', 'INTERNAL')
+
+    const pending = (lines || [])
+      .map((l: any) => ({
+        description: String(l.description || l.reference || 'línea'),
+        unit: String(l.unit || 'uds'),
+        missing: toNumber(l.quantity) - toNumber(l.quantity_received),
+      }))
+      .filter((l) => l.missing > 0)
+    const pendingSummary = pending
+      .map((l) => `${Number.isInteger(l.missing) ? l.missing : l.missing.toFixed(2)} ${l.unit} de ${l.description}`)
+      .join(', ')
+
+    const servedSubtotal = (lines || []).reduce(
+      (s: number, l: any) => s + toNumber(l.quantity_received) * toNumber(l.unit_price),
+      0
+    )
+    const orderSubtotal =
+      toNumber((order as any).subtotal) || toNumber((order as any).total) - toNumber((order as any).tax_amount)
+    const taxRatio = orderSubtotal > 0 ? toNumber((order as any).tax_amount) / orderSubtotal : 0
+
+    const now = new Date().toISOString()
+    const noteLine = `[${now.slice(0, 10)}] Pedido zanjado: el proveedor no sirve ${pendingSummary || 'el resto del pedido'}.`
+    const prevNotes = String((order as any).internal_notes || '').trim()
+
+    const { error: updErr } = await ctx.adminClient
+      .from('supplier_orders')
+      .update({
+        status: 'closed',
+        // Guard contra stock fantasma: si más adelante alguien pasa el pedido a
+        // "Recibido", esa rama se salta la suma de lo pendiente al ver stock_updated_at.
+        stock_updated_at: (order as any).stock_updated_at || now,
+        actual_delivery_date: (order as any).actual_delivery_date || now.slice(0, 10),
+        internal_notes: prevNotes ? `${prevNotes}\n${noteLine}` : noteLine,
+      })
+      .eq('id', supplierOrderId)
+    if (updErr) return failure(updErr.message || 'Error al zanjar el pedido', 'INTERNAL')
+
+    if (servedSubtotal > 0) {
+      createPurchaseJournalEntry(supplierOrderId, {
+        subtotal: servedSubtotal,
+        taxAmount: servedSubtotal * taxRatio,
+      }).catch(() => {})
+    }
+
+    const orderNum = (order as any).order_number || supplierOrderId
+    return success({
+      id: supplierOrderId,
+      status: 'closed',
+      auditEntityId: String(supplierOrderId),
+      auditDescription: `Pedido proveedor ${orderNum} zanjado (Recibido parcial → Zanjado)${pendingSummary ? `; sin servir: ${pendingSummary}` : ''}`,
+      auditOldData: { estado: 'partially_received' },
+      auditNewData: { estado: 'closed' },
+    } as any)
   }
 )
 
@@ -1063,6 +1158,11 @@ export const updateSupplierOrderLinesAction = protectedAction<
     const prevStatus = (order as any).status as string
     if (prevStatus === 'cancelled') {
       return failure('No se puede editar un pedido cancelado', 'VALIDATION')
+    }
+    // Un pedido zanjado está cerrado: editarlo recalcularía el estado y desharía
+    // el zanjado en silencio. Si hace falta, primero volver a "Recibido parcial".
+    if (prevStatus === 'closed') {
+      return failure('No se puede editar un pedido zanjado', 'VALIDATION')
     }
 
     // Líneas actuales en BD: fuente de verdad de lo ya recibido y de la variante.

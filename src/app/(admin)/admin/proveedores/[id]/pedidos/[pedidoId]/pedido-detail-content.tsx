@@ -37,6 +37,7 @@ import { toast } from 'sonner'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import {
   updateSupplierOrderStatusAction,
+  closeSupplierOrderAction,
   getSupplierOrderLines,
   receiveSupplierOrderLines,
   updateSupplierOrderLinesAction,
@@ -70,6 +71,7 @@ const STATUS_LABELS: Record<string, string> = {
   received: 'Recibido',
   incident: 'Incidencia',
   cancelled: 'Cancelado',
+  closed: 'Zanjado',
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -80,6 +82,7 @@ const STATUS_COLORS: Record<string, string> = {
   received: 'bg-green-100 text-green-700',
   incident: 'bg-red-100 text-red-700',
   cancelled: 'bg-gray-100 text-gray-700',
+  closed: 'bg-slate-200 text-slate-700',
 }
 
 type LineType = {
@@ -159,6 +162,10 @@ export function PedidoDetailContent({
   // Delete
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+
+  // Zanjar (cerrar pedido parcial sin servir el resto)
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
+  const [closing, setClosing] = useState(false)
 
   // Incident dialog
   const [incidentLineId, setIncidentLineId] = useState<string | null>(null)
@@ -462,6 +469,20 @@ export function PedidoDetailContent({
     }
   }
 
+  async function handleCloseOrder() {
+    setClosing(true)
+    const res = await closeSupplierOrderAction({ supplierOrderId: order.id })
+    setClosing(false)
+    if (res.success) {
+      setCurrentStatus('closed')
+      setCloseConfirmOpen(false)
+      toast.success('Pedido zanjado. Lo pendiente queda sin servir y no entra en stock.')
+      router.refresh()
+    } else {
+      toast.error((res as any)?.error || 'Error al zanjar el pedido')
+    }
+  }
+
   async function markAsPaid() {
     setLoading('paid')
     const res = await markSupplierInvoicePaid({ orderId: order.id })
@@ -479,6 +500,7 @@ export function PedidoDetailContent({
   const deliveryNotes: DeliveryNoteType[] = order.delivery_notes || []
   const total = lines.reduce((s: number, l: LineType) => s + (Number(l.total_price) || 0), 0)
   const isPaid = currentInvoice?.status === 'pagada'
+  const pendingLines = lines.filter((l) => Number(l.quantity) - Number(l.quantity_received || 0) > 0)
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
@@ -520,9 +542,13 @@ export function PedidoDetailContent({
               }
             </SelectTrigger>
             <SelectContent>
-              {Object.entries(STATUS_LABELS).map(([value, label]) => (
-                <SelectItem key={value} value={value}>{label}</SelectItem>
-              ))}
+              {/* 'Zanjado' no es seleccionable: solo se llega con el botón Zanjar,
+                  que cierra sin sumar a stock lo pendiente. Sí se puede salir de él. */}
+              {Object.entries(STATUS_LABELS)
+                .filter(([value]) => value !== 'closed' || value === currentStatus)
+                .map(([value, label]) => (
+                  <SelectItem key={value} value={value} disabled={value === 'closed'}>{label}</SelectItem>
+                ))}
             </SelectContent>
           </Select>
 
@@ -536,7 +562,18 @@ export function PedidoDetailContent({
             </Button>
           )}
 
-          {currentStatus !== 'cancelled' && (
+          {can('suppliers.create_order') && currentStatus === 'partially_received' && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={loading !== null || closing}
+              onClick={() => setCloseConfirmOpen(true)}
+            >
+              <Check className="h-4 w-4 mr-2" /> Zanjar pedido
+            </Button>
+          )}
+
+          {currentStatus !== 'cancelled' && currentStatus !== 'closed' && (
             <Button
               size="sm"
               variant="outline"
@@ -558,7 +595,7 @@ export function PedidoDetailContent({
             </Button>
           )}
 
-          {currentStatus === 'received' && !isPaid && currentInvoice?.id && (
+          {(currentStatus === 'received' || currentStatus === 'closed') && !isPaid && currentInvoice?.id && (
             <Button
               size="sm"
               disabled={loading !== null}
@@ -1173,6 +1210,44 @@ export function PedidoDetailContent({
             <Button onClick={submitEdit} disabled={editSubmitting}>
               {editSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Guardar cambios
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ZANJAR CONFIRMATION */}
+      <Dialog open={closeConfirmOpen} onOpenChange={setCloseConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Check className="h-5 w-5" /> Zanjar pedido
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p className="text-muted-foreground">
+              El pedido <span className="font-mono font-bold">{order.order_number}</span> se cerrará como
+              «Zanjado»: lo ya recibido se queda tal cual y las cantidades pendientes se dan por
+              no servidas (no entrarán en stock).
+            </p>
+            {pendingLines.length > 0 && (
+              <div className="rounded-md border p-3 space-y-1">
+                <p className="font-medium">Quedará sin servir:</p>
+                <ul className="list-disc pl-5 text-muted-foreground">
+                  {pendingLines.map((l) => (
+                    <li key={l.id}>
+                      {Number(l.quantity) - Number(l.quantity_received || 0)} {l.unit || 'uds'} · {l.description}
+                      {l.reference ? ` (${l.reference})` : ''}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCloseConfirmOpen(false)} disabled={closing}>Cancelar</Button>
+            <Button onClick={handleCloseOrder} disabled={closing}>
+              {closing && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Zanjar pedido
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -81,7 +81,7 @@ export const paymentTermTypeEnum = pgEnum('payment_term_type', ['immediate', 'ne
 export const fabricUnitEnum = pgEnum('fabric_unit', ['meters', 'yards', 'pieces'])
 export const fabricStatusEnum = pgEnum('fabric_status', ['active', 'discontinued', 'seasonal', 'out_of_stock'])
 export const supplierOrderStatusEnum = pgEnum('supplier_order_status', [
-  'draft', 'sent', 'confirmed', 'partially_received', 'received', 'incident', 'cancelled',
+  'draft', 'sent', 'confirmed', 'partially_received', 'received', 'incident', 'cancelled', 'closed',
 ])
 
 // ========== TABLAS ==========

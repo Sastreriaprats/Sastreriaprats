@@ -109,8 +109,18 @@ export async function createSaleJournalEntry(saleId: string): Promise<{ ok: bool
 
 /**
  * Crea asiento por compra a proveedor: Debe 600 (Compras), Debe 472 (IVA soportado), Haber 400 (Proveedores).
+ *
+ * Idempotente por pedido: si ya existe un asiento con reference_type='supplier_order'
+ * para este pedido no crea otro (los flujos de recepción pueden pasar varias veces
+ * por la transición a "recibido": recibir → revertir → recibir, o zanjar → reabrir).
+ *
+ * `amounts` permite asentar un importe distinto al total del pedido (p. ej. al
+ * zanjar un pedido servido parcialmente se asienta solo el valor recibido).
  */
-export async function createPurchaseJournalEntry(supplierOrderId: string): Promise<{ ok: boolean; error?: string }> {
+export async function createPurchaseJournalEntry(
+  supplierOrderId: string,
+  amounts?: { subtotal: number; taxAmount: number }
+): Promise<{ ok: boolean; error?: string }> {
   try {
     const admin = createAdminClient()
     const db: AnyClient = admin
@@ -122,10 +132,19 @@ export async function createPurchaseJournalEntry(supplierOrderId: string): Promi
 
     if (orderError || !order) return { ok: false, error: 'Pedido no encontrado' }
 
+    const { count: existingCount } = await admin
+      .from('journal_entries')
+      .select('id', { count: 'exact', head: true })
+      .eq('reference_type', 'supplier_order')
+      .eq('reference_id', supplierOrderId)
+    if ((existingCount ?? 0) > 0) return { ok: true }
+
     const o = order as any
-    const total = Number(o.total ?? 0)
-    const taxAmount = Number(o.tax_amount ?? 0)
-    const subtotal = total - taxAmount
+    const taxAmount = amounts ? Math.round(amounts.taxAmount * 100) / 100 : Number(o.tax_amount ?? 0)
+    const subtotal = amounts
+      ? Math.round(amounts.subtotal * 100) / 100
+      : Number(o.total ?? 0) - Number(o.tax_amount ?? 0)
+    const total = subtotal + taxAmount
     const rawDate = o.order_date ?? o.created_at
     const date = rawDate ? String(rawDate).slice(0, 10) : new Date().toISOString().split('T')[0]
     const fiscalYear = new Date(date).getFullYear()
