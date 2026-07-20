@@ -1116,6 +1116,7 @@ export interface UpdateOrderInput {
     finishing_notes?: string | null
     configuration?: Record<string, unknown>
     sort_order?: number
+    official_id?: string | null
   }>
 }
 
@@ -1513,6 +1514,10 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
           model_size: line.model_size !== undefined ? (line.model_size?.toString().trim() || null) : ((before as any)?.model_size ?? null),
           finishing_notes: line.finishing_notes !== undefined ? (line.finishing_notes?.toString().trim() || null) : ((before as any)?.finishing_notes ?? null),
           configuration: withPrendaSlug(mergedConfiguration, gtSlugMap.get(line.garment_type_id)),
+          // Igual que is_gift: el row no escribía official_id, así que asignar
+          // oficial en «Editar pedido» solo quedaba como texto en configuration
+          // y la FK seguía vacía (el motor de comisiones R9 la necesita).
+          official_id: line.official_id !== undefined ? (line.official_id || null) : ((before as any)?.official_id ?? null),
           sort_order: sortOrder,
         }
 
