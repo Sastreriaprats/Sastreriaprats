@@ -1495,6 +1495,9 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
           discount_percentage: discountPct,
           discount_amount: discountAmount,
           line_total: lineTotal,
+          // Sin is_gift en el row, el update lo descartaba y el check «Regalo»
+          // del diálogo de edición nunca persistía (solo el alta lo guardaba).
+          is_gift: line.is_gift !== undefined ? line.is_gift === true : ((before as any)?.is_gift ?? false),
           tax_rate: Number(line.tax_rate ?? 21),
           material_cost: costFrom(line.material_cost, (before as any)?.material_cost),
           labor_cost: costFrom(line.labor_cost, (before as any)?.labor_cost),
