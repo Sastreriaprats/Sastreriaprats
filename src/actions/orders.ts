@@ -18,19 +18,25 @@ function normalizeGarmentSlug(s: string): string {
   return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, '_')
 }
 
-/** Mapa garment_type_id → slug, para sembrar `prenda`/`prendaSlug` en la
- *  configuration de las líneas (la ficha de confección las necesita para
- *  detectar el tipo de prenda; el wizard/edición no las persistían). */
-async function buildGarmentSlugMap(admin: AdminClient, garmentTypeIds: (string | null | undefined)[]): Promise<Map<string, string>> {
+/** Mapas garment_type_id → slug y → nombre. El slug siembra `prenda`/`prendaSlug`
+ *  en la configuration de las líneas (la ficha de confección las necesita para
+ *  detectar el tipo de prenda; el wizard/edición no las persistían). El nombre
+ *  se usa para re-etiquetar `prendaLabel` si el tipo de prenda cambia. */
+async function buildGarmentMaps(
+  admin: AdminClient,
+  garmentTypeIds: (string | null | undefined)[],
+): Promise<{ slugById: Map<string, string>; nameById: Map<string, string> }> {
   const ids = [...new Set(garmentTypeIds.filter((x): x is string => !!x))]
-  if (!ids.length) return new Map()
+  const slugById = new Map<string, string>()
+  const nameById = new Map<string, string>()
+  if (!ids.length) return { slugById, nameById }
   const { data } = await admin.from('garment_types').select('id, code, name').in('id', ids)
-  const map = new Map<string, string>()
   for (const g of (data ?? []) as { id: string; code?: string; name?: string }[]) {
     const slug = normalizeGarmentSlug(String(g.code || g.name || ''))
-    if (slug) map.set(String(g.id), slug)
+    if (slug) slugById.set(String(g.id), slug)
+    if (g.name) nameById.set(String(g.id), String(g.name))
   }
-  return map
+  return { slugById, nameById }
 }
 
 /** Devuelve la configuration con `prenda`/`prendaSlug` añadidos si faltan. */
@@ -442,7 +448,7 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
 
     if (orderError) return failure(orderError.message)
 
-    const gtSlugMap = await buildGarmentSlugMap(ctx.adminClient, processedLines.map((l: any) => l.garment_type_id))
+    const { slugById: gtSlugMap } = await buildGarmentMaps(ctx.adminClient, processedLines.map((l: any) => l.garment_type_id))
     const linesToInsert = processedLines.map((line: any) => ({
       ...line,
       configuration: withPrendaSlug(line.configuration, gtSlugMap.get(line.garment_type_id)),
@@ -1451,7 +1457,7 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
       const canEditCosts = await checkUserPermission(ctx.userId, 'orders.view_costs')
       const costFrom = (incoming: number | undefined, beforeVal: unknown): number =>
         canEditCosts && incoming !== undefined ? (Number(incoming) || 0) : (Number(beforeVal ?? 0) || 0)
-      const gtSlugMap = await buildGarmentSlugMap(admin, incomingLines.map((l: any) => l.garment_type_id))
+      const { slugById: gtSlugMap, nameById: gtNameMap } = await buildGarmentMaps(admin, incomingLines.map((l: any) => l.garment_type_id))
       for (let i = 0; i < incomingLines.length; i++) {
         const line = incomingLines[i]
         const unitPrice = Number(line.unit_price) || 0
@@ -1473,6 +1479,29 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
         const mergedConfiguration = before
           ? { ...beforeConfig, ...((line.configuration as Record<string, unknown>) ?? {}) }
           : line.configuration
+
+        // Si cambia el TIPO de prenda de una línea existente, sincronizamos las
+        // claves derivadas de la configuration: prenda/prendaSlug (las lee la
+        // ficha y la referencia de boleta) y el prefijo de prendaLabel (lo pinta
+        // la tarjeta de la prenda). withPrendaSlug solo las rellena si FALTAN,
+        // así que sin esto la prenda seguía mostrándose con el tipo antiguo
+        // aunque la FK sí cambiara (caso PIN-2026-0245: chaleco → pantalón).
+        if (before && String((before as any).garment_type_id) !== String(line.garment_type_id)) {
+          const cfg = (mergedConfiguration ?? {}) as Record<string, unknown>
+          const newSlug = gtSlugMap.get(line.garment_type_id)
+          if (newSlug) {
+            cfg.prenda = newSlug
+            cfg.prendaSlug = newSlug
+          }
+          const newName = gtNameMap.get(line.garment_type_id)
+          const label = String(cfg.prendaLabel ?? '').trim()
+          if (newName && label) {
+            // "Chaleco — Traje con chaleco" → "Pantalón — Traje con chaleco";
+            // solo em/en dash (mismo separador que escribe la ficha).
+            const m = label.match(/\s*(?:—|–)\s*(.+)$/)
+            cfg.prendaLabel = m ? `${newName} — ${m[1].trim()}` : newName
+          }
+        }
 
         // Boleta = tarjeta: la ficha de confección imprime el tejido desde
         // configuration (tejidoStockNombre → tejidoCatalogo → tejido). Si
