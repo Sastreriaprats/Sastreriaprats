@@ -1060,13 +1060,25 @@ export async function requestPasswordResetAction(
       if (authUserId) await linkClientToProfile(admin, email, authUserId)
     }
 
-    const actionLink = (linkRes?.properties as { action_link?: string } | null)?.action_link
-    if (!actionLink) {
-      console.error('[requestPasswordResetAction] generateLink no devolvió action_link')
+    const props = (linkRes?.properties ?? null) as {
+      action_link?: string
+      hashed_token?: string
+    } | null
+
+    // Link a NUESTRA página con el token_hash: el formulario lo canjea con
+    // verifyOtp al enviar. El action_link de Supabase (endpoint /verify) no
+    // sirve aquí: la web usa flujo PKCE y ese redirect deja tokens que el
+    // cliente no puede consumir → "link caducado o no válido". Además el
+    // canje en submit evita que un escáner de email funda el token de un uso.
+    const resetUrl = props?.hashed_token
+      ? `${publicUrl}/auth/restablecer?token_hash=${encodeURIComponent(props.hashed_token)}`
+      : props?.action_link
+    if (!resetUrl) {
+      console.error('[requestPasswordResetAction] generateLink no devolvió hashed_token ni action_link')
       return { success: true }
     }
 
-    await sendPasswordReset(email, actionLink)
+    await sendPasswordReset(email, resetUrl)
     return { success: true }
   } catch (err) {
     console.error('[requestPasswordResetAction] error inesperado:', err)

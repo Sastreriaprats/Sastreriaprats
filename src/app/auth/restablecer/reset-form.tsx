@@ -14,15 +14,26 @@ type Stage = 'loading' | 'ready' | 'invalid' | 'success'
 export function ResetForm() {
   const supabase = useMemo(() => createClient(), [])
   const [stage, setStage] = useState<Stage>('loading')
+  const [tokenHash, setTokenHash] = useState<string | null>(null)
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
 
-  // Supabase pone los tokens en el hash al redirigir desde el email.
-  // El cliente JS los detecta y crea una sesión "recovery" automáticamente.
-  // Verificamos que existe sesión antes de mostrar el formulario.
   useEffect(() => {
+    // Flujo actual: el email trae ?token_hash=… y se canjea con verifyOtp al
+    // ENVIAR el formulario (token de un solo uso: canjearlo en submit evita
+    // que un escáner de email lo funda al abrir el link). Se lee de
+    // window.location para no necesitar Suspense por useSearchParams.
+    const th = new URLSearchParams(window.location.search).get('token_hash')
+    if (th) {
+      setTokenHash(th)
+      setStage('ready')
+      return
+    }
+
+    // Flujo legacy (links antiguos vía /verify de Supabase): tokens en el
+    // hash → supabase-js crea sesión "recovery"; comprobamos que existe.
     let cancelled = false
     async function checkSession() {
       // Pequeño delay para dar tiempo a Supabase JS a procesar el hash.
@@ -50,6 +61,22 @@ export function ResetForm() {
       return
     }
     setIsSaving(true)
+    if (tokenHash) {
+      // Si un intento anterior ya canjeó el token, hay sesión: no repetir
+      // verifyOtp (fallaría por token consumido).
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        const { error: otpError } = await supabase.auth.verifyOtp({
+          type: 'recovery',
+          token_hash: tokenHash,
+        })
+        if (otpError) {
+          setIsSaving(false)
+          setStage('invalid')
+          return
+        }
+      }
+    }
     const { error } = await supabase.auth.updateUser({ password })
     setIsSaving(false)
     if (error) {
