@@ -187,13 +187,14 @@ export const createClientAction = protectedAction<any, any>(
       const hasValidEmail = email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 
       let profileId: string | null = null
-      const defaultPassword = process.env.CLIENT_DEFAULT_PASSWORD
 
-      if (hasValidEmail && defaultPassword) {
+      if (hasValidEmail) {
         const fullName = `${parsed.data.first_name || ''} ${parsed.data.last_name || ''}`.trim()
         const { data: authData, error: authError } = await ctx.adminClient.auth.admin.createUser({
           email,
-          password: defaultPassword,
+          // Contraseña aleatoria que nadie conoce: el cliente fija la suya
+          // desde "¿Olvidaste la contraseña?" (el email queda confirmado).
+          password: crypto.randomUUID() + crypto.randomUUID(),
           email_confirm: true,
           user_metadata: {
             full_name: fullName || email,
@@ -260,10 +261,11 @@ export const createClientAction = protectedAction<any, any>(
         const fullName = `${parsed.data.first_name || ''} ${parsed.data.last_name || ''}`.trim()
         const firstName = parsed.data.first_name || ''
         try {
+          // Sin password: la contraseña generada es aleatoria y no se envía
+          // en claro; el cliente fija la suya vía "¿Olvidaste la contraseña?".
           await sendWelcomeEmail({
             name: fullName || firstName || 'Cliente',
             email: clientEmail,
-            password: profileId && defaultPassword ? defaultPassword : undefined,
           })
         } catch (emailError) {
           console.error('[createClientAction] Error enviando welcome email:', emailError)

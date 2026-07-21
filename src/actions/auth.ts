@@ -386,24 +386,41 @@ export async function registerClientAction(formData: FormData) {
         }
       }
 
-      const { error: clientErr } = await adminClient.from('clients').insert({
-        profile_id: data.user.id,
-        first_name: firstName,
-        last_name: lastName,
-        email,
-        phone: phone || null,
-        source: 'web',
-      })
+      // Si ya existe una ficha de cliente con este email (alta en tienda,
+      // importación…) sin cuenta online, la enlazamos: así el cliente ve su
+      // historial de tienda en /mi-cuenta en vez de estrenar ficha duplicada.
+      const [linkable] = await findLinkableClientsByEmail(adminClient, email)
 
-      if (clientErr) {
-        if (clientErr.code === '23505') {
-          return { error: 'Este email ya está asociado a un cliente. Prueba a iniciar sesión.' }
+      if (linkable) {
+        const { error: linkErr } = await adminClient
+          .from('clients')
+          .update({ profile_id: data.user.id, ...(phone ? { phone } : {}) })
+          .eq('id', linkable.id)
+          .is('profile_id', null)
+        if (linkErr) {
+          console.error('[registerClient] enlace ficha existente:', linkErr)
+          return { error: 'Error al crear el perfil de cliente. Inténtalo de nuevo o contacta con nosotros.' }
         }
-        if (clientErr.code === '23503') {
-          return { error: 'No se pudo crear el perfil. Contacta con info@sastreriaprats.com' }
+      } else {
+        const { error: clientErr } = await adminClient.from('clients').insert({
+          profile_id: data.user.id,
+          first_name: firstName,
+          last_name: lastName,
+          email,
+          phone: phone || null,
+          source: 'web',
+        })
+
+        if (clientErr) {
+          if (clientErr.code === '23505') {
+            return { error: 'Este email ya está asociado a un cliente. Prueba a iniciar sesión.' }
+          }
+          if (clientErr.code === '23503') {
+            return { error: 'No se pudo crear el perfil. Contacta con info@sastreriaprats.com' }
+          }
+          console.error('[registerClient] clients insert:', clientErr)
+          return { error: 'Error al crear el perfil de cliente. Inténtalo de nuevo o contacta con nosotros.' }
         }
-        console.error('[registerClient] clients insert:', clientErr)
-        return { error: 'Error al crear el perfil de cliente. Inténtalo de nuevo o contacta con nosotros.' }
       }
 
       try {
@@ -864,10 +881,133 @@ export async function getServerProfile(userId: string): Promise<UserWithRoles | 
 // ==========================================
 // SOLICITAR RESTABLECIMIENTO DE CONTRASEÑA (público)
 // ==========================================
+
+/** Escapa comodines de LIKE/ILIKE para poder comparar emails literalmente. */
+function escapeLikePattern(s: string): string {
+  return s.replace(/[\\%_]/g, '\\$&')
+}
+
+type LinkableClient = {
+  id: string
+  first_name: string | null
+  last_name: string | null
+  client_code: string | null
+  profile_id: string | null
+}
+
+/**
+ * Fichas de cliente con ese email (case-insensitive) SIN cuenta online,
+ * priorizando la ficha "oficial" de tienda (con client_code) y después la
+ * más antigua. Puede haber varias fichas por email (email NO es unique).
+ */
+async function findLinkableClientsByEmail(
+  admin: ReturnType<typeof createAdminClient>,
+  email: string,
+): Promise<LinkableClient[]> {
+  const { data } = await admin
+    .from('clients')
+    .select('id, first_name, last_name, client_code, profile_id')
+    .ilike('email', escapeLikePattern(email))
+    .is('profile_id', null)
+    .order('created_at', { ascending: true })
+  const rows = (data ?? []) as LinkableClient[]
+  return [...rows.filter((c) => c.client_code), ...rows.filter((c) => !c.client_code)]
+}
+
+/**
+ * Enlaza (best-effort) la ficha de cliente suelta con un usuario auth ya
+ * existente. El UNIQUE de clients.profile_id impide dobles enlaces: si el
+ * usuario ya tiene ficha, no se toca nada.
+ */
+async function linkClientToProfile(
+  admin: ReturnType<typeof createAdminClient>,
+  email: string,
+  userId: string,
+): Promise<void> {
+  try {
+    const { data: already } = await admin
+      .from('clients')
+      .select('id')
+      .eq('profile_id', userId)
+      .limit(1)
+    if (already && already.length > 0) return
+
+    const [target] = await findLinkableClientsByEmail(admin, email)
+    if (!target) return
+
+    const { error } = await admin
+      .from('clients')
+      .update({ profile_id: userId })
+      .eq('id', target.id)
+      .is('profile_id', null)
+    if (error) console.warn('[linkClientToProfile]', error.message)
+  } catch (e) {
+    console.warn('[linkClientToProfile]', e)
+  }
+}
+
+/**
+ * Cliente dado de alta en tienda sin cuenta online: crea el usuario auth al
+ * vuelo (contraseña aleatoria, email confirmado, rol client) y lo enlaza a
+ * su ficha. Devuelve el user id, o null si el email no pertenece a ningún
+ * cliente sin cuenta.
+ */
+async function activateStoreClientAccount(
+  admin: ReturnType<typeof createAdminClient>,
+  email: string,
+): Promise<string | null> {
+  const [target] = await findLinkableClientsByEmail(admin, email)
+  if (!target) return null
+
+  const fullName = `${target.first_name || ''} ${target.last_name || ''}`.trim()
+  const { data: created, error: createErr } = await admin.auth.admin.createUser({
+    email,
+    // Nadie conoce esta contraseña: el cliente fija la suya con el link de
+    // recovery que se envía a continuación.
+    password: crypto.randomUUID() + crypto.randomUUID(),
+    email_confirm: true,
+    user_metadata: {
+      full_name: fullName || email,
+      first_name: target.first_name || '',
+      last_name: target.last_name || '',
+    },
+  })
+  if (createErr || !created?.user?.id) {
+    console.error('[activateStoreClientAccount] createUser:', createErr?.message)
+    return null
+  }
+  const userId = created.user.id
+
+  const { data: clientRole } = await admin
+    .from('roles')
+    .select('id')
+    .eq('name', 'client')
+    .single()
+  if (clientRole) {
+    const { error: roleErr } = await admin
+      .from('user_roles')
+      .insert({ user_id: userId, role_id: clientRole.id })
+    if (roleErr) console.error('[activateStoreClientAccount] user_roles:', roleErr.message)
+  }
+
+  const { error: linkErr } = await admin
+    .from('clients')
+    .update({ profile_id: userId })
+    .eq('id', target.id)
+    .is('profile_id', null)
+  if (linkErr) console.error('[activateStoreClientAccount] enlace profile_id:', linkErr.message)
+
+  return userId
+}
+
 /**
  * Server action pública. Acepta un email, genera un link de recovery
  * vía Supabase Admin y lo envía usando la plantilla custom
  * `password_reset` (branding Prats, español).
+ *
+ * Si el email pertenece a un cliente dado de alta en tienda que aún no tiene
+ * cuenta online, la cuenta se crea aquí al vuelo y el mismo email de
+ * "restablecer contraseña" le sirve para estrenarla (activación perezosa).
  *
  * Anti-enumeración: SIEMPRE devuelve éxito al cliente independientemente
  * de si el email existe en BBDD. Los errores reales se loguean en server.
@@ -889,21 +1029,35 @@ export async function requestPasswordResetAction(
   }
 
   const admin = createAdminClient()
+  const linkOptions = {
+    type: 'recovery' as const,
+    email,
+    options: { redirectTo: `${publicUrl}/auth/restablecer` },
+  }
 
   try {
     // Comprueba si el email existe en auth.users SIN exponerlo al cliente.
-    // Si no existe, devolvemos éxito igualmente para evitar enumeración.
-    const { data: linkRes, error: linkErr } = await admin.auth.admin.generateLink({
-      type: 'recovery',
-      email,
-      options: { redirectTo: `${publicUrl}/auth/restablecer` },
-    })
+    let { data: linkRes, error: linkErr } = await admin.auth.admin.generateLink(linkOptions)
 
     if (linkErr) {
-      // Casos comunes: usuario no existe ("User not found"). Loguear sin
-      // exponer.
-      console.warn('[requestPasswordResetAction] generateLink:', linkErr.message)
-      return { success: true }
+      // Usuario no existe en auth ("User not found"). Si el email es de un
+      // cliente de tienda sin cuenta online, la creamos ahora y seguimos.
+      const activatedId = await activateStoreClientAccount(admin, email)
+      if (!activatedId) {
+        // Email desconocido: éxito silencioso para evitar enumeración.
+        console.warn('[requestPasswordResetAction] generateLink:', linkErr.message)
+        return { success: true }
+      }
+      ;({ data: linkRes, error: linkErr } = await admin.auth.admin.generateLink(linkOptions))
+      if (linkErr) {
+        console.error('[requestPasswordResetAction] generateLink tras activar cuenta:', linkErr.message)
+        return { success: true }
+      }
+    } else {
+      // La cuenta auth ya existía: si su ficha de cliente quedó sin enlazar
+      // (alta antigua, registro fallido a medias), la enlazamos de paso.
+      const authUserId = (linkRes as { user?: { id?: string } } | null)?.user?.id
+      if (authUserId) await linkClientToProfile(admin, email, authUserId)
     }
 
     const actionLink = (linkRes?.properties as { action_link?: string } | null)?.action_link
