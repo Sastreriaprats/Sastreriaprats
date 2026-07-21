@@ -16,9 +16,8 @@ import {
   BarChart3, FileSpreadsheet, FileText, Loader2, Store, UserCog, Clock, Wallet,
   Flame, Star, Receipt, Layers,
 } from 'lucide-react'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts'
 import { useAuth } from '@/components/providers/auth-provider'
-import { getSalesReport, getComparePeriods, getTopProducts, getTailorPerformance, getClientsAnalytics, getClientsAdvancedAnalytics, getSalesByStore, getSalesByEmployee, getSalesByTimePattern, getExpensesReport, getExpensesComparison, getTailoringByCategory, type ReportChannel, type TaxMode, type ClientsAdvancedAnalytics, type TailoringCategoryRow } from '@/actions/reports'
+import { getSalesReport, getComparePeriods, getTopProducts, getTailorPerformance, getClientsAnalytics, getClientsAdvancedAnalytics, getStoreSalesReport, getSalesByEmployee, getSalesByTimePattern, getExpensesReport, getExpensesComparison, type ReportChannel, type TaxMode, type ClientsAdvancedAnalytics, type StoreSalesReport, type StoreSalesStoreRow, type TailoringCategoryKey } from '@/actions/reports'
 import { getStoresList } from '@/actions/config'
 import { listCategories } from '@/actions/categories'
 import { getEmployeeCommissions, type EmployeeCommission, type GroupBonusResult } from '@/actions/commissions'
@@ -42,12 +41,6 @@ type SalesData = {
   chartData: { date: string; pos: number; online: number; tailoring: number; total: number }[]
   totals: { pos: number; online: number; tailoring: number; total: number; ticketCount: number; avgTicket: number }
   byStore?: { store_id: string; store_name: string; boutique: number; gift_cards: number; online: number; tailoring: number; total: number }[]
-}
-
-type TailoringByCatData = {
-  breakdown: TailoringCategoryRow[]
-  total: { amount: number; garments: number }
-  byStore?: { store_id: string; store_name: string; total: number; amounts: { category: string; amount: number }[] }[]
 }
 
 type CompareData = {
@@ -74,8 +67,6 @@ type ClientsData = {
   clientsWithPurchases: number
   dailyUniqueByStore?: { store_id: string; store_name: string; byDay: { day: string; count: number }[] }[]
 }
-
-type StoreItem = { store_id: string; store_name: string; pos: number; gift_cards: number; tailoring: number; total: number }
 
 type EmployeeItem = {
   employee_id: string; employee_name: string
@@ -135,18 +126,17 @@ export function ReportsContent() {
   const [tailorData, setTailorData] = useState<TailorItem[]>([])
   const [clientsData, setClientsData] = useState<ClientsData | null>(null)
   const [clientsAdvanced, setClientsAdvanced] = useState<ClientsAdvancedAnalytics | null>(null)
-  const [storeData, setStoreData] = useState<StoreItem[]>([])
+  const [storeSales, setStoreSales] = useState<StoreSalesReport | null>(null)
   const [employeeData, setEmployeeData] = useState<EmployeeItem[]>([])
   const [employeeByStore, setEmployeeByStore] = useState<EmployeeStoreRow[] | null>(null)
   const [employeeStores, setEmployeeStores] = useState<EmployeeStoreCol[] | null>(null)
   const [employeeCommissions, setEmployeeCommissions] = useState<EmployeeCommission[]>([])
   const [groupBonuses, setGroupBonuses] = useState<GroupBonusResult[]>([])
   const [timePatternData, setTimePatternData] = useState<TimePatternData | null>(null)
-  const [tailoringByCat, setTailoringByCat] = useState<TailoringByCatData | null>(null)
   const [expensesData, setExpensesData] = useState<ExpensesData | null>(null)
   const [expensesComparison, setExpensesComparison] = useState<ExpensesComparison | null>(null)
   const [isExporting, setIsExporting] = useState(false)
-  const [activeTab, setActiveTab] = useState<string>('sales')
+  const [activeTab, setActiveTab] = useState<string>('store-sales')
   const [stores, setStores] = useState<StoreOption[]>([])
   const [storeFilter, setStoreFilter] = useState<string>(activeStoreId || 'all')
   const [channelFilter, setChannelFilter] = useState<ReportChannel>('all')
@@ -187,7 +177,7 @@ export function ReportsContent() {
       const prevStartStr = prevStart.toISOString().split('T')[0]
       const prevEndStr = prevEnd.toISOString().split('T')[0]
 
-      const [salesRes, compareRes, productsRes, tailorRes, clientsRes, clientsAdvRes, storeRes, employeeRes, timeRes, expensesRes, expCompRes, tailoringCatRes, commissionsRes] = await Promise.all([
+      const [salesRes, compareRes, productsRes, tailorRes, clientsRes, clientsAdvRes, storeSalesRes, employeeRes, timeRes, expensesRes, expCompRes, commissionsRes] = await Promise.all([
         getSalesReport({ start_date: start, end_date: end, store_id: storeId, channel, group_by: groupBy, tax_mode }),
         getComparePeriods({
           current_start: start, current_end: end,
@@ -200,12 +190,11 @@ export function ReportsContent() {
         getTailorPerformance({ start_date: start, end_date: end, store_id: storeId, channel, tax_mode }),
         getClientsAnalytics({ start_date: start, end_date: end, store_id: storeId }),
         getClientsAdvancedAnalytics({ start_date: start, end_date: end, store_id: storeId }),
-        getSalesByStore({ start_date: start, end_date: end, store_id: storeId, channel, tax_mode }),
+        getStoreSalesReport({ start_date: start, end_date: end, store_id: storeId, tax_mode }),
         getSalesByEmployee({ start_date: start, end_date: end, store_id: storeId, channel, tax_mode }),
         getSalesByTimePattern({ start_date: start, end_date: end, store_id: storeId, channel, tax_mode }),
         getExpensesReport({ start_date: start, end_date: end, tax_mode }),
         getExpensesComparison({ current_start: start, current_end: end, previous_start: prevStartStr, previous_end: prevEndStr, tax_mode }),
-        getTailoringByCategory({ start_date: start, end_date: end, store_id: storeId }),
         getEmployeeCommissions({ start_date: start, end_date: end }),
       ])
 
@@ -215,12 +204,11 @@ export function ReportsContent() {
       if (tailorRes.success) setTailorData(tailorRes.data)
       if (clientsRes.success) setClientsData(clientsRes.data)
       if (clientsAdvRes.success) setClientsAdvanced(clientsAdvRes.data)
-      if (storeRes.success) setStoreData(storeRes.data)
+      if (storeSalesRes.success) setStoreSales(storeSalesRes.data)
       if (employeeRes.success) { setEmployeeData(employeeRes.data.employees); setEmployeeByStore(employeeRes.data.byStore ?? null); setEmployeeStores(employeeRes.data.stores ?? null) }
       if (timeRes.success) setTimePatternData(timeRes.data)
       if (expensesRes.success) setExpensesData(expensesRes.data)
       if (expCompRes.success) setExpensesComparison(expCompRes.data)
-      if (tailoringCatRes.success) setTailoringByCat(tailoringCatRes.data)
       if (commissionsRes.success) { setEmployeeCommissions(commissionsRes.data.employees); setGroupBonuses(commissionsRes.data.groupBonuses) }
     } catch (err) {
       console.error('[ReportsContent fetchAll]', err)
@@ -285,33 +273,9 @@ export function ReportsContent() {
     : (stores.find(s => s.id === storeFilter)?.name || '')
 
   // Desglose por tienda activo solo en modo "Todas" + toggle on. Cada pestaña que
-  // lo soporte mapea su `byStore` a StoreBreakdownRow[] aquí.
+  // lo soporte mapea su `byStore` a StoreBreakdownRow[] aquí. (El informe 1
+  // "Ventas en tienda" ya es por tienda de serie y no depende del toggle.)
   const showStoreBreakdown = groupByStore && storeFilter === 'all'
-  const salesStoreBreakdown: StoreBreakdownRow[] | null = showStoreBreakdown && salesData?.byStore
-    ? salesData.byStore.map(s => ({
-        store_id: s.store_id, store_name: s.store_name, total: s.total,
-        metrics: [
-          { key: 'boutique', label: 'Boutique', value: s.boutique, color: SALES_STORE_COLORS.boutique },
-          { key: 'gift_cards', label: 'Tarjetas regalo', value: s.gift_cards, color: SALES_STORE_COLORS.gift_cards },
-          { key: 'online', label: 'Online', value: s.online, color: SALES_STORE_COLORS.online },
-          { key: 'tailoring', label: 'Sastrería', value: s.tailoring, color: SALES_STORE_COLORS.tailoring },
-        ],
-      }))
-    : null
-
-  const tailoringStoreBreakdown: StoreBreakdownRow[] | null = showStoreBreakdown && tailoringByCat?.byStore
-    ? (() => {
-        const labelOf = new Map<string, string>(tailoringByCat.breakdown.map(b => [b.category as string, b.label]))
-        return tailoringByCat.byStore.map(s => ({
-          store_id: s.store_id, store_name: s.store_name, total: s.total,
-          metrics: s.amounts.map(a => ({
-            key: a.category, label: labelOf.get(a.category) || a.category,
-            value: a.amount, color: CATEGORY_COLORS[a.category] || '#64748b',
-          })),
-        }))
-      })()
-    : null
-
   const employeeStoreBreakdown: StoreBreakdownRow[] | null = showStoreBreakdown && employeeByStore
     ? employeeByStore.map(s => ({
         store_id: s.store_id, store_name: s.store_name, total: s.total,
@@ -384,7 +348,7 @@ export function ReportsContent() {
     tailorData,
     clientsData,
     clientsAdvanced,
-    storeData,
+    storeSales,
     employeeData,
     employeeStores: storeFilter === 'all' ? employeeStores : null,
     timePatternData,
@@ -571,11 +535,12 @@ export function ReportsContent() {
             <Card>
               <CardContent className="pt-4 pb-3">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-muted-foreground">Facturación total</span>
+                  <span className="text-xs text-muted-foreground">Cobrado total</span>
                   <DollarSign className="h-4 w-4 text-muted-foreground" />
                 </div>
-                <p className="text-2xl font-bold">{formatCurrency(salesData?.totals?.total || 0)}</p>
+                <p className="text-2xl font-bold">{formatCurrency(storeSales?.totals?.collected_total || 0)}</p>
                 {compareData && pctBadge(compareData.changes.revenue)}
+                <p className="text-[10px] text-muted-foreground">Mismo criterio que Dashboard y Contabilidad</p>
               </CardContent>
             </Card>
             <Card>
@@ -584,27 +549,27 @@ export function ReportsContent() {
                   <span className="text-xs text-muted-foreground">Boutique + Tarjetas</span>
                   <ShoppingBag className="h-4 w-4 text-muted-foreground" />
                 </div>
-                <p className="text-2xl font-bold">{formatCurrency(salesData?.totals?.pos || 0)}</p>
-                <p className="text-xs text-muted-foreground">Online: {formatCurrency(salesData?.totals?.online || 0)}</p>
+                <p className="text-2xl font-bold">{formatCurrency((storeSales?.totals?.boutique || 0) + (storeSales?.totals?.gift_cards || 0))}</p>
+                <p className="text-xs text-muted-foreground">Online: {formatCurrency(storeSales?.totals?.online || 0)}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-4 pb-3">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-muted-foreground">Sastrería</span>
+                  <span className="text-xs text-muted-foreground">Sastrería cobrada</span>
                   <Scissors className="h-4 w-4 text-muted-foreground" />
                 </div>
-                <p className="text-2xl font-bold">{formatCurrency(salesData?.totals?.tailoring || 0)}</p>
+                <p className="text-2xl font-bold">{formatCurrency(storeSales?.totals?.tailoring_collected || 0)}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-4 pb-3">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-muted-foreground">Ticket medio</span>
+                  <span className="text-xs text-muted-foreground">Pedidos sastrería</span>
                   <BarChart3 className="h-4 w-4 text-muted-foreground" />
                 </div>
-                <p className="text-2xl font-bold">{formatCurrency(salesData?.totals?.avgTicket || 0)}</p>
-                <p className="text-xs text-muted-foreground">{salesData?.totals?.ticketCount || 0} tickets</p>
+                <p className="text-2xl font-bold">{formatCurrency(storeSales?.totals?.orders_value || 0)}</p>
+                <p className="text-xs text-muted-foreground">{storeSales?.totals?.orders_count || 0} pedidos del periodo (cobrados y sin cobrar)</p>
               </CardContent>
             </Card>
             <Card>
@@ -621,20 +586,16 @@ export function ReportsContent() {
 
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList>
-              <TabsTrigger value="sales" className="gap-1"><BarChart3 className="h-4 w-4" /> Ventas</TabsTrigger>
-              <TabsTrigger value="bytype" className="gap-1"><Layers className="h-4 w-4" /> Ventas por tipo</TabsTrigger>
-              <TabsTrigger value="products" className="gap-1"><ShoppingBag className="h-4 w-4" /> Productos</TabsTrigger>
+              <TabsTrigger value="store-sales" className="gap-1"><Store className="h-4 w-4" /> 1 · Ventas en tienda</TabsTrigger>
+              <TabsTrigger value="employees" className="gap-1"><UserCog className="h-4 w-4" /> 2 · Por empleado</TabsTrigger>
+              <TabsTrigger value="products" className="gap-1"><ShoppingBag className="h-4 w-4" /> 3 · Productos</TabsTrigger>
+              <TabsTrigger value="clients" className="gap-1"><Users className="h-4 w-4" /> 4 · Clientes y horarios</TabsTrigger>
+              <TabsTrigger value="expenses" className="gap-1"><Wallet className="h-4 w-4" /> 5 · Gastos</TabsTrigger>
               <TabsTrigger value="tailors" className="gap-1"><Scissors className="h-4 w-4" /> Sastres</TabsTrigger>
-              <TabsTrigger value="clients" className="gap-1"><Users className="h-4 w-4" /> Clientes</TabsTrigger>
-              <TabsTrigger value="stores" className="gap-1"><Store className="h-4 w-4" /> Por tienda</TabsTrigger>
-              <TabsTrigger value="employees" className="gap-1"><UserCog className="h-4 w-4" /> Por empleado</TabsTrigger>
-              <TabsTrigger value="time" className="gap-1"><Clock className="h-4 w-4" /> Por hora/día</TabsTrigger>
-              <TabsTrigger value="expenses" className="gap-1"><Wallet className="h-4 w-4" /> Gastos</TabsTrigger>
             </TabsList>
 
             <div className="mt-6">
-              <TabsContent value="sales"><VentasTab salesData={salesData} timePatternData={timePatternData} storeBreakdown={salesStoreBreakdown} /></TabsContent>
-              <TabsContent value="bytype"><TailoringByTypeTab data={tailoringByCat} storeName={activeStoreName} storeBreakdown={tailoringStoreBreakdown} /></TabsContent>
+              <TabsContent value="store-sales"><StoreSalesTab data={storeSales} salesData={salesData} isFiltered={storeFilter !== 'all'} /></TabsContent>
               <TabsContent value="products">
                 {/* Alcance del informe: toda la vida del producto o el periodo del
                     filtro superior (petición Mónica: revisar la temporada al cerrarla). */}
@@ -705,10 +666,17 @@ export function ReportsContent() {
                 <TopProductsChart products={filteredProducts} periodMode={productScope === 'period'} />
               </TabsContent>
               <TabsContent value="tailors"><TailorTable data={tailorData} /></TabsContent>
-              <TabsContent value="clients"><ClientsChart data={clientsData} advanced={clientsAdvanced} showByStore={showStoreBreakdown} /></TabsContent>
-              <TabsContent value="stores"><StoreTab data={storeData} /></TabsContent>
+              <TabsContent value="clients">
+                {/* Informe 4 de Mónica: clientes + hora más vendida y día de la semana, juntos. */}
+                <div className="space-y-8">
+                  <ClientsChart data={clientsData} advanced={clientsAdvanced} showByStore={showStoreBreakdown} />
+                  <div>
+                    <h3 className="text-base font-semibold mb-3 flex items-center gap-2"><Clock className="h-4 w-4" /> Por hora y día de la semana</h3>
+                    <TimePatternTab data={timePatternData} showByStore={showStoreBreakdown} />
+                  </div>
+                </div>
+              </TabsContent>
               <TabsContent value="employees"><EmployeeTab data={employeeData} storeBreakdown={employeeStoreBreakdown} stores={storeFilter === 'all' ? employeeStores : null} commissions={employeeCommissions} groupBonuses={groupBonuses} /></TabsContent>
-              <TabsContent value="time"><TimePatternTab data={timePatternData} showByStore={showStoreBreakdown} /></TabsContent>
               <TabsContent value="expenses"><ExpensesTab data={expensesData} comparison={expensesComparison} /></TabsContent>
             </div>
           </Tabs>
@@ -791,265 +759,170 @@ function StoreBreakdown({ rows, title = 'Desglose por tienda' }: { rows: StoreBr
   )
 }
 
-// ─── Tab: Ventas ─────────────────────────────────────────────────────────────
+// ─── Tab 1: Ventas en tienda (estructura pedida por Mónica, jul-2026) ────────
+// Por cada tienda: (1) boutique + tarjeta regalo, (2) sastrería COBRADA en las 4
+// categorías, (3) pedidos del periodo (cobrados y sin cobrar, informativo). Aparte
+// la tienda online y el total cobrado, que cuadra con Dashboard y Contabilidad.
 
 const SALES_STORE_COLORS = { boutique: '#1e3a5f', gift_cards: '#f59e0b', online: '#0ea5e9', tailoring: '#c084fc' }
-
-function VentasTab({ salesData, timePatternData, storeBreakdown }: { salesData: SalesData | null; timePatternData: TimePatternData | null; storeBreakdown: StoreBreakdownRow[] | null }) {
-  const chartData = salesData?.chartData || []
-
-  const bestDay = chartData.length
-    ? chartData.reduce((best, d) => d.total > best.total ? d : best)
-    : null
-
-  const peakHour = timePatternData?.byHour.reduce((best, h) => h.total > best.total ? h : best, { hour: 0, total: 0 }) || null
-
-  return (
-    <div className="space-y-4">
-      {(bestDay || peakHour) && (
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-          {bestDay && bestDay.total > 0 && (
-            <div className="flex items-center gap-3 p-3 rounded-xl border bg-amber-50 border-amber-200">
-              <Star className="h-5 w-5 text-amber-500 shrink-0" />
-              <div>
-                <p className="text-[11px] text-muted-foreground">Mejor día</p>
-                <p className="text-sm font-bold">{bestDay.date.slice(5)}</p>
-                <p className="text-xs text-muted-foreground">{formatCurrency(bestDay.total)}</p>
-              </div>
-            </div>
-          )}
-          {peakHour && peakHour.total > 0 && (
-            <div className="flex items-center gap-3 p-3 rounded-xl border bg-indigo-50 border-indigo-200">
-              <Flame className="h-5 w-5 text-indigo-500 shrink-0" />
-              <div>
-                <p className="text-[11px] text-muted-foreground">Hora pico</p>
-                <p className="text-sm font-bold">{peakHour.hour}:00 h</p>
-                <p className="text-xs text-muted-foreground">{formatCurrency(peakHour.total)}</p>
-              </div>
-            </div>
-          )}
-          {salesData && salesData.totals.avgTicket > 0 && (
-            <div className="flex items-center gap-3 p-3 rounded-xl border bg-green-50 border-green-200">
-              <Receipt className="h-5 w-5 text-green-600 shrink-0" />
-              <div>
-                <p className="text-[11px] text-muted-foreground">Ticket medio</p>
-                <p className="text-sm font-bold">{formatCurrency(salesData.totals.avgTicket)}</p>
-                <p className="text-xs text-muted-foreground">{salesData.totals.ticketCount} tickets</p>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-      {storeBreakdown && <StoreBreakdown rows={storeBreakdown} title="Ventas por tienda" />}
-      <SalesChart data={chartData} />
-    </div>
-  )
-}
-
-// ─── Tab: Ventas por tipo (Sastrería/Camisería × Artesanal/Industrial) ───────
 
 const CATEGORY_COLORS: Record<string, string> = {
   sastreria_artesanal: '#1e3a5f',   // navy
   sastreria_industrial: '#3b82f6',  // azul
   camiseria_artesanal: '#d97706',   // ámbar
   camiseria_industrial: '#f97316',  // naranja
-  boutique: '#10b981',              // esmeralda
-  gift_cards: '#ec4899',            // rosa
 }
-const CATEGORY_SHORT: Record<string, string> = {
-  sastreria_artesanal: 'Sast. Artesanal',
-  sastreria_industrial: 'Sast. Industrial',
-  camiseria_artesanal: 'Cam. Artesanal',
-  camiseria_industrial: 'Cam. Industrial',
-  boutique: 'Boutique',
-  gift_cards: 'Tarjetas',
+const CATEGORY_LABELS: Record<TailoringCategoryKey, string> = {
+  sastreria_artesanal: 'Venta en Sastrería Artesanal',
+  sastreria_industrial: 'Venta en Sastrería Industrial',
+  camiseria_artesanal: 'Venta en Camisería Artesanal',
+  camiseria_industrial: 'Venta en Camisería Industrial',
 }
+const CATEGORY_ORDER: TailoringCategoryKey[] = ['sastreria_artesanal', 'sastreria_industrial', 'camiseria_artesanal', 'camiseria_industrial']
 
-function TailoringByTypeTab({ data, storeName, storeBreakdown }: { data: TailoringByCatData | null; storeName: string; storeBreakdown: StoreBreakdownRow[] | null }) {
-  const storeBadge = (
-    <Badge className="bg-prats-navy text-white gap-1 shrink-0">
-      <Store className="h-3 w-3" />
-      {storeName === 'Todas las tiendas' ? 'Todas las tiendas' : `Tienda: ${storeName}`}
-    </Badge>
+function StoreSalesCard({ s }: { s: StoreSalesStoreRow }) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <CardTitle className="text-base flex items-center gap-2"><Store className="h-4 w-4" /> Ventas en {s.store_name}</CardTitle>
+          <span className="text-lg font-bold">{formatCurrency(s.collected_total)}</span>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <Table>
+          <TableBody>
+            <TableRow className="bg-muted/40">
+              <TableCell className="font-semibold">1 · Ventas de boutique + tarjeta regalo</TableCell>
+              <TableCell className="text-right font-semibold">{formatCurrency(s.boutique + s.gift_cards)}</TableCell>
+            </TableRow>
+            <TableRow>
+              <TableCell className="pl-8 text-muted-foreground">Boutique</TableCell>
+              <TableCell className="text-right">{formatCurrency(s.boutique)}</TableCell>
+            </TableRow>
+            <TableRow>
+              <TableCell className="pl-8 text-muted-foreground">Tarjetas regalo</TableCell>
+              <TableCell className="text-right">{formatCurrency(s.gift_cards)}</TableCell>
+            </TableRow>
+            <TableRow className="bg-muted/40">
+              <TableCell className="font-semibold">2 · Ventas de sastrería (cobrado)</TableCell>
+              <TableCell className="text-right font-semibold">{formatCurrency(s.tailoring_collected)}</TableCell>
+            </TableRow>
+            {CATEGORY_ORDER.map((k) => (
+              <TableRow key={k}>
+                <TableCell className="pl-8 text-muted-foreground">
+                  <span className="inline-block h-2.5 w-2.5 rounded-sm mr-2" style={{ backgroundColor: CATEGORY_COLORS[k] }} />
+                  {CATEGORY_LABELS[k]}
+                </TableCell>
+                <TableCell className="text-right">{formatCurrency(s.tailoring_by_category[k] || 0)}</TableCell>
+              </TableRow>
+            ))}
+            <TableRow className="bg-muted/40">
+              <TableCell className="font-semibold">3 · Pedidos de sastrería del periodo <span className="font-normal text-muted-foreground">({s.orders_count} pedidos, cobrados y sin cobrar)</span></TableCell>
+              <TableCell className="text-right font-semibold">{formatCurrency(s.orders_value)}</TableCell>
+            </TableRow>
+            <TableRow>
+              <TableCell className="pl-8 text-muted-foreground">Ya cobrado de esos pedidos</TableCell>
+              <TableCell className="text-right">{formatCurrency(s.orders_paid)}</TableCell>
+            </TableRow>
+            <TableRow>
+              <TableCell className="pl-8 text-muted-foreground">Pendiente de cobro</TableCell>
+              <TableCell className="text-right">{formatCurrency(s.orders_pending)}</TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+        <p className="text-[11px] text-muted-foreground mt-3">
+          El bloque 3 es el <strong>valor de los pedidos hechos en el periodo</strong> (por fecha de pedido) y es informativo:
+          no se suma al total de la tienda para no duplicar — un pedido cuenta en el bloque 2 cuando se cobra.
+        </p>
+      </CardContent>
+    </Card>
   )
+}
 
-  if (!data || data.total.garments === 0) {
-    return (
-      <div className="space-y-4">
-        <div className="flex justify-end">{storeBadge}</div>
-        <p className="text-center text-muted-foreground py-12">Sin ventas para el periodo seleccionado</p>
-      </div>
-    )
-  }
+function StoreSalesTab({ data, salesData, isFiltered }: { data: StoreSalesReport | null; salesData: SalesData | null; isFiltered: boolean }) {
+  if (!data) return <p className="text-center text-muted-foreground py-12">Sin datos para el periodo seleccionado</p>
 
-  const chartData = data.breakdown.map((b) => ({
-    key: b.category,
-    name: CATEGORY_SHORT[b.category] ?? b.label,
-    importe: Math.round(b.amount * 100) / 100,
-    prendas: b.garments,
-  }))
+  const boutiqueTotal = data.totals.boutique + data.totals.gift_cards
 
   return (
     <div className="space-y-6">
-      {storeBreakdown && <StoreBreakdown rows={storeBreakdown} title="Ventas por tipo y tienda" />}
-      <Card>
-        <CardHeader>
+      {data.stores.map((s) => <StoreSalesCard key={s.store_id} s={s} />)}
+
+      {!isFiltered && (
+        <Card>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <CardTitle className="text-base flex items-center gap-2"><ShoppingBag className="h-4 w-4" /> Ventas tienda online</CardTitle>
+              <span className="text-lg font-bold">{formatCurrency(data.online.total)}</span>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">{data.online.count} pedidos online pagados en el periodo.</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {!isFiltered && data.other_invoices.total > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <CardTitle className="text-base flex items-center gap-2"><Receipt className="h-4 w-4" /> Otros ingresos facturados</CardTitle>
+              <span className="text-lg font-bold">{formatCurrency(data.other_invoices.total)}</span>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              {data.other_invoices.count} facturas emitidas sin ticket ni pedido asociado (se incluyen para que el total cuadre con Contabilidad).
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card className="border-prats-navy/40">
+        <CardHeader className="pb-2">
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <CardTitle className="text-base">Facturación por tipo</CardTitle>
-            {storeBadge}
+            <CardTitle className="text-base flex items-center gap-2"><DollarSign className="h-4 w-4" /> Total cobrado del periodo</CardTitle>
+            <span className="text-xl font-bold">{formatCurrency(data.totals.collected_total)}</span>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Importe neto (sin IVA) · 4 categorías de confección + Boutique + Tarjetas regalo · por fecha de creación
-          </p>
         </CardHeader>
         <CardContent>
-          <div className="h-72 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="name" fontSize={12} tickLine={false} />
-                <YAxis fontSize={11} tickFormatter={(v: number) => `${Math.round(v / 1000)}k`} width={42} />
-                <Tooltip
-                  formatter={(value, _name, item) => [
-                    `${formatCurrency(Number(value ?? 0))} · ${(item?.payload as { prendas?: number })?.prendas ?? 0} prendas`,
-                    'Facturado',
-                  ]}
-                  labelFormatter={(label) => String(label)}
-                />
-                <Bar dataKey="importe" radius={[4, 4, 0, 0]}>
-                  {chartData.map((d) => (
-                    <Cell key={d.key} fill={CATEGORY_COLORS[d.key] ?? '#64748b'} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="pt-4">
           <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Tipo</TableHead>
-                <TableHead className="text-right">Facturado</TableHead>
-                <TableHead className="text-right">Prendas</TableHead>
-                <TableHead className="text-right">% sobre total</TableHead>
-              </TableRow>
-            </TableHeader>
             <TableBody>
-              {data.breakdown.map((b) => (
-                <TableRow key={b.category}>
-                  <TableCell className="flex items-center gap-2 font-medium">
-                    <span className="inline-block h-3 w-3 rounded-sm" style={{ backgroundColor: CATEGORY_COLORS[b.category] }} />
-                    {b.label}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">{formatCurrency(b.amount)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{b.garments}</TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">
-                    {data.total.amount > 0 ? `${((b.amount / data.total.amount) * 100).toFixed(1)}%` : '—'}
-                  </TableCell>
-                </TableRow>
-              ))}
-              <TableRow className="border-t-2 font-bold">
-                <TableCell>Total</TableCell>
-                <TableCell className="text-right tabular-nums">{formatCurrency(data.total.amount)}</TableCell>
-                <TableCell className="text-right tabular-nums">{data.total.garments}</TableCell>
-                <TableCell className="text-right tabular-nums">100%</TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-    </div>
-  )
-}
-
-// ─── Tab: Por tienda ─────────────────────────────────────────────────────────
-
-function StoreTab({ data }: { data: StoreItem[] }) {
-  if (!data.length) return <p className="text-center text-muted-foreground py-12">Sin datos para el periodo seleccionado</p>
-
-  const maxTotal = Math.max(...data.map(d => d.total))
-
-  return (
-    <div className="grid gap-6 lg:grid-cols-2">
-      {/* Gráfico de barras */}
-      <Card>
-        <CardHeader><CardTitle className="text-base">Facturación por tienda</CardTitle></CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {data.map((s) => {
-              const posW = maxTotal > 0 ? (s.pos / maxTotal) * 100 : 0
-              const giftW = maxTotal > 0 ? (s.gift_cards / maxTotal) * 100 : 0
-              const tailW = maxTotal > 0 ? (s.tailoring / maxTotal) * 100 : 0
-              return (
-                <div key={s.store_id}>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="font-medium">{s.store_name}</span>
-                    <span className="text-muted-foreground">{formatCurrency(s.total)}</span>
-                  </div>
-                  <div className="flex h-4 rounded-full overflow-hidden bg-gray-100">
-                    {posW > 0 && (
-                      <div className="bg-prats-navy transition-all" style={{ width: `${posW}%` }} title={`Boutique: ${formatCurrency(s.pos)}`} />
-                    )}
-                    {giftW > 0 && (
-                      <div className="bg-amber-400 transition-all" style={{ width: `${giftW}%` }} title={`Tarjetas regalo: ${formatCurrency(s.gift_cards)}`} />
-                    )}
-                    {tailW > 0 && (
-                      <div className="bg-purple-400 transition-all" style={{ width: `${tailW}%` }} title={`Sastrería: ${formatCurrency(s.tailoring)}`} />
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-          <div className="flex justify-center gap-6 mt-6 text-xs">
-            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-prats-navy" />Boutique</span>
-            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-amber-400" />Tarjetas regalo</span>
-            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-purple-400" />Sastrería</span>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Tabla */}
-      <Card>
-        <CardHeader><CardTitle className="text-base">Detalle por tienda</CardTitle></CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
               <TableRow>
-                <TableHead>Tienda</TableHead>
-                <TableHead className="text-right">Boutique</TableHead>
-                <TableHead className="text-right">Tarjetas regalo</TableHead>
-                <TableHead className="text-right">Sastrería</TableHead>
-                <TableHead className="text-right">Total</TableHead>
+                <TableCell className="text-muted-foreground">Boutique + tarjetas regalo</TableCell>
+                <TableCell className="text-right">{formatCurrency(boutiqueTotal)}</TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.map((s) => (
-                <TableRow key={s.store_id}>
-                  <TableCell className="font-medium">{s.store_name}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(s.pos)}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(s.gift_cards)}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(s.tailoring)}</TableCell>
-                  <TableCell className="text-right font-bold">{formatCurrency(s.total)}</TableCell>
-                </TableRow>
-              ))}
-              {data.length > 1 && (
-                <TableRow className="bg-muted/50 font-bold">
-                  <TableCell>TOTAL</TableCell>
-                  <TableCell className="text-right">{formatCurrency(data.reduce((s, d) => s + d.pos, 0))}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(data.reduce((s, d) => s + d.gift_cards, 0))}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(data.reduce((s, d) => s + d.tailoring, 0))}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(data.reduce((s, d) => s + d.total, 0))}</TableCell>
+              <TableRow>
+                <TableCell className="text-muted-foreground">Sastrería (cobrado)</TableCell>
+                <TableCell className="text-right">{formatCurrency(data.totals.tailoring_collected)}</TableCell>
+              </TableRow>
+              {!isFiltered && (
+                <TableRow>
+                  <TableCell className="text-muted-foreground">Tienda online</TableCell>
+                  <TableCell className="text-right">{formatCurrency(data.totals.online)}</TableCell>
                 </TableRow>
               )}
+              {!isFiltered && data.totals.other_invoices > 0 && (
+                <TableRow>
+                  <TableCell className="text-muted-foreground">Otros ingresos facturados</TableCell>
+                  <TableCell className="text-right">{formatCurrency(data.totals.other_invoices)}</TableCell>
+                </TableRow>
+              )}
+              <TableRow className="bg-muted/50 font-bold">
+                <TableCell>TOTAL</TableCell>
+                <TableCell className="text-right">{formatCurrency(data.totals.collected_total)}</TableCell>
+              </TableRow>
             </TableBody>
           </Table>
+          <p className="text-[11px] text-muted-foreground mt-3">
+            Mismo criterio que la tarjeta «Ventas mes» del Dashboard y que Contabilidad → Resumen:
+            dinero cobrado en el periodo (los pedidos de sastrería cuentan cuando se cobran, no al encargarse).
+          </p>
         </CardContent>
       </Card>
+
+      <SalesChart data={salesData?.chartData || []} />
     </div>
   )
 }
@@ -1139,6 +1012,10 @@ function EmployeeTab({ data, storeBreakdown, stores, commissions, groupBonuses }
               </p>
             )}
             <p><strong>Total (su caja)</strong>: Boutique + Tarjetas + Sastrería cobrada. Refleja caja gestionada, no facturación propia.</p>
+            <p>
+              <strong>Online</strong>: los pedidos de la tienda online no tienen vendedor asignado, por lo que
+              no se pueden atribuir a ningún empleado (aparecen solo en el informe 1, «Ventas en tienda»).
+            </p>
           </div>
         </CardContent>
       </Card>

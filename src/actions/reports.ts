@@ -5,6 +5,21 @@ import { checkUserExplicitPermission } from '@/actions/auth'
 import { success, failure } from '@/lib/errors'
 import { BOUTIQUE_SALE_TYPE, GIFT_CARD_SALE_TYPE, accumulateByStore, compareSizes } from '@/lib/reports/dimensions'
 import { fetchEmployeeBilledLines } from '@/lib/reports/employee-billing'
+import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
+
+/** Lee todas las páginas (evita el tope silencioso de 1000 filas de Supabase). */
+async function readAllPaged<T = Record<string, unknown>>(
+  build: (from: number, to: number) => PromiseLike<{ data: unknown[] | null }>,
+): Promise<T[]> {
+  const out: T[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data } = await build(from, from + 999)
+    const batch = (data ?? []) as T[]
+    out.push(...batch)
+    if (batch.length < 1000) break
+  }
+  return out
+}
 
 export type ReportChannel = 'all' | 'boutique' | 'tailoring'
 export type TaxMode = 'with_tax' | 'without_tax'
@@ -69,13 +84,15 @@ export const getSalesReport = protectedAction<
     if (wantBoutique) {
       let salesQuery = ctx.adminClient
         .from('sale_lines')
-        .select('quantity, line_total, tax_rate, created_at, sales!inner(store_id, stores(name), status, created_at, sale_type)')
+        .select('quantity, quantity_returned, line_total, tax_rate, created_at, sales!inner(store_id, stores(name), status, created_at, sale_type, is_tax_free)')
         // Excluye las líneas de cobro de pedido del TPV (mig 247/248): son sastrería,
-        // no boutique, y ya se cuentan por tailoring_orders/tailoring_order_payments.
+        // no boutique, y ya se cuentan por tailoring_order_payments.
         .is('tailoring_order_id', null)
         .gte('sales.created_at', start_date)
         .lte('sales.created_at', end_date + 'T23:59:59')
-        .eq('sales.status', 'completed')
+        // Netear devoluciones parciales (mismo criterio que el Dashboard y
+        // "Por empleado"): la parte devuelta se descuenta, el resto cuenta.
+        .in('sales.status', ['completed', 'partially_returned'])
       if (store_id) salesQuery = salesQuery.eq('sales.store_id', store_id)
       const res = await salesQuery
       saleLines = res.data
@@ -92,29 +109,41 @@ export const getSalesReport = protectedAction<
       onlineOrders = res.data
     }
 
-    let tailoringOrders: any[] | null = null
+    // Sastrería = COBROS (tailoring_order_payments por payment_date), no valor de
+    // pedidos. Es la definición de "Ventas de sastrería (cobrado)" del informe de
+    // tienda, y la misma que usan el Dashboard y Contabilidad — así el gráfico de
+    // evolución y los KPIs cuadran con ellos. El VALOR de los pedidos del periodo
+    // vive aparte en getStoreSalesReport.orders (no se suma, evitaría duplicar).
+    let tailoringPays: any[] | null = null
     if (wantTailoring) {
-      let tailoringQuery = ctx.adminClient
-        .from('tailoring_orders')
-        // Sastrería data por order_date (fecha REAL del pedido), no por created_at
-        // (fecha de tecleo): un pedido viejo migrado hoy debe contar en su mes real.
-        // order_date es DATE → rango inclusivo sin sufijo de hora.
-        .select('subtotal, total, order_date, status, store_id, stores(name)')
-        .gte('order_date', start_date)
-        .lte('order_date', end_date)
-        .not('status', 'eq', 'cancelled')
-      if (store_id) tailoringQuery = tailoringQuery.eq('store_id', store_id)
-      const res = await tailoringQuery
-      tailoringOrders = res.data
+      let paysQuery = ctx.adminClient
+        .from('tailoring_order_payments')
+        .select('amount, payment_date, tailoring_orders!inner(subtotal, total, store_id, stores(name))')
+        .gte('payment_date', start_date)
+        .lte('payment_date', end_date)
+      if (store_id) paysQuery = paysQuery.eq('tailoring_orders.store_id', store_id)
+      tailoringPays = await readAllPaged<any>((f, t) => paysQuery.range(f, t))
     }
 
     const valueOf = (item: any, valueField: string): number => {
       if (valueField === 'line_total') {
-        const lt = Number(item.line_total) || 0
-        return net ? lineNet(lt, item.tax_rate) : lt
+        // Neteo de devoluciones parciales + con/sin IVA (tax-free: el PVP ya es base).
+        const qty = Number(item.quantity) || 1
+        const qtyRet = Math.min(Math.max(Number(item.quantity_returned) || 0, 0), qty)
+        const gross = (Number(item.line_total) || 0) * (qty > 0 ? (qty - qtyRet) / qty : 1)
+        if (!net) return gross
+        return item.sales?.is_tax_free ? gross : lineNet(gross, item.tax_rate)
       }
       if (valueField === 'total') {
         return net ? (Number(item.subtotal) || 0) : (Number(item.total) || 0)
+      }
+      if (valueField === 'payment') {
+        // Cobro de sastrería: amount es bruto; a base con el ratio del pedido padre.
+        const amt = Number(item.amount) || 0
+        if (!net) return amt
+        const o = item.tailoring_orders || {}
+        const oTotal = Number(o.total) || 0
+        return amt * (oTotal > 0 ? (Number(o.subtotal) || 0) / oTotal : 1)
       }
       return Number(item[valueField]) || 0
     }
@@ -140,7 +169,7 @@ export const getSalesReport = protectedAction<
 
     const posGrouped = groupData(saleLines || [], 'line_total', 'sales')
     const onlineGrouped = groupData(onlineOrders || [], 'total')
-    const tailoringGrouped = groupData(tailoringOrders || [], 'total', undefined, 'order_date')
+    const tailoringGrouped = groupData(tailoringPays || [], 'payment', undefined, 'payment_date')
 
     const allDates = new Set([...Object.keys(posGrouped), ...Object.keys(onlineGrouped), ...Object.keys(tailoringGrouped)])
     const chartData = Array.from(allDates).sort().map(date => ({
@@ -153,9 +182,9 @@ export const getSalesReport = protectedAction<
 
     const totalPos = (saleLines || []).reduce((s, l) => s + valueOf(l, 'line_total'), 0)
     const totalOnline = (onlineOrders || []).reduce((s, o) => s + valueOf(o, 'total'), 0)
-    const totalTailoring = (tailoringOrders || []).reduce((s, o) => s + valueOf(o, 'total'), 0)
+    const totalTailoring = (tailoringPays || []).reduce((s, p) => s + valueOf(p, 'payment'), 0)
     const saleIds = new Set((saleLines || []).map(l => (l.sales as unknown as Record<string, unknown>)?.created_at))
-    const ticketCount = saleIds.size + (onlineOrders || []).length + (tailoringOrders || []).length
+    const ticketCount = saleIds.size + (onlineOrders || []).length + (tailoringPays || []).length
     const grandTotal = totalPos + totalOnline + totalTailoring
 
     // Desglose por tienda (solo en modo "Todas"): agrupa las filas YA cargadas con
@@ -167,8 +196,8 @@ export const getSalesReport = protectedAction<
       const pickLine = (l: any) => ({ storeId: l.sales?.store_id, storeName: l.sales?.stores?.name, value: valueOf(l, 'line_total') })
       const boutiqueByStore = accumulateByStore(lines.filter((l) => l.sales?.sale_type === BOUTIQUE_SALE_TYPE), pickLine)
       const giftByStore = accumulateByStore(lines.filter((l) => l.sales?.sale_type === GIFT_CARD_SALE_TYPE), pickLine)
-      const tailByStore = accumulateByStore(tailoringOrders || [], (o: any) => ({
-        storeId: o.store_id, storeName: o.stores?.name, value: valueOf(o, 'total'),
+      const tailByStore = accumulateByStore(tailoringPays || [], (p: any) => ({
+        storeId: p.tailoring_orders?.store_id, storeName: p.tailoring_orders?.stores?.name, value: valueOf(p, 'payment'),
       }))
       const ids = new Set([...Object.keys(boutiqueByStore), ...Object.keys(giftByStore), ...Object.keys(tailByStore)])
       byStore = [...ids].map((id) => {
@@ -200,6 +229,274 @@ export const getSalesReport = protectedAction<
 export type TailoringCategoryKey =
   | 'sastreria_artesanal' | 'sastreria_industrial'
   | 'camiseria_artesanal' | 'camiseria_industrial'
+
+// ─── Informe 1: "Ventas en tienda" (estructura pedida por Mónica, jul-2026) ──
+// Por cada tienda física: (1) boutique + tarjetas regalo, (2) sastrería COBRADA
+// desglosada en las 4 categorías, (3) pedidos de sastrería del periodo (valor
+// total, cobrado y pendiente — informativo, NO se suma al total cobrado). Aparte:
+// tienda online y facturas emitidas sueltas. El total cobrado usa EXACTAMENTE el
+// mismo criterio que la tarjeta "Ventas mes" del Dashboard y que Contabilidad
+// (cabeceras de sales menos cobros de pedido embebidos, cobros de sastrería
+// prorrateados a base con el ratio del pedido, facturas sueltas por invoice_date).
+
+export type StoreSalesStoreRow = {
+  store_id: string
+  store_name: string
+  boutique: number
+  gift_cards: number
+  tailoring_collected: number
+  tailoring_by_category: Record<TailoringCategoryKey, number>
+  orders_count: number
+  orders_value: number
+  orders_paid: number
+  orders_pending: number
+  collected_total: number // boutique + gift_cards + tailoring_collected
+}
+
+export type StoreSalesReport = {
+  stores: StoreSalesStoreRow[]
+  online: { count: number; total: number }
+  other_invoices: { count: number; total: number }
+  totals: {
+    boutique: number; gift_cards: number; tailoring_collected: number
+    online: number; other_invoices: number
+    collected_total: number
+    orders_count: number; orders_value: number; orders_paid: number; orders_pending: number
+  }
+}
+
+const emptyCategoryTotals = (): Record<TailoringCategoryKey, number> => ({
+  sastreria_artesanal: 0, sastreria_industrial: 0, camiseria_artesanal: 0, camiseria_industrial: 0,
+})
+
+export const getStoreSalesReport = protectedAction<
+  { start_date: string; end_date: string; store_id?: string; tax_mode?: TaxMode },
+  StoreSalesReport
+>(
+  { permission: 'reports.view', auditModule: 'reports' },
+  async (ctx, { start_date, end_date, store_id, tax_mode = 'with_tax' }) => {
+    const net = tax_mode === 'without_tax'
+    const startTs = `${start_date}T00:00:00`
+    const endTs = `${end_date}T23:59:59`
+
+    // Tiendas físicas activas: todas presentes aunque estén a 0 (una tienda nueva
+    // aparece sola, mismo patrón que el desglose por tienda de Contabilidad).
+    const storesQ = ctx.adminClient
+      .from('stores')
+      .select('id, name, display_name, store_type, is_active')
+      .eq('is_active', true)
+      .eq('store_type', 'physical')
+      .order('name')
+
+    const [storesRes, salesRows, cobroBaseBySale, payRows, orderRows, onlineRows, invoiceRows] = await Promise.all([
+      storesQ,
+      // 1) Cabeceras de ventas TPV (boutique + tarjetas). Cabeceras y no líneas:
+      //    misma fórmula que el Dashboard → coincidencia al céntimo.
+      readAllPaged<{ id?: string; subtotal?: number; total?: number; total_returned?: number; sale_type?: string; store_id?: string; stores?: { name?: string } }>((f, t) => {
+        let q = ctx.adminClient
+          .from('sales')
+          .select('id, subtotal, total, total_returned, sale_type, store_id, stores(name)')
+          .gte('created_at', startTs)
+          .lte('created_at', endTs)
+          .in('status', ['completed', 'partially_returned'])
+          .order('created_at', { ascending: true })
+        if (store_id) q = q.eq('store_id', store_id)
+        return q.range(f, t)
+      }),
+      // Cobros de pedido embebidos en tickets (líneas al 0% de IVA): se restan de
+      // la venta — ese dinero se cuenta por el lado del pedido (sastrería cobrada).
+      loadPedidoCobroBaseBySale(ctx.adminClient, startTs, endTs),
+      // 2) Cobros de sastrería por payment_date (fecha real del cobro).
+      readAllPaged<{ amount?: number; tailoring_orders?: { id?: string; subtotal?: number; total?: number; order_type?: string; store_id?: string; stores?: { name?: string } } }>((f, t) => {
+        let q = ctx.adminClient
+          .from('tailoring_order_payments')
+          .select('amount, payment_date, tailoring_orders!inner(id, subtotal, total, order_type, store_id, stores(name))')
+          .gte('payment_date', start_date)
+          .lte('payment_date', end_date)
+          .order('id', { ascending: true })
+        if (store_id) q = q.eq('tailoring_orders.store_id', store_id)
+        return q.range(f, t)
+      }),
+      // 3) Pedidos de sastrería del periodo, por order_date (fecha real del pedido).
+      readAllPaged<{ subtotal?: number; total?: number; total_paid?: number; store_id?: string; stores?: { name?: string } }>((f, t) => {
+        let q = ctx.adminClient
+          .from('tailoring_orders')
+          .select('subtotal, total, total_paid, store_id, stores(name)')
+          .gte('order_date', start_date)
+          .lte('order_date', end_date)
+          .not('status', 'eq', 'cancelled')
+          .order('id', { ascending: true })
+        if (store_id) q = q.eq('store_id', store_id)
+        return q.range(f, t)
+      }),
+      // 4) Tienda online (sin tienda física; se omite al filtrar una tienda concreta).
+      store_id
+        ? Promise.resolve([] as { subtotal?: number; total?: number }[])
+        : readAllPaged<{ subtotal?: number; total?: number }>((f, t) =>
+          ctx.adminClient
+            .from('online_orders')
+            .select('subtotal, total')
+            .gte('created_at', startTs)
+            .lte('created_at', endTs)
+            .in('status', ['paid', 'processing', 'shipped', 'delivered'])
+            .order('id', { ascending: true })
+            .range(f, t)),
+      // 5) Facturas emitidas que son ingreso por sí mismas (sueltas, sin ticket ni
+      //    pedido ni reserva). Mismo criterio que Dashboard/Contabilidad.
+      store_id
+        ? Promise.resolve([] as { subtotal?: number; total?: number }[])
+        : readAllPaged<{ subtotal?: number; total?: number }>((f, t) =>
+          ctx.adminClient
+            .from('invoices')
+            .select('subtotal, total')
+            .eq('invoice_type', 'issued')
+            .is('sale_id', null)
+            .is('tailoring_order_id', null)
+            .is('reservation_id', null)
+            .not('status', 'in', '(draft,cancelled)')
+            .gte('invoice_date', start_date)
+            .lte('invoice_date', end_date)
+            .order('id', { ascending: true })
+            .range(f, t)),
+    ])
+
+    const rowsByStore = new Map<string, StoreSalesStoreRow>()
+    const ensureStore = (id: string | null | undefined, name?: string | null): StoreSalesStoreRow => {
+      const key = id || 'unknown'
+      let row = rowsByStore.get(key)
+      if (!row) {
+        row = {
+          store_id: key, store_name: name || 'Sin tienda',
+          boutique: 0, gift_cards: 0, tailoring_collected: 0,
+          tailoring_by_category: emptyCategoryTotals(),
+          orders_count: 0, orders_value: 0, orders_paid: 0, orders_pending: 0,
+          collected_total: 0,
+        }
+        rowsByStore.set(key, row)
+      }
+      return row
+    }
+    for (const s of (storesRes.data ?? []) as { id: string; name: string; display_name?: string | null }[]) {
+      if (store_id && s.id !== store_id) continue
+      ensureStore(s.id, s.display_name || s.name)
+    }
+
+    // ── Bloque 1: boutique + tarjetas regalo (por cabecera de venta) ──────────
+    for (const sale of salesRows) {
+      const total = Number(sale.total) || 0
+      const returned = Number(sale.total_returned) || 0
+      const proportion = total > 0 ? Math.max(0, (total - returned) / total) : 0
+      // Las líneas de cobro embebidas van al 0% de IVA: su importe es base pura y
+      // se resta igual del bruto y de la base.
+      const cobro = cobroBaseBySale.get(String(sale.id)) || 0
+      const grossBase = net ? (Number(sale.subtotal) || total) : total
+      const value = Math.max(0, grossBase - cobro) * proportion
+      const row = ensureStore(sale.store_id, sale.stores?.name)
+      if ((sale.sale_type ?? '') === GIFT_CARD_SALE_TYPE) row.gift_cards += value
+      else row.boutique += value
+    }
+
+    // ── Bloque 2: sastrería cobrada, desglosada en las 4 categorías ───────────
+    // Un pago pertenece a un pedido que puede mezclar prendas de varias categorías:
+    // se reparte proporcionalmente al peso (line_total) de las líneas del pedido.
+    const orderIds = [...new Set(payRows.map((p) => p.tailoring_orders?.id).filter(Boolean))] as string[]
+    const categoryWeights = new Map<string, Partial<Record<TailoringCategoryKey, number>>>()
+    for (let i = 0; i < orderIds.length; i += 80) {
+      const chunk = orderIds.slice(i, i + 80)
+      const { data: lines } = await ctx.adminClient
+        .from('tailoring_order_lines')
+        .select('tailoring_order_id, line_type, line_total, status, garment_types(category)')
+        .in('tailoring_order_id', chunk)
+        .neq('status', 'cancelled')
+      for (const line of (lines ?? []) as any[]) {
+        const gt = Array.isArray(line.garment_types) ? line.garment_types[0] : line.garment_types
+        const isCamiseria = gt?.category === 'camiseria'
+        const oid = String(line.tailoring_order_id)
+        const lt = Number(line.line_total) || 0
+        if (lt <= 0) continue
+        const w = categoryWeights.get(oid) ?? {}
+        // El eje artesanal/industrial de la línea; el fallback al order_type del
+        // pedido se aplica al repartir (aquí aún no tenemos el pedido a mano).
+        const key = `${isCamiseria ? 'camiseria' : 'sastreria'}_${line.line_type === 'industrial' ? 'industrial' : line.line_type === 'artesanal' ? 'artesanal' : '?'}` as string
+        w[key as TailoringCategoryKey] = (w[key as TailoringCategoryKey] || 0) + lt
+        categoryWeights.set(oid, w)
+      }
+    }
+
+    for (const pay of payRows) {
+      const order = pay.tailoring_orders
+      const amt = Number(pay.amount) || 0
+      const oTotal = Number(order?.total) || 0
+      const ratio = oTotal > 0 ? (Number(order?.subtotal) || 0) / oTotal : 1
+      const value = net ? amt * ratio : amt
+      const row = ensureStore(order?.store_id, order?.stores?.name)
+      row.tailoring_collected += value
+
+      const fallbackAxis = order?.order_type === 'industrial' ? 'industrial' : 'artesanal'
+      const rawWeights = categoryWeights.get(String(order?.id)) ?? {}
+      // Resuelve las claves con eje '?' (línea sin line_type) al order_type del pedido.
+      const weights = emptyCategoryTotals()
+      let weightSum = 0
+      for (const [k, w] of Object.entries(rawWeights)) {
+        const key = (k.endsWith('_?') ? k.replace('_?', `_${fallbackAxis}`) : k) as TailoringCategoryKey
+        weights[key] += w || 0
+        weightSum += w || 0
+      }
+      if (weightSum > 0) {
+        for (const k of Object.keys(weights) as TailoringCategoryKey[]) {
+          if (weights[k] > 0) row.tailoring_by_category[k] += value * (weights[k] / weightSum)
+        }
+      } else {
+        // Pedido sin líneas valorables: todo el cobro a sastrería + eje del pedido.
+        row.tailoring_by_category[`sastreria_${fallbackAxis}` as TailoringCategoryKey] += value
+      }
+    }
+
+    // ── Bloque 3: pedidos del periodo (valor, cobrado, pendiente) ─────────────
+    for (const order of orderRows) {
+      const total = Number(order.total) || 0
+      const subtotal = Number(order.subtotal) || 0
+      const ratio = total > 0 ? subtotal / total : 1
+      const value = net ? subtotal : total
+      const paid = Math.min(value, (Number(order.total_paid) || 0) * (net ? ratio : 1))
+      const row = ensureStore(order.store_id, order.stores?.name)
+      row.orders_count += 1
+      row.orders_value += value
+      row.orders_paid += paid
+      row.orders_pending += Math.max(0, value - paid)
+    }
+
+    for (const row of rowsByStore.values()) {
+      row.collected_total = row.boutique + row.gift_cards + row.tailoring_collected
+    }
+
+    const online = {
+      count: onlineRows.length,
+      total: onlineRows.reduce((s, o) => s + (net ? (Number(o.subtotal) || 0) : (Number(o.total) || 0)), 0),
+    }
+    const other_invoices = {
+      count: invoiceRows.length,
+      total: invoiceRows.reduce((s, inv) => s + (net ? (Number(inv.subtotal) || 0) : (Number(inv.total) || 0)), 0),
+    }
+
+    const stores = [...rowsByStore.values()].sort((a, b) => b.collected_total - a.collected_total)
+    const sum = (pick: (r: StoreSalesStoreRow) => number) => stores.reduce((s, r) => s + pick(r), 0)
+    const totals = {
+      boutique: sum((r) => r.boutique),
+      gift_cards: sum((r) => r.gift_cards),
+      tailoring_collected: sum((r) => r.tailoring_collected),
+      online: online.total,
+      other_invoices: other_invoices.total,
+      collected_total: sum((r) => r.collected_total) + online.total + other_invoices.total,
+      orders_count: sum((r) => r.orders_count),
+      orders_value: sum((r) => r.orders_value),
+      orders_paid: sum((r) => r.orders_paid),
+      orders_pending: sum((r) => r.orders_pending),
+    }
+
+    return success({ stores, online, other_invoices, totals })
+  }
+)
 
 // Las 4 categorías de confección + Boutique + Tarjetas regalo. El tab "Ventas por
 // tipo" muestra las 6 para que el total cuadre con el de ventas del negocio (antes
@@ -352,17 +649,25 @@ export const getComparePeriods = protectedAction<
     const net = tax_mode === 'without_tax'
 
     let saleLinesQ = ctx.adminClient.from('sale_lines')
-      .select('line_total, tax_rate, sales!inner(status, store_id, created_at)')
+      .select('quantity, quantity_returned, line_total, tax_rate, sales!inner(status, store_id, created_at, is_tax_free)')
       .gte('sales.created_at', minStart).lte('sales.created_at', rangeEnd)
-      .eq('sales.status', 'completed')
+      // Neteo de devoluciones parciales, mismo criterio que getSalesReport.
+      .in('sales.status', ['completed', 'partially_returned'])
       // Excluye cobros de pedido del TPV (mig 247/248): el % de cambio cuadra con el
-      // total de getSalesReport, que también los excluye. Sastrería = tailoring_orders.
+      // total de getSalesReport, que también los excluye.
       .is('tailoring_order_id', null)
     if (store_id) saleLinesQ = saleLinesQ.eq('sales.store_id', store_id)
 
+    // Sastrería del % de cambio = COBROS por payment_date (misma definición que
+    // getSalesReport/Dashboard). Los PEDIDOS (ordersCount) siguen por order_date.
+    let paymentsQ = ctx.adminClient.from('tailoring_order_payments')
+      .select('amount, payment_date, tailoring_orders!inner(subtotal, total, store_id)')
+      .gte('payment_date', minStart.slice(0, 10)).lte('payment_date', maxEnd)
+    if (store_id) paymentsQ = paymentsQ.eq('tailoring_orders.store_id', store_id)
+
     let tailoringQ = ctx.adminClient.from('tailoring_orders')
-      // Sastrería por order_date (fecha real), no created_at. DATE → rango sin sufijo de hora.
-      .select('subtotal, total, order_date, store_id')
+      // Pedidos por order_date (fecha real), no created_at. DATE → rango sin sufijo de hora.
+      .select('id, order_date, store_id')
       .gte('order_date', minStart).lte('order_date', maxEnd)
       .not('status', 'eq', 'cancelled')
     if (store_id) tailoringQ = tailoringQ.eq('store_id', store_id)
@@ -372,15 +677,16 @@ export const getComparePeriods = protectedAction<
       .gte('created_at', minStart).lte('created_at', rangeEnd)
     if (store_id) clientsQ = clientsQ.eq('home_store_id', store_id)
 
-    const [saleLinesRes, onlineRes, tailoringRes, clientsRes] = await Promise.all([
-      wantBoutique ? saleLinesQ : Promise.resolve({ data: [] }),
+    const [saleLinesRes, onlineRes, paymentsRes, tailoringRes, clientsRes] = await Promise.all([
+      wantBoutique ? saleLinesQ.limit(20000) : Promise.resolve({ data: [] }),
       wantBoutique && !store_id
         ? ctx.adminClient.from('online_orders')
           .select('subtotal, total, created_at')
           .gte('created_at', minStart).lte('created_at', rangeEnd)
           .in('status', ['paid', 'processing', 'shipped', 'delivered'])
         : Promise.resolve({ data: [] }),
-      wantTailoring ? tailoringQ : Promise.resolve({ data: [] }),
+      wantTailoring ? paymentsQ.limit(20000) : Promise.resolve({ data: [] }),
+      wantTailoring ? tailoringQ.limit(20000) : Promise.resolve({ data: [] }),
       clientsQ,
     ])
 
@@ -394,9 +700,13 @@ export const getComparePeriods = protectedAction<
     let currentRevenue = 0
     let previousRevenue = 0
     for (const l of saleLinesRes.data || []) {
+      const ll = l as any
       const d = dateOfSaleLine(l)
-      const lt = Number(l.line_total) || 0
-      const v = net ? lineNet(lt, (l as any).tax_rate) : lt
+      const qty = Number(ll.quantity) || 1
+      const qtyRet = Math.min(Math.max(Number(ll.quantity_returned) || 0, 0), qty)
+      const gross = (Number(ll.line_total) || 0) * (qty > 0 ? (qty - qtyRet) / qty : 1)
+      const sale = Array.isArray(ll.sales) ? ll.sales[0] : ll.sales
+      const v = net ? (sale?.is_tax_free ? gross : lineNet(gross, ll.tax_rate)) : gross
       if (inCurrent(d)) currentRevenue += v
       if (inPrevious(d)) previousRevenue += v
     }
@@ -406,20 +716,22 @@ export const getComparePeriods = protectedAction<
       if (inCurrent(d)) currentRevenue += v
       if (inPrevious(d)) previousRevenue += v
     }
+    for (const p of paymentsRes.data || []) {
+      const pp = p as any
+      const d = String(pp.payment_date ?? '').slice(0, 10)
+      const amt = Number(pp.amount) || 0
+      const order = Array.isArray(pp.tailoring_orders) ? pp.tailoring_orders[0] : pp.tailoring_orders
+      const oTotal = Number(order?.total) || 0
+      const v = net ? amt * (oTotal > 0 ? (Number(order?.subtotal) || 0) / oTotal : 1) : amt
+      if (inCurrent(d)) currentRevenue += v
+      if (inPrevious(d)) previousRevenue += v
+    }
     let currentOrders = 0
     let previousOrders = 0
     for (const t of tailoringRes.data || []) {
-      const tt = t as any
-      const d = (tt.order_date ?? '').slice(0, 10)
-      const v = net ? (Number(tt.subtotal) || 0) : (Number(t.total) || 0)
-      if (inCurrent(d)) {
-        currentRevenue += v
-        currentOrders += 1
-      }
-      if (inPrevious(d)) {
-        previousRevenue += v
-        previousOrders += 1
-      }
+      const d = ((t as any).order_date ?? '').slice(0, 10)
+      if (inCurrent(d)) currentOrders += 1
+      if (inPrevious(d)) previousOrders += 1
     }
     let currentClients = 0
     let previousClients = 0
@@ -609,10 +921,11 @@ export const getTopProducts = protectedAction<
 
     return success(
       Object.values(products)
-        // Ordenamos por facturación (vendidos arriba); los comprados-no-vendidos
-        // (revenue 0) caen al final pero siguen visibles dentro del límite, y
-        // los que están a cero total cierran la lista en orden alfabético.
-        .sort((a, b) => b.revenue - a.revenue || b.purchasedCost - a.purchasedCost || a.name.localeCompare(b.name))
+        // Ordenamos por Nº DE VENTAS (unidades vendidas, de mayor a menor —
+        // petición Mónica jul-2026), con la facturación como desempate; los
+        // comprados-no-vendidos caen al final pero siguen visibles dentro del
+        // límite, y los que están a cero total cierran en orden alfabético.
+        .sort((a, b) => b.units - a.units || b.revenue - a.revenue || b.purchasedCost - a.purchasedCost || a.name.localeCompare(b.name))
         .slice(0, limit)
         .map((p) => {
           const cogs = p.units * p.unitCost

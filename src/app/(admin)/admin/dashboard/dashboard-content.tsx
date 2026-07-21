@@ -347,6 +347,7 @@ export function DashboardContent() {
               <p className={`text-xs ${stats.monthGrowth >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                 {stats.monthGrowth >= 0 ? '+' : ''}{stats.monthGrowth.toFixed(1)}% vs mes anterior
               </p>
+              <p className="text-[10px] text-muted-foreground">Cobrado sin IVA · igual que Informes y Contabilidad</p>
             </CardContent>
           </Card>
           <Card className="cursor-pointer hover:shadow-md" onClick={() => router.push('/admin/pedidos')}>

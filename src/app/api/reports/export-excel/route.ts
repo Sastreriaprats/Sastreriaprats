@@ -8,14 +8,12 @@ type AnyRec = Record<string, unknown>
 type Row = (string | number)[]
 
 const TAB_TITLES: Record<string, string> = {
-  sales: 'VENTAS',
-  products: 'PRODUCTOS',
-  tailors: 'SASTRES',
-  clients: 'CLIENTES',
-  stores: 'POR TIENDA',
+  'store-sales': 'VENTAS EN TIENDA',
   employees: 'POR EMPLEADO',
-  time: 'POR HORA / DÍA DE LA SEMANA',
+  products: 'PRODUCTOS',
+  clients: 'CLIENTES Y HORARIOS',
   expenses: 'GASTOS',
+  tailors: 'SASTRES',
 }
 
 export async function POST(request: NextRequest) {
@@ -31,10 +29,10 @@ export async function POST(request: NextRequest) {
     start, end, tab,
     storeFilterName, channelLabel, taxLabel,
     salesData, compareData, topProducts, tailorData, clientsData,
-    storeData, employeeData, employeeStores, timePatternData, expensesData, expensesComparison,
+    storeSales, employeeData, employeeStores, timePatternData, expensesData, expensesComparison,
   } = body
 
-  const activeTab: string = typeof tab === 'string' && TAB_TITLES[tab] ? tab : 'sales'
+  const activeTab: string = typeof tab === 'string' && TAB_TITLES[tab] ? tab : 'store-sales'
   const tabTitle = TAB_TITLES[activeTab]
 
   const rows: Row[] = []
@@ -48,13 +46,15 @@ export async function POST(request: NextRequest) {
   rows.push([])
 
   switch (activeTab) {
-    case 'sales': sectionSales(rows, salesData, compareData); break
+    case 'store-sales': sectionStoreSales(rows, storeSales, salesData, compareData); break
     case 'products': sectionProducts(rows, topProducts); break
     case 'tailors': sectionTailors(rows, tailorData); break
-    case 'clients': sectionClients(rows, clientsData); break
-    case 'stores': sectionStores(rows, storeData); break
+    case 'clients':
+      sectionClients(rows, clientsData)
+      rows.push([])
+      sectionTime(rows, timePatternData)
+      break
     case 'employees': sectionEmployees(rows, employeeData, employeeStores); break
-    case 'time': sectionTime(rows, timePatternData); break
     case 'expenses': sectionExpenses(rows, expensesData, expensesComparison); break
   }
 
@@ -77,30 +77,63 @@ function num(n: unknown): number {
 
 // ─── Section builders ────────────────────────────────────────────────────────
 
-function sectionSales(rows: Row[], salesData: AnyRec | null, compareData: AnyRec | null) {
-  if (!salesData) { rows.push(['Sin datos para el periodo seleccionado']); return }
-  const t = (salesData.totals as AnyRec) || {}
-  const chart = (salesData.chartData as AnyRec[]) || []
+const CATEGORY_LABELS: Record<string, string> = {
+  sastreria_artesanal: 'Venta en Sastrería Artesanal',
+  sastreria_industrial: 'Venta en Sastrería Industrial',
+  camiseria_artesanal: 'Venta en Camisería Artesanal',
+  camiseria_industrial: 'Venta en Camisería Industrial',
+}
+const CATEGORY_ORDER = ['sastreria_artesanal', 'sastreria_industrial', 'camiseria_artesanal', 'camiseria_industrial']
+
+// Informe 1 "Ventas en tienda" (estructura de Mónica): por tienda, (1) boutique +
+// tarjetas, (2) sastrería cobrada en 4 categorías, (3) pedidos del periodo. El
+// total cobrado usa el mismo criterio que Dashboard y Contabilidad.
+function sectionStoreSales(rows: Row[], storeSales: AnyRec | null, salesData: AnyRec | null, compareData: AnyRec | null) {
+  if (!storeSales) { rows.push(['Sin datos para el periodo seleccionado']); return }
+  const stores = (storeSales.stores as AnyRec[]) || []
+  const totals = (storeSales.totals as AnyRec) || {}
+  const online = (storeSales.online as AnyRec) || {}
+  const other = (storeSales.other_invoices as AnyRec) || {}
   const changes = (compareData?.changes as AnyRec) || null
 
-  rows.push(['RESUMEN'])
-  rows.push(['Facturación total', num(t.total)])
-  rows.push(['Boutique + Tarjetas', num(t.pos)])
-  rows.push(['Online', num(t.online)])
-  rows.push(['Sastrería', num(t.tailoring)])
-  rows.push(['Tickets', num(t.ticketCount)])
-  rows.push(['Ticket medio', num(t.avgTicket)])
+  for (const s of stores) {
+    const byCat = (s.tailoring_by_category as Record<string, number>) || {}
+    rows.push([`VENTAS EN ${String(s.store_name ?? '').toUpperCase()}`])
+    rows.push(['1. Ventas de boutique + tarjeta regalo', num(s.boutique) + num(s.gift_cards)])
+    rows.push(['    Boutique', num(s.boutique)])
+    rows.push(['    Tarjetas regalo', num(s.gift_cards)])
+    rows.push(['2. Ventas de sastrería (cobrado)', num(s.tailoring_collected)])
+    for (const k of CATEGORY_ORDER) rows.push([`    ${CATEGORY_LABELS[k]}`, num(byCat[k])])
+    rows.push([`3. Pedidos sastrería del periodo (${num(s.orders_count)} pedidos, cobrados y sin cobrar)`, num(s.orders_value)])
+    rows.push(['    Ya cobrado de esos pedidos', num(s.orders_paid)])
+    rows.push(['    Pendiente de cobro', num(s.orders_pending)])
+    rows.push(['TOTAL COBRADO EN TIENDA (1 + 2)', num(s.collected_total)])
+    rows.push([])
+  }
+
+  rows.push(['VENTAS TIENDA ONLINE'])
+  rows.push([`1. Ventas tienda online (${num(online.count)} pedidos)`, num(online.total)])
+  rows.push([])
+
+  if (num(other.total) > 0) {
+    rows.push([`OTROS INGRESOS FACTURADOS (${num(other.count)} facturas sueltas)`, num(other.total)])
+    rows.push([])
+  }
+
+  rows.push(['TOTAL COBRADO DEL PERIODO', num(totals.collected_total)])
+  rows.push(['(Los pedidos del bloque 3 no se suman: cuentan cuando se cobran. Mismo criterio que Dashboard y Contabilidad.)'])
   if (changes) {
-    rows.push(['Variación facturación %', Number((Number(changes.revenue) || 0).toFixed(2))])
-    rows.push(['Variación nuevos clientes %', Number((Number(changes.newClients) || 0).toFixed(2))])
-    rows.push(['Variación pedidos %', Number((Number(changes.ordersCount) || 0).toFixed(2))])
+    rows.push(['Variación cobrado vs periodo anterior %', Number((Number(changes.revenue) || 0).toFixed(2))])
   }
   rows.push([])
 
-  rows.push(['EVOLUCIÓN DE VENTAS'])
-  rows.push(['Fecha', 'Boutique + Tarjetas', 'Online', 'Sastrería', 'Total'])
-  for (const d of chart) {
-    rows.push([String(d.date ?? ''), num(d.pos), num(d.online), num(d.tailoring), num(d.total)])
+  const chart = (salesData?.chartData as AnyRec[]) || []
+  if (chart.length) {
+    rows.push(['EVOLUCIÓN DE LO COBRADO'])
+    rows.push(['Fecha', 'Boutique + Tarjetas', 'Online', 'Sastrería cobrada', 'Total'])
+    for (const d of chart) {
+      rows.push([String(d.date ?? ''), num(d.pos), num(d.online), num(d.tailoring), num(d.total)])
+    }
   }
 }
 
@@ -169,17 +202,6 @@ function sectionClients(rows: Row[], data: AnyRec | null) {
       rows.push([i + 1, String(c.full_name ?? ''), num(c.total_revenue)])
     })
   }
-}
-
-function sectionStores(rows: Row[], items: AnyRec[] | null) {
-  if (!items?.length) { rows.push(['Sin datos para el periodo seleccionado']); return }
-  rows.push(['FACTURACIÓN POR TIENDA'])
-  rows.push(['Tienda', 'Boutique', 'Tarjetas', 'Sastrería', 'Total'])
-  for (const s of items) {
-    rows.push([String(s.store_name ?? ''), num(s.pos), num(s.gift_cards), num(s.tailoring), num(s.total)])
-  }
-  const sum = (k: string) => items.reduce((acc, d) => acc + (Number(d[k]) || 0), 0)
-  rows.push(['TOTAL', sum('pos'), sum('gift_cards'), sum('tailoring'), sum('total')])
 }
 
 function sectionEmployees(rows: Row[], items: AnyRec[] | null, stores: AnyRec[] | null) {

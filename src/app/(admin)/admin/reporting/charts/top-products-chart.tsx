@@ -33,7 +33,9 @@ type SortKey = 'name' | 'purchased_units' | 'units' | 'current_stock' | 'revenue
 // siendo el actual de hoy.
 export function TopProductsChart({ products, periodMode = false }: { products: ProductItem[]; periodMode?: boolean }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'revenue', dir: 'desc' })
+  // Orden por defecto: nº de unidades vendidas, de mayor a menor (petición
+  // Mónica jul-2026); la cabecera sigue permitiendo reordenar por otra columna.
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'units', dir: 'desc' })
   if (!products.length) return <p className="text-center text-muted-foreground py-12">Sin datos</p>
 
   const top10 = products.slice(0, 10)

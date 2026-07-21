@@ -6,14 +6,12 @@ import { aggregateSizeTotals, type SizeBreakdownRow } from '@/lib/reports/dimens
 type AnyRec = Record<string, unknown>
 
 const TAB_TITLES: Record<string, string> = {
-  sales: 'Ventas',
-  products: 'Productos',
-  tailors: 'Sastres',
-  clients: 'Clientes',
-  stores: 'Por tienda',
+  'store-sales': 'Ventas en tienda',
   employees: 'Por empleado',
-  time: 'Por hora / día de la semana',
+  products: 'Productos',
+  clients: 'Clientes y horarios',
   expenses: 'Gastos',
+  tailors: 'Sastres',
 }
 
 export async function POST(request: NextRequest) {
@@ -29,10 +27,10 @@ export async function POST(request: NextRequest) {
     start, end, tab,
     storeFilterName, channelLabel, taxLabel,
     salesData, compareData, topProducts, tailorData, clientsData,
-    storeData, employeeData, employeeStores, timePatternData, expensesData, expensesComparison,
+    storeSales, employeeData, employeeStores, timePatternData, expensesData, expensesComparison,
   } = body
 
-  const activeTab: string = typeof tab === 'string' && TAB_TITLES[tab] ? tab : 'sales'
+  const activeTab: string = typeof tab === 'string' && TAB_TITLES[tab] ? tab : 'store-sales'
   const tabTitle = TAB_TITLES[activeTab]
   const filtersLine = [
     storeFilterName ? `Tienda: ${storeFilterName}` : null,
@@ -42,8 +40,8 @@ export async function POST(request: NextRequest) {
 
   let section = ''
   switch (activeTab) {
-    case 'sales':
-      section = renderSales(salesData, compareData)
+    case 'store-sales':
+      section = renderStoreSales(storeSales, salesData, compareData)
       break
     case 'products':
       section = renderProducts(topProducts)
@@ -52,16 +50,10 @@ export async function POST(request: NextRequest) {
       section = renderTailors(tailorData)
       break
     case 'clients':
-      section = renderClients(clientsData)
-      break
-    case 'stores':
-      section = renderStores(storeData)
+      section = renderClients(clientsData) + renderTime(timePatternData)
       break
     case 'employees':
       section = renderEmployees(employeeData, employeeStores)
-      break
-    case 'time':
-      section = renderTime(timePatternData)
       break
     case 'expenses':
       section = renderExpenses(expensesData, expensesComparison)
@@ -133,23 +125,67 @@ function empty(msg = 'Sin datos para el periodo seleccionado'): string {
 
 // ─── Renderers ───────────────────────────────────────────────────────────────
 
-function renderSales(salesData: AnyRec | null, compareData: AnyRec | null): string {
-  if (!salesData) return empty()
-  const t = (salesData.totals as AnyRec) || {}
-  const chart = (salesData.chartData as AnyRec[]) || []
+const CATEGORY_LABELS: Record<string, string> = {
+  sastreria_artesanal: 'Venta en Sastrería Artesanal',
+  sastreria_industrial: 'Venta en Sastrería Industrial',
+  camiseria_artesanal: 'Venta en Camisería Artesanal',
+  camiseria_industrial: 'Venta en Camisería Industrial',
+}
+const CATEGORY_ORDER = ['sastreria_artesanal', 'sastreria_industrial', 'camiseria_artesanal', 'camiseria_industrial']
+
+// Informe 1 "Ventas en tienda" (estructura de Mónica): por tienda, (1) boutique +
+// tarjetas, (2) sastrería cobrada en 4 categorías, (3) pedidos del periodo. El
+// total cobrado usa el mismo criterio que Dashboard y Contabilidad.
+function renderStoreSales(storeSales: AnyRec | null, salesData: AnyRec | null, compareData: AnyRec | null): string {
+  if (!storeSales) return empty()
+  const stores = (storeSales.stores as AnyRec[]) || []
+  const totals = (storeSales.totals as AnyRec) || {}
+  const online = (storeSales.online as AnyRec) || {}
+  const other = (storeSales.other_invoices as AnyRec) || {}
   const changes = (compareData?.changes as AnyRec) || null
 
-  const kpis = `
-<div class="kpi-grid">
-  <div class="kpi"><div class="kpi-value">${fmtEur(t.total as number)}</div><div class="kpi-label">Facturación total ${changes ? fmtPct(changes.revenue as number) : ''}</div></div>
-  <div class="kpi"><div class="kpi-value">${fmtEur(t.pos as number)}</div><div class="kpi-label">Boutique + Tarjetas</div></div>
-  <div class="kpi"><div class="kpi-value">${fmtEur(t.tailoring as number)}</div><div class="kpi-label">Sastrería</div></div>
-  <div class="kpi"><div class="kpi-value">${fmtEur(t.avgTicket as number)}</div><div class="kpi-label">Ticket medio (${t.ticketCount || 0} tickets)</div></div>
-</div>`
+  const storeBlocks = stores.map((s) => {
+    const byCat = (s.tailoring_by_category as Record<string, number>) || {}
+    const catRows = CATEGORY_ORDER.map(k => `
+<tr><td style="padding-left:24px" class="muted">${escapeHtml(CATEGORY_LABELS[k])}</td><td class="right">${fmtEur(byCat[k])}</td></tr>`).join('')
+    return `<h2>Ventas en ${escapeHtml(String(s.store_name ?? ''))} — <span class="gold">${fmtEur(s.collected_total as number)}</span></h2>
+<table>
+  <tbody>
+    <tr><td><b>1 · Ventas de boutique + tarjeta regalo</b></td><td class="right"><b>${fmtEur((Number(s.boutique) || 0) + (Number(s.gift_cards) || 0))}</b></td></tr>
+    <tr><td style="padding-left:24px" class="muted">Boutique</td><td class="right">${fmtEur(s.boutique as number)}</td></tr>
+    <tr><td style="padding-left:24px" class="muted">Tarjetas regalo</td><td class="right">${fmtEur(s.gift_cards as number)}</td></tr>
+    <tr><td><b>2 · Ventas de sastrería (cobrado)</b></td><td class="right"><b>${fmtEur(s.tailoring_collected as number)}</b></td></tr>
+    ${catRows}
+    <tr><td><b>3 · Pedidos de sastrería del periodo</b> <span class="muted">(${s.orders_count || 0} pedidos, cobrados y sin cobrar)</span></td><td class="right"><b>${fmtEur(s.orders_value as number)}</b></td></tr>
+    <tr><td style="padding-left:24px" class="muted">Ya cobrado de esos pedidos</td><td class="right">${fmtEur(s.orders_paid as number)}</td></tr>
+    <tr><td style="padding-left:24px" class="muted">Pendiente de cobro</td><td class="right">${fmtEur(s.orders_pending as number)}</td></tr>
+  </tbody>
+  <tfoot><tr><td>TOTAL COBRADO EN TIENDA (1 + 2)</td><td class="right">${fmtEur(s.collected_total as number)}</td></tr></tfoot>
+</table>`
+  }).join('')
 
-  if (!chart.length) return kpis + empty('Sin movimientos en el periodo')
+  const onlineBlock = `<h2>Ventas tienda online — <span class="gold">${fmtEur(online.total as number)}</span></h2>
+<p class="muted">${online.count || 0} pedidos online pagados en el periodo.</p>`
 
-  const rows = chart.map(d => `
+  const otherBlock = (Number(other.total) || 0) > 0
+    ? `<h2>Otros ingresos facturados — <span class="gold">${fmtEur(other.total as number)}</span></h2>
+<p class="muted">${other.count || 0} facturas emitidas sin ticket ni pedido asociado (se incluyen para cuadrar con Contabilidad).</p>`
+    : ''
+
+  const totalBlock = `<h2>Total cobrado del periodo ${changes ? fmtPct(changes.revenue as number) : ''}</h2>
+<table>
+  <tbody>
+    <tr><td>Boutique + tarjetas regalo</td><td class="right">${fmtEur((Number(totals.boutique) || 0) + (Number(totals.gift_cards) || 0))}</td></tr>
+    <tr><td>Sastrería (cobrado)</td><td class="right">${fmtEur(totals.tailoring_collected as number)}</td></tr>
+    <tr><td>Tienda online</td><td class="right">${fmtEur(totals.online as number)}</td></tr>
+    ${(Number(totals.other_invoices) || 0) > 0 ? `<tr><td>Otros ingresos facturados</td><td class="right">${fmtEur(totals.other_invoices as number)}</td></tr>` : ''}
+  </tbody>
+  <tfoot><tr><td>TOTAL</td><td class="right">${fmtEur(totals.collected_total as number)}</td></tr></tfoot>
+</table>
+<p class="muted" style="font-size:10px">El bloque 3 (pedidos del periodo) es informativo y no se suma: un pedido cuenta cuando se cobra. Mismo criterio que la tarjeta «Ventas mes» del Dashboard y que Contabilidad → Resumen.</p>`
+
+  const chart = (salesData?.chartData as AnyRec[]) || []
+  const chartRows = chart.map(d => `
 <tr>
   <td>${escapeHtml(String(d.date))}</td>
   <td class="right">${fmtEur(d.pos as number)}</td>
@@ -157,14 +193,12 @@ function renderSales(salesData: AnyRec | null, compareData: AnyRec | null): stri
   <td class="right">${fmtEur(d.tailoring as number)}</td>
   <td class="right"><b>${fmtEur(d.total as number)}</b></td>
 </tr>`).join('')
-
   const sum = (k: string) => chart.reduce((s, d) => s + (Number(d[k]) || 0), 0)
-
-  return `${kpis}
-<h2>Evolución de ventas</h2>
+  const evolBlock = chart.length ? `
+<h2>Evolución de lo cobrado</h2>
 <table>
-  <thead><tr><th>Fecha</th><th class="right">Boutique + Tarjetas</th><th class="right">Online</th><th class="right">Sastrería</th><th class="right">Total</th></tr></thead>
-  <tbody>${rows}</tbody>
+  <thead><tr><th>Fecha</th><th class="right">Boutique + Tarjetas</th><th class="right">Online</th><th class="right">Sastrería cobrada</th><th class="right">Total</th></tr></thead>
+  <tbody>${chartRows}</tbody>
   <tfoot><tr>
     <td>TOTAL</td>
     <td class="right">${fmtEur(sum('pos'))}</td>
@@ -172,7 +206,9 @@ function renderSales(salesData: AnyRec | null, compareData: AnyRec | null): stri
     <td class="right">${fmtEur(sum('tailoring'))}</td>
     <td class="right">${fmtEur(sum('total'))}</td>
   </tr></tfoot>
-</table>`
+</table>` : ''
+
+  return storeBlocks + onlineBlock + otherBlock + totalBlock + evolBlock
 }
 
 function renderProducts(items: AnyRec[] | null): string {
@@ -268,31 +304,6 @@ ${topRows ? `<h2>Top clientes por facturación</h2>
   <thead><tr><th>#</th><th>Cliente</th><th class="right">Facturación</th></tr></thead>
   <tbody>${topRows}</tbody>
 </table>` : ''}`
-}
-
-function renderStores(items: AnyRec[] | null): string {
-  if (!items?.length) return empty()
-  const rows = items.map(s => `
-<tr>
-  <td>${escapeHtml(String(s.store_name ?? ''))}</td>
-  <td class="right">${fmtEur(s.pos as number)}</td>
-  <td class="right">${fmtEur(s.gift_cards as number)}</td>
-  <td class="right">${fmtEur(s.tailoring as number)}</td>
-  <td class="right"><b>${fmtEur(s.total as number)}</b></td>
-</tr>`).join('')
-  const sum = (k: string) => items.reduce((s, d) => s + (Number(d[k]) || 0), 0)
-  return `<h2>Facturación por tienda</h2>
-<table>
-  <thead><tr><th>Tienda</th><th class="right">Boutique</th><th class="right">Tarjetas</th><th class="right">Sastrería</th><th class="right">Total</th></tr></thead>
-  <tbody>${rows}</tbody>
-  <tfoot><tr>
-    <td>TOTAL</td>
-    <td class="right">${fmtEur(sum('pos'))}</td>
-    <td class="right">${fmtEur(sum('gift_cards'))}</td>
-    <td class="right">${fmtEur(sum('tailoring'))}</td>
-    <td class="right">${fmtEur(sum('total'))}</td>
-  </tr></tfoot>
-</table>`
 }
 
 function renderEmployees(items: AnyRec[] | null, stores: AnyRec[] | null): string {
