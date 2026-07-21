@@ -3990,6 +3990,46 @@ function CajaSessionsTab() {
       .order('withdrawn_at', { ascending: true })
     const wdData = wdRes.data ?? []
 
+    // Resolver nombres y clientes para el detalle de cada movimiento:
+    // manual_transactions/cash_withdrawals solo guardan el uuid del usuario, y
+    // la venta/pedido va referenciado por su número dentro de la descripción
+    // (acoplamiento por texto ya conocido). Mejor esfuerzo: lo que no resuelva
+    // (RLS, texto libre…) simplemente no se muestra — nunca el uuid crudo.
+    const userIds = new Set<string>()
+    for (const r of txData) if (r.created_by) userIds.add(String(r.created_by))
+    for (const r of wdData as CashWithdrawal[]) if (r.withdrawn_by) userIds.add(String(r.withdrawn_by))
+    const refOf = (desc: unknown): string | null => String(desc ?? '').match(/\b[A-Z]{2,6}-\d{4}-\d{3,6}\b/)?.[0] ?? null
+    const ticketNums = new Set<string>()
+    const orderNums = new Set<string>()
+    for (const r of txData) {
+      const ref = refOf(r.description)
+      if (!ref) continue
+      if (ref.startsWith('TICK-')) ticketNums.add(ref)
+      else orderNums.add(ref)
+    }
+    const [profRes, salesRes, ordersRes] = await Promise.all([
+      userIds.size > 0
+        ? supabase.from('profiles').select('id, full_name').in('id', [...userIds])
+        : Promise.resolve({ data: [] as { id: string; full_name: string | null }[] }),
+      ticketNums.size > 0
+        ? supabase.from('sales').select('ticket_number, clients(full_name)').in('ticket_number', [...ticketNums])
+        : Promise.resolve({ data: [] as unknown[] }),
+      orderNums.size > 0
+        ? supabase.from('tailoring_orders').select('order_number, clients(full_name)').in('order_number', [...orderNums])
+        : Promise.resolve({ data: [] as unknown[] }),
+    ])
+    const nameByUser = new Map<string, string>()
+    for (const p of (profRes.data ?? []) as { id: string; full_name: string | null }[]) {
+      if (p.full_name) nameByUser.set(String(p.id), p.full_name)
+    }
+    const clientByRef = new Map<string, string>()
+    for (const row of (salesRes.data ?? []) as { ticket_number?: string; clients?: { full_name?: string | null } | null }[]) {
+      if (row.ticket_number && row.clients?.full_name) clientByRef.set(row.ticket_number, row.clients.full_name)
+    }
+    for (const row of (ordersRes.data ?? []) as { order_number?: string; clients?: { full_name?: string | null } | null }[]) {
+      if (row.order_number && row.clients?.full_name) clientByRef.set(row.order_number, row.clients.full_name)
+    }
+
     const apertura = {
       type: 'apertura',
       ts: session.opened_at,
@@ -4012,8 +4052,23 @@ function CajaSessionsTab() {
       },
     } : null
 
-    const manual = txData.map((r: CajaManualTx) => ({ type: 'manual', ts: r.created_at, data: r as unknown as Record<string, unknown> }))
-    const withdrawals = wdData.map((r: CashWithdrawal) => ({ type: 'withdrawal', ts: r.withdrawn_at, data: r as unknown as Record<string, unknown> }))
+    const manual = txData.map((r: CajaManualTx) => ({
+      type: 'manual',
+      ts: r.created_at,
+      data: {
+        ...(r as unknown as Record<string, unknown>),
+        creator: { full_name: nameByUser.get(String(r.created_by ?? '')) ?? null },
+        client_name: clientByRef.get(refOf(r.description) ?? '') ?? null,
+      },
+    }))
+    const withdrawals = wdData.map((r: CashWithdrawal) => ({
+      type: 'withdrawal',
+      ts: r.withdrawn_at,
+      data: {
+        ...(r as unknown as Record<string, unknown>),
+        creator: { full_name: nameByUser.get(String(r.withdrawn_by ?? '')) ?? null },
+      },
+    }))
     const merged = [apertura, ...manual, ...withdrawals, ...(cierre ? [cierre] : [])].sort(
       (a, b) => new Date(a.ts || 0).getTime() - new Date(b.ts || 0).getTime()
     )
@@ -4313,7 +4368,9 @@ function CajaSessionsTab() {
                       const isCierreEv = ev.type === 'cierre'
                       const d = ev.data
                       const ts = ev.ts
-                      const who = (d?.creator as { full_name?: string })?.full_name ?? (d?.profiles as { full_name?: string })?.full_name ?? d?.created_by ?? ''
+                      // Nunca enseñar el uuid crudo: si el nombre no resuelve, la línea se omite.
+                      const who = (d?.creator as { full_name?: string | null })?.full_name ?? (d?.profiles as { full_name?: string })?.full_name ?? ''
+                      const clientName = typeof d?.client_name === 'string' ? d.client_name : ''
                       const desc = String(isAperturaEv ? 'Apertura de caja' : isCierreEv ? 'Cierre de caja' : isManual ? (d?.description ?? '—') : (d?.reason ?? 'Retirada'))
                       const amount = Number(isManual ? d?.total : d?.amount) ?? (isAperturaEv ? Number(d?.total ?? 0) : 0)
                       const isIncome = isManual && d?.type === 'income'
@@ -4356,7 +4413,8 @@ function CajaSessionsTab() {
                             <span className="text-lg shrink-0">{icon}</span>
                             <div className="min-w-0 flex-1">
                               <p className={`text-sm font-medium ${textClass}`}>{desc}</p>
-                              <p className="text-xs text-muted-foreground mt-0.5">{String(who)}</p>
+                              {clientName && <p className="text-xs mt-0.5">Cliente: {clientName}</p>}
+                              {who && <p className="text-xs text-muted-foreground mt-0.5">{isCobro ? `Registrado por ${String(who)}` : String(who)}</p>}
                               {isRetirada && !!(d?.reason || (isManual && d?.description)) && <p className="text-xs text-red-600/80 mt-0.5">{String(d?.reason || d?.description)}</p>}
                               {isCobro && methodLabel && <div className="mt-1"><PaymentMethodBadge method={methodLabel} /></div>}
                             </div>
