@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { checkUserPermission } from '@/actions/auth'
+import { saleNetBase, fetchVoucherPaidBySale, fetchReturnedLeftBySale } from '@/lib/server/commission-base'
 
 export type GoalType = 'boutique' | 'sastreria' | 'online'
 
@@ -259,10 +260,12 @@ export async function getEmployeeGoals(input: {
         .eq('store_id', storeId)
         .eq('year', year)
         .eq('month', month),
-      // Paginado + devoluciones restan (misma vara que el motor de comisiones).
+      // Paginado + misma vara que el motor de comisiones: la base sigue al
+      // DINERO QUE ENTRA (ver commission-base.ts). El canje de un vale no cuenta
+      // y las devoluciones por vale/cambio no restan (solo los reintegros).
       readAllPagedGoals((f, t) => admin
         .from('sales')
-        .select('salesperson_id, total, total_returned, tax_amount, sale_type')
+        .select('id, salesperson_id, total, total_returned, tax_amount, sale_type')
         .eq('store_id', storeId)
         .in('status', ['completed', 'partially_returned'])
         .gte('created_at', monthStart)
@@ -271,6 +274,16 @@ export async function getEmployeeGoals(input: {
         .range(f, t)),
     ])
     const salesRes = { data: salesRows, error: null as null }
+
+    const [voucherPaidBySale, returnedLeftBySale] = await Promise.all([
+      fetchVoucherPaidBySale(admin, monthStart, nextMonthStart),
+      fetchReturnedLeftBySale(
+        admin,
+        (salesRows as { id: string; total_returned?: number | string | null }[])
+          .filter(r => (Number(r.total_returned) || 0) > 0)
+          .map(r => r.id),
+      ),
+    ])
 
     if (assignedRes.error) return { error: assignedRes.error.message }
     if (goalsRes.error) return { error: goalsRes.error.message }
@@ -309,11 +322,9 @@ export async function getEmployeeGoals(input: {
     }
 
     const actuals = new Map<string, { boutique: number; sastreria: number }>()
-    for (const r of (salesRes.data || []) as { salesperson_id: string | null; total: number | string | null; total_returned?: number | string | null; tax_amount: number | string | null; sale_type: string | null }[]) {
+    for (const r of (salesRes.data || []) as { id: string; salesperson_id: string | null; total: number | string | null; total_returned?: number | string | null; tax_amount: number | string | null; sale_type: string | null }[]) {
       if (!r.salesperson_id) continue
-      const total = Number(r.total) || 0
-      const proportion = total > 0 ? Math.max(0, (total - (Number(r.total_returned) || 0)) / total) : 0
-      const net = (total - (Number(r.tax_amount) || 0)) * proportion
+      const net = saleNetBase(r, voucherPaidBySale, returnedLeftBySale)
       const e = actuals.get(r.salesperson_id) ?? { boutique: 0, sastreria: 0 }
       const st = r.sale_type ?? ''
       if (BOUTIQUE_SALE_TYPES.includes(st)) e.boutique += net
