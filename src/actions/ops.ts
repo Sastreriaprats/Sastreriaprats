@@ -155,12 +155,16 @@ async function computeYear(year: number) {
     // Mapa venta -> nº de ticket oficial (CLP)
     admin.from('cash_internal_tickets')
       .select('sale_id, ref').eq('source', 'sale').eq('year', year),
-    // Facturas emitidas NO asociadas a ticket ni pedido (se suman más abajo)
+    // Facturas emitidas NO asociadas a ticket, pedido NI reserva (se suman más
+    // abajo). El filtro reservation_id replica el del Resumen de la capa A
+    // (accounting.ts): sin él, una factura emitida desde reserva contaba en el
+    // escenario y no en A → B+C dejaba de cuadrar con A.
     admin.from('invoices')
       .select('id, invoice_number, client_name, subtotal, tax_amount, total, payment_method, invoice_date, pdf_url')
       .eq('invoice_type', 'issued')
       .is('sale_id', null)
       .is('tailoring_order_id', null)
+      .is('reservation_id', null)
       .not('status', 'in', '(draft,cancelled)')
       .gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`),
   ])
