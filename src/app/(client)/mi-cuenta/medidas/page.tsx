@@ -1,8 +1,14 @@
+import { redirect } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { MeasurementsContent } from './measurements-content'
 
+const SECTION_HIDDEN: boolean = true
+
 export default async function MeasurementsPage() {
+  // Oculto temporalmente (jul-2026): el cliente no debe ver sus medidas
+  if (SECTION_HIDDEN) redirect('/mi-cuenta')
+
   const supabase = await createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null

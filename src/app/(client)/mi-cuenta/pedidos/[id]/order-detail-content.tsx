@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import { ArrowLeft, Truck, CheckCircle, Clock, MapPin } from 'lucide-react'
+import { ArrowLeft, Truck, Check, Clock, MapPin } from 'lucide-react'
 import { formatDate, formatDateTime, formatCurrency, getOrderStatusLabel, getOrderStatusColor } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 
@@ -31,6 +31,22 @@ const onlineSteps = ['paid', 'processing', 'shipped', 'delivered']
 // Subset destacado del flujo tailoring para el timeline del cliente (no es el
 // pipeline completo del admin — se omiten estados intermedios para no saturar).
 const tailoringSteps = ['created', 'fabric_ordered', 'in_production', 'in_fitting', 'pendiente_terminacion', 'finished', 'delivered']
+// Pipeline completo del admin en orden: los estados intermedios (cut,
+// fabric_received_*, received_in_store…) se proyectan al último hito del
+// subset del cliente ya alcanzado, para que el stepper nunca quede vacío.
+const tailoringPipeline = ['created', 'fabric_ordered', 'fabric_received_store', 'fabric_received_factory', 'cut', 'in_production', 'in_fitting', 'received_in_store', 'pendiente_terminacion', 'finished', 'delivered']
+
+function tailoringStepIndex(status: string): number {
+  const direct = tailoringSteps.indexOf(status)
+  if (direct !== -1) return direct
+  const pos = tailoringPipeline.indexOf(status)
+  if (pos === -1) return -1
+  let idx = -1
+  for (let i = 0; i < tailoringSteps.length; i++) {
+    if (tailoringPipeline.indexOf(tailoringSteps[i]) <= pos) idx = i
+  }
+  return idx
+}
 
 export function OrderDetailContent({ order, lines, history }: {
   order: Record<string, unknown>
@@ -40,7 +56,9 @@ export function OrderDetailContent({ order, lines, history }: {
   const router = useRouter()
   const isTailoring = order.type === 'tailoring'
   const steps = isTailoring ? tailoringSteps : onlineSteps
-  const currentStepIndex = steps.indexOf(order.status as string)
+  const currentStepIndex = isTailoring
+    ? tailoringStepIndex(order.status as string)
+    : steps.indexOf(order.status as string)
   const isCancelled = order.status === 'cancelled'
 
   let shippingAddress: Record<string, unknown> | null = null
@@ -79,32 +97,42 @@ export function OrderDetailContent({ order, lines, history }: {
 
       {!isCancelled && (
         <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
+          <CardContent className="pt-6 pb-5">
+            <div className="flex items-start">
               {steps.map((step, i) => {
-                const isComplete = i <= currentStepIndex
+                const isComplete = i < currentStepIndex
                 const isCurrent = i === currentStepIndex
                 return (
-                  <div key={step} className="flex flex-col items-center flex-1">
+                  <div key={step} className="flex flex-col items-center flex-1 min-w-0">
+                    {/* Conectores siempre presentes (invisibles en los extremos)
+                        para que el círculo quede centrado sobre su etiqueta */}
                     <div className="flex items-center w-full">
-                      {i > 0 && (
-                        <div className={cn('flex-1 h-0.5', i <= currentStepIndex ? 'bg-green-500' : 'bg-gray-200')} />
-                      )}
                       <div className={cn(
-                        'h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0 border-2 transition-all',
-                        isComplete ? 'bg-green-500 border-green-500 text-white'
-                          : isCurrent ? 'border-prats-navy text-prats-navy bg-white'
-                          : 'border-gray-200 text-gray-300 bg-white'
+                        'flex-1 h-[2px] rounded-full transition-colors',
+                        i === 0 ? 'invisible' : i <= currentStepIndex ? 'bg-prats-navy' : 'bg-gray-200'
+                      )} />
+                      <div className={cn(
+                        'h-9 w-9 mx-1 rounded-full flex items-center justify-center flex-shrink-0 border-2 transition-all',
+                        isComplete || isCurrent
+                          ? 'bg-prats-navy border-prats-navy text-white shadow-sm'
+                          : 'border-gray-200 text-gray-400 bg-white'
                       )}>
-                        {isComplete ? <CheckCircle className="h-4 w-4" /> : <span className="text-xs">{i + 1}</span>}
+                        {isComplete ? (
+                          <Check className="h-4 w-4" strokeWidth={3} />
+                        ) : (
+                          <span className={cn('text-xs', isCurrent && 'font-semibold')}>{i + 1}</span>
+                        )}
                       </div>
-                      {i < steps.length - 1 && (
-                        <div className={cn('flex-1 h-0.5', i < currentStepIndex ? 'bg-green-500' : 'bg-gray-200')} />
-                      )}
+                      <div className={cn(
+                        'flex-1 h-[2px] rounded-full transition-colors',
+                        i === steps.length - 1 ? 'invisible' : i < currentStepIndex ? 'bg-prats-navy' : 'bg-gray-200'
+                      )} />
                     </div>
                     <p className={cn(
-                      'text-[10px] mt-2 text-center',
-                      isComplete || isCurrent ? 'text-prats-navy font-medium' : 'text-gray-400'
+                      'text-[10px] sm:text-xs mt-2 px-1 text-center leading-tight',
+                      isCurrent ? 'text-prats-navy font-semibold'
+                        : isComplete ? 'text-prats-navy'
+                        : 'text-gray-400'
                     )}>
                       {statusLabel(step)}
                     </p>

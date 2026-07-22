@@ -1,7 +1,9 @@
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { OrderDetailContent } from './order-detail-content'
+
+const SECTION_HIDDEN: boolean = true
 
 export default async function OrderDetailPage({
   params,
@@ -10,6 +12,9 @@ export default async function OrderDetailPage({
   params: Promise<{ id: string }>
   searchParams: Promise<{ type?: string }>
 }) {
+  // Oculto temporalmente (jul-2026): el cliente no debe ver el detalle de sus pedidos
+  if (SECTION_HIDDEN) redirect('/mi-cuenta')
+
   const { id } = await params
   const { type } = await searchParams
 

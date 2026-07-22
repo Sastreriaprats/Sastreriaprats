@@ -23,6 +23,9 @@ function statusLabel(status: string): string {
   return ONLINE_STATUS_LABELS[status] ?? getOrderStatusLabel(status)
 }
 
+// Oculto temporalmente (jul-2026): historial de pedidos no visible para el cliente
+const SHOW_ORDER_HISTORY: boolean = false
+
 function statusColor(status: string): string {
   return ONLINE_STATUS_COLORS[status] ?? getOrderStatusColor(status)
 }
@@ -56,7 +59,7 @@ function getTailoringOrderSummary(lines: TailoringLine[] | undefined): string {
     .join(' — ')
 }
 
-export function ClientDashboard({ client, recentOnline, recentTailoring, onlineOrderCount, tailoringOrderCount }: {
+export function ClientDashboard({ client, recentOnline, recentTailoring }: {
   client: Record<string, unknown> | null
   recentOnline: Record<string, unknown>[]
   recentTailoring: Record<string, unknown>[]
@@ -80,21 +83,8 @@ export function ClientDashboard({ client, recentOnline, recentTailoring, onlineO
         <p className="text-sm text-gray-500">Bienvenido a tu área personal</p>
       </div>
 
+      {/* Ocultos temporalmente (jul-2026): contadores de pedidos no visibles para el cliente */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-        <Card>
-          <CardContent className="pt-4 pb-3 text-center">
-            <ShoppingBag className="h-5 w-5 mx-auto text-prats-gold mb-1" />
-            <p className="text-2xl font-bold text-prats-navy">{onlineOrderCount ?? recentOnline.length}</p>
-            <p className="text-xs text-gray-400">Pedidos online</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4 pb-3 text-center">
-            <Scissors className="h-5 w-5 mx-auto text-prats-gold mb-1" />
-            <p className="text-2xl font-bold text-prats-navy">{tailoringOrderCount ?? recentTailoring.length}</p>
-            <p className="text-xs text-gray-400">Pedidos sastrería</p>
-          </CardContent>
-        </Card>
         <Card>
           <CardContent className="pt-4 pb-3 text-center">
             <Package className="h-5 w-5 mx-auto text-prats-gold mb-1" />
@@ -106,7 +96,7 @@ export function ClientDashboard({ client, recentOnline, recentTailoring, onlineO
         </Card>
       </div>
 
-      <Card>
+      {SHOW_ORDER_HISTORY && <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">Pedidos recientes</CardTitle>
@@ -153,7 +143,7 @@ export function ClientDashboard({ client, recentOnline, recentTailoring, onlineO
             </div>
           )}
         </CardContent>
-      </Card>
+      </Card>}
     </div>
   )
 }

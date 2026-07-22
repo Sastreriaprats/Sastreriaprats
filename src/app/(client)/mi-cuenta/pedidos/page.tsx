@@ -3,7 +3,12 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { OrdersListContent } from './orders-list-content'
 
+const SECTION_HIDDEN: boolean = true
+
 export default async function OrdersPage() {
+  // Oculto temporalmente (jul-2026): el cliente no debe ver su historial de pedidos
+  if (SECTION_HIDDEN) redirect('/mi-cuenta')
+
   const supabase = await createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null

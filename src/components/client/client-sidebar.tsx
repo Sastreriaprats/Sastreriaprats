@@ -2,15 +2,16 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, ShoppingBag, Ruler, User, Heart, LogOut, Loader2 } from 'lucide-react'
+import { LayoutDashboard, User, Heart, LogOut, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { logoutClientAction } from '@/actions/auth'
 import { cn } from '@/lib/utils'
 
 const navItems = [
   { label: 'Mi cuenta', href: '/mi-cuenta', icon: LayoutDashboard, exact: true },
-  { label: 'Mis pedidos', href: '/mi-cuenta/pedidos', icon: ShoppingBag },
-  { label: 'Mis medidas', href: '/mi-cuenta/medidas', icon: Ruler },
+  // Ocultos temporalmente (jul-2026): pedidos y medidas no visibles para el cliente
+  // { label: 'Mis pedidos', href: '/mi-cuenta/pedidos', icon: ShoppingBag },
+  // { label: 'Mis medidas', href: '/mi-cuenta/medidas', icon: Ruler },
   { label: 'Favoritos', href: '/mi-cuenta/favoritos', icon: Heart },
   { label: 'Mi perfil', href: '/mi-cuenta/datos', icon: User },
 ]
