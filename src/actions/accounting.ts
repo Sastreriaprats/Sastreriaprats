@@ -3,6 +3,7 @@
 import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { normalizeSearchTerm } from '@/lib/utils'
+import { fuzzySearchIds } from '@/lib/server/query-helpers'
 import { generateInvoicePdf } from '@/lib/pdf/invoice-pdf'
 import { generateEstimatePdf } from '@/lib/pdf/estimate-pdf'
 import { sendEstimateEmail } from '@/lib/email/transactional'
@@ -1002,17 +1003,30 @@ export const getClientsForInvoice = protectedAction<{ query?: string } | void, C
     // hasta que el usuario escribe.
     if (q.length < 2) return success([])
 
-    // Escape de caracteres especiales de PostgREST: la coma rompe el `.or()`
-    // y `%`/`_` son comodines de ILIKE que el usuario no debe controlar.
-    const escaped = q.replace(/[,%_]/g, (c) => `\\${c}`)
-    const pattern = `%${escaped}%`
+    // Multi-palabra: cada token debe aparecer (AND) en `search_text` (columna
+    // generada unaccent = nombre + email + tel + NIF + código, mig 142). Así
+    // "jorge ll" encuentra a "Jorge Llavona" esté el nombre como esté (orden,
+    // tildes, nombre compuesto), igual que el resto de buscadores del admin.
+    const SELECT =
+      'id, first_name, last_name, full_name, email, phone, document_number, address, postal_code, city, province, country, client_companies(id, company_name, nif, contact_email, is_default)'
+    const normalized = normalizeSearchTerm(q)
+    let query = ctx.adminClient.from('clients').select(SELECT)
+    for (const token of normalized.split(/\s+/).filter(Boolean)) {
+      query = query.ilike('search_text', `%${token}%`)
+    }
+    let { data } = await query.order('full_name').limit(30)
 
-    const { data } = await ctx.adminClient
-      .from('clients')
-      .select('id, first_name, last_name, full_name, email, phone, document_number, address, postal_code, city, province, country, client_companies(id, company_name, nif, contact_email, is_default)')
-      .or(`full_name.ilike.${pattern},first_name.ilike.${pattern},last_name.ilike.${pattern},email.ilike.${pattern},document_number.ilike.${pattern}`)
-      .order('full_name')
-      .limit(30)
+    // Fallback difuso (trigram, AND por token vía mig 268): tolera erratas y
+    // grafías g/j ("ignacio gimenez" → "Ignacio Jiménez") sin sacar todos los
+    // homónimos. Solo si la pasada estricta no encontró nada.
+    if (!data || data.length === 0) {
+      const ids = await fuzzySearchIds('clients', normalized, 30)
+      if (ids.length > 0) {
+        const res = await ctx.adminClient.from('clients').select(SELECT).in('id', ids).limit(30)
+        data = res.data
+      }
+    }
+
     return success((data || []).map((c: Record<string, unknown>) => {
       const fn = (c as any).full_name ?? `${(c as any).first_name ?? ''} ${(c as any).last_name ?? ''}`.trim()
       const rawCompanies = ((c as any).client_companies ?? []) as Record<string, unknown>[]
