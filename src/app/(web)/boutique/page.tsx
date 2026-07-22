@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { permanentRedirect } from 'next/navigation'
+import { CategoryLinks } from '@/components/web/category-links'
 import { CatalogContent } from './catalog-content'
 
 // Dinámica: hay que leer searchParams para redirigir las URLs antiguas.
@@ -28,5 +29,15 @@ export default async function BoutiquePage({
     permanentRedirect(`/boutique/categoria/${encodeURIComponent(category)}`)
   }
 
-  return <CatalogContent />
+  return (
+    <main>
+      <section className="border-b border-gray-200 px-4 py-8 text-center">
+        <h1 className="font-serif text-3xl font-light text-black md:text-4xl">Boutique</h1>
+        <div className="mt-6">
+          <CategoryLinks />
+        </div>
+      </section>
+      <CatalogContent />
+    </main>
+  )
 }

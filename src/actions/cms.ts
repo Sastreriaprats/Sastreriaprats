@@ -584,27 +584,39 @@ export async function getWebCategories(): Promise<WebCategory[]> {
   try {
     const { createAdminClient } = await import('@/lib/supabase/admin')
     const admin = createAdminClient()
-    // Obtener categorías principales + subcategorías en una sola query
+    // Se traen también las ocultas: hacen falta para recorrer la jerarquía
+    // cuando una categoría visible cuelga de una intermedia oculta (p. ej.
+    // trajes → ceremonia (oculta) → smoking). El filtro de visibilidad se
+    // aplica después, por fila.
     const { data } = await admin
       .from('product_categories')
-      .select('id, name, slug, sort_order, parent_id')
+      .select('id, name, slug, sort_order, parent_id, is_visible_web')
       .eq('is_active', true)
-      .eq('is_visible_web', true)
       .in('product_type', ['boutique', 'accessory'])
       .order('sort_order', { ascending: true })
 
     if (!data) return []
 
-    // Separar padres e hijos
-    const parents = data.filter(c => !c.parent_id)
-    const children = data.filter(c => c.parent_id)
+    const byId = new Map(data.map(c => [c.id, c]))
+    // Ancestro raíz (parent_id null) de cada categoría, saltando intermedias
+    const rootOf = (c: (typeof data)[number]) => {
+      let cur = c
+      while (cur.parent_id) {
+        const parent = byId.get(cur.parent_id)
+        if (!parent) return null
+        cur = parent
+      }
+      return cur
+    }
+
+    const parents = data.filter(c => !c.parent_id && c.is_visible_web)
 
     return parents.map(p => ({
       name: p.name,
       slug: p.slug,
       sort_order: p.sort_order,
-      children: children
-        .filter(c => c.parent_id === p.id)
+      children: data
+        .filter(c => c.parent_id && c.is_visible_web && rootOf(c)?.id === p.id)
         .map(c => ({ name: c.name, slug: c.slug, sort_order: c.sort_order })),
     }))
   } catch (err) {

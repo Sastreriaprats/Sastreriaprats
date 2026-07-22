@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { BreadcrumbSchema } from '@/components/seo/schema-org'
 import { buildBreadcrumbs } from '@/lib/seo/metadata'
+import { CategoryLinks } from '@/components/web/category-links'
 import { CatalogContent, type CatalogInitialData } from '../../catalog-content'
 
 // Página de categoría con URL propia (/boutique/categoria/<slug>) en lugar del
@@ -83,6 +84,9 @@ export default async function CategoryPage({
       />
       <section className="border-b border-gray-200 px-4 py-8 text-center">
         <h1 className="font-serif text-3xl font-light text-black md:text-4xl">{category.name}</h1>
+        <div className="mt-6">
+          <CategoryLinks current={category.slug} />
+        </div>
       </section>
       <CatalogContent category={category.slug} initialData={initialData} />
     </main>

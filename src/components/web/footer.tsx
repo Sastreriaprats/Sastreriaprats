@@ -2,12 +2,18 @@ import Link from 'next/link'
 import { Facebook, Instagram, Linkedin, Mail } from 'lucide-react'
 import { CookieSettingsButton } from '@/components/legal/cookie-settings-button'
 import { BRAND, STORE_LOCATIONS, SOCIAL_LINKS } from '@/lib/constants'
+import { getWebCategories } from '@/actions/cms'
 
-export function WebFooter() {
+export async function WebFooter() {
+  // Enlaces a categorías en HTML servido: junto con CategoryLinks son el único
+  // enlazado interno rastreable a las categorías (el menú del header solo se
+  // monta al abrirlo).
+  const categories = await getWebCategories()
+
   return (
     <footer className="bg-white border-t border-gray-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-12">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-12">
           {/* Col 1: Marca */}
           <div>
             <p className="text-lg font-medium text-black">Sastrería Prats.</p>
@@ -48,7 +54,28 @@ export function WebFooter() {
             <p className="text-sm text-gray-600 font-medium mt-2">Domingos: Cerrado</p>
           </div>
 
-          {/* Col 3: Políticas */}
+          {/* Col 3: Boutique */}
+          {categories.length > 0 && (
+            <div>
+              <h4 className="text-sm font-bold uppercase tracking-wide text-black mb-4">BOUTIQUE</h4>
+              <ul className="space-y-2">
+                {categories.map((c) => (
+                  <li key={c.slug}>
+                    <Link href={`/boutique/categoria/${c.slug}`} className="text-sm text-gray-600 hover:text-black transition-colors">
+                      {c.name}
+                    </Link>
+                  </li>
+                ))}
+                <li>
+                  <Link href="/boutique" className="text-sm text-gray-600 hover:text-black transition-colors">
+                    Ver toda la colección
+                  </Link>
+                </li>
+              </ul>
+            </div>
+          )}
+
+          {/* Col 4: Políticas */}
           <div>
             <h4 className="text-sm font-bold uppercase tracking-wide text-black mb-4">POLÍTICAS</h4>
             <ul className="space-y-2">
@@ -59,7 +86,7 @@ export function WebFooter() {
             </ul>
           </div>
 
-          {/* Col 4: Síguenos */}
+          {/* Col 5: Síguenos */}
           <div>
             <h4 className="text-sm font-bold uppercase tracking-wide text-black mb-4">SÍGUENOS</h4>
             <ul className="space-y-2">
