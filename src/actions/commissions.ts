@@ -6,6 +6,7 @@ import { success, failure } from '@/lib/errors'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { checkUserPermission, checkUserExplicitPermission } from '@/actions/auth'
+import { saleNetBase, fetchVoucherPaidBySale, fetchReturnedLeftBySale } from '@/lib/server/commission-base'
 import { revalidatePath } from 'next/cache'
 
 // ============================================================================
@@ -140,7 +141,7 @@ export const getEmployeeCommissions = protectedAction<
       // Incluye partially_returned: las devoluciones RESTAN de la base
       // (prorrateo por total_returned), no eliminan el ticket entero.
       readAllPaged((f, t) => admin.from('sales')
-        .select('salesperson_id, total, total_returned, tax_amount, sale_type, created_at')
+        .select('id, salesperson_id, total, total_returned, tax_amount, sale_type, created_at')
         .in('status', ['completed', 'partially_returned'])
         .gte('created_at', start_date)
         .lte('created_at', end_date + 'T23:59:59')
@@ -174,9 +175,25 @@ export const getEmployeeCommissions = protectedAction<
     const storeNames = new Map<string, string>()
     for (const s of (storesRes.data || []) as any[]) storeNames.set(s.id, s.name)
 
-    // Ventas netas por empleado, mes y bucket. Las devoluciones restan: la base
-    // se prorratea por lo NO devuelto (misma proporción que el criterio general
-    // de facturación); una devolución parcial ya no elimina el ticket entero.
+    // La comisión sigue al DINERO QUE ENTRA (ver commission-base.ts): el canje
+    // de un vale NO comisiona a quien lo atiende (esa base ya se comisionó a
+    // quien la cobró), y una devolución por VALE/CAMBIO no le resta la comisión
+    // al vendedor original (el dinero se quedó dentro). Solo restan los
+    // reintegros reales (efectivo/tarjeta). Las devoluciones de importe salido
+    // se consultan solo para las ventas con total_returned > 0.
+    const endExclusive = (() => {
+      const d = new Date(end_date + 'T00:00:00'); d.setDate(d.getDate() + 1)
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T00:00:00`
+    })()
+    const returnedSaleIds = (salesRows as any[])
+      .filter(r => (Number(r.total_returned) || 0) > 0)
+      .map(r => r.id as string)
+    const [voucherPaidBySale, returnedLeftBySale] = await Promise.all([
+      fetchVoucherPaidBySale(admin, start_date, endExclusive),
+      fetchReturnedLeftBySale(admin, returnedSaleIds),
+    ])
+
+    // Ventas netas por empleado, mes y bucket.
     type Buckets = { boutique: number; gift_cards: number; sastreria: number }
     const empSales = new Map<string, Map<string, Buckets>>()  // emp → monthKey → buckets
     for (const r of (salesRows || []) as any[]) {
@@ -184,10 +201,7 @@ export const getEmployeeCommissions = protectedAction<
       if (!emp) continue
       const mk = madridMonthKey(r.created_at)
       if (!monthKeys.has(mk)) continue
-      const total = Number(r.total) || 0
-      const returned = Number(r.total_returned) || 0
-      const proportion = total > 0 ? Math.max(0, (total - returned) / total) : 0
-      const net = (total - (Number(r.tax_amount) || 0)) * proportion
+      const net = saleNetBase(r, voucherPaidBySale, returnedLeftBySale)
       const st = (r.sale_type ?? '') as string
       let byMonth = empSales.get(emp)
       if (!byMonth) { byMonth = new Map(); empSales.set(emp, byMonth) }
@@ -303,6 +317,9 @@ export const getEmployeeCommissions = protectedAction<
 
         const targetByStore = new Map<string, number>()
         for (const g of (sgRes.data || []) as any[]) targetByStore.set(g.store_id, (targetByStore.get(g.store_id) || 0) + (Number(g.target_amount) || 0))
+        // Actual de TIENDA (no de vendedor): agregado que se cancela solo a lo
+        // largo del ciclo vale→canje, así que conserva la fórmula simple (no
+        // aplica la regla "dinero que entra" de la base individual de arriba).
         const actualByStore = new Map<string, number>()
         for (const r of (ssRows || []) as any[]) {
           const st = (r.sale_type ?? '') as string

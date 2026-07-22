@@ -22,9 +22,18 @@ import { EditOrderDialog } from '@/components/orders/edit-order-dialog'
 import { EditFichaDialog } from '@/components/orders/edit-ficha-dialog'
 import { LinePhotosViewer } from '@/components/orders/line-photos-viewer'
 import { getOrderLinePhotosBatch } from '@/actions/order-line-photos'
-import { Plus, Scissors, Loader2, Pencil } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Plus, Scissors, Loader2, Pencil, Search, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { useActiveStore } from '@/hooks/use-store'
+
+/** Normaliza para búsqueda: minúsculas y sin acentos. */
+function normalizeSearch(s: unknown): string {
+  return String(s ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+}
 
 function isLineCamiseria(line: any): boolean {
   const cfg = line?.configuration ?? {}
@@ -56,6 +65,7 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
   const [markingId, setMarkingId] = useState<string | null>(null)
   const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null)
   const [ticketLoadingId, setTicketLoadingId] = useState<string | null>(null)
+  const [lineQuery, setLineQuery] = useState('')
 
   // Arreglos del pedido
   const [orderAlterations, setOrderAlterations] = useState<AlterationRow[]>([])
@@ -111,12 +121,41 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
   const deliveredCount = visibleLines.filter((l: any) => l.delivered_at).length
   const totalCount = visibleLines.length
 
+  // Texto buscable por prenda: nombre, referencia y campos útiles del taller.
+  const buildLineSearchText = (line: any): string => {
+    const cfg = line?.configuration ?? {}
+    const ref = lineRefs.get(String(line.id))
+    return normalizeSearch(
+      [
+        getLineName(line),
+        ref,
+        ref ? `${order.order_number}-${ref}` : '',
+        line?.garment_types?.name,
+        cfg.prendaLabel,
+        cfg.prenda,
+        cfg.product_name,
+        cfg.modCuello,
+        cfg.puno,
+        line?.model_name,
+        line?.fabric_description,
+        line?.finishing_notes,
+      ]
+        .filter(Boolean)
+        .join(' ')
+    )
+  }
+
+  const normalizedQuery = normalizeSearch(lineQuery).trim()
+  const matchesQuery = (line: any) =>
+    normalizedQuery === '' || buildLineSearchText(line).includes(normalizedQuery)
+
   const groupLines = (group: LineGroup) =>
-    visibleLines.filter((l: any) => getLineGroup(l) === group)
+    visibleLines.filter((l: any) => getLineGroup(l) === group && matchesQuery(l))
 
   const sastreriaLines = groupLines('sastreria')
   const camiseriaLines = groupLines('camiseria')
   const complementosLines = groupLines('complementos')
+  const filteredCount = sastreriaLines.length + camiseriaLines.length + complementosLines.length
 
   const handleMarkDelivered = async (lineId: string) => {
     setMarkingId(lineId)
@@ -282,6 +321,35 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
                 style={{ width: totalCount ? `${(deliveredCount / totalCount) * 100}%` : '0%' }}
               />
             </div>
+
+            {/* Buscador de prendas dentro del pedido */}
+            <div className="relative mb-4">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/40 pointer-events-none" />
+              <Input
+                value={lineQuery}
+                onChange={(e) => setLineQuery(e.target.value)}
+                placeholder="Buscar prenda por nombre, referencia, tejido..."
+                className="pl-9 pr-9 bg-white/[0.05] border-white/15 text-white placeholder:text-white/40 focus-visible:border-[#c9a96e]/50"
+              />
+              {lineQuery && (
+                <button
+                  type="button"
+                  onClick={() => setLineQuery('')}
+                  aria-label="Limpiar búsqueda"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/70 transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
+            {normalizedQuery !== '' && (
+              <p className="text-xs text-white/50 mb-3">
+                {filteredCount === 0
+                  ? 'Ninguna prenda coincide con la búsqueda.'
+                  : `${filteredCount} de ${totalCount} prendas coinciden`}
+              </p>
+            )}
 
             {sastreriaLines.length > 0 && (
               <>

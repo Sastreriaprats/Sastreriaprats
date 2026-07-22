@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import {
   ArrowLeft, Phone, Mail, Trash2, GitMerge, Ban, UserCheck,
-  Ruler, StickyNote, Scissors, Shirt, ShoppingBag, History, Pencil, CalendarDays, Receipt, Building2, BookmarkCheck,
+  Ruler, StickyNote, Scissors, Shirt, ShoppingBag, History, Pencil, CalendarDays, Receipt, Building2, BookmarkCheck, CalendarClock,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { usePermissions } from '@/hooks/use-permissions'
@@ -32,10 +32,75 @@ import { ClientAlterationsTab } from './tabs/client-alterations-tab'
 import { ClientAppointmentsTab } from './tabs/client-appointments-tab'
 import { ClientCompaniesTab } from './tabs/client-companies-tab'
 import { ClientReservationsTab } from './tabs/client-reservations-tab'
+import { listClientAppointments } from '@/actions/calendar'
 
 const categoryColors: Record<string, string> = {
   standard: 'bg-gray-100 text-gray-700',
   vip: 'bg-amber-100 text-amber-700',
+}
+
+const salutationLabels: Record<string, string> = { sr: 'Sr.', sra: 'Sra.' }
+
+const appointmentTypeLabels: Record<string, string> = {
+  fitting: 'Prueba', delivery: 'Entrega', consultation: 'Consulta',
+  boutique: 'Boutique', meeting: 'Reunión', measurement: 'Toma de medidas',
+  pickup: 'Recogida', other: 'Otro',
+}
+
+// Banner destacado con la próxima cita futura del cliente (si la tiene).
+// Reutiliza listClientAppointments; no requiere action nueva ni migración.
+function NextAppointmentBanner({ clientId, onOpen }: { clientId: string; onOpen: () => void }) {
+  const [next, setNext] = useState<any | null>(null)
+
+  useEffect(() => {
+    let active = true
+    listClientAppointments({ client_id: clientId })
+      .then(result => {
+        if (!active || !result.success || !result.data) return
+        const now = new Date()
+        const today = now.toISOString().slice(0, 10)
+        const nowTime = now.toTimeString().slice(0, 5)
+        const upcoming = (result.data as any[])
+          .filter(a => (a.status === 'scheduled' || a.status === 'confirmed'))
+          .filter(a => {
+            const d = String(a.date)
+            const t = String(a.start_time || '').slice(0, 5)
+            return d > today || (d === today && t >= nowTime)
+          })
+          .sort((a, b) => {
+            const da = `${a.date} ${String(a.start_time || '')}`
+            const db = `${b.date} ${String(b.start_time || '')}`
+            return da < db ? -1 : da > db ? 1 : 0
+          })[0]
+        setNext(upcoming || null)
+      })
+      .catch(err => console.error('[NextAppointmentBanner]', err))
+    return () => { active = false }
+  }, [clientId])
+
+  if (!next) return null
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="flex w-full items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-left transition hover:bg-blue-100"
+    >
+      <CalendarClock className="h-5 w-5 shrink-0 text-blue-600" />
+      <div className="flex flex-1 flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">
+        <span className="font-semibold text-blue-800">Próxima cita:</span>
+        <span className="font-medium text-blue-900">
+          {formatDate(next.date)} · {String(next.start_time).slice(0, 5)}
+        </span>
+        <Badge variant="outline" className="border-blue-200 bg-white text-xs text-blue-700">
+          {appointmentTypeLabels[next.type] || next.type}
+        </Badge>
+        {next.title && <span className="text-blue-700">{next.title}</span>}
+        {next.stores?.name && <span className="text-blue-600/80">· {next.stores.name}</span>}
+      </div>
+      <span className="text-xs font-medium text-blue-600">Ver citas →</span>
+    </button>
+  )
 }
 
 function ClientSummaryTab({ client }: { client: any }) {
@@ -44,6 +109,7 @@ function ClientSummaryTab({ client }: { client: any }) {
       <Card>
         <CardHeader><CardTitle className="text-base">Datos personales</CardTitle></CardHeader>
         <CardContent className="space-y-2 text-sm">
+          {client.salutation && <p><span className="text-muted-foreground">Tratamiento:</span> {salutationLabels[client.salutation]}</p>}
           {client.email && <p><span className="text-muted-foreground">Email:</span> {client.email}</p>}
           {client.phone && <p><span className="text-muted-foreground">Teléfono:</span> {client.phone}</p>}
           {client.date_of_birth && <p><span className="text-muted-foreground">Nacimiento:</span> {formatDate(client.date_of_birth)}</p>}
@@ -85,6 +151,7 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
   const [isDeleting, setIsDeleting] = useState(false)
   const [showMergeDialog, setShowMergeDialog] = useState(false)
   const [isToggling, setIsToggling] = useState(false)
+  const [activeTab, setActiveTab] = useState(initialTab)
 
   // Toggle desactivar/reactivar (soft). Distinto del hard delete (admin) de abajo.
   const handleToggleActive = async () => {
@@ -129,7 +196,10 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
             </Avatar>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-bold">{client.full_name}</h1>
+                <h1 className="text-2xl font-bold">
+                  {client.salutation && <span className="text-muted-foreground font-semibold">{salutationLabels[client.salutation]} </span>}
+                  {client.full_name}
+                </h1>
                 <Badge className={`text-xs ${categoryColors[client.category] || ''}`}>
                   {client.category?.toUpperCase()}
                 </Badge>
@@ -217,7 +287,9 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
         </Card>
       </div>
 
-      <Tabs defaultValue={initialTab}>
+      <NextAppointmentBanner clientId={client.id} onOpen={() => setActiveTab('citas')} />
+
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="resumen" className="gap-1"><History className="h-4 w-4" /> Resumen</TabsTrigger>
           <TabsTrigger value="datos" className="gap-1"><Pencil className="h-4 w-4" /> Datos</TabsTrigger>

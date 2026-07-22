@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { checkUserPermission } from '@/actions/auth'
-import { aggregateSizeTotals, type SizeBreakdownRow } from '@/lib/reports/dimensions'
+import { aggregateSizeTotals, topSizesLabel, type SizeBreakdownRow } from '@/lib/reports/dimensions'
 
 type AnyRec = Record<string, unknown>
 
@@ -224,6 +224,7 @@ function renderProducts(items: AnyRec[] | null): string {
   <td class="right">${hasCost ? fmtEur(p.unit_cost as number) : '—'}</td>
   <td class="right">${hasCost ? fmtEur(p.margin as number) : '—'}</td>
   <td class="right">${hasCost && Number(p.revenue_net) > 0 ? `${marginPct.toFixed(1)}%` : '—'}</td>
+  <td class="muted">${escapeHtml(topSizesLabel(p.sizeBreakdown as SizeBreakdownRow[] | undefined)) || '—'}</td>
 </tr>`
   }).join('')
   // Agregado por talla de los productos exportados (mismo dato que la tarjeta
@@ -244,7 +245,7 @@ function renderProducts(items: AnyRec[] | null): string {
 </table>` : ''
   return `<h2>Top productos</h2>
 <table>
-  <thead><tr><th>#</th><th>Producto</th><th>SKU</th><th class="right">Compradas</th><th class="right">Vendidas</th><th class="right">Stock</th><th class="right">Facturación</th><th class="right">Coste ud.</th><th class="right">Margen</th><th class="right">Margen %</th></tr></thead>
+  <thead><tr><th>#</th><th>Producto</th><th>SKU</th><th class="right">Compradas</th><th class="right">Vendidas</th><th class="right">Stock</th><th class="right">Facturación</th><th class="right">Coste ud.</th><th class="right">Margen</th><th class="right">Margen %</th><th>Tallas más vendidas</th></tr></thead>
   <tbody>${rows}</tbody>
 </table>
 ${sizeSection}

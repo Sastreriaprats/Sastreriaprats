@@ -35,6 +35,12 @@ function getDefaultStart() {
 function getDefaultEnd() {
   return new Date().toISOString().split('T')[0]
 }
+// Fecha corta para las tablas de detalle (acepta timestamp ISO o 'YYYY-MM-DD').
+function fmtReportDay(value: string | null): string {
+  if (!value) return '—'
+  const d = new Date(value.length <= 10 ? `${value}T00:00:00` : value)
+  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
 
 type SalesData = {
   chartData: { date: string; pos: number; online: number; tailoring: number; total: number }[]
@@ -845,7 +851,31 @@ function StoreSalesTab({ data, salesData, isFiltered }: { data: StoreSalesReport
             </div>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground">{data.online.count} pedidos online pagados en el periodo.</p>
+            <p className="text-sm text-muted-foreground mb-3">{data.online.count} pedidos online pagados en el periodo.</p>
+            {data.online.items.length > 0 && (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Pedido</TableHead>
+                      <TableHead>Fecha</TableHead>
+                      <TableHead>Cliente</TableHead>
+                      <TableHead className="text-right">Importe</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.online.items.map((o, i) => (
+                      <TableRow key={`${o.order_number}-${i}`}>
+                        <TableCell className="font-medium whitespace-nowrap">{o.order_number}</TableCell>
+                        <TableCell className="text-muted-foreground whitespace-nowrap">{fmtReportDay(o.date)}</TableCell>
+                        <TableCell>{o.client}</TableCell>
+                        <TableCell className="text-right whitespace-nowrap">{formatCurrency(o.amount)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -859,9 +889,35 @@ function StoreSalesTab({ data, salesData, isFiltered }: { data: StoreSalesReport
             </div>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground mb-3">
               {data.other_invoices.count} facturas emitidas sin ticket ni pedido asociado (se incluyen para que el total cuadre con Contabilidad).
             </p>
+            {data.other_invoices.items.length > 0 && (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Factura</TableHead>
+                      <TableHead>Fecha</TableHead>
+                      <TableHead>Cliente</TableHead>
+                      <TableHead>Concepto</TableHead>
+                      <TableHead className="text-right">Importe</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.other_invoices.items.map((inv, i) => (
+                      <TableRow key={`${inv.invoice_number}-${i}`}>
+                        <TableCell className="font-medium whitespace-nowrap">{inv.invoice_number}</TableCell>
+                        <TableCell className="text-muted-foreground whitespace-nowrap">{fmtReportDay(inv.date)}</TableCell>
+                        <TableCell>{inv.client}</TableCell>
+                        <TableCell className="text-muted-foreground max-w-[280px] truncate" title={inv.concept}>{inv.concept || '—'}</TableCell>
+                        <TableCell className="text-right whitespace-nowrap">{formatCurrency(inv.amount)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

@@ -5,7 +5,7 @@ import { ChevronRight, ShoppingCart, Package, TrendingUp, ArrowUp, ArrowDown, Ar
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatCurrency } from '@/lib/utils'
-import { aggregateSizeTotals } from '@/lib/reports/dimensions'
+import { aggregateSizeTotals, compareSizes } from '@/lib/reports/dimensions'
 
 type Breakdown = { size: string; store_id: string; store_name: string; units: number; revenue: number }
 type SizeBreakdown = { size: string; comprado: number; vendido: number; queda: number }
@@ -292,11 +292,15 @@ export function TopProductsChart({ products, periodMode = false }: { products: P
                               </tr>
                             </thead>
                             <tbody>
-                              {p.sizeBreakdown.map((b, j) => (
+                              {/* Tallas más vendidas primero (petición David jul-2026); a igualdad,
+                                  orden natural de talla. La más vendida se resalta en negrita. */}
+                              {[...p.sizeBreakdown]
+                                .sort((a, b) => b.vendido - a.vendido || compareSizes(a.size, b.size))
+                                .map((b, j) => (
                                 <tr key={j}>
-                                  <td className="py-0.5 font-mono">{b.size}</td>
+                                  <td className={`py-0.5 font-mono ${j === 0 && b.vendido > 0 ? 'font-semibold' : ''}`}>{b.size}</td>
                                   {!periodMode && <td className="py-0.5 text-right tabular-nums">{b.comprado}</td>}
-                                  <td className="py-0.5 text-right tabular-nums">{b.vendido}</td>
+                                  <td className={`py-0.5 text-right tabular-nums ${j === 0 && b.vendido > 0 ? 'font-semibold' : ''}`}>{b.vendido}</td>
                                   {/* Talla agotada resaltada en rojo (petición Mónica/Isma) */}
                                   <td className={`py-0.5 text-right tabular-nums ${b.queda === 0 ? 'text-red-600 font-semibold' : ''}`}>{b.queda}</td>
                                 </tr>
