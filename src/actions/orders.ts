@@ -75,6 +75,25 @@ export async function getNextTalonNumber(): Promise<number> {
 export const listOrders = protectedAction<ListParams & { status?: string }, ListResult<any>>(
   { permission: 'orders.view', auditModule: 'orders' },
   async (ctx, params) => {
+    // El rango de fechas viaja en la URL como dos escalares serializables
+    // (`date_from`/`date_to`, vía urlFilterKeys del hook useList) para que se
+    // preserven al volver del detalle. Aquí los reconstruimos en el objeto
+    // `order_date: { gte, lte }` que entiende toda la lógica de consulta,
+    // contadores y sumatorios de abajo.
+    if (params.filters && (params.filters.date_from || params.filters.date_to)) {
+      const { date_from, date_to, ...rest } = params.filters
+      params = {
+        ...params,
+        filters: {
+          ...rest,
+          order_date: {
+            ...(date_from ? { gte: date_from } : {}),
+            ...(date_to ? { lte: date_to } : {}),
+          },
+        },
+      }
+    }
+
     const statusFilter = params.filters?.status ?? params.status
     const isOverdue = statusFilter === 'overdue'
     const today = new Date().toISOString().split('T')[0]

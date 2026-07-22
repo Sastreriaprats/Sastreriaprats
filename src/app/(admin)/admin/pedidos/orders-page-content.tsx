@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -58,18 +58,28 @@ interface Props {
 
 export function OrdersPageContent({ initialView, initialStatus, initialType, initialTab }: Props) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { can } = usePermissions()
 
+  // Los filtros del tab Sastrería (estado, subtipo, rango de fechas) y la vista
+  // se persisten en la URL (vía useList con syncUrl + los helpers de abajo), de
+  // modo que al entrar en un pedido y volver con "atrás" se restauran. Estos
+  // "espejos" de estado local se inicializan LEYENDO la URL (no las props del
+  // server), para que los controles visuales queden sincronizados con el filtro
+  // restaurado. Mismo patrón que el listado de clientes.
   const [tab, setTab] = useState<TabValue>(initialTab)
-  const [view, setView] = useState<'table' | 'pipeline'>(initialView as any)
-  const [statusFilter, setStatusFilter] = useState(initialStatus || 'all')
+  const [view, setView] = useState<'table' | 'pipeline'>(
+    () => ((searchParams.get('view') || initialView) === 'pipeline' ? 'pipeline' : 'table'),
+  )
+  const [statusFilter, setStatusFilter] = useState(() => searchParams.get('status') || initialStatus || 'all')
   // Buscador independiente para el tab "Pedidos a proveedor" (no comparte
   // estado con useList(listOrders), así no dispara queries de sastrería).
   const [supplierSearch, setSupplierSearch] = useState('')
   // Subtipo dentro del tab Sastrería: all | artesanal | industrial
-  const [subTypeFilter, setSubTypeFilter] = useState<'all' | 'artesanal' | 'industrial'>(
-    initialType === 'artesanal' || initialType === 'industrial' ? initialType : 'all',
-  )
+  const [subTypeFilter, setSubTypeFilter] = useState<'all' | 'artesanal' | 'industrial'>(() => {
+    const v = searchParams.get('order_type') || initialType
+    return v === 'artesanal' || v === 'industrial' ? v : 'all'
+  })
 
   const [supplierOrders, setSupplierOrders] = useState<any[]>([])
   const [loadingSupplier, setLoadingSupplier] = useState(false)
@@ -89,6 +99,17 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
     setTab(next)
     const params = new URLSearchParams()
     if (next !== 'tailoring') params.set('tab', next)
+    const qs = params.toString()
+    router.replace(`/admin/pedidos${qs ? `?${qs}` : ''}`, { scroll: false })
+  }
+
+  // Cambiar la vista (tabla/pipeline) preservando el resto de la query, para que
+  // también se restaure al volver del detalle.
+  const changeView = (next: 'table' | 'pipeline') => {
+    setView(next)
+    const params = new URLSearchParams(searchParams.toString())
+    if (next === 'pipeline') params.set('view', next)
+    else params.delete('view')
     const qs = params.toString()
     router.replace(`/admin/pedidos${qs ? `?${qs}` : ''}`, { scroll: false })
   }
@@ -145,9 +166,12 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
       .then(({ count }) => setOnlineActiveCount(count ?? 0))
   }, [])
 
-  // Rango de fechas (sobre order_date) para el tab Sastrería.
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  // Rango de fechas (sobre order_date) para el tab Sastrería. Se inicializa desde
+  // la URL para restaurarlo al volver del detalle; se persiste como date_from/
+  // date_to (ver urlFilterKeys del useList) y la acción lo reconstruye en el
+  // filtro order_date { gte, lte }.
+  const [dateFrom, setDateFrom] = useState(() => searchParams.get('date_from') || '')
+  const [dateTo, setDateTo] = useState(() => searchParams.get('date_to') || '')
 
   const {
     data: orders, total, totalPages, page, setPage,
@@ -158,13 +182,14 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
     pageSize: 25,
     defaultSort: 'order_date',
     defaultOrder: 'desc',
-    defaultFilters: initialStatus === 'overdue'
-      ? { status: 'overdue', ...(subTypeFilter !== 'all' ? { order_type: subTypeFilter } : {}) }
-      : (subTypeFilter !== 'all' ? { order_type: subTypeFilter } : {}),
+    // Los filtros persistidos (estado, subtipo, rango de fechas) se leen de la
+    // URL dentro del hook (urlFilterKeys), así que no hace falta sembrarlos aquí.
+    defaultFilters: {},
     // Página/búsqueda/filtros en la URL: al volver del detalle se restauran.
-    // El rango de fechas (order_date {gte,lte}) no es serializable y queda fuera.
+    // El rango de fechas viaja como date_from/date_to (escalares serializables);
+    // listOrders los reconstruye en el filtro order_date { gte, lte }.
     syncUrl: true,
-    urlFilterKeys: ['status', 'order_type'],
+    urlFilterKeys: ['status', 'order_type', 'date_from', 'date_to'],
   })
 
   // Contador de pedidos de sastrería activos (excluye delivered y cancelled)
@@ -208,20 +233,17 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
     setFilters(prev => ({ ...prev, order_type: v !== 'all' ? v : undefined }))
   }
 
-  // Aplica el rango de fechas al filtro `order_date` (objeto { gte, lte }) que
-  // listOrders/queryList saben interpretar. Vacío en ambos extremos → se quita.
+  // Aplica el rango de fechas como date_from/date_to (escalares que el hook
+  // sincroniza con la URL); listOrders los traduce al filtro order_date
+  // { gte, lte }. Vacío en ambos extremos → se quitan.
   const applyDateRange = (from: string, to: string) => {
     setDateFrom(from)
     setDateTo(to)
-    setFilters(prev => {
-      const next = { ...prev }
-      if (from || to) {
-        next.order_date = { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) }
-      } else {
-        delete next.order_date
-      }
-      return next
-    })
+    setFilters(prev => ({
+      ...prev,
+      date_from: from || undefined,
+      date_to: to || undefined,
+    }))
   }
 
   const hasActiveFilters = statusFilter !== 'all' || subTypeFilter !== 'all' || !!dateFrom || !!dateTo
@@ -330,10 +352,10 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
         <div className="flex items-center gap-2">
           {tab === 'tailoring' && (
             <div className="flex rounded-lg border p-0.5">
-              <Button variant={view === 'table' ? 'default' : 'ghost'} size="sm" className="h-7 px-2" onClick={() => setView('table')}>
+              <Button variant={view === 'table' ? 'default' : 'ghost'} size="sm" className="h-7 px-2" onClick={() => changeView('table')}>
                 <LayoutList className="h-4 w-4" />
               </Button>
-              <Button variant={view === 'pipeline' ? 'default' : 'ghost'} size="sm" className="h-7 px-2" onClick={() => setView('pipeline')}>
+              <Button variant={view === 'pipeline' ? 'default' : 'ghost'} size="sm" className="h-7 px-2" onClick={() => changeView('pipeline')}>
                 <Kanban className="h-4 w-4" />
               </Button>
             </div>
