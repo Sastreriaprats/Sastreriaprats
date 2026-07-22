@@ -253,10 +253,13 @@ export type StoreSalesStoreRow = {
   collected_total: number // boutique + gift_cards + tailoring_collected
 }
 
+export type OnlineOrderDetail = { order_number: string; date: string | null; client: string; amount: number }
+export type OtherInvoiceDetail = { invoice_number: string; date: string | null; client: string; concept: string; amount: number }
+
 export type StoreSalesReport = {
   stores: StoreSalesStoreRow[]
-  online: { count: number; total: number }
-  other_invoices: { count: number; total: number }
+  online: { count: number; total: number; items: OnlineOrderDetail[] }
+  other_invoices: { count: number; total: number; items: OtherInvoiceDetail[] }
   totals: {
     boutique: number; gift_cards: number; tailoring_collected: number
     online: number; other_invoices: number
@@ -268,6 +271,16 @@ export type StoreSalesReport = {
 const emptyCategoryTotals = (): Record<TailoringCategoryKey, number> => ({
   sastreria_artesanal: 0, sastreria_industrial: 0, camiseria_artesanal: 0, camiseria_industrial: 0,
 })
+
+type OnlineOrderRaw = {
+  order_number?: string; subtotal?: number; total?: number; paid_at?: string | null
+  shipping_address?: { first_name?: string; last_name?: string } | null
+  clients?: { first_name?: string; last_name?: string } | { first_name?: string; last_name?: string }[] | null
+}
+type InvoiceRaw = {
+  invoice_number?: string; subtotal?: number; total?: number
+  invoice_date?: string | null; client_name?: string | null; notes?: string | null
+}
 
 export const getStoreSalesReport = protectedAction<
   { start_date: string; end_date: string; store_id?: string; tax_mode?: TaxMode },
@@ -333,26 +346,26 @@ export const getStoreSalesReport = protectedAction<
       //    concreta). Por FECHA DE PAGO (paid_at), que es la fecha contable de
       //    la factura W: así el total cuadra exacto con Dashboard/Contabilidad.
       store_id
-        ? Promise.resolve([] as { subtotal?: number; total?: number }[])
-        : readAllPaged<{ subtotal?: number; total?: number }>((f, t) =>
+        ? Promise.resolve([] as OnlineOrderRaw[])
+        : readAllPaged<OnlineOrderRaw>((f, t) =>
           ctx.adminClient
             .from('online_orders')
-            .select('subtotal, total')
+            .select('order_number, subtotal, total, paid_at, shipping_address, clients(first_name, last_name)')
             .gte('paid_at', startTs)
             .lte('paid_at', endTs)
             .in('status', ['paid', 'processing', 'shipped', 'delivered'])
-            .order('id', { ascending: true })
+            .order('paid_at', { ascending: true })
             .range(f, t)),
       // 5) Facturas emitidas que son ingreso por sí mismas (sueltas, sin ticket,
       //    pedido, reserva NI pedido online). Las de la serie W (online_order_id)
       //    se EXCLUYEN: la tienda online ya se suma en el bloque 4 — dejarlas
       //    aquí contaba el online dos veces en el total del informe.
       store_id
-        ? Promise.resolve([] as { subtotal?: number; total?: number }[])
-        : readAllPaged<{ subtotal?: number; total?: number }>((f, t) =>
+        ? Promise.resolve([] as InvoiceRaw[])
+        : readAllPaged<InvoiceRaw>((f, t) =>
           ctx.adminClient
             .from('invoices')
-            .select('subtotal, total')
+            .select('invoice_number, subtotal, total, invoice_date, client_name, notes')
             .eq('invoice_type', 'issued')
             .is('sale_id', null)
             .is('tailoring_order_id', null)
@@ -361,7 +374,7 @@ export const getStoreSalesReport = protectedAction<
             .not('status', 'in', '(draft,cancelled)')
             .gte('invoice_date', start_date)
             .lte('invoice_date', end_date)
-            .order('id', { ascending: true })
+            .order('invoice_date', { ascending: true })
             .range(f, t)),
     ])
 
@@ -475,13 +488,32 @@ export const getStoreSalesReport = protectedAction<
       row.collected_total = row.boutique + row.gift_cards + row.tailoring_collected
     }
 
+    const onlineName = (o: OnlineOrderRaw): string => {
+      const cl = Array.isArray(o.clients) ? o.clients[0] : o.clients
+      const from = (p?: { first_name?: string; last_name?: string } | null) =>
+        [p?.first_name, p?.last_name].filter(Boolean).join(' ').trim()
+      return from(cl) || from(o.shipping_address) || 'Cliente online'
+    }
     const online = {
       count: onlineRows.length,
       total: onlineRows.reduce((s, o) => s + (net ? (Number(o.subtotal) || 0) : (Number(o.total) || 0)), 0),
+      items: onlineRows.map((o): OnlineOrderDetail => ({
+        order_number: o.order_number || '—',
+        date: o.paid_at ?? null,
+        client: onlineName(o),
+        amount: net ? (Number(o.subtotal) || 0) : (Number(o.total) || 0),
+      })),
     }
     const other_invoices = {
       count: invoiceRows.length,
       total: invoiceRows.reduce((s, inv) => s + (net ? (Number(inv.subtotal) || 0) : (Number(inv.total) || 0)), 0),
+      items: invoiceRows.map((inv): OtherInvoiceDetail => ({
+        invoice_number: inv.invoice_number || '—',
+        date: inv.invoice_date ?? null,
+        client: inv.client_name?.trim() || '—',
+        concept: inv.notes?.trim() || '',
+        amount: net ? (Number(inv.subtotal) || 0) : (Number(inv.total) || 0),
+      })),
     }
 
     const stores = [...rowsByStore.values()].sort((a, b) => b.collected_total - a.collected_total)
