@@ -929,7 +929,7 @@ export const findSaleByTicketNumber = protectedAction<
     // Intento 1: match exacto (case-insensitive) en estados devolvibles
     const { data: exactMatch } = await ctx.adminClient
       .from('sales')
-      .select('*, sale_lines(*), clients(full_name)')
+      .select('*, sale_lines(*), clients(full_name), sale_payments(payment_method, amount)')
       .ilike('ticket_number', trimmed)
       .in('status', ['completed', 'partially_returned'])
       .maybeSingle()
@@ -952,7 +952,7 @@ export const findSaleByTicketNumber = protectedAction<
       // Cargar la venta completa
       const { data: sale } = await ctx.adminClient
         .from('sales')
-        .select('*, sale_lines(*), clients(full_name)')
+        .select('*, sale_lines(*), clients(full_name), sale_payments(payment_method, amount)')
         .eq('id', candidates[0].id)
         .maybeSingle()
       return success(sale ? { sale } : null)
@@ -1011,7 +1011,7 @@ export const getSaleByIdForReturn = protectedAction<
   async (ctx, { saleId }) => {
     const { data: sale } = await ctx.adminClient
       .from('sales')
-      .select('*, sale_lines(*), clients(full_name)')
+      .select('*, sale_lines(*), clients(full_name), sale_payments(payment_method, amount)')
       .eq('id', saleId)
       .maybeSingle()
     return success(sale ? { sale } : null)
@@ -1088,7 +1088,7 @@ export const findSaleByBarcode = protectedAction<
     // 3) Devolver la venta completa con líneas y cliente
     const { data: sale } = await ctx.adminClient
       .from('sales')
-      .select('*, sale_lines(*), clients(full_name)')
+      .select('*, sale_lines(*), clients(full_name), sale_payments(payment_method, amount)')
       .eq('id', saleId)
       .single()
 
@@ -1097,8 +1097,10 @@ export const findSaleByBarcode = protectedAction<
 )
 
 export const createReturn = protectedAction<{
-  original_sale_id: string; return_type: 'exchange' | 'voucher'
+  original_sale_id: string; return_type: 'exchange' | 'voucher' | 'refund'
   line_ids: string[]; reason: string; store_id: string
+  refund_method?: 'cash' | 'card' | 'bizum' | 'transfer' | null
+  return_date?: string | null
 }, any>(
   {
     permission: 'pos.sell',
@@ -1108,6 +1110,21 @@ export const createReturn = protectedAction<{
     revalidate: ['/pos'],
   },
   async (ctx, input) => {
+    if (!['voucher', 'refund'].includes(input.return_type)) {
+      return failure('Tipo de devolución no válido', 'VALIDATION')
+    }
+    if (input.return_type === 'refund'
+      && !['cash', 'card', 'bizum', 'transfer'].includes(input.refund_method ?? '')) {
+      return failure('Selecciona el método por el que se devuelve el importe', 'VALIDATION')
+    }
+    const returnDate = (input.return_date ?? '').trim() || null
+    if (returnDate) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(returnDate)) return failure('Fecha de devolución no válida', 'VALIDATION')
+      if (returnDate > new Date().toISOString().slice(0, 10)) {
+        return failure('La fecha de la devolución no puede ser futura', 'VALIDATION')
+      }
+    }
+
     const { data: result, error: rpcError } = await ctx.adminClient.rpc('rpc_create_return', {
       p_original_sale_id: input.original_sale_id,
       p_return_type: input.return_type,
@@ -1115,6 +1132,8 @@ export const createReturn = protectedAction<{
       p_reason: input.reason,
       p_store_id: input.store_id,
       p_user_id: ctx.userId,
+      p_refund_method: input.return_type === 'refund' ? input.refund_method : null,
+      p_return_date: returnDate,
     })
 
     if (rpcError) return failure(rpcError.message)
@@ -1150,11 +1169,16 @@ export const createReturn = protectedAction<{
     )
     if (!returnJournal.ok) console.error(`[createReturn] asiento de devolución del ticket ${originalTicketNumber ?? input.original_sale_id} falló: ${returnJournal.error}`)
 
+    const refundLabels: Record<string, string> = { cash: 'efectivo', card: 'tarjeta', bizum: 'Bizum', transfer: 'transferencia' }
+    const modeDesc = input.return_type === 'refund'
+      ? ` · Reintegro en ${refundLabels[input.refund_method ?? ''] ?? input.refund_method}`
+      : ''
     return success({
       ...result,
       auditEntityId: String(result.return_id),
-      auditDescription: `Devolución del ticket ${originalTicketNumber ?? '—'}${originalClientName ? ' · ' + originalClientName : ''}`,
+      auditDescription: `Devolución del ticket ${originalTicketNumber ?? '—'}${originalClientName ? ' · ' + originalClientName : ''}${modeDesc}`,
       voucher_code: result.voucher_code ?? null,
+      refund_method: result.refund_method ?? null,
       original_ticket_number: originalTicketNumber,
       original_client_name: originalClientName,
       return_created_at: returnRow?.created_at ?? new Date().toISOString(),

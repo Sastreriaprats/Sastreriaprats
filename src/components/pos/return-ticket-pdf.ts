@@ -22,7 +22,8 @@ export interface ReturnTicketLine {
 }
 
 export interface ReturnTicketData {
-  return_type: 'voucher' | 'exchange'
+  return_type: 'voucher' | 'exchange' | 'refund'
+  refund_method?: string | null
   original_ticket_number: string | null
   client_name?: string | null
   total_returned: number
@@ -60,7 +61,9 @@ export async function generateReturnTicketPdf(data: ReturnTicketData, mode: 'dow
   const timeStr = createdAt.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
   const totalArticles = data.lines.reduce((a, l) => a + (l.quantity || 1), 0)
   const logoBase64 = await getLogoBase64Client()
-  const kindLabel = data.return_type === 'voucher' ? 'VALE DE DEVOLUCIÓN' : 'CAMBIO DIRECTO'
+  const kindLabel = data.return_type === 'voucher' ? 'VALE DE DEVOLUCIÓN'
+    : data.return_type === 'refund' ? 'DEVOLUCIÓN DE IMPORTE'
+    : 'CAMBIO DIRECTO'
 
   const content: Content[] = [
     ...(logoBase64
@@ -146,6 +149,14 @@ export async function generateReturnTicketPdf(data: ReturnTicketData, mode: 'dow
       { text: 'CÓDIGO DEL VALE', fontSize: FONT_SMALL, alignment: 'center', color: '#555', margin: [0, 0, 0, 2] as [number, number, number, number] },
       { text: data.voucher_code, fontSize: FONT_HEAD + 2, bold: true, alignment: 'center', margin: [0, 0, 0, 2] as [number, number, number, number] },
       { text: `Válido hasta ${expiryStr}`, fontSize: FONT_SMALL, alignment: 'center', color: '#555', margin: [0, 0, 0, 8] as [number, number, number, number] },
+    )
+  } else if (data.return_type === 'refund') {
+    const REFUND_LABELS: Record<string, string> = { cash: 'EFECTIVO', card: 'TARJETA', bizum: 'BIZUM', transfer: 'TRANSFERENCIA' }
+    const methodLabel = REFUND_LABELS[data.refund_method ?? ''] ?? (data.refund_method ?? '—').toUpperCase()
+    content.push(
+      { canvas: [{ type: 'line', x1: 0, y1: 0, x2: W_PT - 2 * MARGIN_PT, y2: 0, lineWidth: 0.5 }], margin: [0, 0, 0, 6] as [number, number, number, number] },
+      { text: 'IMPORTE DEVUELTO EN', fontSize: FONT_SMALL, alignment: 'center', color: '#555', margin: [0, 0, 0, 2] as [number, number, number, number] },
+      { text: methodLabel, fontSize: FONT_HEAD + 2, bold: true, alignment: 'center', margin: [0, 0, 0, 8] as [number, number, number, number] },
     )
   } else if (data.return_type === 'exchange') {
     content.push(

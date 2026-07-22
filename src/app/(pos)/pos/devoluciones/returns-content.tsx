@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { ArrowLeft, Search, Loader2, ArrowRightLeft, Ticket, ShoppingBag, Barcode, X, Package, Printer, Receipt } from 'lucide-react'
+import { ArrowLeft, Search, Loader2, ArrowRightLeft, Ticket, ShoppingBag, Barcode, X, Package, Printer, Receipt, Banknote } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/components/providers/auth-provider'
 import { useAction } from '@/hooks/use-action'
@@ -35,6 +35,14 @@ interface TicketCandidate {
   total: number
   client_name: string | null
 }
+
+type RefundMethod = 'cash' | 'card' | 'bizum' | 'transfer'
+
+const PAYMENT_LABELS: Record<string, string> = {
+  cash: 'Efectivo', card: 'Tarjeta', bizum: 'Bizum', transfer: 'Transferencia', voucher: 'Vale', mixed: 'Mixto',
+}
+
+const todayStr = () => new Date().toISOString().slice(0, 10)
 
 interface ReplacementItem {
   variantId: string
@@ -73,7 +81,9 @@ export function ReturnsContent() {
   const [ticketCandidates, setTicketCandidates] = useState<TicketCandidate[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [selectedLineIds, setSelectedLineIds] = useState<string[]>([])
-  const [returnType, setReturnType] = useState<'exchange' | 'voucher'>('voucher')
+  const [returnType, setReturnType] = useState<'exchange' | 'voucher' | 'refund'>('voucher')
+  const [refundMethod, setRefundMethod] = useState<RefundMethod | null>(null)
+  const [returnDate, setReturnDate] = useState(todayStr())
   const [reason, setReason] = useState('')
   const barcodeBufferRef = useRef({ digits: '', firstAt: 0 })
   const barcodeInputRef = useRef<HTMLInputElement>(null)
@@ -213,6 +223,22 @@ export function ReturnsContent() {
     ?.filter((l: any) => selectedLineIds.includes(l.id))
     ?.reduce((sum: number, l: any) => sum + l.line_total, 0) || 0
 
+  // Cómo se pagó el ticket original (para mostrarlo y preseleccionar el reintegro)
+  const salePayments: Array<{ payment_method: string; amount: number }> = (foundSale?.sale_payments ?? [])
+    .map((p: any) => ({ payment_method: String(p.payment_method), amount: Number(p.amount ?? 0) }))
+  const originalMethods = new Set(salePayments.map((p) => p.payment_method))
+
+  // Al cargar un ticket nuevo: fecha a hoy y método de reintegro = el del pago
+  // original (el de mayor importe que no sea vale).
+  useEffect(() => {
+    if (!foundSale) return
+    setReturnDate(todayStr())
+    const candidates = (foundSale.sale_payments ?? [])
+      .filter((p: any) => ['cash', 'card', 'bizum', 'transfer'].includes(String(p.payment_method)))
+      .sort((a: any, b: any) => Number(b.amount ?? 0) - Number(a.amount ?? 0))
+    setRefundMethod(candidates.length > 0 ? (String(candidates[0].payment_method) as RefundMethod) : null)
+  }, [foundSale])
+
   // Búsqueda en vivo de productos para el cambio directo (debounce 300ms)
   useEffect(() => {
     if (returnType !== 'exchange') return
@@ -285,13 +311,14 @@ export function ReturnsContent() {
   const replacementsTotal = replacements.reduce((sum, r) => sum + r.unitPrice * r.quantity, 0)
   const priceDiff = replacementsTotal - selectedTotal // positivo = cliente paga; negativo = se devuelve saldo
 
-  // Devolución a VALE (flujo existente, sin cambios)
+  // Devolución a VALE o REINTEGRO al método de pago (misma RPC, tipo distinto)
   const { execute, isLoading: isProcessing } = useAction(createReturn, {
-    successMessage: 'Vale de devolución generado',
+    successMessage: 'Devolución procesada',
     onSuccess: (data: any) => {
       const storeConfig = getStorePdfData(activeStoreName)
       setCompletedReturn({
-        return_type: 'voucher',
+        return_type: data?.return_type === 'refund' ? 'refund' : 'voucher',
+        refund_method: data?.refund_method ?? null,
         original_ticket_number: data?.original_ticket_number ?? foundSale?.ticket_number ?? null,
         client_name: data?.original_client_name ?? foundSale?.clients?.full_name ?? null,
         total_returned: Number(data?.total_returned ?? selectedTotal ?? 0),
@@ -311,6 +338,12 @@ export function ReturnsContent() {
         storePhones: storeConfig.phones,
       })
       if (data?.voucher_code) toast.success(`Código del vale: ${data.voucher_code}`, { duration: 10000 })
+      if (data?.return_type === 'refund' && data?.refund_method) {
+        toast.success(
+          `Devolver ${formatCurrency(Number(data?.total_returned ?? 0))} al cliente en ${(PAYMENT_LABELS[data.refund_method] ?? data.refund_method).toLowerCase()}`,
+          { duration: 10000 },
+        )
+      }
     },
   })
 
@@ -358,6 +391,8 @@ export function ReturnsContent() {
     setReplacements([])
     setProductQuery('')
     setProductResults([])
+    setRefundMethod(null)
+    setReturnDate(todayStr())
   }
 
   const handlePrintReturnTicket = async () => {
@@ -385,14 +420,27 @@ export function ReturnsContent() {
       if (replacements.length === 0) return false
       if (!cashSessionId) return false // la venta del cambio necesita caja abierta
     }
+    if (returnType === 'refund') {
+      if (!refundMethod) return false
+      if (!returnDate || returnDate > todayStr()) return false
+    }
+    if (returnType === 'voucher' && (!returnDate || returnDate > todayStr())) return false
     return true
   }
 
-  // Lanza el flujo correcto según el tipo: vale (createReturn) o cambio (processExchange)
+  // Lanza el flujo correcto según el tipo: vale/reintegro (createReturn) o cambio (processExchange)
   const handleProcess = () => {
     if (!foundSale || !activeStoreId) return
-    if (returnType === 'voucher') {
-      execute({ original_sale_id: foundSale.id, return_type: 'voucher', line_ids: selectedLineIds, reason, store_id: activeStoreId })
+    if (returnType === 'voucher' || returnType === 'refund') {
+      execute({
+        original_sale_id: foundSale.id,
+        return_type: returnType,
+        line_ids: selectedLineIds,
+        reason,
+        store_id: activeStoreId,
+        refund_method: returnType === 'refund' ? refundMethod : null,
+        return_date: returnDate !== todayStr() ? returnDate : null,
+      })
       return
     }
     // Cambio: una sola llamada atómica
@@ -498,6 +546,16 @@ export function ReturnsContent() {
                     <span className="text-sm text-muted-foreground">{formatDateTime(foundSale.created_at)}</span>
                   </div>
                   {foundSale.clients && <p className="text-sm text-muted-foreground">Cliente: {foundSale.clients.full_name}</p>}
+                  {salePayments.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      <span className="text-xs text-muted-foreground">Pagado con:</span>
+                      {salePayments.map((p, i) => (
+                        <Badge key={i} variant="secondary" className="text-xs font-normal">
+                          {PAYMENT_LABELS[p.payment_method] ?? p.payment_method} · {formatCurrency(p.amount)}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm font-semibold mb-3">Selecciona los artículos a devolver:</p>
@@ -531,11 +589,16 @@ export function ReturnsContent() {
 
                     <div className="space-y-2">
                       <Label>Tipo de devolución</Label>
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-3 gap-3">
                         <Button variant={returnType === 'voucher' ? 'default' : 'outline'} className="h-16 flex-col gap-1"
                           onClick={() => setReturnType('voucher')}>
                           <Ticket className="h-5 w-5" /><span className="text-sm">Vale de compra</span>
                           <span className="text-xs opacity-70">Válido 1 año</span>
+                        </Button>
+                        <Button variant={returnType === 'refund' ? 'default' : 'outline'} className="h-16 flex-col gap-1"
+                          onClick={() => setReturnType('refund')}>
+                          <Banknote className="h-5 w-5" /><span className="text-sm">Devolver importe</span>
+                          <span className="text-xs opacity-70">Al método de pago</span>
                         </Button>
                         <Button variant={returnType === 'exchange' ? 'default' : 'outline'} className="h-16 flex-col gap-1"
                           onClick={() => setReturnType('exchange')}>
@@ -549,6 +612,47 @@ export function ReturnsContent() {
                         </p>
                       )}
                     </div>
+
+                    {returnType === 'refund' && (
+                      <div className="space-y-2 p-3 border rounded bg-muted/30">
+                        <Label className="text-sm font-semibold">Método por el que se devuelve el importe</Label>
+                        <div className="grid grid-cols-4 gap-1.5">
+                          {(['cash', 'card', 'bizum', 'transfer'] as const).map((m) => (
+                            <Button key={m} type="button" size="sm"
+                              variant={refundMethod === m ? 'default' : 'outline'}
+                              className="h-9 text-xs"
+                              onClick={() => setRefundMethod(m)}>
+                              {PAYMENT_LABELS[m]}{originalMethods.has(m) ? ' ✓' : ''}
+                            </Button>
+                          ))}
+                        </div>
+                        <p className="text-xs text-muted-foreground">✓ = método con el que se pagó el ticket original.</p>
+                        {refundMethod && !originalMethods.has(refundMethod) && (
+                          <p className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded p-2">
+                            El ticket no se pagó por {PAYMENT_LABELS[refundMethod].toLowerCase()}. Asegúrate de que es lo acordado con el cliente.
+                          </p>
+                        )}
+                        {refundMethod === 'cash' && !cashSessionId && returnDate === todayStr() && (
+                          <p className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded p-2">
+                            No hay caja abierta en esta tienda: para devolver efectivo hoy hace falta una caja abierta.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {returnType !== 'exchange' && (
+                      <div className="space-y-2">
+                        <Label>Fecha de la devolución</Label>
+                        <Input type="date" value={returnDate} max={todayStr()}
+                          onChange={(e) => setReturnDate(e.target.value)} className="w-44" />
+                        {returnDate !== todayStr() && returnDate && (
+                          <p className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded p-2">
+                            La devolución se registrará con fecha {returnDate.split('-').reverse().join('/')}
+                            {returnType === 'refund' && refundMethod === 'cash' ? ' y se ajustará la caja de ese día' : ''}.
+                          </p>
+                        )}
+                      </div>
+                    )}
 
                     {returnType === 'exchange' && (
                       <div className="space-y-3 p-3 border rounded bg-muted/30">
@@ -674,7 +778,9 @@ export function ReturnsContent() {
                       disabled={isProcessing || isExchanging || !canProcess()}
                       className="w-full h-12 bg-prats-navy hover:bg-prats-navy-light">
                       {(isProcessing || isExchanging) ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <ArrowRightLeft className="mr-2 h-5 w-5" />}
-                      {returnType === 'voucher' ? 'Generar vale de devolución' : 'Procesar cambio'}
+                      {returnType === 'voucher' ? 'Generar vale de devolución'
+                        : returnType === 'refund' ? `Devolver ${formatCurrency(selectedTotal)}${refundMethod ? ` en ${PAYMENT_LABELS[refundMethod].toLowerCase()}` : ''}`
+                        : 'Procesar cambio'}
                     </Button>
                   </CardContent>
                 </Card>
@@ -689,7 +795,9 @@ export function ReturnsContent() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Receipt className="h-5 w-5 text-green-600" />
-              {completedReturn?.return_type === 'voucher' ? 'Vale de devolución generado' : 'Cambio realizado'}
+              {completedReturn?.return_type === 'voucher' ? 'Vale de devolución generado'
+                : completedReturn?.return_type === 'refund' ? 'Devolución de importe registrada'
+                : 'Cambio realizado'}
             </DialogTitle>
           </DialogHeader>
           {completedReturn && (
@@ -719,6 +827,14 @@ export function ReturnsContent() {
                   <div className="flex justify-between items-center py-2 border-b border-slate-100">
                     <dt className="text-slate-600">Diferencia cobrada</dt>
                     <dd className="font-semibold tabular-nums text-orange-700">{formatCurrency(completedReturn.diferencia_cobrada ?? 0)}</dd>
+                  </div>
+                )}
+                {completedReturn.return_type === 'refund' && completedReturn.refund_method && (
+                  <div className="flex flex-col gap-1 py-2 rounded bg-blue-50 border border-blue-200 px-3">
+                    <dt className="text-xs text-blue-800 uppercase tracking-wide font-medium">Devolver al cliente</dt>
+                    <dd className="font-bold text-lg text-blue-900">
+                      {formatCurrency(completedReturn.total_returned)} en {(PAYMENT_LABELS[completedReturn.refund_method] ?? completedReturn.refund_method).toLowerCase()}
+                    </dd>
                   </div>
                 )}
                 {completedReturn.client_name && (

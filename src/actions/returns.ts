@@ -9,6 +9,7 @@ export type ReturnRow = {
   id: string
   created_at: string
   return_type: string
+  refund_method: string | null
   total_returned: number
   reason: string | null
   notes: string | null
@@ -27,7 +28,7 @@ export type ReturnRow = {
 }
 
 const SELECT = `
-  id, created_at, return_type, total_returned, reason, notes,
+  id, created_at, return_type, refund_method, total_returned, reason, notes,
   original_sale_id, voucher_id, exchange_sale_id, store_id,
   original_sale:sales!returns_original_sale_id_fkey ( id, ticket_number, total, client:clients ( full_name ) ),
   voucher:vouchers ( code, status, remaining_amount, original_amount ),
@@ -36,7 +37,7 @@ const SELECT = `
 `
 
 type RawReturn = {
-  id: string; created_at: string; return_type: string; total_returned: number
+  id: string; created_at: string; return_type: string; refund_method: string | null; total_returned: number
   reason: string | null; notes: string | null; original_sale_id: string | null; voucher_id: string | null; store_id: string | null
   original_sale: { id: string; ticket_number: string | null; total: number | null; client: { full_name: string | null } | null } | null
   voucher: { code: string | null; status: string | null; remaining_amount: number | null; original_amount: number | null } | null
@@ -49,6 +50,7 @@ function toRow(r: RawReturn): ReturnRow {
     id: r.id,
     created_at: r.created_at,
     return_type: r.return_type,
+    refund_method: r.refund_method ?? null,
     total_returned: Number(r.total_returned),
     reason: r.reason,
     notes: r.notes,

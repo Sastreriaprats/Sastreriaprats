@@ -14,7 +14,8 @@ import { useList } from '@/hooks/use-list'
 import { listReturns, type ReturnRow } from '@/actions/returns'
 import { formatCurrency, formatDate } from '@/lib/utils'
 
-const TYPE_LABEL: Record<string, string> = { voucher: 'Vale', exchange: 'Cambio', cash: 'Efectivo' }
+const TYPE_LABEL: Record<string, string> = { voucher: 'Vale', exchange: 'Cambio', cash: 'Efectivo', refund: 'Reintegro' }
+const REFUND_METHOD_LABEL: Record<string, string> = { cash: 'efectivo', card: 'tarjeta', bizum: 'Bizum', transfer: 'transferencia' }
 const VOUCHER_BADGE: Record<string, string> = {
   active: 'bg-green-100 text-green-700', used: 'bg-gray-100 text-gray-600',
   cancelled: 'bg-red-100 text-red-700', partially_used: 'bg-amber-100 text-amber-700', expired: 'bg-gray-100 text-gray-500',
@@ -66,6 +67,7 @@ export function ReturnsListContent() {
           <SelectContent>
             <SelectItem value="all">Todos los tipos</SelectItem>
             <SelectItem value="voucher">Vale</SelectItem>
+            <SelectItem value="refund">Reintegro</SelectItem>
             <SelectItem value="exchange">Cambio</SelectItem>
           </SelectContent>
         </Select>
@@ -122,7 +124,12 @@ export function ReturnsListContent() {
                   <TableCell className="whitespace-nowrap">{formatDate(r.created_at)}</TableCell>
                   <TableCell className="font-mono text-xs">{r.ticket_number ?? '—'}</TableCell>
                   <TableCell>{r.client_name ?? '—'}</TableCell>
-                  <TableCell>{TYPE_LABEL[r.return_type] ?? r.return_type}</TableCell>
+                  <TableCell>
+                    {TYPE_LABEL[r.return_type] ?? r.return_type}
+                    {r.return_type === 'refund' && r.refund_method
+                      ? ` (${REFUND_METHOD_LABEL[r.refund_method] ?? r.refund_method})`
+                      : ''}
+                  </TableCell>
                   <TableCell className="text-right tabular-nums">{formatCurrency(r.total_returned)}</TableCell>
                   <TableCell>
                     {r.return_type === 'voucher' && r.voucher_status ? (

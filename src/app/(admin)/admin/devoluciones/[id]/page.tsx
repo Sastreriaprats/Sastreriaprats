@@ -13,7 +13,8 @@ import { ReturnCancelButton } from './return-cancel-button'
 
 export const metadata: Metadata = { title: 'Detalle de devolución' }
 
-const TYPE_LABEL: Record<string, string> = { voucher: 'Vale', exchange: 'Cambio', cash: 'Efectivo' }
+const TYPE_LABEL: Record<string, string> = { voucher: 'Vale', exchange: 'Cambio', cash: 'Efectivo', refund: 'Reintegro' }
+const REFUND_METHOD_LABEL: Record<string, string> = { cash: 'Efectivo', card: 'Tarjeta', bizum: 'Bizum', transfer: 'Transferencia' }
 const VOUCHER_BADGE: Record<string, string> = {
   active: 'bg-green-100 text-green-700', used: 'bg-gray-100 text-gray-600',
   cancelled: 'bg-red-100 text-red-700', partially_used: 'bg-amber-100 text-amber-700', expired: 'bg-gray-100 text-gray-500',
@@ -49,6 +50,9 @@ export default async function ReturnDetailPage(props: { params: Promise<{ id: st
             <p><span className="text-muted-foreground">Ticket original:</span> <span className="font-mono">{r.ticket_number ?? '—'}</span>{r.sale_total != null && <span className="text-muted-foreground"> · {formatCurrency(r.sale_total)}</span>}</p>
             <p><span className="text-muted-foreground">Cliente:</span> {r.client_name ?? '—'}</p>
             <p><span className="text-muted-foreground">Tipo:</span> {TYPE_LABEL[r.return_type] ?? r.return_type}</p>
+            {r.return_type === 'refund' && (
+              <p><span className="text-muted-foreground">Método del reintegro:</span> {r.refund_method ? (REFUND_METHOD_LABEL[r.refund_method] ?? r.refund_method) : '—'}</p>
+            )}
             <p><span className="text-muted-foreground">Importe devuelto:</span> {formatCurrency(r.total_returned)}</p>
             <p><span className="text-muted-foreground">Procesada por:</span> {r.processed_by_name ?? '—'}</p>
             <p><span className="text-muted-foreground">Tienda:</span> {r.store_name ?? '—'}</p>
