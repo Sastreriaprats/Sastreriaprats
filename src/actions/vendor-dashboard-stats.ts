@@ -21,6 +21,7 @@ export interface VendorDashboardStats {
     target: number
     actual: number
   } | null
+  employeeTodaySales: number
   employeeMonthSales: number
   employeeYearSales: number
   todaySales: VendorTodaySaleRow[]
@@ -78,19 +79,30 @@ export async function getVendorDashboardStats(
 
     if (todaySalesRes.error) return { error: todaySalesRes.error.message }
 
-    // Mes en hora de Madrid (los created_at son UTC).
+    // Mes y día en hora de Madrid (los created_at son UTC). Así "hoy" usa la
+    // MISMA vara neta que mes/año, no el total con IVA de la tabla de tickets.
     const madridMonth = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit',
     })
+    const madridDay = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit',
+    })
     const currentMonthKey = madridMonth.format(now)
+    const currentDayKey = madridDay.format(now)
+    let employeeTodaySales = 0
     let employeeMonthSales = 0
     let employeeYearSales = 0
     for (const l of billedLines) {
       employeeYearSales += l.amount_net
-      if (madridMonth.format(new Date(l.created_at)) === currentMonthKey) {
+      const created = new Date(l.created_at)
+      if (madridMonth.format(created) === currentMonthKey) {
         employeeMonthSales += l.amount_net
       }
+      if (madridDay.format(created) === currentDayKey) {
+        employeeTodaySales += l.amount_net
+      }
     }
+    employeeTodaySales = Math.round(employeeTodaySales * 100) / 100
     employeeMonthSales = Math.round(employeeMonthSales * 100) / 100
     employeeYearSales = Math.round(employeeYearSales * 100) / 100
 
@@ -154,6 +166,7 @@ export async function getVendorDashboardStats(
     return {
       data: {
         storeGoal,
+        employeeTodaySales,
         employeeMonthSales,
         employeeYearSales,
         todaySales,

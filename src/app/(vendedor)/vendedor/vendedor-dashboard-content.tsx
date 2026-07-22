@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -31,6 +32,7 @@ function formatHourMinute(iso: string): string {
 }
 
 const quickLinks = [
+  { label: 'Mis ventas', href: '/vendedor/mis-ventas', icon: Receipt, description: 'Todas mis ventas y comisión' },
   { label: 'Clientes', href: '/vendedor/clientes', icon: Users, description: 'Ver y gestionar clientes' },
   { label: 'Productos y Stock', href: '/vendedor/stock', icon: Package, description: 'Consultar productos y existencias' },
   { label: 'Cobros', href: '/vendedor/cobros', icon: CircleDollarSign, description: 'Cobros pendientes' },
@@ -84,7 +86,7 @@ export function VendedorDashboardContent() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-4 pb-4">
             <div className="flex items-center gap-3 mb-3">
@@ -113,6 +115,25 @@ export function VendedorDashboardContent() {
               <p className="text-sm text-muted-foreground">
                 {goal ? 'Sin objetivo definido este mes' : 'Selecciona una tienda'}
               </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-4 pb-4">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="h-10 w-10 rounded-full bg-[#1a2744]/10 flex items-center justify-center">
+                <Receipt className="h-5 w-5 text-[#1a2744]" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Mis ventas de hoy</p>
+                <p className="text-xs text-muted-foreground">{new Date().toLocaleDateString('es-ES', { day: 'numeric', month: 'long' })} · sin IVA</p>
+              </div>
+            </div>
+            {loadingStats ? (
+              <Skeleton className="h-8 w-32" />
+            ) : (
+              <p className="text-2xl font-bold">{formatCurrency(stats?.employeeTodaySales ?? 0)}</p>
             )}
           </CardContent>
         </Card>
@@ -164,16 +185,19 @@ export function VendedorDashboardContent() {
                 <Receipt className="h-5 w-5 text-[#1a2744]" />
               </div>
               <div>
-                <CardTitle className="text-base">Mis ventas de hoy</CardTitle>
+                <CardTitle className="text-base">Tickets de hoy</CardTitle>
                 {loadingStats ? (
                   <Skeleton className="h-4 w-32 mt-1" />
                 ) : (
                   <p className="text-xs text-muted-foreground">
-                    {(stats?.todayCount ?? 0)} ticket{(stats?.todayCount ?? 0) === 1 ? '' : 's'} · {formatCurrency(stats?.todayTotal ?? 0)}
+                    {(stats?.todayCount ?? 0)} ticket{(stats?.todayCount ?? 0) === 1 ? '' : 's'}
                   </p>
                 )}
               </div>
             </div>
+            <Button variant="link" size="sm" className="px-0" onClick={() => router.push('/vendedor/mis-ventas')}>
+              Ver todas mis ventas
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="p-0">
