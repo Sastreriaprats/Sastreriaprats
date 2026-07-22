@@ -7,6 +7,7 @@ import { toCountryCode, countryName } from '@/lib/countries'
 const REQUIRED_ACCOUNTS: Record<string, { name: string; level: number; account_type: string }> = {
   '430': { name: 'Clientes', level: 3, account_type: 'asset' },
   '700': { name: 'Ventas mercaderías', level: 3, account_type: 'income' },
+  '708': { name: 'Devoluciones de ventas', level: 3, account_type: 'income' },
   '477': { name: 'HP IVA repercutido', level: 3, account_type: 'liability' },
   '472': { name: 'HP IVA soportado', level: 3, account_type: 'asset' },
   '473': { name: 'HP retenciones y pagos a cuenta', level: 3, account_type: 'asset' },
@@ -44,6 +45,77 @@ async function getNextEntryNumber(db: AnyClient, fiscalYear: number): Promise<nu
   return ((data as { entry_number?: number } | null)?.entry_number ?? 0) + 1
 }
 
+type EntryLine = { account_code: string; debit: number; credit: number; description: string }
+
+/**
+ * Inserta cabecera + líneas de un asiento con las dos garantías que faltaban:
+ * - Carrera de numeración: UNIQUE(fiscal_year, entry_number) → ante 23505 se
+ *   recalcula el número y se reintenta (dos ventas simultáneas ya no dejan a la
+ *   segunda sin asiento).
+ * - Sin cascarones: si el INSERT de líneas falla, se borra la cabecera y se
+ *   devuelve error (antes quedaban asientos con importe y cero líneas).
+ */
+async function insertEntry(
+  db: AnyClient,
+  header: {
+    entry_date: string
+    description: string
+    entry_type: string
+    reference_type: string
+    reference_id: string
+  },
+  lines: EntryLine[],
+): Promise<{ ok: boolean; entryId?: string; error?: string }> {
+  const fiscalYear = new Date(header.entry_date).getFullYear()
+  const fiscalMonth = new Date(header.entry_date).getMonth() + 1
+  const totalDebit = Math.round(lines.reduce((s, l) => s + l.debit, 0) * 100) / 100
+  const totalCredit = Math.round(lines.reduce((s, l) => s + l.credit, 0) * 100) / 100
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const entryNumber = await getNextEntryNumber(db, fiscalYear)
+    const { data: entry, error: entryError } = await db
+      .from('journal_entries')
+      .insert({
+        entry_number: entryNumber,
+        fiscal_year: fiscalYear,
+        fiscal_month: fiscalMonth,
+        entry_date: header.entry_date,
+        description: header.description,
+        entry_type: header.entry_type,
+        reference_type: header.reference_type,
+        reference_id: header.reference_id,
+        status: 'posted',
+        total_debit: totalDebit,
+        total_credit: totalCredit,
+      })
+      .select('id')
+      .single()
+
+    if (entryError) {
+      if (entryError.code === '23505') continue // choque de numeración: recalcular
+      return { ok: false, error: entryError.message }
+    }
+    if (!entry) return { ok: false, error: 'Error al crear asiento' }
+
+    const { error: linesError } = await db.from('journal_entry_lines').insert(
+      lines.map((l, idx) => ({
+        journal_entry_id: entry.id,
+        account_code: l.account_code,
+        debit: l.debit,
+        credit: l.credit,
+        description: l.description,
+        sort_order: idx,
+      }))
+    )
+    if (linesError) {
+      await db.from('journal_entries').delete().eq('id', entry.id)
+      return { ok: false, error: linesError.message }
+    }
+    return { ok: true, entryId: entry.id as string }
+  }
+  return { ok: false, error: 'No se pudo asignar número de asiento (conflictos repetidos)' }
+}
+
 /**
  * Crea asiento contable por venta (TPV): Debe 430 (Clientes), Haber 700 (Ventas), Haber 477 (IVA).
  * Actualiza sales.journal_entry_id si la columna existe.
@@ -54,52 +126,111 @@ export async function createSaleJournalEntry(saleId: string): Promise<{ ok: bool
     const db: AnyClient = admin
     const { data: sale, error: saleError } = await admin
       .from('sales')
-      .select('id, total, subtotal, tax_amount, client_id, created_at')
+      .select('id, ticket_number, total, subtotal, tax_amount, client_id, created_at, journal_entry_id')
       .eq('id', saleId)
       .single()
 
     if (saleError || !sale) return { ok: false, error: 'Venta no encontrada' }
 
     const s = sale as any
+
+    // Idempotencia: si la venta ya tiene asiento, o existe un asiento de venta
+    // que la referencia (p. ej. quedó creado con el vínculo roto), no crear otro
+    // — se reengancha el vínculo si faltaba.
+    if (s.journal_entry_id) return { ok: true }
+    const { data: existing } = await admin
+      .from('journal_entries')
+      .select('id')
+      .eq('reference_type', 'sale')
+      .eq('reference_id', saleId)
+      .limit(1)
+      .maybeSingle()
+    if (existing?.id) {
+      const { error: relinkError } = await db.from('sales').update({ journal_entry_id: existing.id }).eq('id', saleId)
+      if (relinkError) return { ok: false, error: relinkError.message }
+      return { ok: true }
+    }
+
     const total = Number(s.total ?? 0)
     const subtotal = Number(s.subtotal ?? s.total) ?? 0
     const taxAmount = Number(s.tax_amount ?? 0)
     const saleDate = s.created_at as string | undefined
     const date = saleDate ? saleDate.slice(0, 10) : new Date().toISOString().split('T')[0]
-    const fiscalYear = new Date(date).getFullYear()
-    const fiscalMonth = new Date(date).getMonth() + 1
 
     await ensureChartAccounts(db)
-    const entryNumber = await getNextEntryNumber(db, fiscalYear)
-
-    const { data: entry, error: entryError } = await db
-      .from('journal_entries')
-      .insert({
-        entry_number: entryNumber,
-        fiscal_year: fiscalYear,
-        fiscal_month: fiscalMonth,
-        entry_date: date,
-        description: `Venta TPV #${saleId.slice(0, 8)}`,
-        entry_type: 'sale',
-        reference_type: 'sale',
-        reference_id: saleId,
-        status: 'posted',
-        total_debit: total,
-        total_credit: total,
-      })
-      .select('id')
-      .single()
-
-    if (entryError || !entry) return { ok: false, error: entryError?.message ?? 'Error al crear asiento' }
-
-    const entryId = entry.id
-    await db.from('journal_entry_lines').insert([
-      { journal_entry_id: entryId, account_code: '430', debit: total, credit: 0, description: 'Cliente', sort_order: 0 },
-      { journal_entry_id: entryId, account_code: '700', debit: 0, credit: subtotal, description: 'Ventas', sort_order: 1 },
-      { journal_entry_id: entryId, account_code: '477', debit: 0, credit: taxAmount, description: 'IVA repercutido', sort_order: 2 },
+    const created = await insertEntry(db, {
+      entry_date: date,
+      description: `Venta TPV ${s.ticket_number ?? '#' + saleId.slice(0, 8)}`,
+      entry_type: 'sale',
+      reference_type: 'sale',
+      reference_id: saleId,
+    }, [
+      { account_code: '430', debit: total, credit: 0, description: 'Cliente' },
+      { account_code: '700', debit: 0, credit: subtotal, description: 'Ventas' },
+      { account_code: '477', debit: 0, credit: taxAmount, description: 'IVA repercutido' },
     ])
+    if (!created.ok || !created.entryId) return { ok: false, error: created.error }
 
-    await db.from('sales').update({ journal_entry_id: entryId }).eq('id', saleId)
+    const { error: linkError } = await db.from('sales').update({ journal_entry_id: created.entryId }).eq('id', saleId)
+    if (linkError) return { ok: false, error: `Asiento creado pero sin vincular: ${linkError.message}` }
+    return { ok: true }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Error desconocido'
+    return { ok: false, error: msg }
+  }
+}
+
+/**
+ * Asiento de DEVOLUCIÓN de una venta (total o parcial): Debe 708 (Devoluciones
+ * de ventas) por la base + Debe 477 (IVA) + Haber 430 (Cliente) por lo devuelto.
+ * Sin él, el diario mantenía el ingreso íntegro de ventas devueltas mientras
+ * los resúmenes sí lo neteaban (descuadre diario ↔ P&L).
+ *
+ * `returnedAmount` es el importe (IVA incluido) de ESTA devolución; la base se
+ * prorratea con subtotal/total de la venta original. `entryDate` = fecha real
+ * de la devolución (por defecto hoy).
+ */
+export async function createSaleReturnJournalEntry(
+  saleId: string,
+  returnedAmount: number,
+  entryDate?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const amount = Math.round(Number(returnedAmount) * 100) / 100
+    if (!(amount > 0)) return { ok: true } // nada que asentar
+
+    const admin = createAdminClient()
+    const db: AnyClient = admin
+    const { data: sale, error: saleError } = await admin
+      .from('sales')
+      .select('id, ticket_number, total, subtotal')
+      .eq('id', saleId)
+      .single()
+    if (saleError || !sale) return { ok: false, error: 'Venta no encontrada' }
+
+    const s = sale as any
+    const total = Number(s.total ?? 0)
+    const subtotal = Number(s.subtotal ?? 0)
+    const ratio = total > 0 && subtotal > 0 ? subtotal / total : 1 / 1.21
+    const base = Math.round(amount * ratio * 100) / 100
+    const vat = Math.round((amount - base) * 100) / 100
+    const date = entryDate && /^\d{4}-\d{2}-\d{2}/.test(entryDate)
+      ? entryDate.slice(0, 10)
+      : new Date().toISOString().split('T')[0]
+
+    await ensureChartAccounts(db)
+    const created = await insertEntry(db, {
+      entry_date: date,
+      description: `Devolución venta ${s.ticket_number ?? '#' + saleId.slice(0, 8)}`,
+      entry_type: 'sale',
+      reference_type: 'sale_return',
+      reference_id: saleId,
+    }, [
+      { account_code: '708', debit: base, credit: 0, description: 'Devolución de ventas' },
+      { account_code: '477', debit: vat, credit: 0, description: 'IVA repercutido devuelto' },
+      { account_code: '430', debit: 0, credit: amount, description: 'Cliente' },
+    ])
+    if (!created.ok) return { ok: false, error: created.error }
     return { ok: true }
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Error desconocido'
@@ -147,39 +278,20 @@ export async function createPurchaseJournalEntry(
     const total = subtotal + taxAmount
     const rawDate = o.order_date ?? o.created_at
     const date = rawDate ? String(rawDate).slice(0, 10) : new Date().toISOString().split('T')[0]
-    const fiscalYear = new Date(date).getFullYear()
-    const fiscalMonth = new Date(date).getMonth() + 1
 
     await ensureChartAccounts(db)
-    const entryNumber = await getNextEntryNumber(db, fiscalYear)
-
-    const { data: entry, error: entryError } = await db
-      .from('journal_entries')
-      .insert({
-        entry_number: entryNumber,
-        fiscal_year: fiscalYear,
-        fiscal_month: fiscalMonth,
-        entry_date: date,
-        description: `Compra proveedor #${supplierOrderId.slice(0, 8)}`,
-        entry_type: 'purchase',
-        reference_type: 'supplier_order',
-        reference_id: supplierOrderId,
-        status: 'posted',
-        total_debit: total,
-        total_credit: total,
-      })
-      .select('id')
-      .single()
-
-    if (entryError || !entry) return { ok: false, error: entryError?.message ?? 'Error al crear asiento' }
-
-    const entryId = entry.id
-    await db.from('journal_entry_lines').insert([
-      { journal_entry_id: entryId, account_code: '600', debit: subtotal, credit: 0, description: 'Compras', sort_order: 0 },
-      { journal_entry_id: entryId, account_code: '472', debit: taxAmount, credit: 0, description: 'IVA soportado', sort_order: 1 },
-      { journal_entry_id: entryId, account_code: '400', debit: 0, credit: total, description: 'Proveedor', sort_order: 2 },
+    const created = await insertEntry(db, {
+      entry_date: date,
+      description: `Compra proveedor #${supplierOrderId.slice(0, 8)}`,
+      entry_type: 'purchase',
+      reference_type: 'supplier_order',
+      reference_id: supplierOrderId,
+    }, [
+      { account_code: '600', debit: subtotal, credit: 0, description: 'Compras' },
+      { account_code: '472', debit: taxAmount, credit: 0, description: 'IVA soportado' },
+      { account_code: '400', debit: 0, credit: total, description: 'Proveedor' },
     ])
-
+    if (!created.ok) return { ok: false, error: created.error }
     return { ok: true }
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Error desconocido'
@@ -196,49 +308,50 @@ export async function createOnlineOrderJournalEntry(onlineOrderId: string): Prom
     const db: AnyClient = admin
     const { data: order, error: orderError } = await db
       .from('online_orders')
-      .select('id, total, subtotal, tax_amount, created_at')
+      .select('id, order_number, total, subtotal, tax_amount, shipping_cost, paid_at, created_at')
       .eq('id', onlineOrderId)
       .single()
 
     if (orderError || !order) return { ok: false, error: 'Pedido online no encontrado' }
 
-    const total = Number(order.total ?? 0)
-    const subtotal = Number(order.subtotal ?? total - Number(order.tax_amount ?? 0))
-    const taxAmount = Number(order.tax_amount ?? 0)
-    const date = order.created_at ? String(order.created_at).slice(0, 10) : new Date().toISOString().split('T')[0]
-    const fiscalYear = new Date(date).getFullYear()
-    const fiscalMonth = new Date(date).getMonth() + 1
+    // Idempotente: los webhooks de pago reintentan.
+    const { data: existing } = await admin
+      .from('journal_entries')
+      .select('id')
+      .eq('reference_type', 'online_order')
+      .eq('reference_id', onlineOrderId)
+      .limit(1)
+      .maybeSingle()
+    if (existing?.id) return { ok: true }
+
+    // IMPORTES: en online_orders `subtotal` es el precio de productos IVA
+    // INCLUIDO (precio web) y `tax_amount` no cubre el envío — usarlos tal cual
+    // descuadraba el asiento (haber > debe, IVA dos veces). Derivamos base e IVA
+    // del TOTAL realmente cobrado (misma fórmula que la factura W: total/1,21),
+    // que además absorbe pagos parciales con tarjeta regalo (el ingreso del vale
+    // ya se asentó al venderse la tarjeta).
+    const TAX = 21
+    const total = Math.round(Number(order.total ?? 0) * 100) / 100
+    const base = Math.round((total / (1 + TAX / 100)) * 100) / 100
+    const taxAmount = Math.round((total - base) * 100) / 100
+    // Fecha contable: el PAGO confirma la venta online (coherente con la
+    // factura W y con los resúmenes, que usan paid_at).
+    const rawDate = order.paid_at ?? order.created_at
+    const date = rawDate ? String(rawDate).slice(0, 10) : new Date().toISOString().split('T')[0]
 
     await ensureChartAccounts(db)
-    const entryNumber = await getNextEntryNumber(db, fiscalYear)
-
-    const { data: entry, error: entryError } = await db
-      .from('journal_entries')
-      .insert({
-        entry_number: entryNumber,
-        fiscal_year: fiscalYear,
-        fiscal_month: fiscalMonth,
-        entry_date: date,
-        description: `Venta online #${order.order_number ?? onlineOrderId.slice(0, 8)}`,
-        entry_type: 'sale',
-        reference_type: 'online_order',
-        reference_id: onlineOrderId,
-        status: 'posted',
-        total_debit: total,
-        total_credit: total,
-      })
-      .select('id')
-      .single()
-
-    if (entryError || !entry) return { ok: false, error: entryError?.message ?? 'Error al crear asiento' }
-
-    const entryId = entry.id
-    await db.from('journal_entry_lines').insert([
-      { journal_entry_id: entryId, account_code: '430', debit: total, credit: 0, description: 'Cliente', sort_order: 0 },
-      { journal_entry_id: entryId, account_code: '700', debit: 0, credit: subtotal, description: 'Ventas', sort_order: 1 },
-      { journal_entry_id: entryId, account_code: '477', debit: 0, credit: taxAmount, description: 'IVA repercutido', sort_order: 2 },
+    const created = await insertEntry(db, {
+      entry_date: date,
+      description: `Venta online #${order.order_number ?? onlineOrderId.slice(0, 8)}`,
+      entry_type: 'sale',
+      reference_type: 'online_order',
+      reference_id: onlineOrderId,
+    }, [
+      { account_code: '430', debit: total, credit: 0, description: 'Cliente' },
+      { account_code: '700', debit: 0, credit: base, description: 'Ventas' },
+      { account_code: '477', debit: 0, credit: taxAmount, description: 'IVA repercutido' },
     ])
-
+    if (!created.ok) return { ok: false, error: created.error }
     return { ok: true }
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Error desconocido'
@@ -449,6 +562,60 @@ export async function createOnlineOrderInvoice(onlineOrderId: string): Promise<{
 }
 
 /**
+ * Crea asiento por movimiento manual de contabilidad (ingresos/gastos sueltos).
+ * income → 430/700+477; expense → 600+472/400. Idempotente por referencia.
+ */
+export async function createManualTransactionJournalEntry(manualTransactionId: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const admin = createAdminClient()
+    const db: AnyClient = admin
+    const { data: mt, error: mtError } = await admin
+      .from('manual_transactions')
+      .select('id, type, date, description, amount, tax_amount, total, journal_entry_id')
+      .eq('id', manualTransactionId)
+      .single()
+    if (mtError || !mt) return { ok: false, error: 'Movimiento no encontrado' }
+
+    const m = mt as any
+    if (m.journal_entry_id) return { ok: true } // idempotente
+
+    const base = Number(m.amount ?? 0)
+    const tax = Number(m.tax_amount ?? 0)
+    const total = Number(m.total ?? base + tax)
+    const date = m.date ? String(m.date).slice(0, 10) : new Date().toISOString().split('T')[0]
+    const isIncome = String(m.type) === 'income'
+    const lines: EntryLine[] = isIncome
+      ? [
+          { account_code: '430', debit: total, credit: 0, description: 'Cliente' },
+          { account_code: '700', debit: 0, credit: base, description: 'Ventas' },
+          { account_code: '477', debit: 0, credit: tax, description: 'IVA repercutido' },
+        ]
+      : [
+          { account_code: '600', debit: base, credit: 0, description: 'Compras/Gastos' },
+          { account_code: '472', debit: tax, credit: 0, description: 'IVA soportado' },
+          { account_code: '400', debit: 0, credit: total, description: 'Proveedor' },
+        ]
+
+    await ensureChartAccounts(db)
+    const created = await insertEntry(db, {
+      entry_date: date,
+      description: `Movimiento manual: ${String(m.description ?? '').slice(0, 120)}`,
+      entry_type: isIncome ? 'sale' : 'purchase',
+      reference_type: 'manual_transaction',
+      reference_id: manualTransactionId,
+    }, lines)
+    if (!created.ok || !created.entryId) return { ok: false, error: created.error }
+
+    const { error: linkError } = await db.from('manual_transactions').update({ journal_entry_id: created.entryId }).eq('id', manualTransactionId)
+    if (linkError) return { ok: false, error: `Asiento creado pero sin vincular: ${linkError.message}` }
+    return { ok: true }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Error desconocido'
+    return { ok: false, error: msg }
+  }
+}
+
+/**
  * Crea asiento por factura emitida. Incluye IRPF (cuenta 473) si aplica.
  */
 export async function createInvoiceJournalEntry(invoiceId: string): Promise<{ ok: boolean; error?: string }> {
@@ -457,13 +624,15 @@ export async function createInvoiceJournalEntry(invoiceId: string): Promise<{ ok
     const db: AnyClient = admin
     const { data: inv, error: invError } = await admin
       .from('invoices')
-      .select('id, invoice_number, total, subtotal, tax_amount, irpf_amount, invoice_date')
+      .select('id, invoice_number, total, subtotal, tax_amount, irpf_amount, invoice_date, journal_entry_id')
       .eq('id', invoiceId)
       .single()
 
     if (invError || !inv) return { ok: false, error: 'Factura no encontrada' }
 
     const i = inv as any
+    if (i.journal_entry_id) return { ok: true } // idempotente
+
     const total = Number(i.total ?? 0)
     const subtotal = Number(i.subtotal ?? 0)
     const taxAmount = Number(i.tax_amount ?? 0)
@@ -471,57 +640,28 @@ export async function createInvoiceJournalEntry(invoiceId: string): Promise<{ ok
     const date = i.invoice_date
       ? String(i.invoice_date).slice(0, 10)
       : new Date().toISOString().split('T')[0]
-    const fiscalYear = new Date(date).getFullYear()
-    const fiscalMonth = new Date(date).getMonth() + 1
 
-    await ensureChartAccounts(db)
-    const entryNumber = await getNextEntryNumber(db, fiscalYear)
-
-    const lines: { journal_entry_id: string; account_code: string; debit: number; credit: number; description: string; sort_order: number }[] = [
-      { journal_entry_id: '', account_code: '430', debit: total, credit: 0, description: 'Cliente', sort_order: 0 },
-      { journal_entry_id: '', account_code: '700', debit: 0, credit: subtotal, description: 'Ventas', sort_order: 1 },
-      { journal_entry_id: '', account_code: '477', debit: 0, credit: taxAmount, description: 'IVA repercutido', sort_order: 2 },
+    const lines: EntryLine[] = [
+      { account_code: '430', debit: total, credit: 0, description: 'Cliente' },
+      { account_code: '700', debit: 0, credit: subtotal, description: 'Ventas' },
+      { account_code: '477', debit: 0, credit: taxAmount, description: 'IVA repercutido' },
     ]
     if (irpfAmount > 0) {
-      lines.push({ journal_entry_id: '', account_code: '473', debit: irpfAmount, credit: 0, description: 'IRPF', sort_order: 3 })
+      lines.push({ account_code: '473', debit: irpfAmount, credit: 0, description: 'IRPF' })
     }
 
-    const totalDebit = lines.reduce((s, l) => s + l.debit, 0)
-    const totalCredit = lines.reduce((s, l) => s + l.credit, 0)
+    await ensureChartAccounts(db)
+    const created = await insertEntry(db, {
+      entry_date: date,
+      description: `Factura ${i.invoice_number ?? invoiceId.slice(0, 8)}`,
+      entry_type: 'sale',
+      reference_type: 'invoice',
+      reference_id: invoiceId,
+    }, lines)
+    if (!created.ok || !created.entryId) return { ok: false, error: created.error }
 
-    const { data: entry, error: entryError } = await db
-      .from('journal_entries')
-      .insert({
-        entry_number: entryNumber,
-        fiscal_year: fiscalYear,
-        fiscal_month: fiscalMonth,
-        entry_date: date,
-        description: `Factura ${i.invoice_number ?? invoiceId.slice(0, 8)}`,
-        entry_type: 'sale',
-        reference_type: 'invoice',
-        reference_id: invoiceId,
-        status: 'posted',
-        total_debit: totalDebit,
-        total_credit: totalCredit,
-      })
-      .select('id')
-      .single()
-
-    if (entryError || !entry) return { ok: false, error: entryError?.message ?? 'Error al crear asiento' }
-
-    const entryId = entry.id
-    await db.from('journal_entry_lines').insert(
-      lines.map((l, idx) => ({
-        journal_entry_id: entryId,
-        account_code: l.account_code,
-        debit: l.debit,
-        credit: l.credit,
-        description: l.description,
-        sort_order: idx,
-      }))
-    )
-
-    await db.from('invoices').update({ journal_entry_id: entryId }).eq('id', invoiceId)
+    const { error: linkError } = await db.from('invoices').update({ journal_entry_id: created.entryId }).eq('id', invoiceId)
+    if (linkError) return { ok: false, error: `Asiento creado pero sin vincular: ${linkError.message}` }
     return { ok: true }
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Error desconocido'
@@ -583,53 +723,25 @@ export async function reverseInvoiceJournalEntry(invoiceId: string): Promise<{ o
     if (lines.length === 0) return { ok: true, skipped: true }
 
     const date = new Date().toISOString().split('T')[0]
-    const fiscalYear = new Date(date).getFullYear()
-    const fiscalMonth = new Date(date).getMonth() + 1
-    const entryNumber = await getNextEntryNumber(db, fiscalYear)
 
     // Líneas espejo: Debe <-> Haber
-    const swapped = lines.map((l, idx) => ({
+    const swapped: EntryLine[] = lines.map((l) => ({
       account_code: l.account_code,
       debit: Number(l.credit ?? 0),
       credit: Number(l.debit ?? 0),
-      description: l.description ?? null,
-      sort_order: idx,
+      description: l.description ?? '',
     }))
-    const totalDebit = swapped.reduce((s, l) => s + l.debit, 0)
-    const totalCredit = swapped.reduce((s, l) => s + l.credit, 0)
 
-    const { data: entry, error: entryErr } = await db
-      .from('journal_entries')
-      .insert({
-        entry_number: entryNumber,
-        fiscal_year: fiscalYear,
-        fiscal_month: fiscalMonth,
-        entry_date: date,
-        description: `Anulación factura ${(inv as { invoice_number?: string }).invoice_number ?? invoiceId.slice(0, 8)}`,
-        // entry_type debe ser uno permitido por el CHECK (sale/purchase/manual);
-        // el inverso es de contexto venta, igual que el asiento original.
-        entry_type: 'sale',
-        reference_type: 'invoice',
-        reference_id: invoiceId,
-        status: 'posted',
-        total_debit: totalDebit,
-        total_credit: totalCredit,
-      })
-      .select('id')
-      .single()
-    if (entryErr || !entry) return { ok: false, error: entryErr?.message ?? 'Error al crear asiento inverso' }
-
-    const { error: linesErr } = await db.from('journal_entry_lines').insert(
-      swapped.map((l) => ({
-        journal_entry_id: entry.id,
-        account_code: l.account_code,
-        debit: l.debit,
-        credit: l.credit,
-        description: l.description,
-        sort_order: l.sort_order,
-      }))
-    )
-    if (linesErr) return { ok: false, error: linesErr.message }
+    const created = await insertEntry(db, {
+      entry_date: date,
+      description: `Anulación factura ${(inv as { invoice_number?: string }).invoice_number ?? invoiceId.slice(0, 8)}`,
+      // entry_type debe ser uno permitido por el CHECK (sale/purchase/manual);
+      // el inverso es de contexto venta, igual que el asiento original.
+      entry_type: 'sale',
+      reference_type: 'invoice',
+      reference_id: invoiceId,
+    }, swapped)
+    if (!created.ok) return { ok: false, error: created.error }
 
     return { ok: true }
   } catch (e) {

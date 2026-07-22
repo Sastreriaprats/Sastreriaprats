@@ -6,7 +6,7 @@ import {
   createSaleSchema, createGiftCardSchema,
 } from '@/lib/validations/pos'
 import { success, failure } from '@/lib/errors'
-import { createSaleJournalEntry } from '@/actions/accounting-triggers'
+import { createSaleJournalEntry, createSaleReturnJournalEntry } from '@/actions/accounting-triggers'
 import { normalizeSearchTerm } from '@/lib/utils'
 import { formatClientAddress } from '@/lib/clients/format'
 import { resolveClientIdsForSearch } from '@/lib/server/query-helpers'
@@ -96,7 +96,7 @@ export const openCashSession = protectedAction<any, any>(
       .single()
 
     if (error) return failure(error.message)
-    await ctx.adminClient.from('manual_transactions').insert({
+    const { error: mirrorError } = await ctx.adminClient.from('manual_transactions').insert({
       type: 'income',
       date: new Date().toISOString().split('T')[0],
       description: 'Apertura de caja',
@@ -108,6 +108,7 @@ export const openCashSession = protectedAction<any, any>(
       created_by: ctx.userId,
       cash_session_id: session.id,
     })
+    if (mirrorError) console.error(`[openCashSession] espejo de apertura no registrado (sesión ${session.id}): ${mirrorError.message}`)
     const description = `Apertura de caja — Fondo inicial: ${Number(parsed.data.opening_amount).toFixed(2)} €`
     return success({ ...session, auditDescription: description })
   }
@@ -252,48 +253,62 @@ export const createSale = protectedAction<{
 
     if (rpcError) return failure(rpcError.message)
 
-    // Generar vouchers residuales para los vales que se aplicaron por menos de su saldo
+    // Generar vouchers residuales para los vales que se aplicaron por menos de su
+    // saldo. La RPC deja el vale padre a 0 SIEMPRE: si este insert fallara, el
+    // cliente perdería el saldo sobrante — por eso se reintenta (con código
+    // nuevo, por si el choque fue de unicidad) y, si aun así falla, se avisa en
+    // el resultado en vez de tragarse el error.
     const residualVouchers: Array<{ id: string; code: string; amount: number; expiry_date: string }> = []
+    let residualFailure: string | null = null
     for (const vp of voucherPayments) {
       const residualAmount = vp.prev_remaining - vp.amount
       if (residualAmount > 0.005) {
-        const code = await generateUniqueVoucherCode(ctx.adminClient)
         const expiryDate = new Date()
         expiryDate.setDate(expiryDate.getDate() + 365)
         const expiryStr = expiryDate.toISOString().split('T')[0]
-        const { data: residual, error: residualError } = await ctx.adminClient
-          .from('vouchers')
-          .insert({
-            code,
-            voucher_type: 'fixed',
-            voucher_kind: 'residual',
-            parent_voucher_id: vp.voucher_id,
-            original_amount: residualAmount,
-            remaining_amount: residualAmount,
-            origin_sale_id: result.id,
-            client_id: vp.client_id,
-            issued_date: new Date().toISOString().split('T')[0],
-            expiry_date: expiryStr,
-            status: 'active',
-            issued_by_store_id: parsedSale.data.store_id,
-            issued_by: ctx.userId,
-            notes: `Saldo residual del vale ${vp.voucher_id}`,
-          })
-          .select('id, code, remaining_amount, expiry_date')
-          .single()
-        if (!residualError && residual) {
-          residualVouchers.push({
-            id: residual.id,
-            code: residual.code,
-            amount: Number(residual.remaining_amount),
-            expiry_date: residual.expiry_date,
-          })
+        let inserted = false
+        for (let attempt = 0; attempt < 3 && !inserted; attempt++) {
+          const code = await generateUniqueVoucherCode(ctx.adminClient)
+          const { data: residual, error: residualError } = await ctx.adminClient
+            .from('vouchers')
+            .insert({
+              code,
+              voucher_type: 'fixed',
+              voucher_kind: 'residual',
+              parent_voucher_id: vp.voucher_id,
+              original_amount: residualAmount,
+              remaining_amount: residualAmount,
+              origin_sale_id: result.id,
+              client_id: vp.client_id,
+              issued_date: new Date().toISOString().split('T')[0],
+              expiry_date: expiryStr,
+              status: 'active',
+              issued_by_store_id: parsedSale.data.store_id,
+              issued_by: ctx.userId,
+              notes: `Saldo residual del vale ${vp.voucher_id}`,
+            })
+            .select('id, code, remaining_amount, expiry_date')
+            .single()
+          if (!residualError && residual) {
+            inserted = true
+            residualVouchers.push({
+              id: residual.id,
+              code: residual.code,
+              amount: Number(residual.remaining_amount),
+              expiry_date: residual.expiry_date,
+            })
+          } else if (attempt === 2) {
+            residualFailure = `No se pudo emitir el vale residual de ${residualAmount.toFixed(2)}€ (vale ${vp.voucher_id}): ${residualError?.message ?? 'error desconocido'}`
+            console.error(`[createSale] ${residualFailure} · venta ${result.id}`)
+          }
         }
       }
     }
 
-    // Fire-and-forget: asiento contable
-    createSaleJournalEntry(result.id).catch(() => {})
+    // Asiento contable: con reintento de numeración e idempotencia dentro; si
+    // aun así falla, queda registrado (antes: .catch(() => {}) y ventas sin asiento).
+    const journal = await createSaleJournalEntry(result.id)
+    if (!journal.ok) console.error(`[createSale] asiento de la venta ${result.ticket_number ?? result.id} falló: ${journal.error}`)
 
     // Nombre del vendedor desde la venta YA GUARDADA (salesperson_id aplicado por
     // la RPC, incluido el fallback al usuario). Robusto e independiente del estado
@@ -320,6 +335,7 @@ export const createSale = protectedAction<{
       ...result,
       salesperson_name,
       residualVouchers,
+      residual_voucher_error: residualFailure,
       auditDescription,
     })
   }
@@ -409,37 +425,54 @@ export const createGiftCard = protectedAction<any, any>(
     })
     if (rpcError) return failure(rpcError.message)
 
-    // 2. Generar voucher de tipo gift_card asociado a la venta.
-    const code = await generateUniqueVoucherCode(ctx.adminClient)
+    // 2. Generar voucher de tipo gift_card asociado a la venta. La venta YA está
+    // cobrada: si este insert falla no se puede devolver un failure "a secas"
+    // (la dependienta reintentaría y cobraría dos veces) → reintento con código
+    // nuevo y, si falla igual, error explícito con el nº de ticket avisando de
+    // NO repetir la venta.
     const today = new Date()
     const expiry = new Date()
     expiry.setDate(today.getDate() + (data.expiry_days ?? 365))
     const expiryStr = expiry.toISOString().split('T')[0]
     const issuedStr = today.toISOString().split('T')[0]
 
-    const { data: voucher, error: voucherError } = await ctx.adminClient
-      .from('vouchers')
-      .insert({
-        code,
-        voucher_type: 'fixed',
-        voucher_kind: 'gift_card',
-        original_amount: data.amount,
-        remaining_amount: data.amount,
-        origin_sale_id: saleResult.id,
-        client_id: data.client_id ?? null,
-        issued_date: issuedStr,
-        expiry_date: expiryStr,
-        status: 'active',
-        issued_by_store_id: data.store_id,
-        issued_by: ctx.userId,
-        notes: data.notes ?? null,
-      })
-      .select('id, code, original_amount, remaining_amount, issued_date, expiry_date')
-      .single()
-    if (voucherError) return failure(voucherError.message)
+    let voucher: { id: string; code: string; original_amount: number; remaining_amount: number; issued_date: string; expiry_date: string } | null = null
+    let voucherErrorMsg: string | null = null
+    for (let attempt = 0; attempt < 3 && !voucher; attempt++) {
+      const code = await generateUniqueVoucherCode(ctx.adminClient)
+      const { data: inserted, error: voucherError } = await ctx.adminClient
+        .from('vouchers')
+        .insert({
+          code,
+          voucher_type: 'fixed',
+          voucher_kind: 'gift_card',
+          original_amount: data.amount,
+          remaining_amount: data.amount,
+          origin_sale_id: saleResult.id,
+          client_id: data.client_id ?? null,
+          issued_date: issuedStr,
+          expiry_date: expiryStr,
+          status: 'active',
+          issued_by_store_id: data.store_id,
+          issued_by: ctx.userId,
+          notes: data.notes ?? null,
+        })
+        .select('id, code, original_amount, remaining_amount, issued_date, expiry_date')
+        .single()
+      if (!voucherError && inserted) voucher = inserted
+      else voucherErrorMsg = voucherError?.message ?? 'error desconocido'
+    }
+    if (!voucher) {
+      console.error(`[createGiftCard] venta ${saleResult.ticket_number ?? saleResult.id} cobrada pero el vale no se emitió: ${voucherErrorMsg}`)
+      return failure(
+        `La venta ${saleResult.ticket_number ?? ''} se ha cobrado pero el vale NO se pudo emitir (${voucherErrorMsg}). ` +
+        `NO repitas la venta: anula el ticket o avisa a administración para emitir el vale a mano.`
+      )
+    }
 
-    // Fire-and-forget: asiento contable
-    createSaleJournalEntry(saleResult.id).catch(() => {})
+    // Asiento contable (con reintento e idempotencia; errores registrados)
+    const gcJournal = await createSaleJournalEntry(saleResult.id)
+    if (!gcJournal.ok) console.error(`[createGiftCard] asiento de la venta ${saleResult.ticket_number ?? saleResult.id} falló: ${gcJournal.error}`)
 
     const auditDescription = `Tarjeta regalo ${voucher.code} · ${Number(data.amount).toFixed(2)}€`
 
@@ -844,13 +877,14 @@ export const cashWithdrawal = protectedAction<{
       .single()
 
     if (session) {
-      await ctx.adminClient
+      const { error: totalsError } = await ctx.adminClient
         .from('cash_sessions')
         .update({ total_withdrawals: (session.total_withdrawals || 0) + input.amount })
         .eq('id', input.session_id)
+      if (totalsError) console.error(`[cashWithdrawal] total_withdrawals no actualizado (sesión ${input.session_id}): ${totalsError.message}`)
     }
 
-    await ctx.adminClient.from('manual_transactions').insert({
+    const { error: mirrorError } = await ctx.adminClient.from('manual_transactions').insert({
       type: 'expense',
       date: new Date().toISOString().split('T')[0],
       description: `Retirada de caja: ${input.reason}`,
@@ -864,6 +898,7 @@ export const cashWithdrawal = protectedAction<{
       cash_session_id: input.session_id,
       withdrawal_id: withdrawal.id,
     })
+    if (mirrorError) console.error(`[cashWithdrawal] espejo de retirada no registrado (retirada ${withdrawal.id}): ${mirrorError.message}`)
 
     const tipoEs = withdrawalType === 'gasto' ? 'Gasto' : 'Extracción'
     const auditDescription = `${tipoEs} de caja · ${Number(input.amount).toFixed(2)}€ · Motivo: ${input.reason}`
@@ -1105,6 +1140,16 @@ export const createReturn = protectedAction<{
     const originalClientName = (originalSale as any)?.clients?.full_name ?? null
     const originalTicketNumber = (originalSale as any)?.ticket_number ?? null
 
+    // Asiento de la devolución (708/477 contra 430): sin él, el diario mantenía
+    // el ingreso íntegro de la venta devuelta mientras los resúmenes lo netean.
+    const returnedAmount = Number((returnRow as any)?.total_returned ?? 0)
+    const returnJournal = await createSaleReturnJournalEntry(
+      input.original_sale_id,
+      returnedAmount,
+      String((returnRow as any)?.created_at ?? '')
+    )
+    if (!returnJournal.ok) console.error(`[createReturn] asiento de devolución del ticket ${originalTicketNumber ?? input.original_sale_id} falló: ${returnJournal.error}`)
+
     return success({
       ...result,
       auditEntityId: String(result.return_id),
@@ -1182,6 +1227,19 @@ export const processExchange = protectedAction<{
     // La RPC lanza mensajes legibles ("La compra supera el crédito…",
     // "Stock insuficiente…"): los pasamos tal cual al usuario.
     if (rpcError) return failure(rpcError.message)
+
+    // Asientos del cambio directo: la RPC crea la venta nueva DENTRO de Postgres
+    // y no asienta nada → sin esto, toda venta nacida de un cambio quedaba fuera
+    // del diario (y la devolución del crédito también).
+    {
+      const rr = result as { exchange_sale_id?: string; credito_X?: number }
+      if (rr.exchange_sale_id) {
+        const je = await createSaleJournalEntry(rr.exchange_sale_id)
+        if (!je.ok) console.error(`[processExchange] asiento de la venta del cambio (${rr.exchange_sale_id}) falló: ${je.error}`)
+      }
+      const jr = await createSaleReturnJournalEntry(input.original_sale_id, Number(rr.credito_X ?? 0))
+      if (!jr.ok) console.error(`[processExchange] asiento de devolución del cambio (venta ${input.original_sale_id}) falló: ${jr.error}`)
+    }
 
     // Datos extra para el ticket de cambio (igual que createReturn enriquece su modal)
     const [{ data: originalSale }, { data: lines }] = await Promise.all([
@@ -1757,7 +1815,8 @@ export const editSaleLines = protectedAction<
     }
     // La RPC borró el asiento viejo; lo regeneramos con los nuevos totales.
     if (data?.regenerate_journal) {
-      await createSaleJournalEntry(saleId)
+      const je = await createSaleJournalEntry(saleId)
+      if (!je.ok) console.error(`[editSaleLines] no se pudo regenerar el asiento de la venta ${ticketNumber}: ${je.error}`)
     }
     return success({
       ...(data as Record<string, unknown>),
