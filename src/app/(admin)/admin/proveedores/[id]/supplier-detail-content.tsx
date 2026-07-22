@@ -505,6 +505,8 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                   <p><span className="text-muted-foreground">NIF/CIF:</span> {supplier.nif_cif || '-'}</p>
                   <p><span className="text-muted-foreground">Dirección:</span> {supplier.address || '-'}{supplier.city && `, ${supplier.city}`}{supplier.postal_code && ` ${supplier.postal_code}`}</p>
                   <p><span className="text-muted-foreground">País:</span> {supplier.country || 'España'}</p>
+                  {supplier.contact_phone && <p className="flex items-center gap-1"><span className="text-muted-foreground">Teléfono:</span> <Phone className="h-3 w-3" />{supplier.contact_phone}</p>}
+                  {supplier.contact_email && <p className="flex items-center gap-1"><span className="text-muted-foreground">Email:</span> <Mail className="h-3 w-3" />{supplier.contact_email}</p>}
                 </CardContent>
               </Card>
               <Card>
