@@ -30,6 +30,21 @@ const madridMonthKey = (iso: string): string => _madridDayFmt.format(new Date(is
 const pad = (n: number) => String(n).padStart(2, '0')
 const round2 = (n: number) => Math.round(n * 100) / 100
 
+/** Lee TODAS las filas de una query paginando de 1000 en 1000 (el tope del
+ *  servidor NO se evita con .limit(); solo .range() pagina de verdad). */
+async function readAllPaged<T = Record<string, unknown>>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null }>,
+): Promise<T[]> {
+  const out: T[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data } = await build(from, from + 999)
+    const batch = data ?? []
+    out.push(...batch)
+    if (batch.length < 1000) break
+  }
+  return out
+}
+
 /** Lista de claves YYYY-MM entre dos fechas YYYY-MM-DD (inclusive). */
 function monthKeysInRange(start: string, end: string): string[] {
   const [sy, sm] = start.split('-').map(Number)
@@ -117,20 +132,25 @@ export const getEmployeeCommissions = protectedAction<
     const monthKeys = new Set(monthKeysInRange(start_date, end_date))
     const years = Array.from(new Set([...monthKeys].map(k => Number(k.slice(0, 4)))))
 
-    const [plansRes, assignRes, salesRes, goalsRes, bonusesRes, bonusStoresRes, bonusMembersRes, storesRes] = await Promise.all([
+    const [plansRes, assignRes, salesRows, goalsRows, bonusesRes, bonusStoresRes, bonusMembersRes, storesRes] = await Promise.all([
       admin.from('commission_plans').select('*').eq('is_active', true),
       admin.from('commission_assignments').select('*').eq('is_active', true),
-      admin.from('sales')
-        .select('salesperson_id, total, tax_amount, sale_type, created_at')
-        .eq('status', 'completed')
+      // Paginado real: un .limit(20000) NO evita el tope del servidor (max-rows
+      // 1000, verificado empíricamente) — solo .range() pagina de verdad.
+      // Incluye partially_returned: las devoluciones RESTAN de la base
+      // (prorrateo por total_returned), no eliminan el ticket entero.
+      readAllPaged((f, t) => admin.from('sales')
+        .select('salesperson_id, total, total_returned, tax_amount, sale_type, created_at')
+        .in('status', ['completed', 'partially_returned'])
         .gte('created_at', start_date)
         .lte('created_at', end_date + 'T23:59:59')
-        // Sin límite explícito, Supabase trunca a 1000 filas en silencio y la
-        // base de comisiones se quedaría corta en meses con >1000 ventas.
-        .limit(20000),
-      admin.from('employee_monthly_goals')
+        .order('created_at', { ascending: true })
+        .range(f, t)),
+      readAllPaged((f, t) => admin.from('employee_monthly_goals')
         .select('employee_id, goal_type, target_amount, year, month')
-        .in('year', years.length ? years : [0]),
+        .in('year', years.length ? years : [0])
+        .order('id', { ascending: true })
+        .range(f, t)),
       admin.from('commission_group_bonuses').select('*').eq('is_active', true),
       admin.from('commission_group_bonus_stores').select('bonus_id, store_id'),
       admin.from('commission_group_bonus_members').select('bonus_id, employee_id'),
@@ -138,7 +158,6 @@ export const getEmployeeCommissions = protectedAction<
     ])
 
     if (plansRes.error) return failure(plansRes.error.message, 'INTERNAL')
-    if (salesRes.error) return failure(salesRes.error.message, 'INTERNAL')
 
     const plans = new Map<string, CommissionPlan>()
     for (const p of (plansRes.data || []) as any[]) {
@@ -155,15 +174,20 @@ export const getEmployeeCommissions = protectedAction<
     const storeNames = new Map<string, string>()
     for (const s of (storesRes.data || []) as any[]) storeNames.set(s.id, s.name)
 
-    // Ventas netas por empleado, mes y bucket.
+    // Ventas netas por empleado, mes y bucket. Las devoluciones restan: la base
+    // se prorratea por lo NO devuelto (misma proporción que el criterio general
+    // de facturación); una devolución parcial ya no elimina el ticket entero.
     type Buckets = { boutique: number; gift_cards: number; sastreria: number }
     const empSales = new Map<string, Map<string, Buckets>>()  // emp → monthKey → buckets
-    for (const r of (salesRes.data || []) as any[]) {
+    for (const r of (salesRows || []) as any[]) {
       const emp = r.salesperson_id as string | null
       if (!emp) continue
       const mk = madridMonthKey(r.created_at)
       if (!monthKeys.has(mk)) continue
-      const net = (Number(r.total) || 0) - (Number(r.tax_amount) || 0)
+      const total = Number(r.total) || 0
+      const returned = Number(r.total_returned) || 0
+      const proportion = total > 0 ? Math.max(0, (total - returned) / total) : 0
+      const net = (total - (Number(r.tax_amount) || 0)) * proportion
       const st = (r.sale_type ?? '') as string
       let byMonth = empSales.get(emp)
       if (!byMonth) { byMonth = new Map(); empSales.set(emp, byMonth) }
@@ -176,7 +200,7 @@ export const getEmployeeCommissions = protectedAction<
 
     // Objetivos por empleado y mes (sumados sobre tiendas).
     const empGoals = new Map<string, Map<string, { boutique: number; sastreria: number }>>()
-    for (const g of (goalsRes.data || []) as any[]) {
+    for (const g of (goalsRows || []) as any[]) {
       const mk = `${g.year}-${pad(g.month)}`
       if (!monthKeys.has(mk)) continue
       const emp = g.employee_id as string
@@ -206,9 +230,16 @@ export const getEmployeeCommissions = protectedAction<
           } else {
             const goals = empGoals.get(emp)?.get(mk) ?? { boutique: 0, sastreria: 0 }
             for (const [base, target] of [[boutiqueBase, goals.boutique], [sastreriaBase, goals.sastreria]] as const) {
-              const below = Math.min(base, target)
-              const above = Math.max(0, base - target)
-              tiered += below * plan.rate_below / 100 + above * plan.rate_above / 100
+              if (target > 0) {
+                const below = Math.min(base, target)
+                const above = Math.max(0, base - target)
+                tiered += below * plan.rate_below / 100 + above * plan.rate_above / 100
+              } else {
+                // Sin objetivo cargado ese mes: tramo BAJO para toda la base.
+                // (Antes, target=0 mandaba TODO al tramo alto — sobrepagaba
+                // cada mes en que nadie hubiera fijado el objetivo.)
+                tiered += base * plan.rate_below / 100
+              }
             }
           }
         }
@@ -255,24 +286,31 @@ export const getEmployeeCommissions = protectedAction<
         const qEndMonth = months[2]
         const qEnd = `${qy}-${pad(qEndMonth)}-${pad(new Date(qy, qEndMonth, 0).getDate())}`
 
-        const [sgRes, ssRes] = await Promise.all([
+        const [sgRes, ssRows] = await Promise.all([
           admin.from('store_monthly_goals')
             .select('store_id, goal_type, target_amount')
             .eq('year', qy).in('month', months).in('store_id', bStores).in('goal_type', goalTypes),
-          admin.from('sales')
-            .select('store_id, total, tax_amount, sale_type')
-            .eq('status', 'completed').in('store_id', bStores)
-            .gte('created_at', qStart).lte('created_at', qEnd + 'T23:59:59'),
+          // Paginado: un trimestre de varias tiendas supera 1000 ventas con
+          // facilidad y el tope del servidor truncaba el "actual" en silencio
+          // (bonus que no se activaba o pool menor).
+          readAllPaged((f, t) => admin.from('sales')
+            .select('store_id, total, total_returned, tax_amount, sale_type')
+            .in('status', ['completed', 'partially_returned']).in('store_id', bStores)
+            .gte('created_at', qStart).lte('created_at', qEnd + 'T23:59:59')
+            .order('created_at', { ascending: true })
+            .range(f, t)),
         ])
 
         const targetByStore = new Map<string, number>()
         for (const g of (sgRes.data || []) as any[]) targetByStore.set(g.store_id, (targetByStore.get(g.store_id) || 0) + (Number(g.target_amount) || 0))
         const actualByStore = new Map<string, number>()
-        for (const r of (ssRes.data || []) as any[]) {
+        for (const r of (ssRows || []) as any[]) {
           const st = (r.sale_type ?? '') as string
           const inGoal = (goalTypes.includes('boutique') && st === BOUTIQUE_SALE_TYPE) || (goalTypes.includes('sastreria') && SASTRERIA_SALE_TYPES.includes(st))
           if (!inGoal) continue
-          const net = (Number(r.total) || 0) - (Number(r.tax_amount) || 0)
+          const total = Number(r.total) || 0
+          const proportion = total > 0 ? Math.max(0, (total - (Number(r.total_returned) || 0)) / total) : 0
+          const net = (total - (Number(r.tax_amount) || 0)) * proportion
           actualByStore.set(r.store_id, (actualByStore.get(r.store_id) || 0) + net)
         }
 
@@ -358,6 +396,10 @@ export async function getCommissionConfig(): Promise<{
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
+    // La configuración revela tarifas, quién comisiona y bonus: solo para
+    // quien gestiona configuración (antes bastaba cualquier sesión).
+    const canRead = await checkUserPermission(user.id, 'config.edit')
+    if (!canRead) return { error: 'Sin permisos para ver la configuración de comisiones' }
 
     const admin = createAdminClient()
     const [plansRes, assignRes, bonusesRes, bStoresRes, bMembersRes, storesRes, profilesRes] = await Promise.all([
@@ -431,14 +473,20 @@ export async function upsertCommissionPlan(input: {
     const { user, admin } = auth
 
     if (!input.name?.trim()) return { error: 'El plan necesita un nombre' }
+    const rateBelow = Number(input.rate_below ?? 0)
+    const rateAbove = Number(input.rate_above ?? 0)
+    if (!Number.isFinite(rateBelow) || rateBelow < 0 || rateBelow > 100 ||
+        !Number.isFinite(rateAbove) || rateAbove < 0 || rateAbove > 100) {
+      return { error: 'Los porcentajes deben estar entre 0 y 100' }
+    }
     const row = {
       name: input.name.trim(),
       store_id: input.store_id || null,
       base_boutique: !!input.base_boutique,
       base_gift_cards: !!input.base_gift_cards,
       base_sastreria: !!input.base_sastreria,
-      rate_below: input.rate_below ?? 0,
-      rate_above: input.rate_above ?? 0,
+      rate_below: rateBelow,
+      rate_above: rateAbove,
       use_target: input.use_target ?? true,
       is_active: input.is_active ?? true,
       updated_at: new Date().toISOString(),
@@ -582,11 +630,15 @@ export async function upsertGroupBonus(input: {
     if ('error' in auth) return { error: auth.error }
     const { user, admin } = auth
     if (!input.name?.trim()) return { error: 'El bonus necesita un nombre' }
+    const rate = Number(input.rate ?? 0)
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) return { error: 'El porcentaje debe estar entre 0 y 100' }
+    if (!input.store_ids?.length) return { error: 'El bonus necesita al menos una tienda' }
+    if (!input.member_ids?.length) return { error: 'El bonus necesita al menos un beneficiario' }
 
     const row = {
       name: input.name.trim(),
       period_type: input.period_type || 'quarter',
-      rate: input.rate ?? 0,
+      rate,
       base_type: input.base_type || 'excess',
       goal_types: input.goal_types?.length ? input.goal_types : ['boutique', 'sastreria'],
       is_active: input.is_active ?? true,
@@ -603,11 +655,20 @@ export async function upsertGroupBonus(input: {
       id = data.id
     }
 
-    // Reemplazar tiendas y miembros (set completo).
-    await admin.from('commission_group_bonus_stores').delete().eq('bonus_id', id)
-    if (input.store_ids.length) await admin.from('commission_group_bonus_stores').insert(input.store_ids.map(s => ({ bonus_id: id, store_id: s })))
-    await admin.from('commission_group_bonus_members').delete().eq('bonus_id', id)
-    if (input.member_ids.length) await admin.from('commission_group_bonus_members').insert(input.member_ids.map(e => ({ bonus_id: id, employee_id: e })))
+    // Reemplazar tiendas y miembros (set completo, con chequeo: un fallo aquí
+    // dejaría el bonus sin tiendas/beneficiarios en silencio).
+    const { error: delStoresErr } = await admin.from('commission_group_bonus_stores').delete().eq('bonus_id', id)
+    if (delStoresErr) return { error: delStoresErr.message }
+    if (input.store_ids.length) {
+      const { error: insStoresErr } = await admin.from('commission_group_bonus_stores').insert(input.store_ids.map(s => ({ bonus_id: id, store_id: s })))
+      if (insStoresErr) return { error: insStoresErr.message }
+    }
+    const { error: delMembersErr } = await admin.from('commission_group_bonus_members').delete().eq('bonus_id', id)
+    if (delMembersErr) return { error: delMembersErr.message }
+    if (input.member_ids.length) {
+      const { error: insMembersErr } = await admin.from('commission_group_bonus_members').insert(input.member_ids.map(e => ({ bonus_id: id, employee_id: e })))
+      if (insMembersErr) return { error: insMembersErr.message }
+    }
 
     await admin.rpc('log_audit', {
       p_user_id: user.id, p_action: input.id ? 'update' : 'create', p_module: 'config',

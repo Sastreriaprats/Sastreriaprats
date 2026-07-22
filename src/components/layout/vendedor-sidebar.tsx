@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation'
 import { useAuth } from '@/components/providers/auth-provider'
 import { usePermissions } from '@/hooks/use-permissions'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { LayoutDashboard, Users, Package, CircleDollarSign, ShoppingCart, Tag, ClipboardList, Scissors, Ruler } from 'lucide-react'
+import { LayoutDashboard, Users, Package, CircleDollarSign, ShoppingCart, Tag, ClipboardList, Scissors, Ruler, TrendingUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
@@ -19,6 +19,9 @@ const navItems = [
   { label: 'Caja TPV', href: '/vendedor/caja', icon: ShoppingCart },
   { label: 'Albaranes', href: '/admin/almacen/albaranes', icon: ClipboardList },
   { label: 'Etiquetas y códigos', href: '/admin/stock/codigos-barras', icon: Tag, permission: 'barcodes.manage' as const },
+  // Vista personal "Mis ventas y comisiones" (el servidor scopa a su fila
+  // por reports.view_own; el middleware ya permite /admin/reporting).
+  { label: 'Mis comisiones', href: '/admin/reporting', icon: TrendingUp, permission: 'reports.view_own' as const },
 ]
 
 export function VendedorSidebar({ collapsed = false }: { collapsed?: boolean }) {

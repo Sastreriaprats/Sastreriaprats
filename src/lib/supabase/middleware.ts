@@ -253,6 +253,10 @@ export async function updateSession(request: NextRequest) {
     const isPedidosRoute       = pathname.startsWith('/admin/pedidos')
     const isAlbaranesRoute     = pathname.startsWith('/admin/almacen/albaranes')
     const isFacturasRoute      = pathname.startsWith('/admin/facturas')
+    // Informes: los vendedores entran a su vista personal "Mis ventas y
+    // comisiones" (la página scopa en servidor por reports.view_own — mig 232;
+    // sin esta excepción la vista era inalcanzable para ellos).
+    const isReportingRoute     = pathname.startsWith('/admin/reporting')
     if (hasSastreRole) {
       const url = request.nextUrl.clone()
       url.pathname = '/sastre'
@@ -261,7 +265,7 @@ export async function updateSession(request: NextRequest) {
       setSecurityHeaders(redirectRes)
       return redirectRes
     }
-    if (hasVendedorRole && !(isVendedorAvanzado && (isCodigosBarrasRoute || isProductosRoute || isStockDashboardRoute || isPedidosRoute || isAlbaranesRoute || isFacturasRoute)) && !isCalendarioRoute) {
+    if (hasVendedorRole && !(isVendedorAvanzado && (isCodigosBarrasRoute || isProductosRoute || isStockDashboardRoute || isPedidosRoute || isAlbaranesRoute || isFacturasRoute)) && !isCalendarioRoute && !isReportingRoute) {
       const url = request.nextUrl.clone()
       url.pathname = '/vendedor'
       const redirectRes = NextResponse.redirect(url)

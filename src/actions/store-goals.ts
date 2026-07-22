@@ -38,6 +38,21 @@ const SASTRERIA_SALE_TYPES = ['tailoring_deposit', 'tailoring_final', 'alteratio
 // Estados de online_orders que se consideran facturación realizada.
 const ONLINE_COUNTED_STATUSES = ['paid', 'processing', 'shipped', 'delivered']
 
+/** Lee TODAS las filas paginando de 1000 en 1000 (el tope del servidor no se
+ *  evita con .limit(); solo .range() pagina de verdad). */
+async function readAllPagedGoals<T = Record<string, unknown>>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null }>,
+): Promise<T[]> {
+  const out: T[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data } = await build(from, from + 999)
+    const batch = data ?? []
+    out.push(...batch)
+    if (batch.length < 1000) break
+  }
+  return out
+}
+
 /** Devuelve una fila por tienda con sus objetivos para el mes indicado. */
 export async function getStoreGoalsForMonth(
   year: number,
@@ -54,16 +69,18 @@ export async function getStoreGoalsForMonth(
     const nextMonth = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 }
     const nextMonthStart = `${nextMonth.y}-${pad(nextMonth.m)}-01T00:00:00`
 
-    const [storesRes, goalsRes, salesRes, onlineRes] = await Promise.all([
+    const [storesRes, goalsRes, salesRows, onlineRes] = await Promise.all([
       admin.from('stores').select('id, code, name, store_type').eq('is_active', true).order('name'),
       admin.from('store_monthly_goals').select('store_id, goal_type, target_amount').eq('year', year).eq('month', month),
-      admin.from('sales').select('store_id, total, tax_amount, sale_type').eq('status', 'completed').gte('created_at', monthStart).lt('created_at', nextMonthStart),
+      // Paginado (el tope de 1000 filas del servidor no se evita con .limit())
+      // e incluye partially_returned: las devoluciones restan del "actual",
+      // misma vara que el motor de comisiones.
+      readAllPagedGoals((f, t) => admin.from('sales').select('store_id, total, total_returned, tax_amount, sale_type').in('status', ['completed', 'partially_returned']).gte('created_at', monthStart).lt('created_at', nextMonthStart).order('created_at', { ascending: true }).range(f, t)),
       admin.from('online_orders').select('total, tax_amount').in('status', ONLINE_COUNTED_STATUSES).gte('created_at', monthStart).lt('created_at', nextMonthStart),
     ])
 
     if (storesRes.error) return { error: storesRes.error.message }
     if (goalsRes.error) return { error: goalsRes.error.message }
-    if (salesRes.error) return { error: salesRes.error.message }
     if (onlineRes.error) return { error: onlineRes.error.message }
 
     const goalsByStore = new Map<string, { boutique: number; sastreria: number; online: number }>()
@@ -73,12 +90,15 @@ export async function getStoreGoalsForMonth(
       goalsByStore.set(g.store_id, entry)
     }
 
-    // Los objetivos se miden en base imponible (sin IVA): total - tax_amount.
+    // Los objetivos se miden en base imponible (sin IVA): total - tax_amount,
+    // prorrateando por lo NO devuelto (las devoluciones restan).
     const actualByStore = new Map<string, { boutique: number; sastreria: number }>()
-    for (const r of (salesRes.data || []) as { store_id: string | null; total: number | string | null; tax_amount: number | string | null; sale_type: string | null }[]) {
+    for (const r of (salesRows || []) as { store_id: string | null; total: number | string | null; total_returned?: number | string | null; tax_amount: number | string | null; sale_type: string | null }[]) {
       if (!r.store_id) continue
       const entry = actualByStore.get(r.store_id) ?? { boutique: 0, sastreria: 0 }
-      const net = (Number(r.total) || 0) - (Number(r.tax_amount) || 0)
+      const total = Number(r.total) || 0
+      const proportion = total > 0 ? Math.max(0, (total - (Number(r.total_returned) || 0)) / total) : 0
+      const net = (total - (Number(r.tax_amount) || 0)) * proportion
       const st = r.sale_type ?? ''
       if (BOUTIQUE_SALE_TYPES.includes(st)) entry.boutique += net
       else if (SASTRERIA_SALE_TYPES.includes(st)) entry.sastreria += net
@@ -228,7 +248,7 @@ export async function getEmployeeGoals(input: {
     const nextMonth = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 }
     const nextMonthStart = `${nextMonth.y}-${pad(nextMonth.m)}-01T00:00:00`
 
-    const [assignedRes, goalsRes, salesRes] = await Promise.all([
+    const [assignedRes, goalsRes, salesRows] = await Promise.all([
       admin
         .from('user_stores')
         .select('user_id, profiles!user_stores_user_id_fkey(id, full_name, is_active)')
@@ -239,18 +259,21 @@ export async function getEmployeeGoals(input: {
         .eq('store_id', storeId)
         .eq('year', year)
         .eq('month', month),
-      admin
+      // Paginado + devoluciones restan (misma vara que el motor de comisiones).
+      readAllPagedGoals((f, t) => admin
         .from('sales')
-        .select('salesperson_id, total, tax_amount, sale_type')
+        .select('salesperson_id, total, total_returned, tax_amount, sale_type')
         .eq('store_id', storeId)
-        .eq('status', 'completed')
+        .in('status', ['completed', 'partially_returned'])
         .gte('created_at', monthStart)
-        .lt('created_at', nextMonthStart),
+        .lt('created_at', nextMonthStart)
+        .order('created_at', { ascending: true })
+        .range(f, t)),
     ])
+    const salesRes = { data: salesRows, error: null as null }
 
     if (assignedRes.error) return { error: assignedRes.error.message }
     if (goalsRes.error) return { error: goalsRes.error.message }
-    if (salesRes.error) return { error: salesRes.error.message }
 
     type AssignedRow = { user_id: string; profiles: { id: string; full_name: string | null; is_active: boolean | null } | { id: string; full_name: string | null; is_active: boolean | null }[] | null }
     const employees = new Map<string, { full_name: string }>()
@@ -286,9 +309,11 @@ export async function getEmployeeGoals(input: {
     }
 
     const actuals = new Map<string, { boutique: number; sastreria: number }>()
-    for (const r of (salesRes.data || []) as { salesperson_id: string | null; total: number | string | null; tax_amount: number | string | null; sale_type: string | null }[]) {
+    for (const r of (salesRes.data || []) as { salesperson_id: string | null; total: number | string | null; total_returned?: number | string | null; tax_amount: number | string | null; sale_type: string | null }[]) {
       if (!r.salesperson_id) continue
-      const net = (Number(r.total) || 0) - (Number(r.tax_amount) || 0)
+      const total = Number(r.total) || 0
+      const proportion = total > 0 ? Math.max(0, (total - (Number(r.total_returned) || 0)) / total) : 0
+      const net = (total - (Number(r.tax_amount) || 0)) * proportion
       const e = actuals.get(r.salesperson_id) ?? { boutique: 0, sastreria: 0 }
       const st = r.sale_type ?? ''
       if (BOUTIQUE_SALE_TYPES.includes(st)) e.boutique += net
