@@ -7,7 +7,7 @@ import { generateInvoicePdf } from '@/lib/pdf/invoice-pdf'
 import { generateEstimatePdf } from '@/lib/pdf/estimate-pdf'
 import { sendEstimateEmail } from '@/lib/email/transactional'
 import { formalGreeting } from '@/lib/email/greeting'
-import { createInvoiceJournalEntry, reverseInvoiceJournalEntry } from '@/actions/accounting-triggers'
+import { createInvoiceJournalEntry, reverseInvoiceJournalEntry, createManualTransactionJournalEntry } from '@/actions/accounting-triggers'
 import { formatClientAddress } from '@/lib/clients/format'
 import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
 
@@ -702,23 +702,29 @@ export const getVatQuarterly = protectedAction<
     // discriminado y que daban "IVA soportado = 0").
     // Sin filtro de status: el IVA soportado se contabiliza al RECIBIR la
     // factura, independientemente del estado de pago.
-    const [salesRes, purchasesRes, tailoringPaymentsRes, otherInvoicesRes] = await Promise.all([
-      ctx.adminClient.from('sales').select('total, total_returned, subtotal, tax_amount, created_at').gte('created_at', yearStart).lte('created_at', yearEnd).in('status', ['completed', 'partially_returned']),
-      ctx.adminClient.from('ap_supplier_invoices').select('amount, tax_amount, invoice_date').eq('is_proforma', false).gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`),
+    // Paginado con readAllPaged: sin esto, un año con >1000 filas en cualquiera
+    // de estas tablas truncaba el IVA de los últimos trimestres en silencio.
+    const [salesRows, purchasesRows, tailoringPaymentsRows, otherInvoicesRows, cobroBaseBySale] = await Promise.all([
+      readAllPaged((f, t) => ctx.adminClient.from('sales').select('id, total, total_returned, subtotal, tax_amount, created_at').gte('created_at', yearStart).lte('created_at', yearEnd).in('status', ['completed', 'partially_returned']).order('created_at', { ascending: true }).range(f, t)),
+      readAllPaged((f, t) => ctx.adminClient.from('ap_supplier_invoices').select('amount, tax_amount, invoice_date').eq('is_proforma', false).gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`).order('invoice_date', { ascending: true }).range(f, t)),
       // Cobros de sastrería (backoffice): mismo criterio que el Resumen. amount
       // bruto → base/IVA prorrateando subtotal/total del pedido. Fecha contable:
       // payment_date. No se solapan con `sales` ni con `invoices` (que aquí no
       // se suman), por lo que no hay doble conteo.
-      ctx.adminClient.from('tailoring_order_payments').select('amount, payment_date, tailoring_order:tailoring_orders(subtotal, total)').gte('payment_date', `${year}-01-01`).lte('payment_date', `${year}-12-31`),
+      readAllPaged((f, t) => ctx.adminClient.from('tailoring_order_payments').select('amount, payment_date, tailoring_order:tailoring_orders(subtotal, total)').gte('payment_date', `${year}-01-01`).lte('payment_date', `${year}-12-31`).order('payment_date', { ascending: true }).range(f, t)),
       // Facturas emitidas que son ingreso por sí mismas (online serie W +
       // sueltas), mismo criterio que el Resumen: se excluyen las ligadas a
       // ticket/pedido/reserva porque esos cobros ya se cuentan → sin doble conteo.
-      ctx.adminClient.from('invoices').select('subtotal, tax_amount, invoice_date').eq('invoice_type', 'issued').is('sale_id', null).is('tailoring_order_id', null).is('reservation_id', null).not('status', 'in', '(draft,cancelled)').gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`),
+      readAllPaged((f, t) => ctx.adminClient.from('invoices').select('subtotal, tax_amount, invoice_date').eq('invoice_type', 'issued').is('sale_id', null).is('tailoring_order_id', null).is('reservation_id', null).not('status', 'in', '(draft,cancelled)').gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`).order('invoice_date', { ascending: true }).range(f, t)),
+      // Base de los cobros de pedido embebidos en tickets: esa parte del ticket
+      // va al 0% (la cuota ya era correcta) pero su BASE no debe declararse dos
+      // veces (aquí como ticket y otra vez como cobro de sastrería).
+      loadPedidoCobroBaseBySale(ctx.adminClient, yearStart, yearEnd),
     ])
-    const sales = (salesRes.data || []) as Array<{ total?: number; total_returned?: number; subtotal?: number; tax_amount?: number; created_at?: string }>
-    const purchases = (purchasesRes.data || []) as Array<{ amount?: number; tax_amount?: number; invoice_date?: string }>
-    const tailoringPayments = (tailoringPaymentsRes.data || []) as Array<{ amount?: number; payment_date?: string; tailoring_order?: { subtotal?: number; total?: number } }>
-    const otherInvoices = (otherInvoicesRes.data || []) as Array<{ subtotal?: number; tax_amount?: number; invoice_date?: string }>
+    const sales = salesRows as Array<{ id?: string; total?: number; total_returned?: number; subtotal?: number; tax_amount?: number; created_at?: string }>
+    const purchases = purchasesRows as Array<{ amount?: number; tax_amount?: number; invoice_date?: string }>
+    const tailoringPayments = tailoringPaymentsRows as Array<{ amount?: number; payment_date?: string; tailoring_order?: { subtotal?: number; total?: number } }>
+    const otherInvoices = otherInvoicesRows as Array<{ subtotal?: number; tax_amount?: number; invoice_date?: string }>
 
     const quarterFromMonth = (m: number) => Math.ceil(m / 3) as 1 | 2 | 3 | 4
     const byQuarter: Record<number, {
@@ -738,7 +744,10 @@ export const getVatQuarterly = protectedAction<
         const total = Number(x.total) || 0
         const returned = Number(x.total_returned) || 0
         const proportion = total > 0 ? Math.max(0, (total - returned) / total) : 0
-        const base = (Number(x.subtotal ?? x.total) || 0) * proportion
+        // Resta la base de líneas que son cobro de un pedido: ya se declara vía
+        // tailoringPayments (mismo criterio que netSale del Resumen).
+        const cobroPedido = cobroBaseBySale.get(String(x.id)) || 0
+        const base = Math.max(0, (Number(x.subtotal ?? x.total) || 0) - cobroPedido) * proportion
         const iva = (Number(x.tax_amount) || 0) * proportion
         byQuarter[q].baseSales += base
         byQuarter[q].ivaRepercutido += iva
@@ -863,22 +872,27 @@ export const getVatQuarterlyDetail = protectedAction<
     if (!summaryRes.success) return failure(summaryRes.error)
 
     // Facturas EMITIDAS del año. Excluye draft y cancelled del modelo 303.
-    const [issuedRes, receivedRes] = await Promise.all([
-      ctx.adminClient
+    // Paginado (readAllPaged): el libro debe listar TODAS las facturas del año.
+    const [issuedData, receivedData] = await Promise.all([
+      readAllPaged((f, t) => ctx.adminClient
         .from('invoices')
         .select('invoice_number, invoice_date, client_name, client_nif, subtotal, tax_rate, tax_amount, irpf_rate, irpf_amount, total, status, sale_id, tailoring_order_id, id')
         .gte('invoice_date', yearStart)
         .lte('invoice_date', yearEnd)
         .not('status', 'in', '(draft,cancelled)')
-        .order('invoice_date', { ascending: true }),
-      ctx.adminClient
+        .order('invoice_date', { ascending: true })
+        .range(f, t)),
+      readAllPaged((f, t) => ctx.adminClient
         .from('ap_supplier_invoices')
         .select('invoice_number, invoice_date, supplier_name, supplier_cif, amount, tax_amount, total_amount, retention_amount, status, payment_date')
         .eq('is_proforma', false) // las proformas no entran en el libro de facturas recibidas
         .gte('invoice_date', yearStart)
         .lte('invoice_date', yearEnd)
-        .order('invoice_date', { ascending: true }),
+        .order('invoice_date', { ascending: true })
+        .range(f, t)),
     ])
+    const issuedRes = { data: issuedData }
+    const receivedRes = { data: receivedData }
 
     // Para determinar el "origen" de cada factura emitida sin sale_id ni
     // tailoring_order_id, miramos si hay un estimate enlazado.
@@ -1429,6 +1443,13 @@ export const createManualTransaction = protectedAction<
       return failure('Error al guardar el movimiento')
     }
 
+    // El switch "Generar asiento contable automáticamente" del formulario:
+    // hasta ahora se aceptaba y se ignoraba (guardado fantasma funcional).
+    if (input.generateJournalEntry) {
+      const je = await createManualTransactionJournalEntry(String(data.id))
+      if (!je.ok) console.error(`[createManualTransaction] asiento del movimiento ${data.id} falló: ${je.error}`)
+    }
+
     return success({ id: String(data.id) })
   }
 )
@@ -1815,11 +1836,10 @@ export const createInvoiceFromSaleAction = protectedAction<
       return failure(linesError.message ?? 'Error al crear las líneas')
     }
 
-    // Solo crear asiento contable si se emite directamente. En modo draft el
-    // asiento se generará al pulsar "Emitir" desde el editor.
-    if (!draft) {
-      createInvoiceJournalEntry(inv.id as string).catch((e) => console.error('Journal entry from sale invoice:', e))
-    }
+    // SIN asiento propio: la venta (ticket) ya tiene su asiento de venta en el
+    // diario; un asiento de la factura duplicaría la 700/477 (mismo principio
+    // que la serie W, que usa el asiento del pedido online). La factura suma en
+    // resúmenes vía sale_id/criterio unificado, no vía diario.
     return success({ id: inv.id as string, invoice_number, auditEntityId: String(inv.id), auditDescription: `Factura ${invoice_number}` })
   }
 )
@@ -2275,10 +2295,15 @@ export const updateInvoiceAction = protectedAction<UpdateInvoiceInput, { id: str
 
     if (error) return failure(error.message)
 
-    // Reemplazar líneas. Idealmente esto debería ser atómico (RPC), pero
-    // por ahora al menos capturamos el error del INSERT — si fallara, las
-    // líneas quedan vacías y el sastre lo verá inmediatamente.
-    await ctx.adminClient.from('invoice_lines').delete().eq('invoice_id', input.id)
+    // Reemplazar líneas. No es atómico (sin RPC), así que: guardamos las líneas
+    // actuales ANTES de borrar y, si el INSERT nuevo falla, las restauramos para
+    // no dejar jamás una factura (posiblemente emitida) sin líneas.
+    const { data: prevLines } = await ctx.adminClient
+      .from('invoice_lines')
+      .select('description, quantity, unit_price, tax_rate, discount_percentage, line_total, sort_order, product_variant_id, rectifies_line_id')
+      .eq('invoice_id', input.id)
+    const { error: deleteLinesError } = await ctx.adminClient.from('invoice_lines').delete().eq('invoice_id', input.id)
+    if (deleteLinesError) return failure(deleteLinesError.message)
     if (recalc.computedLines.length > 0) {
       const { error: insertLinesError } = await ctx.adminClient.from('invoice_lines').insert(
         recalc.computedLines.map((l, i) => ({
@@ -2292,7 +2317,15 @@ export const updateInvoiceAction = protectedAction<UpdateInvoiceInput, { id: str
           sort_order: i,
         }))
       )
-      if (insertLinesError) return failure(insertLinesError.message)
+      if (insertLinesError) {
+        if (prevLines?.length) {
+          const { error: restoreError } = await ctx.adminClient.from('invoice_lines').insert(
+            (prevLines as Record<string, unknown>[]).map((l) => ({ ...l, invoice_id: input.id }))
+          )
+          if (restoreError) console.error(`[updateInvoiceAction] restauración de líneas de ${invoiceNumber} falló: ${restoreError.message}`)
+        }
+        return failure(insertLinesError.message)
+      }
     }
     return success({ id: input.id, auditEntityId: String(input.id), auditDescription: `Factura ${invoiceNumber}` })
   }
@@ -2311,10 +2344,20 @@ export const issueInvoiceAction = protectedAction<string, { id: string; auditEnt
 
     const { data: inv } = await ctx.adminClient
       .from('invoices')
-      .select('invoice_number')
+      .select('invoice_number, journal_entry_id, sale_id')
       .eq('id', invoiceId)
       .maybeSingle()
-    const invoiceNumber = (inv as { invoice_number?: string } | null)?.invoice_number ?? ''
+    const invRow = inv as { invoice_number?: string; journal_entry_id?: string | null; sale_id?: string | null } | null
+    const invoiceNumber = invRow?.invoice_number ?? ''
+
+    // Asiento al emitir (la UI siempre lo anunció; antes no se creaba nunca).
+    // Solo si no existe ya y la factura NO viene de un ticket: el ticket ya
+    // tiene su propio asiento de venta y duplicaría la 700 en el diario
+    // (mismo principio que la serie W, que usa el asiento del pedido online).
+    if (!invRow?.journal_entry_id && !invRow?.sale_id) {
+      const je = await createInvoiceJournalEntry(invoiceId)
+      if (!je.ok) console.error(`[issueInvoiceAction] asiento de ${invoiceNumber} falló: ${je.error}`)
+    }
     return success({ id: invoiceId, auditEntityId: String(invoiceId), auditDescription: `Factura ${invoiceNumber} emitida` })
   }
 )

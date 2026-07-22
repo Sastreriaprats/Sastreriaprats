@@ -329,20 +329,24 @@ export const getStoreSalesReport = protectedAction<
         if (store_id) q = q.eq('store_id', store_id)
         return q.range(f, t)
       }),
-      // 4) Tienda online (sin tienda física; se omite al filtrar una tienda concreta).
+      // 4) Tienda online (sin tienda física; se omite al filtrar una tienda
+      //    concreta). Por FECHA DE PAGO (paid_at), que es la fecha contable de
+      //    la factura W: así el total cuadra exacto con Dashboard/Contabilidad.
       store_id
         ? Promise.resolve([] as { subtotal?: number; total?: number }[])
         : readAllPaged<{ subtotal?: number; total?: number }>((f, t) =>
           ctx.adminClient
             .from('online_orders')
             .select('subtotal, total')
-            .gte('created_at', startTs)
-            .lte('created_at', endTs)
+            .gte('paid_at', startTs)
+            .lte('paid_at', endTs)
             .in('status', ['paid', 'processing', 'shipped', 'delivered'])
             .order('id', { ascending: true })
             .range(f, t)),
-      // 5) Facturas emitidas que son ingreso por sí mismas (sueltas, sin ticket ni
-      //    pedido ni reserva). Mismo criterio que Dashboard/Contabilidad.
+      // 5) Facturas emitidas que son ingreso por sí mismas (sueltas, sin ticket,
+      //    pedido, reserva NI pedido online). Las de la serie W (online_order_id)
+      //    se EXCLUYEN: la tienda online ya se suma en el bloque 4 — dejarlas
+      //    aquí contaba el online dos veces en el total del informe.
       store_id
         ? Promise.resolve([] as { subtotal?: number; total?: number }[])
         : readAllPaged<{ subtotal?: number; total?: number }>((f, t) =>
@@ -353,6 +357,7 @@ export const getStoreSalesReport = protectedAction<
             .is('sale_id', null)
             .is('tailoring_order_id', null)
             .is('reservation_id', null)
+            .is('online_order_id', null)
             .not('status', 'in', '(draft,cancelled)')
             .gte('invoice_date', start_date)
             .lte('invoice_date', end_date)
