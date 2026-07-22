@@ -865,7 +865,11 @@ export function InvoicesTab({ editId, onEditConsumed }: { editId: string | null;
           <DialogHeader>
             <DialogTitle>Nueva factura</DialogTitle>
           </DialogHeader>
-          <ScrollArea className="flex-1 min-h-0 pr-1">
+          {/* Scroll nativo, NO <ScrollArea>: el h-full del viewport de Radix no resuelve
+              cuando el DialogContent solo tiene max-h (altura indefinida) y el contenido
+              queda recortado sin poder desplazarse. El overflow en el propio flex-item
+              no depende de alturas porcentuales. */}
+          <div className="flex-1 min-h-0 overflow-y-auto pr-1">
             <div className="space-y-4 p-1">
               {/* Client */}
               {(() => {
@@ -1092,7 +1096,7 @@ export function InvoicesTab({ editId, onEditConsumed }: { editId: string | null;
                 <Textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} />
               </div>
             </div>
-          </ScrollArea>
+          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
             <Button onClick={handleSave} disabled={saving}>
@@ -1610,7 +1614,11 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                 : <>Editar factura {inv.invoice_number} (borrador)</>}
             </DialogTitle>
           </DialogHeader>
-          <ScrollArea className="flex-1 min-h-0 pr-1">
+          {/* Scroll nativo, NO <ScrollArea>: el h-full del viewport de Radix no resuelve
+              cuando el DialogContent solo tiene max-h (altura indefinida) y el contenido
+              queda recortado sin poder desplazarse. El overflow en el propio flex-item
+              no depende de alturas porcentuales. */}
+          <div className="flex-1 min-h-0 overflow-y-auto pr-1">
             <div className="space-y-4 p-1">
               {!conceptOnly && inv.status !== 'draft' && (
                 <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 flex items-start gap-2">
@@ -1858,7 +1866,7 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
               </div>
               )}
             </div>
-          </ScrollArea>
+          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>Cancelar</Button>
             <Button onClick={handleUpdate} disabled={saving}>
@@ -1995,7 +2003,11 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
           <DialogHeader>
             <DialogTitle>Factura rectificativa · <span className="font-mono">{inv.invoice_number}</span></DialogTitle>
           </DialogHeader>
-          <ScrollArea className="flex-1 min-h-0 pr-1">
+          {/* Scroll nativo, NO <ScrollArea>: el h-full del viewport de Radix no resuelve
+              cuando el DialogContent solo tiene max-h (altura indefinida) y el contenido
+              queda recortado sin poder desplazarse. El overflow en el propio flex-item
+              no depende de alturas porcentuales. */}
+          <div className="flex-1 min-h-0 overflow-y-auto pr-1">
             <div className="space-y-4 p-1">
               <div className="rounded-md border p-3 text-sm bg-muted/30 grid grid-cols-2 gap-2">
                 <div><span className="text-muted-foreground">Cliente:</span> <span className="font-medium">{inv.client_name}</span></div>
@@ -2100,7 +2112,7 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                 </>
               )}
             </div>
-          </ScrollArea>
+          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreditNoteOpen(false)} disabled={creditNoteSaving}>Cancelar</Button>
             <Button
@@ -2627,7 +2639,11 @@ function EstimatesTab() {
       <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm() }}>
         <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
           <DialogHeader><DialogTitle>{editingId ? `Editar presupuesto ${editingNumber}` : 'Nuevo presupuesto'}</DialogTitle></DialogHeader>
-          <ScrollArea className="flex-1 min-h-0 pr-1">
+          {/* Scroll nativo, NO <ScrollArea>: el h-full del viewport de Radix no resuelve
+              cuando el DialogContent solo tiene max-h (altura indefinida) y el contenido
+              queda recortado sin poder desplazarse. El overflow en el propio flex-item
+              no depende de alturas porcentuales. */}
+          <div className="flex-1 min-h-0 overflow-y-auto pr-1">
             <div className="space-y-4 p-1">
               {(() => {
                 const hasCompanies = !!selectedClient && selectedClient.companies.length > 0
@@ -2760,7 +2776,7 @@ function EstimatesTab() {
                 <Textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} />
               </div>
             </div>
-          </ScrollArea>
+          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
             <Button onClick={handleSave} disabled={saving}>

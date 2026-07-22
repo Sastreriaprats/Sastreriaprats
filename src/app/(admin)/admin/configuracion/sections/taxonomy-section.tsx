@@ -18,7 +18,6 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Loader2, Plus, Pencil, Trash2, Users, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { usePermissions } from '@/hooks/use-permissions'
@@ -382,7 +381,9 @@ function AssignProductsDialog({
             <Badge variant="secondary">{selectedIds.size} seleccionados</Badge>
           </div>
 
-          <ScrollArea className="flex-1 min-h-0 rounded-md border">
+          {/* Scroll nativo, NO <ScrollArea>: con DialogContent max-h (altura indefinida)
+              el viewport de Radix no resuelve h-full y el listado queda recortado sin scroll. */}
+          <div className="flex-1 min-h-0 overflow-y-auto rounded-md border">
             {loading ? (
               <div className="p-8 text-center text-sm text-muted-foreground">
                 <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
@@ -412,7 +413,7 @@ function AssignProductsDialog({
                 ))}
               </ul>
             )}
-          </ScrollArea>
+          </div>
         </div>
 
         <DialogFooter className="px-6 py-4 border-t">
