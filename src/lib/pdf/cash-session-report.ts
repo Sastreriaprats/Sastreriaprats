@@ -34,12 +34,15 @@ export interface CashSessionReportData {
   countedCash: number
   cashDifference: number
   closingNotes?: string
-  // Cobros de pedidos de sastrería desglosados por método (no van en `total*Sales`)
+  // Cobros de pedidos de sastrería y reservas desglosados por método.
+  // OJO: estos importes YA están incluidos en `total*Sales` (las RPC de cobro
+  // suman a los totales de cash_sessions); aquí solo sirven para separar la
+  // columna "Ventas TPV" de la de cobros, nunca para sumarse otra vez.
   sastreriaCashPayments?: number
   sastreriaCardPayments?: number
   sastreriaBizumPayments?: number
   sastreriaTransferPayments?: number
-  sastreriaTotal?: number
+  sastreriaVoucherPayments?: number
 }
 
 const NAVY = '#1B2A4A'
@@ -206,20 +209,42 @@ function buildDocDefinition(d: CashSessionReportData): PdfDocDefinition {
     margin: [0, 8, 0, 0] as [number, number, number, number],
   })
 
-  // ─── RESUMEN DE ENTRADAS (ventas TPV + cobros sastrería) ─────────────────
+  // ─── RESUMEN DE ENTRADAS ─────────────────────────────────────────────────
+  // Los `total*Sales` de la sesión YA incluyen los cobros de pedidos/reservas:
+  // la columna "Ventas TPV" se obtiene restándolos, y el total por método es
+  // el total de la sesión (nunca la suma de ambas columnas otra vez).
+  const round2 = (n: number) => Math.round(n * 100) / 100
   const sastCash = d.sastreriaCashPayments ?? 0
   const sastCard = d.sastreriaCardPayments ?? 0
   const sastBizum = d.sastreriaBizumPayments ?? 0
   const sastTransfer = d.sastreriaTransferPayments ?? 0
-  const sastTotal = d.sastreriaTotal ?? (sastCash + sastCard + sastBizum + sastTransfer)
+  const sastVoucher = d.sastreriaVoucherPayments ?? 0
+  const sastTotal = sastCash + sastCard + sastBizum + sastTransfer + sastVoucher
   const hasSastreria = sastTotal > 0
-  const totalEntradas = d.totalSales + sastTotal
+
+  // Métodos: [etiqueta, total de la sesión, parte de cobros pedido/reserva]
+  const methods: Array<[string, number, number]> = [
+    ['Efectivo', d.totalCashSales, sastCash],
+    ['Tarjeta', d.totalCardSales, sastCard],
+    ['Bizum', d.totalBizumSales, sastBizum],
+    ['Transferencia', d.totalTransferSales, sastTransfer],
+    ['Vales', d.totalVoucherSales, sastVoucher],
+  ]
+  // max(0, …) protege frente a sesiones históricas con cobros vinculados que
+  // nunca sumaron a los totales; la fila siempre cuadra: total = tpv + cobros.
+  const rows = methods.map(([label, total, sast]) => {
+    const tpv = Math.max(0, round2(total - sast))
+    return { label, tpv, sast, total: round2(tpv + sast) }
+  })
+  const tpvSum = round2(rows.reduce((acc, r) => acc + r.tpv, 0))
+  const sastSum = round2(rows.reduce((acc, r) => acc + r.sast, 0))
+  const totalEntradas = round2(tpvSum + sastSum)
 
   const headerRow = hasSastreria
     ? [
         { text: 'Método de pago', fontSize: 8, color: LABEL_COLOR, fillColor: LABEL_BG },
         { text: 'Ventas TPV', fontSize: 8, alignment: 'right' as const, color: LABEL_COLOR, fillColor: LABEL_BG },
-        { text: 'Cobros sastrería', fontSize: 8, alignment: 'right' as const, color: LABEL_COLOR, fillColor: LABEL_BG },
+        { text: 'Cobros pedido/reserva', fontSize: 8, alignment: 'right' as const, color: LABEL_COLOR, fillColor: LABEL_BG },
         { text: 'Total', fontSize: 8, alignment: 'right' as const, color: LABEL_COLOR, fillColor: LABEL_BG },
       ]
     : [
@@ -227,28 +252,28 @@ function buildDocDefinition(d: CashSessionReportData): PdfDocDefinition {
         { text: 'Importe', fontSize: 8, alignment: 'right' as const, color: LABEL_COLOR, fillColor: LABEL_BG },
       ]
 
-  const methodRow = (label: string, tpv: number, sast: number) => hasSastreria
+  const methodRow = (r: { label: string; tpv: number; sast: number; total: number }) => hasSastreria
     ? [
-        { text: label, fontSize: 9, color: TEXT },
-        { text: fmt(tpv), fontSize: 9, alignment: 'right' as const, color: TEXT },
-        { text: fmt(sast), fontSize: 9, alignment: 'right' as const, color: TEXT },
-        { text: fmt(tpv + sast), fontSize: 9, alignment: 'right' as const, color: TEXT, bold: true },
+        { text: r.label, fontSize: 9, color: TEXT },
+        { text: fmt(r.tpv), fontSize: 9, alignment: 'right' as const, color: TEXT },
+        { text: r.sast === 0 ? '—' : fmt(r.sast), fontSize: 9, alignment: 'right' as const, color: r.sast === 0 ? LABEL_COLOR : TEXT },
+        { text: fmt(r.total), fontSize: 9, alignment: 'right' as const, color: TEXT, bold: true },
       ]
     : [
-        { text: label, fontSize: 9, color: TEXT },
-        { text: fmt(tpv), fontSize: 9, alignment: 'right' as const, color: TEXT },
+        { text: r.label, fontSize: 9, color: TEXT },
+        { text: fmt(r.total), fontSize: 9, alignment: 'right' as const, color: TEXT },
       ]
 
   const totalRow = hasSastreria
     ? [
         { text: 'TOTAL ENTRADAS', fontSize: 9, bold: true, color: NAVY },
-        { text: fmt(d.totalSales), fontSize: 9, bold: true, alignment: 'right' as const, color: NAVY },
-        { text: fmt(sastTotal), fontSize: 9, bold: true, alignment: 'right' as const, color: NAVY },
+        { text: fmt(tpvSum), fontSize: 9, bold: true, alignment: 'right' as const, color: NAVY },
+        { text: fmt(sastSum), fontSize: 9, bold: true, alignment: 'right' as const, color: NAVY },
         { text: fmt(totalEntradas), fontSize: 9, bold: true, alignment: 'right' as const, color: NAVY },
       ]
     : [
-        { text: 'TOTAL VENTAS', fontSize: 9, bold: true, color: NAVY },
-        { text: fmt(d.totalSales), fontSize: 9, bold: true, alignment: 'right' as const, color: NAVY },
+        { text: 'TOTAL ENTRADAS', fontSize: 9, bold: true, color: NAVY },
+        { text: fmt(totalEntradas), fontSize: 9, bold: true, alignment: 'right' as const, color: NAVY },
       ]
 
   content.push(sectionHeader(hasSastreria ? 'RESUMEN DE ENTRADAS' : 'RESUMEN DE VENTAS'))
@@ -257,22 +282,7 @@ function buildDocDefinition(d: CashSessionReportData): PdfDocDefinition {
       widths: hasSastreria ? ['*', 70, 80, 70] : ['*', 80],
       body: [
         headerRow,
-        methodRow('Efectivo', d.totalCashSales, sastCash),
-        methodRow('Tarjeta', d.totalCardSales, sastCard),
-        methodRow('Bizum', d.totalBizumSales, sastBizum),
-        methodRow('Transferencia', d.totalTransferSales, sastTransfer),
-        // Vales solo aplica al TPV
-        hasSastreria
-          ? [
-              { text: 'Vales', fontSize: 9, color: TEXT },
-              { text: fmt(d.totalVoucherSales), fontSize: 9, alignment: 'right' as const, color: TEXT },
-              { text: '—', fontSize: 9, alignment: 'right' as const, color: LABEL_COLOR },
-              { text: fmt(d.totalVoucherSales), fontSize: 9, alignment: 'right' as const, color: TEXT, bold: true },
-            ]
-          : [
-              { text: 'Vales', fontSize: 9, color: TEXT },
-              { text: fmt(d.totalVoucherSales), fontSize: 9, alignment: 'right' as const, color: TEXT },
-            ],
+        ...rows.map(methodRow),
         totalRow,
       ],
     },

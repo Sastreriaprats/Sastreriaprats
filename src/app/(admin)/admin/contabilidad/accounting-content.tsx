@@ -3867,11 +3867,6 @@ interface TimelineEvent {
   data: Record<string, unknown>
 }
 
-interface PaymentRow {
-  payment_date: string
-  amount: number | null
-}
-
 function CajaSessionsTab() {
   const supabase = useMemo(() => createClient(), [])
   const { can } = usePermissions()
@@ -3885,8 +3880,7 @@ function CajaSessionsTab() {
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(new Set())
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
-  const [detailTotalCobrosSastreria, setDetailTotalCobrosSastreria] = useState<number>(0)
-  const [detailSastreriaByMethod, setDetailSastreriaByMethod] = useState<{ cash: number; card: number; bizum: number; transfer: number }>({ cash: 0, card: 0, bizum: 0, transfer: 0 })
+  const [detailSastreriaByMethod, setDetailSastreriaByMethod] = useState<{ cash: number; card: number; bizum: number; transfer: number; voucher: number }>({ cash: 0, card: 0, bizum: 0, transfer: 0, voucher: 0 })
   // Editar/borrar retiradas de caja (permiso cash_withdrawals.manage)
   const [wdEdit, setWdEdit] = useState<{ id: string; amount: string; reason: string } | null>(null)
   const [wdSaving, setWdSaving] = useState(false)
@@ -3924,40 +3918,17 @@ function CajaSessionsTab() {
       const list = (sessData ?? []) as unknown as CashSession[]
       setSessions(list)
       if (list.length > 0) {
+        // Solo cobros VINCULADOS a la sesión (cash_session_id). Nada de fallbacks
+        // por rango de fechas: mezclaban cobros de otras tiendas en el arqueo.
         const ids = list.map((s: CashSession) => s.id).filter(Boolean)
+        const bySession: Record<string, number> = {}
         const { data: topSums } = await supabase
           .from('tailoring_order_payments')
           .select('cash_session_id, amount')
           .in('cash_session_id', ids)
-        const bySession: Record<string, number> = {}
         for (const row of topSums ?? []) {
           const id = row.cash_session_id
           if (id) bySession[id] = (bySession[id] ?? 0) + Number(row.amount ?? 0)
-        }
-        const zeroSessions = list.filter((s: CashSession) => (bySession[s.id] ?? 0) === 0)
-        if (zeroSessions.length > 0) {
-          const openedDates = zeroSessions.map((s: CashSession) => s.opened_at ? s.opened_at.split('T')[0] : null).filter((d): d is string => d !== null)
-          const closedDates = zeroSessions.map((s: CashSession) => s.closed_at ? s.closed_at.split('T')[0] : new Date().toISOString().split('T')[0])
-          const minDate = openedDates.length ? openedDates.reduce((a, b) => a < b ? a : b) : null
-          const maxDate = closedDates.reduce((a, b) => a > b ? a : b)
-          if (minDate) {
-            const { data: fallbackRows } = await supabase
-              .from('tailoring_order_payments')
-              .select('payment_date, amount')
-              .gte('payment_date', minDate)
-              .lte('payment_date', maxDate)
-            for (const s of zeroSessions) {
-              const openedDate = s.opened_at ? s.opened_at.split('T')[0] : null
-              const closedDate = s.closed_at ? s.closed_at.split('T')[0] : new Date().toISOString().split('T')[0]
-              if (!openedDate) continue
-              const sum2 = (fallbackRows ?? []).reduce((acc: number, r: PaymentRow) => {
-                const d = r.payment_date
-                if (d >= openedDate && d <= closedDate) return acc + Number(r.amount ?? 0)
-                return acc
-              }, 0)
-              bySession[s.id] = Math.max(bySession[s.id] ?? 0, sum2)
-            }
-          }
         }
         if (!cancelled) setCobrosBySession(bySession)
       }
@@ -3983,10 +3954,6 @@ function CajaSessionsTab() {
     setSelectedSession(session)
     setVista('detail')
     setDetailLoading(true)
-    const openedDate = session.opened_at ? session.opened_at.split('T')[0] : null
-    const openedAtFull = session.opened_at
-    const closedAtFull = session.closed_at ?? new Date().toISOString()
-
     let txData: CajaManualTx[] = []
     const { data: mtRes } = await supabase
       .from('manual_transactions')
@@ -4090,38 +4057,34 @@ function CajaSessionsTab() {
     )
     setTimelineEvents(merged)
 
-    const sumBySession = txData
-      .filter((r: CajaManualTx) => r.category === 'sastreria')
-      .reduce((acc: number, r: CajaManualTx) => acc + Number(r.total ?? 0), 0)
-    if (sumBySession > 0) {
-      setDetailTotalCobrosSastreria(sumBySession)
-    } else if (openedDate) {
-      const { data: mtSastreriaRange } = await supabase
-        .from('manual_transactions')
-        .select('total')
-        .eq('category', 'sastreria')
-        .gte('created_at', openedAtFull)
-        .lte('created_at', closedAtFull)
-      const fallbackSum = (mtSastreriaRange ?? []).reduce((acc: number, r: { total: number | null }) => acc + Number(r.total ?? 0), 0)
-      setDetailTotalCobrosSastreria(fallbackSum)
-    } else {
-      setDetailTotalCobrosSastreria(0)
-    }
-
-    // Desglose de cobros sastrería por método de pago (para el arqueo PDF y vista)
-    const byMethod = { cash: 0, card: 0, bizum: 0, transfer: 0 }
-    const { data: sastPays } = await supabase
-      .from('tailoring_order_payments')
-      .select('amount, payment_method')
-      .eq('cash_session_id', session.id)
-    for (const p of sastPays ?? []) {
-      const m = String(p.payment_method ?? '').toLowerCase()
-      const amt = Number(p.amount ?? 0)
+    // Desglose de cobros de pedidos y reservas por método de pago (para el
+    // arqueo PDF). Solo cobros VINCULADOS a la sesión: estos importes ya están
+    // incluidos en los total_*_sales de cash_sessions (los suman las RPC de
+    // cobro), así que sirven para separar la columna "TPV" de la de "cobros",
+    // nunca para sumarse otra vez al total.
+    const byMethod = { cash: 0, card: 0, bizum: 0, transfer: 0, voucher: 0 }
+    const addPay = (method: unknown, amount: unknown) => {
+      const m = String(method ?? '').toLowerCase()
+      const amt = Number(amount ?? 0)
       if (m === 'cash' || m === 'efectivo') byMethod.cash += amt
       else if (m === 'card' || m === 'tarjeta') byMethod.card += amt
       else if (m === 'bizum') byMethod.bizum += amt
-      else if (m === 'transfer' || m === 'transferencia') byMethod.transfer += amt
+      // check/cheque acumula en transfer, igual que rpc_add_order_payment
+      else if (m === 'transfer' || m === 'transferencia' || m === 'check' || m === 'cheque') byMethod.transfer += amt
+      else if (m === 'voucher' || m === 'vale') byMethod.voucher += amt
     }
+    const [{ data: sastPays }, { data: resPays }] = await Promise.all([
+      supabase
+        .from('tailoring_order_payments')
+        .select('amount, payment_method')
+        .eq('cash_session_id', session.id),
+      supabase
+        .from('product_reservation_payments')
+        .select('amount, payment_method')
+        .eq('cash_session_id', session.id),
+    ])
+    for (const p of sastPays ?? []) addPay(p.payment_method, p.amount)
+    for (const p of resPays ?? []) addPay(p.payment_method, p.amount)
     setDetailSastreriaByMethod(byMethod)
 
     setDetailLoading(false)
@@ -4159,18 +4122,17 @@ function CajaSessionsTab() {
     const closedTime = s.closed_at ? new Date(s.closed_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : null
     const openingAmount = Number(s.opening_amount) ?? 0
 
-    const totalCobrosSastreria = detailTotalCobrosSastreria
-    const totalVentasTpv = Number(s.total_sales) ?? 0
+    // Los total_*_sales de cash_sessions YA incluyen los cobros de pedidos y
+    // reservas (los suman las RPC de cobro): total entradas = total_sales, sin
+    // volver a sumar nada.
     const totalRetiradas = Number(s.total_withdrawals) ?? 0
     const totalCashSales = Number(s.total_cash_sales) ?? 0
-    const efectivoIngresosTimeline = timelineEvents
-      .filter((ev: TimelineEvent) => ev.type === 'manual' && ev.data?.type === 'income' && (typeof ev.data?.notes === 'string' && ev.data.notes.toLowerCase().includes('efectivo')))
-      .reduce((sum: number, ev: TimelineEvent) => sum + Number(ev.data?.total ?? 0), 0)
-    const efectivoEnCaja = openingAmount + efectivoIngresosTimeline - totalRetiradas
-    const expectedCash = openingAmount + totalCashSales - totalRetiradas
+    const totalReturns = Number(s.total_returns) ?? 0
+    const efectivoEnCaja = openingAmount + totalCashSales - totalReturns - totalRetiradas
+    const expectedCash = openingAmount + totalCashSales - totalReturns - totalRetiradas
     const countedCash = s.counted_cash != null ? Number(s.counted_cash) : null
     const diff = countedCash != null ? countedCash - expectedCash : null
-    const totalEntradas = totalVentasTpv + totalCobrosSastreria
+    const totalEntradas = Number(s.total_sales) ?? 0
 
     const formatMethod = (notes: string | null) => {
       if (!notes) return null
@@ -4276,7 +4238,7 @@ function CajaSessionsTab() {
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-3">
-          <Button variant="outline" size="sm" onClick={() => { setVista('list'); setSelectedSession(null); setTimelineEvents([]); setDetailTotalCobrosSastreria(0); setDetailSastreriaByMethod({ cash: 0, card: 0, bizum: 0, transfer: 0 }) }}>
+          <Button variant="outline" size="sm" onClick={() => { setVista('list'); setSelectedSession(null); setTimelineEvents([]); setDetailSastreriaByMethod({ cash: 0, card: 0, bizum: 0, transfer: 0, voucher: 0 }) }}>
             ← Volver al listado
           </Button>
           {s.status === 'closed' && (
@@ -4302,14 +4264,19 @@ function CajaSessionsTab() {
                     totalReturns: Number(s.total_returns ?? 0),
                     totalWithdrawals: Number(s.total_withdrawals ?? 0),
                     depositsCollected: Number(s.total_deposits_collected ?? 0),
-                    expectedCash: Number(s.expected_cash ?? 0),
+                    // Recalculados con los totales actuales de la sesión (no los
+                    // guardados al cerrar): cobros vinculados a posteriori sobre una
+                    // sesión cerrada cambian el efectivo esperado, y el PDF debe
+                    // cuadrar consigo mismo y con el panel.
+                    expectedCash,
                     countedCash: Number(s.counted_cash ?? 0),
-                    cashDifference: Number(s.cash_difference ?? 0),
+                    cashDifference: diff ?? 0,
                     closingNotes: s.closing_notes ?? undefined,
                     sastreriaCashPayments: detailSastreriaByMethod.cash,
                     sastreriaCardPayments: detailSastreriaByMethod.card,
                     sastreriaBizumPayments: detailSastreriaByMethod.bizum,
                     sastreriaTransferPayments: detailSastreriaByMethod.transfer,
+                    sastreriaVoucherPayments: detailSastreriaByMethod.voucher,
                   })
                 } catch {
                   console.error('Error generando PDF de arqueo')
@@ -4475,9 +4442,13 @@ function CajaSessionsTab() {
               </Card>
               <Card>
                 <CardContent className="pt-4 pb-4 space-y-2">
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Efectivo</span><span className="tabular-nums">{formatCurrency(totalCashSales)}</span></div>
                   <div className="flex justify-between text-sm"><span className="text-muted-foreground">Tarjeta</span><span className="tabular-nums">{formatCurrency(Number(s.total_card_sales) ?? 0)}</span></div>
                   <div className="flex justify-between text-sm"><span className="text-muted-foreground">Bizum</span><span className="tabular-nums">{formatCurrency(Number(s.total_bizum_sales) ?? 0)}</span></div>
                   <div className="flex justify-between text-sm"><span className="text-muted-foreground">Transfer.</span><span className="tabular-nums">{formatCurrency(Number(s.total_transfer_sales) ?? 0)}</span></div>
+                  {Number(s.total_voucher_sales ?? 0) !== 0 && (
+                    <div className="flex justify-between text-sm"><span className="text-muted-foreground">Vales</span><span className="tabular-nums">{formatCurrency(Number(s.total_voucher_sales) ?? 0)}</span></div>
+                  )}
                   <div className="border-t pt-2 mt-2 flex justify-between text-sm font-medium"><span className="text-muted-foreground">Total entradas</span><span className="tabular-nums">{formatCurrency(totalEntradas)}</span></div>
                   <div className="flex justify-between text-sm"><span className="text-muted-foreground">Total retiradas</span><span className="tabular-nums text-red-600">{formatCurrency(totalRetiradas)}</span></div>
                 </CardContent>
@@ -4641,11 +4612,11 @@ function CajaSessionsTab() {
       'Apertura': s.opened_at ?? '',
       'Cierre': s.closed_at ?? '',
       'Fondo inicial': Number(s.opening_amount) || 0,
-      'Ventas Efectivo': Number(s.total_cash_sales) || 0,
-      'Ventas Tarjeta': Number(s.total_card_sales) || 0,
-      'Ventas Bizum': Number(s.total_bizum_sales) || 0,
-      'Ventas Transferencia': Number(s.total_transfer_sales) || 0,
-      'Total Ventas': Number(s.total_sales) || 0,
+      'Entradas Efectivo': Number(s.total_cash_sales) || 0,
+      'Entradas Tarjeta': Number(s.total_card_sales) || 0,
+      'Entradas Bizum': Number(s.total_bizum_sales) || 0,
+      'Entradas Transferencia': Number(s.total_transfer_sales) || 0,
+      'Total Entradas': Number(s.total_sales) || 0,
       'Devoluciones': Number(s.total_returns) || 0,
       'Diferencia': Number(s.cash_difference) || 0,
       'Estado': s.status,
@@ -4688,9 +4659,9 @@ function CajaSessionsTab() {
                     >
                       <span className="font-medium">{monthLabel}</span>
                       <span className="flex items-center gap-3 text-sm text-muted-foreground">
-                        <span>Ventas TPV: {formatCurrency(totalVentasMes)}</span>
+                        <span>Entradas: {formatCurrency(totalVentasMes)}</span>
                         <span>·</span>
-                        <span>Sastrería: {formatCurrency(totalCobrosMes)}</span>
+                        <span>De sastrería: {formatCurrency(totalCobrosMes)}</span>
                         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                       </span>
                     </button>
@@ -4713,9 +4684,8 @@ function CajaSessionsTab() {
                             {list.map((s: CashSession) => {
                               const openedBy = s.opened_by_profile?.full_name ?? '—'
                               const closedBy = s.closed_by_profile?.full_name ?? '—'
-                              const cobrosSastreria = cobrosBySession[s.id] ?? 0
-                              const totalSales = Number(s.total_sales) ?? 0
-                              const totalEntrada = totalSales + cobrosSastreria
+                              // total_sales ya incluye los cobros de pedidos/reservas vinculados
+                              const totalEntrada = Number(s.total_sales) ?? 0
                               const horaApertura = s.opened_at ? new Date(s.opened_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : '—'
                               const horaCierre = s.closed_at ? new Date(s.closed_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : '—'
                               return (
