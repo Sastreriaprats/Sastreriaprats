@@ -17,13 +17,12 @@ import {
   Flame, Star, Receipt, Layers,
 } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
-import { getSalesReport, getComparePeriods, getTopProducts, getTailorPerformance, getClientsAnalytics, getClientsAdvancedAnalytics, getStoreSalesReport, getSalesByEmployee, getSalesByTimePattern, getExpensesReport, getExpensesComparison, type ReportChannel, type TaxMode, type ClientsAdvancedAnalytics, type StoreSalesReport, type StoreSalesStoreRow, type TailoringCategoryKey } from '@/actions/reports'
+import { getSalesReport, getComparePeriods, getTopProducts, getClientsAnalytics, getClientsAdvancedAnalytics, getStoreSalesReport, getSalesByEmployee, getSalesByTimePattern, getExpensesReport, getExpensesComparison, type ReportChannel, type TaxMode, type ClientsAdvancedAnalytics, type StoreSalesReport, type StoreSalesStoreRow, type TailoringCategoryKey } from '@/actions/reports'
 import { getStoresList } from '@/actions/config'
 import { listCategories } from '@/actions/categories'
 import { getEmployeeCommissions, type EmployeeCommission, type GroupBonusResult } from '@/actions/commissions'
 import { SalesChart } from './charts/sales-chart'
 import { TopProductsChart } from './charts/top-products-chart'
-import { TailorTable } from './tables/tailor-table'
 import { ClientsChart } from './charts/clients-chart'
 import { formatCurrency, normalizeSearchTerm } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -52,12 +51,6 @@ type CompareData = {
 type ProductItem = { product_id: string; name: string; sku: string; category_id?: string | null; units: number; revenue: number; revenue_net: number; unit_cost: number; cogs: number; margin: number; purchased_units: number; purchased_cost: number; current_stock: number; breakdown: { size: string; store_id: string; store_name: string; units: number; revenue: number }[]; sizeBreakdown: { size: string; comprado: number; vendido: number; queda: number }[] }
 
 type ReportCategory = { id: string; name: string; parent_id: string | null; level?: number }
-
-type TailorItem = {
-  tailor_id: string; name: string; orders: number; revenue: number
-  fittings: number; completed: number; avgOrderValue: number; completionRate: number
-  paid_in_period: number; pending_of_period_orders: number; paidRate: number
-}
 
 type ClientsData = {
   newClients: number; totalClientsHistorical: number
@@ -123,7 +116,6 @@ export function ReportsContent() {
   // Modo de la pestaña Productos: histórico total del producto (por defecto) o
   // acotado al periodo/tienda del filtro superior (petición Mónica: temporadas).
   const [productScope, setProductScope] = useState<'historic' | 'period'>('historic')
-  const [tailorData, setTailorData] = useState<TailorItem[]>([])
   const [clientsData, setClientsData] = useState<ClientsData | null>(null)
   const [clientsAdvanced, setClientsAdvanced] = useState<ClientsAdvancedAnalytics | null>(null)
   const [storeSales, setStoreSales] = useState<StoreSalesReport | null>(null)
@@ -177,7 +169,7 @@ export function ReportsContent() {
       const prevStartStr = prevStart.toISOString().split('T')[0]
       const prevEndStr = prevEnd.toISOString().split('T')[0]
 
-      const [salesRes, compareRes, productsRes, tailorRes, clientsRes, clientsAdvRes, storeSalesRes, employeeRes, timeRes, expensesRes, expCompRes, commissionsRes] = await Promise.all([
+      const [salesRes, compareRes, productsRes, clientsRes, clientsAdvRes, storeSalesRes, employeeRes, timeRes, expensesRes, expCompRes, commissionsRes] = await Promise.all([
         getSalesReport({ start_date: start, end_date: end, store_id: storeId, channel, group_by: groupBy, tax_mode }),
         getComparePeriods({
           current_start: start, current_end: end,
@@ -187,7 +179,6 @@ export function ReportsContent() {
         // limit alto: el informe incluye TODO el catálogo, también prendas a cero
         // (petición de Isma) — con 500 los no-vendidos quedaban cortados.
         getTopProducts({ start_date: start, end_date: end, store_id: storeId, channel, limit: 5000, tax_mode, scope: productScope }),
-        getTailorPerformance({ start_date: start, end_date: end, store_id: storeId, channel, tax_mode }),
         getClientsAnalytics({ start_date: start, end_date: end, store_id: storeId }),
         getClientsAdvancedAnalytics({ start_date: start, end_date: end, store_id: storeId }),
         getStoreSalesReport({ start_date: start, end_date: end, store_id: storeId, tax_mode }),
@@ -201,7 +192,6 @@ export function ReportsContent() {
       if (salesRes.success) setSalesData(salesRes.data)
       if (compareRes.success) setCompareData(compareRes.data)
       if (productsRes.success) setTopProducts(productsRes.data)
-      if (tailorRes.success) setTailorData(tailorRes.data)
       if (clientsRes.success) setClientsData(clientsRes.data)
       if (clientsAdvRes.success) setClientsAdvanced(clientsAdvRes.data)
       if (storeSalesRes.success) setStoreSales(storeSalesRes.data)
@@ -345,7 +335,6 @@ export function ReportsContent() {
     salesData,
     compareData,
     topProducts: filteredProducts,
-    tailorData,
     clientsData,
     clientsAdvanced,
     storeSales,
@@ -591,7 +580,6 @@ export function ReportsContent() {
               <TabsTrigger value="products" className="gap-1"><ShoppingBag className="h-4 w-4" /> 3 · Productos</TabsTrigger>
               <TabsTrigger value="clients" className="gap-1"><Users className="h-4 w-4" /> 4 · Clientes y horarios</TabsTrigger>
               <TabsTrigger value="expenses" className="gap-1"><Wallet className="h-4 w-4" /> 5 · Gastos</TabsTrigger>
-              <TabsTrigger value="tailors" className="gap-1"><Scissors className="h-4 w-4" /> Sastres</TabsTrigger>
             </TabsList>
 
             <div className="mt-6">
@@ -665,7 +653,6 @@ export function ReportsContent() {
                 </div>
                 <TopProductsChart products={filteredProducts} periodMode={productScope === 'period'} />
               </TabsContent>
-              <TabsContent value="tailors"><TailorTable data={tailorData} /></TabsContent>
               <TabsContent value="clients">
                 {/* Informe 4 de Mónica: clientes + hora más vendida y día de la semana, juntos. */}
                 <div className="space-y-8">
@@ -1002,7 +989,7 @@ function EmployeeTab({ data, storeBreakdown, stores, commissions, groupBonuses }
               <p>
                 <strong>Sastrería cobrada (su caja)</strong>: pagos de sastrería que este empleado <strong>registró
                 en su caja</strong>, aunque el pedido sea de OTRO sastre. Es dinero que cobró, <strong>no</strong> sastrería
-                que vendió. La pestaña &ldquo;Sastres&rdquo; muestra esos mismos cobros agrupados por el sastre dueño del pedido.
+                que vendió.
               </p>
             )}
             {hasTailorOrders && (

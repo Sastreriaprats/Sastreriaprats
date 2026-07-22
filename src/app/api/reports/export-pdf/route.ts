@@ -11,7 +11,6 @@ const TAB_TITLES: Record<string, string> = {
   products: 'Productos',
   clients: 'Clientes y horarios',
   expenses: 'Gastos',
-  tailors: 'Sastres',
 }
 
 export async function POST(request: NextRequest) {
@@ -26,7 +25,7 @@ export async function POST(request: NextRequest) {
   const {
     start, end, tab,
     storeFilterName, channelLabel, taxLabel,
-    salesData, compareData, topProducts, tailorData, clientsData,
+    salesData, compareData, topProducts, clientsData,
     storeSales, employeeData, employeeStores, timePatternData, expensesData, expensesComparison,
   } = body
 
@@ -45,9 +44,6 @@ export async function POST(request: NextRequest) {
       break
     case 'products':
       section = renderProducts(topProducts)
-      break
-    case 'tailors':
-      section = renderTailors(tailorData)
       break
     case 'clients':
       section = renderClients(clientsData) + renderTime(timePatternData)
@@ -253,25 +249,6 @@ function renderProducts(items: AnyRec[] | null): string {
 </table>
 ${sizeSection}
 <p class="muted" style="font-size:11px;margin-top:6px">Datos históricos totales del producto (no dependen del filtro de fechas). Margen = facturación sin IVA − (uds vendidas × coste). Compradas = Stock actual + Vendidas (stock inicial cargado a mano + recepciones de proveedor).</p>`
-}
-
-function renderTailors(items: AnyRec[] | null): string {
-  if (!items?.length) return empty()
-  const rows = items.map(t => `
-<tr>
-  <td>${escapeHtml(String(t.name ?? ''))}</td>
-  <td class="right">${t.orders || 0}</td>
-  <td class="right">${t.completed || 0}</td>
-  <td class="right">${(Number(t.completionRate) || 0).toFixed(1)}%</td>
-  <td class="right">${t.fittings || 0}</td>
-  <td class="right">${fmtEur(t.avgOrderValue as number)}</td>
-  <td class="right"><b>${fmtEur(t.revenue as number)}</b></td>
-</tr>`).join('')
-  return `<h2>Rendimiento por sastre</h2>
-<table>
-  <thead><tr><th>Sastre</th><th class="right">Pedidos</th><th class="right">Completados</th><th class="right">% Compl.</th><th class="right">Pruebas</th><th class="right">Ticket medio</th><th class="right">Facturación</th></tr></thead>
-  <tbody>${rows}</tbody>
-</table>`
 }
 
 function renderClients(data: AnyRec | null): string {

@@ -13,7 +13,6 @@ const TAB_TITLES: Record<string, string> = {
   products: 'PRODUCTOS',
   clients: 'CLIENTES Y HORARIOS',
   expenses: 'GASTOS',
-  tailors: 'SASTRES',
 }
 
 export async function POST(request: NextRequest) {
@@ -28,7 +27,7 @@ export async function POST(request: NextRequest) {
   const {
     start, end, tab,
     storeFilterName, channelLabel, taxLabel,
-    salesData, compareData, topProducts, tailorData, clientsData,
+    salesData, compareData, topProducts, clientsData,
     storeSales, employeeData, employeeStores, timePatternData, expensesData, expensesComparison,
   } = body
 
@@ -48,7 +47,6 @@ export async function POST(request: NextRequest) {
   switch (activeTab) {
     case 'store-sales': sectionStoreSales(rows, storeSales, salesData, compareData); break
     case 'products': sectionProducts(rows, topProducts); break
-    case 'tailors': sectionTailors(rows, tailorData); break
     case 'clients':
       sectionClients(rows, clientsData)
       rows.push([])
@@ -159,19 +157,6 @@ function sectionProducts(rows: Row[], items: AnyRec[] | null) {
     rows.push(['UNIDADES POR TALLA (productos exportados)'])
     rows.push(['Talla', 'Uds compradas', 'Uds vendidas', 'Stock'])
     for (const s of sizeTotals) rows.push([s.size, num(s.comprado), num(s.vendido), num(s.queda)])
-  }
-}
-
-function sectionTailors(rows: Row[], items: AnyRec[] | null) {
-  if (!items?.length) { rows.push(['Sin datos para el periodo seleccionado']); return }
-  rows.push(['RENDIMIENTO SASTRES'])
-  rows.push(['Sastre', 'Pedidos', 'Completados', '% Completado', 'Pruebas', 'Ticket medio', 'Facturación'])
-  for (const t of items) {
-    rows.push([
-      String(t.name ?? ''), num(t.orders), num(t.completed),
-      Number((Number(t.completionRate) || 0).toFixed(2)), num(t.fittings),
-      Number((Number(t.avgOrderValue) || 0).toFixed(2)), num(t.revenue),
-    ])
   }
 }
 
