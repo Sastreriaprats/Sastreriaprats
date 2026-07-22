@@ -259,7 +259,7 @@ export const listSupplierInvoices = protectedAction<
     let q = ctx.adminClient
       .from(TABLE)
       .select('*')
-      .order('due_date', { ascending: false })
+      .order('invoice_date', { ascending: false })
 
     if (status === 'vencida') {
       q = q.in('status', ['pendiente', 'parcial']).lt('due_date', new Date().toISOString().slice(0, 10))
@@ -289,8 +289,11 @@ export const listSupplierInvoices = protectedAction<
         }
       }
     }
-    if (dateFrom) q = q.gte('due_date', dateFrom)
-    if (dateTo) q = q.lte('due_date', dateTo)
+    // Filtro por rango = fecha de EMISIÓN (invoice_date), el criterio contable.
+    // El vencimiento (due_date) solo manda en el estado "vencida" (arriba) y en
+    // el calendario de pagos (getSupplierPaymentCalendar), no en este listado.
+    if (dateFrom) q = q.gte('invoice_date', dateFrom)
+    if (dateTo) q = q.lte('invoice_date', dateTo)
     if (paymentMethod && paymentMethod !== 'all') {
       if (paymentMethod === 'none') {
         q = q.is('payment_method', null)
