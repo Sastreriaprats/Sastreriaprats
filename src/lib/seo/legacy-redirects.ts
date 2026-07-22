@@ -15,25 +15,30 @@ import type { Redirect } from 'next/dist/lib/load-custom-routes'
  * las rutas específicas van ANTES que los comodines (:path*) del final.
  */
 
-// Categorías de Shopify cuyo handle coincide con el slug de product_categories.
+// Categorías de Shopify cuyo handle coincide con el slug de una categoría
+// VISIBLE en web (is_visible_web). Las ocultas van en REMAPPED_COLLECTIONS
+// hacia su ancestro visible: redirigir a una oculta produce 301 → 404.
 const MATCHING_COLLECTIONS = [
-  'trajes', 'corbatas', 'camisas', 'pantalones-lana', 'gabardinas', 'poleras',
-  'americanas', 'pantalones', 'accesorios', 'saharianas', 'panuelos', 'pijamas',
-  'smoking', 'pantalones-algodon', 'cazadoras', 'sobrecamisas',
+  'trajes', 'camisas', 'gabardinas', 'poleras',
+  'americanas', 'pantalones', 'accesorios', 'saharianas', 'panuelos',
+  'smoking', 'cazadoras', 'sobrecamisas',
 ]
 
-// Categorías de Shopify renombradas/fusionadas → categoría equivalente actual.
+// Categorías de Shopify renombradas/fusionadas u ocultas → categoría VISIBLE
+// equivalente actual.
 const REMAPPED_COLLECTIONS: Record<string, string> = {
   'americanas-y-tebas': 'americanas-tebas',
   'camisas-y-poleras': 'camisas-poleras',
   'tebas-1': 'tebas',
   'prendas-exteriores-cortas': 'prenda-exterior',
-  'new-collection-fw-25-26': 'nueva-coleccion',
   'chaquetas-y-abrigos-1': 'abrigos-anoraks',
   'abrigos-y-anoraks': 'abrigos-anoraks',
   'ropa-de-casa': 'homewear',
-  'batas-1': 'batas',
-  'jerseys': 'jersey',
+  'batas-1': 'homewear',
+  'corbatas': 'accesorios',
+  'pantalones-lana': 'pantalones',
+  'pantalones-algodon': 'pantalones',
+  'pijamas': 'homewear',
 }
 
 export const legacyShopifyRedirects: Redirect[] = [
@@ -42,11 +47,11 @@ export const legacyShopifyRedirects: Redirect[] = [
   { source: '/pages/contacto', destination: '/contacto', permanent: true },
   { source: '/pages/bespoke', destination: '/sastreria', permanent: true },
   { source: '/pages/medida-artesanal', destination: '/sastreria', permanent: true },
-  { source: '/pages/ceremonia', destination: '/boutique/categoria/ceremonia', permanent: true },
+  { source: '/pages/ceremonia', destination: '/boutique/categoria/smoking', permanent: true },
   { source: '/pages/camiseria', destination: '/boutique/categoria/camisas', permanent: true },
   { source: '/pages/trunk-shows', destination: '/blog', permanent: true },
   { source: '/pages/guia-de-tallas-teba', destination: '/boutique/categoria/tebas', permanent: true },
-  { source: '/pages/tallas-pijama', destination: '/boutique/categoria/pijamas', permanent: true },
+  { source: '/pages/tallas-pijama', destination: '/boutique/categoria/homewear', permanent: true },
   { source: '/pages/tallas-polera', destination: '/boutique/categoria/poleras', permanent: true },
   { source: '/pages/data-sharing-opt-out', destination: '/privacidad', permanent: true },
   { source: '/pages/traje-ast2f-luka', destination: '/boutique', permanent: true },
@@ -70,6 +75,10 @@ export const legacyShopifyRedirects: Redirect[] = [
     destination: `/boutique/categoria/${to}`,
     permanent: true,
   })),
+
+  // ---- Colecciones sin categoría visible equivalente → catálogo general ----
+  { source: '/collections/new-collection-fw-25-26', destination: '/boutique', permanent: true },
+  { source: '/collections/jerseys', destination: '/boutique', permanent: true },
 
   // ---- Rutas de colección anidadas concretas ----
   { source: '/collections/tebas-1/teba', destination: '/boutique/categoria/tebas', permanent: true },

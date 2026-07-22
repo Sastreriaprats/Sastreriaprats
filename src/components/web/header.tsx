@@ -84,7 +84,8 @@ function AnnouncementBar({ text }: { text?: string }) {
       {(() => {
         const text = slides[current]
         const linkMap: [RegExp, string][] = [
-          [/nueva colección/i, '/boutique/categoria/nueva-coleccion'],
+          // La categoría nueva-coleccion está oculta (sin productos): "nueva
+          // colección" cae en la regla general y enlaza al catálogo completo.
           [/otoño.*invierno|primavera.*verano|colección/i, '/boutique'],
           [/reserv/i, '/reservar'],
           [/envío/i, '/aviso-legal'],
