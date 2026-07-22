@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { checkUserPermission } from '@/actions/auth'
-import { aggregateSizeTotals, type SizeBreakdownRow } from '@/lib/reports/dimensions'
+import { aggregateSizeTotals, topSizesLabel, type SizeBreakdownRow } from '@/lib/reports/dimensions'
 
 type AnyRec = Record<string, unknown>
 type Row = (string | number)[]
@@ -138,7 +138,7 @@ function sectionStoreSales(rows: Row[], storeSales: AnyRec | null, salesData: An
 function sectionProducts(rows: Row[], items: AnyRec[] | null) {
   if (!items?.length) { rows.push(['Sin datos para el periodo seleccionado']); return }
   rows.push(['TOP PRODUCTOS'])
-  rows.push(['#', 'Producto', 'SKU', 'Uds compradas', 'Uds vendidas', 'Stock', 'Facturación', 'Coste ud.', 'Margen (sin IVA)', 'Margen %'])
+  rows.push(['#', 'Producto', 'SKU', 'Uds compradas', 'Uds vendidas', 'Stock', 'Facturación', 'Coste ud.', 'Margen (sin IVA)', 'Margen %', 'Tallas más vendidas'])
   items.forEach((p, i) => {
     const marginPct = Number(p.revenue_net) > 0 ? (Number(p.margin) / Number(p.revenue_net)) * 100 : 0
     rows.push([
@@ -146,6 +146,7 @@ function sectionProducts(rows: Row[], items: AnyRec[] | null) {
       num(p.purchased_units), num(p.units), num(p.current_stock), num(p.revenue),
       num(p.unit_cost), num(p.margin),
       Number(p.unit_cost) > 0 && Number(p.revenue_net) > 0 ? `${marginPct.toFixed(1)}%` : '—',
+      topSizesLabel(p.sizeBreakdown as SizeBreakdownRow[] | undefined) || '—',
     ])
   })
 

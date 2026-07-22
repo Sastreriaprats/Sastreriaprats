@@ -73,6 +73,21 @@ export function aggregateSizeTotals(
   return Object.values(acc).sort((a, b) => b.vendido - a.vendido || compareSizes(a.size, b.size))
 }
 
+/**
+ * Etiqueta compacta con las TALLAS MÁS VENDIDAS de UN producto, más vendida
+ * primero: p.ej. "50 (12) · 52 (9) · 48 (5)". La usan los exports PDF/Excel para
+ * mostrar, por producto, el mismo detalle que las filas expandibles de la web.
+ * Ignora tallas con 0 vendidas; devuelve '' si el producto no vendió ninguna.
+ */
+export function topSizesLabel(sizeBreakdown?: SizeBreakdownRow[] | null, limit = 5): string {
+  return (sizeBreakdown || [])
+    .filter((b) => b.vendido > 0)
+    .sort((a, b) => b.vendido - a.vendido || compareSizes(a.size, b.size))
+    .slice(0, limit)
+    .map((b) => `${b.size} (${b.vendido})`)
+    .join(' · ')
+}
+
 /** Bucket acumulado por tienda. */
 export type StoreBucket = { store_name: string; total: number }
 
