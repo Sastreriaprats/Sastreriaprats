@@ -2161,7 +2161,10 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
         discount_amount: 0,
         tax_amount: 0,
         total: subtotal,
-        total_paid: entregadoACuenta,
+        // total_paid lo fija rpc_add_order_payment al registrar la entrega
+        // (recalcula SUM de cobros). Escribirlo aquí de forma optimista dejaba
+        // un "pagado" fantasma si la RPC luego fallaba.
+        total_paid: 0,
         created_by: ctx.userId,
       })
       .select('id')
@@ -2285,7 +2288,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
 
     const total = subtotalLines
     const entrega = Number(input.entregaACuenta) || 0
-    const totalPaid = entrega
+    let entregaError: string | null = null
 
     // Extraer fabric_id / fabric_meters / fabric_description desde configuration
     // (tejidoStockId / tejidoMetros / tejidoStockNombre|tejidoCatalogo|tejido)
@@ -2367,15 +2370,17 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
     const taxAmountCalc = Math.round((subtotalLines - subtotalLines / 1.21) * 100) / 100
     const subtotalNoTax = Math.round((subtotalLines / 1.21) * 100) / 100
 
-    await ctx.adminClient
+    // total_paid NO se escribe aquí: lo recalcula rpc_add_order_payment al
+    // registrar la entrega a cuenta (SUM de cobros reales).
+    const { error: totalsUpdateError } = await ctx.adminClient
       .from('tailoring_orders')
       .update({
         subtotal: subtotalNoTax,
         tax_amount: taxAmountCalc,
         total: subtotalLines,
-        total_paid: totalPaid,
       })
       .eq('id', order.id)
+    if (totalsUpdateError) console.error(`[createFichaOrder] totales del pedido ${orderNumber} no actualizados: ${totalsUpdateError.message}`)
 
     await ctx.adminClient.from('tailoring_order_state_history').insert({
       tailoring_order_id: order.id,
@@ -2422,10 +2427,12 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
         p_user_id: ctx.userId,
       })
       if (rpcError) {
-        // La ficha y sus líneas ya están creadas; no rompemos el flujo, pero
-        // dejamos rastro para que el descuadre se pueda investigar igual que
-        // antes (el insert manual antiguo también log-only en errores).
+        // La ficha y sus líneas ya están creadas; no rompemos el flujo, pero el
+        // cobro NO quedó registrado (y total_paid ya no se pre-escribe, así que
+        // el pedido muestra la deuda real). Se avisa en el resultado para que
+        // la tienda registre el cobro desde la ficha.
         console.error('[createFichaOrder] rpc_add_order_payment error:', rpcError)
+        entregaError = `La entrega a cuenta de ${entrega.toFixed(2)}€ NO quedó registrada (${rpcError.message}). Regístrala desde la ficha del pedido (Cobros).`
       }
     }
 
@@ -2442,13 +2449,14 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
       if (client) clientName = (client as any).full_name || [ (client as any).first_name, (client as any).last_name ].filter(Boolean).join(' ') || 'Sin nombre'
     }
     const PAYMENT_METHOD_ES: Record<string, string> = { cash: 'efectivo', card: 'tarjeta', transfer: 'transferencia', bizum: 'bizum' }
-    const auditDescription = entrega > 0 && paymentMethodDb
+    const auditDescription = entrega > 0 && paymentMethodDb && !entregaError
       ? `Pedido ${orderNumber} · Cliente: ${clientName} · Total ${total.toFixed(2)}€ · Entrega a cuenta ${entrega.toFixed(2)}€ (${PAYMENT_METHOD_ES[paymentMethodDb] ?? paymentMethodDb})`
-      : `Pedido ${orderNumber} · Cliente: ${clientName} · Total ${total.toFixed(2)}€`
+      : `Pedido ${orderNumber} · Cliente: ${clientName} · Total ${total.toFixed(2)}€${entregaError ? ' · ⚠ entrega a cuenta SIN registrar' : ''}`
 
     return success({
       orderId: order.id,
       orderNumber,
+      payment_error: entregaError,
       auditEntityId: order.id,
       auditDescription,
     } as unknown as { orderId: string; orderNumber: string })

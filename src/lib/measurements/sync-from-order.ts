@@ -188,17 +188,10 @@ export async function syncOrderLineMeasurementsToClient(
     // 7. Merge preservando otras prendas del registro body
     const mergedValues = { ...currentValues, ...subValues }
 
-    // 8. Desactivar versión actual y crear una nueva
-    const { error: updErr } = await admin
-      .from('client_measurements')
-      .update({ is_current: false })
-      .eq('client_id', clientId)
-      .eq('garment_type_id', destGarmentTypeId)
-    if (updErr) {
-      console.error('[syncOrderLineMeasurementsToClient] update is_current=false:', updErr)
-      return
-    }
-
+    // 8. ORDEN SEGURO: crear la versión nueva PRIMERO y desactivar las
+    // anteriores después. Antes era al revés y un fallo del insert (best-effort,
+    // solo console.error) dejaba al cliente sin medidas vigentes tras guardar
+    // un pedido — "medidas que se borran solas".
     const { data: last } = await admin
       .from('client_measurements')
       .select('version')
@@ -209,7 +202,7 @@ export async function syncOrderLineMeasurementsToClient(
       .maybeSingle()
     const nextVersion = ((last as { version?: number } | null)?.version ?? 0) + 1
 
-    const { error: insErr } = await admin
+    const { data: insertedRow, error: insErr } = await admin
       .from('client_measurements')
       .insert({
         client_id: clientId,
@@ -221,8 +214,21 @@ export async function syncOrderLineMeasurementsToClient(
         taken_at: new Date().toISOString(),
         taken_by: userId,
       })
-    if (insErr) {
+      .select('id')
+      .single()
+    if (insErr || !insertedRow) {
       console.error('[syncOrderLineMeasurementsToClient] insert new version:', insErr)
+      return // sin tocar las versiones existentes: no se pierde nada
+    }
+
+    const { error: updErr } = await admin
+      .from('client_measurements')
+      .update({ is_current: false })
+      .eq('client_id', clientId)
+      .eq('garment_type_id', destGarmentTypeId)
+      .neq('id', (insertedRow as { id: string }).id)
+    if (updErr) {
+      console.error('[syncOrderLineMeasurementsToClient] update is_current=false:', updErr)
     }
   } catch (err) {
     console.error('[syncOrderLineMeasurementsToClient] unexpected:', err)

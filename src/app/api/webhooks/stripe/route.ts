@@ -74,8 +74,11 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: orderError.message }, { status: 500 })
           }
 
-          for (const line of orderLines) {
-            await admin.from('online_order_lines').insert({
+          // Líneas en UN insert y CON chequeo: si fallan, se retira el pedido y
+          // se responde 500 para que Stripe reintente limpio (mismo patrón que
+          // el webhook de Redsys).
+          const { error: linesInsertError } = await admin.from('online_order_lines').insert(
+            orderLines.map((line: { variant_id: string; product_name: string; variant_sku: string; quantity: number; unit_price: number; total: number }) => ({
               order_id: order.id,
               variant_id: line.variant_id,
               product_name: line.product_name,
@@ -83,10 +86,17 @@ export async function POST(request: NextRequest) {
               quantity: line.quantity,
               unit_price: line.unit_price,
               total: line.total,
-            })
+            }))
+          )
+          if (linesInsertError) {
+            console.error('[Stripe webhook] insert online_order_lines', linesInsertError)
+            await admin.from('online_orders').delete().eq('id', order.id)
+            return NextResponse.json({ error: linesInsertError.message }, { status: 500 })
           }
 
-          await createOnlineOrderJournalEntry(order.id).catch(() => {})
+          await createOnlineOrderJournalEntry(order.id)
+            .then((r) => { if (!r.ok) console.error('[Stripe webhook] asiento:', r.error) })
+            .catch((e) => console.error('[Stripe webhook] asiento:', e))
 
           // Factura serie W automática (control en Contabilidad y escenario C).
           await createOnlineOrderInvoice(order.id)
@@ -138,7 +148,9 @@ export async function POST(request: NextRequest) {
             stripe_payment_intent: session.payment_intent as string,
           }).eq('id', orderId)
 
-          await createOnlineOrderJournalEntry(orderId).catch(() => {})
+          await createOnlineOrderJournalEntry(orderId)
+            .then((r) => { if (!r.ok) console.error('[Stripe webhook] asiento:', r.error) })
+            .catch((e) => console.error('[Stripe webhook] asiento:', e))
 
           // Factura serie W automática (control en Contabilidad y escenario C).
           await createOnlineOrderInvoice(orderId)

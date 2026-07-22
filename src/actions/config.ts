@@ -478,7 +478,8 @@ export async function updateRolePermissionsAction(
     const removedNames = removed.map((id) => nameById.get(id) ?? id)
     const roleLabel = (roleRow as any)?.display_name || (roleRow as any)?.name || 'rol'
 
-    await admin.from('role_permissions').delete().eq('role_id', roleId)
+    const { error: delPermsErr } = await admin.from('role_permissions').delete().eq('role_id', roleId)
+    if (delPermsErr) return { error: delPermsErr.message }
 
     if (permissionIds.length > 0) {
       const inserts = permissionIds.map((pid) => ({
@@ -487,7 +488,17 @@ export async function updateRolePermissionsAction(
         granted_by: user.id,
       }))
       const { error } = await admin.from('role_permissions').insert(inserts)
-      if (error) return { error: error.message }
+      if (error) {
+        // Restaurar los permisos previos: sin esto, un fallo aquí dejaba el rol
+        // VACÍO (todos los usuarios del rol bloqueados hasta re-guardar).
+        if (prevIds.length > 0) {
+          const { error: restoreErr } = await admin.from('role_permissions').insert(
+            prevIds.map((pid) => ({ role_id: roleId, permission_id: pid, granted_by: user.id }))
+          )
+          if (restoreErr) console.error('[updateRolePermissionsAction] restauración de permisos falló:', restoreErr)
+        }
+        return { error: error.message }
+      }
     }
 
     const summaryParts: string[] = []

@@ -254,11 +254,12 @@ export async function updateAdminUser(input: UpdateUserInput): Promise<{ data?: 
     const { data: profile } = await admin.from('profiles').select('first_name, last_name').eq('id', input.userId).single()
     const newFirst = input.firstName ?? profile?.first_name
     const newLast  = input.lastName  ?? profile?.last_name
-    await admin.from('profiles').update({
+    const { error: nameErr } = await admin.from('profiles').update({
       first_name: newFirst,
       last_name:  newLast,
       full_name:  `${newFirst} ${newLast}`.trim(),
     }).eq('id', input.userId)
+    if (nameErr) return { error: 'Error al actualizar el nombre: ' + nameErr.message }
     if (input.firstName) changes.first_name = { old: profile?.first_name, new: newFirst }
     if (input.lastName)  changes.last_name  = { old: profile?.last_name,  new: newLast }
   }
@@ -276,8 +277,21 @@ export async function updateAdminUser(input: UpdateUserInput): Promise<{ data?: 
   }
 
   if (input.roleId) {
-    await admin.from('user_roles').delete().eq('user_id', input.userId)
-    await admin.from('user_roles').insert({ user_id: input.userId, role_id: input.roleId })
+    // Guardamos los roles actuales ANTES de borrar: si el insert del nuevo rol
+    // fallara, se restauran (antes el usuario podía quedarse sin ningún rol).
+    const { data: prevRoles } = await admin.from('user_roles').select('role_id').eq('user_id', input.userId)
+    const { error: delRoleErr } = await admin.from('user_roles').delete().eq('user_id', input.userId)
+    if (delRoleErr) return { error: 'Error al actualizar el rol: ' + delRoleErr.message }
+    const { error: insRoleErr } = await admin.from('user_roles').insert({ user_id: input.userId, role_id: input.roleId })
+    if (insRoleErr) {
+      if (prevRoles?.length) {
+        const { error: restoreErr } = await admin.from('user_roles').insert(
+          (prevRoles as { role_id: string }[]).map((r) => ({ user_id: input.userId, role_id: r.role_id }))
+        )
+        if (restoreErr) console.error('[updateAdminUser] restauración de roles falló:', restoreErr)
+      }
+      return { error: 'Error al asignar el rol: ' + insRoleErr.message }
+    }
     const { data: role } = await admin.from('roles').select('name').eq('id', input.roleId).single()
     changes.role = { old: '?', new: role?.name ?? input.roleId }
   }

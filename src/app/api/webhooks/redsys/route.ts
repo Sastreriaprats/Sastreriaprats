@@ -100,8 +100,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: orderError?.message || 'insert error' }, { status: 500 })
     }
 
-    for (const line of orderLines) {
-      await admin.from('online_order_lines').insert({
+    // Líneas en UN insert y CON chequeo: si fallan, se retira el pedido y se
+    // responde 500 para que Redsys reintente (el pending sigue existiendo y el
+    // reintento entra limpio). Antes, un fallo aquí dejaba un pedido pagado
+    // incompleto sellado por la idempotencia: mercancía cobrada que no se
+    // preparaba ni descontaba stock.
+    const { error: linesInsertError } = await admin.from('online_order_lines').insert(
+      orderLines.map((line) => ({
         order_id: order.id,
         variant_id: line.variant_id,
         product_name: line.product_name,
@@ -109,10 +114,17 @@ export async function POST(request: NextRequest) {
         quantity: line.quantity,
         unit_price: line.unit_price,
         total: line.total,
-      })
+      }))
+    )
+    if (linesInsertError) {
+      console.error('[redsys webhook] insert online_order_lines', linesInsertError)
+      await admin.from('online_orders').delete().eq('id', order.id)
+      return NextResponse.json({ error: linesInsertError.message }, { status: 500 })
     }
 
-    await createOnlineOrderJournalEntry(order.id).catch(() => {})
+    await createOnlineOrderJournalEntry(order.id)
+      .then((r) => { if (!r.ok) console.error('[redsys webhook] asiento:', r.error) })
+      .catch((e) => console.error('[redsys webhook] asiento:', e))
 
     // Factura serie W automática (control en Contabilidad y escenario C).
     // Si falla no bloquea el pedido: se puede regenerar con el backfill.

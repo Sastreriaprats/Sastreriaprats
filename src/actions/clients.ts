@@ -752,18 +752,6 @@ export const saveBodyMeasurements = protectedAction<{ client_id: string; values:
 
     const prevValues = (prev?.values ?? {}) as Record<string, unknown>
 
-    // Desactivar medidas anteriores
-    const { error: updateError } = await ctx.adminClient
-      .from('client_measurements')
-      .update({ is_current: false })
-      .eq('client_id', input.client_id)
-      .eq('garment_type_id', input.garment_type_id)
-
-    if (updateError) {
-      console.error('[saveBodyMeasurements] UPDATE error:', updateError)
-      return failure(updateError.message)
-    }
-
     // Obtener última versión
     const { data: last } = await ctx.adminClient
       .from('client_measurements')
@@ -772,10 +760,13 @@ export const saveBodyMeasurements = protectedAction<{ client_id: string; values:
       .eq('garment_type_id', input.garment_type_id)
       .order('version', { ascending: false })
       .limit(1)
-      .single()
+      .maybeSingle()
 
     const nextVersion = (last?.version ?? 0) + 1
 
+    // ORDEN SEGURO: primero insertar la versión nueva y DESPUÉS desactivar las
+    // anteriores. Antes era al revés y un fallo del insert dejaba al cliente sin
+    // NINGUNA medida vigente (ficha, PDF y panel sastre en blanco).
     const { data, error } = await ctx.adminClient
       .from('client_measurements')
       .insert({
@@ -792,6 +783,17 @@ export const saveBodyMeasurements = protectedAction<{ client_id: string; values:
       .single()
 
     if (error) return failure(error.message)
+
+    // Desactivar las versiones anteriores (la nueva queda como vigente). Si esto
+    // fallara, convivirían dos is_current y los lectores (order by version desc)
+    // seguirían viendo la nueva — sin pérdida; se deja rastro.
+    const { error: updateError } = await ctx.adminClient
+      .from('client_measurements')
+      .update({ is_current: false })
+      .eq('client_id', input.client_id)
+      .eq('garment_type_id', input.garment_type_id)
+      .neq('id', data.id)
+    if (updateError) console.error('[saveBodyMeasurements] no se pudieron desactivar versiones anteriores:', updateError)
 
     // Diff de medidas: solo los campos (cm) que cambiaron
     const newValues = (input.values ?? {}) as Record<string, unknown>
