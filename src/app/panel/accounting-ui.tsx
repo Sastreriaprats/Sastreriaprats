@@ -266,8 +266,7 @@ export function MonthlyCashTable({ year, rows }: { year: number; rows: MovementR
           <tr>
             <th className={TH}>Mes</th>
             <th className={THR}>Nº cobros</th>
-            <th className={THR}>Base (sin IVA)</th>
-            <th className={THR}>Efectivo (con IVA)</th>
+            <th className={THR}>Efectivo (total)</th>
             <th className={`${TH} w-8`} />
           </tr>
         </thead>
@@ -275,7 +274,6 @@ export function MonthlyCashTable({ year, rows }: { year: number; rows: MovementR
           {MONTH_LABELS.map((label, i) => {
             const key = monthKey(year, i)
             const monthRows = byMonth[key] ?? []
-            const base = monthRows.reduce((s, m) => s + m.base, 0)
             const total = monthRows.reduce((s, m) => s + m.total, 0)
             const isOpen = openMonth === key
             return [
@@ -286,7 +284,6 @@ export function MonthlyCashTable({ year, rows }: { year: number; rows: MovementR
               >
                 <td className={`${TD} font-medium text-slate-600`}>{label}</td>
                 <td className={`${TDR} text-slate-500`}>{monthRows.length || '—'}</td>
-                <td className={`${TDR} text-slate-500`}>{eur(base)}</td>
                 <td className={`${TDR} font-semibold`}>{eur(total)}</td>
                 <td className={`${TD} text-slate-400`}>
                   {monthRows.length > 0 && (isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />)}
@@ -294,7 +291,7 @@ export function MonthlyCashTable({ year, rows }: { year: number; rows: MovementR
               </tr>,
               isOpen && (
                 <tr key={`${key}-detail`}>
-                  <td colSpan={5} className="bg-slate-50/70 px-4 pb-4 pt-1">
+                  <td colSpan={4} className="bg-slate-50/70 px-4 pb-4 pt-1">
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="text-left text-[10px] uppercase tracking-wide text-slate-400">

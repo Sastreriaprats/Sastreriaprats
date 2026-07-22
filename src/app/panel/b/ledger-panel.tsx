@@ -140,12 +140,7 @@ export function LedgerPanel() {
         const byMonth = groupByMonth(data.movements.filter((m) => m.kind !== 'manual'))
         return Array.from({ length: 12 }, (_, i) => {
           const key = monthKey(year, i)
-          const rows = byMonth[key] ?? []
-          return {
-            Mes: key,
-            'Base (sin IVA)': n2(rows.reduce((s, m) => s + m.base, 0)),
-            'Efectivo (con IVA)': n2(rows.reduce((s, m) => s + m.total, 0)),
-          }
+          return { Mes: key, 'Efectivo (total)': n2((byMonth[key] ?? []).reduce((s, m) => s + m.total, 0)) }
         })
       })() },
       { name: 'Cobros efectivo', rows: data.movements.map((m) => ({
@@ -247,7 +242,7 @@ export function LedgerPanel() {
       ) : tab === 'mensual' ? (
         <div className="space-y-3">
           <MonthlyCashTable year={year} rows={data.movements.filter((m) => m.kind !== 'manual')} />
-          <p className="text-xs text-slate-400">La columna «Efectivo (con IVA)» es el dinero real cobrado en efectivo; «Base (sin IVA)» es su base imponible, que suma con los «Ingresos» del escenario C (también sin IVA) para reconciliar con Informes y Contabilidad. Pincha en un mes para ver todos sus cobros. Los cobros manuales no se incluyen (tienen su pestaña).</p>
+          <p className="text-xs text-slate-400">Totales con IVA incluido. Pincha en un mes para ver todos sus cobros. Los cobros manuales no se incluyen (tienen su pestaña).</p>
         </div>
       ) : tab === 'movimientos' ? (
         <MovementsTable rows={data.movements} />
