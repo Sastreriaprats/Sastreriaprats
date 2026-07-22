@@ -21,6 +21,8 @@ export interface OrderPayment {
   notes: string | null
   next_payment_date: string | null
   created_by: string | null
+  /** Nombre del usuario que registró el cobro (profiles.full_name) */
+  created_by_name: string | null
   created_at: string
 }
 
@@ -76,7 +78,24 @@ export const getOrderPayments = protectedAction<{ tailoring_order_id: string }, 
         console.error('[getOrderPayments]', error)
         return failure(error.message)
       }
-      return success(serializeForServerAction(data ?? []))
+
+      // Resolver created_by → nombre del vendedor que registró el cobro
+      const rows = data ?? []
+      const userIds = [...new Set(rows.map(r => r.created_by).filter(Boolean))] as string[]
+      let namesById: Record<string, string> = {}
+      if (userIds.length > 0) {
+        const { data: profiles } = await ctx.adminClient
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', userIds)
+        namesById = Object.fromEntries((profiles ?? []).map(p => [p.id, p.full_name]))
+      }
+      const enriched = rows.map(r => ({
+        ...r,
+        created_by_name: r.created_by ? (namesById[r.created_by] ?? null) : null,
+      }))
+
+      return success(serializeForServerAction(enriched))
     } catch (e) {
       console.error('[getOrderPayments] unexpected:', e)
       return failure('Error al obtener pagos')
