@@ -11,7 +11,11 @@ import { success, failure } from '@/lib/errors'
 const BUCKET = 'order-line-photos'
 const MAX_PHOTOS = 2
 const MAX_SIZE_MB = 5
-const ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/webp']
+// Normalmente el cliente ya convierte a JPEG antes de subir (preparePhotoForUpload),
+// pero aceptamos también HEIC/HEIF como defensa en profundidad: si la conversión en
+// cliente fallara (dispositivo antiguo), no perdemos la foto en silencio.
+const ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']
+const ALLOWED_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif']
 const SIGNED_URL_TTL = 3600 // 1 hora
 
 /** Normaliza el nombre del fichero a un slug seguro (defensa contra path traversal). */
@@ -56,8 +60,12 @@ export const addOrderLinePhoto = protectedAction<FormData, { path: string; photo
     if (!lineId) return failure('Falta la línea', 'VALIDATION')
     if (!file || !file.size) return failure('No se ha enviado ningún archivo', 'VALIDATION')
     if (file.size > MAX_SIZE_MB * 1024 * 1024) return failure(`El archivo supera el máximo de ${MAX_SIZE_MB} MB`, 'VALIDATION')
-    if (!ALLOWED_MIMES.includes(file.type)) {
-      return failure(`Tipo de archivo no permitido (${file.type}). Permitidos: JPG, PNG, WEBP`, 'VALIDATION')
+    // Validamos por MIME y, si el navegador no dio type (cámara del iPad a veces lo
+    // deja vacío), como respaldo por la extensión del nombre del fichero.
+    const mimeOk = !!file.type && ALLOWED_MIMES.includes(file.type)
+    const extOk = ALLOWED_EXTS.includes(slugifyFilename(file.name || '').ext)
+    if (!mimeOk && !extOk) {
+      return failure(`Tipo de archivo no permitido (${file.type || 'desconocido'}). Permitidos: JPG, PNG, WEBP, HEIC`, 'VALIDATION')
     }
 
     const { data: line, error: lineErr } = await ctx.adminClient
@@ -75,9 +83,16 @@ export const addOrderLinePhoto = protectedAction<FormData, { path: string; photo
     const path = `${lineId}/${Date.now()}_${slug}.${ext}`
     const buf = Buffer.from(await file.arrayBuffer())
 
+    // contentType fiable: si el navegador no dio type, lo derivamos de la extensión
+    // para que la signed URL renderice bien en el <img>.
+    const EXT_MIME: Record<string, string> = {
+      jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+      webp: 'image/webp', heic: 'image/heic', heif: 'image/heif',
+    }
+    const contentType = file.type || EXT_MIME[ext] || 'application/octet-stream'
     const { error: upErr } = await ctx.adminClient.storage
       .from(BUCKET)
-      .upload(path, buf, { contentType: file.type, upsert: false })
+      .upload(path, buf, { contentType, upsert: false })
     if (upErr) return failure(upErr.message || 'Error al subir la foto')
 
     const next = [...current, path]

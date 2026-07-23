@@ -21,6 +21,7 @@ import { listActiveFabricsForFicha } from '@/actions/fabrics'
 import { addOrderLinePhoto, removeOrderLinePhoto, getOrderLinePhotoUrls } from '@/actions/order-line-photos'
 import { usePermissions } from '@/hooks/use-permissions'
 import { useFileDropzone } from '@/hooks/use-file-dropzone'
+import { preparePhotoForUpload } from '@/lib/image/prepare-photo-upload'
 import { createClient } from '@/lib/supabase/client'
 import { fuzzyFilterSort } from '@/lib/utils'
 
@@ -543,9 +544,12 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
     if (!lineId) return
     setPhotoBusy(true)
     try {
+      // Normaliza a JPEG en cliente: la cámara del iPad entrega HEIC/HEIF (o type
+      // vacío) y 12 MP >5 MB, que el servidor rechazaría en silencio. Best-effort.
+      const prepared = await preparePhotoForUpload(file)
       const fd = new FormData()
       fd.set('lineId', lineId)
-      fd.set('file', file)
+      fd.set('file', prepared)
       const res = await addOrderLinePhoto(fd)
       if (!res.success) { toast.error(res.error || 'No se pudo subir la foto'); return }
       await refreshPhotos()
@@ -568,7 +572,9 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
   }
   const { dragging: draggingPhoto, dropzoneProps: photoDropzoneProps } = useFileDropzone({
     onFiles: (files) => {
-      const img = files.find((f) => f.type.startsWith('image/'))
+      // Aceptamos por MIME de imagen o, si el navegador no dio type, por extensión
+      // (HEIC del iPad puede llegar con type vacío). Se normaliza en handleAddPhoto.
+      const img = files.find((f) => f.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/i.test(f.name))
       if (!img) { toast.error('Solo se admiten imágenes'); return }
       if (photos.length >= 2) { toast.error('Máximo 2 fotos por prenda'); return }
       void handleAddPhoto(img)
@@ -958,7 +964,7 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
           <section className="space-y-2">
             <Label>Fotos de la prenda</Label>
             <p className="text-xs text-muted-foreground">
-              Hasta 2 fotos (tejido, detalles, resultado). JPG/PNG/WEBP, máx. 5 MB.
+              Hasta 2 fotos (tejido, detalles, resultado). Puedes hacerlas con la cámara del iPad.
             </p>
             <div className="grid grid-cols-2 gap-3">
               {photos.map((ph) => (
@@ -992,7 +998,7 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
                     : <><ImagePlus className="h-5 w-5 mb-1" /><span>{draggingPhoto ? 'Suelta la foto aquí' : 'Subir foto'}</span></>}
                   <input
                     type="file"
-                    accept="image/jpeg,image/png,image/webp"
+                    accept="image/*"
                     className="hidden"
                     disabled={photoBusy}
                     onChange={(e) => { const f = e.target.files?.[0]; if (f) handleAddPhoto(f); e.target.value = '' }}
