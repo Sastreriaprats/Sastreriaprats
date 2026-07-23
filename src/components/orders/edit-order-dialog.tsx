@@ -122,18 +122,18 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
   // no anulada). El pago NO bloquea: un pedido pagado pero sin factura se puede
   // reajustar (el servidor impide bajar el total por debajo de lo ya cobrado). Para
   // editar uno facturado hay que anular antes la factura (genera nota de abono) → al
-  // quedar anulada deja de ser vigente y se desbloquea. El vínculo real es
-  // invoices.tailoring_order_id (la columna order.invoice_id está en desuso).
+  // quedar anulada deja de ser vigente y se desbloquea. El vínculo es el puente
+  // invoice_tailoring_orders (mig 269, N:M): una factura conjunta cubre varios pedidos.
   // El servidor revalida esto en updateOrderAction; aquí es solo UX.
   const [hasValidInvoice, setHasValidInvoice] = useState(false)
   useEffect(() => {
     if (!open || !order?.id) return
     let cancelled = false
     createClient()
-      .from('invoices')
-      .select('id')
+      .from('invoice_tailoring_orders')
+      .select('invoice_id, invoices!inner(status)')
       .eq('tailoring_order_id', order.id)
-      .not('status', 'in', '(draft,cancelled)')
+      .not('invoices.status', 'in', '(draft,cancelled)')
       .limit(1)
       .then(({ data }) => { if (!cancelled) setHasValidInvoice((data?.length ?? 0) > 0) })
     return () => { cancelled = true }

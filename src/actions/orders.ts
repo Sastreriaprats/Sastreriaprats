@@ -39,6 +39,23 @@ async function buildGarmentMaps(
   return { slugById, nameById }
 }
 
+/**
+ * ¿El pedido está incluido en alguna factura VIGENTE (emitida y no anulada)?
+ * Bloquea la edición de importes. Consulta el puente invoice_tailoring_orders
+ * (mig 269, N:M): una factura conjunta cubre varios pedidos, así que el vínculo
+ * ya no es la columna escalar invoices.tailoring_order_id sino el puente. Anular
+ * la factura la deja en 'cancelled' → deja de bloquear.
+ */
+async function orderHasVigentInvoice(admin: AdminClient, orderId: string): Promise<boolean> {
+  const { data } = await admin
+    .from('invoice_tailoring_orders')
+    .select('invoice_id, invoices!inner(status)')
+    .eq('tailoring_order_id', orderId)
+    .not('invoices.status', 'in', '(draft,cancelled)')
+    .limit(1)
+  return (data?.length ?? 0) > 0
+}
+
 /** Devuelve la configuration con `prenda`/`prendaSlug` añadidos si faltan. */
 function withPrendaSlug(configuration: unknown, slug: string | undefined): Record<string, unknown> {
   const cfg = (configuration ?? {}) as Record<string, unknown>
@@ -1357,15 +1374,9 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
       return failure('No se puede editar un pedido cancelado', 'CONFLICT')
     }
     // Factura vigente = emitida y no anulada (cualquier status salvo draft/cancelled).
-    // El vínculo real es invoices.tailoring_order_id (la columna tailoring_orders.invoice_id
-    // está en desuso). Anular la factura la deja en 'cancelled' → ya no bloquea.
-    const { data: vigentInvoices } = await admin
-      .from('invoices')
-      .select('id')
-      .eq('tailoring_order_id', input.orderId)
-      .not('status', 'in', '(draft,cancelled)')
-      .limit(1)
-    const priceLocked = (vigentInvoices?.length ?? 0) > 0
+    // El vínculo es el puente invoice_tailoring_orders (mig 269, N:M): una factura
+    // conjunta cubre varios pedidos. Anular la factura la deja en 'cancelled' → ya no bloquea.
+    const priceLocked = await orderHasVigentInvoice(admin, input.orderId)
 
     const { data: linesBefore } = await admin
       .from('tailoring_order_lines')
@@ -1926,13 +1937,7 @@ export const duplicateOrderLineAction = protectedAction<
 
     // Añadir una prenda cambia importes: bloqueado con factura vigente (mismo
     // criterio que updateOrderAction; el pago ya no bloquea).
-    const { data: vigentInvoices } = await admin
-      .from('invoices')
-      .select('id')
-      .eq('tailoring_order_id', orderId)
-      .not('status', 'in', '(draft,cancelled)')
-      .limit(1)
-    if ((vigentInvoices?.length ?? 0) > 0) {
+    if (await orderHasVigentInvoice(admin, orderId)) {
       return failure('El pedido tiene una factura vigente: anúlala antes de añadir prendas', 'VALIDATION')
     }
 

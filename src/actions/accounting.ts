@@ -1127,7 +1127,7 @@ export const getProductsForInvoice = protectedAction<
 /** Pedidos de sastrería para cargar líneas en factura/presupuesto (opcionalmente por cliente). */
 export const listTailoringOrdersForInvoice = protectedAction<
   { clientId?: string },
-  { id: string; order_number: string; total: number; client_name: string }[]
+  { id: string; order_number: string; total: number; client_name: string; already_invoiced: boolean }[]
 >(
   { permission: 'accounting.edit', auditModule: 'accounting' },
   async (ctx, { clientId }) => {
@@ -1139,12 +1139,106 @@ export const listTailoringOrdersForInvoice = protectedAction<
       .limit(100)
     if (clientId) q = q.eq('client_id', clientId)
     const { data } = await q
+    // Pedidos ya incluidos en alguna factura VIGENTE (no draft/cancelled), para
+    // avisar en el selector y evitar facturarlos dos veces (mig 269).
+    const { data: linked } = await ctx.adminClient
+      .from('invoice_tailoring_orders')
+      .select('tailoring_order_id, invoices!inner(status)')
+      .not('invoices.status', 'in', '(draft,cancelled)')
+    const invoicedSet = new Set((linked || []).map((r: Record<string, unknown>) => String(r.tailoring_order_id)))
     return success((data || []).map((o: Record<string, unknown>) => ({
       id: String(o.id),
       order_number: String((o as any).order_number ?? ''),
       total: Number((o as any).total ?? 0),
       client_name: String((o as any).clients?.full_name ?? '') || '—',
+      already_invoiced: invoicedSet.has(String(o.id)),
     })))
+  }
+)
+
+/** Reservas del cliente candidatas a facturar (mismo patrón que pedidos). */
+export const listReservationsForInvoice = protectedAction<
+  { clientId?: string },
+  { id: string; reservation_number: string; total: number; client_name: string; already_invoiced: boolean }[]
+>(
+  { permission: 'accounting.edit', auditModule: 'accounting' },
+  async (ctx, { clientId }) => {
+    let q = ctx.adminClient
+      .from('product_reservations')
+      .select('id, reservation_number, total, client_id, clients(full_name)')
+      .not('status', 'in', '("cancelled")')
+      .order('created_at', { ascending: false })
+      .limit(100)
+    if (clientId) q = q.eq('client_id', clientId)
+    const { data } = await q
+    const { data: linked } = await ctx.adminClient
+      .from('invoice_reservations')
+      .select('reservation_id, invoices!inner(status)')
+      .not('invoices.status', 'in', '(draft,cancelled)')
+    const invoicedSet = new Set((linked || []).map((r: Record<string, unknown>) => String(r.reservation_id)))
+    return success((data || []).map((o: Record<string, unknown>) => ({
+      id: String(o.id),
+      reservation_number: String((o as any).reservation_number ?? ''),
+      total: Number((o as any).total ?? 0),
+      client_name: String((o as any).clients?.full_name ?? '') || '—',
+      already_invoiced: invoicedSet.has(String(o.id)),
+    })))
+  }
+)
+
+/** Líneas de una reserva formateadas para factura (base imponible). */
+export const getReservationLinesForInvoice = protectedAction<
+  string,
+  { description: string; quantity: number; unit_price: number; tax_rate: number; line_total: number }[]
+>(
+  { permission: 'accounting.edit', auditModule: 'accounting' },
+  async (ctx, reservationId) => {
+    const { data: resLines } = await ctx.adminClient
+      .from('product_reservation_lines')
+      .select(`
+        quantity, unit_price, line_total, status, sort_order,
+        product_variant:product_variants (
+          size, color, variant_sku,
+          product:products ( name, tax_rate )
+        )
+      `)
+      .eq('reservation_id', reservationId)
+      .order('sort_order', { ascending: true })
+
+    // Mismo criterio y conversión PVP→base que createInvoiceFromReservationAction.
+    const lines = (resLines ?? [])
+      .filter((l: any) => l.status !== 'cancelled')
+      .map((l: any) => {
+        const pv = l.product_variant
+        const prod = pv?.product
+        const name = prod?.name || 'Producto'
+        const variantBits = [pv?.size ? `T.${pv.size}` : null, pv?.color].filter(Boolean).join(' / ')
+        const description = variantBits ? `${name} (${variantBits})` : name
+        const qty = Math.max(1, Number(l.quantity) || 1)
+        const taxRate = Number(prod?.tax_rate) || 21
+        const lineTotal = Number(l.line_total)
+        const unitPriceNoTax = Number((lineTotal / (1 + taxRate / 100) / qty).toFixed(2))
+        return { description, quantity: qty, unit_price: unitPriceNoTax, tax_rate: taxRate, line_total: lineTotal }
+      })
+    return success(lines)
+  }
+)
+
+/** Pedidos y reservas que YA cubre una factura (para preseleccionar al editar). */
+export const getInvoiceSourcesAction = protectedAction<
+  string,
+  { orderIds: string[]; reservationIds: string[] }
+>(
+  { permission: 'accounting.edit', auditModule: 'accounting' },
+  async (ctx, invoiceId) => {
+    const [{ data: orders }, { data: reservations }] = await Promise.all([
+      ctx.adminClient.from('invoice_tailoring_orders').select('tailoring_order_id').eq('invoice_id', invoiceId),
+      ctx.adminClient.from('invoice_reservations').select('reservation_id').eq('invoice_id', invoiceId),
+    ])
+    return success({
+      orderIds: (orders || []).map((r: Record<string, unknown>) => String(r.tailoring_order_id)),
+      reservationIds: (reservations || []).map((r: Record<string, unknown>) => String(r.reservation_id)),
+    })
   }
 )
 
@@ -1538,6 +1632,12 @@ export type CreateInvoiceInput = {
     discount_percentage?: number
     line_total: number
   }[]
+  // Orígenes de sastrería que cubre la factura (relación N:M, mig 269). Una
+  // factura puede agrupar varios pedidos y varias reservas del mismo cliente.
+  // `undefined` = no tocar los puentes; `[]` = vaciarlos. El trigger de la mig
+  // 269 mantiene el espejo escalar invoices.tailoring_order_id / reservation_id.
+  tailoring_order_ids?: string[]
+  reservation_ids?: string[]
 }
 
 /**
@@ -1632,6 +1732,39 @@ async function nextSeriesNumber(
 const nextInvoiceNumber = (adminClient: AdminClient) =>
   nextSeriesNumber(adminClient, 'invoices', 'invoice_number', 'F')
 
+/**
+ * Sincroniza los puentes factura↔pedidos y factura↔reservas (mig 269).
+ * Solo actúa sobre el puente cuyo array llega DEFINIDO: `undefined` deja el
+ * puente intacto (llamadas que no gestionan orígenes), `[]` lo vacía. Reemplaza
+ * el contenido (borra + inserta) para reflejar exactamente la selección. El
+ * trigger de la mig 269 actualiza el espejo escalar en `invoices`.
+ */
+async function syncInvoiceSources(
+  adminClient: AdminClient,
+  invoiceId: string,
+  tailoringOrderIds: string[] | undefined,
+  reservationIds: string[] | undefined,
+): Promise<void> {
+  if (tailoringOrderIds !== undefined) {
+    await adminClient.from('invoice_tailoring_orders').delete().eq('invoice_id', invoiceId)
+    const ids = [...new Set(tailoringOrderIds)]
+    if (ids.length) {
+      await adminClient
+        .from('invoice_tailoring_orders')
+        .insert(ids.map((id) => ({ invoice_id: invoiceId, tailoring_order_id: id })))
+    }
+  }
+  if (reservationIds !== undefined) {
+    await adminClient.from('invoice_reservations').delete().eq('invoice_id', invoiceId)
+    const ids = [...new Set(reservationIds)]
+    if (ids.length) {
+      await adminClient
+        .from('invoice_reservations')
+        .insert(ids.map((id) => ({ invoice_id: invoiceId, reservation_id: id })))
+    }
+  }
+}
+
 export const createInvoiceAction = protectedAction<CreateInvoiceInput, { id: string; invoice_number: string }>(
   {
     permission: 'accounting.manage_invoices',
@@ -1699,6 +1832,9 @@ export const createInvoiceAction = protectedAction<CreateInvoiceInput, { id: str
       console.error('Error creating invoice lines:', linesError)
       return failure(linesError.message ?? 'Error al crear las líneas de factura')
     }
+
+    // Enlaza los pedidos/reservas que cubre la factura (mig 269, N:M).
+    await syncInvoiceSources(ctx.adminClient, inv.id as string, input.tailoring_order_ids, input.reservation_ids)
 
     const displayNumber = `F-${invoice_number}`
     const auditDescription = `Factura ${displayNumber} · ${recalc.total.toFixed(2)}€`
@@ -2038,7 +2174,9 @@ export const createInvoiceFromTailoringOrderAction = protectedAction<
       return failure(linesError.message ?? 'Error al crear las líneas')
     }
 
-    createInvoiceJournalEntry(inv.id as string).catch((e) => console.error('Journal entry from tailoring order invoice:', e))
+    // Enlace N:M (mig 269). Sin asiento 700: el ingreso del pedido ya se cuenta
+    // como cobro en los informes de sastrería; crearlo aquí lo duplicaría.
+    await syncInvoiceSources(ctx.adminClient, inv.id as string, [orderId], undefined)
     return success({ id: inv.id as string, invoice_number, auditEntityId: String(inv.id), auditDescription: `Factura ${invoice_number}` })
   }
 )
@@ -2207,10 +2345,10 @@ export const createInvoiceFromReservationAction = protectedAction<
       return failure(linesError.message ?? 'Error al crear las líneas')
     }
 
-    // En modo draft el asiento se generará al pulsar "Emitir" desde el editor.
-    if (!draft) {
-      createInvoiceJournalEntry(inv.id as string).catch((e) => console.error('Journal entry from reservation invoice:', e))
-    }
+    // Enlace N:M (mig 269). El trigger espejo mantiene invoices.reservation_id.
+    // Sin asiento 700: el ingreso de la reserva ya se cuenta como cobro; crearlo
+    // aquí (o al emitir) lo duplicaría — misma política que issueInvoiceAction.
+    await syncInvoiceSources(ctx.adminClient, inv.id as string, undefined, [reservationId])
     return success({ id: inv.id as string, invoice_number, auditEntityId: String(inv.id), auditDescription: `Factura ${invoice_number}` })
   }
 )
@@ -2341,6 +2479,10 @@ export const updateInvoiceAction = protectedAction<UpdateInvoiceInput, { id: str
         return failure(insertLinesError.message)
       }
     }
+
+    // Sincroniza los pedidos/reservas que cubre la factura (mig 269, N:M).
+    await syncInvoiceSources(ctx.adminClient, input.id, input.tailoring_order_ids, input.reservation_ids)
+
     return success({ id: input.id, auditEntityId: String(input.id), auditDescription: `Factura ${invoiceNumber}` })
   }
 )
@@ -2358,17 +2500,25 @@ export const issueInvoiceAction = protectedAction<string, { id: string; auditEnt
 
     const { data: inv } = await ctx.adminClient
       .from('invoices')
-      .select('invoice_number, journal_entry_id, sale_id')
+      .select('invoice_number, journal_entry_id, sale_id, tailoring_order_id, reservation_id')
       .eq('id', invoiceId)
       .maybeSingle()
-    const invRow = inv as { invoice_number?: string; journal_entry_id?: string | null; sale_id?: string | null } | null
+    const invRow = inv as {
+      invoice_number?: string; journal_entry_id?: string | null; sale_id?: string | null
+      tailoring_order_id?: string | null; reservation_id?: string | null
+    } | null
     const invoiceNumber = invRow?.invoice_number ?? ''
 
     // Asiento al emitir (la UI siempre lo anunció; antes no se creaba nunca).
     // Solo si no existe ya y la factura NO viene de un ticket: el ticket ya
     // tiene su propio asiento de venta y duplicaría la 700 en el diario
     // (mismo principio que la serie W, que usa el asiento del pedido online).
-    if (!invRow?.journal_entry_id && !invRow?.sale_id) {
+    // Tampoco si la factura tiene origen pedido/reserva de sastrería (mig 269):
+    // ese ingreso ya se cuenta como COBRO en los informes, así que crear la 700
+    // aquí lo duplicaría. El espejo escalar (tailoring_order_id / reservation_id)
+    // refleja si hay filas en los puentes invoice_tailoring_orders / _reservations.
+    const hasSastreriaOrigin = !!invRow?.tailoring_order_id || !!invRow?.reservation_id
+    if (!invRow?.journal_entry_id && !invRow?.sale_id && !hasSastreriaOrigin) {
       const je = await createInvoiceJournalEntry(invoiceId)
       if (!je.ok) console.error(`[issueInvoiceAction] asiento de ${invoiceNumber} falló: ${je.error}`)
     }

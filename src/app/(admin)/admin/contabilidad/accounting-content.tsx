@@ -40,6 +40,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
 import { formatCurrency, formatDate, cn, normalizeSearchTerm } from '@/lib/utils'
+import { useInvoiceSources, InvoiceSourcesSection } from './invoice-sources'
 import { formatClientAddress } from '@/lib/clients/format'
 import { downloadExcel, downloadExcelMulti } from '@/lib/excel/export'
 import { toast } from 'sonner'
@@ -53,7 +54,7 @@ import {
   getProductsForInvoice, listTailoringOrdersForInvoice, getTailoringOrderLinesForInvoice,
   createInvoiceAction, updateInvoiceAction, getInvoiceStatusAction, issueInvoiceAction, deleteInvoiceAction, cancelInvoiceAction, createCreditNote,
   createEstimateAction, updateEstimateAction, updateEstimateFullAction, getEstimateDetail, sendEstimateAction, acceptEstimateAction, rejectEstimateAction, convertEstimateToInvoiceAction,
-  getInvoiceLinesAction, updateJournalEntryDescriptionAction, deleteJournalEntry,
+  getInvoiceLinesAction, getInvoiceSourcesAction, updateJournalEntryDescriptionAction, deleteJournalEntry,
   generateInvoicePdfAction, generateEstimatePdfAction,
   type InvoiceRow, type EstimateRow, type JournalEntryRow, type VatQuarterRow,
   type ManualTransaction, type AccountingMovementRow, type AccountingSummary,
@@ -594,10 +595,8 @@ export function InvoicesTab({ editId, onEditConsumed }: { editId: string | null;
   const [productSearch, setProductSearch] = useState('')
   const [productResults, setProductResults] = useState<{ id: string; name: string; sku: string; base_price: number; price_with_tax?: number }[]>([])
   const [loadingProducts, setLoadingProducts] = useState(false)
-  const [orderDialogOpen, setOrderDialogOpen] = useState(false)
-  const [ordersList, setOrdersList] = useState<{ id: string; order_number: string; total: number; client_name: string }[]>([])
-  const [loadingOrders, setLoadingOrders] = useState(false)
-  const [loadingOrderLines, setLoadingOrderLines] = useState(false)
+  // Pedidos/reservas que cubre la factura (relación N:M, mig 269).
+  const sources = useInvoiceSources()
 
   // Form state
   const [form, setForm] = useState({
@@ -676,32 +675,8 @@ export function InvoicesTab({ editId, onEditConsumed }: { editId: string | null;
     setProductDialogOpen(false)
     setProductSearch('')
   }
-  const openOrderDialog = async () => {
-    setOrderDialogOpen(true)
-    setLoadingOrders(true)
-    const r = await listTailoringOrdersForInvoice({ clientId: form.client_id || undefined })
-    if (r.success) setOrdersList(r.data)
-    setLoadingOrders(false)
-  }
-  const addOrderLines = async (orderId: string) => {
-    setLoadingOrderLines(true)
-    const r = await getTailoringOrderLinesForInvoice(orderId)
-    setLoadingOrderLines(false)
-    if (!r.success || !r.data.length) {
-      toast.error(!r.success && 'error' in r ? r.error : 'El pedido no tiene líneas')
-      return
-    }
-    const newLines: InvoiceLine[] = r.data.map(l => ({
-      description: l.description,
-      quantity: l.quantity,
-      unit_price: l.unit_price,
-      tax_rate: l.tax_rate,
-      discount_percentage: 0,
-    }))
-    setLines(prev => [...prev, ...newLines])
-    toast.success(`${newLines.length} línea(s) añadida(s) desde el pedido`)
-    setOrderDialogOpen(false)
-  }
+  const addSourceLines = (newLines: { description: string; quantity: number; unit_price: number; tax_rate: number }[]) =>
+    setLines(prev => [...prev, ...newLines.map(l => ({ ...l, discount_percentage: 0 }))])
 
   const subtotal = lines.reduce((s, l) => s + l.quantity * l.unit_price * (1 - (l.discount_percentage ?? 0) / 100), 0)
   const taxAmount = lines.reduce((s, l) => s + l.quantity * l.unit_price * (1 - (l.discount_percentage ?? 0) / 100) * (l.tax_rate / 100), 0)
@@ -746,6 +721,8 @@ export function InvoicesTab({ editId, onEditConsumed }: { editId: string | null;
             line_total: lineSubtotal * (1 + l.tax_rate / 100),
           }
         }),
+        tailoring_order_ids: sources.orderIds,
+        reservation_ids: sources.reservationIds,
       })
 
       if (!result.success) {
@@ -758,6 +735,7 @@ export function InvoicesTab({ editId, onEditConsumed }: { editId: string | null;
       setDialogOpen(false)
       setLines([{ description: '', quantity: 1, unit_price: 0, tax_rate: 21 }])
       setForm({ client_id: '', client_name: '', client_nif: '', client_address: '', client_email: '', client_phone: '', payment_method: '', invoice_date: new Date().toISOString().split('T')[0], due_date: '', notes: '', irpf_rate: 0, tax_rate: 21 })
+      sources.reset()
       load()
     } catch (error) {
       console.error('Error creating invoice:', error)
@@ -1057,7 +1035,7 @@ export function InvoicesTab({ editId, onEditConsumed }: { editId: string | null;
                   <div className="flex flex-wrap gap-2">
                     <Button size="sm" variant="outline" onClick={addLine}><Plus className="h-3.5 w-3.5 mr-1" /> Añadir línea (texto libre)</Button>
                     <Button size="sm" variant="default" onClick={openProductDialog}><Package className="h-3.5 w-3.5 mr-1" /> Escoger producto</Button>
-                    <Button size="sm" variant="outline" onClick={openOrderDialog}><ClipboardList className="h-3.5 w-3.5 mr-1" /> Escoger pedido</Button>
+                    <InvoiceSourcesSection state={sources} clientId={form.client_id || undefined} onAddLines={addSourceLines} />
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -1132,32 +1110,6 @@ export function InvoicesTab({ editId, onEditConsumed }: { editId: string | null;
               )}
             </ScrollArea>
           </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Diálogo selección pedido (Nueva factura) */}
-      <Dialog open={orderDialogOpen} onOpenChange={setOrderDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Añadir líneas desde pedido</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">Se listan los pedidos de sastrería{form.client_id ? ' del cliente seleccionado' : ''}. Al elegir uno se añaden sus líneas a la factura.</p>
-          <ScrollArea className="h-72 rounded border p-2">
-            {loadingOrders ? (
-              <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-            ) : ordersList.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">No hay pedidos.</p>
-            ) : (
-              <div className="space-y-1">
-                {ordersList.map(o => (
-                  <button key={o.id} type="button" className="w-full text-left rounded p-3 hover:bg-muted border flex justify-between items-center gap-2" onClick={() => addOrderLines(o.id)} disabled={loadingOrderLines}>
-                    <span className="font-mono font-medium">{o.order_number}</span>
-                    <span className="text-sm text-muted-foreground truncate">{o.client_name}</span>
-                    <span className="font-semibold shrink-0">{formatCurrency(o.total)}</span>
-                    {loadingOrderLines ? <Loader2 className="h-4 w-4 animate-spin shrink-0" /> : null}
-                  </button>
-                ))}
-              </div>
-            )}
-          </ScrollArea>
         </DialogContent>
       </Dialog>
     </div>
@@ -1294,19 +1246,19 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
   const [productSearch, setProductSearch] = useState('')
   const [productResults, setProductResults] = useState<{ id: string; name: string; sku: string; base_price: number; price_with_tax?: number }[]>([])
   const [loadingProducts, setLoadingProducts] = useState(false)
-  const [orderDialogOpen, setOrderDialogOpen] = useState(false)
-  const [ordersList, setOrdersList] = useState<{ id: string; order_number: string; total: number; client_name: string }[]>([])
-  const [loadingOrders, setLoadingOrders] = useState(false)
-  const [loadingOrderLines, setLoadingOrderLines] = useState(false)
+  // Pedidos/reservas que cubre la factura (relación N:M, mig 269).
+  const sources = useInvoiceSources()
 
   const openEdit = async () => {
-    const [r, cr] = await Promise.all([
+    const [r, cr, sr] = await Promise.all([
       getInvoiceLinesAction(inv.id),
       inv.client_id ? getClientForInvoiceById(inv.client_id) : Promise.resolve({ success: true as const, data: null }),
+      getInvoiceSourcesAction(inv.id),
     ])
     if (r.success) {
       setLines(r.data.lines.map(l => ({ description: l.description, quantity: l.quantity, unit_price: l.unit_price, tax_rate: l.tax_rate })))
     }
+    if (sr.success) sources.init(sr.data.orderIds, sr.data.reservationIds)
     if (cr.success && cr.data) {
       setSelectedClient(cr.data)
       // Si el client_name de la factura coincide con una empresa del cliente,
@@ -1352,23 +1304,8 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
     setProductDialogOpen(false)
     setProductSearch('')
   }
-  const openOrderDialogEdit = async () => {
-    setOrderDialogOpen(true)
-    setLoadingOrders(true)
-    const r = await listTailoringOrdersForInvoice({ clientId: form.client_id || undefined })
-    if (r.success) setOrdersList(r.data)
-    setLoadingOrders(false)
-  }
-  const addOrderLinesEdit = async (orderId: string) => {
-    setLoadingOrderLines(true)
-    const r = await getTailoringOrderLinesForInvoice(orderId)
-    setLoadingOrderLines(false)
-    if (!r.success || !r.data.length) { toast.error(!r.success && 'error' in r ? r.error : 'El pedido no tiene líneas'); return }
-    const newLines: InvoiceLine[] = r.data.map(l => ({ description: l.description, quantity: l.quantity, unit_price: l.unit_price, tax_rate: l.tax_rate, discount_percentage: 0 }))
-    setLines(prev => [...prev, ...newLines])
-    toast.success(`${newLines.length} línea(s) añadida(s) desde el pedido`)
-    setOrderDialogOpen(false)
-  }
+  const addSourceLinesEdit = (newLines: { description: string; quantity: number; unit_price: number; tax_rate: number }[]) =>
+    setLines(prev => [...prev, ...newLines.map(l => ({ ...l, discount_percentage: 0 }))])
 
   const subtotal  = lines.reduce((s, l) => s + l.quantity * l.unit_price * (1 - (l.discount_percentage ?? 0) / 100), 0)
   const taxAmount = lines.reduce((s, l) => s + l.quantity * l.unit_price * (1 - (l.discount_percentage ?? 0) / 100) * (l.tax_rate / 100), 0)
@@ -1438,6 +1375,8 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
           line_total: lineSubtotal * (1 + l.tax_rate / 100),
         }
       }),
+      tailoring_order_ids: sources.orderIds,
+      reservation_ids: sources.reservationIds,
       conceptOnly,
     })
     setSaving(false)
@@ -1450,7 +1389,7 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
   const handleIssue = async () => {
     const r = await issueInvoiceAction(inv.id)
     if (!r.success) { toast.error(!r.success && 'error' in r ? r.error : 'Error al emitir'); return }
-    toast.success('Factura emitida — asiento contable creado')
+    toast.success('Factura emitida')
     onRefresh()
   }
 
@@ -1805,7 +1744,7 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                   <div className="flex flex-wrap gap-2">
                     <Button size="sm" variant="outline" onClick={addLine}><Plus className="h-3.5 w-3.5 mr-1" /> Añadir línea</Button>
                     <Button size="sm" variant="default" onClick={openProductDialogEdit}><Package className="h-3.5 w-3.5 mr-1" /> Escoger producto</Button>
-                    <Button size="sm" variant="outline" onClick={openOrderDialogEdit}><ClipboardList className="h-3.5 w-3.5 mr-1" /> Escoger pedido</Button>
+                    <InvoiceSourcesSection state={sources} clientId={form.client_id || undefined} onAddLines={addSourceLinesEdit} />
                   </div>
                   )}
                 </div>
@@ -1897,25 +1836,6 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
               )}
             </ScrollArea>
           </div>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={orderDialogOpen} onOpenChange={setOrderDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Añadir líneas desde pedido</DialogTitle></DialogHeader>
-          <ScrollArea className="h-72 rounded border p-2">
-            {loadingOrders ? <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : ordersList.length === 0 ? <p className="text-sm text-muted-foreground text-center py-8">No hay pedidos.</p> : (
-              <div className="space-y-1">
-                {ordersList.map(o => (
-                  <button key={o.id} type="button" className="w-full text-left rounded p-3 hover:bg-muted border flex justify-between items-center gap-2" onClick={() => addOrderLinesEdit(o.id)} disabled={loadingOrderLines}>
-                    <span className="font-mono font-medium">{o.order_number}</span>
-                    <span className="text-sm text-muted-foreground truncate">{o.client_name}</span>
-                    <span className="font-semibold shrink-0">{formatCurrency(o.total)}</span>
-                    {loadingOrderLines ? <Loader2 className="h-4 w-4 animate-spin shrink-0" /> : null}
-                  </button>
-                ))}
-              </div>
-            )}
-          </ScrollArea>
         </DialogContent>
       </Dialog>
 
