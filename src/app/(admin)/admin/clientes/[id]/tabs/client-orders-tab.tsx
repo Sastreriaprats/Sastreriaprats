@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Loader2, Scissors, Plus } from 'lucide-react'
 import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel, summarizeOrderGarments } from '@/lib/utils'
+import { getOrderManufacturingLabel } from '@/lib/orders/line-groups'
 
 export function ClientOrdersTab({ clientId }: { clientId: string }) {
   const router = useRouter()
@@ -21,7 +22,7 @@ export function ClientOrdersTab({ clientId }: { clientId: string }) {
       try {
         const { data } = await supabase
           .from('tailoring_orders')
-          .select('id, order_number, order_type, status, order_date, estimated_delivery_date, total, total_paid, total_pending, stores(name), tailoring_order_lines(id, sort_order, configuration, garment_types(name))')
+          .select('id, order_number, order_type, status, order_date, estimated_delivery_date, total, total_paid, total_pending, stores(name), tailoring_order_lines(id, sort_order, line_type, configuration, garment_types(name, code))')
           .eq('client_id', clientId)
           .order('order_date', { ascending: false })
           .limit(100)
@@ -78,7 +79,7 @@ export function ClientOrdersTab({ clientId }: { clientId: string }) {
               <TableCell className="text-sm max-w-[200px] truncate" title={summarizeOrderGarments(o.tailoring_order_lines)}>
                 {summarizeOrderGarments(o.tailoring_order_lines)}
               </TableCell>
-              <TableCell><Badge variant="outline" className="text-xs">{o.order_type === 'artesanal' ? 'Artesanal' : 'Industrial'}</Badge></TableCell>
+              <TableCell><Badge variant="outline" className="text-xs">{getOrderManufacturingLabel(o.tailoring_order_lines) ?? (o.order_type === 'artesanal' ? 'Artesanal' : 'Industrial')}</Badge></TableCell>
               <TableCell><Badge className={`text-xs ${getOrderStatusColor(o.status)}`}>{getOrderStatusLabel(o.status)}</Badge></TableCell>
               <TableCell className="text-sm">{formatDate(o.order_date)}</TableCell>
               <TableCell className="text-sm">{formatDate(o.estimated_delivery_date)}</TableCell>

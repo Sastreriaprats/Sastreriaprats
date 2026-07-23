@@ -20,6 +20,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
+import { getOrderManufacturingLabel } from '@/lib/orders/line-groups'
 import { OrderGarmentsTab } from './tabs/order-garments-tab'
 import { OrderHistoryTab } from './tabs/order-history-tab'
 import { OrderFittingsTab } from './tabs/order-fittings-tab'
@@ -83,6 +84,11 @@ export function OrderDetailContent({ order }: { order: any }) {
   const marginPct = order.total > 0 ? (marginAmount / Number(order.total) * 100) : 0
   const marginColor = marginPct >= 20 ? 'text-green-600' : marginPct >= 10 ? 'text-amber-600' : 'text-red-600'
   const garmentCount = order.tailoring_order_lines?.length || 0
+  // Etiqueta artesanal/industrial de la cabecera: se DERIVA de las líneas
+  // (mismo criterio que el badge por prenda) en vez del order_type guardado,
+  // que podía quedar descuadrado. Si el pedido mezcla ambos, muestra "Mixto".
+  const orderTypeLabel = getOrderManufacturingLabel(order.tailoring_order_lines)
+    ?? (order.order_type === 'artesanal' ? 'Artesanal' : 'Industrial')
 
   return (
     <div className="space-y-6">
@@ -92,7 +98,7 @@ export function OrderDetailContent({ order }: { order: any }) {
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold font-mono">{order.order_number}</h1>
             <Badge className={`${getOrderStatusColor(order.status)}`}>{getOrderStatusLabel(order.status)}</Badge>
-            <Badge variant="outline">{order.order_type === 'artesanal' ? 'Artesanal' : 'Industrial'}</Badge>
+            <Badge variant="outline">{orderTypeLabel}</Badge>
             {(() => {
               const orderLines = order.tailoring_order_lines || []
               const gifts = orderLines.filter((l: any) => l.is_gift === true).length

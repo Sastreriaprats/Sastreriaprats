@@ -53,7 +53,7 @@ const SELECT_ORDERS = `
   created_at,
   clients ( id, full_name, phone, email, category ),
   stores ( name, code ),
-  tailoring_order_lines ( id, sort_order, configuration, is_gift, garment_types ( name ) )
+  tailoring_order_lines ( id, sort_order, line_type, configuration, is_gift, garment_types ( name, code ) )
 `
 
 /** Devuelve el siguiente número de talón (solo el número, ej. 46). */
@@ -2068,8 +2068,16 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
     revalidate: ['/sastre/pedidos'],
   },
   async (ctx, input) => {
+    // La camisería sigue el flujo de su tipo real: 'camiseria' es artesanal
+    // (corte y prueba en tienda) y 'camiseria_industrial' es industrial
+    // (fábrica y recepción en tienda). Igual que hace el alta desde admin
+    // (create-order-wizard: isCamiseriaType). Antes se colapsaba cualquier
+    // valor != 'artesanal' a 'industrial', lo que marcaba como Industrial las
+    // camiserías artesanales (bug reportado jul-2026).
     const orderTypeDb: 'artesanal' | 'industrial' =
-      input.orderType === 'artesanal' ? 'artesanal' : 'industrial'
+      input.orderType === 'industrial' || input.orderType === 'camiseria_industrial'
+        ? 'industrial'
+        : 'artesanal'
 
     const initialStatus = 'created'
 
@@ -2252,7 +2260,10 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
       linesToInsert.push({
         tailoring_order_id: order.id,
         garment_type_id: camiseriaGarmentTypeId,
-        line_type: 'industrial',
+        // Hereda el tipo real del pedido (artesanal/industrial). Antes estaba
+        // fijado a 'industrial', por eso las camisas de camisería artesanal
+        // salían con badge "Industrial".
+        line_type: orderTypeDb,
         unit_price: precio,
         line_total: precio,
         is_gift: esRegalo,

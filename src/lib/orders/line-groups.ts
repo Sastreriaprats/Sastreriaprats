@@ -59,6 +59,32 @@ export function getLineGroup(line: unknown): LineGroup {
 }
 
 /**
+ * Etiqueta artesanal/industrial de un PEDIDO, derivada de sus líneas (mismo
+ * criterio que el badge por prenda). Los complementos/boutique no cuentan para
+ * el eje artesanal/industrial. Devuelve 'Mixto' si el pedido mezcla ambos, o
+ * `null` si no hay líneas de sastrería/camisería (el llamador cae entonces al
+ * `order_type` del pedido).
+ *
+ * Se deriva de las líneas —y NO del `order_type` guardado— porque este último
+ * podía quedar descuadrado: una camisería artesanal se guardaba como pedido
+ * 'industrial' (bug jul-2026). Requiere que las líneas traigan `line_type`.
+ */
+export function getOrderManufacturingLabel(
+  lines: unknown,
+): 'Artesanal' | 'Industrial' | 'Mixto' | null {
+  const arr = Array.isArray(lines) ? lines : []
+  const types = new Set<'artesanal' | 'industrial'>()
+  for (const line of arr) {
+    if (getLineGroup(line) === 'complementos') continue
+    const lt = (line as { line_type?: string } | null)?.line_type
+    types.add(lt === 'artesanal' ? 'artesanal' : 'industrial')
+  }
+  if (types.size === 0) return null
+  if (types.size > 1) return 'Mixto'
+  return types.has('artesanal') ? 'Artesanal' : 'Industrial'
+}
+
+/**
  * Devuelve un nombre legible para mostrar en listados. Depende del grupo:
  *  - sastreria: prendaLabel → slug de prenda → nombre del garment_type
  *  - camiseria: "Camisa (Cuello, Puño)" si hay datos; si no, nombre del garment_type

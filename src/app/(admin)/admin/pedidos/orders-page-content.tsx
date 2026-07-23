@@ -34,6 +34,7 @@ import { OrdersPipeline } from './orders-pipeline'
 import { ReservationsTab } from '@/app/(admin)/admin/stock/tabs/reservations-tab'
 import { OnlineOrdersList } from '@/app/(admin)/admin/tienda-online/online-orders-list'
 import { ALL_VISIBLE_STATUSES } from '@/lib/orders/statuses'
+import { getOrderManufacturingLabel } from '@/lib/orders/line-groups'
 import { downloadExcel } from '@/lib/excel/export'
 
 const orderStatuses = ALL_VISIBLE_STATUSES
@@ -278,7 +279,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
         'Email': o.clients?.email ?? '',
         'Fecha pedido': formatDate(o.order_date || o.created_at),
         'Entrega estimada': formatDate(o.estimated_delivery_date),
-        'Tipo': o.order_type === 'artesanal' ? 'Artesanal' : 'Industrial',
+        'Tipo': getOrderManufacturingLabel(o.tailoring_order_lines) ?? (o.order_type === 'artesanal' ? 'Artesanal' : 'Industrial'),
         'Estado': getOrderStatusLabel(o.status),
         'Encargo': summarizeOrderGarments(o.tailoring_order_lines),
         'Total': Number(o.total) || 0,
@@ -629,7 +630,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                           <TableCell className="text-sm max-w-[180px] truncate" title={summarizeOrderGarments(order.tailoring_order_lines)}>
                             {summarizeOrderGarments(order.tailoring_order_lines)}
                           </TableCell>
-                          <TableCell><Badge variant="outline" className="text-xs">{order.order_type === 'artesanal' ? 'Artesanal' : 'Industrial'}</Badge></TableCell>
+                          <TableCell><Badge variant="outline" className="text-xs">{getOrderManufacturingLabel(order.tailoring_order_lines) ?? (order.order_type === 'artesanal' ? 'Artesanal' : 'Industrial')}</Badge></TableCell>
                           <TableCell><Badge className={`text-xs ${getOrderStatusColor(order.status)}`}>{getOrderStatusLabel(order.status)}</Badge></TableCell>
                           <TableCell className="text-sm">{formatDate(order.order_date || order.created_at)}</TableCell>
                           <TableCell className={`text-sm ${isOverdue ? 'text-red-600 font-medium' : ''}`}>{formatDate(order.estimated_delivery_date)}</TableCell>
