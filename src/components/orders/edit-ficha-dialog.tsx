@@ -870,7 +870,10 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
                     setTejidoPopoverOpen(open)
                     // Al abrir, el buscador parte del tejido ACTUAL (no vacío) para
                     // que se vea y para no dispararse un onValueChange en blanco.
-                    if (open) setTejidoSearch(str(cfg.tejidoStockNombre ?? cfg.tejidoCatalogo ?? cfg.tejido))
+                    // OJO: || y NO ?? — el texto libre pone tejidoStockNombre='' (cadena
+                    // vacía, no nullish) y guarda el valor en tejidoCatalogo; con ?? la
+                    // cadena '' cortaba y el tejido escrito no se mostraba (bug Isma).
+                    if (open) setTejidoSearch(str(cfg.tejidoStockNombre || cfg.tejidoCatalogo || cfg.tejido))
                   }}
                 >
                   <PopoverTrigger asChild>
@@ -882,7 +885,9 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
                       className="w-full justify-between font-normal"
                     >
                       <span className="truncate">
-                        {str(cfg.tejidoStockNombre ?? cfg.tejidoCatalogo ?? cfg.tejido) || 'Buscar o escribir tejido...'}
+                        {/* || y NO ?? — ver nota en onOpenChange: el texto libre deja
+                            tejidoStockNombre='' y el valor vive en tejidoCatalogo. */}
+                        {str(cfg.tejidoStockNombre || cfg.tejidoCatalogo || cfg.tejido) || 'Buscar o escribir tejido...'}
                       </span>
                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                     </Button>
