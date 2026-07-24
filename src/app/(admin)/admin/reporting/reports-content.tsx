@@ -519,10 +519,12 @@ export function ReportsContent() {
       {isLoading ? (
         <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin" /></div>
       ) : !canSeeGlobal ? (
-        // Vista personal del vendedor: solo su "Por empleado" (datos ya acotados en servidor).
+        // Vista personal del vendedor: solo sus VENTAS (datos ya acotados en servidor).
+        // Las comisiones se ocultan aquí a propósito (el cálculo aún se está revisando);
+        // el informe de comisiones sigue visible para admin/propietario.
         <div className="space-y-4">
-          <h2 className="text-lg font-semibold">Mis ventas y comisiones</h2>
-          <EmployeeTab data={employeeData} storeBreakdown={null} stores={null} commissions={employeeCommissions} groupBonuses={groupBonuses} />
+          <h2 className="text-lg font-semibold">Mis ventas</h2>
+          <EmployeeTab data={employeeData} storeBreakdown={null} stores={null} commissions={employeeCommissions} groupBonuses={groupBonuses} showCommissions={false} />
         </div>
       ) : (
         <>
@@ -972,7 +974,7 @@ function StoreSalesTab({ data, salesData, isFiltered }: { data: StoreSalesReport
 
 // ─── Tab: Por empleado ───────────────────────────────────────────────────────
 
-function EmployeeTab({ data, storeBreakdown, stores, commissions, groupBonuses }: { data: EmployeeItem[]; storeBreakdown: StoreBreakdownRow[] | null; stores: EmployeeStoreCol[] | null; commissions: EmployeeCommission[]; groupBonuses: GroupBonusResult[] }) {
+function EmployeeTab({ data, storeBreakdown, stores, commissions, groupBonuses, showCommissions = true }: { data: EmployeeItem[]; storeBreakdown: StoreBreakdownRow[] | null; stores: EmployeeStoreCol[] | null; commissions: EmployeeCommission[]; groupBonuses: GroupBonusResult[]; showCommissions?: boolean }) {
   if (!data.length) return <p className="text-center text-muted-foreground py-12">Sin datos para el periodo seleccionado</p>
 
   const hasSales = data.some(e => e.pos_ops > 0 || e.pos_total > 0)
@@ -1113,7 +1115,7 @@ function EmployeeTab({ data, storeBreakdown, stores, commissions, groupBonuses }
         )
       })()}
 
-      <CommissionsBlock commissions={commissions} groupBonuses={groupBonuses} />
+      {showCommissions && <CommissionsBlock commissions={commissions} groupBonuses={groupBonuses} />}
     </div>
   )
 }
