@@ -6,7 +6,7 @@
  * Producía HTML directo (no Markdown) compatible con el render público de
  * /blog/[slug], que ya hace DOMPurify.sanitize + dangerouslySetInnerHTML.
  *
- * Toolbar: bold, italic, h1-h3, listas, blockquote, code, link, image,
+ * Toolbar: bold, italic, h2-h3, listas, blockquote, code, link, image,
  * undo, redo. La inserción de imagen llama a `onImageUpload` (provisto
  * por el padre) que sube a Supabase Storage y devuelve la URL pública.
  *
@@ -22,7 +22,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useFileDropzone } from '@/hooks/use-file-dropzone'
 import {
-  Bold, Italic, Heading1, Heading2, Heading3,
+  Bold, Italic, Heading2, Heading3,
   List, ListOrdered, Quote, Code, Link as LinkIcon,
   Image as ImageIcon, Undo, Redo,
 } from 'lucide-react'
@@ -110,10 +110,8 @@ function Toolbar({
 
       <span className="mx-1 h-5 w-px bg-border" />
 
-      <ToolbarBtn title="Encabezado 1" active={editor.isActive('heading', { level: 1 })}
-        onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}>
-        <Heading1 className="h-4 w-4" />
-      </ToolbarBtn>
+      {/* El H1 de la página es el título del post; el cuerpo empieza en H2 para
+          no duplicar encabezados (mejor SEO). Por eso no hay botón H1 aquí. */}
       <ToolbarBtn title="Encabezado 2" active={editor.isActive('heading', { level: 2 })}
         onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>
         <Heading2 className="h-4 w-4" />

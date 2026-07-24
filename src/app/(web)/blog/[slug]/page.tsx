@@ -20,6 +20,33 @@ type Props = {
  * TipTap envuelve en su propio <p>) y los metemos en un <div class="blog-gallery">
  * que el CSS dispone lado a lado. Una imagen suelta se queda a ancho completo.
  */
+/**
+ * Normaliza los encabezados del CUERPO para que la página tenga un único H1
+ * (el título del post, que se renderiza aparte). Dos pasos:
+ *  1) Elimina encabezados vacíos (sin texto: solo espacios, &nbsp; o <br>),
+ *     como el H2 en blanco que a veces deja el editor.
+ *  2) Si el cuerpo trae algún H1 (el editor ofrecía botón H1), baja toda la
+ *     jerarquía un nivel (h1→h2 … h5→h6; h6 se mantiene). Solo se degrada
+ *     cuando hay H1, así los posts que ya empiezan bien en H2 no se tocan.
+ * No modifica lo guardado en BD: es una capa de presentación, reversible.
+ */
+function normalizeBodyHeadings(html: string): string {
+  // 1) Fuera encabezados vacíos.
+  let out = html.replace(
+    /<h([1-6])(?:\s[^>]*)?>(?:\s|&nbsp;|<br\s*\/?>)*<\/h\1>/gi,
+    ''
+  )
+  // 2) Degradar un nivel solo si hay algún H1 en el cuerpo.
+  if (/<h1[\s>]/i.test(out)) {
+    out = out.replace(
+      /<(\/?)h([1-5])((?:\s[^>]*)?)>/gi,
+      (_m, slash: string, level: string, attrs: string) =>
+        `<${slash}h${Number(level) + 1}${attrs}>`
+    )
+  }
+  return out
+}
+
 function groupImageGalleries(html: string): string {
   // 1) Normalizar: una imagen sola dentro de su propio <p> → <img> de bloque,
   //    así ambos flujos de TipTap (inline:false y <p><img></p>) quedan iguales.
@@ -82,6 +109,9 @@ export default async function BlogPostPage({ params }: Props) {
       .replace(/\son\w+\s*=\s*'[^']*'/gi, '')
       .replace(/javascript:/gi, '')
   }
+
+  // Un solo H1 en la página: el título del post. Los del cuerpo bajan un nivel.
+  body = normalizeBodyHeadings(body)
 
   // Agrupar imágenes consecutivas en galerías en fila (lado a lado).
   body = groupImageGalleries(body)
