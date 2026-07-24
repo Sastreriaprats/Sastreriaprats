@@ -430,6 +430,35 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
 
   const marginColor = summary.marginPct >= 20 ? 'text-green-600' : summary.marginPct >= 10 ? 'text-amber-600' : 'text-red-600'
 
+  // Nombre de la prenda por garment_type_id, para etiquetar el aviso de PVP 0.
+  const garmentNameById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const g of garmentTypes) m.set(g.id, g.name)
+    return m
+  }, [garmentTypes])
+
+  // Etiqueta legible de una línea: preferimos su referencia de boleta
+  // (PIN-2026-0054-CAM1…) si la tiene; si es una línea nueva sin id, el nombre
+  // del tipo de prenda.
+  const lineLabel = useCallback((l: EditableLine) => {
+    const ref = l.id ? lineRefs.get(String(l.id)) : null
+    if (ref) return `${order?.order_number}-${ref}`
+    return garmentNameById.get(l.garment_type_id) || 'Prenda'
+  }, [lineRefs, garmentNameById, order?.order_number])
+
+  // Detección de prendas SIN precio: PVP 0 € y NO marcadas como regalo. Un
+  // pedido con varias prendas donde a alguna se le olvidó poner el importe
+  // arrastra un total incompleto (p. ej. camisas a 0 y el total solo refleja el
+  // traje). Lo hacemos visible para que no pase desapercibido.
+  const linesMissingPrice = useMemo(
+    () => lines.filter((l) => !l.is_gift && (Number(l.unit_price) || 0) === 0),
+    [lines],
+  )
+  const missingPriceLabels = useMemo(
+    () => linesMissingPrice.map(lineLabel),
+    [linesMissingPrice, lineLabel],
+  )
+
   // Helpers para líneas
   const addLine = () => {
     const defaultGarment = garmentTypes[0]
@@ -784,6 +813,21 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                 El precio no se puede editar porque el pedido tiene una factura emitida (evita descuadrarla). Para cambiar importes, anula antes la factura (se generará una nota de abono) y volverás a poder editarlos. El resto de datos (tejido, cortador, medidas, notas…) sí se puede editar.
               </p>
             )}
+            {linesMissingPrice.length > 0 && (
+              <div className="rounded-md border-2 border-red-400 bg-red-50 px-3 py-2.5 text-sm text-red-800">
+                <p className="font-semibold flex items-center gap-1.5">
+                  <X className="h-4 w-4 shrink-0" />
+                  {linesMissingPrice.length === 1
+                    ? 'Hay 1 prenda sin precio (PVP 0 €)'
+                    : `Hay ${linesMissingPrice.length} prendas sin precio (PVP 0 €)`}
+                </p>
+                <p className="text-xs mt-1">
+                  El total no las incluye. Revisa el PVP de:{' '}
+                  <strong className="font-mono">{missingPriceLabels.join(', ')}</strong>.
+                  {' '}Si alguna es gratis a propósito, márcala como «Regalo».
+                </p>
+              </div>
+            )}
             {lines.length === 0 ? (
               <div className="rounded-md border p-6 text-center text-sm text-muted-foreground">
                 No hay prendas. Añade al menos una.
@@ -840,9 +884,14 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                           </Select>
                         </TableCell>
                         <TableCell>
-                          <Input className="h-8 text-xs" type="number" min={0} step={0.01} disabled={priceLocked || l.is_gift}
+                          <Input
+                            className={`h-8 text-xs ${!l.is_gift && (Number(l.unit_price) || 0) === 0 ? 'border-red-400 bg-red-50 focus-visible:ring-red-400' : ''}`}
+                            type="number" min={0} step={0.01} disabled={priceLocked || l.is_gift}
                             value={l.is_gift ? '' : l.unit_price} placeholder={l.is_gift ? 'Regalo' : undefined}
                             onChange={(e) => updateLine(l._key, 'unit_price', parseFloat(e.target.value) || 0)} />
+                          {!l.is_gift && (Number(l.unit_price) || 0) === 0 && (
+                            <p className="mt-0.5 text-[10px] font-semibold text-red-600 whitespace-nowrap">Sin precio</p>
+                          )}
                           <label className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground cursor-pointer select-none whitespace-nowrap">
                             <input type="checkbox" className="h-3 w-3 accent-primary" disabled={priceLocked}
                               checked={l.is_gift}
@@ -1216,6 +1265,21 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
               Los cambios quedarán registrados en el historial del pedido.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {linesMissingPrice.length > 0 && (
+            <div className="rounded-md border-2 border-red-400 bg-red-50 px-3 py-2.5 text-sm text-red-800">
+              <p className="font-semibold flex items-center gap-1.5">
+                <X className="h-4 w-4 shrink-0" />
+                {linesMissingPrice.length === 1
+                  ? '1 prenda se guardará sin precio (PVP 0 €)'
+                  : `${linesMissingPrice.length} prendas se guardarán sin precio (PVP 0 €)`}
+              </p>
+              <p className="text-xs mt-1">
+                No suman al total:{' '}
+                <strong className="font-mono">{missingPriceLabels.join(', ')}</strong>.
+                {' '}Confirma solo si es correcto.
+              </p>
+            </div>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={saving}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
