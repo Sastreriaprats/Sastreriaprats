@@ -8,10 +8,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { TrendingUp, Receipt, CircleDollarSign, Printer, Loader2, Award } from 'lucide-react'
-import { usePermissions } from '@/hooks/use-permissions'
+import { TrendingUp, Receipt, CircleDollarSign, Printer, Loader2 } from 'lucide-react'
 import { getMyEmployeeSales, type MyEmployeeSales } from '@/actions/my-sales'
-import { getEmployeeCommissions } from '@/actions/commissions'
 import { getSaleForTicket } from '@/actions/pos'
 import { generateTicketPdf } from '@/components/pos/ticket-pdf'
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
@@ -48,9 +46,6 @@ function getMonthRange(year: number, month: number): { start: string; end: strin
 }
 
 export function MisVentasContent() {
-  const { canAny } = usePermissions()
-  const canSeeCommission = canAny(['reports.view_own', 'reports.view', 'reports.view_all_employees'])
-
   const now = new Date()
   const [dateRange, setDateRange] = useState(() => ({
     start: fmtLocal(new Date(now.getFullYear(), now.getMonth(), 1)),
@@ -58,34 +53,22 @@ export function MisVentasContent() {
   }))
 
   const [data, setData] = useState<MyEmployeeSales | null>(null)
-  const [commission, setCommission] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [printingId, setPrintingId] = useState<string | null>(null)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
-      const [salesRes, commissionsRes] = await Promise.all([
-        getMyEmployeeSales({ from: dateRange.start, to: dateRange.end }),
-        canSeeCommission
-          ? getEmployeeCommissions({ start_date: dateRange.start, end_date: dateRange.end })
-          : Promise.resolve(null),
-      ])
+      const salesRes = await getMyEmployeeSales({ from: dateRange.start, to: dateRange.end })
       if (salesRes.data) setData(salesRes.data)
       else if (salesRes.error) toast.error(salesRes.error)
-      if (commissionsRes && commissionsRes.success) {
-        const mine = commissionsRes.data.employees[0]
-        setCommission(mine ? mine.total : 0)
-      } else {
-        setCommission(null)
-      }
     } catch (err) {
       console.error('[MisVentasContent]', err)
       toast.error('Error al cargar tus ventas')
     } finally {
       setLoading(false)
     }
-  }, [dateRange.start, dateRange.end, canSeeCommission])
+  }, [dateRange.start, dateRange.end])
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
@@ -200,7 +183,7 @@ export function MisVentasContent() {
       </div>
 
       {/* Resumen del periodo */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Card>
           <CardContent className="pt-4 pb-4">
             <div className="flex items-center gap-3 mb-3">
@@ -231,30 +214,7 @@ export function MisVentasContent() {
           </CardContent>
         </Card>
 
-        {canSeeCommission && (
-          <Card>
-            <CardContent className="pt-4 pb-4">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="h-10 w-10 rounded-full bg-[#1a2744]/10 flex items-center justify-center">
-                  <Award className="h-5 w-5 text-[#1a2744]" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">Comisión del periodo</p>
-                  <p className="text-xs text-muted-foreground">Según tu plan y objetivos</p>
-                </div>
-              </div>
-              {loading ? <Skeleton className="h-8 w-28" /> : <p className="text-2xl font-bold">{formatCurrency(commission ?? 0)}</p>}
-            </CardContent>
-          </Card>
-        )}
       </div>
-
-      {canSeeCommission && (
-        <p className="text-[11px] text-muted-foreground -mt-2">
-          La comisión se calcula por meses según tu plan y el objetivo mensual (los tramos se aplican mes a mes),
-          así que al elegir un rango que cruza varios meses se suma la comisión de cada mes. Es la misma cifra que la liquidación oficial.
-        </p>
-      )}
 
       {/* Detalle por día */}
       <Card>

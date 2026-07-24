@@ -32,7 +32,7 @@ function formatHourMinute(iso: string): string {
 }
 
 const quickLinks = [
-  { label: 'Mis ventas', href: '/vendedor/mis-ventas', icon: Receipt, description: 'Todas mis ventas y comisión' },
+  { label: 'Mis ventas', href: '/vendedor/mis-ventas', icon: Receipt, description: 'Todas mis ventas' },
   { label: 'Clientes', href: '/vendedor/clientes', icon: Users, description: 'Ver y gestionar clientes' },
   { label: 'Productos y Stock', href: '/vendedor/stock', icon: Package, description: 'Consultar productos y existencias' },
   { label: 'Cobros', href: '/vendedor/cobros', icon: CircleDollarSign, description: 'Cobros pendientes' },
