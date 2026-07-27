@@ -3266,6 +3266,7 @@ function MovimientosTab() {
   const [filterYear, setFilterYear] = useState(new Date().getFullYear())
   const [filterMonth, setFilterMonth] = useState(0)
   const [filterStore, setFilterStore] = useState<string>('')
+  const [search, setSearch] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [editRow, setEditRow] = useState<{ id: string; total: number; payment_method: string } | null>(null)
@@ -3368,7 +3369,19 @@ function MovimientosTab() {
     return Array.from(names).sort()
   }, [rows])
 
-  const filteredRows = filterStore ? rows.filter(r => r.storeName === filterStore) : rows
+  const searchTokens = useMemo(() => normalizeSearchTerm(search).split(/\s+/).filter(Boolean), [search])
+  const filteredRows = useMemo(() => {
+    let out = filterStore ? rows.filter(r => r.storeName === filterStore) : rows
+    if (searchTokens.length > 0) {
+      // Búsqueda multi-palabra (AND, sin acentos) sobre proveedor + descripción +
+      // concepto + nº referencia + categoría. Permite buscar movimientos por proveedor.
+      out = out.filter(r => {
+        const hay = normalizeSearchTerm(`${r.supplierName ?? ''} ${r.description ?? ''} ${r.sourceLabel ?? ''} ${r.referenceNumber ?? ''} ${r.category ?? ''}`)
+        return searchTokens.every(t => hay.includes(t))
+      })
+    }
+    return out
+  }, [rows, filterStore, searchTokens])
 
   const totalIngresos = filteredRows.filter(r => r.type === 'income').reduce((s, r) => s + r.total, 0)
   const totalGastos   = filteredRows.filter(r => r.type === 'expense').reduce((s, r) => s + r.total, 0)
@@ -3428,6 +3441,12 @@ function MovimientosTab() {
             ))}
           </SelectContent>
         </Select>
+        <Input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Buscar proveedor o concepto…"
+          className="w-56"
+        />
         <div className="flex-1" />
         <Button variant="outline" size="sm" onClick={handleExportExcel}>
           <Download className="h-4 w-4 mr-2" /> Descargar Excel

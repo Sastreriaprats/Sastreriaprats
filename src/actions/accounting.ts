@@ -1309,6 +1309,9 @@ export type AccountingMovementRow = {
   journalEntryId?: string
   storeId?: string | null
   storeName?: string | null
+  // Nombre del proveedor asociado (compras de supplier_order y pagos de factura de
+  // proveedor). Permite buscar/filtrar por proveedor en el listado de movimientos.
+  supplierName?: string | null
 }
 
 export const getAccountingMovements = protectedAction<
@@ -1356,12 +1359,14 @@ export const getAccountingMovements = protectedAction<
     let numberByInvoiceId: Record<string, string> = {}
     let numberByOrderId: Record<string, string> = {}
     let numberByOnlineId: Record<string, string> = {}
+    // Nombre de proveedor por id de compra (supplier_order), para poder filtrar por proveedor.
+    let supplierNameByOrderId: Record<string, string> = {}
 
     // Una ronda de queries en paralelo para todas las referencias (antes: hasta 4 secuenciales)
     const [salesRes, invsRes, ordersRes, onlinesRes] = await Promise.all([
       saleIds.length > 0 ? ctx.adminClient.from('sales').select('id, ticket_number').in('id', saleIds) : Promise.resolve({ data: [] }),
       invoiceIds.length > 0 ? ctx.adminClient.from('invoices').select('id, invoice_number').in('id', invoiceIds) : Promise.resolve({ data: [] }),
-      supplierOrderIds.length > 0 ? ctx.adminClient.from('supplier_orders').select('id, order_number').in('id', supplierOrderIds) : Promise.resolve({ data: [] }),
+      supplierOrderIds.length > 0 ? ctx.adminClient.from('supplier_orders').select('id, order_number, supplier_id').in('id', supplierOrderIds) : Promise.resolve({ data: [] }),
       onlineOrderIds.length > 0 ? ctx.adminClient.from('online_orders').select('id, order_number').in('id', onlineOrderIds) : Promise.resolve({ data: [] }),
     ])
     for (const s of salesRes.data || []) {
@@ -1375,6 +1380,16 @@ export const getAccountingMovements = protectedAction<
     }
     for (const o of onlinesRes.data || []) {
       numberByOnlineId[(o as { id: string }).id] = (o as { order_number?: string }).order_number ?? (o as { id: string }).id.slice(0, 8)
+    }
+    // Resolver nombre de proveedor para las compras (supplier_order -> supplier_id -> suppliers.name).
+    const orderSupplierIds = [...new Set((ordersRes.data || []).map((o: any) => o.supplier_id).filter(Boolean) as string[])]
+    if (orderSupplierIds.length > 0) {
+      const { data: sups } = await ctx.adminClient.from('suppliers').select('id, name').in('id', orderSupplierIds)
+      const nameById = new Map((sups ?? []).map((s: any) => [String(s.id), String(s.name ?? '')]))
+      for (const o of ordersRes.data || []) {
+        const sid = (o as any).supplier_id
+        if (sid) supplierNameByOrderId[(o as { id: string }).id] = nameById.get(String(sid)) ?? ''
+      }
     }
 
     const sourceLabels: Record<string, string> = {
@@ -1413,12 +1428,13 @@ export const getAccountingMovements = protectedAction<
         referenceNumber: referenceNumber ?? undefined,
         isManual: false,
         journalEntryId: e.id,
+        supplierName: refType === 'supplier_order' && refId ? (supplierNameByOrderId[refId] || null) : null,
       })
     }
 
     let q = ctx.adminClient
       .from('manual_transactions')
-      .select('id, type, date, description, category, amount, tax_rate, tax_amount, total, notes, created_at, cash_sessions(store_id, stores(name))')
+      .select('id, type, date, description, category, amount, tax_rate, tax_amount, total, notes, created_at, ap_supplier_invoice_id, cash_sessions(store_id, stores(name))')
       .gte('date', dateFrom)
       .lte('date', dateTo)
       .order('date', { ascending: false })
@@ -1427,9 +1443,19 @@ export const getAccountingMovements = protectedAction<
 
     const { data: manual } = await q
     const manualList = (manual || []) as Array<Record<string, unknown>>
+    // Nombre de proveedor para los pagos de factura de proveedor (manual_transactions ->
+    // ap_supplier_invoice_id -> ap_supplier_invoices.supplier_name).
+    const manualInvoiceIds = [...new Set(manualList.map((m: any) => m.ap_supplier_invoice_id).filter(Boolean) as string[])]
+    const supplierNameByInvoiceId = new Map<string, string>()
+    if (manualInvoiceIds.length > 0) {
+      const { data: apInvs } = await ctx.adminClient
+        .from('ap_supplier_invoices').select('id, supplier_name').in('id', manualInvoiceIds)
+      for (const inv of (apInvs ?? []) as any[]) supplierNameByInvoiceId.set(String(inv.id), String(inv.supplier_name ?? ''))
+    }
     for (const m of manualList) {
       const storeName = (m as any).cash_sessions?.stores?.name ?? null
       const storeId = (m as any).cash_sessions?.store_id ?? null
+      const apInvoiceId = (m as any).ap_supplier_invoice_id as string | null
       rows.push({
         id: String(m.id),
         source: 'manual',
@@ -1444,6 +1470,7 @@ export const getAccountingMovements = protectedAction<
         isManual: true,
         storeId,
         storeName,
+        supplierName: apInvoiceId ? (supplierNameByInvoiceId.get(apInvoiceId) || null) : null,
       })
     }
 

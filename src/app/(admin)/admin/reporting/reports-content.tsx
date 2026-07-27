@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -1387,6 +1387,27 @@ function TimePatternTab({ data, showByStore }: { data: TimePatternData | null; s
 // ─── Tab: Gastos ─────────────────────────────────────────────────────────────
 
 function ExpensesTab({ data, comparison }: { data: ExpensesData | null; comparison: ExpensesComparison | null }) {
+  const [providerSearch, setProviderSearch] = useState('')
+  const provTokens = useMemo(() => normalizeSearchTerm(providerSearch).split(/\s+/).filter(Boolean), [providerSearch])
+  // Desglose de proveedores filtrado por nombre (multi-palabra, sin acentos). Recalcula
+  // los subtotales por tipo y oculta los tipos que se quedan sin facturas.
+  const filteredProviders = useMemo(() => {
+    const pb = data?.providersBreakdown
+    if (!pb) return []
+    if (provTokens.length === 0) return pb
+    return pb
+      .map((t) => {
+        const invoices = t.invoices.filter((inv) => {
+          const hay = normalizeSearchTerm(inv.supplier_name ?? '')
+          return provTokens.every((tok) => hay.includes(tok))
+        })
+        const total = Math.round(invoices.reduce((s, i) => s + i.total, 0) * 100) / 100
+        const count = invoices.reduce((s, i) => s + i.count, 0)
+        return { ...t, invoices, total, count }
+      })
+      .filter((t) => t.invoices.length > 0)
+  }, [data, provTokens])
+
   if (!data) return <p className="text-center text-muted-foreground py-12">Sin datos para el periodo seleccionado</p>
 
   if (!data.byCategory.length) {
@@ -1487,10 +1508,21 @@ function ExpensesTab({ data, comparison }: { data: ExpensesData | null; comparis
 
       {data.providersBreakdown && data.providersBreakdown.length > 0 && (
         <Card>
-          <CardHeader><CardTitle className="text-base">Proveedores — desglose por tipo y factura</CardTitle></CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
+            <CardTitle className="text-base">Proveedores — desglose por tipo y factura</CardTitle>
+            <Input
+              value={providerSearch}
+              onChange={(e) => setProviderSearch(e.target.value)}
+              placeholder="Buscar proveedor…"
+              className="w-56"
+            />
+          </CardHeader>
           <CardContent>
+            {filteredProviders.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-6 text-center">Ningún proveedor coincide con «{providerSearch}»</p>
+            ) : (
             <div className="space-y-2">
-              {data.providersBreakdown.map((t) => (
+              {filteredProviders.map((t) => (
                 <details key={t.type} className="rounded-lg border" open>
                   <summary className="flex items-center justify-between px-3 py-2 cursor-pointer select-none font-medium">
                     <span>{t.label} <span className="text-xs text-muted-foreground font-normal">({t.invoices.length} {t.invoices.length === 1 ? 'factura' : 'facturas'})</span></span>
@@ -1521,10 +1553,11 @@ function ExpensesTab({ data, comparison }: { data: ExpensesData | null; comparis
                 </details>
               ))}
               <div className="flex justify-between px-3 py-2 font-bold border-t">
-                <span>TOTAL proveedores</span>
-                <span className="text-red-700">{formatCurrency(data.providersBreakdown.reduce((s, t) => s + t.total, 0))}</span>
+                <span>TOTAL proveedores{provTokens.length > 0 ? ' (filtrado)' : ''}</span>
+                <span className="text-red-700">{formatCurrency(filteredProviders.reduce((s, t) => s + t.total, 0))}</span>
               </div>
             </div>
+            )}
           </CardContent>
         </Card>
       )}
