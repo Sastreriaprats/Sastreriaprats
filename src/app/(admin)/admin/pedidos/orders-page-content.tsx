@@ -27,7 +27,7 @@ import { usePermissions } from '@/hooks/use-permissions'
 import { listOrders, deleteOrder } from '@/actions/orders'
 import { listReservations } from '@/actions/reservations'
 import { getClientPendingDebt, type PendingPaymentRow } from '@/actions/payments'
-import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel, summarizeOrderGarments, normalizeSearchTerm } from '@/lib/utils'
+import { countUnpricedGarments, formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel, summarizeOrderGarments, normalizeSearchTerm } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { OrdersPipeline } from './orders-pipeline'
@@ -644,6 +644,15 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                               return (
                                 <Badge variant="outline" className="ml-1.5 text-[10px] bg-amber-100 text-amber-800 border-amber-300">
                                   {gifts === orderLines.length ? 'Regalo' : 'Incluye regalo'}
+                                </Badge>
+                              )
+                            })()}
+                            {(() => {
+                              const unpriced = countUnpricedGarments(order.tailoring_order_lines)
+                              if (unpriced === 0) return null
+                              return (
+                                <Badge variant="outline" className="ml-1.5 text-[10px] bg-rose-100 text-rose-700 border-rose-300">
+                                  {unpriced === 1 ? '1 sin precio' : `${unpriced} sin precio`}
                                 </Badge>
                               )
                             })()}

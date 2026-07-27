@@ -274,3 +274,20 @@ export function summarizeOrderGarments(
   }
   return names.join(', ') || '—'
 }
+
+/**
+ * Nº de prendas de un pedido PENDIENTES DE PRECIO: sin PVP y que NO son regalo.
+ * Misma definición que la validación de alta ("indica el PVP o márcala como
+ * regalo", orders.ts): un regalo va a 0 a propósito y no cuenta. Permite avisar
+ * en el panel de pedidos sin abrir el pedido.
+ */
+export function countUnpricedGarments(
+  lines: Array<{ unit_price?: number | string | null; is_gift?: boolean | null }> | null | undefined,
+): number {
+  if (!lines || lines.length === 0) return 0
+  return lines.reduce((n, l) => {
+    if (l.is_gift) return n
+    const price = Number(l.unit_price ?? 0)
+    return n + (price > 0 ? 0 : 1)
+  }, 0)
+}

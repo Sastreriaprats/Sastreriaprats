@@ -70,7 +70,7 @@ const SELECT_ORDERS = `
   created_at,
   clients ( id, full_name, phone, email, category ),
   stores ( name, code ),
-  tailoring_order_lines ( id, sort_order, line_type, configuration, is_gift, garment_types ( name, code ) )
+  tailoring_order_lines ( id, sort_order, line_type, configuration, is_gift, unit_price, garment_types ( name, code ) )
 `
 
 /** Devuelve el siguiente número de talón (solo el número, ej. 46). */

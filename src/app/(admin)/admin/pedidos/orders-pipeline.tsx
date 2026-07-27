@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import { Loader2, AlertTriangle, StickyNote } from 'lucide-react'
-import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel, summarizeOrderGarments } from '@/lib/utils'
+import { countUnpricedGarments, formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel, summarizeOrderGarments } from '@/lib/utils'
 import { TAILORING_PIPELINE_STATUSES } from '@/lib/orders/statuses'
 
 export function OrdersPipeline({ orders, isLoading, onRefresh }: {
@@ -36,6 +36,7 @@ export function OrdersPipeline({ orders, isLoading, onRefresh }: {
             <div className="space-y-2 min-h-[200px]">
               {col.orders.map((order: any) => {
                 const isOverdue = order.estimated_delivery_date && new Date(order.estimated_delivery_date) < new Date()
+                const unpriced = countUnpricedGarments(order.tailoring_order_lines)
                 return (
                   <Card key={order.id} className="cursor-pointer hover:shadow-md transition-shadow"
                     onClick={() => router.push(`/admin/pedidos/${order.id}`)}>
@@ -55,6 +56,11 @@ export function OrdersPipeline({ orders, isLoading, onRefresh }: {
                       <p className="text-xs text-muted-foreground truncate" title={summarizeOrderGarments(order.tailoring_order_lines)}>
                         {summarizeOrderGarments(order.tailoring_order_lines)}
                       </p>
+                      {unpriced > 0 && (
+                        <Badge variant="outline" className="mt-1 text-[10px] bg-rose-100 text-rose-700 border-rose-300">
+                          {unpriced === 1 ? '1 prenda sin precio' : `${unpriced} prendas sin precio`}
+                        </Badge>
+                      )}
                       <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
                         <span>{formatDate(order.estimated_delivery_date)}</span>
                         <span className="font-medium text-foreground">{formatCurrency(order.total)}</span>
