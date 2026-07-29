@@ -273,7 +273,6 @@ export function SupplierInvoicesContent() {
       dateTo: dateTo || undefined,
       paymentMethod: paymentMethodFilter === 'all' ? undefined : paymentMethodFilter,
     })
-    console.log('[DEBUG] listSupplierInvoices result:', r.success, r.success ? r.data?.length : (r as any).error)
     if (r.success) {
       setRows(r.data)
       const ids = r.data.map((x) => x.id)
@@ -404,7 +403,7 @@ export function SupplierInvoicesContent() {
         'Pagado': paid,
         'Pendiente': pendiente,
         'Estado': STATUS_BADGE[row.status]?.label ?? row.status,
-        'Método Pago': row.payment_method ?? '',
+        'Método Pago': (row.payment_method ? (PAYMENT_METHOD_LABEL[row.payment_method] ?? row.payment_method) : (row.supplier_payment_method ? (PAYMENT_METHOD_LABEL[row.supplier_payment_method] ?? row.supplier_payment_method) : '')),
       }
     })
     const range = dateFrom && dateTo ? `-${dateFrom}_a_${dateTo}` : ''
@@ -1093,8 +1092,12 @@ export function SupplierInvoicesContent() {
                 const badge = displayStatus(row)
                 const paid = paidMap[row.id] ?? 0
                 const pending = Math.max(0, Math.round((row.total_amount - paid) * 100) / 100)
-                const paymentLabel = row.payment_method
-                  ? (PAYMENT_METHOD_LABEL[row.payment_method] ?? row.payment_method)
+                // La factura manda; si no tiene forma de pago propia, se muestra la
+                // de la ficha del proveedor (heredada, informativa).
+                const inheritedPm = !row.payment_method ? row.supplier_payment_method : null
+                const effectivePm = row.payment_method || inheritedPm
+                const paymentLabel = effectivePm
+                  ? (PAYMENT_METHOD_LABEL[effectivePm] ?? effectivePm)
                   : null
                 const selectable = !row.is_proforma && pending > 0
                 return (
@@ -1128,7 +1131,12 @@ export function SupplierInvoicesContent() {
                     </TableCell>
                     <TableCell className="text-sm">
                       {paymentLabel ? (
-                        <span>{paymentLabel}</span>
+                        <span
+                          className={inheritedPm ? 'text-muted-foreground' : undefined}
+                          title={inheritedPm ? 'Según la ficha del proveedor' : undefined}
+                        >
+                          {paymentLabel}
+                        </span>
                       ) : (
                         <span className="text-muted-foreground italic">—</span>
                       )}

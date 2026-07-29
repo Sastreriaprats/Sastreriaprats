@@ -98,7 +98,10 @@ const emptyForm = {
   expense_type: 'general' as 'general' | 'alquiler' | 'compras',
   payment_terms: '',
   payment_days: 30,
-  payment_method: '',
+  // Transferencia es el método por defecto REAL (no solo visual): el desplegable
+  // mostraba 'transfer' aunque el estado estuviera vacío, y al guardar se
+  // persistía null → la factura del proveedor salía sin tipo de pago.
+  payment_method: 'transfer',
   bank_iban: '',
   internal_notes: '',
   is_active: true,
@@ -178,7 +181,7 @@ export function SuppliersPageContent() {
         expense_type: (['general', 'alquiler', 'compras'].includes(full.expense_type) ? full.expense_type : 'general') as 'general' | 'alquiler' | 'compras',
         payment_terms: full.payment_terms ?? '',
         payment_days: typeof full.payment_days === 'number' ? full.payment_days : 30,
-        payment_method: full.payment_method ?? '',
+        payment_method: full.payment_method ?? 'transfer',
         bank_iban: full.bank_iban ?? '',
         internal_notes: full.internal_notes ?? '',
         is_active: full.is_active !== false,

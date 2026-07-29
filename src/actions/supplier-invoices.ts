@@ -59,6 +59,10 @@ export type ApSupplierInvoiceRow = {
   status: string
   payment_date: string | null
   payment_method: string | null
+  /** Forma de pago de la ficha del proveedor (slug). Solo informativa: se usa
+   * como fallback de presentación cuando la factura no tiene payment_method
+   * propio. No se persiste ni sustituye al campo de la factura. */
+  supplier_payment_method?: string | null
   notes: string | null
   attachment_url: string | null
   created_at: string
@@ -330,6 +334,29 @@ export const listSupplierInvoices = protectedAction<
       attachment_url: r.attachment_url != null ? String(r.attachment_url) : null,
       created_at: String(r.created_at ?? ''),
     }))
+
+    // Fallback informativo del tipo de pago: para las facturas SIN payment_method
+    // propio, tomamos el de la ficha del proveedor (su forma de pago habitual) solo
+    // para mostrarlo en la lista. No modifica la factura ni el filtro por tipo.
+    const supplierIdsForFallback = [...new Set(
+      list.filter((r) => !r.payment_method && r.supplier_id).map((r) => r.supplier_id as string),
+    )]
+    if (supplierIdsForFallback.length > 0) {
+      const { data: sup } = await ctx.adminClient
+        .from('suppliers')
+        .select('id, payment_method')
+        .in('id', supplierIdsForFallback)
+      const pmById = new Map<string, string | null>()
+      for (const s of (sup || []) as { id: string; payment_method: string | null }[]) {
+        pmById.set(String(s.id), toPaymentMethodSlug(s.payment_method))
+      }
+      for (const r of list) {
+        if (!r.payment_method && r.supplier_id) {
+          (r as ApSupplierInvoiceRow).supplier_payment_method = pmById.get(r.supplier_id) ?? null
+        }
+      }
+    }
+
     return success(list)
   }
 )
