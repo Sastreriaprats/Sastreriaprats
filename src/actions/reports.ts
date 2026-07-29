@@ -1260,10 +1260,26 @@ export const getSalesByEmployee = protectedAction<
     // Alinea con la caja (espejo fechado por payment_date). DATE → sin sufijo de hora.
     let paymentsQ = ctx.adminClient
       .from('tailoring_order_payments')
-      .select('amount, created_by, payment_date, tailoring_orders!inner(store_id, stores(name))')
+      .select('amount, created_by, payment_date, cash_session_id, tailoring_order_id, tailoring_orders!inner(store_id, stores(name))')
       .gte('payment_date', start_date)
       .lte('payment_date', end_date)
     if (store_id) paymentsQ = paymentsQ.eq('tailoring_orders.store_id', store_id)
+
+    // Vendedor de un cobro de sastrería EMBEBIDO en un ticket: el cobro lo teclea
+    // el usuario logado en caja (created_by), que puede NO ser el vendedor de la
+    // venta (p.ej. un encargado logado mientras vende otra persona). La línea de
+    // cobro del ticket ("Pedido/Cobro pendiente - PIN", tailoring_order_id) sí
+    // lleva el vendedor real en salesperson_id. Emparejamos cada pago con su línea
+    // por (pedido, sesión de caja, importe) para atribuir la sastrería a quien
+    // vendió; si no hay ticket (cobro de backoffice) se queda con created_by.
+    let cobroLinesQ = ctx.adminClient
+      .from('sale_lines')
+      .select('tailoring_order_id, line_total, salesperson_id, sales!inner(cash_session_id, created_at, status)')
+      .not('tailoring_order_id', 'is', null)
+      .gte('sales.created_at', start_date)
+      .lte('sales.created_at', end_date + 'T23:59:59')
+      .in('sales.status', ['completed', 'partially_returned'])
+      .limit(20000)
 
     let tailoringOrdersQ = ctx.adminClient
       .from('tailoring_orders')
@@ -1275,11 +1291,23 @@ export const getSalesByEmployee = protectedAction<
       .not('status', 'eq', 'cancelled')
     if (store_id) tailoringOrdersQ = tailoringOrdersQ.eq('store_id', store_id)
 
-    const [saleLinesRes, paymentsRes, tailoringOrdersRes] = await Promise.all([
+    const [saleLinesRes, paymentsRes, tailoringOrdersRes, cobroLinesRes] = await Promise.all([
       wantBoutique ? saleLinesQ : Promise.resolve({ data: [] as any[] }),
       wantTailoring ? paymentsQ : Promise.resolve({ data: [] as any[] }),
       wantTailoring ? tailoringOrdersQ : Promise.resolve({ data: [] as any[] }),
+      wantTailoring ? cobroLinesQ : Promise.resolve({ data: [] as any[] }),
     ])
+
+    // Mapa (pedido | sesión | importe) → vendedor real, desde las líneas de cobro
+    // de ticket. Permite atribuir cada cobro de sastrería a quien vendió.
+    const cobroSellerByKey = new Map<string, string>()
+    for (const l of (cobroLinesRes.data || []) as any[]) {
+      const oid = l.tailoring_order_id
+      const sp = l.salesperson_id
+      if (!oid || !sp) continue
+      const key = `${oid}|${(l.sales as any)?.cash_session_id ?? ''}|${(Number(l.line_total) || 0).toFixed(2)}`
+      if (!cobroSellerByKey.has(key)) cobroSellerByKey.set(key, String(sp))
+    }
 
     const employees: Record<string, {
       name: string
@@ -1328,7 +1356,9 @@ export const getSalesByEmployee = protectedAction<
     }
 
     for (const payment of paymentsRes.data || []) {
-      const empId = (payment.created_by as string) || 'unknown'
+      // Cobro embebido en ticket → vendedor de la línea de cobro; si no, created_by.
+      const key = `${(payment as any).tailoring_order_id}|${(payment as any).cash_session_id ?? ''}|${(Number(payment.amount) || 0).toFixed(2)}`
+      const empId = cobroSellerByKey.get(key) || (payment.created_by as string) || 'unknown'
       const e = ensure(empId)
       e.tailoring_ops += 1
       const amt = (payment.amount as number) || 0
