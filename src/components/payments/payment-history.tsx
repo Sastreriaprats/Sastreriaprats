@@ -92,7 +92,8 @@ export function PaymentHistory({
   // Columna de acciones (editar/borrar). Pedido: visible con !readonly (comportamiento
   // previo). Venta: gateada por sales.edit (sin permiso no aparece).
   const showActions = !readonly && (entityType === 'tailoring_order' || (entityType === 'sale' && can('sales.edit')))
-  // Columna "Vendedor": solo pedidos de sastrería (sale_payments no guarda created_by).
+  // Columna "Registrado por": quién registró el cobro (created_by del pago), NO el
+  // vendedor de la venta. Solo pedidos de sastrería (sale_payments no guarda created_by).
   const showSeller = entityType === 'tailoring_order'
   const [payments, setPayments] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -353,7 +354,7 @@ export function PaymentHistory({
                 <TableHead className={variant === 'sastre' ? 'text-xs text-white/50' : 'text-xs'}>Fecha</TableHead>
                 <TableHead className={variant === 'sastre' ? 'text-xs text-white/50' : 'text-xs'}>Método</TableHead>
                 {showSeller && (
-                  <TableHead className={variant === 'sastre' ? 'text-xs text-white/50' : 'text-xs'}>Vendedor</TableHead>
+                  <TableHead className={variant === 'sastre' ? 'text-xs text-white/50' : 'text-xs'}>Registrado por</TableHead>
                 )}
                 <TableHead className={variant === 'sastre' ? 'text-xs text-right text-white/50' : 'text-xs text-right'}>Importe</TableHead>
                 <TableHead className={variant === 'sastre' ? 'text-xs text-white/50' : 'text-xs'}>Referencia</TableHead>
