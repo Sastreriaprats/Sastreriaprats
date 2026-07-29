@@ -3842,11 +3842,23 @@ function CajaSessionsTab() {
     let cancelled = false
     const load = async () => {
       setLoading(true)
-      const { data: sessData, error } = await supabase
-        .from('cash_sessions')
-        .select('*, opened_by_profile:profiles!cash_sessions_opened_by_fkey(full_name), closed_by_profile:profiles!cash_sessions_closed_by_fkey(full_name), stores(name)')
-        .order('opened_at', { ascending: false })
-        .limit(100)
+      // Lectura paginada COMPLETA: antes había un `.limit(100)` que, ordenando por
+      // opened_at desc, dejaba fuera los meses más antiguos en cuanto se acumulaban
+      // >100 sesiones (desaparecían abril/mayo). Traemos todas por páginas de 1000
+      // (límite de PostgREST) para que se listen todos los meses.
+      const PAGE = 1000
+      let sessData: unknown[] = []
+      let error: unknown = null
+      for (let from = 0; ; from += PAGE) {
+        const { data: page, error: pageErr } = await supabase
+          .from('cash_sessions')
+          .select('*, opened_by_profile:profiles!cash_sessions_opened_by_fkey(full_name), closed_by_profile:profiles!cash_sessions_closed_by_fkey(full_name), stores(name)')
+          .order('opened_at', { ascending: false })
+          .range(from, from + PAGE - 1)
+        if (pageErr) { error = pageErr; break }
+        sessData = sessData.concat(page ?? [])
+        if (!page || page.length < PAGE) break
+      }
       if (cancelled) return
       if (error) {
         toast.error('Error al cargar sesiones de caja')

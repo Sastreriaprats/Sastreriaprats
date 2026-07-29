@@ -84,6 +84,10 @@ type Reservation = {
   cancelled_at: string | null
   client?: { id: string; full_name?: string | null; first_name?: string | null; last_name?: string | null; client_code?: string | null; phone?: string | null } | null
   store?: { id: string; code?: string | null; name?: string | null; display_name?: string | null } | null
+  // Vendedor asignado a la reserva (employee_id) y usuario que la creó (created_by).
+  // La action ya los resuelve por join; se muestran en la columna "Vendedor".
+  employee?: { id: string; full_name?: string | null } | null
+  created_by_profile?: { id: string; full_name?: string | null } | null
   lines?: ReservationLine[]
   payments?: Array<{ id: string; payment_date: string; payment_method: string; amount: number | string; reference: string | null; notes: string | null; created_at: string }>
 }
@@ -393,6 +397,8 @@ export function ReservationsTab() {
       payments: (r.payments || []).map((p) => ({ payment_method: p.payment_method, amount: Number(p.amount) })),
       clientName,
       clientCode: r.client?.client_code ?? null,
+      // Vendedor de la reserva (o quien la creó) → línea "Atendido por" del ticket.
+      attendedBy: r.employee?.full_name ?? r.created_by_profile?.full_name ?? null,
       storeAddress: storeConfig.address,
       storeSubtitle: storeConfig.subtitle,
       storePhones: storeConfig.phones,
@@ -496,6 +502,7 @@ export function ReservationsTab() {
             <TableRow>
               <TableHead>Nº</TableHead>
               <TableHead>Cliente</TableHead>
+              <TableHead>Vendedor</TableHead>
               <TableHead>Productos</TableHead>
               <TableHead className="text-center">Uds</TableHead>
               <TableHead>Estado</TableHead>
@@ -508,13 +515,13 @@ export function ReservationsTab() {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={9} className="h-32 text-center">
+                <TableCell colSpan={10} className="h-32 text-center">
                   <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
                 </TableCell>
               </TableRow>
             ) : reservations.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">
+                <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
                   Sin reservas
                 </TableCell>
               </TableRow>
@@ -539,6 +546,9 @@ export function ReservationsTab() {
                   <TableCell className="align-top">
                     <div className="text-sm">{getClientName(r.client)}</div>
                     {r.client?.phone && <div className="text-xs text-muted-foreground font-mono">{r.client.phone}</div>}
+                  </TableCell>
+                  <TableCell className="align-top text-sm">
+                    {r.employee?.full_name ?? r.created_by_profile?.full_name ?? '—'}
                   </TableCell>
                   <TableCell className="align-top">
                     <div className="space-y-1">
@@ -675,7 +685,7 @@ export function ReservationsTab() {
           {!loading && reservations.length > 0 && (
             <TableFooter>
               <TableRow>
-                <TableCell colSpan={5} className="text-right font-medium">
+                <TableCell colSpan={6} className="text-right font-medium">
                   Totales (página actual · {reservations.length} reservas)
                 </TableCell>
                 <TableCell className="text-right text-xs whitespace-nowrap">
