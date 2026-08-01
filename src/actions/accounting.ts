@@ -9,7 +9,7 @@ import { generateEstimatePdf } from '@/lib/pdf/estimate-pdf'
 import { sendEstimateEmail } from '@/lib/email/transactional'
 import { formalGreeting } from '@/lib/email/greeting'
 import { createInvoiceJournalEntry, reverseInvoiceJournalEntry, createManualTransactionJournalEntry } from '@/actions/accounting-triggers'
-import { formatClientAddress } from '@/lib/clients/format'
+import { formatClientAddress, resolveInvoiceParty } from '@/lib/clients/format'
 import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
 
 /** Una fila del desglose por tienda. storeId null → gastos sin tienda asignada. */
@@ -308,6 +308,12 @@ export type InvoiceRow = {
   verifactu_sent: boolean
   is_rectifying: boolean
   invoice_series: string
+  // Origen del documento: las facturas de ticket/pedido/reserva NO llevan
+  // asiento propio (el ingreso lo aporta la venta o el cobro), así que anularlas
+  // o abonarlas no mueve el diario. La UI lo avisa.
+  sale_id: string | null
+  tailoring_order_id: string | null
+  reservation_id: string | null
 }
 
 export const getInvoices = protectedAction<
@@ -318,7 +324,7 @@ export const getInvoices = protectedAction<
   async (ctx, { search, status, dateFrom, dateTo }) => {
     let q = ctx.adminClient
       .from('invoices')
-      .select('id, invoice_number, invoice_series, client_id, client_name, client_nif, client_address, client_email, client_phone, payment_method, invoice_date, due_date, total, tax_rate, irpf_rate, notes, status, pdf_url, sent_to_client, verifactu_sent, is_rectifying')
+      .select('id, invoice_number, invoice_series, client_id, client_name, client_nif, client_address, client_email, client_phone, payment_method, invoice_date, due_date, total, tax_rate, irpf_rate, notes, status, pdf_url, sent_to_client, verifactu_sent, is_rectifying, sale_id, tailoring_order_id, reservation_id')
       .eq('invoice_type', 'issued')
       .order('invoice_date', { ascending: false })
 
@@ -359,6 +365,9 @@ export const getInvoices = protectedAction<
       verifactu_sent: Boolean(r.verifactu_sent),
       is_rectifying: Boolean(r.is_rectifying),
       invoice_series: String(r.invoice_series ?? 'F'),
+      sale_id: (r.sale_id as string) ?? null,
+      tailoring_order_id: (r.tailoring_order_id as string) ?? null,
+      reservation_id: (r.reservation_id as string) ?? null,
     })))
   }
 )
@@ -1930,8 +1939,11 @@ export const createInvoiceFromSaleAction = protectedAction<
         .single()
       if (client) {
         const c = client as { full_name?: string; company_name?: string; company_nif?: string; document_number?: string; address?: string; postal_code?: string; city?: string; province?: string; country?: string; email?: string; phone?: string }
-        clientName = c.full_name || c.company_name || clientName
-        clientNif = c.company_nif || c.document_number || null
+        // Nombre y NIF del MISMO titular: si la ficha tiene CIF de empresa, la
+        // factura va a la razón social (ver resolveInvoiceParty).
+        const party = resolveInvoiceParty(c, clientName)
+        clientName = party.name
+        clientNif = party.nif
         clientAddress = formatClientAddress(c) || null
         clientEmail = c.email || null
         clientPhone = c.phone || null
@@ -2128,8 +2140,11 @@ export const createInvoiceFromTailoringOrderAction = protectedAction<
         .single()
       if (client) {
         const c = client as { full_name?: string; company_name?: string; company_nif?: string; document_number?: string; address?: string; postal_code?: string; city?: string; province?: string; country?: string; email?: string; phone?: string }
-        clientName = c.full_name || c.company_name || clientName
-        clientNif = c.company_nif || c.document_number || null
+        // Nombre y NIF del MISMO titular: si la ficha tiene CIF de empresa, la
+        // factura va a la razón social (ver resolveInvoiceParty).
+        const party = resolveInvoiceParty(c, clientName)
+        clientName = party.name
+        clientNif = party.nif
         clientAddress = formatClientAddress(c) || null
         clientEmail = c.email || null
         clientPhone = c.phone || null
@@ -2299,8 +2314,11 @@ export const createInvoiceFromReservationAction = protectedAction<
         .single()
       if (client) {
         const c = client as { full_name?: string; company_name?: string; company_nif?: string; document_number?: string; address?: string; postal_code?: string; city?: string; province?: string; country?: string; email?: string; phone?: string }
-        clientName = c.full_name || c.company_name || clientName
-        clientNif = c.company_nif || c.document_number || null
+        // Nombre y NIF del MISMO titular: si la ficha tiene CIF de empresa, la
+        // factura va a la razón social (ver resolveInvoiceParty).
+        const party = resolveInvoiceParty(c, clientName)
+        clientName = party.name
+        clientNif = party.nif
         clientAddress = formatClientAddress(c) || null
         clientEmail = c.email || null
         clientPhone = c.phone || null
@@ -2604,7 +2622,13 @@ export const deleteInvoiceAction = protectedAction<string, { deleted: true }>(
 
 /** Anula una factura ya emitida (status 'cancelled'). Para borradores hay
  *  que usar deleteInvoiceAction. Se requiere motivo y se preserva el
- *  registro fiscal. */
+ *  registro fiscal.
+ *
+ *  CERROJO FISCAL: anular solo vale mientras el documento NO haya salido. Si la
+ *  factura ya se envió al cliente, ya se registró en Hacienda (Verifactu) o su
+ *  asiento está en un periodo cerrado, el documento ya circuló o se declaró y la
+ *  vía correcta es la rectificativa (RD 1619/2012 art. 15), no la anulación.
+ *  En esos casos se bloquea y se redirige a "Factura rectificativa". */
 export const cancelInvoiceAction = protectedAction<
   { invoiceId: string; reason: string },
   { id: string; status: 'cancelled' }
@@ -2623,7 +2647,7 @@ export const cancelInvoiceAction = protectedAction<
 
     const { data: inv } = await ctx.adminClient
       .from('invoices')
-      .select('id, invoice_number, status, notes')
+      .select('id, invoice_number, status, notes, verifactu_sent, sent_to_client, journal_entry_id')
       .eq('id', invoiceId)
       .single()
     if (!inv) return failure('Factura no encontrada', 'NOT_FOUND')
@@ -2638,6 +2662,34 @@ export const cancelInvoiceAction = protectedAction<
     }
     if (status === 'rectified') {
       return failure('La factura ya fue rectificada', 'CONFLICT')
+    }
+
+    // ── Cerrojo fiscal: si el documento ya salió, toca rectificativa ─────────
+    if ((inv as { verifactu_sent?: boolean }).verifactu_sent === true) {
+      return failure(
+        'Esta factura ya está registrada en Hacienda (Verifactu): no se puede anular. Emite una factura rectificativa (abono).',
+        'CONFLICT',
+      )
+    }
+    if ((inv as { sent_to_client?: boolean }).sent_to_client === true) {
+      return failure(
+        'Esta factura ya se envió al cliente: no se puede anular. Emite una factura rectificativa (abono) para dejar constancia del abono.',
+        'CONFLICT',
+      )
+    }
+    const jeId = (inv as { journal_entry_id?: string | null }).journal_entry_id ?? null
+    if (jeId) {
+      const { data: je } = await ctx.adminClient
+        .from('journal_entries')
+        .select('is_period_closed')
+        .eq('id', jeId)
+        .single()
+      if ((je as { is_period_closed?: boolean } | null)?.is_period_closed === true) {
+        return failure(
+          'El periodo contable de esta factura está cerrado: no se puede anular. Emite una factura rectificativa (abono).',
+          'CONFLICT',
+        )
+      }
     }
 
     const stamp = new Date().toISOString().slice(0, 10)
@@ -2734,6 +2786,92 @@ export const createCreditNote = protectedAction<CreateCreditNoteInput, CreateCre
       total: Number(data.total ?? 0),
       original_status: String(data.original_status ?? ''),
       auditDescription: `Rectificativa ${data.credit_note_number} emitida (${data.is_full ? 'total' : 'parcial'}, ${Number(data.total ?? 0).toFixed(2)} €): ${reason.trim()}`,
+    } as any)
+  }
+)
+
+/**
+ * Abono TOTAL en un clic ("Anular con abono"): emite la rectificativa por todo
+ * lo que quede pendiente de rectificar en la factura. Es el camino correcto
+ * cuando la factura ya salió (enviada al cliente / a Hacienda / periodo
+ * cerrado) y por tanto `cancelInvoiceAction` la bloquea: la original queda en
+ * estado 'rectified' y la R deja constancia del abono.
+ *
+ * Delega en la misma RPC que el abono selectivo, así que hereda todos sus
+ * cerrojos (estado rectificable, cantidades máximas por línea, periodo abierto)
+ * y, desde la mig 273, la contrapartida contable solo se crea si la factura
+ * original tenía asiento.
+ */
+export const createFullCreditNoteAction = protectedAction<
+  { invoiceId: string; reason: string },
+  CreateCreditNoteOutput
+>(
+  { permission: 'invoices.credit_note', auditAction: 'create', auditModule: 'accounting', auditEntity: 'invoice' },
+  async (ctx, { invoiceId, reason }) => {
+    if (!invoiceId) return failure('Falta el identificador de la factura', 'VALIDATION')
+    if (!reason || reason.trim().length < 10) {
+      return failure('El motivo es obligatorio (mínimo 10 caracteres)', 'VALIDATION')
+    }
+    if (!(await userIsFullAdmin(ctx))) {
+      return failure('Solo un administrador puede emitir facturas rectificativas.', 'FORBIDDEN')
+    }
+
+    const { data: origLines } = await ctx.adminClient
+      .from('invoice_lines')
+      .select('id, quantity')
+      .eq('invoice_id', invoiceId)
+    const orig = (origLines ?? []) as { id: string; quantity: number | string }[]
+    if (orig.length === 0) return failure('La factura no tiene líneas que abonar', 'VALIDATION')
+
+    // Descontar lo ya rectificado en rectificativas previas no anuladas: el
+    // abono "total" es sobre lo que queda vivo, no sobre la cantidad original.
+    const alreadyByLine = new Map<string, number>()
+    const { data: rect } = await ctx.adminClient
+      .from('invoice_lines')
+      .select('rectifies_line_id, quantity, invoices!inner(is_rectifying, status)')
+      .in('rectifies_line_id', orig.map(l => l.id))
+    for (const r of (rect ?? []) as Record<string, unknown>[]) {
+      const i = r.invoices as { is_rectifying?: boolean; status?: string } | null
+      if (!i?.is_rectifying || i?.status === 'cancelled') continue
+      const k = String(r.rectifies_line_id)
+      alreadyByLine.set(k, (alreadyByLine.get(k) ?? 0) + Math.abs(Number(r.quantity ?? 0)))
+    }
+
+    const cleaned = orig
+      .map(l => ({
+        original_line_id: l.id,
+        qty_to_rectify: Number(l.quantity) - (alreadyByLine.get(l.id) ?? 0),
+      }))
+      .filter(l => l.qty_to_rectify > 0)
+    if (cleaned.length === 0) {
+      return failure('Esta factura ya está rectificada por completo', 'CONFLICT')
+    }
+
+    const { data, error } = await ctx.adminClient.rpc('rpc_create_credit_note', {
+      p_invoice_id: invoiceId,
+      p_lines: cleaned,
+      p_reason: reason.trim(),
+      p_user_id: ctx.userId,
+    })
+    if (error) {
+      console.error('[createFullCreditNoteAction]', error)
+      return failure(error.message)
+    }
+    if (data && data.success === false) {
+      return failure(String(data.error || 'No se pudo emitir la rectificativa'), 'CONFLICT')
+    }
+
+    return success({
+      credit_note_id: String(data.credit_note_id),
+      credit_note_number: String(data.credit_note_number),
+      is_full: Boolean(data.is_full),
+      subtotal: Number(data.subtotal ?? 0),
+      tax_amount: Number(data.tax_amount ?? 0),
+      irpf_amount: Number(data.irpf_amount ?? 0),
+      total: Number(data.total ?? 0),
+      original_status: String(data.original_status ?? ''),
+      auditEntityId: String(data.credit_note_id),
+      auditDescription: `Abono total ${data.credit_note_number} (${Number(data.total ?? 0).toFixed(2)} €): ${reason.trim()}`,
     } as any)
   }
 )

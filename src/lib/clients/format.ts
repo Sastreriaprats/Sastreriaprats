@@ -25,3 +25,40 @@ export function formatClientAddress(c: {
     .filter(Boolean)
     .join(', ')
 }
+
+/**
+ * Destinatario FISCAL de una factura a partir de la ficha de cliente.
+ *
+ * El nombre y el NIF de una factura tienen que ser del MISMO titular. La ficha
+ * mezcla los dos planos —persona de contacto (`full_name`, `document_number`) y
+ * sociedad (`company_name`, `company_nif`)—, así que la regla es:
+ *
+ *   - Con NIF de empresa → la factura va a la SOCIEDAD (razón social + CIF).
+ *     El nombre de la persona es solo el contacto y no puede encabezar una
+ *     factura cuyo NIF es el de la sociedad.
+ *   - Sin NIF de empresa → persona física (nombre + DNI/NIE).
+ *
+ * Antes se hacía `full_name || company_name` con `company_nif || document_number`,
+ * que para un cliente-empresa emitía "Antonio Arias" con el CIF de la sociedad.
+ * Ha provocado al menos tres anulaciones en producción (F2026-0008, F2026-0033,
+ * F2026-0034).
+ */
+export function resolveInvoiceParty(
+  c: {
+    full_name?: string | null
+    company_name?: string | null
+    company_nif?: string | null
+    document_number?: string | null
+  },
+  fallbackName = 'Consumidor final',
+): { name: string; nif: string | null } {
+  const person = c.full_name?.trim() || ''
+  const company = c.company_name?.trim() || ''
+  const companyNif = c.company_nif?.trim() || ''
+  const personNif = c.document_number?.trim() || ''
+
+  if (companyNif) {
+    return { name: company || person || fallbackName, nif: companyNif }
+  }
+  return { name: person || company || fallbackName, nif: personNif || null }
+}

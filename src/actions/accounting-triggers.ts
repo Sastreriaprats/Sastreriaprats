@@ -2,6 +2,7 @@
 
 import { createAdminClient } from '@/lib/supabase/admin'
 import { toCountryCode, countryName } from '@/lib/countries'
+import { resolveInvoiceParty } from '@/lib/clients/format'
 
 /** Cuentas usadas en asientos automáticos. Código -> { name, level, account_type } */
 const REQUIRED_ACCOUNTS: Record<string, { name: string; level: number; account_type: string }> = {
@@ -474,8 +475,12 @@ export async function createOnlineOrderInvoice(onlineOrderId: string): Promise<{
         .eq('id', o.client_id)
         .maybeSingle()
       const c = (client ?? {}) as { full_name?: string; company_name?: string; company_nif?: string; document_number?: string }
-      clientName = clientName || c.full_name || c.company_name || ''
-      clientNif = c.company_nif || c.document_number || null
+      // Con CIF de empresa la factura va a la sociedad, aunque el envío vaya a
+      // nombre de la persona (ver resolveInvoiceParty). Sin CIF de empresa
+      // manda el nombre de la dirección de envío, que es el fiscalmente usado.
+      const party = resolveInvoiceParty(c, clientName)
+      clientName = c.company_nif?.trim() ? party.name : (clientName || party.name)
+      clientNif = party.nif
     }
     clientName = clientName || 'Cliente tienda online'
     const clientCountry = toCountryCode(String(addr.country ?? ''))

@@ -52,7 +52,7 @@ import {
   getManualTransactions, createManualTransaction, deleteManualTransaction, updateManualTransaction,
   getAccountingMovements,
   getProductsForInvoice, listTailoringOrdersForInvoice, getTailoringOrderLinesForInvoice,
-  createInvoiceAction, updateInvoiceAction, getInvoiceStatusAction, issueInvoiceAction, deleteInvoiceAction, cancelInvoiceAction, createCreditNote,
+  createInvoiceAction, updateInvoiceAction, getInvoiceStatusAction, issueInvoiceAction, deleteInvoiceAction, cancelInvoiceAction, createCreditNote, createFullCreditNoteAction,
   createEstimateAction, updateEstimateAction, updateEstimateFullAction, getEstimateDetail, sendEstimateAction, acceptEstimateAction, rejectEstimateAction, convertEstimateToInvoiceAction,
   getInvoiceLinesAction, getInvoiceSourcesAction, updateJournalEntryDescriptionAction, deleteJournalEntry,
   generateInvoicePdfAction, generateEstimatePdfAction,
@@ -1132,14 +1132,25 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
+  const [fullCreditOpen, setFullCreditOpen] = useState(false)
+  const [fullCreditReason, setFullCreditReason] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
   const s = INVOICE_STATUS[inv.status] ?? INVOICE_STATUS.draft
   const canDelete = inv.status === 'draft' || (inv.status === 'cancelled' && !inv.verifactu_sent)
-  const canCancel = ['issued', 'paid', 'partially_paid', 'overdue'].includes(inv.status)
+  // Anular solo mientras el documento no haya salido: si ya se envió al cliente
+  // o a Hacienda, la vía correcta es la rectificativa (el servidor lo bloquea
+  // igualmente en cancelInvoiceAction; aquí se oculta la opción).
+  const hasLeftTheBuilding = inv.verifactu_sent || inv.sent_to_client
+  const canCancel = ['issued', 'paid', 'partially_paid', 'overdue'].includes(inv.status) && !hasLeftTheBuilding
+  const cancelBlocked = ['issued', 'paid', 'partially_paid', 'overdue'].includes(inv.status) && hasLeftTheBuilding
   const canCreditNote =
     can('invoices.credit_note') && isSuperAdmin &&
     ['issued', 'paid', 'partially_paid', 'overdue'].includes(inv.status) &&
     !inv.is_rectifying
+  // Facturas nacidas de un ticket / pedido / reserva: el ingreso y el IVA los
+  // aporta la venta o el cobro, no la factura, así que anularlas o abonarlas no
+  // mueve el diario ni devuelve el dinero.
+  const fromOperation = Boolean(inv.sale_id || inv.tailoring_order_id || inv.reservation_id)
 
   // ── Estado del diálogo de rectificativa (abono total/parcial) ──
   const [creditNoteOpen, setCreditNoteOpen] = useState(false)
@@ -1454,6 +1465,27 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
     onRefresh()
   }
 
+  // Abono total en un clic: emite la rectificativa por todo lo pendiente y deja
+  // la original en 'rectified'. Es lo que toca cuando la factura ya salió.
+  const handleFullCreditNote = async () => {
+    const reason = fullCreditReason.trim()
+    if (reason.length < 10) {
+      toast.error('El motivo es obligatorio (mínimo 10 caracteres)')
+      return
+    }
+    setActionLoading(true)
+    const res = await createFullCreditNoteAction({ invoiceId: inv.id, reason })
+    setActionLoading(false)
+    if (!res.success) {
+      toast.error('error' in res ? res.error : 'Error al emitir el abono')
+      return
+    }
+    toast.success(`Abono ${res.data.credit_note_number} emitido (${formatCurrency(res.data.total)})`)
+    setFullCreditOpen(false)
+    setFullCreditReason('')
+    onRefresh()
+  }
+
   return (
     <>
       <TableRow>
@@ -1504,7 +1536,7 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                 <CheckCircle className="h-3.5 w-3.5 text-green-600" />
               </Button>
             )}
-            {(canDelete || canCancel || canCreditNote) && (
+            {(canDelete || canCancel || canCreditNote || cancelBlocked) && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button size="icon" variant="ghost" className="h-8 w-8" title="Más acciones">
@@ -1531,14 +1563,33 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                       </DropdownMenuItem>
                     </>
                   )}
+                  {cancelBlocked && (
+                    <>
+                      {canDelete && <DropdownMenuSeparator />}
+                      <DropdownMenuItem
+                        disabled
+                        title={inv.verifactu_sent
+                          ? 'Ya registrada en Hacienda: solo se puede rectificar'
+                          : 'Ya enviada al cliente: solo se puede rectificar'}
+                      >
+                        <Ban className="mr-2 h-4 w-4" /> Anular factura (ya {inv.verifactu_sent ? 'en Hacienda' : 'enviada'})
+                      </DropdownMenuItem>
+                    </>
+                  )}
                   {canCreditNote && (
                     <>
                       {(canDelete || canCancel) && <DropdownMenuSeparator />}
                       <DropdownMenuItem
+                        onClick={() => { setFullCreditOpen(true); setFullCreditReason('') }}
+                        className="text-purple-700 focus:text-purple-800 focus:bg-purple-50"
+                      >
+                        <FileMinus className="mr-2 h-4 w-4" /> Anular con abono (total)
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
                         onClick={() => setCreditNoteOpen(true)}
                         className="text-purple-700 focus:text-purple-800 focus:bg-purple-50"
                       >
-                        <FileMinus className="mr-2 h-4 w-4" /> Factura rectificativa
+                        <FileMinus className="mr-2 h-4 w-4" /> Rectificativa parcial…
                       </DropdownMenuItem>
                     </>
                   )}
@@ -1893,6 +1944,16 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
                   fiscal se mantiene intacto. No se elimina nada — el cambio queda
                   reflejado en el historial.
                 </p>
+                {fromOperation && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    Esta factura viene de{' '}
+                    {inv.sale_id ? 'un ticket de TPV' : inv.tailoring_order_id ? 'un pedido de sastrería' : 'una reserva'}.
+                    Anularla <strong>no devuelve el dinero ni el género</strong>: la venta, el
+                    cobro y la caja se quedan como están, y el ingreso sigue contando en
+                    Contabilidad. Si además hay que devolver el importe, haz la
+                    devolución en el TPV.
+                  </div>
+                )}
                 <div className="space-y-1">
                   <Label htmlFor={`cancel-reason-${inv.id}`}>Motivo de anulación *</Label>
                   <Textarea
@@ -1918,6 +1979,59 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
             >
               {actionLoading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Anular factura
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* AlertDialog: anular con abono (rectificativa total en un clic) */}
+      <AlertDialog open={fullCreditOpen} onOpenChange={(open) => { setFullCreditOpen(open); if (!open) setFullCreditReason('') }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-purple-700">
+              <FileMinus className="h-5 w-5" /> Anular con abono {inv.invoice_number}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  Se emite una <strong>factura rectificativa (serie R)</strong> por el importe
+                  íntegro pendiente. La original queda como <strong>rectificada</strong> y el
+                  abono deja constancia documental — es la vía correcta cuando la factura ya
+                  llegó al cliente o ya se declaró.
+                </p>
+                {fromOperation && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    Al venir de{' '}
+                    {inv.sale_id ? 'un ticket de TPV' : inv.tailoring_order_id ? 'un pedido de sastrería' : 'una reserva'},
+                    el abono es solo el documento: no mueve el diario (el ingreso lo aporta la
+                    venta) ni devuelve el dinero. La devolución se hace en el TPV.
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <Label htmlFor={`fullcredit-reason-${inv.id}`}>Motivo del abono *</Label>
+                  <Textarea
+                    id={`fullcredit-reason-${inv.id}`}
+                    value={fullCreditReason}
+                    onChange={(e) => setFullCreditReason(e.target.value)}
+                    rows={3}
+                    placeholder="Ej: emitida a nombre incorrecto, se reemite a nombre de la empresa"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Mínimo 10 caracteres. Queda en la rectificativa y en el historial.
+                  </p>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={actionLoading}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); handleFullCreditNote() }}
+              disabled={actionLoading || fullCreditReason.trim().length < 10}
+              className="bg-purple-700 hover:bg-purple-800"
+            >
+              {actionLoading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Emitir abono total
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
