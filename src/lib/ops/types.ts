@@ -138,6 +138,7 @@ export type ApInvoiceLite = {
   total: number                 // total del documento: base + IVA − retención
   isIntraEU: boolean            // proveedor intracomunitario (CIF-IVA de otro país UE)
   attachmentPath?: string       // path en el bucket supplier-invoices (PDF adjunto)
+  note?: string                 // nota de la factura (ap_supplier_invoices.notes), visible en C
 }
 
 // Desglose del IVA soportado por tipo impositivo. byQuarter[0..3] = T1..T4.

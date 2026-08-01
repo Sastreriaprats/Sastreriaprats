@@ -173,6 +173,9 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
   // filtro order_date { gte, lte }.
   const [dateFrom, setDateFrom] = useState(() => searchParams.get('date_from') || '')
   const [dateTo, setDateTo] = useState(() => searchParams.get('date_to') || '')
+  // Filtro "solo pedidos con prendas sin precio" (se evalúa en servidor, sobre
+  // todas las páginas). Se inicializa desde la URL para restaurarlo al volver.
+  const [unpricedOnly, setUnpricedOnly] = useState(() => searchParams.get('unpriced') === 'true')
 
   const {
     data: orders, total, totalPages, page, setPage,
@@ -190,7 +193,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
     // El rango de fechas viaja como date_from/date_to (escalares serializables);
     // listOrders los reconstruye en el filtro order_date { gte, lte }.
     syncUrl: true,
-    urlFilterKeys: ['status', 'order_type', 'date_from', 'date_to'],
+    urlFilterKeys: ['status', 'order_type', 'date_from', 'date_to', 'unpriced'],
   })
 
   // Contador de pedidos de sastrería activos (excluye delivered y cancelled)
@@ -247,12 +250,20 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
     }))
   }
 
-  const hasActiveFilters = statusFilter !== 'all' || subTypeFilter !== 'all' || !!dateFrom || !!dateTo
+  // Activa/desactiva el filtro "sin precio". Se guarda como escalar 'true' para
+  // que el hook lo sincronice con la URL; listOrders lo evalúa en servidor.
+  const applyUnpriced = (v: boolean) => {
+    setUnpricedOnly(v)
+    setFilters(prev => ({ ...prev, unpriced: v ? 'true' : undefined }))
+  }
+
+  const hasActiveFilters = statusFilter !== 'all' || subTypeFilter !== 'all' || !!dateFrom || !!dateTo || unpricedOnly
   const clearAllFilters = () => {
     setStatusFilter('all')
     setSubTypeFilter('all')
     setDateFrom('')
     setDateTo('')
+    setUnpricedOnly(false)
     setFilters({})
   }
 
@@ -483,6 +494,14 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                 <AlertTriangle className="h-3 w-3 mr-1 inline" />
                 Con retraso {(statusCounts['overdue'] ?? 0) > 0 ? `(${statusCounts['overdue']})` : ''}
               </Badge>
+              <Badge
+                variant={unpricedOnly ? 'default' : 'outline'}
+                className={`cursor-pointer ${unpricedOnly ? 'bg-rose-100 text-rose-700 border-rose-300' : ''}`}
+                onClick={() => applyUnpriced(!unpricedOnly)}
+              >
+                <CircleDollarSign className="h-3 w-3 mr-1 inline" />
+                Sin precio
+              </Badge>
               {orderStatuses.filter(s => s !== 'cancelled').map(s => (
                 <Badge
                   key={s}
@@ -516,6 +535,12 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
                   <Badge variant="secondary" className="text-xs gap-1 pr-1">
                     {dateFrom ? formatDate(dateFrom) : '…'} – {dateTo ? formatDate(dateTo) : '…'}
                     <button type="button" onClick={() => applyDateRange('', '')} className="ml-0.5 hover:text-foreground"><X className="h-3 w-3" /></button>
+                  </Badge>
+                )}
+                {unpricedOnly && (
+                  <Badge variant="secondary" className="text-xs gap-1 pr-1">
+                    Sin precio
+                    <button type="button" onClick={() => applyUnpriced(false)} className="ml-0.5 hover:text-foreground"><X className="h-3 w-3" /></button>
                   </Badge>
                 )}
               </div>

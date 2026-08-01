@@ -9,7 +9,7 @@ import { ALL_VISIBLE_STATUSES, classifyLinesForStatusChange, deriveOrderStatusFr
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { sendOrderConfirmation, sendTailoringStatusUpdate } from '@/lib/email/transactional'
-import { normalizeSearchTerm, getOrderStatusLabel, formatDateTimeMadrid } from '@/lib/utils'
+import { normalizeSearchTerm, getOrderStatusLabel, formatDateTimeMadrid, countUnpricedGarments } from '@/lib/utils'
 import { checkUserPermission } from '@/actions/auth'
 import { syncOrderLineMeasurementsToClient } from '@/lib/measurements/sync-from-order'
 
@@ -92,6 +92,18 @@ export async function getNextTalonNumber(): Promise<number> {
 export const listOrders = protectedAction<ListParams & { status?: string }, ListResult<any>>(
   { permission: 'orders.view', auditModule: 'orders' },
   async (ctx, params) => {
+    // Filtro "solo pedidos con prendas sin precio". Viaja en la URL como escalar
+    // (`unpriced=true`, vía urlFilterKeys). Se evalúa en JS (la excepción de
+    // conjuntos/trajes no es expresable en SQL), así que lo extraemos aquí para
+    // que no llegue a los constructores de query como una columna inexistente.
+    const unpricedOnly =
+      params.filters?.unpriced === 'true' || params.filters?.unpriced === true
+    if (params.filters && 'unpriced' in params.filters) {
+      const restFilters = { ...params.filters }
+      delete restFilters.unpriced
+      params = { ...params, filters: restFilters }
+    }
+
     // El rango de fechas viaja en la URL como dos escalares serializables
     // (`date_from`/`date_to`, vía urlFilterKeys del hook useList) para que se
     // preserven al volver del detalle. Aquí los reconstruimos en el objeto
@@ -137,6 +149,80 @@ export const listOrders = protectedAction<ListParams & { status?: string }, List
       const parts = [`order_number.ilike.%${safeSearch}%`]
       if (clientIds.length > 0) parts.push(`client_id.in.(${clientIds.join(',')})`)
       searchOr = parts.join(',')
+    }
+
+    // Rama "solo sin precio": traemos TODOS los pedidos que cumplen el resto de
+    // filtros (menos el de estado, para poder contar las píldoras por estado) con
+    // sus líneas, y filtramos en JS por `countUnpricedGarments > 0` — que ya
+    // aplica la excepción de conjuntos (el pantalón de un traje cuyo precio va en
+    // la americana NO cuenta como pendiente). Paginamos en memoria. Es un filtro
+    // puntual de uso admin, de ahí el tope de seguridad de 100k.
+    if (unpricedOnly) {
+      let evalQuery = ctx.adminClient.from('tailoring_orders').select(SELECT_ORDERS)
+      if (searchOr) evalQuery = evalQuery.or(searchOr)
+      if (params.filters?.order_type) evalQuery = evalQuery.eq('order_type', params.filters.order_type)
+      const evalRange = params.filters?.order_date
+      if (evalRange && typeof evalRange === 'object') {
+        const r = evalRange as Record<string, unknown>
+        if (r.gte !== undefined && r.gte !== '') evalQuery = evalQuery.gte('order_date', r.gte)
+        if (r.lte !== undefined && r.lte !== '') evalQuery = evalQuery.lte('order_date', r.lte)
+      }
+      if (params.storeId) evalQuery = evalQuery.eq('store_id', params.storeId)
+      evalQuery = evalQuery.order(params.sortBy || 'order_date', { ascending: params.sortOrder === 'asc' })
+
+      const page = params.page || 1
+      const pageSize = params.pageSize || 25
+      const { data: evalData, error: evalError } = await evalQuery.range(0, 99999)
+      if (evalError) {
+        console.error('[listOrders] unpriced eval:', evalError)
+        return success({ data: [], total: 0, page, pageSize, totalPages: 0, statusCounts: {}, totalAll: 0, aggregates: { total: 0, total_paid: 0, total_pending: 0 } })
+      }
+
+      const allUnpriced = (evalData || []).filter(
+        (o: any) => countUnpricedGarments(o.tailoring_order_lines) > 0,
+      )
+
+      // Contadores por estado sobre el conjunto SIN precio, ignorando el filtro de
+      // estado (mismo criterio que la rama normal: las píldoras muestran cuántos
+      // hay de cada estado dentro del resto de filtros activos).
+      const statusCounts = allUnpriced.reduce((acc: Record<string, number>, o: any) => {
+        acc[o.status] = (acc[o.status] || 0) + 1
+        return acc
+      }, {} as Record<string, number>)
+      const overdueUnpriced = allUnpriced.filter(
+        (o: any) => o.estimated_delivery_date && o.estimated_delivery_date < today && !['delivered', 'cancelled'].includes(o.status),
+      )
+      statusCounts['overdue'] = overdueUnpriced.length
+      const totalAll = allUnpriced.length
+
+      // Subconjunto mostrado según el filtro de estado activo.
+      let shown = allUnpriced
+      if (isOverdue) shown = overdueUnpriced
+      else if (statusFilter && statusFilter !== 'all') shown = allUnpriced.filter((o: any) => o.status === statusFilter)
+
+      const aggregates = shown.reduce(
+        (acc: { total: number; total_paid: number; total_pending: number }, r: any) => {
+          acc.total += Number(r.total) || 0
+          acc.total_paid += Number(r.total_paid) || 0
+          acc.total_pending += Number(r.total_pending) || 0
+          return acc
+        },
+        { total: 0, total_paid: 0, total_pending: 0 },
+      )
+
+      const from = (page - 1) * pageSize
+      const paged = shown.slice(from, from + pageSize)
+
+      return success({
+        data: paged,
+        total: shown.length,
+        page,
+        pageSize,
+        totalPages: Math.ceil(shown.length / pageSize),
+        statusCounts,
+        totalAll,
+        aggregates,
+      })
     }
 
     let result: Awaited<ReturnType<typeof queryList<any>>>
@@ -1487,6 +1573,25 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
       const canEditCosts = await checkUserPermission(ctx.userId, 'orders.view_costs')
       const costFrom = (incoming: number | undefined, beforeVal: unknown): number =>
         canEditCosts && incoming !== undefined ? (Number(incoming) || 0) : (Number(beforeVal ?? 0) || 0)
+      // Precios €/m de los tejidos NUESTROS (de stock) implicados, para poder
+      // autocompletar el coste de MATERIAL de las líneas cuyo tejido es de stock
+      // pero cuyo material_cost quedó a 0 (ver red de seguridad más abajo).
+      // Reunimos los fabric_id entrantes y los de BD (el diálogo puede reenviar
+      // un fabric_id sin tocarlo). Una sola consulta, tolerante a fallo.
+      const fabricIdsForCost = new Set<string>()
+      for (const l of incomingLines) if (l.fabric_id) fabricIdsForCost.add(String(l.fabric_id))
+      for (const l of linesBeforeArr) if ((l as any).fabric_id) fabricIdsForCost.add(String((l as any).fabric_id))
+      const fabricPriceById = new Map<string, number>()
+      if (fabricIdsForCost.size > 0) {
+        const { data: fabricRows } = await admin
+          .from('fabrics')
+          .select('id, price_per_meter')
+          .in('id', Array.from(fabricIdsForCost))
+        for (const f of (fabricRows ?? []) as any[]) {
+          const p = Number(f.price_per_meter) || 0
+          if (f.id) fabricPriceById.set(String(f.id), p)
+        }
+      }
       const { slugById: gtSlugMap, nameById: gtNameMap } = await buildGarmentMaps(admin, incomingLines.map((l: any) => l.garment_type_id))
       for (let i = 0; i < incomingLines.length; i++) {
         const line = incomingLines[i]
@@ -1585,6 +1690,23 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
           // Escribirla desde el cliente crearía un segundo escritor y drift
           // texto↔FK cuando el texto no cambia.
           sort_order: sortOrder,
+        }
+
+        // Red de seguridad del coste de MATERIAL para tejido NUESTRO (de stock).
+        // Si la línea acaba con un fabric_id de stock y metros pero su
+        // material_cost quedó a 0, lo derivamos del precio €/m del tejido
+        // (price_per_meter × metros). Cubre el flujo "Editar ficha", que asigna
+        // el tejido de stock pero NO calcula el coste (no tiene ni campo de
+        // metros ni de coste), y cualquier alta previa sin coste. Solo RELLENA
+        // el hueco: nunca pisa un coste ya introducido (>0), así que respeta los
+        // overrides manuales. Petición del cliente: "que salte el coste del
+        // tejido en Material cuando el tejido es nuestro".
+        if ((Number(row.material_cost) || 0) <= 0 && row.fabric_id) {
+          const meters = Number(row.fabric_meters) || 0
+          const ppm = fabricPriceById.get(String(row.fabric_id)) || 0
+          if (meters > 0 && ppm > 0) {
+            row.material_cost = round2(ppm * meters)
+          }
         }
 
         if (line.id) {

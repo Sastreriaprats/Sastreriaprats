@@ -235,10 +235,12 @@ export function ScenarioCView() {
         'Nº': f.number, Proveedor: f.supplier, CIF: f.cif ?? '', Fecha: f.date,
         Base: n2(f.base), 'Tipo IVA %': f.vatRate ?? 'varios', IVA: n2(f.vat),
         'Tipo retención %': n2(f.retentionRate), 'Retención': n2(f.retentionAmount), Total: n2(f.total),
+        Notas: f.note ?? '',
       })) },
       { name: 'Facturas intracomunitarias', rows: apIntraEU.map((f) => ({
         'Nº': f.number, Proveedor: f.supplier, 'NIF-IVA': f.cif ?? '', Fecha: f.date,
         Base: n2(f.base), IVA: n2(f.vat), Total: n2(f.total),
+        Notas: f.note ?? '',
       })) },
     ]
     if (fromDate || toDate) {
@@ -500,7 +502,7 @@ function ApInvoicesCard({ title, tag, rows, footnote, intra = false }: {
   footnote: string
   intra?: boolean
 }) {
-  const cols = intra ? 8 : 9
+  const cols = intra ? 9 : 10
   return (
     <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-x-auto">
       <div className="flex items-baseline justify-between border-b border-slate-200 px-4 py-3">
@@ -518,6 +520,7 @@ function ApInvoicesCard({ title, tag, rows, footnote, intra = false }: {
             <th className="text-right px-3 py-3">IVA</th>
             {!intra && <th className="text-right px-3 py-3">Retención</th>}
             <th className="text-right px-3 py-3">Total</th>
+            <th className="text-left px-3 py-3">Notas</th>
             <th className="text-right px-3 py-3">PDF</th>
           </tr>
         </thead>
@@ -543,6 +546,11 @@ function ApInvoicesCard({ title, tag, rows, footnote, intra = false }: {
                 </td>
               )}
               <td className="px-3 py-2 text-right font-medium tabular-nums">{eur(f.total)}</td>
+              <td className="px-3 py-2 max-w-[18rem] text-slate-600">
+                {f.note
+                  ? <span className="block truncate" title={f.note}>{f.note}</span>
+                  : <span className="text-slate-300">—</span>}
+              </td>
               <td className="px-3 py-2 text-right"><DownloadBtn apPath={f.attachmentPath} /></td>
             </tr>
           ))}
@@ -556,6 +564,7 @@ function ApInvoicesCard({ title, tag, rows, footnote, intra = false }: {
                 <td className="px-3 py-2.5 text-right tabular-nums">{eur(rows.reduce((s, f) => s + f.retentionAmount, 0))}</td>
               )}
               <td className="px-3 py-2.5 text-right tabular-nums">{eur(rows.reduce((s, f) => s + f.total, 0))}</td>
+              <td />
               <td />
             </tr>
           )}

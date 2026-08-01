@@ -1,5 +1,6 @@
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
+import { getLineGroup } from "@/lib/orders/line-groups"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -275,19 +276,105 @@ export function summarizeOrderGarments(
   return names.join(', ') || '—'
 }
 
+type PricingLine = {
+  unit_price?: number | string | null
+  is_gift?: boolean | null
+  configuration?: Record<string, unknown> | null
+  garment_types?: { code?: string | null } | null
+}
+
+/** Etiqueta de conjunto de una línea: texto tras el guión largo de prendaLabel
+ *  ("Americana — Traje 1" → "Traje 1"). Solo em/en dash, el separador que
+ *  escribe la ficha del sastre (ver line-refs.ts). */
+function unpricedGroupLabelOf(l: PricingLine): string | null {
+  const cfg = (l.configuration ?? {}) as Record<string, unknown>
+  const label = String(cfg.prendaLabel ?? '').trim()
+  const m = label.match(/\s*(?:—|–)\s*(.+)$/)
+  return m ? m[1].trim() : null
+}
+
+/** Slug normalizado de la prenda (prendaSlug o código del garment_type),
+ *  sin acentos y en minúsculas: "Pantalón" → "pantalon". */
+function garmentSlugOf(l: PricingLine): string {
+  const cfg = (l.configuration ?? {}) as Record<string, unknown>
+  return String(cfg.prendaSlug ?? l.garment_types?.code ?? '')
+    .trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+}
+
+// Chaquetas que "llevan el precio" de un conjunto (traje, chaqué, frac, smoking,
+// levita). Y piezas secundarias que en un traje van a 0€ a propósito.
+const SUIT_JACKET_SLUGS = new Set(['americana', 'chaque', 'chaquet', 'levita', 'frac', 'smoking_jacket'])
+const SUIT_COMPANION_SLUGS = new Set(['pantalon', 'smoking_trouser', 'chaleco'])
+
+const isLinePriced = (l: PricingLine) => Number(l.unit_price ?? 0) > 0
+
 /**
  * Nº de prendas de un pedido PENDIENTES DE PRECIO: sin PVP y que NO son regalo.
- * Misma definición que la validación de alta ("indica el PVP o márcala como
- * regalo", orders.ts): un regalo va a 0 a propósito y no cuenta. Permite avisar
- * en el panel de pedidos sin abrir el pedido.
+ * Misma definición base que la validación de alta ("indica el PVP o márcala como
+ * regalo", orders.ts): un regalo va a 0 a propósito y no cuenta.
+ *
+ * Excepción del CONJUNTO (traje/chaqué/frac/smoking/levita): el precio del
+ * conjunto se pone en UNA sola pieza (la chaqueta) y las demás van a 0€ a
+ * propósito, así que NO deben contar como "sin precio". Se detecta por dos vías:
+ *   1) Conjunto EXPLÍCITO: ≥2 piezas de sastrería con el mismo texto tras "—" en
+ *      prendaLabel ("Traje 1"). Cuenta como 1 pendiente solo si NINGUNA pieza del
+ *      conjunto tiene PVP ni es regalo.
+ *   2) Conjunto IMPLÍCITO (pedidos antiguos sin prendaLabel): un pantalón/chaleco
+ *      a 0€ es la pieza secundaria de un traje si el pedido lleva una chaqueta
+ *      con precio → no cuenta.
+ *
+ * Permite avisar en el panel de pedidos sin abrir el pedido.
  */
-export function countUnpricedGarments(
-  lines: Array<{ unit_price?: number | string | null; is_gift?: boolean | null }> | null | undefined,
-): number {
+export function countUnpricedGarments(lines: PricingLine[] | null | undefined): number {
   if (!lines || lines.length === 0) return 0
-  return lines.reduce((n, l) => {
-    if (l.is_gift) return n
-    const price = Number(l.unit_price ?? 0)
-    return n + (price > 0 ? 0 : 1)
-  }, 0)
+
+  // Miembros por conjunto explícito (solo cuenta como conjunto si tiene ≥2 piezas).
+  const groupMembers = new Map<string, PricingLine[]>()
+  for (const l of lines) {
+    if (getLineGroup(l) !== 'sastreria') continue
+    const g = unpricedGroupLabelOf(l)
+    if (!g) continue
+    if (!groupMembers.has(g)) groupMembers.set(g, [])
+    groupMembers.get(g)!.push(l)
+  }
+
+  // ¿El pedido lleva alguna chaqueta de conjunto CON precio? (para la excepción
+  // del traje implícito en pedidos antiguos sin prendaLabel).
+  const hasPricedSuitJacket = lines.some(
+    (l) => getLineGroup(l) === 'sastreria' && SUIT_JACKET_SLUGS.has(garmentSlugOf(l)) && isLinePriced(l),
+  )
+
+  let count = 0
+  const countedGroups = new Set<string>()
+
+  for (const l of lines) {
+    const isSastreria = getLineGroup(l) === 'sastreria'
+    const g = isSastreria ? unpricedGroupLabelOf(l) : null
+    const members = g ? groupMembers.get(g) : undefined
+
+    // Pieza de un CONJUNTO explícito (≥2 piezas): el precio va al conjunto entero.
+    if (g && members && members.length > 1) {
+      if (countedGroups.has(g)) continue
+      countedGroups.add(g)
+      // El conjunto está cubierto si alguna pieza tiene PVP o es regalo, o bien si
+      // TODAS sus piezas son secundarias (pantalón/chaleco) y la chaqueta con
+      // precio quedó fuera del grupo (etiqueta sin sufijo, p.ej. "Chaqué" suelto).
+      const satisfied =
+        members.some(isLinePriced) ||
+        members.some((m) => !!m.is_gift) ||
+        (hasPricedSuitJacket && members.every((m) => SUIT_COMPANION_SLUGS.has(garmentSlugOf(m))))
+      if (!satisfied) count += 1
+      continue
+    }
+
+    // Prenda suelta / camisería / complemento: PVP por línea.
+    if (l.is_gift) continue
+    if (isLinePriced(l)) continue
+    // Conjunto IMPLÍCITO: pantalón/chaleco a 0€ con una chaqueta con precio en el
+    // mismo pedido → pieza secundaria del traje, no cuenta.
+    if (isSastreria && SUIT_COMPANION_SLUGS.has(garmentSlugOf(l)) && hasPricedSuitJacket) continue
+    count += 1
+  }
+
+  return count
 }

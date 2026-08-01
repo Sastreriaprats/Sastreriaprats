@@ -148,7 +148,7 @@ async function computeYear(year: number) {
     listDepositTags(),
     // Gastos / IVA soportado = FACTURAS RECIBIDAS (ap_supplier_invoices)
     admin.from('ap_supplier_invoices')
-      .select('id, invoice_number, supplier_name, supplier_cif, amount, tax_amount, retention_rate, retention_amount, invoice_date, attachment_url')
+      .select('id, invoice_number, supplier_name, supplier_cif, amount, tax_amount, retention_rate, retention_amount, invoice_date, attachment_url, notes')
       .eq('is_proforma', false)
       .gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`),
     readApInvoiceLines(admin, year),
@@ -359,6 +359,7 @@ async function computeYear(year: number) {
     const num = String(x.invoice_number ?? '')
     const cif = String(x.supplier_cif ?? '').trim() || undefined
     const attachment = typeof x.attachment_url === 'string' && x.attachment_url.trim() ? x.attachment_url.trim() : undefined
+    const note = typeof x.notes === 'string' && x.notes.trim() ? x.notes.trim() : undefined
     // Total del DOCUMENTO: la retención se resta del pago al proveedor
     // (se ingresa a Hacienda por el 111/115), no cambia base ni IVA.
     const docTotal = base + vat - ret
@@ -372,7 +373,7 @@ async function computeYear(year: number) {
     apInvoices.push({
       number: num, supplier, cif, date: d.slice(0, 10), base: r2(base), vat: r2(vat), vatRate,
       retentionRate: r2(retRate), retentionAmount: r2(ret), total: r2(docTotal),
-      isIntraEU: isIntraEUCif(cif), attachmentPath: attachment,
+      isIntraEU: isIntraEUCif(cif), attachmentPath: attachment, note,
     })
   }
 
