@@ -211,8 +211,13 @@ export function DashboardContent() {
   const loadVendorSales = useCallback(() => {
     setVendorSalesLoading(true)
     const now = new Date()
-    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
-    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10)
+    // Formateo LOCAL: toISOString() sobre una medianoche local resta un día en
+    // España (UTC+1/+2), y el mes salía corrido — sin el día 30/31 y con el
+    // último día del mes anterior colado dentro.
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+    const start = ymd(new Date(now.getFullYear(), now.getMonth(), 1))
+    const end = ymd(new Date(now.getFullYear(), now.getMonth() + 1, 0))
     getCommissionsByEmployee({ start_date: start, end_date: end })
       .then(res => {
         if (res.success && res.data) {

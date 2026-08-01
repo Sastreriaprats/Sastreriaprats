@@ -70,25 +70,31 @@ function getDateRangeForPreset(preset: DateRangePreset): { from: string; to: str
   const y = today.getFullYear()
   const m = today.getMonth()
   const pad = (n: number) => String(n).padStart(2, '0')
+  // Los límites del rango se formatean en hora LOCAL, nunca con toISOString():
+  // new Date(y, m, 1) es medianoche local, que en España (UTC+1/+2) cae en el
+  // día anterior en UTC, así que toISOString() restaba un día a cada extremo.
+  // Efecto real: "Este mes" iba del día 30/31 del mes anterior al penúltimo día
+  // del actual, y las facturas del último día del mes no aparecían nunca.
+  const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
   if (preset === 'all') return { from: '', to: '' }
   if (preset === 'last_7') {
     const d = new Date(today); d.setDate(d.getDate() - 6)
-    return { from: d.toISOString().slice(0, 10), to: today.toISOString().slice(0, 10) }
+    return { from: ymd(d), to: ymd(today) }
   }
   if (preset === 'last_30') {
     const d = new Date(today); d.setDate(d.getDate() - 29)
-    return { from: d.toISOString().slice(0, 10), to: today.toISOString().slice(0, 10) }
+    return { from: ymd(d), to: ymd(today) }
   }
   if (preset === 'this_month') {
     const first = new Date(y, m, 1)
     const last = new Date(y, m + 1, 0)
-    return { from: first.toISOString().slice(0, 10), to: last.toISOString().slice(0, 10) }
+    return { from: ymd(first), to: ymd(last) }
   }
   if (preset === 'this_quarter') {
     const q = Math.floor(m / 3) + 1
     const first = new Date(y, (q - 1) * 3, 1)
     const last = new Date(y, q * 3, 0)
-    return { from: first.toISOString().slice(0, 10), to: last.toISOString().slice(0, 10) }
+    return { from: ymd(first), to: ymd(last) }
   }
   if (preset === 'this_year') {
     return { from: `${y}-01-01`, to: `${y}-12-31` }
