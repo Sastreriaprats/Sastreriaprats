@@ -29,12 +29,13 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, FileDown, Receipt, ChevronLeft, ChevronRight, FileText, Gift, Trash2, AlertTriangle, Pencil, X, CreditCard, Plus, Package, Scissors, ExternalLink, StickyNote } from 'lucide-react'
+import { Loader2, FileDown, Receipt, ChevronLeft, ChevronRight, FileText, Gift, Trash2, AlertTriangle, Pencil, X, CreditCard, Plus, Package, Scissors, ExternalLink, StickyNote, Globe } from 'lucide-react'
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils'
 import { listTickets, listSastreriaTickets, getSaleForTicket, previewSaleDeletion, deleteSaleCompletely, updateSaleClientNotes, updateSalePayments, previewSaleEdit, editSaleLines, searchProductsForPos } from '@/actions/pos'
+import { listOnlineTickets } from '@/actions/online-orders'
 import { PaymentHistory } from '@/components/payments/payment-history'
 import { listClients } from '@/actions/clients'
-import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
+import { createInvoiceFromSaleAction, generateInvoicePdfAction, cancelInvoiceAction } from '@/actions/accounting'
 import { generateTicketPdf } from '@/components/pos/ticket-pdf'
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
 import { usePermissions } from '@/hooks/use-permissions'
@@ -56,6 +57,22 @@ const CASH_FIELD_LABELS: Record<string, string> = {
   total_transfer_sales: 'Ventas transferencia',
   total_voucher_sales: 'Ventas vale',
   total_sales: 'Ventas totales',
+}
+
+// Pestaña Online: estados de `online_orders` y pasarelas de cobro.
+const ONLINE_STATUS_BADGE: Record<string, { label: string; className: string }> = {
+  paid:       { label: 'Pagado',    className: 'bg-green-100 text-green-800 border-green-200 hover:bg-green-100' },
+  processing: { label: 'Preparando', className: 'bg-blue-100 text-blue-800 border-blue-200 hover:bg-blue-100' },
+  shipped:    { label: 'Enviado',   className: 'bg-indigo-100 text-indigo-800 border-indigo-200 hover:bg-indigo-100' },
+  delivered:  { label: 'Entregado', className: 'bg-emerald-100 text-emerald-800 border-emerald-200 hover:bg-emerald-100' },
+  refunded:   { label: 'Reembolsado', className: 'bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-100' },
+  cancelled:  { label: 'Cancelado', className: 'bg-red-100 text-red-800 border-red-200 hover:bg-red-100' },
+}
+
+const ONLINE_PAYMENT_LABELS: Record<string, string> = {
+  redsys: 'Redsys (TPV virtual)',
+  stripe: 'Stripe',
+  card: 'Tarjeta',
 }
 
 type DeleteRow = { id: string; ticket_number: string }
@@ -104,7 +121,7 @@ const STATUS_BADGE: Record<string, { label: string; className: string } | null> 
 export function TicketsContent() {
   const router = useRouter()
   const { can } = usePermissions()
-  const [view, setView] = useState<'tienda' | 'sastreria'>('tienda')
+  const [view, setView] = useState<'tienda' | 'sastreria' | 'online'>('tienda')
   const [data, setData] = useState<any[]>([])
   const [total, setTotal] = useState(0)
   // Página persistida en la URL: volver atrás desde otra pantalla la conserva.
@@ -120,6 +137,10 @@ export function TicketsContent() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [invoiceLoadingId, setInvoiceLoadingId] = useState<string | null>(null)
   const [invoiceConfirmRow, setInvoiceConfirmRow] = useState<any | null>(null)
+  // Anulación de la factura W de un pedido online (pestaña Online)
+  const [cancelInvoiceRow, setCancelInvoiceRow] = useState<{ invoice_id: string; invoice_number: string; order_number: string; total: number; is_test: boolean } | null>(null)
+  const [cancelReason, setCancelReason] = useState('')
+  const [cancellingInvoice, setCancellingInvoice] = useState(false)
 
   // Eliminar ticket (borrado físico)
   const [deleteRow, setDeleteRow] = useState<DeleteRow | null>(null)
@@ -174,6 +195,16 @@ export function TicketsContent() {
             clientSearch: clientSearch.trim() || undefined,
             dateFrom: dateFrom || undefined,
             dateTo: dateTo || undefined,
+          })
+        : view === 'online'
+        ? await listOnlineTickets({
+            page,
+            pageSize,
+            clientSearch: clientSearch.trim() || undefined,
+            dateFrom: dateFrom || undefined,
+            dateTo: dateTo || undefined,
+            productSearch: productSearch.trim() || undefined,
+            ticketSearch: ticketSearch.trim() || undefined,
           })
         : await listTickets({
             page,
@@ -310,6 +341,48 @@ export function TicketsContent() {
     } finally {
       setInvoiceLoadingId(null)
       setInvoiceConfirmRow(null)
+    }
+  }
+
+  // Pestaña Online: anular la factura W de un pedido (típicamente pruebas de la
+  // pasarela). La decisión es de contabilidad; cancelInvoiceAction ya bloquea la
+  // anulación cuando procede una rectificativa (enviada, Verifactu, periodo cerrado).
+  const handleCancelInvoice = async () => {
+    if (!cancelInvoiceRow?.invoice_id) return
+    const reason = cancelReason.trim()
+    if (reason.length < 3) { toast.error('Indica el motivo de la anulación'); return }
+    setCancellingInvoice(true)
+    try {
+      const res = await cancelInvoiceAction({ invoiceId: cancelInvoiceRow.invoice_id, reason })
+      if (!res.success) {
+        toast.error('error' in res ? res.error : 'No se pudo anular la factura')
+        return
+      }
+      toast.success(`Factura ${cancelInvoiceRow.invoice_number} anulada`)
+      setCancelInvoiceRow(null)
+      setCancelReason('')
+      load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo anular la factura')
+    } finally {
+      setCancellingInvoice(false)
+    }
+  }
+
+  // Pestaña Online: el documento de la venta es su factura de la serie W.
+  const handleDownloadInvoicePdf = async (invoiceId: string) => {
+    setDownloadingId(invoiceId)
+    try {
+      const res = await generateInvoicePdfAction(invoiceId)
+      if (!res.success || !res.data?.url) {
+        toast.error('error' in res ? res.error : 'Error al generar el PDF')
+        return
+      }
+      window.open(res.data.url, '_blank')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al generar el PDF')
+    } finally {
+      setDownloadingId(null)
     }
   }
 
@@ -558,7 +631,7 @@ export function TicketsContent() {
             <Receipt className="h-7 w-7" />
             Tickets
           </h1>
-          <p className="text-muted-foreground text-sm mt-1">Tickets de tienda y, en la pestaña Sastrería, las ventas y cobros diarios de pedidos de sastrería.</p>
+          <p className="text-muted-foreground text-sm mt-1">Tickets de tienda; en Sastrería, las ventas y cobros diarios de pedidos; en Online, las ventas de la tienda web (su documento es la factura de la serie W, no pasan por caja).</p>
         </div>
         <Link href="/admin/tickets/vales">
           <Button variant="outline" size="sm" className="gap-1">
@@ -589,6 +662,16 @@ export function TicketsContent() {
           )}
         >
           <Scissors className="h-4 w-4" /> Sastrería
+        </button>
+        <button
+          type="button"
+          onClick={() => { if (view !== 'online') { setView('online'); setPage(1) } }}
+          className={cn(
+            'inline-flex items-center gap-1.5 rounded-md px-4 py-1.5 text-sm font-medium transition-colors',
+            view === 'online' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          <Globe className="h-4 w-4" /> Online
         </button>
       </div>
 
@@ -622,7 +705,7 @@ export function TicketsContent() {
               onChange={(date) => setDateTo(date)}
             />
           </div>
-          {view === 'tienda' && (
+          {view !== 'sastreria' && (
             <div className="flex flex-col gap-1">
               <label className="text-xs text-muted-foreground">Producto</label>
               <Input
@@ -635,7 +718,7 @@ export function TicketsContent() {
           )}
           <div className="flex flex-col gap-1">
             <label className="text-xs text-muted-foreground">Nº ticket</label>
-            <Input placeholder="CLP o TICK…" value={ticketSearch} onChange={(e) => setTicketSearch(e.target.value)} className="w-40" />
+            <Input placeholder={view === 'online' ? 'WEB-…' : 'CLP o TICK…'} value={ticketSearch} onChange={(e) => setTicketSearch(e.target.value)} className="w-40" />
           </div>
           <div className="flex items-end">
             <Button variant="outline" onClick={() => { setPage(1); load() }}>Buscar</Button>
@@ -890,10 +973,132 @@ export function TicketsContent() {
               </Table>
               )}
 
+              {view === 'online' && (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Nº Pedido</TableHead>
+                    <TableHead>Fecha de cobro</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Productos (resumen)</TableHead>
+                    <TableHead>Total</TableHead>
+                    <TableHead>Pago</TableHead>
+                    <TableHead>Estado</TableHead>
+                    <TableHead>Factura</TableHead>
+                    <TableHead className="w-[240px]">Acciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.map((row) => {
+                    const badge = ONLINE_STATUS_BADGE[row.status] ?? null
+                    const isDimmed = row.status === 'cancelled' || row.status === 'refunded'
+                    // Pedidos cobrados con la pasarela en modo demo: no son ventas reales.
+                    const isTest = row.payment_method === 'demo'
+                    return (
+                      <TableRow key={row.id} className={cn(isDimmed && 'opacity-60')}>
+                        <TableCell className="font-mono">
+                          <div className="flex items-center gap-1.5">
+                            {row.order_number}
+                            {isTest && (
+                              <Badge variant="outline" className="text-[10px] bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-100">
+                                Prueba
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {row.paid_at ? formatDateTime(row.paid_at) : '—'}
+                        </TableCell>
+                        <TableCell>
+                          {row.client_name ? (
+                            <div>
+                              <div>{row.client_name}</div>
+                              {row.client_email && <div className="text-xs text-muted-foreground">{row.client_email}</div>}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="max-w-[280px] truncate text-sm" title={row.products_summary}>
+                          {row.products_summary}
+                        </TableCell>
+                        <TableCell className="font-medium">{formatCurrency(Number(row.total) || 0)}</TableCell>
+                        <TableCell className="text-sm capitalize">{ONLINE_PAYMENT_LABELS[row.payment_method] ?? row.payment_method ?? '—'}</TableCell>
+                        <TableCell>
+                          {badge ? (
+                            <Badge variant="outline" className={cn('text-xs font-medium', badge.className)}>{badge.label}</Badge>
+                          ) : (
+                            <span className="text-sm">{row.status}</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {row.invoice_number ? (
+                            <span className={cn('font-mono', row.invoice_status === 'cancelled' && 'line-through text-muted-foreground')}
+                              title={row.invoice_status === 'cancelled' ? 'Factura anulada' : undefined}>
+                              {row.invoice_number}
+                            </span>
+                          ) : (
+                            <span className="text-amber-700 text-xs flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3" /> Sin factura
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1.5 items-center">
+                            {row.invoice_id && row.invoice_status !== 'cancelled' && can('accounting.manage_invoices') && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="gap-1"
+                                disabled={downloadingId === row.invoice_id}
+                                onClick={() => handleDownloadInvoicePdf(row.invoice_id)}
+                              >
+                                {downloadingId === row.invoice_id ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileDown className="h-3 w-3" />}
+                                Factura
+                              </Button>
+                            )}
+                            {row.invoice_id && row.invoice_status !== 'cancelled' && can('accounting.manage_invoices') && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="gap-1 text-red-600 hover:text-red-700"
+                                onClick={() => {
+                                  setCancelReason(isTest ? 'Pedido de prueba, no es una venta real' : '')
+                                  setCancelInvoiceRow({
+                                    invoice_id: row.invoice_id,
+                                    invoice_number: row.invoice_number,
+                                    order_number: row.order_number,
+                                    total: Number(row.total) || 0,
+                                    is_test: isTest,
+                                  })
+                                }}
+                              >
+                                <X className="h-3 w-3" />
+                                Anular factura
+                              </Button>
+                            )}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="gap-1"
+                              onClick={() => router.push(`/admin/tienda-online/pedidos/${row.id}`)}
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                              Ver pedido
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+              )}
+
               {totalPages > 1 && (
                 <div className="flex items-center justify-between px-4 py-3 border-t">
                   <p className="text-sm text-muted-foreground">
-                    {total} {view === 'sastreria' ? `movimiento${total !== 1 ? 's' : ''}` : `ticket${total !== 1 ? 's' : ''}`} · Página {page} de {totalPages}
+                    {total} {view === 'sastreria' ? `movimiento${total !== 1 ? 's' : ''}` : view === 'online' ? `venta${total !== 1 ? 's' : ''} online` : `ticket${total !== 1 ? 's' : ''}`} · Página {page} de {totalPages}
                   </p>
                   <div className="flex gap-2">
                     <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
@@ -939,6 +1144,49 @@ export function TicketsContent() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Anular la factura W de una venta online (decisión de contabilidad) */}
+      <Dialog open={Boolean(cancelInvoiceRow)} onOpenChange={(v) => { if (!v && !cancellingInvoice) { setCancelInvoiceRow(null); setCancelReason('') } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-red-700 flex items-center gap-2">
+              <X className="h-5 w-5" /> Anular factura {cancelInvoiceRow?.invoice_number}
+            </DialogTitle>
+            <DialogDescription>
+              Pedido <span className="font-mono">{cancelInvoiceRow?.order_number}</span> · {formatCurrency(cancelInvoiceRow?.total ?? 0)}.
+              La factura dejará de contar en Contabilidad, IVA e Informes, y su asiento se revierte. El pedido no se toca.
+            </DialogDescription>
+          </DialogHeader>
+          {cancelInvoiceRow?.is_test && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 flex gap-2">
+              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>
+                Este pedido se cobró con la pasarela en modo <strong>demo</strong>: no es una venta real. Si su IVA ya se
+                declaró en un trimestre presentado, consulta antes con la gestoría — puede proceder una rectificativa en
+                lugar de la anulación.
+              </span>
+            </div>
+          )}
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Motivo de la anulación</label>
+            <Textarea
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Ej.: pedido de prueba, no es una venta real"
+              rows={3}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" disabled={cancellingInvoice} onClick={() => { setCancelInvoiceRow(null); setCancelReason('') }}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" disabled={cancellingInvoice || cancelReason.trim().length < 3} onClick={handleCancelInvoice}>
+              {cancellingInvoice ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Anular factura
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(deleteRow)} onOpenChange={(v) => { if (!v && !deleting) setDeleteRow(null) }}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">

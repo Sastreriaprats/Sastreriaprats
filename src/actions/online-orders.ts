@@ -3,6 +3,8 @@
 import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { sendShippingConfirmation } from '@/lib/email/transactional'
+import { resolveClientIdsForSearch } from '@/lib/server/query-helpers'
+import { normalizeSearchTerm } from '@/lib/utils'
 
 const ALLOWED_STATUSES = [
   'pending_payment', 'paid', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded',
@@ -96,6 +98,171 @@ export const getOnlineOrdersList = protectedAction<
       }
     })
     return success(rows)
+  }
+)
+
+/**
+ * Listado de VENTAS online para la pestaña Online de Tickets.
+ *
+ * Un pedido web no crea ninguna fila en `sales` ni pasa por caja: su documento
+ * es la factura de la serie W. Esta lista es el equivalente al ticket para la
+ * tienda online, con los mismos filtros que la pestaña Tienda.
+ *
+ * Criterio de inclusión = el de Informes/Contabilidad: solo pedidos con cobro
+ * real (paid/processing/shipped/delivered/refunded) más los cancelados DESPUÉS
+ * de haberse cobrado. Quedan fuera los carritos sin pagar (pending_payment y
+ * cancelados sin `paid_at`), que no son ventas. La fecha mostrada es `paid_at`,
+ * la fecha contable de la factura W.
+ */
+export interface OnlineTicketRow {
+  id: string
+  order_number: string
+  paid_at: string | null
+  total: number
+  payment_method: string | null
+  status: string
+  client_name: string | null
+  client_email: string | null
+  products_summary: string
+  invoice_id: string | null
+  invoice_number: string | null
+  invoice_status: string | null
+}
+
+const ONLINE_SALE_STATUSES = ['paid', 'processing', 'shipped', 'delivered', 'refunded', 'cancelled']
+
+export const listOnlineTickets = protectedAction<{
+  page?: number
+  pageSize?: number
+  clientSearch?: string
+  dateFrom?: string
+  dateTo?: string
+  productSearch?: string
+  ticketSearch?: string
+}, { data: OnlineTicketRow[]; total: number; page: number; pageSize: number; totalPages: number }>(
+  { permission: 'pos.access', auditModule: 'pos' },
+  async (ctx, { page = 1, pageSize = 20, clientSearch, dateFrom, dateTo, productSearch, ticketSearch }) => {
+    const admin = ctx.adminClient
+    const empty = { data: [] as OnlineTicketRow[], total: 0, page, pageSize, totalPages: 0 }
+
+    let q = admin
+      .from('online_orders')
+      .select('id, order_number, status, total, payment_method, paid_at, client_id, shipping_address, clients:client_id(email, first_name, last_name, full_name)', { count: 'exact' })
+      .in('status', ONLINE_SALE_STATUSES)
+      .not('paid_at', 'is', null) // sin cobro no es venta (descarta carritos abandonados)
+      .order('paid_at', { ascending: false })
+
+    if (dateFrom) q = q.gte('paid_at', `${dateFrom}T00:00:00`)
+    if (dateTo) q = q.lte('paid_at', `${dateTo}T23:59:59`)
+    if (ticketSearch && ticketSearch.trim()) {
+      q = q.ilike('order_number', `%${ticketSearch.trim().replace(/[(),]/g, '')}%`)
+    }
+
+    // Cliente: por ficha (tokens AND, mismo helper que el resto de buscadores) y,
+    // si no hay ficha, por el nombre guardado en la dirección de envío.
+    if (clientSearch && clientSearch.trim()) {
+      const term = normalizeSearchTerm(clientSearch)
+      if (term) {
+        const ids = await resolveClientIdsForSearch(admin, term)
+        const { data: byAddress } = await admin
+          .from('online_orders')
+          .select('id, shipping_address')
+          .in('status', ONLINE_SALE_STATUSES)
+          .not('paid_at', 'is', null)
+          .limit(1000)
+        const tokens = term.split(/\s+/).filter(Boolean)
+        const addressIds = ((byAddress ?? []) as { id: string; shipping_address: Record<string, unknown> | null }[])
+          .filter((o) => {
+            const a = o.shipping_address
+            if (!a || typeof a !== 'object') return false
+            const name = normalizeSearchTerm([a.first_name, a.last_name].filter(Boolean).join(' '))
+            return tokens.every((t) => name.includes(t))
+          })
+          .map((o) => o.id)
+        if (ids.length === 0 && addressIds.length === 0) return success(empty)
+        const orParts: string[] = []
+        if (ids.length) orParts.push(`client_id.in.(${ids.join(',')})`)
+        if (addressIds.length) orParts.push(`id.in.(${addressIds.join(',')})`)
+        q = q.or(orParts.join(','))
+      }
+    }
+
+    if (productSearch && productSearch.trim()) {
+      const tokens = normalizeSearchTerm(productSearch).split(/\s+/).filter(Boolean)
+      if (tokens.length > 0) {
+        let linesQ = admin.from('online_order_lines').select('order_id')
+        for (const t of tokens) linesQ = linesQ.ilike('product_name', `%${t}%`)
+        const { data: lines } = await linesQ.limit(1000)
+        const ids = [...new Set(((lines ?? []) as { order_id: string }[]).map((l) => l.order_id))]
+        if (ids.length === 0) return success(empty)
+        q = q.in('id', ids)
+      }
+    }
+
+    const from = (page - 1) * pageSize
+    const { data, count, error } = await q.range(from, from + pageSize - 1)
+    if (error) return failure(error.message)
+
+    type ClientRel = { email?: string | null; first_name?: string | null; last_name?: string | null; full_name?: string | null }
+    type OrderRow = {
+      id: string; order_number: string; status: string; total: number | string | null
+      payment_method: string | null; paid_at: string | null
+      shipping_address: Record<string, unknown> | null; clients: ClientRel | null
+    }
+    const list = (data ?? []) as unknown as OrderRow[]
+    const total = count ?? 0
+    if (list.length === 0) return success({ ...empty, total, totalPages: Math.ceil(total / pageSize) })
+
+    const orderIds = list.map((o) => o.id)
+    const [linesRes, invoicesRes] = await Promise.all([
+      admin.from('online_order_lines').select('order_id, product_name, quantity, status').in('order_id', orderIds),
+      admin.from('invoices').select('id, invoice_number, status, online_order_id').in('online_order_id', orderIds),
+    ])
+
+    const linesByOrder: Record<string, string[]> = {}
+    type LineRow = { order_id: string; product_name: string | null; quantity: number | string | null; status: string }
+    for (const l of (linesRes.data ?? []) as unknown as LineRow[]) {
+      if (l.status === 'cancelled') continue
+      const label = `${l.product_name ?? 'Producto'}${Number(l.quantity) > 1 ? ` ×${l.quantity}` : ''}`
+      ;(linesByOrder[l.order_id] ??= []).push(label)
+    }
+    // Una factura vigente por pedido (único parcial); si solo hay anuladas, se
+    // muestra la última para que se vea POR QUÉ ese pedido no está facturado.
+    const invoiceByOrder: Record<string, { id: string; invoice_number: string; status: string }> = {}
+    type InvRow = { id: string; invoice_number: string; status: string; online_order_id: string }
+    for (const inv of (invoicesRes.data ?? []) as unknown as InvRow[]) {
+      const cur = invoiceByOrder[inv.online_order_id]
+      if (!cur || (cur.status === 'cancelled' && inv.status !== 'cancelled')) {
+        invoiceByOrder[inv.online_order_id] = { id: inv.id, invoice_number: inv.invoice_number, status: inv.status }
+      }
+    }
+
+    const rows: OnlineTicketRow[] = list.map((o) => {
+      const c = o.clients
+      const addr = (o.shipping_address && typeof o.shipping_address === 'object' ? o.shipping_address : null) as
+        { first_name?: string; last_name?: string; email?: string } | null
+      const client_name =
+        (c && ((c.full_name ?? '').toString().trim() || [c.first_name, c.last_name].filter(Boolean).join(' ').trim()))
+        || (addr ? [addr.first_name, addr.last_name].filter(Boolean).join(' ').trim() : '')
+        || null
+      const inv = invoiceByOrder[o.id]
+      return {
+        id: o.id,
+        order_number: o.order_number,
+        paid_at: o.paid_at ?? null,
+        total: Number(o.total) || 0,
+        payment_method: o.payment_method ?? null,
+        status: o.status,
+        client_name,
+        client_email: c?.email ?? addr?.email ?? null,
+        products_summary: (linesByOrder[o.id] ?? []).slice(0, 3).join(' · ') || '—',
+        invoice_id: inv?.id ?? null,
+        invoice_number: inv?.invoice_number ?? null,
+        invoice_status: inv?.status ?? null,
+      }
+    })
+
+    return success({ data: rows, total, page, pageSize, totalPages: Math.ceil(total / pageSize) })
   }
 )
 
