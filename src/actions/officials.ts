@@ -35,11 +35,29 @@ const ARTESANAL_TYPES = new Set(['artesanal', 'camiseria'])
 const INDUSTRIAL_TYPES = new Set(['industrial', 'camiseria_industrial'])
 
 /**
+ * Estados de PRENDA (tailoring_order_lines.status) en los que el oficial ya
+ * terminó su trabajo. El estado del PEDIDO puede seguir en "En confección"
+ * porque otras prendas del mismo pedido siguen abiertas: por eso la carga y el
+ * detalle se clasifican por el estado de la LÍNEA, no por el de la cabecera
+ * (aviso de Ismael, jul-2026: todo salía como "En confección").
+ */
+const FINISHED_LINE_STATUSES = new Set(['finished', 'delivered', 'received_in_store'])
+/** Prendas fuera del trabajo del oficial: ni pendientes ni terminadas. */
+const EXCLUDED_LINE_STATUSES = new Set(['cancelled'])
+
+export function isFinishedGarment(lineStatus: string | null | undefined): boolean {
+  return FINISHED_LINE_STATUSES.has(lineStatus || '')
+}
+
+/**
  * Devuelve la "carga" actual de cada oficial activo:
  * cuántas líneas figuran con él como cortador y cuántas como oficial en pedidos
  * cuyo estado de cabecera está activo según el rediseño de Ismael:
  *   - Artesanal/camiseria: in_production, in_fitting
  *   - Industrial/camiseria_industrial: in_production
+ *
+ * Carga = SOLO lo pendiente: dentro de esos pedidos, las prendas que el oficial
+ * ya dio por terminadas/entregadas no suman (ver FINISHED_LINE_STATUSES).
  *
  * Oficiales "fantasma" (texto en configuration que no coincide con ninguna
  * fila de `officials`) se ignoran. Solo aparecen los oficiales dados de alta.
@@ -65,12 +83,13 @@ export const getOfficialsLoad = protectedAction<void, OfficialLoad[]>(
     // 2. Líneas en pedidos activos (cabecera in_production o in_fitting)
     const { data: linesRows, error: linesErr } = await ctx.adminClient
       .from('tailoring_order_lines')
-      .select('id, configuration, tailoring_orders!inner(status, order_type)')
+      .select('id, status, configuration, tailoring_orders!inner(status, order_type)')
       .in('tailoring_orders.status', ['in_production', 'in_fitting'])
     if (linesErr) return failure(linesErr.message)
 
     type LineRow = {
       id: string
+      status: string
       configuration: { cortador?: string; oficial?: string } | null
       tailoring_orders:
         | { status: string; order_type: string }
@@ -105,6 +124,10 @@ export const getOfficialsLoad = protectedAction<void, OfficialLoad[]>(
       if (isIndustrial && status !== 'in_production') continue
       if (!isArtesanal && !isIndustrial) continue // proveedor, oficial, otros: fuera
 
+      // La CARGA es lo que le queda por hacer: las prendas ya terminadas (o
+      // entregadas) dentro de un pedido todavía abierto no cuentan.
+      if (isFinishedGarment(l.status) || EXCLUDED_LINE_STATUSES.has(l.status)) continue
+
       const cortador = normalizeName(l.configuration?.cortador)
       const oficial = normalizeName(l.configuration?.oficial)
 
@@ -132,7 +155,12 @@ export type OfficialInProgressItem = {
   order_id: string
   order_number: string
   order_type: string
-  status: string // 'in_production' | 'in_fitting'
+  /** Estado de la PRENDA (tailoring_order_lines.status). */
+  status: string
+  /** Estado de la cabecera del pedido, para contexto. */
+  order_status: string
+  /** true si la prenda ya está terminada/entregada (bloque «Terminadas»). */
+  is_finished: boolean
   client_name: string
   garment_type: string
   fabric_name: string | null
@@ -141,17 +169,29 @@ export type OfficialInProgressItem = {
   days_in_progress: number
 }
 
+/** Prendas de un rol, partidas en lo que queda por hacer y lo ya terminado. */
+export type OfficialRoleItems = {
+  pending: OfficialInProgressItem[]
+  finished: OfficialInProgressItem[]
+}
+
 export type OfficialInProgress = {
   official: { id: string; name: string; specialty: string | null } | null
-  asCortador: OfficialInProgressItem[]
-  asOficial: OfficialInProgressItem[]
+  asCortador: OfficialRoleItems
+  asOficial: OfficialRoleItems
 }
 
 /**
- * Devuelve las prendas en proceso de un oficial concreto, separadas por
- * rol (cortador / oficial). Misma lógica de "en proceso" que getOfficialsLoad:
+ * Devuelve las prendas de un oficial concreto en pedidos vivos, separadas por
+ * rol (cortador / oficial) y, dentro de cada rol, entre las que sigue teniendo
+ * en confección y las que ya ha terminado. Universo igual que getOfficialsLoad:
  *  - Artesanal/camiseria: estados in_production, in_fitting
  *  - Industrial/camiseria_industrial: solo in_production
+ * (pedidos ya cerrados no entran: para el histórico está la liquidación).
+ *
+ * La clasificación pendiente/terminada usa el estado de la LÍNEA, no el del
+ * pedido: un pedido sigue "En confección" mientras alguna prenda esté abierta,
+ * y por eso antes salían como en curso prendas ya acabadas.
  *
  * Días en proceso: aproximación con `tailoring_orders.updated_at`. Si se
  * requiere precisión exacta (cuándo entró al estado actual), habría que
@@ -180,7 +220,7 @@ export const getOfficialInProgressItems = protectedAction<
     const { data: linesRows, error: linesErr } = await ctx.adminClient
       .from('tailoring_order_lines')
       .select(
-        'id, configuration, model_name, fabric_description, ' +
+        'id, status, configuration, model_name, fabric_description, ' +
           'garment_types(name), ' +
           'fabrics(name, fabric_code), ' +
           'tailoring_orders!inner(id, order_number, order_type, status, estimated_delivery_date, updated_at, clients(full_name, first_name, last_name))'
@@ -190,6 +230,7 @@ export const getOfficialInProgressItems = protectedAction<
 
     type LineRow = {
       id: string
+      status: string
       configuration: { cortador?: string; oficial?: string } | null
       model_name: string | null
       fabric_description: string | null
@@ -202,8 +243,8 @@ export const getOfficialInProgressItems = protectedAction<
 
     const lines = (linesRows ?? []) as unknown as LineRow[]
 
-    const asCortador: OfficialInProgressItem[] = []
-    const asOficial: OfficialInProgressItem[] = []
+    const asCortador: OfficialRoleItems = { pending: [], finished: [] }
+    const asOficial: OfficialRoleItems = { pending: [], finished: [] }
     const now = Date.now()
 
     for (const l of lines) {
@@ -214,6 +255,7 @@ export const getOfficialInProgressItems = protectedAction<
       const isIndustrial = INDUSTRIAL_TYPES.has(parent.order_type)
       if (isIndustrial && parent.status !== 'in_production') continue
       if (!isArtesanal && !isIndustrial) continue
+      if (EXCLUDED_LINE_STATUSES.has(l.status)) continue
 
       const lineCortador = normalizeName(l.configuration?.cortador)
       const lineOficial = normalizeName(l.configuration?.oficial)
@@ -238,12 +280,15 @@ export const getOfficialInProgressItems = protectedAction<
         ? Math.max(0, Math.floor((now - updatedAt) / (24 * 60 * 60 * 1000)))
         : 0
 
+      const finished = isFinishedGarment(l.status)
       const item: OfficialInProgressItem = {
         line_id: l.id,
         order_id: parent.id,
         order_number: parent.order_number,
         order_type: parent.order_type,
-        status: parent.status,
+        status: l.status,
+        order_status: parent.status,
+        is_finished: finished,
         client_name: clientName,
         garment_type: garmentType,
         fabric_name: fabricName,
@@ -254,13 +299,18 @@ export const getOfficialInProgressItems = protectedAction<
 
       // Una misma línea puede asignarle al oficial los dos roles (cortador y
       // oficial). En ese caso aparece en ambas secciones por diseño.
-      if (matchesCortador) asCortador.push(item)
-      if (matchesOficial) asOficial.push(item)
+      const bucket = finished ? 'finished' : 'pending'
+      if (matchesCortador) asCortador[bucket].push(item)
+      if (matchesOficial) asOficial[bucket].push(item)
     }
 
     // Ordenar por días en proceso (descendente: lo más antiguo primero)
-    asCortador.sort((a, b) => b.days_in_progress - a.days_in_progress)
-    asOficial.sort((a, b) => b.days_in_progress - a.days_in_progress)
+    const byDays = (a: OfficialInProgressItem, b: OfficialInProgressItem) =>
+      b.days_in_progress - a.days_in_progress
+    asCortador.pending.sort(byDays)
+    asCortador.finished.sort(byDays)
+    asOficial.pending.sort(byDays)
+    asOficial.finished.sort(byDays)
 
     return success({
       official: official as { id: string; name: string; specialty: string | null },

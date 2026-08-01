@@ -356,8 +356,18 @@ export function OfficialsPageContent() {
                       {(() => {
                         const load = loadById.get(o.id)
                         if (!load) return <span className="text-xs text-muted-foreground">—</span>
+                        // Con 0 pendientes el detalle sigue siendo útil (puede
+                        // tener prendas terminadas en pedidos abiertos): link igual.
                         if (load.total === 0) {
-                          return <Badge variant="outline" className="text-xs font-normal text-muted-foreground">0</Badge>
+                          return (
+                            <Link
+                              href={`/admin/oficiales/${o.id}`}
+                              className="inline-flex items-center justify-center rounded-full border px-2.5 py-0.5 text-xs font-normal text-muted-foreground hover:bg-muted transition-colors min-w-[2rem]"
+                              title="Sin prendas pendientes"
+                            >
+                              0
+                            </Link>
+                          )
                         }
                         return (
                           <Link

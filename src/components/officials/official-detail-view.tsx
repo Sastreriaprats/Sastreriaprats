@@ -1,8 +1,9 @@
 'use client'
 
 /**
- * Vista de detalle de un oficial: prendas en proceso bajo su responsabilidad,
- * separadas por rol (cortador / oficial).
+ * Vista de detalle de un oficial: prendas bajo su responsabilidad en pedidos
+ * vivos, separadas por rol (cortador / oficial) y, dentro de cada rol, entre
+ * las que sigue teniendo en confección y las que ya ha terminado.
  *
  * Reutilizado en /admin/oficiales/[id] y /sastre/oficiales/[id]. La prop
  * `basePath` controla los links salientes (vuelta al listado, ir al pedido).
@@ -10,7 +11,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, ArrowLeft, Scissors, UserCheck, Calendar, ExternalLink } from 'lucide-react'
+import { Loader2, ArrowLeft, Scissors, UserCheck, Calendar, ExternalLink, CheckCircle2, Hammer } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -18,6 +19,7 @@ import {
   getOfficialInProgressItems,
   type OfficialInProgress,
   type OfficialInProgressItem,
+  type OfficialRoleItems,
 } from '@/actions/officials'
 import { formatDate, getOrderStatusLabel } from '@/lib/utils'
 
@@ -81,7 +83,8 @@ export function OfficialDetailView({ officialId, basePath }: Props) {
   }
 
   const { official, asCortador, asOficial } = data
-  const isEmpty = asCortador.length === 0 && asOficial.length === 0
+  const roleTotal = (r: OfficialRoleItems) => r.pending.length + r.finished.length
+  const isEmpty = roleTotal(asCortador) === 0 && roleTotal(asOficial) === 0
   const specialties = official.specialty
     ? official.specialty.split(',').map((s) => s.trim()).filter(Boolean)
     : []
@@ -116,19 +119,19 @@ export function OfficialDetailView({ officialId, basePath }: Props) {
         </Card>
       ) : (
         <>
-          {asCortador.length > 0 && (
+          {roleTotal(asCortador) > 0 && (
             <Section
               icon={<Scissors className="h-4 w-4" />}
               title="Como cortador"
-              items={asCortador}
+              role={asCortador}
               orderPath={orderPath}
             />
           )}
-          {asOficial.length > 0 && (
+          {roleTotal(asOficial) > 0 && (
             <Section
               icon={<UserCheck className="h-4 w-4" />}
               title="Como oficial"
-              items={asOficial}
+              role={asOficial}
               orderPath={orderPath}
             />
           )}
@@ -139,27 +142,75 @@ export function OfficialDetailView({ officialId, basePath }: Props) {
 }
 
 function Section({
-  icon, title, items, orderPath,
+  icon, title, role, orderPath,
 }: {
   icon: React.ReactNode
   title: string
-  items: OfficialInProgressItem[]
+  role: OfficialRoleItems
   orderPath: (id: string) => string
 }) {
+  const total = role.pending.length + role.finished.length
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
+        <CardTitle className="text-base flex flex-wrap items-center gap-2">
           {icon}
-          {title} ({items.length})
+          {title} ({total})
+          <span className="text-xs font-normal text-muted-foreground">
+            {role.pending.length} en confección · {role.finished.length} terminada{role.finished.length === 1 ? '' : 's'}
+          </span>
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
-        {items.map((it) => (
-          <ItemRow key={`${it.line_id}-${title}`} item={it} orderPath={orderPath} />
-        ))}
+      <CardContent className="space-y-6">
+        <SubSection
+          icon={<Hammer className="h-3.5 w-3.5" />}
+          label="En confección"
+          items={role.pending}
+          emptyText="Nada pendiente."
+          sectionKey={title}
+          orderPath={orderPath}
+        />
+        <SubSection
+          icon={<CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />}
+          label="Terminadas"
+          items={role.finished}
+          emptyText="Ninguna terminada todavía."
+          sectionKey={title}
+          orderPath={orderPath}
+        />
       </CardContent>
     </Card>
+  )
+}
+
+/**
+ * Bloque «En confección» / «Terminadas» dentro de un rol. Se pinta aunque esté
+ * vacío para que quede claro que la separación existe (p. ej. "Nada pendiente").
+ */
+function SubSection({
+  icon, label, items, emptyText, sectionKey, orderPath,
+}: {
+  icon: React.ReactNode
+  label: string
+  items: OfficialInProgressItem[]
+  emptyText: string
+  sectionKey: string
+  orderPath: (id: string) => string
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {icon}
+        {label} ({items.length})
+      </div>
+      {items.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{emptyText}</p>
+      ) : (
+        items.map((it) => (
+          <ItemRow key={`${it.line_id}-${sectionKey}-${label}`} item={it} orderPath={orderPath} />
+        ))
+      )}
+    </div>
   )
 }
 
@@ -174,10 +225,18 @@ function ItemRow({
     <div className="flex flex-col gap-2 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary" className="text-[10px] font-medium">En proceso</Badge>
-          <span className="text-xs text-muted-foreground">{getOrderStatusLabel(item.status)}</span>
-          <span className="text-xs text-muted-foreground">·</span>
+          {/* Estado de la PRENDA (no el del pedido): «Terminado»/«Entregado al
+              cliente» pueden convivir con un pedido aún en confección. */}
+          <Badge
+            variant={item.is_finished ? 'outline' : 'secondary'}
+            className={`text-[10px] font-medium ${item.is_finished ? 'border-emerald-600/40 bg-emerald-50 text-emerald-700' : ''}`}
+          >
+            {getOrderStatusLabel(item.status)}
+          </Badge>
           <span className="text-xs text-muted-foreground">{item.days_in_progress} día{item.days_in_progress === 1 ? '' : 's'}</span>
+          {item.order_status !== item.status && (
+            <span className="text-xs text-muted-foreground/70">· pedido: {getOrderStatusLabel(item.order_status)}</span>
+          )}
         </div>
         <p className="mt-1 font-medium">{item.client_name}</p>
         <p className="text-sm text-muted-foreground">

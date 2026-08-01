@@ -95,7 +95,15 @@ export function OfficialsLoadTable({ basePath }: { basePath: '/admin' | '/sastre
                     </TableCell>
                     <TableCell>
                       {o.total === 0 ? (
-                        <Badge variant="outline" className="text-xs font-normal text-muted-foreground">0</Badge>
+                        // 0 pendientes ≠ nada que ver: puede tener prendas ya
+                        // terminadas dentro de pedidos abiertos.
+                        <Link
+                          href={`${basePath}/oficiales/${o.id}`}
+                          className="inline-flex items-center justify-center rounded-full border px-2.5 py-0.5 text-xs font-normal text-muted-foreground hover:bg-muted transition-colors min-w-[2rem]"
+                          title="Sin prendas pendientes"
+                        >
+                          0
+                        </Link>
                       ) : (
                         <Link
                           href={`${basePath}/oficiales/${o.id}`}
