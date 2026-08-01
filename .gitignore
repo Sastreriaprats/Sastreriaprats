@@ -45,3 +45,7 @@ import-log.json
 # one-shot import reports & local CSVs
 /tmp/
 /scripts/data/
+
+# Previsualizaciones de plantillas de email generadas a mano para revisarlas
+# en el navegador: son artefactos locales, no forman parte de la aplicación.
+/email-previews/
