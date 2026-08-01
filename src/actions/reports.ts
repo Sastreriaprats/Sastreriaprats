@@ -5,7 +5,7 @@ import { checkUserExplicitPermission } from '@/actions/auth'
 import { success, failure } from '@/lib/errors'
 import { BOUTIQUE_SALE_TYPE, GIFT_CARD_SALE_TYPE, accumulateByStore, compareSizes } from '@/lib/reports/dimensions'
 import { fetchEmployeeBilledLines } from '@/lib/reports/employee-billing'
-import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
+import { loadPedidoCobroBaseBySale, isPedidoCobroDescription } from '@/lib/accounting/pedido-cobro-lines'
 
 /** Lee todas las páginas (evita el tope silencioso de 1000 filas de Supabase). */
 async function readAllPaged<T = Record<string, unknown>>(
@@ -848,9 +848,15 @@ export const getTopProducts = protectedAction<
       }
       const { data } = await q.range(from, from + PAGE - 1)
       if (!data?.length) break
-      // Excluir cobros pendientes — no son productos vendidos
+      // Excluir las líneas de ticket que son COBROS, no género vendido:
+      //   - "Pedido sastrería - PIN-…" / "Cobro pendiente - PIN|WEL-…" → cobro de un pedido
+      //   - "Cobro pendiente - TICK-…" → deuda pendiente de otra venta
+      // Un pedido de sastrería no es un producto: si entra aquí se cuela en el Top
+      // de productos, en el margen y en el desglose por talla (aviso de Isma, jul-2026).
       for (const line of data as any[]) {
-        if (!String(line.description || '').startsWith('Cobro pendiente')) filteredLines.push(line)
+        const desc = String(line.description || '')
+        if (desc.startsWith('Cobro pendiente') || isPedidoCobroDescription(desc)) continue
+        filteredLines.push(line)
       }
       if (data.length < PAGE) break
     }
