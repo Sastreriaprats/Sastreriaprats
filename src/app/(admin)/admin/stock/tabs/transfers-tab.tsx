@@ -75,6 +75,7 @@ export function TransfersTab() {
   const [searchTerm, setSearchTerm] = useState('')
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [lines, setLines] = useState<TransferLine[]>([])
+  const [lastAddedVariantId, setLastAddedVariantId] = useState<string | null>(null)
 
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -138,7 +139,8 @@ export function TransfersTab() {
         fetchTransfers()
         if (typeof window !== 'undefined') window.dispatchEvent(new Event('stock-transfers-updated'))
       } else {
-        toast.error(result.error || 'No se pudo confirmar la recepción')
+        // El error de stock nombra las líneas afectadas: hace falta tiempo para leerlo.
+        toast.error(result.error || 'No se pudo confirmar la recepción', { duration: 15000 })
       }
     } finally {
       setConfirmingReception(false)
@@ -203,7 +205,7 @@ export function TransfersTab() {
         fetchTransfers()
         if (typeof window !== 'undefined') window.dispatchEvent(new Event('stock-transfers-updated'))
       } else {
-        toast.error(result.error || 'No se pudo aprobar el traspaso')
+        toast.error(result.error || 'No se pudo aprobar el traspaso', { duration: 15000 })
       }
     } finally {
       setActioningId(null)
@@ -280,19 +282,33 @@ export function TransfersTab() {
     return () => clearTimeout(timer)
   }, [searchTerm, fromWarehouseId, isMassive, loadSearchResults])
 
+  // Lo recién añadido va SIEMPRE al principio de la lista (y si la variante ya estaba,
+  // suma una unidad y sube esa línea): con listas largas, añadir al final es inviable.
   const addManualLine = (row: any) => {
-    setLines((prev) => {
-      if (prev.some((x) => x.product_variant_id === row.product_variant_id)) return prev
-      return [...prev, {
-        product_variant_id: row.product_variant_id,
+    const variantId = row.product_variant_id
+    const available = Number(row.available) || 0
+    const existing = lines.find((x) => x.product_variant_id === variantId)
+    const rest = lines.filter((x) => x.product_variant_id !== variantId)
+
+    if (existing) {
+      const cap = existing.available || available
+      const next = Math.min(cap, Number(existing.quantity_requested || 0) + 1)
+      if (next === Number(existing.quantity_requested || 0)) {
+        toast.warning(`${existing.product_name}: ya has puesto el máximo disponible en origen (${cap})`)
+      }
+      setLines([{ ...existing, quantity_requested: next, selected: true }, ...rest])
+    } else {
+      setLines([{
+        product_variant_id: variantId,
         product_name: row.product_name,
         product_sku: row.product_sku,
         variant_sku: row.variant_sku,
-        available: Number(row.available) || 0,
+        available,
         quantity_requested: 1,
         selected: true,
-      }]
-    })
+      }, ...rest])
+    }
+    setLastAddedVariantId(variantId)
   }
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
@@ -309,6 +325,7 @@ export function TransfersTab() {
     setSearchTerm('')
     setSearchResults([])
     setLines([])
+    setLastAddedVariantId(null)
   }
 
   const submitNewTransfer = async () => {
@@ -579,6 +596,7 @@ export function TransfersTab() {
                 const enabled = Boolean(v)
                 setIsMassive(enabled)
                 setLines([])
+                setLastAddedVariantId(null)
                 setSearchResults([])
                 setSearchTerm('')
               }}
@@ -677,7 +695,14 @@ export function TransfersTab() {
                             </div>
                           </TableCell>
                           <TableCell className="text-right">
-                            <Button size="sm" variant="outline" onClick={() => addManualLine(r)} disabled={!r.available}>Añadir</Button>
+                            {(() => {
+                              const already = lines.find((l) => l.product_variant_id === r.product_variant_id)
+                              return (
+                                <Button size="sm" variant="outline" onClick={() => addManualLine(r)} disabled={!r.available}>
+                                  {already ? `Añadir otra (${already.quantity_requested})` : 'Añadir'}
+                                </Button>
+                              )
+                            })()}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -712,14 +737,22 @@ export function TransfersTab() {
                     </TableCell>
                   </TableRow>
                 ) : lines.map((line, idx) => (
-                  <TableRow key={line.product_variant_id}>
+                  <TableRow
+                    key={line.product_variant_id}
+                    className={line.product_variant_id === lastAddedVariantId ? 'bg-primary/10' : undefined}
+                  >
                     <TableCell>
                       <Checkbox
                         checked={line.selected}
                         onCheckedChange={(v) => setLines((prev) => prev.map((x, i) => i === idx ? { ...x, selected: Boolean(v) } : x))}
                       />
                     </TableCell>
-                    <TableCell>{line.product_name}</TableCell>
+                    <TableCell>
+                      {line.product_name}
+                      {line.product_variant_id === lastAddedVariantId ? (
+                        <Badge variant="outline" className="ml-2 text-[10px] font-normal">recién añadido</Badge>
+                      ) : null}
+                    </TableCell>
                     <TableCell className="font-mono text-xs">{line.variant_sku || line.product_sku}</TableCell>
                     <TableCell>{line.available}</TableCell>
                     <TableCell>

@@ -1711,9 +1711,22 @@ export const approveStockTransfer = protectedAction<
 
     const { data: lines, error: linesError } = await ctx.adminClient
       .from('stock_transfer_lines')
-      .select('id, product_variant_id, quantity_requested, quantity_sent, quantity_received')
+      .select(`
+        id, product_variant_id, quantity_requested, quantity_sent, quantity_received,
+        product_variants ( variant_sku, size, color, products ( name, sku ) )
+      `)
       .eq('transfer_id', id)
     if (linesError || !lines?.length) return failure('No hay líneas en el traspaso', 'VALIDATION')
+
+    // Etiqueta legible de una línea para los mensajes de error: nunca devolver el UUID
+    // de la variante, que no le dice nada a quien recepciona el traspaso.
+    const lineLabel = (line: any) => {
+      const v = line.product_variants
+      const name = v?.products?.name || 'Producto sin nombre'
+      const ref = v?.variant_sku || v?.products?.sku || null
+      const attrs = [v?.size ? `talla ${v.size}` : null, v?.color || null].filter(Boolean).join(' · ')
+      return [name, ref ? `(${ref})` : null, attrs || null].filter(Boolean).join(' · ')
+    }
 
     // Modo parcial: alguna línea tiene quantity_received > 0 (destino ya declaró recepción).
     // En modo parcial, lo que se mueve al stock es quantity_received (puede ser 0 para líneas no recibidas).
@@ -1733,12 +1746,24 @@ export const approveStockTransfer = protectedAction<
       .in('product_variant_id', variantIds)
     const fromMap = new Map((fromLevels || []).map((r: any) => [r.product_variant_id, { id: r.id, quantity: Number(r.quantity || 0) }]))
 
+    // Se recorren TODAS las líneas antes de fallar, para poder decir de una vez cuáles
+    // son las que no tienen stock (si no, hay que reintentar una por una).
+    const shortages: string[] = []
     for (const line of lines as any[]) {
       const qty = qtyToMove(line)
       if (qty <= 0) continue
-      const fromLevel = fromMap.get(line.product_variant_id)
-      if (!fromLevel) return failure(`Sin stock en origen para variante ${line.product_variant_id}`, 'CONFLICT')
-      if (fromLevel.quantity < qty) return failure(`Stock insuficiente en origen para variante ${line.product_variant_id}: disponible ${fromLevel.quantity}, solicitado ${qty}`, 'CONFLICT')
+      const availableQty = fromMap.get(line.product_variant_id)?.quantity ?? 0
+      if (availableQty < qty) {
+        shortages.push(`${lineLabel(line)}: disponible ${availableQty}, necesario ${qty}`)
+      }
+    }
+    if (shortages.length) {
+      const shown = shortages.slice(0, 5).join(' — ')
+      const rest = shortages.length > 5 ? ` — y ${shortages.length - 5} línea(s) más` : ''
+      const prefix = shortages.length === 1
+        ? 'Sin stock suficiente en origen en esta línea'
+        : `Sin stock suficiente en origen en ${shortages.length} líneas`
+      return failure(`${prefix} → ${shown}${rest}. Ajusta la cantidad recibida de esa(s) línea(s) o revisa el stock del almacén origen.`, 'CONFLICT')
     }
 
     for (const line of lines as any[]) {
