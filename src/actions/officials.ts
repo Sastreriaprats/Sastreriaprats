@@ -45,7 +45,9 @@ const FINISHED_LINE_STATUSES = new Set(['finished', 'delivered', 'received_in_st
 /** Prendas fuera del trabajo del oficial: ni pendientes ni terminadas. */
 const EXCLUDED_LINE_STATUSES = new Set(['cancelled'])
 
-export function isFinishedGarment(lineStatus: string | null | undefined): boolean {
+// Sin `export`: este módulo es 'use server' y ahí solo pueden exportarse
+// funciones async (server actions). Solo se usa dentro de este fichero.
+function isFinishedGarment(lineStatus: string | null | undefined): boolean {
   return FINISHED_LINE_STATUSES.has(lineStatus || '')
 }
 
