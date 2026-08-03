@@ -45,7 +45,7 @@ import { generateTicketPdf, printTicketPdf, printGiftTicketPdf } from '@/compone
 import { createPrintReporter } from '@/lib/client-telemetry'
 import { printGiftCardPdf, downloadGiftCardPdf } from '@/components/pos/gift-card-pdf'
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
-import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
+import { createInvoiceFromSaleAction, generateInvoicePdfAction, updateInvoiceConceptsAction } from '@/actions/accounting'
 import { getActiveReservationsForVariant, listReservations } from '@/actions/reservations'
 import { getClientPendingWork, markAlterationCharged } from '@/actions/alterations'
 import { ReservationDialog } from './reservation-dialog'
@@ -135,6 +135,9 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const [payments, setPayments] = useState<Payment[]>([])
   const [completedSale, setCompletedSale] = useState<any | null>(null)
   const [showTicketModal, setShowTicketModal] = useState(false)
+  // Revisión de conceptos antes de emitir la factura del ticket
+  const [showInvoiceConcepts, setShowInvoiceConcepts] = useState(false)
+  const [invoiceConcepts, setInvoiceConcepts] = useState<string[]>([])
   const [saleWithoutClient, setSaleWithoutClient] = useState(false)
   const [showClientDialog, setShowClientDialog] = useState(false)
   const [showCreateClientDialog, setShowCreateClientDialog] = useState(false)
@@ -778,13 +781,19 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
         const method = cobroPaymentMethodRef.current
         const orderMethod = method === 'bizum' || method === 'voucher' ? 'card' : (method === 'cash' || method === 'card' || method === 'transfer' ? method : 'cash')
         const today = new Date().toISOString().split('T')[0]
+        // Fecha del cobro = la de la VENTA, no la de hoy. En una venta atrasada
+        // (mig 253) el ticket vive en la caja de aquel día: si el cobro del pedido
+        // se registrase con la fecha de hoy, entraría en la caja de hoy y
+        // descuadraría los dos cierres (la de hoy de más, la de aquel día de
+        // menos). La RPC devuelve la fecha que realmente aplicó.
+        const cobroDate = (data as any)?.sale_date ?? saleDate ?? today
         const newSaleId = (data as any)?.id ?? (data as any)?.sale?.id ?? null
         for (const item of cobroLines) {
           try {
             if (item.entity_type === 'tailoring_order') {
               const res = await addOrderPayment({
                 tailoring_order_id: item.entity_id,
-                payment_date: today,
+                payment_date: cobroDate,
                 payment_method: orderMethod,
                 amount: item.amount,
                 storeId: activeStoreId ?? undefined,
@@ -800,6 +809,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
             } else {
               const res = await addSalePayment({
                 sale_id: item.entity_id,
+                payment_date: cobroDate,
                 payment_method: orderMethod,
                 amount: item.amount,
                 storeId: activeStoreId ?? undefined,
@@ -1086,7 +1096,17 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
     await printGiftTicketPdf(data)
   }
 
-  const handleDownloadFactura = async () => {
+  // Facturar el ticket: primero se revisan los CONCEPTOS. Las descripciones del
+  // ticket son internas ("Cobro pendiente - WEL-2026-0005", refs de reserva) y no
+  // sirven tal cual en una factura que va al cliente. Si no se toca nada, sale
+  // exactamente igual que antes.
+  const handleDownloadFactura = () => {
+    if (!completedSale?.id) return
+    setInvoiceConcepts(ticketLines.map(l => l.description))
+    setShowInvoiceConcepts(true)
+  }
+
+  const confirmFactura = async () => {
     if (!completedSale?.id) return
     setDownloadingInvoice(true)
     try {
@@ -1095,11 +1115,24 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
         toast.error('error' in createRes ? createRes.error : 'Error al crear la factura')
         return
       }
+      const original = ticketLines.map(l => l.description)
+      const changed = invoiceConcepts.some((d, i) => d.trim() && d.trim() !== (original[i] ?? '').trim())
+      if (changed) {
+        const upd = await updateInvoiceConceptsAction({
+          invoiceId: createRes.data.id,
+          descriptions: invoiceConcepts,
+        })
+        if (!upd.success) {
+          toast.error('error' in upd ? upd.error : 'No se pudieron guardar los conceptos')
+          return
+        }
+      }
       const pdfRes = await generateInvoicePdfAction(createRes.data.id)
       if (!pdfRes.success || !pdfRes.data?.url) {
         toast.error('error' in pdfRes ? pdfRes.error : 'Error al generar el PDF')
         return
       }
+      setShowInvoiceConcepts(false)
       window.open(pdfRes.data.url, '_blank', 'noopener,noreferrer')
       toast.success(`Factura ${createRes.data.invoice_number} generada`)
     } catch (e) {
@@ -2095,6 +2128,46 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
           <DialogFooter className="border-t bg-slate-50 px-6 py-4 flex-row justify-between">
             <Button variant="outline" className="rounded-lg border-slate-300" onClick={() => { setPayments([]); setShowPayment(false) }}>
               Cancelar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Conceptos de la factura: revisar/redactar antes de emitirla */}
+      <Dialog open={showInvoiceConcepts} onOpenChange={(open) => { if (!open && !downloadingInvoice) setShowInvoiceConcepts(false) }}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-blue-600" />
+              Conceptos de la factura
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-slate-600">
+            Revisa cómo verá el cliente cada línea. Los importes, el total y el IVA no cambian.
+          </p>
+          <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
+            {invoiceConcepts.map((desc, i) => (
+              <div key={i} className="space-y-1">
+                <Label className="text-xs text-slate-500">
+                  Línea {i + 1} · {formatCurrency(
+                    (ticketLines[i]?.unit_price ?? 0) * (ticketLines[i]?.quantity ?? 1) *
+                    (1 - (ticketLines[i]?.discount_percentage || 0) / 100)
+                  )}
+                </Label>
+                <Input
+                  value={desc}
+                  onChange={(e) => setInvoiceConcepts(prev => prev.map((d, j) => (j === i ? e.target.value : d)))}
+                />
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowInvoiceConcepts(false)} disabled={downloadingInvoice}>
+              Cancelar
+            </Button>
+            <Button onClick={confirmFactura} disabled={downloadingInvoice}>
+              {downloadingInvoice ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Emitir factura
             </Button>
           </DialogFooter>
         </DialogContent>

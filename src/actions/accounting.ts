@@ -1892,7 +1892,7 @@ export const createInvoiceFromSaleAction = protectedAction<
   async (ctx, { saleId, draft }) => {
     const { data: sale, error: saleError } = await ctx.adminClient
       .from('sales')
-      .select('id, subtotal, tax_amount, total, client_id, store_id')
+      .select('id, subtotal, tax_amount, total, client_id, store_id, created_at, ticket_number')
       .eq('id', saleId)
       .single()
 
@@ -1960,6 +1960,17 @@ export const createInvoiceFromSaleAction = protectedAction<
     const dueDate = new Date()
     dueDate.setDate(dueDate.getDate() + 15)
 
+    // Fecha de OPERACIÓN: la del ticket. La factura se expide hoy (invoice_date),
+    // que es lo que mantiene correlativa la serie F; pero si la venta fue otro día
+    // hay que hacerla constar (RD 1619/2012 art. 6.1.f) — si no, una venta atrasada
+    // (mig 253) o un ticket facturado días después aparenta ser de hoy. Va en las
+    // notas, que el PDF ya imprime.
+    const saleDay = String((sale as { created_at?: string }).created_at ?? '').slice(0, 10)
+    const ticketNumber = (sale as { ticket_number?: string }).ticket_number ?? ''
+    const operationNote = saleDay && saleDay !== today
+      ? `Fecha de operación: ${saleDay.split('-').reverse().join('/')}${ticketNumber ? ` · Ticket ${ticketNumber}` : ''}`
+      : null
+
     const { data: inv, error } = await ctx.adminClient
       .from('invoices')
       .insert({
@@ -1983,6 +1994,7 @@ export const createInvoiceFromSaleAction = protectedAction<
         irpf_rate: 0,
         irpf_amount: 0,
         total,
+        notes: operationNote,
         status: draft ? 'draft' : 'issued',
         sale_id: saleId,
         store_id: storeId,
@@ -2005,7 +2017,12 @@ export const createInvoiceFromSaleAction = protectedAction<
           // Convertimos vía line_total para evitar errores acumulados de redondeo
           // (mismo patrón que createInvoiceFromTailoringOrderAction).
           const qty = Math.max(1, Number(l.quantity) || 1)
-          const taxRate = Number(l.tax_rate) || 21
+          // `?? 21`, NO `|| 21`: un tipo 0 es legítimo y hay que respetarlo. Los
+          // cobros de pedido embebidos en el ticket van al 0% (su IVA lo aporta el
+          // pedido, no la venta); con `||` se facturaban al 21% y la factura dejaba
+          // de cuadrar consigo misma — la suma de bases no daba el subtotal de la
+          // cabecera, que se copia de la venta.
+          const taxRate = Number(l.tax_rate ?? 21)
           const lineTotal = Number(l.line_total)
           const unitPriceNoTax = lineTotal / (1 + taxRate / 100) / qty
           return {
@@ -2400,6 +2417,71 @@ export const createInvoiceFromReservationAction = protectedAction<
 
 // ── Editar factura borrador ───────────────────────────────────────────────────
 export type UpdateInvoiceInput = CreateInvoiceInput & { id: string; conceptOnly?: boolean }
+
+/**
+ * Reescribe SOLO las descripciones de las líneas de una factura, por orden.
+ * Es el "conceptOnly" de updateInvoiceAction sin exigir el objeto de factura
+ * entero: pensado para el TPV, donde se factura un ticket en el momento y hay
+ * que poder redactar los conceptos para el cliente (los del ticket son internos:
+ * "Cobro pendiente - WEL-2026-0005", referencias de reserva…). No toca importes,
+ * fechas ni cabecera, así que la factura sigue cuadrando con la venta.
+ */
+export const updateInvoiceConceptsAction = protectedAction<
+  { invoiceId: string; descriptions: string[] },
+  { id: string; updated: number; auditEntityId: string; auditDescription: string }
+>(
+  { permission: 'accounting.manage_invoices', auditModule: 'accounting', auditAction: 'update', auditEntity: 'invoice' },
+  async (ctx, { invoiceId, descriptions }) => {
+    if (!invoiceId) return failure('Falta el identificador de la factura', 'VALIDATION')
+
+    const { data: inv } = await ctx.adminClient
+      .from('invoices')
+      .select('id, invoice_number, status, verifactu_sent')
+      .eq('id', invoiceId)
+      .maybeSingle()
+    if (!inv) return failure('Factura no encontrada', 'NOT_FOUND')
+
+    // Mismos cerrojos que updateInvoiceAction: Hacienda manda.
+    if ((inv as { verifactu_sent?: boolean }).verifactu_sent === true) {
+      return failure(
+        'Esta factura ya fue enviada a Hacienda (Verifactu). No se puede editar — emite una factura rectificativa.',
+        'FORBIDDEN',
+      )
+    }
+    const status = (inv as { status: string }).status
+    if (!['draft', 'issued', 'paid', 'partially_paid', 'overdue'].includes(status)) {
+      return failure(`No se pueden editar facturas en estado "${status}".`, 'FORBIDDEN')
+    }
+
+    const { data: lines, error: linesErr } = await ctx.adminClient
+      .from('invoice_lines')
+      .select('id, sort_order')
+      .eq('invoice_id', invoiceId)
+      .order('sort_order', { ascending: true })
+    if (linesErr) return failure(linesErr.message)
+
+    const sorted = (lines ?? []) as Array<{ id: string }>
+    let updated = 0
+    for (let i = 0; i < descriptions.length && i < sorted.length; i++) {
+      const text = String(descriptions[i] ?? '').trim()
+      if (!text) continue
+      const { error } = await ctx.adminClient
+        .from('invoice_lines')
+        .update({ description: text })
+        .eq('id', sorted[i].id)
+      if (error) return failure(error.message)
+      updated++
+    }
+
+    const number = (inv as { invoice_number?: string }).invoice_number ?? ''
+    return success({
+      id: invoiceId,
+      updated,
+      auditEntityId: String(invoiceId),
+      auditDescription: `Conceptos editados en la factura ${number}`,
+    })
+  }
+)
 
 export const updateInvoiceAction = protectedAction<UpdateInvoiceInput, { id: string; auditEntityId: string; auditDescription: string }>(
   { permission: 'accounting.manage_invoices', auditModule: 'accounting', auditAction: 'update', auditEntity: 'invoice' },

@@ -7,12 +7,15 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { ArrowLeft, Loader2, TrendingUp, ShoppingBag, CreditCard, Users, Printer, FileText } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { PaymentMethodBadge } from '@/components/ui/payment-method-badge'
 import { generateTicketPdf } from '@/components/pos/ticket-pdf'
-import { createInvoiceFromSaleAction, generateInvoicePdfAction } from '@/actions/accounting'
+import { createInvoiceFromSaleAction, generateInvoicePdfAction, updateInvoiceConceptsAction } from '@/actions/accounting'
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
 import { toast } from 'sonner'
 
@@ -55,6 +58,12 @@ export function PosSummaryContent() {
   const [isLoading, setIsLoading] = useState(true)
   const [printingId, setPrintingId] = useState<string | null>(null)
   const [invoicingId, setInvoicingId] = useState<string | null>(null)
+  // Revisión de conceptos antes de emitir la factura de un ticket
+  const [showConcepts, setShowConcepts] = useState(false)
+  const [issuingInvoice, setIssuingInvoice] = useState(false)
+  const [invoiceSale, setInvoiceSale] = useState<{ id: string; ticket_number?: string } | null>(null)
+  const [invoiceLines, setInvoiceLines] = useState<{ description: string; line_total: number }[]>([])
+  const [invoiceConcepts, setInvoiceConcepts] = useState<string[]>([])
   const storeName = stores.find((s) => s.storeId === activeStoreId)?.storeName ?? null
 
   useEffect(() => {
@@ -276,25 +285,58 @@ export function PosSummaryContent() {
     }
   }
 
+  // Facturar un ticket del día: primero se revisan los CONCEPTOS, porque las
+  // descripciones del ticket son internas y la factura va al cliente. Si no se
+  // toca nada, el resultado es el mismo de siempre.
   const handleInvoice = async (sale: any) => {
     setInvoicingId(sale.id)
     try {
-      const createRes = await createInvoiceFromSaleAction({ saleId: sale.id })
+      const { data: lines } = await supabase
+        .from('sale_lines')
+        .select('description, line_total, sort_order')
+        .eq('sale_id', sale.id)
+        .order('sort_order', { ascending: true })
+      const rows = (lines || []) as { description: string; line_total: number | string }[]
+      setInvoiceSale(sale)
+      setInvoiceLines(rows.map(l => ({ description: l.description, line_total: Number(l.line_total) || 0 })))
+      setInvoiceConcepts(rows.map(l => l.description))
+      setShowConcepts(true)
+    } catch {
+      toast.error('Error al preparar la factura')
+    } finally {
+      setInvoicingId(null)
+    }
+  }
+
+  const confirmInvoice = async () => {
+    if (!invoiceSale?.id) return
+    setIssuingInvoice(true)
+    try {
+      const createRes = await createInvoiceFromSaleAction({ saleId: invoiceSale.id })
       if (!createRes.success || !createRes.data) {
         toast.error('error' in createRes ? createRes.error : 'Error al crear la factura')
         return
+      }
+      const changed = invoiceConcepts.some((d, i) => d.trim() && d.trim() !== (invoiceLines[i]?.description ?? '').trim())
+      if (changed) {
+        const upd = await updateInvoiceConceptsAction({ invoiceId: createRes.data.id, descriptions: invoiceConcepts })
+        if (!upd.success) {
+          toast.error('error' in upd ? upd.error : 'No se pudieron guardar los conceptos')
+          return
+        }
       }
       const pdfRes = await generateInvoicePdfAction(createRes.data.id)
       if (!pdfRes.success || !pdfRes.data?.url) {
         toast.error('error' in pdfRes ? pdfRes.error : 'Error al generar el PDF')
         return
       }
+      setShowConcepts(false)
       window.open(pdfRes.data.url, '_blank', 'noopener,noreferrer')
       toast.success(`Factura ${createRes.data.invoice_number} generada`)
     } catch (e) {
       toast.error('Error al emitir la factura')
     } finally {
-      setInvoicingId(null)
+      setIssuingInvoice(false)
     }
   }
 
@@ -469,6 +511,41 @@ export function PosSummaryContent() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Conceptos de la factura: revisar/redactar antes de emitirla */}
+      <Dialog open={showConcepts} onOpenChange={(open) => { if (!open && !issuingInvoice) setShowConcepts(false) }}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-blue-600" />
+              Conceptos de la factura {invoiceSale?.ticket_number ? `· ${invoiceSale.ticket_number}` : ''}
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-slate-600">
+            Revisa cómo verá el cliente cada línea. Los importes, el total y el IVA no cambian.
+          </p>
+          <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
+            {invoiceConcepts.map((desc, i) => (
+              <div key={i} className="space-y-1">
+                <Label className="text-xs text-slate-500">
+                  Línea {i + 1} · {formatCurrency(invoiceLines[i]?.line_total ?? 0)}
+                </Label>
+                <Input
+                  value={desc}
+                  onChange={(e) => setInvoiceConcepts(prev => prev.map((d, j) => (j === i ? e.target.value : d)))}
+                />
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowConcepts(false)} disabled={issuingInvoice}>Cancelar</Button>
+            <Button onClick={confirmInvoice} disabled={issuingInvoice}>
+              {issuingInvoice ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Emitir factura
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
