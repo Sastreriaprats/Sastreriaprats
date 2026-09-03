@@ -153,8 +153,13 @@ export async function queryList<T>(
   const { data, count, error } = await query
 
   if (error) {
+    // Antes se devolvia una lista vacia con exito, asi que la pantalla no podia
+    // distinguir "no hay resultados" de "la consulta ha fallado" y enseñaba
+    // "Sin resultados" y contadores a 0 como si fueran datos buenos. Los seis
+    // llamantes viven dentro de protectedAction, cuyo catch lo convierte en
+    // {success:false}, y useList ya muestra el error sin vaciar la tabla.
     console.error(`[queryList] Error querying ${table}:`, error)
-    return { data: [], total: 0, page, pageSize, totalPages: 0 }
+    throw new Error(error.message || `Error al consultar ${table}`)
   }
 
   const total = count || 0

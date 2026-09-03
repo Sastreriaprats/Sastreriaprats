@@ -183,7 +183,12 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
     filters, setFilters, isLoading, refresh, pageSize,
     statusCounts: statusCountsFromApi, totalAll, aggregates,
   } = useList(listOrders, {
-    pageSize: 25,
+    // El Kanban no tiene paginador: con 25 solo pintaba la primera pagina y el
+    // resto de pedidos no aparecia en ninguna columna. `pageSize` esta en las
+    // dependencias del hook, asi que al cambiar de vista se recarga solo.
+    // 500 < 1000 (tope de PostgREST); si algun dia se pasa de ahi habra que
+    // paginar de verdad en bucle.
+    pageSize: view === 'pipeline' ? 500 : 25,
     defaultSort: 'order_date',
     defaultOrder: 'desc',
     // Los filtros persistidos (estado, subtipo, rango de fechas) se leen de la

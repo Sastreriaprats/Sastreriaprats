@@ -1666,6 +1666,19 @@ export const approveStockTransfer = protectedAction<
     // ANTES de evaluar si se completa el par, para que queden registradas aunque la
     // aprobación aún sea parcial.
     if (role === 'destination' && receivedQuantities && typeof receivedQuantities === 'object') {
+      // "No ha llegado nada" no es una recepcion, es un rechazo. Y si se
+      // guardara, `partialMode` (mas abajo) no distingue "todas a 0" de "nadie
+      // declaro nada" -quantity_received es DEFAULT 0- y acabaria moviendo el
+      // 100% de lo solicitado: el destino sumaria stock que no tiene y el
+      // origen perderia unidades que siguen en la estanteria.
+      const declarados = Object.values(receivedQuantities)
+        .map((n) => Math.max(0, Math.trunc(Number(n) || 0)))
+      if (declarados.length > 0 && declarados.every((n) => n === 0)) {
+        return failure(
+          'No has indicado ninguna unidad recibida. Si no ha llegado nada, rechaza el traspaso en lugar de recepcionarlo.',
+          'VALIDATION',
+        )
+      }
       const { data: existingLines } = await ctx.adminClient
         .from('stock_transfer_lines')
         .select('id, quantity_requested')

@@ -77,7 +77,7 @@ export function PaymentHistory({
   entityStoreId, entityStoreName,
 }: PaymentHistoryProps) {
   const { activeStoreId } = useActiveStore()
-  const { can, isSuperAdmin } = usePermissions()
+  const { can, canAny, isSuperAdmin } = usePermissions()
   // Tienda efectiva donde cae el cobro: SIEMPRE la del pedido/venta si la
   // conocemos. Solo si no la sabemos (callers antiguos) se recurre a la
   // tienda activa del operador. Esto evita que un cobro de un pedido de
@@ -95,6 +95,11 @@ export function PaymentHistory({
   // Columna "Registrado por": quién registró el cobro (created_by del pago), NO el
   // vendedor de la venta. Solo pedidos de sastrería (sale_payments no guarda created_by).
   const showSeller = entityType === 'tailoring_order'
+  // El boton de registrar cobro solo se ofrece a quien la accion se lo va a
+  // permitir: antes se pintaba siempre y el cobro moria en "Sin permisos".
+  const canRegisterPayment = entityType === 'sale'
+    ? canAny(['sales.edit', 'pos.sell'])
+    : canAny(['orders.edit', 'pos.sell'])
   const [payments, setPayments] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -311,7 +316,7 @@ export function PaymentHistory({
       {/* Cabecera + botón */}
       <div className="flex items-center justify-between">
         <h4 className={`text-sm font-medium${variant === 'sastre' ? ' text-white/70' : ''}`}>Historial de pagos</h4>
-        {!readonly && totalPending > 0 && (
+        {!readonly && totalPending > 0 && canRegisterPayment && (
           <Button
             size="sm"
             onClick={() => { resetForm(); setDialogOpen(true) }}

@@ -336,6 +336,10 @@ export const createSale = protectedAction<{
       salesperson_name,
       residualVouchers,
       residual_voucher_error: residualFailure,
+      // Se propaga a la UI para que el fallo del asiento deje de ser invisible.
+      // NO convierte la venta en error: el cobro ya esta hecho y repetirlo seria
+      // peor; lo que hace falta es que alguien se entere y lo arregle.
+      journal_error: journal.ok ? null : (journal.error ?? 'error desconocido'),
       auditDescription,
     })
   }
@@ -479,6 +483,9 @@ export const createGiftCard = protectedAction<any, any>(
     return success({
       sale: saleResult,
       voucher,
+      // Se propaga a la UI: un asiento que falla dejaba la operacion sin
+      // rastro en el diario y nadie se enteraba (ver createSale).
+      journal_error: gcJournal.ok ? null : (gcJournal.error ?? 'error desconocido'),
       auditDescription,
     })
   }
@@ -1175,6 +1182,9 @@ export const createReturn = protectedAction<{
       : ''
     return success({
       ...result,
+      // Se propaga a la UI: un asiento que falla dejaba la operacion sin
+      // rastro en el diario y nadie se enteraba (ver createSale).
+      journal_error: returnJournal.ok ? null : (returnJournal.error ?? 'error desconocido'),
       auditEntityId: String(result.return_id),
       auditDescription: `Devolución del ticket ${originalTicketNumber ?? '—'}${originalClientName ? ' · ' + originalClientName : ''}${modeDesc}`,
       voucher_code: result.voucher_code ?? null,
@@ -1255,14 +1265,15 @@ export const processExchange = protectedAction<{
     // Asientos del cambio directo: la RPC crea la venta nueva DENTRO de Postgres
     // y no asienta nada → sin esto, toda venta nacida de un cambio quedaba fuera
     // del diario (y la devolución del crédito también).
+    let exchangeJournalError: string | null = null
     {
       const rr = result as { exchange_sale_id?: string; credito_X?: number }
       if (rr.exchange_sale_id) {
         const je = await createSaleJournalEntry(rr.exchange_sale_id)
-        if (!je.ok) console.error(`[processExchange] asiento de la venta del cambio (${rr.exchange_sale_id}) falló: ${je.error}`)
+        if (!je.ok) { exchangeJournalError = je.error ?? 'error desconocido'; console.error(`[processExchange] asiento de la venta del cambio (${rr.exchange_sale_id}) falló: ${je.error}`) }
       }
       const jr = await createSaleReturnJournalEntry(input.original_sale_id, Number(rr.credito_X ?? 0))
-      if (!jr.ok) console.error(`[processExchange] asiento de devolución del cambio (venta ${input.original_sale_id}) falló: ${jr.error}`)
+      if (!jr.ok) { exchangeJournalError = jr.error ?? 'error desconocido'; console.error(`[processExchange] asiento de devolución del cambio (venta ${input.original_sale_id}) falló: ${jr.error}`) }
     }
 
     // Datos extra para el ticket de cambio (igual que createReturn enriquece su modal)
@@ -1288,6 +1299,9 @@ export const processExchange = protectedAction<{
 
     return success({
       ...result,
+      // Se propaga a la UI: un asiento que falla dejaba la operacion sin
+      // rastro en el diario y nadie se enteraba (ver createSale).
+      journal_error: exchangeJournalError,
       original_ticket_number: ticketNumber,
       original_client_name: sale?.clients?.full_name ?? null,
       reason: input.reason,
@@ -1838,12 +1852,16 @@ export const editSaleLines = protectedAction<
       return failure(String(data.error || 'No se pudo editar la venta'), 'CONFLICT')
     }
     // La RPC borró el asiento viejo; lo regeneramos con los nuevos totales.
+    let editJournalError: string | null = null
     if (data?.regenerate_journal) {
       const je = await createSaleJournalEntry(saleId)
-      if (!je.ok) console.error(`[editSaleLines] no se pudo regenerar el asiento de la venta ${ticketNumber}: ${je.error}`)
+      if (!je.ok) { editJournalError = je.error ?? 'error desconocido'; console.error(`[editSaleLines] no se pudo regenerar el asiento de la venta ${ticketNumber}: ${je.error}`) }
     }
     return success({
       ...(data as Record<string, unknown>),
+      // Se propaga a la UI: un asiento que falla dejaba la operacion sin
+      // rastro en el diario y nadie se enteraba (ver createSale).
+      journal_error: editJournalError,
       auditEntityId: String(saleId),
       auditDescription: `Líneas de la venta ${ticketNumber}`,
     })

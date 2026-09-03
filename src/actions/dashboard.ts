@@ -26,27 +26,6 @@ interface DashboardStats {
   deliveriesToday: number
 }
 
-const DEFAULT_DASHBOARD_STATS: DashboardStats = {
-  salesToday: 0,
-  salesThisMonth: 0,
-  salesLastMonth: 0,
-  monthGrowth: 0,
-  activeOrders: 0,
-  ordersInProduction: 0,
-  ordersPendingDelivery: 0,
-  ordersOverdue: 0,
-  clientsTotal: 0,
-  clientsNewThisMonth: 0,
-  avgTicket: 0,
-  cashSessionOpen: false,
-  cashSessionTotal: 0,
-  lowStockCount: 0,
-  supplierDebtTotal: 0,
-  overduePayments: 0,
-  fittingsToday: 0,
-  deliveriesToday: 0,
-}
-
 export const getDashboardStats = protectedAction<string | undefined, DashboardStats>(
   { permission: 'reports.view', auditModule: 'dashboard' },
   async (ctx, _storeId) => {
@@ -201,8 +180,16 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
       }
       return success(JSON.parse(JSON.stringify(result)))
     } catch (queryErr) {
+      // Antes se devolvian todos los contadores a CERO como si fueran buenos:
+      // el panel decia "0,00 €" de ventas y "0" de pedidos, indistinguible de
+      // un dia flojo de verdad. Mejor decir que ha fallado.
       console.error('[getDashboardStats] Error en consultas:', queryErr)
-      return success({ ...DEFAULT_DASHBOARD_STATS })
+      return failure(
+        queryErr instanceof Error
+          ? `No se pudieron cargar los indicadores del panel: ${queryErr.message}`
+          : 'No se pudieron cargar los indicadores del panel',
+        'INTERNAL',
+      )
     }
   }
 )

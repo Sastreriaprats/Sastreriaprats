@@ -261,7 +261,10 @@ export const getSalePayments = protectedAction<{ sale_id: string }, any[]>(
 )
 
 export const addSalePayment = protectedAction<AddSalePaymentInput, any>(
-  { permission: 'sales.edit', auditAction: 'payment', auditModule: 'sales' },
+  // Cobrar no es editar: `sales.edit` solo lo tiene administrador, asi que
+  // sastres y vendedores no podian registrar el cobro de una venta a plazos
+  // pese a tener el boton delante. Borrar/editar un cobro siguen en sales.edit.
+  { permission: ['sales.edit', 'pos.sell'], auditAction: 'payment', auditModule: 'sales' },
   async (ctx, input) => {
     try {
       const today = new Date().toISOString().split('T')[0]

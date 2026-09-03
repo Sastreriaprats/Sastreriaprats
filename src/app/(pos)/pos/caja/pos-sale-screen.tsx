@@ -780,6 +780,16 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
       setShowPayment(false)
       setCompletedSale(data)
       setShowTicketModal(true)
+      // Avisos de cosas que fallaron DESPUES de cobrar. La venta es valida y no
+      // hay que repetirla, pero alguien tiene que enterarse: hasta ahora estos
+      // fallos solo iban a la consola del servidor y las ventas se quedaban sin
+      // asiento en el diario sin que nadie lo supiera.
+      if ((data as any)?.journal_error) {
+        toast.warning('Venta cobrada, pero NO se ha generado su asiento contable. Avisa a administracion. NO repitas la venta.', { duration: 15000 })
+      }
+      if ((data as any)?.residual_voucher_error) {
+        toast.warning(String((data as any).residual_voucher_error), { duration: 15000 })
+      }
       const cobroLines = lastCobroLinesRef.current
       lastCobroLinesRef.current = []
       if (cobroLines.length > 0) {
