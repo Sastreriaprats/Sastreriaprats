@@ -61,7 +61,7 @@ const DEFAULT_DASHBOARD_STATS: DashboardStats = {
 }
 
 export const getDashboardStats = protectedAction<string | undefined, DashboardStats>(
-  { auditModule: 'dashboard' },
+  { permission: 'reports.view', auditModule: 'dashboard' },
   async (ctx, _storeId) => {
     try {
       const admin = ctx.adminClient
@@ -222,7 +222,7 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
 
 /** Ventas del mes actual: un día por entrada desde día 1 hasta hoy. */
 export const getSalesChartData = protectedAction<void, { date: string; label: string; total: number }[]>(
-  { auditModule: 'dashboard' },
+  { permission: 'reports.view', auditModule: 'dashboard' },
   async (ctx) => {
     try {
       const admin = ctx.adminClient
@@ -298,7 +298,7 @@ export interface DashboardAlerts {
 }
 
 export const getDashboardAlerts = protectedAction<void, DashboardAlerts>(
-  { auditModule: 'dashboard' },
+  { permission: ['reports.view', 'orders.view', 'stock.view'], auditModule: 'dashboard' },
   async (ctx) => {
     const admin = ctx.adminClient
     const today = new Date().toISOString().split('T')[0]
@@ -317,7 +317,7 @@ export const getDashboardAlerts = protectedAction<void, DashboardAlerts>(
 )
 
 export const getRecentActivity = protectedAction<void, { id: string; action: string; module: string; entity_display: string | null; description: string | null; created_at: string; user_full_name: string | null }[]>(
-  { auditModule: 'dashboard' },
+  { permission: 'audit.view', auditModule: 'dashboard' },
   async (ctx) => {
     const { data } = await ctx.adminClient
       .from('audit_logs')
@@ -363,7 +363,7 @@ const ONLINE_COUNTED_STATUSES = ['paid', 'processing', 'shipped', 'delivered']
 const ONLINE_HOST_STORE_CODE = 'PIN'
 
 export const getStoresWithStats = protectedAction<{ includeInactive?: boolean } | undefined, StoreStats[]>(
-  { auditModule: 'dashboard' },
+  { permission: ['config.view', 'reports.view'], auditModule: 'dashboard' },
   async (ctx, input) => {
     const admin = ctx.adminClient
     const includeInactive = input?.includeInactive === true
@@ -528,7 +528,7 @@ export interface DashboardAppointment {
 }
 
 export const getDashboardAppointments = protectedAction<void, { appointments: DashboardAppointment[]; todayCount: number; weekCount: number }>(
-  { auditModule: 'dashboard' },
+  { permission: 'calendar.view', auditModule: 'dashboard' },
   async (ctx) => {
     const today = new Date().toISOString().split('T')[0]
     // Calcular fin de semana (domingo)

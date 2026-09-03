@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const hasPerm = await checkUserPermission(user.id, 'reporting.export')
+  const hasPerm = await checkUserPermission(user.id, 'reports.export')
   if (!hasPerm) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await request.json()

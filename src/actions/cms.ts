@@ -293,7 +293,7 @@ export type HomeSectionForAdmin = {
 }
 
 export const getHomeSectionsForAdmin = protectedAction<void, HomeSectionForAdmin[]>(
-  { permission: 'cms.edit_pages', auditModule: 'cms' },
+  { permission: 'cms.edit', auditModule: 'cms' },
   async (ctx) => {
     const { data: page } = await ctx.adminClient
       .from('cms_pages')
@@ -345,7 +345,7 @@ export const updateHomeSection = protectedAction<
   { ok: boolean }
 >(
   {
-    permission: 'cms.edit_pages',
+    permission: 'cms.edit',
     auditModule: 'cms',
     revalidate: ['/', '/admin/tienda-online'],
   },
@@ -387,7 +387,7 @@ const WEB_CONTENT_BUCKET = 'web-content'
 
 export const uploadWebContentImage = protectedAction<FormData, { url: string }>(
   {
-    permission: 'cms.edit_pages',
+    permission: 'cms.edit',
     auditModule: 'cms',
     revalidate: ['/', '/admin/tienda-online'],
   },
@@ -427,7 +427,7 @@ export const getSignedUploadUrl = protectedAction<
   { signedUrl: string; token: string; path: string; publicUrl: string }
 >(
   {
-    permission: 'cms.edit_pages',
+    permission: 'cms.edit',
     auditModule: 'cms',
   },
   async (ctx, { filename, contentType }) => {

@@ -192,7 +192,7 @@ export const createFabricAction = protectedAction<
   any
 >(
   {
-    permission: 'stock.create_product',
+    permission: 'products.edit',
     auditModule: 'stock',
     auditAction: 'create',
     auditEntity: 'fabric',
@@ -241,7 +241,7 @@ export const createFabricAction = protectedAction<
 /** Actualiza un tejido. */
 export const updateFabricAction = protectedAction<{ id: string; data: any }, any>(
   {
-    permission: 'stock.create_product',
+    permission: 'products.edit',
     auditModule: 'stock',
     auditAction: 'update',
     auditEntity: 'fabric',
@@ -273,7 +273,7 @@ export const addFabricStockAction = protectedAction<
   any
 >(
   {
-    permission: 'stock.create_product',
+    permission: 'products.edit',
     auditModule: 'stock',
     auditAction: 'update',
     auditEntity: 'fabric',
@@ -306,7 +306,7 @@ export const subtractFabricStockAction = protectedAction<
   any
 >(
   {
-    permission: 'stock.create_product',
+    permission: 'products.edit',
     auditModule: 'stock',
     auditAction: 'update',
     auditEntity: 'fabric',

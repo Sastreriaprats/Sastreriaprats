@@ -238,7 +238,7 @@ export const updateOrderPayment = protectedAction<
 // ─── Sale Payments ─────────────────────────────────────────────────────────────
 
 export const getSalePayments = protectedAction<{ sale_id: string }, any[]>(
-  { permission: 'sales.view' },
+  { permission: ['orders.view', 'pos.access'] },
   async (ctx, { sale_id }) => {
     try {
       const { data, error } = await ctx.adminClient
@@ -454,7 +454,7 @@ export const getPendingPayments = protectedAction<
   { type?: 'all' | 'orders' | 'sales' | 'reservations' | 'alterations'; search?: string },
   PendingPaymentRow[]
 >(
-  { permission: ['orders.view', 'sales.view'] },
+  { permission: ['orders.view', 'pos.access'] },
   async (ctx, { type = 'all', search }) => {
     try {
       const rows: PendingPaymentRow[] = []
@@ -705,7 +705,7 @@ export const getClientPendingDebt = protectedAction<
   { client_id: string },
   PendingPaymentRow[]
 >(
-  { permission: ['orders.view', 'sales.view'] },
+  { permission: ['orders.view', 'pos.access'] },
   async (ctx, { client_id }) => {
     try {
       const rows: PendingPaymentRow[] = []

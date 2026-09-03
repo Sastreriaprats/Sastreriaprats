@@ -504,7 +504,7 @@ export const markAlterationCharged = protectedAction<
   { alterationId: string; saleId?: string | null; paymentMethod?: string | null },
   { id: string }
 >(
-  { permission: 'sales.create', auditModule: 'alterations' },
+  { permission: 'pos.sell', auditModule: 'alterations' },
   async (ctx, { alterationId, saleId, paymentMethod }) => {
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
     if (saleId) patch.sale_id = saleId
@@ -531,7 +531,7 @@ export const clearAlterationCharge = protectedAction<
   { id: string }
 >(
   {
-    permission: 'sales.create',
+    permission: 'pos.sell',
     auditModule: 'alterations',
     auditAction: 'update',
     auditEntity: 'alteration',

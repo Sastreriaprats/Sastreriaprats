@@ -44,7 +44,7 @@ export const FabricsTab = forwardRef<{ openNewFabricDialog: () => void }>(functi
   const [adjustingFabric, setAdjustingFabric] = useState<FabricRow | null>(null)
   /** Trigger interno para refrescar el listado tras guardar en el modal. */
   const [refreshTrigger, setRefreshTrigger] = useState(0)
-  const canEditFabric = can('stock.create_product') || can('products.edit')
+  const canEditFabric = can('products.edit')
   const canAdjustStock = can('stock.edit')
 
   useImperativeHandle(ref, () => ({

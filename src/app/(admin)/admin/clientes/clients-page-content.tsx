@@ -186,7 +186,7 @@ export function ClientsPageContent({ basePath = '/admin' }: { basePath?: string 
             <SelectItem value="inactive">Inactivos</SelectItem>
           </SelectContent>
         </Select>
-        {can('clients.export') && (
+        {can('reports.export') && (
           <Button variant="outline" size="sm" className="gap-1" onClick={handleExportExcel} disabled={exporting || isLoading}>
             {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Exportar a Excel
           </Button>
