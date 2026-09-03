@@ -43,9 +43,21 @@ export function ProductContent({ slug }: { slug: string }) {
   useEffect(() => {
     fetch('/api/auth/me')
       .then((r) => r.json())
-      .then((data) => { if (data.clientId) setClientId(data.clientId) })
+      .then((data) => {
+        if (!data.clientId) return
+        setClientId(data.clientId)
+        // El corazon nacia siempre vacio aunque el producto ya estuviera
+        // guardado: no habia forma de consultar los favoritos del cliente.
+        return fetch('/api/public/wishlist')
+          .then((r) => r.json())
+          .then((w) => {
+            if (Array.isArray(w?.productIds) && product?.id) {
+              setIsInWishlist(w.productIds.includes(product.id))
+            }
+          })
+      })
       .catch(() => {})
-  }, [])
+  }, [product?.id])
 
   useEffect(() => {
     fetch(`/api/public/catalog/${slug}`)
@@ -149,25 +161,28 @@ export function ProductContent({ slug }: { slug: string }) {
   const stock = (selectedVariant?.total_stock as number) || 0
   const canAdd = selectedVariant && stock > 0 && (sizes.length === 0 || selectedSize)
 
+  // Alterna: si ya esta en favoritos lo quita. Antes solo sabia añadir, asi que
+  // desde la tienda no habia manera de deshacerlo.
   const handleAddToWishlist = async () => {
     if (!product?.id) return
     if (!clientId) {
       toast.error('Inicia sesión para guardar favoritos')
       return
     }
+    const quitar = isInWishlist
     setWishlistLoading(true)
     const res = await fetch('/api/public/wishlist', {
-      method: 'POST',
+      method: quitar ? 'DELETE' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ product_id: product.id }),
     })
     setWishlistLoading(false)
     const data = await res.json().catch(() => ({}))
     if (res.ok) {
-      setIsInWishlist(true)
-      toast.success('Añadido a favoritos')
+      setIsInWishlist(!quitar)
+      toast.success(quitar ? 'Quitado de favoritos' : 'Añadido a favoritos')
     } else {
-      toast.error(data.error || 'Error al añadir')
+      toast.error(data.error || (quitar ? 'Error al quitar' : 'Error al añadir'))
     }
   }
 
