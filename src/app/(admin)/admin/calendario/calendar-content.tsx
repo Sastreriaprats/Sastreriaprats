@@ -18,6 +18,7 @@ import { DayView } from './views/day-view'
 import { AgendaView } from './views/agenda-view'
 import { AppointmentDialog } from './appointment-dialog'
 import { ScheduleBlocksPanel } from './schedule-blocks-panel'
+import { toLocalISODate } from '@/lib/dates'
 
 const MONTHS_ES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -110,21 +111,24 @@ export function CalendarContent() {
     setViewInitialized(true)
   }, [isMobile, viewInitialized])
 
+  // El rango se formatea en hora LOCAL: con toISOString() la vista Mes pedia
+  // del 31 del mes anterior al penultimo dia del mes en curso, asi que las
+  // citas del ULTIMO dia del mes no se cargaban nunca.
   const getDateRange = useCallback(() => {
     const d = new Date(currentDate)
     if (view === 'month') {
       const start = new Date(d.getFullYear(), d.getMonth(), 1)
       const end = new Date(d.getFullYear(), d.getMonth() + 1, 0)
-      return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] }
+      return { start: toLocalISODate(start), end: toLocalISODate(end) }
     } else if (view === 'week' || view === 'agenda') {
       const dayOfWeek = (d.getDay() + 6) % 7
       const start = new Date(d)
       start.setDate(d.getDate() - dayOfWeek)
       const end = new Date(start)
       end.setDate(start.getDate() + 6)
-      return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] }
+      return { start: toLocalISODate(start), end: toLocalISODate(end) }
     } else {
-      return { start: d.toISOString().split('T')[0], end: d.toISOString().split('T')[0] }
+      return { start: toLocalISODate(d), end: toLocalISODate(d) }
     }
   }, [currentDate, view])
 
@@ -223,7 +227,7 @@ export function CalendarContent() {
       const { start, end } = getDateRange()
       return `${formatDate(start)} — ${formatDate(end)}`
     }
-    return formatDate(currentDate.toISOString().split('T')[0])
+    return formatDate(toLocalISODate(currentDate))
   }
 
   return (

@@ -5,6 +5,7 @@ import { success, failure } from '@/lib/errors'
 import { getBusinessHours, isSlotBlocked, type ScheduleBlockLike } from '@/lib/schedule-utils'
 import { resolveClientIdsForSearch } from '@/lib/server/query-helpers'
 import { normalizeSearchTerm } from '@/lib/utils'
+import { todayLocalISODate } from '@/lib/dates'
 
 /**
  * Devuelve el bloqueo de agenda activo que choca con la franja indicada, o
@@ -112,7 +113,7 @@ export const findNextAppointmentByClient = protectedAction<{ query: string }, {
     if (error) return failure(error.message)
     if (!data || data.length === 0) return success({ appointment: null, hasPastOnly: false })
 
-    const today = new Date().toISOString().slice(0, 10)
+    const today = todayLocalISODate()
     const nowTime = new Date().toTimeString().slice(0, 5)
     const rows = data as Array<Record<string, unknown>>
     const upcoming = rows.find((a) => {

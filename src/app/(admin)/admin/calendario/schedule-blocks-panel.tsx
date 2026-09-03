@@ -18,6 +18,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { todayLocalISODate } from '@/lib/dates'
 
 export function ScheduleBlocksPanel() {
   const { can } = usePermissions()
@@ -94,7 +95,7 @@ export function ScheduleBlocksPanel() {
     }
   }
 
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayLocalISODate()
 
   return (
     <Card className="border-amber-200 bg-amber-50/50">

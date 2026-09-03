@@ -26,14 +26,15 @@ import { TopProductsChart } from './charts/top-products-chart'
 import { ClientsChart } from './charts/clients-chart'
 import { formatCurrency, normalizeSearchTerm } from '@/lib/utils'
 import { toast } from 'sonner'
+import { toLocalISODate, todayLocalISODate } from '@/lib/dates'
 
 function getDefaultStart() {
   const d = new Date()
   d.setDate(1)
-  return d.toISOString().split('T')[0]
+  return toLocalISODate(d)
 }
 function getDefaultEnd() {
-  return new Date().toISOString().split('T')[0]
+  return todayLocalISODate()
 }
 // Fecha corta para las tablas de detalle (acepta timestamp ISO o 'YYYY-MM-DD').
 function fmtReportDay(value: string | null): string {
@@ -228,16 +229,14 @@ export function ReportsContent() {
       case 'year': start = new Date(now.getFullYear(), 0, 1); break
       default: start = new Date(now.getFullYear(), now.getMonth(), 1)
     }
-    setDateRange({ start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] })
+    setDateRange({ start: toLocalISODate(start), end: toLocalISODate(end) })
   }
 
-  // Selector de mes natural completo (día 1 → último día). Formateo en hora LOCAL
-  // (no toISOString, que desplazaría un día por la zona horaria de Madrid).
-  const fmtLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  // Selector de mes natural completo (día 1 → último día), en hora LOCAL.
   const setMonth = (year: number, month: number) => {
     const start = new Date(year, month, 1)
     const end = new Date(year, month + 1, 0) // día 0 del mes siguiente = último día del mes
-    setDateRange({ start: fmtLocal(start), end: fmtLocal(end) })
+    setDateRange({ start: toLocalISODate(start), end: toLocalISODate(end) })
   }
 
   // Lista de los últimos 24 meses para el desplegable. value = `${year}-${monthIndex}`.

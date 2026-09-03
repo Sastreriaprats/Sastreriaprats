@@ -17,6 +17,8 @@
  * todo el taller aparecía en retraso y la alarma dejó de significar nada.
  */
 
+import { toLocalISODate } from '@/lib/dates'
+
 export type ProductionOrderType =
   | 'artesanal'              // Sastrería artesanal
   | 'camiseria'              // Camisería artesanal
@@ -42,17 +44,8 @@ export function isProductionOrderType(t: string | null | undefined): t is Produc
   return t != null && Object.prototype.hasOwnProperty.call(PRODUCTION_LEAD_TIMES, t)
 }
 
-/**
- * YYYY-MM-DD en hora LOCAL. `toISOString()` convierte a UTC y en España (UTC+1/+2)
- * puede devolver el día anterior, corriendo la fecha un día (mismo fallo ya visto
- * en los rangos de fecha de contabilidad).
- */
-export function toLocalISODate(d: Date): string {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
+/** Reexportado desde el modulo canonico de fechas para los importadores actuales. */
+export { toLocalISODate }
 
 /** Suma meses de calendario recortando al último día del mes destino (31-ene + 1 mes = 28-feb). */
 export function addMonths(from: Date, months: number): Date {
