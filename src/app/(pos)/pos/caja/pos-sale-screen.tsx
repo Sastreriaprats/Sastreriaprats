@@ -1213,6 +1213,12 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
         // (única fuente, cubre las 3 vías: deep-link + panel de cobros). Producto de
         // boutique y cobros de arreglo → null (NULL = boutique real). No toca sale_type.
         tailoring_order_id: l.cobro_ref?.entity_type === 'tailoring_order' ? l.cobro_ref.entity_id : null,
+        // (274) Cobro de un TICKET a plazos dentro de este ticket. Ese dinero
+        // vuelve a entrar en caja por addSalePayment -> rpc_add_sale_payment,
+        // asi que la RPC tiene que netearlo igual que hace con los cobros de
+        // pedido, o el arqueo espera el doble. Es solo un marcador del JSON:
+        // sale_lines no tiene esta columna y el INSERT la ignora.
+        cobro_sale_id: l.cobro_ref?.entity_type === 'sale' ? l.cobro_ref.entity_id : null,
         description: l.description,
         sku: l.sku,
         quantity: l.quantity,

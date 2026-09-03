@@ -7,6 +7,7 @@ import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { sendWelcomeEmail } from '@/lib/email/transactional'
 import { buildAuditDiff } from '@/lib/audit'
+import { ALTERATION_DEBT_SINCE } from '@/lib/alterations/debt-cutoff'
 
 type ClientAggregates = {
   spent: number
@@ -79,7 +80,9 @@ async function computeClientAggregates(
       .is('payment_method', null)
       .eq('is_included', false)
       .neq('status', 'cancelled')
-      .gt('sale_price', 0),
+      .gt('sale_price', 0)
+      // Corte: los arreglos anteriores se dan por saldados (ver debt-cutoff).
+      .gte('created_at', ALTERATION_DEBT_SINCE),
   ])
 
   for (const o of (ordersRes.data ?? []) as Array<Record<string, unknown>>) {

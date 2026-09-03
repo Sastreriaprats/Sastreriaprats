@@ -6,6 +6,7 @@ import { success, failure } from '@/lib/errors'
 import { serializeForServerAction } from '@/lib/server/serialize'
 import { resolveClientIdsForSearch } from '@/lib/server/query-helpers'
 import { normalizeSearchTerm } from '@/lib/utils'
+import { ALTERATION_DEBT_SINCE } from '@/lib/alterations/debt-cutoff'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -650,6 +651,8 @@ export const getPendingPayments = protectedAction<
           .eq('is_included', false)
           .neq('status', 'cancelled')
           .gt('sale_price', 0)
+          // Corte: los arreglos anteriores se dan por saldados (ver debt-cutoff).
+          .gte('created_at', ALTERATION_DEBT_SINCE)
           .order('created_at', { ascending: false })
           .limit(500)
 
@@ -847,6 +850,8 @@ export const getClientPendingDebt = protectedAction<
         .eq('is_included', false)
         .neq('status', 'cancelled')
         .gt('sale_price', 0)
+        // Corte: los arreglos anteriores se dan por saldados (ver debt-cutoff).
+        .gte('created_at', ALTERATION_DEBT_SINCE)
         .order('created_at', { ascending: false })
         .limit(50)
 
