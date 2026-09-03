@@ -27,6 +27,7 @@ import { NuevaVentaSteps } from '../nueva-venta-steps'
 import { generateFichaConfeccionPDF, generateFichaForLine } from '@/lib/pdf/ficha-confeccion'
 import { toast } from 'sonner'
 import { getOrderStatusLabel } from '@/lib/utils'
+import { getDefaultDeliveryDate, getLeadTimeLabel } from '@/lib/orders/production-times'
 import { FichaPantalonConfig } from './components/ficha-pantalon-config'
 import { FichaChalecoConfig } from './components/ficha-chaleco-config'
 import { FichaAmericanaConfig } from './components/ficha-americana-config'
@@ -503,6 +504,7 @@ export function NuevaVentaFichaClient({
   const orderType = tipoProp || orderTypeProp || ''
   const router = useRouter()
   const isCamiseria = orderType === 'camiseria' || orderType === 'camiseria_industrial'
+  const leadTimeLabel = getLeadTimeLabel(orderType)
   const { data: garmentTypesData } = useGarmentTypes()
   const bodyGarmentTypeId = garmentTypesData?.find((g) => g.code === 'body')?.id ?? null
 
@@ -542,7 +544,12 @@ export function NuevaVentaFichaClient({
     numeroTalon: '',
     cortador: '',
     situacionTrabajo: 'in_production',
+    // Próxima visita = la PRUEBA (15 días laborables). No es la entrega.
     fechaProximaVisita: add15WorkingDays(new Date()),
+    // Entrega estimada = plazo de producción del tipo de pedido (1 mes / 60 / 30
+    // días, ver src/lib/orders/production-times.ts). Es la fecha que se guarda en
+    // el pedido y la que dispara las alarmas de retraso; editable para urgentes.
+    fechaEntregaEstimada: getDefaultDeliveryDate(orderType) ?? add15WorkingDays(new Date()),
     observaciones: '',
     domicilio: '',
     localidad: '',
@@ -919,6 +926,7 @@ export function NuevaVentaFichaClient({
     cortador: ficha.cortador,
     situacionTrabajo: ficha.situacionTrabajo,
     fechaProximaVisita: ficha.fechaProximaVisita,
+    fechaEntregaEstimada: ficha.fechaEntregaEstimada,
     fechaCobro: ficha.fechaCobro,
     fechaEmision: ficha.fechaEmision,
     // Tejido y metros viven AHORA por prenda en prendaConfigs[key], no aquí.
@@ -1100,7 +1108,7 @@ export function NuevaVentaFichaClient({
         prenda: usePrendasArquitectura ? undefined : (prenda || undefined),
         cortador: usePrendasArquitectura ? undefined : (ficha.cortador.trim() || undefined),
         oficial: undefined,
-        fechaCompromiso: usePrendasArquitectura ? undefined : (ficha.fechaProximaVisita || undefined),
+        fechaCompromiso: usePrendasArquitectura ? undefined : (ficha.fechaEntregaEstimada || ficha.fechaProximaVisita || undefined),
         situacionTrabajo: usePrendasArquitectura ? undefined : (ficha.situacionTrabajo || undefined),
         fechaCobro: usePrendasArquitectura ? undefined : (ficha.fechaCobro || undefined),
         fichaData: usePrendasArquitectura ? undefined : { ...buildFichaCommon(), prendaLabel: PRENDA_LABELS[prenda] || prenda },
@@ -1308,6 +1316,14 @@ export function NuevaVentaFichaClient({
                   <div>
                     <Label className="text-white/60 text-xs">Fecha próxima visita</Label>
                     <Input type="date" className="mt-1 min-h-[44px] bg-[#0d1629] border-[#c9a96e]/20 text-white" value={ficha.fechaProximaVisita} onChange={(e) => setFichaField('fechaProximaVisita', e.target.value)} />
+                  </div>
+                  <div>
+                    <Label className="text-white/60 text-xs">
+                      Entrega estimada
+                      {leadTimeLabel && <span className="text-[#c9a96e]/70"> · {leadTimeLabel}</span>}
+                    </Label>
+                    <Input type="date" className="mt-1 min-h-[44px] bg-[#0d1629] border-[#c9a96e]/20 text-white" value={ficha.fechaEntregaEstimada} onChange={(e) => setFichaField('fechaEntregaEstimada', e.target.value)} />
+                    <p className="text-[10px] text-white/40 mt-1">Adelántala si el pedido es urgente</p>
                   </div>
                 </div>
 

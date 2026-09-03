@@ -6,6 +6,7 @@ import { queryList, queryById, getNextNumber, resolveClientIdsForSearch } from '
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createTailoringOrderSchema, tailoringOrderLineSchema, changeOrderStatusSchema } from '@/lib/validations/orders'
 import { ALL_VISIBLE_STATUSES, classifyLinesForStatusChange, deriveOrderStatusFromLines, type OrderStatus } from '@/lib/orders/statuses'
+import { getDefaultDeliveryDate } from '@/lib/orders/production-times'
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { sendOrderConfirmation, sendTailoringStatusUpdate } from '@/lib/email/transactional'
@@ -2310,7 +2311,14 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
         status: initialStatus,
         order_number: orderNumber,
         order_date: (input.fichaCommon?.fechaEmision as string) || undefined,
-        estimated_delivery_date: (input.fichaCommon?.fechaProximaVisita as string) || input.fechaCompromiso || null,
+        // La entrega estimada es la que dispara las alarmas de retraso: NO es la
+        // fecha de próxima visita (esa es la prueba). Si la ficha no la manda
+        // (clientes antiguos, rutas legacy) se aplica el plazo de producción por
+        // defecto del tipo de pedido. Ver src/lib/orders/production-times.ts.
+        estimated_delivery_date:
+          (input.fichaCommon?.fechaEntregaEstimada as string)
+          || input.fechaCompromiso
+          || getDefaultDeliveryDate(input.orderType),
         subtotal,
         discount_amount: 0,
         tax_amount: 0,

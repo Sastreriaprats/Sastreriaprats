@@ -32,6 +32,7 @@ import { getClientMeasurements, listClients } from '@/actions/clients'
 import { listSuppliers, createSupplierOrderAction } from '@/actions/suppliers'
 import { listFabricsBySupplier } from '@/actions/fabrics'
 import { formatCurrency, fuzzyFilterSort } from '@/lib/utils'
+import { getDefaultDeliveryDate, getLeadTimeLabel, toLocalISODate } from '@/lib/orders/production-times'
 import { generateFichaForLineCamiseria } from '@/lib/pdf/ficha-confeccion'
 
 type OrderType = 'artesanal' | 'industrial' | 'proveedor' | 'oficial' | 'camiseria' | 'camiseria_industrial'
@@ -438,11 +439,23 @@ export function CreateOrderWizard({
     if (orderType === 'proveedor' && step === 1 && !paymentDueDate) {
       const in30 = new Date()
       in30.setDate(in30.getDate() + 30)
-      if (!estimatedDelivery) setEstimatedDelivery(in30.toISOString().slice(0, 10))
+      if (!estimatedDelivery) setEstimatedDelivery(toLocalISODate(in30))
       setAlertOnPayment(false)
       setAlertOnDelivery(true)
     }
   }, [orderType, step])
+
+  // Plazo de producción por defecto según el tipo de pedido (1 mes artesanal /
+  // camisería, 60 días industrial, 30 días camisería industrial). Solo propone:
+  // la fecha sigue siendo editable para los urgentes.
+  // Ver src/lib/orders/production-times.ts.
+  useEffect(() => {
+    if (estimatedDelivery) return
+    const defaultDate = getDefaultDeliveryDate(orderType)
+    if (defaultDate) setEstimatedDelivery(defaultDate)
+  }, [orderType])
+
+  const leadTimeLabel = getLeadTimeLabel(orderType)
 
   // Las líneas llevan PVP (IVA incluido), modelo canónico del resto de rutas:
   // el total es la suma de PVP tras descuentos y el IVA se extrae del PVP.
@@ -890,7 +903,7 @@ export function CreateOrderWizard({
           <CardHeader><CardTitle>Detalles del pedido</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label>Fecha estimada de entrega</Label>
+              <Label>Fecha estimada de entrega {leadTimeLabel && <span className="text-xs font-normal text-muted-foreground">· plazo por defecto: {leadTimeLabel}</span>}</Label>
               <DatePickerPopover value={estimatedDelivery} onChange={(date) => setEstimatedDelivery(date)} />
               <div className="flex items-center gap-2 mt-2">
                 <Switch id="alert-art" checked={alertOnDelivery} onCheckedChange={setAlertOnDelivery} />
@@ -1352,7 +1365,7 @@ export function CreateOrderWizard({
         <Card>
           <CardHeader><CardTitle>Detalles</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-2"><Label>Fecha estimada de entrega</Label><DatePickerPopover value={estimatedDelivery} onChange={(date) => setEstimatedDelivery(date)} /><div className="flex items-center gap-2 mt-2"><Switch id="alert-ind" checked={alertOnDelivery} onCheckedChange={setAlertOnDelivery} /><Label htmlFor="alert-ind" className="text-sm font-normal cursor-pointer">Alerta en fecha de entrega</Label></div></div>
+            <div className="space-y-2"><Label>Fecha estimada de entrega {leadTimeLabel && <span className="text-xs font-normal text-muted-foreground">· plazo por defecto: {leadTimeLabel}</span>}</Label><DatePickerPopover value={estimatedDelivery} onChange={(date) => setEstimatedDelivery(date)} /><div className="flex items-center gap-2 mt-2"><Switch id="alert-ind" checked={alertOnDelivery} onCheckedChange={setAlertOnDelivery} /><Label htmlFor="alert-ind" className="text-sm font-normal cursor-pointer">Alerta en fecha de entrega</Label></div></div>
             <div className="space-y-2">
               <Label>Fabricante *</Label>
               {selectedFactory ? (

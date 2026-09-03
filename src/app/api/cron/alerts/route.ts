@@ -81,21 +81,23 @@ export async function GET(request: NextRequest) {
     alerts.push(`${supplierOrdersDelivery.length} pedidos a proveedor con entrega próxima`)
   }
 
-  const { data: overdueOrders } = await admin
+  // Conteo EXACTO: con select() plano Supabase corta en 1000 filas y la alarma
+  // mentiría en cuanto el listado creciera.
+  const { count: overdueOrdersCount } = await admin
     .from('tailoring_orders')
-    .select('id, order_number, clients(full_name)')
+    .select('id', { count: 'exact', head: true })
     .lt('estimated_delivery_date', today)
     .not('status', 'in', '("delivered","cancelled")')
 
-  if (overdueOrders && overdueOrders.length > 0) {
+  if (overdueOrdersCount && overdueOrdersCount > 0) {
     await createNotification({
       type: 'order_update',
       title: 'Pedidos con retraso',
-      message: `${overdueOrders.length} pedidos pasados de fecha estimada`,
+      message: `${overdueOrdersCount} pedidos pasados de fecha estimada`,
       link: '/admin/pedidos?status=overdue',
       module: 'orders',
     })
-    alerts.push(`${overdueOrders.length} pedidos con retraso`)
+    alerts.push(`${overdueOrdersCount} pedidos con retraso`)
   }
 
   await admin
