@@ -421,6 +421,9 @@ function EditUserForm({ user, roles, stores, onSuccess }: {
   const [firstName, setFirstName] = useState(user.first_name ?? fallbackFirst)
   const [lastName, setLastName] = useState(user.last_name ?? fallbackLast)
   const [roleId, setRoleId] = useState(user.roles[0]?.id ?? '')
+  // Roles que el usuario tiene ademas del que muestra el selector (p.ej.
+  // informes_comisiones sobre administrador). Se conservan al guardar.
+  const extraRoles = user.roles.slice(1)
   const [selectedStoreIds, setSelectedStoreIds] = useState<string[]>([])
   const [primaryStoreId, setPrimaryStoreId] = useState<string>('')
   const [storesDirty, setStoresDirty] = useState(false)
@@ -475,7 +478,7 @@ function EditUserForm({ user, roles, stores, onSuccess }: {
       userId: user.id,
       firstName,
       lastName,
-      roleId: roleId || undefined,
+      roleIds: roleId ? [roleId, ...extraRoles.map(r => r.id)] : undefined,
       storeIds: storesDirty ? selectedStoreIds : undefined,
       primaryStoreId: storesDirty ? (primaryStoreId || selectedStoreIds[0]) : undefined,
       isActive,
@@ -509,6 +512,11 @@ function EditUserForm({ user, roles, stores, onSuccess }: {
             {roles.map(r => <SelectItem key={r.id} value={r.id}>{r.display_name ?? r.name}</SelectItem>)}
           </SelectContent>
         </Select>
+        {extraRoles.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Conserva además: {extraRoles.map(r => r.display_name ?? r.name).join(', ')}
+          </p>
+        )}
       </div>
       <div className="space-y-1">
         <Label>Tiendas asignadas</Label>
