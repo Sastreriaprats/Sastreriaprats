@@ -6,20 +6,7 @@ import { success, failure } from '@/lib/errors'
 import { BOUTIQUE_SALE_TYPE, GIFT_CARD_SALE_TYPE, accumulateByStore, compareSizes } from '@/lib/reports/dimensions'
 import { fetchEmployeeBilledLines } from '@/lib/reports/employee-billing'
 import { loadPedidoCobroBaseBySale, isPedidoCobroDescription } from '@/lib/accounting/pedido-cobro-lines'
-
-/** Lee todas las páginas (evita el tope silencioso de 1000 filas de Supabase). */
-async function readAllPaged<T = Record<string, unknown>>(
-  build: (from: number, to: number) => PromiseLike<{ data: unknown[] | null }>,
-): Promise<T[]> {
-  const out: T[] = []
-  for (let from = 0; ; from += 1000) {
-    const { data } = await build(from, from + 999)
-    const batch = (data ?? []) as T[]
-    out.push(...batch)
-    if (batch.length < 1000) break
-  }
-  return out
-}
+import { readAllPaged } from '@/lib/server/paged'
 
 export type ReportChannel = 'all' | 'boutique' | 'tailoring'
 export type TaxMode = 'with_tax' | 'without_tax'
@@ -82,31 +69,36 @@ export const getSalesReport = protectedAction<
 
     let saleLines: any[] | null = null
     if (wantBoutique) {
-      let salesQuery = ctx.adminClient
-        .from('sale_lines')
-        .select('quantity, quantity_returned, line_total, tax_rate, created_at, sales!inner(store_id, stores(name), status, created_at, sale_type, is_tax_free)')
-        // Excluye las líneas de cobro de pedido del TPV (mig 247/248): son sastrería,
-        // no boutique, y ya se cuentan por tailoring_order_payments.
-        .is('tailoring_order_id', null)
-        .gte('sales.created_at', start_date)
-        .lte('sales.created_at', end_date + 'T23:59:59')
-        // Netear devoluciones parciales (mismo criterio que el Dashboard y
-        // "Por empleado"): la parte devuelta se descuenta, el resto cuenta.
-        .in('sales.status', ['completed', 'partially_returned'])
-      if (store_id) salesQuery = salesQuery.eq('sales.store_id', store_id)
-      const res = await salesQuery
-      saleLines = res.data
+      // Paginado: sin esto el informe se calculaba sobre las primeras 1.000
+      // lineas de venta del rango y tanto el grafico de evolucion como los KPIs
+      // salian cortos. El `.order('id')` hace el paginado determinista.
+      saleLines = await readAllPaged<any>((f, t) => {
+        let q = ctx.adminClient
+          .from('sale_lines')
+          .select('quantity, quantity_returned, line_total, tax_rate, created_at, sales!inner(store_id, stores(name), status, created_at, sale_type, is_tax_free)')
+          // Excluye las líneas de cobro de pedido del TPV (mig 247/248): son sastrería,
+          // no boutique, y ya se cuentan por tailoring_order_payments.
+          .is('tailoring_order_id', null)
+          .gte('sales.created_at', start_date)
+          .lte('sales.created_at', end_date + 'T23:59:59')
+          // Netear devoluciones parciales (mismo criterio que el Dashboard y
+          // "Por empleado"): la parte devuelta se descuenta, el resto cuenta.
+          .in('sales.status', ['completed', 'partially_returned'])
+        if (store_id) q = q.eq('sales.store_id', store_id)
+        return q.order('id', { ascending: true }).range(f, t)
+      }, 'getSalesReport.saleLines')
     }
 
     let onlineOrders: any[] | null = null
     if (wantBoutique && !store_id) {
-      const res = await ctx.adminClient
+      onlineOrders = await readAllPaged<any>((f, t) => ctx.adminClient
         .from('online_orders')
         .select('subtotal, total, created_at, status')
         .gte('created_at', start_date)
         .lte('created_at', end_date + 'T23:59:59')
         .in('status', ['paid', 'processing', 'shipped', 'delivered'])
-      onlineOrders = res.data
+        .order('id', { ascending: true })
+        .range(f, t), 'getSalesReport.onlineOrders')
     }
 
     // Sastrería = COBROS (tailoring_order_payments por payment_date), no valor de

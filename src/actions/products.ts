@@ -13,6 +13,7 @@ import { generateFabricCode } from '@/actions/fabrics'
 import { buildAuditDiff } from '@/lib/audit'
 import { normalizeSearchTerm } from '@/lib/utils'
 import { checkUserPermission } from '@/actions/auth'
+import { readAllPaged, readAllByIds } from '@/lib/server/paged'
 
 /** Obtiene el siguiente número correlativo para un SKU base. Cuenta productos con sku LIKE 'skuBase-%' y retorna (count+1) con pad 3. Si el SKU completo ya existe (race), reintenta con el siguiente. */
 export const getNextSkuNumber = protectedAction<
@@ -2096,34 +2097,39 @@ export const listStockByWarehouse = protectedAction<{ warehouseId?: string; sear
   { permission: ['products.view', 'stock.view'], auditModule: 'stock' },
   async (ctx, { warehouseId, search }) => {
     try {
-      let slQuery = ctx.adminClient
-        .from('stock_levels')
-        .select('id, quantity, reserved, warehouse_id, product_variant_id')
-        .order('quantity', { ascending: false })
+      // Paginado: hay decenas de miles de lineas de stock y sin paginar solo
+      // se veian las 1.000 primeras, asi que el inventario salia incompleto y
+      // el filtro "Sin stock" -que ordena por cantidad descendente- no llegaba
+      // nunca a las filas con 0. El `.order('id')` desempata para que el
+      // paginado no repita ni se salte filas.
+      const slData = await readAllPaged<any>((f, t) => {
+        let q = ctx.adminClient
+          .from('stock_levels')
+          .select('id, quantity, reserved, warehouse_id, product_variant_id')
+          .order('quantity', { ascending: false })
+          .order('id', { ascending: true })
+        if (warehouseId && warehouseId !== 'all') q = q.eq('warehouse_id', warehouseId)
+        return q.range(f, t)
+      }, 'listStockByWarehouse.stock_levels')
+      if (!slData.length) return success([])
 
-      if (warehouseId && warehouseId !== 'all') {
-        slQuery = slQuery.eq('warehouse_id', warehouseId)
-      }
-
-      const { data: slData, error: slError } = await slQuery
-      if (slError) return failure(slError.message || 'Error al cargar stock', 'INTERNAL')
-      if (!slData?.length) return success([])
-
+      // Los `.in(...)` van por lotes: con miles de variantes, un solo `.in()`
+      // volveria a recortar a 1.000 y se perderian filas del listado.
       const variantIds = [...new Set(slData.map((sl: any) => sl.product_variant_id))]
-      const { data: variantsData } = await ctx.adminClient
+      const variantsData = await readAllByIds<any>(variantIds, (chunk) => ctx.adminClient
         .from('product_variants')
         .select('id, variant_sku, size, color, product_id')
-        .in('id', variantIds)
+        .in('id', chunk), 'listStockByWarehouse.variants')
 
-      if (!variantsData?.length) return success([])
+      if (!variantsData.length) return success([])
 
       const productIds = [...new Set(variantsData.map((v: any) => v.product_id))]
-      const { data: productsData } = await ctx.adminClient
+      const productsData = await readAllByIds<any>(productIds, (chunk) => ctx.adminClient
         .from('products')
         .select('id, sku, name, product_type, main_image_url, supplier_id, suppliers(name)')
-        .in('id', productIds)
+        .in('id', chunk), 'listStockByWarehouse.products')
 
-      if (!productsData?.length) return success([])
+      if (!productsData.length) return success([])
 
       const variantMap = Object.fromEntries(variantsData.map((v: any) => [v.id, v]))
       const productMap = Object.fromEntries(productsData.map((p: any) => [p.id, p]))

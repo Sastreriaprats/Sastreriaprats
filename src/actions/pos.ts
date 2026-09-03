@@ -500,7 +500,7 @@ export const getSaleForTicket = protectedAction<string, {
       .from('sales')
       .select(`
         id, ticket_number, created_at, client_id, subtotal, discount_amount, discount_percentage,
-        tax_amount, total, payment_method, is_tax_free, status,
+        tax_amount, total, payment_method, is_tax_free, status, notes,
         stores(name),
         profiles!sales_salesperson_id_fkey(full_name)
       `)

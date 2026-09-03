@@ -8,6 +8,7 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { checkUserPermission, checkUserExplicitPermission } from '@/actions/auth'
 import { saleNetBase, fetchVoucherPaidBySale, fetchReturnedLeftBySale } from '@/lib/server/commission-base'
 import { revalidatePath } from 'next/cache'
+import { readAllPaged } from '@/lib/server/paged'
 
 // ============================================================================
 // Comisiones de VENDEDORES (configurable). Ver mig 231.
@@ -30,21 +31,6 @@ const madridMonthKey = (iso: string): string => _madridDayFmt.format(new Date(is
 
 const pad = (n: number) => String(n).padStart(2, '0')
 const round2 = (n: number) => Math.round(n * 100) / 100
-
-/** Lee TODAS las filas de una query paginando de 1000 en 1000 (el tope del
- *  servidor NO se evita con .limit(); solo .range() pagina de verdad). */
-async function readAllPaged<T = Record<string, unknown>>(
-  build: (from: number, to: number) => PromiseLike<{ data: T[] | null }>,
-): Promise<T[]> {
-  const out: T[] = []
-  for (let from = 0; ; from += 1000) {
-    const { data } = await build(from, from + 999)
-    const batch = data ?? []
-    out.push(...batch)
-    if (batch.length < 1000) break
-  }
-  return out
-}
 
 /** Lista de claves YYYY-MM entre dos fechas YYYY-MM-DD (inclusive). */
 function monthKeysInRange(start: string, end: string): string[] {

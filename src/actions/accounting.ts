@@ -11,6 +11,8 @@ import { formalGreeting } from '@/lib/email/greeting'
 import { createInvoiceJournalEntry, reverseInvoiceJournalEntry, createManualTransactionJournalEntry } from '@/actions/accounting-triggers'
 import { formatClientAddress, resolveInvoiceParty } from '@/lib/clients/format'
 import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
+import { readAllPaged } from '@/lib/server/paged'
+import { toLocalISODate } from '@/lib/dates'
 
 /** Una fila del desglose por tienda. storeId null → gastos sin tienda asignada. */
 export type StoreBreakdownRow = {
@@ -34,21 +36,6 @@ export type AccountingSummary = {
   pendingIncome: number
   /** Previsión: total (con IVA) de facturas de proveedor por pagar (snapshot). */
   pendingExpenses: number
-}
-
-/** Lee TODAS las filas de una query paginada (Supabase tope 1000 por página).
- *  `build` debe crear una query nueva en cada llamada, con su `.range(f, t)`. */
-async function readAllPaged<T = Record<string, unknown>>(
-  build: (from: number, to: number) => PromiseLike<{ data: T[] | null }>,
-): Promise<T[]> {
-  const out: T[] = []
-  for (let from = 0; ; from += 1000) {
-    const { data } = await build(from, from + 999)
-    const batch = data ?? []
-    out.push(...batch)
-    if (batch.length < 1000) break
-  }
-  return out
 }
 
 export const getAccountingSummary = protectedAction<{ from: string; to: string }, AccountingSummary>(
@@ -1334,12 +1321,12 @@ export const getAccountingMovements = protectedAction<
       ? `${y}-${String(month).padStart(2, '0')}-01`
       : `${y}-01-01`
     const dateTo = month
-      ? new Date(y, month, 0).toISOString().split('T')[0]
+      ? toLocalISODate(new Date(y, month, 0))
       : `${y}-12-31`
 
     const rows: AccountingMovementRow[] = []
 
-    const { data: entries } = await ctx.adminClient
+    const entries = await readAllPaged<Record<string, unknown>>((f, t) => ctx.adminClient
       .from('journal_entries')
       .select('id, entry_date, description, entry_type, reference_type, reference_id, total_debit, total_credit')
       .gte('entry_date', dateFrom)
@@ -1347,6 +1334,8 @@ export const getAccountingMovements = protectedAction<
       .eq('status', 'posted')
       .not('reference_type', 'in', '("sale","invoice","online_order")')
       .order('entry_date', { ascending: false })
+      .order('id', { ascending: false })
+      .range(f, t), 'getAccountingMovements.journal_entries')
 
     const entriesList = (entries || []) as Array<{
       id: string
@@ -1441,16 +1430,17 @@ export const getAccountingMovements = protectedAction<
       })
     }
 
-    let q = ctx.adminClient
-      .from('manual_transactions')
-      .select('id, type, date, description, category, amount, tax_rate, tax_amount, total, notes, created_at, ap_supplier_invoice_id, cash_sessions(store_id, stores(name))')
-      .gte('date', dateFrom)
-      .lte('date', dateTo)
-      .order('date', { ascending: false })
-
-    if (type) q = q.eq('type', type)
-
-    const { data: manual } = await q
+    const manual = await readAllPaged<Record<string, unknown>>((f, t) => {
+      let q = ctx.adminClient
+        .from('manual_transactions')
+        .select('id, type, date, description, category, amount, tax_rate, tax_amount, total, notes, created_at, ap_supplier_invoice_id, cash_sessions(store_id, stores(name))')
+        .gte('date', dateFrom)
+        .lte('date', dateTo)
+        .order('date', { ascending: false })
+        .order('id', { ascending: false })
+      if (type) q = q.eq('type', type)
+      return q.range(f, t)
+    }, 'getAccountingMovements.manual_transactions')
     const manualList = (manual || []) as Array<Record<string, unknown>>
     // Nombre de proveedor para los pagos de factura de proveedor (manual_transactions ->
     // ap_supplier_invoice_id -> ap_supplier_invoices.supplier_name).

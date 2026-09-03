@@ -3,20 +3,7 @@
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
-
-/** Lee todas las páginas (evita el tope silencioso de 1000 filas de Supabase). */
-async function readAllPaged<T = Record<string, unknown>>(
-  build: (from: number, to: number) => PromiseLike<{ data: T[] | null }>,
-): Promise<T[]> {
-  const out: T[] = []
-  for (let from = 0; ; from += 1000) {
-    const { data } = await build(from, from + 999)
-    const batch = data ?? []
-    out.push(...batch)
-    if (batch.length < 1000) break
-  }
-  return out
-}
+import { readAllPaged } from '@/lib/server/paged'
 
 interface DashboardStats {
   salesToday: number
