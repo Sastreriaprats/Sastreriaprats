@@ -598,9 +598,13 @@ export const getTailoringByCategory = protectedAction<
       .lte('sales.created_at', end_date + 'T23:59:59')
     if (store_id) salesQ = salesQ.eq('sales.store_id', store_id)
 
-    const [{ data, error }, { data: slData, error: slError }] = await Promise.all([query.limit(20000), salesQ.limit(20000)])
-    if (error) return failure(error.message)
-    if (slError) return failure(slError.message)
+    // Paginado: `.limit(20000)` no evita el tope de 1.000 filas de PostgREST.
+    const [data, slData] = await Promise.all([
+      readAllPaged<any>((f, t) => query.order('id', { ascending: true }).range(f, t),
+        'getTailoringByCategory.lines'),
+      readAllPaged<any>((f, t) => salesQ.order('id', { ascending: true }).range(f, t),
+        'getTailoringByCategory.saleLines'),
+    ])
 
     // Clasificamos CADA línea a (categoría, tienda, importe neto, prendas) en una
     // lista única. De ahí salen tanto los totales globales como el desglose por
@@ -707,15 +711,28 @@ export const getComparePeriods = protectedAction<
     if (store_id) clientsQ = clientsQ.eq('home_store_id', store_id)
 
     const [saleLinesRes, onlineRes, paymentsRes, tailoringRes, clientsRes] = await Promise.all([
-      wantBoutique ? saleLinesQ.limit(20000) : Promise.resolve({ data: [] }),
-      wantBoutique && !store_id
-        ? ctx.adminClient.from('online_orders')
-          .select('subtotal, total, created_at')
-          .gte('created_at', minStart).lte('created_at', rangeEnd)
-          .in('status', ['paid', 'processing', 'shipped', 'delivered'])
+      // Paginado: `.limit(20000)` no evita el tope de 1.000 filas de PostgREST,
+      // asi que el % de variacion comparaba dos cifras incompletas.
+      wantBoutique
+        ? readAllPaged<any>((f, t) => saleLinesQ.order('id', { ascending: true }).range(f, t),
+            'getComparePeriods.saleLines').then((data) => ({ data }))
         : Promise.resolve({ data: [] }),
-      wantTailoring ? paymentsQ.limit(20000) : Promise.resolve({ data: [] }),
-      wantTailoring ? tailoringQ.limit(20000) : Promise.resolve({ data: [] }),
+      wantBoutique && !store_id
+        ? readAllPaged<any>((f, t) => ctx.adminClient.from('online_orders')
+            .select('subtotal, total, created_at')
+            .gte('created_at', minStart).lte('created_at', rangeEnd)
+            .in('status', ['paid', 'processing', 'shipped', 'delivered'])
+            .order('id', { ascending: true }).range(f, t),
+            'getComparePeriods.online').then((data) => ({ data }))
+        : Promise.resolve({ data: [] }),
+      wantTailoring
+        ? readAllPaged<any>((f, t) => paymentsQ.order('id', { ascending: true }).range(f, t),
+            'getComparePeriods.payments').then((data) => ({ data }))
+        : Promise.resolve({ data: [] }),
+      wantTailoring
+        ? readAllPaged<any>((f, t) => tailoringQ.order('id', { ascending: true }).range(f, t),
+            'getComparePeriods.tailoring').then((data) => ({ data }))
+        : Promise.resolve({ data: [] }),
       clientsQ,
     ])
 
@@ -1251,7 +1268,6 @@ export const getSalesByEmployee = protectedAction<
       // Excluye cobros de pedido del TPV (mig 247/248): sastrería, no boutique. Aquí
       // evita además el DOBLE conteo (el cobro ya cuenta en tailoring_total vía pagos).
       .is('tailoring_order_id', null)
-      .limit(20000)
     if (store_id) saleLinesQ = saleLinesQ.eq('sales.store_id', store_id)
 
     // Cobrado por payment_date (fecha real del cobro), no created_at (tecleo).
@@ -1277,7 +1293,6 @@ export const getSalesByEmployee = protectedAction<
       .gte('sales.created_at', start_date)
       .lte('sales.created_at', end_date + 'T23:59:59')
       .in('sales.status', ['completed', 'partially_returned'])
-      .limit(20000)
 
     let tailoringOrdersQ = ctx.adminClient
       .from('tailoring_orders')
@@ -1289,11 +1304,29 @@ export const getSalesByEmployee = protectedAction<
       .not('status', 'eq', 'cancelled')
     if (store_id) tailoringOrdersQ = tailoringOrdersQ.eq('store_id', store_id)
 
+    // Las cuatro lecturas van PAGINADAS. El `.limit(20000)` que llevaban dos de
+    // ellas no ampliaba nada: PostgREST recorta a 1.000 filas pase lo que pase
+    // (ya está documentado en commissions.ts, "verificado empíricamente"), así
+    // que la facturación por vendedor se calculaba sobre las primeras 1.000
+    // líneas del rango. El `.order()` estable evita que el paginado repita o se
+    // salte filas. Mismos filtros, mismo resultado al céntimo.
     const [saleLinesRes, paymentsRes, tailoringOrdersRes, cobroLinesRes] = await Promise.all([
-      wantBoutique ? saleLinesQ : Promise.resolve({ data: [] as any[] }),
-      wantTailoring ? paymentsQ : Promise.resolve({ data: [] as any[] }),
-      wantTailoring ? tailoringOrdersQ : Promise.resolve({ data: [] as any[] }),
-      wantTailoring ? cobroLinesQ : Promise.resolve({ data: [] as any[] }),
+      wantBoutique
+        ? readAllPaged<any>((f, t) => saleLinesQ.order('id', { ascending: true }).range(f, t),
+            'getSalesByEmployee.saleLines').then((data) => ({ data }))
+        : Promise.resolve({ data: [] as any[] }),
+      wantTailoring
+        ? readAllPaged<any>((f, t) => paymentsQ.order('id', { ascending: true }).range(f, t),
+            'getSalesByEmployee.payments').then((data) => ({ data }))
+        : Promise.resolve({ data: [] as any[] }),
+      wantTailoring
+        ? readAllPaged<any>((f, t) => tailoringOrdersQ.order('id', { ascending: true }).range(f, t),
+            'getSalesByEmployee.tailoringOrders').then((data) => ({ data }))
+        : Promise.resolve({ data: [] as any[] }),
+      wantTailoring
+        ? readAllPaged<any>((f, t) => cobroLinesQ.order('id', { ascending: true }).range(f, t),
+            'getSalesByEmployee.cobroLines').then((data) => ({ data }))
+        : Promise.resolve({ data: [] as any[] }),
     ])
 
     // Mapa (pedido | sesión | importe) → vendedor real, desde las líneas de cobro
@@ -2359,12 +2392,13 @@ export const getUserSalesSummary = protectedAction<
 
     // Sastrería cobrada en backoffice (serie separada, no comisionable):
     // atribuida a quien registró el cobro, por payment_date (fecha real).
-    const { data: tailoringPayments, error: tpErr } = await ctx.adminClient
+    // Paginado: `.limit(20000)` no evita el tope de 1.000 filas de PostgREST.
+    const tailoringPayments = await readAllPaged<any>((f, t) => ctx.adminClient
       .from('tailoring_order_payments')
       .select('amount, payment_date')
       .eq('created_by', user_id)
-      .limit(20000)
-    if (tpErr) return failure(tpErr.message || 'Error al consultar cobros de sastrería', 'INTERNAL')
+      .order('id', { ascending: true })
+      .range(f, t), 'getUserSalesSummary.tailoringPayments')
 
     // Agregar por venta
     type SaleAgg = {
