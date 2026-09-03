@@ -1,3 +1,5 @@
+import { publicProductName, publicProductDescription } from '@/lib/products/public-display'
+
 interface SchemaProps {
   data: Record<string, unknown>
 }
@@ -14,8 +16,8 @@ export function ProductSchema({ product }: { product: Record<string, unknown> & 
   const data: Record<string, unknown> = {
     '@context': 'https://schema.org',
     '@type': 'Product',
-    name: product.name,
-    description: product.description,
+    name: publicProductName(product),
+    description: publicProductDescription(product) || undefined,
     image: product.main_image_url,
     url,
     sku: variants[0]?.variant_sku,

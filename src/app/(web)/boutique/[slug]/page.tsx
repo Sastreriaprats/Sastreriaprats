@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { ProductContent } from './product-content'
+import { publicProductName, publicProductDescription } from '@/lib/products/public-display'
 
 export const revalidate = 60
 
@@ -10,8 +11,9 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     const res = await fetch(`${baseUrl}/api/public/catalog/${slug}`, { next: { revalidate: 60 } })
     if (!res.ok) return { title: 'Producto no encontrado' }
     const product = await res.json()
-    const title = `${product.name} — Sastrería Prats`
-    const description = product.description?.slice(0, 160) || `${product.name} en Sastrería Prats.`
+    const name = publicProductName(product)
+    const title = `${name} — Sastrería Prats`
+    const description = publicProductDescription(product).slice(0, 160) || `${name} en Sastrería Prats.`
     return {
       title,
       description,

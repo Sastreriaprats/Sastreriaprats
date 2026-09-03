@@ -23,7 +23,7 @@ const SELECT_ALTERATIONS = `
   official_id, official_name, description,
   cost_price, sale_price,
   alteration_date, workshop_sent_date, client_delivery_date,
-  status, notes,
+  status, notes, payment_method, is_included,
   store_id, created_by, created_at, updated_at,
   tailoring_order_id, sale_id, alteration_type, estimated_completion,
   clients ( id, full_name, phone ),
@@ -518,6 +518,46 @@ export const markAlterationCharged = protectedAction<
       return failure(error.message)
     }
     return success({ id: alterationId })
+  }
+)
+
+// ─── clearAlterationCharge ────────────────────────────────────────────────
+// Deshace la marca de cobrado de un arreglo (vuelve a contar como deuda del
+// cliente). Solo para arreglos saldados a mano: si el cobro entró por un ticket
+// (`sale_id`), hay que anular/devolver esa venta, no desmarcar el arreglo.
+
+export const clearAlterationCharge = protectedAction<
+  { alterationId: string },
+  { id: string }
+>(
+  {
+    permission: 'sales.create',
+    auditModule: 'alterations',
+    auditAction: 'update',
+    auditEntity: 'alteration',
+  },
+  async (ctx, { alterationId }) => {
+    const { data: alt } = await ctx.adminClient
+      .from('alterations')
+      .select('sale_id, alteration_number')
+      .eq('id', alterationId)
+      .maybeSingle()
+    if (alt?.sale_id) {
+      return failure('Este arreglo se cobró en un ticket: anula o devuelve esa venta para dejarlo pendiente')
+    }
+    const { error } = await ctx.adminClient
+      .from('alterations')
+      .update({ payment_method: null, updated_at: new Date().toISOString() })
+      .eq('id', alterationId)
+    if (error) {
+      console.error('[clearAlterationCharge]', error)
+      return failure(error.message)
+    }
+    return success({
+      id: alterationId,
+      auditEntityId: alterationId,
+      auditDescription: `Arreglo ${alt?.alteration_number ?? ''}: marcado como pendiente de cobro`,
+    })
   }
 )
 

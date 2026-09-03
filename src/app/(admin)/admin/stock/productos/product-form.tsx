@@ -736,8 +736,10 @@ export function ProductForm({
       is_visible_web: basico.product_type === 'tailoring_fabric' ? false : web.is_visible_web,
       fabric_meters_used: basico.product_type === 'tailoring_fabric' ? (basico.fabric_meters_used !== '' && basico.fabric_meters_used != null ? Number(basico.fabric_meters_used) : 0) : undefined,
       web_slug: web.web_slug || undefined,
-      web_title: web.web_title || undefined,
-      web_description: web.web_description || undefined,
+      // null (no undefined) para que vaciar el campo lo borre de verdad: el
+      // update es parcial y una clave undefined se pierde por el camino.
+      web_title: web.web_title.trim() || null,
+      web_description: web.web_description.trim() || null,
       web_tags: web.web_tags.length ? web.web_tags : undefined,
       color: web.color || undefined,
       material: web.material || undefined,

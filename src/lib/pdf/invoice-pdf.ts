@@ -228,10 +228,20 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
   const { error: uploadError } = await admin.storage.from(BUCKET).upload(slug, pdfBuffer, {
     contentType: 'application/pdf',
     upsert: true,
+    // Las facturas EMITIDAS se suben a un slug ESTABLE (factura-F2026-XXXX.pdf) y
+    // se sobrescriben con upsert al reeditarlas. Sin esto, Supabase sirve el objeto
+    // con Cache-Control por defecto (3600s) y el navegador/CDN seguían mostrando el
+    // PDF ANTIGUO tras editar la factura (p. ej. cambiar la forma de pago y verla
+    // igual). max-age=0 fuerza revalidación en cada acceso.
+    cacheControl: '0',
   })
   if (uploadError) throw new Error(`Error al subir PDF: ${uploadError.message}`)
 
   const { data: urlData } = admin.storage.from(BUCKET).getPublicUrl(slug)
-  await admin.from('invoices').update({ pdf_url: urlData.publicUrl }).eq('id', invoiceId)
-  return urlData.publicUrl
+  // Cache-buster por versión: aunque el slug sea estable, la URL cambia en cada
+  // regeneración, así que invalida cualquier copia ya cacheada por el navegador o
+  // el CDN de la edición anterior. El PDF se regenera fresco en cada acceso.
+  const publicUrl = `${urlData.publicUrl}?v=${Date.now()}`
+  await admin.from('invoices').update({ pdf_url: publicUrl }).eq('id', invoiceId)
+  return publicUrl
 }

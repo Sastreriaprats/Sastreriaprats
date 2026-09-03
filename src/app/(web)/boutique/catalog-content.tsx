@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { Search, Loader2, ShoppingBag, Heart, ChevronDown } from 'lucide-react'
+import { publicProductName } from '@/lib/products/public-display'
 import { PratsSpinner } from '@/components/ui/prats-spinner'
 import { trackAddToCart } from '@/lib/analytics/events'
 import { useCart } from '@/components/providers/cart-provider'
@@ -190,6 +191,8 @@ export function CatalogContent({
               const hasStock = variants?.some((v) => (v.total_stock as number) > 0)
               const productId = product.id as string
               const isFavorite = favoriteIds.has(productId)
+              // Título web del admin si lo hay; si no, el nombre interno.
+              const displayName = publicProductName(product)
 
               return (
                 <Link
@@ -216,7 +219,7 @@ export function CatalogContent({
                     {product.main_image_url ? (
                       <Image
                         src={product.main_image_url as string}
-                        alt={product.name as string}
+                        alt={displayName}
                         fill
                         className="object-cover transition-transform duration-700 ease-out group-hover:scale-110"
                         sizes="(max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
@@ -248,7 +251,7 @@ export function CatalogContent({
 
                   {/* Info */}
                   <div className="px-3 py-3">
-                    <h3 className="text-sm font-medium text-black leading-tight">{product.name as string}</h3>
+                    <h3 className="text-sm font-medium text-black leading-tight">{displayName}</h3>
                     <p className="text-sm text-gray-500 mt-1">{formatPrice(minPrice)}</p>
                   </div>
                 </Link>

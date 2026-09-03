@@ -262,6 +262,7 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
                   Number(client.total_pending_orders) > 0 && `Pedidos ${formatCurrency(client.total_pending_orders)}`,
                   Number(client.total_pending_sales) > 0 && `Tickets ${formatCurrency(client.total_pending_sales)}`,
                   Number(client.total_pending_reservations) > 0 && `Reservas ${formatCurrency(client.total_pending_reservations)}`,
+                  Number(client.total_pending_alterations) > 0 && `Arreglos ${formatCurrency(client.total_pending_alterations)}`,
                 ].filter(Boolean).join(' · ')}
               </p>
             )}

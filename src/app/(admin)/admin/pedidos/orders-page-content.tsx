@@ -206,7 +206,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
   }, [statusCountsFromApi, totalAll])
 
   // Si la búsqueda deja un único cliente en el listado, se carga su deuda
-  // total unificada (encargos + tickets + reservas) y se muestra en un banner:
+  // total unificada (encargos + tickets + reservas + arreglos) y se muestra en un banner:
   // así se ve todo lo que debe sin ir a la pestaña Reservas ni a Cobros.
   useEffect(() => {
     if (isLoading) return
@@ -552,6 +552,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
               ['tailoring_order', 'Encargos'],
               ['sale', 'Tickets'],
               ['reservation', 'Reservas'],
+              ['alteration', 'Arreglos'],
             ] as const).map(([type, label]) => {
               const rows = clientDebt.rows.filter((r) => r.entity_type === type)
               return { label, count: rows.length, amount: rows.reduce((s, r) => s + r.total_pending, 0) }

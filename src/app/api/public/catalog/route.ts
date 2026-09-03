@@ -79,7 +79,7 @@ export async function GET(request: NextRequest) {
   let query = admin
     .from('products')
     .select(`
-      id, name, web_slug, description, base_price, price_with_tax, tax_rate, brand, collection, season,
+      id, name, web_slug, web_title, web_description, description, base_price, price_with_tax, tax_rate, brand, collection, season,
       material, main_image_url, is_visible_web, product_type, images,
       category_id, product_categories!products_category_id_fkey(name, slug),
       product_variants(id, variant_sku, size, color, color_hex, barcode, price_override, is_active,
@@ -103,11 +103,12 @@ export async function GET(request: NextRequest) {
   if (categoryIds && categoryIds.length > 0) query = query.in('category_id', categoryIds)
   if (search) {
     // Multi-palabra sin acentos: cada token debe aparecer (AND) en search_text
-    // (name+sku+barcode, unaccent — mig 142), brand o description. Antes era un
+    // (name+sku+barcode, unaccent — mig 142), brand, description o los textos web
+    // (título/descripción, que pueden diferir del nombre interno). Antes era un
     // patrón único contiguo: "americana lana" no encontraba "Americana de lana".
     const tokens = normalizeSearchTerm(sanitizeSearchPattern(search)).split(/\s+/).filter(Boolean)
     for (const t of tokens) {
-      query = query.or(`search_text.ilike.%${t}%,brand.ilike.%${t}%,description.ilike.%${t}%`)
+      query = query.or(`search_text.ilike.%${t}%,brand.ilike.%${t}%,description.ilike.%${t}%,web_title.ilike.%${t}%,web_description.ilike.%${t}%`)
     }
   }
   if (minPrice) query = query.gte('price_with_tax', parseFloat(minPrice))

@@ -435,7 +435,7 @@ export const updateSalePayment = protectedAction<
 
 export interface PendingPaymentRow {
   id: string
-  entity_type: 'tailoring_order' | 'sale' | 'reservation'
+  entity_type: 'tailoring_order' | 'sale' | 'reservation' | 'alteration'
   reference: string
   client_name: string
   client_id: string
@@ -451,7 +451,7 @@ export interface PendingPaymentRow {
 }
 
 export const getPendingPayments = protectedAction<
-  { type?: 'all' | 'orders' | 'sales' | 'reservations'; search?: string },
+  { type?: 'all' | 'orders' | 'sales' | 'reservations' | 'alterations'; search?: string },
   PendingPaymentRow[]
 >(
   { permission: ['orders.view', 'sales.view'] },
@@ -635,6 +635,60 @@ export const getPendingPayments = protectedAction<
         }
       }
 
+      // Arreglos sin cobrar: el arreglo no tiene cobros parciales, o está
+      // saldado (sale_id / payment_method) o se debe entero. Los `is_included`
+      // van dentro del precio del pedido y los de precio 0 no generan deuda.
+      if (type === 'all' || type === 'alterations') {
+        let query = ctx.adminClient
+          .from('alterations')
+          .select('id, alteration_number, sale_price, garment_type, created_at, client_id, clients(id, full_name), stores(id, name)')
+          .is('sale_id', null)
+          .is('payment_method', null)
+          .eq('is_included', false)
+          .neq('status', 'cancelled')
+          .gt('sale_price', 0)
+          .order('created_at', { ascending: false })
+          .limit(500)
+
+        if (searchTerm) {
+          if (clientIds.length > 0) {
+            query = query.or(`alteration_number.ilike.%${searchTerm}%,client_id.in.(${clientIds.join(',')})`)
+          } else {
+            query = query.ilike('alteration_number', `%${searchTerm}%`)
+          }
+        }
+
+        const { data: alterations, error: altErr } = await query
+        if (altErr) {
+          console.error('[getPendingPayments] alterations:', altErr)
+        } else {
+          for (const a of alterations ?? []) {
+            const client = Array.isArray(a.clients) ? a.clients[0] : a.clients
+            const store = Array.isArray(a.stores) ? a.stores[0] : a.stores
+            const total = Number(a.sale_price ?? 0)
+            if (total <= 0) continue
+            const created = new Date(a.created_at)
+            const days = Math.floor((today.getTime() - created.getTime()) / (1000 * 60 * 60 * 24))
+            rows.push({
+              id: a.id,
+              entity_type: 'alteration',
+              reference: a.alteration_number ?? a.id.slice(0, 8),
+              client_name: client?.full_name ?? '—',
+              client_id: client?.id ?? '',
+              total,
+              total_paid: 0,
+              total_pending: total,
+              last_payment_date: null,
+              next_payment_date: null,
+              created_at: a.created_at,
+              days_since_creation: days,
+              store_id: store?.id ?? null,
+              store_name: store?.name ?? null,
+            })
+          }
+        }
+      }
+
       // Orden único: más reciente primero (por created_at)
       rows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
@@ -772,6 +826,46 @@ export const getClientPendingDebt = protectedAction<
           last_payment_date: null,
           next_payment_date: null,
           created_at: r.created_at,
+          days_since_creation: days,
+          store_id: store?.id ?? null,
+          store_name: store?.name ?? null,
+        })
+      }
+
+      // Arreglos del cliente sin cobrar (mismo criterio que Cobros pendientes):
+      // con precio de venta, no incluidos en un pedido, no cancelados y sin
+      // marca de cobro. Un arreglo entregado y no cobrado sigue siendo deuda.
+      const { data: alterations } = await ctx.adminClient
+        .from('alterations')
+        .select('id, alteration_number, sale_price, garment_type, created_at, client_id, clients(id, full_name), stores(id, name)')
+        .eq('client_id', client_id)
+        .is('sale_id', null)
+        .is('payment_method', null)
+        .eq('is_included', false)
+        .neq('status', 'cancelled')
+        .gt('sale_price', 0)
+        .order('created_at', { ascending: false })
+        .limit(50)
+
+      for (const a of alterations ?? []) {
+        const total = Number(a.sale_price ?? 0)
+        if (total <= 0) continue
+        const client = Array.isArray(a.clients) ? a.clients[0] : a.clients
+        const store = Array.isArray(a.stores) ? a.stores[0] : a.stores
+        const created = new Date(a.created_at)
+        const days = Math.floor((today.getTime() - created.getTime()) / (1000 * 60 * 60 * 24))
+        rows.push({
+          id: a.id,
+          entity_type: 'alteration',
+          reference: a.alteration_number ?? a.id.slice(0, 8),
+          client_name: client?.full_name ?? '—',
+          client_id: client?.id ?? '',
+          total,
+          total_paid: 0,
+          total_pending: total,
+          last_payment_date: null,
+          next_payment_date: null,
+          created_at: a.created_at,
           days_since_creation: days,
           store_id: store?.id ?? null,
           store_name: store?.name ?? null,

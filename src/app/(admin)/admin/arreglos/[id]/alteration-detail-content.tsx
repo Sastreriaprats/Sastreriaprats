@@ -23,7 +23,7 @@ import { ArrowLeft, FileDown, Printer, Save, Ban, Trash2, Loader2 } from 'lucide
 import { toast } from 'sonner'
 import { formatDate } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
-import { updateAlteration, cancelAlteration, deleteAlteration } from '@/actions/alterations'
+import { updateAlteration, cancelAlteration, deleteAlteration, markAlterationCharged, clearAlterationCharge } from '@/actions/alterations'
 import {
   type AlterationWithRelations,
   type AlterationStatus,
@@ -31,6 +31,13 @@ import {
   ALTERATION_STATUS_COLORS,
 } from '@/types/alterations'
 import { downloadAlterationPdf, printAlterationPdf } from '@/lib/pdf/alteration-pdf'
+
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  cash: 'Efectivo',
+  card: 'Tarjeta',
+  transfer: 'Transferencia',
+  bizum: 'Bizum',
+}
 
 export function AlterationDetailContent({ alteration, basePath = '/admin' }: { alteration: AlterationWithRelations; basePath?: string }) {
   const router = useRouter()
@@ -59,6 +66,13 @@ export function AlterationDetailContent({ alteration, basePath = '/admin' }: { a
   // ── Eliminar ──────────────────────────────────────────────────────────────
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+
+  // ── Cobro ─────────────────────────────────────────────────────────────────
+  // Mientras no esté marcado como cobrado, el arreglo cuenta como deuda del
+  // cliente (aviso del TPV, ficha del cliente y Cobros pendientes).
+  const isCharged = Boolean(alteration.sale_id) || Boolean(alteration.payment_method)
+  const [chargeMethod, setChargeMethod] = useState('cash')
+  const [charging, setCharging] = useState(false)
 
   // Cargar oficiales activos (mismo patrón que nueva-venta-ficha-client)
   useEffect(() => {
@@ -140,6 +154,36 @@ export function AlterationDetailContent({ alteration, basePath = '/admin' }: { a
       router.push(`${basePath}/clientes/${clientId}?tab=arreglos`)
     } finally {
       setDeleting(false)
+    }
+  }
+
+  const handleMarkCharged = async () => {
+    setCharging(true)
+    try {
+      const res = await markAlterationCharged({ alterationId: alteration.id, paymentMethod: chargeMethod })
+      if (!res.success) {
+        toast.error('error' in res ? res.error : 'Error al marcar como cobrado')
+        return
+      }
+      toast.success('Arreglo marcado como cobrado')
+      router.refresh()
+    } finally {
+      setCharging(false)
+    }
+  }
+
+  const handleClearCharge = async () => {
+    setCharging(true)
+    try {
+      const res = await clearAlterationCharge({ alterationId: alteration.id })
+      if (!res.success) {
+        toast.error('error' in res ? res.error : 'Error al dejarlo pendiente')
+        return
+      }
+      toast.success('Arreglo marcado como pendiente de cobro')
+      router.refresh()
+    } finally {
+      setCharging(false)
     }
   }
 
@@ -237,6 +281,56 @@ export function AlterationDetailContent({ alteration, basePath = '/admin' }: { a
               <Label>Tipo</Label>
               <p className="text-sm text-muted-foreground">{alteration.alteration_type}</p>
             </div>
+
+            {/* Cobro: sin marca de cobro el arreglo asoma como deuda del cliente */}
+            {basePath === '/admin' && (
+              <div className="space-y-2 rounded-md border p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="text-muted-foreground text-xs">Cobro</Label>
+                  {isCharged ? (
+                    <Badge variant="outline" className="bg-green-100 text-green-700 border-green-200">
+                      Cobrado{alteration.payment_method ? ` · ${PAYMENT_METHOD_LABELS[alteration.payment_method] ?? alteration.payment_method}` : ''}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-200">
+                      Pendiente de cobro
+                    </Badge>
+                  )}
+                </div>
+                {isCharged ? (
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-muted-foreground">
+                      {alteration.sale_id ? 'Cobrado en un ticket de caja.' : 'Marcado como cobrado a mano.'}
+                    </p>
+                    {!alteration.sale_id && (
+                      <Button variant="ghost" size="sm" className="h-8 text-xs" disabled={charging} onClick={handleClearCharge}>
+                        {charging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Dejar pendiente'}
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-xs text-muted-foreground">
+                      Lo normal es cobrarlo en caja al entregarlo (sale como pendiente del cliente en el TPV).
+                      Usa esto solo si ya se cobró fuera del TPV.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Select value={chargeMethod} onValueChange={setChargeMethod}>
+                        <SelectTrigger className="h-8 text-xs w-36"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => (
+                            <SelectItem key={value} value={value}>{label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button variant="outline" size="sm" className="h-8 text-xs" disabled={charging} onClick={handleMarkCharged}>
+                        {charging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Marcar cobrado'}
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
 
             {alteration.tailoring_orders && (
               <div className="space-y-1">

@@ -153,7 +153,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const [wantPartialPayment, setWantPartialPayment] = useState(false)
   const [downloadingInvoice, setDownloadingInvoice] = useState(false)
   const [invoiceConfirmOpen, setInvoiceConfirmOpen] = useState(false)
-  const [clientPendingDebt, setClientPendingDebt] = useState<Array<{ entity_type: 'tailoring_order' | 'sale'; entity_id: string; reference: string; total_pending: number }>>([])
+  const [clientPendingDebt, setClientPendingDebt] = useState<Array<{ entity_type: 'tailoring_order' | 'sale' | 'alteration'; entity_id: string; reference: string; total_pending: number }>>([])
   const [clientDebtLoading, setClientDebtLoading] = useState(false)
   const [clientReservations, setClientReservations] = useState<any[]>([])
   const [clientReservationsLoading, setClientReservationsLoading] = useState(false)
@@ -362,7 +362,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
           setClientPendingDebt(result.data
             .filter((r) => r.entity_type !== 'reservation')
             .map((r) => ({
-              entity_type: r.entity_type as 'tailoring_order' | 'sale',
+              entity_type: r.entity_type as 'tailoring_order' | 'sale' | 'alteration',
               entity_id: r.id,
               reference: r.reference,
               total_pending: r.total_pending,
@@ -646,12 +646,17 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
       ...toAdd.map((p) => ({
         id: crypto.randomUUID(),
         product_variant_id: null as string | null,
-        description: `Cobro pendiente - ${p.reference}`,
+        description: p.entity_type === 'alteration'
+          ? `Arreglo - ${p.reference}`
+          : `Cobro pendiente - ${p.reference}`,
         sku: '',
         quantity: 1,
         unit_price: p.total_pending,
         discount_percentage: 0,
-        tax_rate: 0,
+        // Los arreglos son un servicio de sastrería que se factura aquí → 21%.
+        // Los cobros de pedido/ticket van al 0% porque su IVA se declara por el
+        // lado del pedido o de la venta original.
+        tax_rate: p.entity_type === 'alteration' ? 21 : 0,
         cost_price: 0,
         cobro_ref: { entity_type: p.entity_type, entity_id: p.entity_id } as const,
       })),
@@ -1236,6 +1241,21 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
 
   const totalCashInDrawer = (session?.opening_amount ?? 0) + sessionTotals.total_cash_sales - (session?.total_returns ?? 0) - (session?.total_withdrawals ?? 0)
   const clientDebtTotal = clientPendingDebt.reduce((s, i) => s + i.total_pending, 0)
+  // Desglose del aviso ámbar: de dónde viene lo que debe (encargos, tickets a
+  // plazos, arreglos sin cobrar) para no tener que adivinarlo en caja.
+  const clientDebtBreakdown = ([
+    ['tailoring_order', 'encargo', 'encargos'],
+    ['sale', 'ticket', 'tickets'],
+    ['alteration', 'arreglo', 'arreglos'],
+  ] as const)
+    .map(([type, singular, plural]) => {
+      const rows = clientPendingDebt.filter((i) => i.entity_type === type)
+      if (rows.length === 0) return null
+      const amount = rows.reduce((s, i) => s + i.total_pending, 0)
+      return `${rows.length} ${rows.length === 1 ? singular : plural} ${formatCurrency(amount)}`
+    })
+    .filter(Boolean)
+    .join(' · ')
 
   return (
     <div className="flex flex-col h-screen bg-slate-50">
@@ -1348,7 +1368,9 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
             {!clientDebtLoading && clientPendingDebt.length > 0 && selectedClientId && (
               <div className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs">
                 <p className="font-semibold text-amber-800 tabular-nums">Pendiente: {formatCurrency(clientDebtTotal)}</p>
-                <p className="text-amber-700/90 mt-0.5 leading-tight">Puedes añadirlo al cobro actual.</p>
+                <p className="text-amber-700/90 mt-0.5 leading-tight">
+                  {clientDebtBreakdown || 'Puedes añadirlo al cobro actual.'}
+                </p>
                 <Button type="button" size="sm" variant="outline" className="mt-2 w-full h-auto min-h-8 py-2 text-xs font-medium border-amber-300 text-amber-800 hover:bg-amber-100 hover:border-amber-400 justify-center text-center whitespace-normal leading-tight" onClick={addPendingDebtToTicket}>
                   Incluir pendientes en este ticket
                 </Button>

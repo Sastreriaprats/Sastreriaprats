@@ -15,6 +15,7 @@ import { useCart } from '@/components/providers/cart-provider'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { ProductSchema, BreadcrumbSchema } from '@/components/seo/schema-org'
+import { publicProductName, publicProductDescription } from '@/lib/products/public-display'
 import { buildBreadcrumbs } from '@/lib/seo/metadata'
 import { trackViewItem, trackAddToCart } from '@/lib/analytics/events'
 import { sortSizeStrings } from '@/lib/utils/sort-sizes'
@@ -116,11 +117,16 @@ export function ProductContent({ slug }: { slug: string }) {
     return <div className="text-center py-32 text-gray-400">Producto no encontrado</div>
   }
 
+  // Escaparate: si el producto tiene Título/Descripción web (admin → pestaña
+  // Web), mandan sobre el nombre y la descripción internos.
+  const displayName = publicProductName(product)
+  const displayDescription = publicProductDescription(product)
+
   const rawImages = product.images as string[] | { url: string; alt_text?: string }[] | null
   const images = rawImages && rawImages.length > 0
-    ? rawImages.map((img) => typeof img === 'string' ? { url: img, alt_text: product.name as string } : img)
+    ? rawImages.map((img) => typeof img === 'string' ? { url: img, alt_text: displayName } : img)
     : product.main_image_url
-      ? [{ url: product.main_image_url as string, alt_text: product.name as string }]
+      ? [{ url: product.main_image_url as string, alt_text: displayName }]
       : []
 
   const hasMultiple = images.length > 1
@@ -189,7 +195,7 @@ export function ProductContent({ slug }: { slug: string }) {
       <ProductSchema product={product as Parameters<typeof ProductSchema>[0]['product']} />
       <BreadcrumbSchema items={buildBreadcrumbs([
         { label: 'Boutique', path: '/boutique' },
-        { label: product.name as string, path: `/boutique/${slug}` },
+        { label: displayName, path: `/boutique/${slug}` },
       ])} />
       <button
         type="button"
@@ -213,7 +219,7 @@ export function ProductContent({ slug }: { slug: string }) {
                 >
                   <Image
                     src={images[activeImage].url}
-                    alt={images[activeImage].alt_text || (product.name as string)}
+                    alt={images[activeImage].alt_text || displayName}
                     fill
                     className="object-cover"
                     sizes="(max-width: 1024px) 100vw, 50vw"
@@ -282,7 +288,7 @@ export function ProductContent({ slug }: { slug: string }) {
 
         {/* Product info */}
         <div>
-          <h1 className="text-3xl md:text-4xl font-display text-prats-navy mb-4 leading-tight">{product.name as string}</h1>
+          <h1 className="text-3xl md:text-4xl font-display text-prats-navy mb-4 leading-tight">{displayName}</h1>
           <p className="text-2xl text-gray-900 mb-10">{formatPrice(price)}</p>
 
           {colors && colors.length > 0 && (
@@ -411,9 +417,9 @@ export function ProductContent({ slug }: { slug: string }) {
             </p>
           )}
 
-          {(product.description as string) && (
+          {displayDescription && (
             <div className="mb-8">
-              <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line">{product.description as string}</p>
+              <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line">{displayDescription}</p>
             </div>
           )}
 
@@ -519,7 +525,7 @@ export function ProductContent({ slug }: { slug: string }) {
             >
               <Image
                 src={images[activeImage].url}
-                alt={images[activeImage].alt_text || (product.name as string)}
+                alt={images[activeImage].alt_text || displayName}
                 fill
                 className="object-contain select-none"
                 sizes="92vw"

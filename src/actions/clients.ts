@@ -14,18 +14,21 @@ type ClientAggregates = {
   pendingOrders: number
   pendingSales: number
   pendingReservations: number
+  pendingAlterations: number
   count: number
 }
 
 const EMPTY_AGGREGATES: ClientAggregates = {
-  spent: 0, pending: 0, pendingOrders: 0, pendingSales: 0, pendingReservations: 0, count: 0,
+  spent: 0, pending: 0, pendingOrders: 0, pendingSales: 0, pendingReservations: 0,
+  pendingAlterations: 0, count: 0,
 }
 
 /**
  * Calcula en vivo los totales por cliente sumando pedidos de confección
  * (`tailoring_orders`), ventas POS completadas (`sales`), pedidos de la
  * tienda online no cancelados (`online_orders`), el pendiente de reservas
- * no canceladas (`product_reservations`) y el de tickets a plazos (`sales`
+ * no canceladas (`product_reservations`), el de arreglos con precio y sin
+ * cobrar (`alterations`) y el de tickets a plazos (`sales`
  * con payment_status pending/partial). Las columnas
  * homónimas en `clients` están sin trigger y permanecen a 0.
  */
@@ -36,7 +39,7 @@ async function computeClientAggregates(
   const map = new Map<string, ClientAggregates>()
   if (clientIds.length === 0) return map
 
-  const [ordersRes, salesRes, onlineRes, reservationsRes] = await Promise.all([
+  const [ordersRes, salesRes, onlineRes, reservationsRes, alterationsRes] = await Promise.all([
     admin
       .from('tailoring_orders')
       .select('client_id, total_paid, total_pending')
@@ -64,6 +67,19 @@ async function computeClientAggregates(
       .select('client_id, total, total_paid')
       .in('client_id', clientIds)
       .in('status', ['active', 'pending_stock', 'fulfilled']),
+    // Arreglos con precio de venta y sin marca de cobro (`sale_id` del ticket
+    // que los cobró o `payment_method` si se saldaron a mano). Un arreglo ya
+    // entregado puede seguir sin pagarse: entregar no es cobrar. Los incluidos
+    // en el precio de un pedido no generan deuda propia.
+    admin
+      .from('alterations')
+      .select('client_id, sale_price')
+      .in('client_id', clientIds)
+      .is('sale_id', null)
+      .is('payment_method', null)
+      .eq('is_included', false)
+      .neq('status', 'cancelled')
+      .gt('sale_price', 0),
   ])
 
   for (const o of (ordersRes.data ?? []) as Array<Record<string, unknown>>) {
@@ -104,6 +120,15 @@ async function computeClientAggregates(
     cur.pendingReservations += reservationPending
     map.set(id, cur)
   }
+  for (const a of (alterationsRes.data ?? []) as Array<Record<string, unknown>>) {
+    const id = String(a.client_id || '')
+    if (!id) continue
+    const cur = map.get(id) ?? { ...EMPTY_AGGREGATES }
+    const alterationPending = Math.max(0, Number(a.sale_price) || 0)
+    cur.pending += alterationPending
+    cur.pendingAlterations += alterationPending
+    map.set(id, cur)
+  }
   for (const o of (onlineRes.data ?? []) as Array<Record<string, unknown>>) {
     const id = String(o.client_id || '')
     if (!id) continue
@@ -128,6 +153,7 @@ function applyAggregates<T extends Record<string, unknown>>(
     total_pending_orders: a.pendingOrders,
     total_pending_sales: a.pendingSales,
     total_pending_reservations: a.pendingReservations,
+    total_pending_alterations: a.pendingAlterations,
     purchase_count: a.count,
     average_ticket: a.count > 0 ? a.spent / a.count : 0,
   }
