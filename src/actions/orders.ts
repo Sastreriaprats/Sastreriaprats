@@ -175,8 +175,11 @@ export const listOrders = protectedAction<ListParams & { status?: string }, List
       const pageSize = params.pageSize || 25
       const { data: evalData, error: evalError } = await evalQuery.range(0, 99999)
       if (evalError) {
+        // Antes se devolvia un listado vacio con exito: la pantalla decia "no
+        // hay pedidos sin precio" y los contadores a 0 como si fuera el dato
+        // real. useList ya muestra el error y conserva la pagina anterior.
         console.error('[listOrders] unpriced eval:', evalError)
-        return success({ data: [], total: 0, page, pageSize, totalPages: 0, statusCounts: {}, totalAll: 0, aggregates: { total: 0, total_paid: 0, total_pending: 0 } })
+        return failure(evalError.message || 'No se pudo cargar el listado de pedidos')
       }
 
       const allUnpriced = (evalData || []).filter(
@@ -251,7 +254,7 @@ export const listOrders = protectedAction<ListParams & { status?: string }, List
       const { data, count, error } = await query.range(from, to)
       if (error) {
         console.error('[listOrders] overdue:', error)
-        return success({ data: [], total: 0, page, pageSize, totalPages: 0, statusCounts: {}, totalAll: 0 })
+        return failure(error.message || 'No se pudo cargar el listado de pedidos retrasados')
       }
       result = {
         data: (data || []) as any[],

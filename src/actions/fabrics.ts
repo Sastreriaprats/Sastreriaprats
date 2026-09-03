@@ -4,6 +4,8 @@ import { protectedAction } from '@/lib/server/action-wrapper'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { success, failure } from '@/lib/errors'
 import { normalizeSearchTerm } from '@/lib/utils'
+import { queryList } from '@/lib/server/query-helpers'
+import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 
 /** Lista tejidos activos para el selector de la ficha de confección (sin restricción de permiso, solo autenticado). */
 export const listActiveFabricsForFicha = protectedAction<
@@ -426,5 +428,41 @@ export const adjustFabricStock = protectedAction<
       auditEntityId: String(fabricId),
       auditDescription: `Ajuste de stock de tejido "${(row as any).name}" (${before}→${after})`,
     } as unknown as { stock_before: number; stock_after: number })
+  }
+)
+
+/**
+ * Listado de TEJIDOS para el panel del sastre (pestaña "Telas" de Stock).
+ *
+ * Los tejidos viven en la tabla `fabrics`, no en `products`: la pestaña pedia
+ * products con product_type='tailoring_fabric' y en esa tabla no hay ni una
+ * sola fila con ese tipo, asi que siempre salia vacia.
+ *
+ * Se devuelven con las mismas claves que la pantalla ya sabe pintar (name, sku,
+ * material, product_type) para no duplicar el render. `stock_meters` viaja tal
+ * cual y la pantalla lo usa como total en metros.
+ */
+export const listFabricsForSastre = protectedAction<ListParams, ListResult<any>>(
+  { permission: 'products.view', auditModule: 'stock' },
+  async (ctx, params) => {
+    const result = await queryList<Record<string, unknown>>('fabrics', {
+      ...params,
+      searchFields: ['search_text'],
+    }, 'id, fabric_code, name, composition, price_per_meter, stock_meters, is_active')
+
+    return success({
+      ...result,
+      data: (result.data ?? []).map((f) => ({
+        id: f.id,
+        name: f.name,
+        sku: f.fabric_code,
+        material: f.composition,
+        stock_meters: f.stock_meters,
+        base_price: f.price_per_meter,
+        product_type: 'tailoring_fabric',
+        product_categories: null,
+        fabric_meters_used: null,
+      })),
+    })
   }
 )

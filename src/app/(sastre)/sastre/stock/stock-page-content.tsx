@@ -5,6 +5,7 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import { Search } from 'lucide-react'
 import { useList } from '@/hooks/use-list'
 import { listProductsForSastre } from '@/actions/products'
+import { listFabricsForSastre } from '@/actions/fabrics'
 import { SastreHeader } from '../../components/sastre-header'
 import { formatCurrency } from '@/lib/utils'
 
@@ -16,6 +17,8 @@ const PRODUCT_TYPE_TELAS = 'tailoring_fabric'
 const PRODUCT_TYPE_BOUTIQUE = 'boutique'
 
 function getStockTotal(product: Record<string, unknown>): number {
+  // Los tejidos no tienen variantes ni stock_levels: su existencia son metros.
+  if (product.stock_meters != null) return Number(product.stock_meters) || 0
   const variants = (product.product_variants as Array<Record<string, unknown>>) || []
   let total = 0
   for (const v of variants) {
@@ -36,26 +39,28 @@ export function StockPageContent({ sastreName }: { sastreName: string }) {
     () => (searchParams.get('tab') === TAB_BOUTIQUE ? TAB_BOUTIQUE : TAB_TELAS),
   )
 
-  const {
-    data: products,
-    total,
-    search,
-    setSearch,
-    isLoading,
-    setFilters,
-  } = useList(listProductsForSastre, {
+  // Dos listados distintos porque son dos TABLAS distintas: la boutique vive en
+  // `products` y los tejidos en `fabrics`. Antes las dos pestañas pedian
+  // products y la de Telas filtraba por product_type='tailoring_fabric', un
+  // tipo que no tiene ni una fila: siempre salia vacia.
+  const boutiqueList = useList(listProductsForSastre, {
     pageSize: 50,
     defaultSort: 'name',
     defaultOrder: 'asc',
-    defaultFilters: {
-      product_type: searchParams.get('tab') === TAB_BOUTIQUE ? PRODUCT_TYPE_BOUTIQUE : PRODUCT_TYPE_TELAS,
-    },
-    syncUrl: true,
+    defaultFilters: { product_type: PRODUCT_TYPE_BOUTIQUE },
   })
+  const telasList = useList(listFabricsForSastre, {
+    pageSize: 50,
+    defaultSort: 'name',
+    defaultOrder: 'asc',
+    defaultFilters: { is_active: true },
+  })
+
+  const { data: products, total, search, setSearch, isLoading } =
+    activeTab === TAB_TELAS ? telasList : boutiqueList
 
   const changeTab = (tab: TabKey) => {
     setActiveTab(tab)
-    setFilters({ product_type: tab === TAB_TELAS ? PRODUCT_TYPE_TELAS : PRODUCT_TYPE_BOUTIQUE })
     const params = new URLSearchParams(searchParams.toString())
     if (tab === TAB_BOUTIQUE) params.set('tab', TAB_BOUTIQUE)
     else params.delete('tab')
