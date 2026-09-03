@@ -5,6 +5,8 @@ import { cn } from '@/lib/utils'
 import { CheckCircle2, XCircle, Ban } from 'lucide-react'
 import type { CalendarEvent } from '../calendar-content'
 import { getAdminHours, isDayClosed } from '@/lib/schedule-utils'
+import { toLocalISODate, todayLocalISODate } from '@/lib/dates'
+import { isSlotBlocked, type ScheduleBlockLike } from '@/lib/schedule-utils'
 
 const typeLabels: Record<string, string> = {
   fitting: 'Prueba', delivery: 'Entrega', consultation: 'Consulta',
@@ -26,14 +28,16 @@ function getEventStyle(event: CalendarEvent) {
   return event.color
 }
 
-export function DayView({ currentDate, events, onSlotClick, onEventClick }: {
+export function DayView({ currentDate, events, blocks, onSlotClick, onEventClick }: {
   currentDate: Date
   events: CalendarEvent[]
+  /** Bloqueos de agenda del día, para pintarlos en la rejilla. */
+  blocks?: (ScheduleBlockLike & { block_date?: string })[]
   onSlotClick: (date: string, time: string) => void
   onEventClick: (event: CalendarEvent) => void
 }) {
-  const dateStr = currentDate.toISOString().split('T')[0]
-  const today = new Date().toISOString().split('T')[0]
+  const dateStr = toLocalISODate(currentDate)
+  const today = todayLocalISODate()
   const isToday = dateStr === today
   const closed = isDayClosed(dateStr)
   const HOURS = getAdminHours(dateStr)

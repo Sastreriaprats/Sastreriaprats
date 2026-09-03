@@ -18,6 +18,7 @@ import { DayView } from './views/day-view'
 import { AgendaView } from './views/agenda-view'
 import { AppointmentDialog } from './appointment-dialog'
 import { ScheduleBlocksPanel } from './schedule-blocks-panel'
+import { listScheduleBlocks, type ScheduleBlock } from '@/actions/schedule-blocks'
 import { toLocalISODate } from '@/lib/dates'
 
 const MONTHS_ES = [
@@ -69,6 +70,7 @@ export function CalendarContent() {
   const [view, setView] = useState<'month' | 'week' | 'day' | 'agenda'>('week')
   const [viewInitialized, setViewInitialized] = useState(false)
   const [currentDate, setCurrentDate] = useState(new Date())
+  const [blocks, setBlocks] = useState<ScheduleBlock[]>([])
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [tailorFilter, setTailorFilter] = useState('all')
@@ -136,12 +138,19 @@ export function CalendarContent() {
     setIsLoading(true)
     try {
       const { start, end } = getDateRange()
-      const result = await listAppointments({
-        start_date: start,
-        end_date: end,
-        store_id: activeStoreId || undefined,
-        tailor_id: tailorFilter !== 'all' ? tailorFilter : undefined,
-      })
+      // Los bloqueos de agenda se cargan junto a las citas para poder PINTARLOS:
+      // antes solo se aplicaban al guardar, asi que una franja bloqueada parecia
+      // libre y el choque se descubria al intentar crear la cita.
+      const [result, blocksRes] = await Promise.all([
+        listAppointments({
+          start_date: start,
+          end_date: end,
+          store_id: activeStoreId || undefined,
+          tailor_id: tailorFilter !== 'all' ? tailorFilter : undefined,
+        }),
+        listScheduleBlocks({ from_date: start, to_date: end, store_id: activeStoreId || undefined }),
+      ])
+      setBlocks(blocksRes.success ? (blocksRes.data as ScheduleBlock[]) : [])
 
       if (result.success) {
         setEvents(
@@ -328,8 +337,8 @@ export function CalendarContent() {
         <>
           {view === 'agenda' && <AgendaView events={events} onSlotClick={handleSlotClick} onEventClick={handleEventClick} />}
           {view === 'month' && <MonthView currentDate={currentDate} events={events} onSlotClick={handleSlotClick} onEventClick={handleEventClick} />}
-          {view === 'week' && <WeekView currentDate={currentDate} events={events} onSlotClick={handleSlotClick} onEventClick={handleEventClick} />}
-          {view === 'day' && <DayView currentDate={currentDate} events={events} onSlotClick={handleSlotClick} onEventClick={handleEventClick} />}
+          {view === 'week' && <WeekView currentDate={currentDate} events={events} blocks={blocks} onSlotClick={handleSlotClick} onEventClick={handleEventClick} />}
+          {view === 'day' && <DayView currentDate={currentDate} events={events} blocks={blocks} onSlotClick={handleSlotClick} onEventClick={handleEventClick} />}
         </>
       )}
 

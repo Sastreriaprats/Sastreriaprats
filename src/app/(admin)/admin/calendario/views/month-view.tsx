@@ -2,6 +2,7 @@
 
 import { cn } from '@/lib/utils'
 import type { CalendarEvent } from '../calendar-content'
+import { toLocalISODate, todayLocalISODate } from '@/lib/dates'
 
 const DAYS_ES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
 
@@ -31,7 +32,7 @@ export function MonthView({ currentDate, events, onSlotClick, onEventClick }: {
   const lastDay = new Date(year, month + 1, 0)
   const startDay = (firstDay.getDay() + 6) % 7
   const totalDays = lastDay.getDate()
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayLocalISODate()
 
   const getEventsForDay = (day: number) => {
     const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`

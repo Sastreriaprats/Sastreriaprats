@@ -3,6 +3,8 @@
 import { cn } from '@/lib/utils'
 import type { CalendarEvent } from '../calendar-content'
 import { getAdminHours, isDayClosed, isSaturday } from '@/lib/schedule-utils'
+import { toLocalISODate, todayLocalISODate } from '@/lib/dates'
+import { isSlotBlocked, type ScheduleBlockLike } from '@/lib/schedule-utils'
 
 const HOURS = Array.from({ length: 13 }, (_, i) => i + 8)
 const DAYS_ES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
@@ -21,9 +23,11 @@ function getEventStyle(event: CalendarEvent) {
   return event.color
 }
 
-export function WeekView({ currentDate, events, onSlotClick, onEventClick }: {
+export function WeekView({ currentDate, events, blocks, onSlotClick, onEventClick }: {
   currentDate: Date
   events: CalendarEvent[]
+  /** Bloqueos de agenda del rango visible, para pintarlos en la rejilla. */
+  blocks?: (ScheduleBlockLike & { block_date?: string })[]
   onSlotClick: (date: string, time: string) => void
   onEventClick: (event: CalendarEvent) => void
 }) {
@@ -37,7 +41,7 @@ export function WeekView({ currentDate, events, onSlotClick, onEventClick }: {
     return d
   })
 
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayLocalISODate()
 
   const getEventsForSlot = (date: string, hour: number) => {
     const hourStr = `${hour.toString().padStart(2, '0')}:`
@@ -104,7 +108,7 @@ export function WeekView({ currentDate, events, onSlotClick, onEventClick }: {
       <div className="grid grid-cols-[52px_repeat(7,1fr)] border-b bg-muted/50">
         <div className="p-2 text-xs text-muted-foreground text-center border-r">Hora</div>
         {weekDays.map((day, i) => {
-          const dateStr = day.toISOString().split('T')[0]
+          const dateStr = toLocalISODate(day)
           const isToday = dateStr === today
           const closed = isDayClosed(dateStr)
           return (
@@ -130,11 +134,18 @@ export function WeekView({ currentDate, events, onSlotClick, onEventClick }: {
               {hour.toString().padStart(2, '0')}:00
             </div>
             {weekDays.map((day, i) => {
-              const dateStr = day.toISOString().split('T')[0]
+              const dateStr = toLocalISODate(day)
               const isToday = dateStr === today
               const closed = isDayClosed(dateStr)
               const satAfternoon = isSaturday(dateStr) && hour >= 14
-              const isBlocked = closed || satAfternoon
+              // Bloqueo de agenda (festivo, viaje, evento privado): se pinta como
+              // no disponible en vez de dejar que se descubra al guardar la cita.
+              const agendaBlock = isSlotBlocked(
+                (blocks ?? []).filter((b) => b.block_date === dateStr),
+                `${hour.toString().padStart(2, '0')}:00`,
+                `${(hour + 1).toString().padStart(2, '0')}:00`,
+              )
+              const isBlocked = closed || satAfternoon || !!agendaBlock
               const slotEvents = getEventsForSlot(dateStr, hour)
               const colLayout = getColumnLayout(slotEvents)
 
