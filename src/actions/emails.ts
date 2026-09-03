@@ -15,6 +15,26 @@ import { readAllPaged } from '@/lib/server/paged'
 
 const STRUCTURED_CODES = new Set(['newsletter_default', 'newsletter_optin'])
 
+/**
+ * Errores que condenan a TODOS los destinatarios que quedan: cuota diaria
+ * agotada, API key inválida, dominio sin verificar o secreto de tokens
+ * ausente. Seguir el bucle solo gasta llamadas y llena el historial de fallos
+ * (una campaña dejó 801 logs 'failed' seguidos por la cuota diaria y otra
+ * 1.789 por el secreto de tokens). Los errores de UN destinatario concreto
+ * (dirección inválida, rebote) NO entran aquí.
+ */
+function isFatalSendError(message: string): boolean {
+  const m = (message || '').toLowerCase()
+  return (
+    m.includes('quota') ||
+    m.includes('api key') ||
+    m.includes('resend_api_key') ||
+    m.includes('not verified') ||
+    m.includes('no está verificado') ||
+    m.includes('newsletter_token_secret')
+  )
+}
+
 /** Valida los campos obligatorios del content según la plantilla.
  *  Devuelve null si pasa, o un string con el motivo si falla. */
 function validateStructuredContent(code: string, content: NewsletterContent | null | undefined): string | null {
@@ -202,7 +222,33 @@ export const listCampaigns = protectedAction<void, Record<string, unknown>[]>(
       .select('id, name, subject, status, segment, total_recipients, sent_count, delivered_count, opened_count, clicked_count, created_at, scheduled_at, sent_at')
       .is('deleted_at', null)
       .order('created_at', { ascending: false })
-    return success(data || [])
+
+    // Entregados/Abiertos/Clics se DERIVAN de email_logs: nadie mantiene los
+    // contadores de email_campaigns (ni código ni trigger), así que la tabla salía
+    // siempre a 0 aunque llegaran los eventos de Resend. Se cuentan en SQL con
+    // count exacto —nunca trayendo las filas, que PostgREST cortaría en 1000— y
+    // solo para las campañas ya enviadas. Al derivarlos, las campañas antiguas se
+    // recuperan solas en cuanto entren eventos, sin backfill.
+    const rows = (data || []) as Record<string, unknown>[]
+    await Promise.all(
+      rows.map(async (c) => {
+        if (!((c.sent_count as number) > 0)) return
+        const base = () =>
+          ctx.adminClient
+            .from('email_logs')
+            .select('id', { count: 'exact', head: true })
+            .eq('campaign_id', c.id as string)
+        const [delivered, opened, clicked] = await Promise.all([
+          base().not('delivered_at', 'is', null),
+          base().not('opened_at', 'is', null),
+          base().not('clicked_at', 'is', null),
+        ])
+        c.delivered_count = delivered.count || 0
+        c.opened_count = opened.count || 0
+        c.clicked_count = clicked.count || 0
+      })
+    )
+    return success(rows)
   }
 )
 
@@ -386,7 +432,13 @@ export const sendCampaign = protectedAction<
       .single()
 
     if (!campaign) return failure('Campaña no encontrada')
-    if ((campaign.status as string) !== 'draft') return failure('Solo se pueden enviar campañas en borrador')
+    // 'failed' = envío que quedó a medias (p.ej. la cuota diaria de Resend se
+    // agotó a mitad). Se permite reintentar porque más abajo se saltan los
+    // destinatarios que YA recibieron el email: no se duplica a nadie.
+    const campaignStatus = campaign.status as string
+    if (campaignStatus !== 'draft' && campaignStatus !== 'failed') {
+      return failure('Solo se pueden enviar campañas en borrador o con el envío fallido')
+    }
 
     const template = campaign.email_templates as Record<string, unknown> | null
     const templateCode = (template?.code as string) || ''
@@ -439,13 +491,39 @@ export const sendCampaign = protectedAction<
       .update({ status: 'sending', sent_at: new Date().toISOString() })
       .eq('id', campaignId)
 
+    // Idempotencia al reintentar: se saltan los destinatarios que YA recibieron
+    // el email en un intento anterior de esta misma campaña. Sin esto, reenviar
+    // para alcanzar a los que fallaron duplicaría el email a los que sí lo
+    // recibieron. Cuenta como recibido cualquier log que no sea 'failed': el
+    // webhook de Resend reescribe el status a delivered/opened/bounced.
+    const previousLogs = await readAllPaged<{ recipient_email: string | null; status: string | null }>(
+      (from, to) => ctx.adminClient
+        .from('email_logs')
+        .select('recipient_email, status')
+        .eq('campaign_id', campaignId)
+        .order('id', { ascending: true })
+        .range(from, to),
+      'sendCampaign:logs previos'
+    )
+    const alreadySent = new Set(
+      previousLogs
+        .filter(l => (l.status ?? '') !== 'failed')
+        .map(l => (l.recipient_email ?? '').trim().toLowerCase())
+        .filter(Boolean)
+    )
+
     let sentCount = 0
     const batchSize = 50
+    // Motivo de parada. Un error de cuenta condena a todos los que quedan: sin
+    // esto se seguían haciendo ~800 llamadas a Resend y ~800 inserts inútiles.
+    let fatalError: string | null = null
 
-    for (let i = 0; i < recipients.length; i += batchSize) {
+    for (let i = 0; i < recipients.length && !fatalError; i += batchSize) {
       const batch = recipients.slice(i, i + batchSize)
 
       for (const recipient of batch) {
+        if (fatalError) break
+        if (alreadySent.has(String(recipient.email ?? '').trim().toLowerCase())) continue
         const clientId = recipient.id as string
         let unsubscribeHeaders: Record<string, string> | undefined
         let unsubUrl = ''
@@ -494,6 +572,12 @@ export const sendCampaign = protectedAction<
               status: 'failed',
               error_message: 'No se pudo generar token (NEWSLETTER_TOKEN_SECRET?)',
             })
+            // Si falta el secreto de tokens el fallo se repite con TODOS: se
+            // para en vez de escribir un log de fallo por destinatario.
+            if (isFatalSendError(tokenErr instanceof Error ? tokenErr.message : '')) {
+              fatalError = 'No se pudo generar token (NEWSLETTER_TOKEN_SECRET?)'
+              break
+            }
             continue
           }
         }
@@ -558,6 +642,13 @@ export const sendCampaign = protectedAction<
             status: 'failed',
             error_message: errMsg,
           })
+          // Cuota diaria agotada / API key / dominio sin verificar: el resto de
+          // destinatarios fallaría igual. Se para y la campaña queda 'failed'
+          // para poder reintentar solo con los que se han quedado fuera.
+          if (isFatalSendError(errMsg)) {
+            fatalError = errMsg
+            break
+          }
         }
       }
 
@@ -566,15 +657,23 @@ export const sendCampaign = protectedAction<
       }
     }
 
+    // Acumula lo ya enviado en intentos anteriores: si no, un reintento
+    // borraría de la ficha los envíos que sí salieron la primera vez.
+    const totalSent = alreadySent.size + sentCount
+    // Solo se marca 'failed' si el envío se CORTÓ por un error de cuenta; los
+    // fallos sueltos (direcciones inválidas) no deben teñir de rojo una
+    // campaña que ha salido entera. 'failed' es el único estado, además de
+    // 'draft', desde el que se puede volver a lanzar.
+    const finalStatus = fatalError ? 'failed' : 'sent'
     await ctx.adminClient.from('email_campaigns').update({
-      status: 'sent', sent_count: sentCount, total_recipients: recipients.length,
+      status: finalStatus, sent_count: totalSent, total_recipients: recipients.length,
     }).eq('id', campaignId)
 
     return success({
-      sent: sentCount,
+      sent: totalSent,
       total: recipients.length,
       auditEntityId: String(campaignId),
-      auditDescription: `Campaña "${(campaign.name as string) || ''}" enviada (${sentCount}/${recipients.length})`,
+      auditDescription: `Campaña "${(campaign.name as string) || ''}" ${fatalError ? 'INTERRUMPIDA' : 'enviada'} (${totalSent}/${recipients.length})${fatalError ? `: ${fatalError}` : ''}`,
     })
   }
 )

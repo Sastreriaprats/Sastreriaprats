@@ -1,6 +1,7 @@
 'use server'
 
 import { protectedAction } from '@/lib/server/action-wrapper'
+import { revalidatePath } from 'next/cache'
 import { success, failure } from '@/lib/errors'
 
 // Tipos para contenido de la home (CMS)
@@ -498,6 +499,10 @@ export const upsertBlogPost = protectedAction<Record<string, unknown>, unknown>(
         .update({ ...postData, updated_by: ctx.userId })
         .eq('id', id as string)
       if (error) return failure(error.message)
+      // La ficha pública /blog/[slug] es estática (revalidate = 1800) y el
+      // `revalidate` del wrapper solo admite rutas fijas: sin esto, la errata
+      // corregida seguía viéndose media hora en la web.
+      if (typeof input.slug === 'string' && input.slug.trim()) revalidatePath(`/blog/${input.slug.trim()}`)
       return success({ id, auditEntityId: String(id), auditDescription: `Entrada de blog "${input.title_es ?? ''}"` })
     } else {
       const { data, error } = await ctx.adminClient
@@ -506,6 +511,9 @@ export const upsertBlogPost = protectedAction<Record<string, unknown>, unknown>(
         .select('id')
         .single()
       if (error) return failure(error.message)
+      // Mismo motivo que en la rama de edición: la ficha del artículo nuevo
+      // puede estar ya cacheada como 404 si alguien visitó la URL antes.
+      if (typeof input.slug === 'string' && input.slug.trim()) revalidatePath(`/blog/${input.slug.trim()}`)
       return success({ id: data.id, auditEntityId: String(data.id), auditDescription: `Entrada de blog "${input.title_es ?? ''}"` })
     }
   }

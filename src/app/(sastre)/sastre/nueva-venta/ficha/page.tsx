@@ -8,7 +8,7 @@ import { NuevaVentaFichaClient } from './nueva-venta-ficha-client'
 
 function NuevaVentaFichaPage() {
   const searchParams = useSearchParams()
-  const { profile, activeStoreId } = useAuth()
+  const { profile, activeStoreId, hasRole } = useAuth()
 
   const sastreName = profile?.fullName ?? profile?.firstName ?? profile?.lastName ?? 'Sastre'
   const clientId = searchParams.get('clientId') ?? ''
@@ -30,7 +30,9 @@ function NuevaVentaFichaPage() {
       />
     )
 
-  return <SastreLayoutWithSidebar sastreName={sastreName}>{content}</SastreLayoutWithSidebar>
+  // El lateral solo pinta "Caja TPV" y "Cobros" si recibe isSastrePlus; sin
+  // pasarlo, los dos enlaces desaparecían a mitad de Nueva venta.
+  return <SastreLayoutWithSidebar sastreName={sastreName} isSastrePlus={hasRole('sastre_plus')}>{content}</SastreLayoutWithSidebar>
 }
 
 export default function Page() {

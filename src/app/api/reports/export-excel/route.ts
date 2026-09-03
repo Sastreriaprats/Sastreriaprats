@@ -168,7 +168,9 @@ function sectionClients(rows: Row[], data: AnyRec | null) {
 
   rows.push(['RESUMEN CLIENTES'])
   rows.push(['Nuevos clientes', num(data.newClients)])
-  rows.push(['Total clientes', num(data.totalClients)])
+  // getClientsAnalytics devuelve el histórico como `totalClientsHistorical`;
+  // leer `totalClients` (clave inexistente) exportaba siempre 0.
+  rows.push(['Total clientes', num(data.totalClientsHistorical)])
   rows.push(['Clientes con compras', num(data.clientsWithPurchases)])
   rows.push([])
 

@@ -358,6 +358,15 @@ export function ReportsContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildExportPayload()),
       })
+      // Sin esta rama, un 403 (falta el permiso reports.export) o un 500 no mostraban
+      // NADA: ni fichero ni aviso, y el usuario repetía el clic creyendo que fallaba
+      // la descarga del navegador.
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        toast.error(body?.error === 'Forbidden' ? 'No tienes permiso para exportar informes' : 'No se pudo exportar el informe')
+        setIsExporting(false)
+        return
+      }
       if (res.ok) {
         const blob = await res.blob()
         const url = URL.createObjectURL(blob)
@@ -366,7 +375,9 @@ export function ReportsContent() {
         a.download = `informe-prats-${activeTab}-${dateRange.start}-${dateRange.end}.html`
         a.click()
         URL.revokeObjectURL(url)
-        toast.success('PDF descargado')
+        // La ruta devuelve HTML (text/html), no un PDF: el aviso dice la verdad
+        // para que nadie lo reenvíe a la gestoría creyendo que es un PDF.
+        toast.success('Informe descargado — ábrelo e imprime a PDF')
       }
     } catch {
       toast.error('Error al exportar')
@@ -382,6 +393,13 @@ export function ReportsContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildExportPayload()),
       })
+      // Mismo motivo que en el PDF: un 403/500 se tragaba en silencio.
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        toast.error(body?.error === 'Forbidden' ? 'No tienes permiso para exportar informes' : 'No se pudo exportar el informe')
+        setIsExporting(false)
+        return
+      }
       if (res.ok) {
         const blob = await res.blob()
         const url = URL.createObjectURL(blob)
@@ -420,7 +438,8 @@ export function ReportsContent() {
         {canSeeGlobal && (
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" className="gap-1" onClick={handleExportPDF} disabled={isExporting || isLoading}>
-              <FileText className="h-3 w-3" /> PDF
+              {/* La exportación genera HTML con estilos de impresión, no un PDF real. */}
+              <FileText className="h-3 w-3" /> Imprimir (HTML)
             </Button>
             <Button variant="outline" size="sm" className="gap-1" onClick={handleExportExcel} disabled={isExporting || isLoading}>
               <FileSpreadsheet className="h-3 w-3" /> Excel
@@ -1220,6 +1239,11 @@ function CommissionsBlock({ commissions, groupBonuses }: { commissions: Employee
                 <p>
                   Bonus de <strong>{formatCurrency(gb.pool)}</strong> ({gb.rate}% sobre {gb.base_type === 'total' ? 'la venta conjunta' : 'el exceso conjunto'}),
                   repartido entre {gb.members.length}: {gb.members.map(m => `${m.employee_name} (${formatCurrency(m.amount)})`).join(', ')}.
+                  {/* El bonus es trimestral: si el rango no cubre el trimestre entero no se
+                      suma arriba, y hay que decirlo o el gerente cree que falta dinero. */}
+                  {!gb.counted && (
+                    <> Es un bonus del <strong>trimestre completo</strong>, así que <strong>no</strong> se suma a la «Comisión total» de arriba: el rango consultado no cubre {gb.quarter_label} entero.</>
+                  )}
                 </p>
               ) : (
                 <p>Todas las tiendas listadas deben superar su objetivo del trimestre para que se active el bonus ({gb.rate}% sobre {gb.base_type === 'total' ? 'la venta conjunta' : 'el exceso conjunto'}).</p>

@@ -22,6 +22,7 @@ import {
 import { ArrowLeft, FileDown, Printer, Save, Ban, Trash2, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDate } from '@/lib/utils'
+import { usePermissions } from '@/hooks/use-permissions'
 import { createClient } from '@/lib/supabase/client'
 import { updateAlteration, cancelAlteration, deleteAlteration, markAlterationCharged, clearAlterationCharge } from '@/actions/alterations'
 import {
@@ -41,6 +42,11 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
 
 export function AlterationDetailContent({ alteration, basePath = '/admin' }: { alteration: AlterationWithRelations; basePath?: string }) {
   const router = useRouter()
+  const { can, isAdmin } = usePermissions()
+  // Marcar cobrado / dejar pendiente pide el mismo permiso que la action
+  // (pos.sell). El panel del sastre queda fuera: no maneja caja y su listado ni
+  // siquiera muestra el estado de cobro.
+  const canCharge = basePath !== '/sastre' && (isAdmin || can('pos.sell'))
 
   // ── Form state (todos los campos editables) ───────────────────────────────
   const [phone, setPhone] = useState(alteration.phone ?? '')
@@ -282,8 +288,11 @@ export function AlterationDetailContent({ alteration, basePath = '/admin' }: { a
               <p className="text-sm text-muted-foreground">{alteration.alteration_type}</p>
             </div>
 
-            {/* Cobro: sin marca de cobro el arreglo asoma como deuda del cliente */}
-            {basePath === '/admin' && (
+            {/* Cobro: sin marca de cobro el arreglo asoma como deuda del cliente.
+                El ESTADO tiene que verse también desde /vendedor: ahí el listado ya
+                pinta "Debe X €" y la ficha no ofrecía nada, así que el vendedor veía
+                la deuda y no podía ni consultarla ni saldarla. */}
+            {basePath !== '/sastre' && (
               <div className="space-y-2 rounded-md border p-3">
                 <div className="flex items-center justify-between gap-2">
                   <Label className="text-muted-foreground text-xs">Cobro</Label>
@@ -297,7 +306,7 @@ export function AlterationDetailContent({ alteration, basePath = '/admin' }: { a
                     </Badge>
                   )}
                 </div>
-                {isCharged ? (
+                {canCharge && (isCharged ? (
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs text-muted-foreground">
                       {alteration.sale_id ? 'Cobrado en un ticket de caja.' : 'Marcado como cobrado a mano.'}
@@ -328,7 +337,7 @@ export function AlterationDetailContent({ alteration, basePath = '/admin' }: { a
                       </Button>
                     </div>
                   </>
-                )}
+                ))}
               </div>
             )}
 
@@ -336,7 +345,12 @@ export function AlterationDetailContent({ alteration, basePath = '/admin' }: { a
               <div className="space-y-1">
                 <Label>Pedido vinculado</Label>
                 <Link
-                  href={`/admin/pedidos/${alteration.tailoring_orders.id}`}
+                  // El panel del sastre tiene su propia ruta de pedidos y el
+                  // middleware saca a /sastre cualquier /admin, asi que el
+                  // enlace fijo lo dejaba en el dashboard. El del vendedor NO
+                  // tiene /vendedor/pedidos: para el sigue valiendo /admin
+                  // (excepcion isPedidosRoute del middleware).
+                  href={`${basePath === '/sastre' ? '/sastre' : '/admin'}/pedidos/${alteration.tailoring_orders.id}`}
                   className="text-sm font-mono hover:underline block"
                 >
                   {alteration.tailoring_orders.order_number}
@@ -404,13 +418,17 @@ export function AlterationDetailContent({ alteration, basePath = '/admin' }: { a
               <Ban className="h-4 w-4" /> Cancelar arreglo
             </Button>
           )}
-          <Button
-            variant="outline"
-            onClick={() => setDeleteOpen(true)}
-            className="gap-1 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
-          >
-            <Trash2 className="h-4 w-4" /> Eliminar permanentemente
-          </Button>
+          {/* El borrado es fisico: solo lo ensenamos a quien puede borrar
+              clientes (el server action exige el mismo permiso). */}
+          {can('clients.delete') && (
+            <Button
+              variant="outline"
+              onClick={() => setDeleteOpen(true)}
+              className="gap-1 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+            >
+              <Trash2 className="h-4 w-4" /> Eliminar permanentemente
+            </Button>
+          )}
         </div>
         <Button onClick={handleSave} disabled={saving} className="gap-1">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}

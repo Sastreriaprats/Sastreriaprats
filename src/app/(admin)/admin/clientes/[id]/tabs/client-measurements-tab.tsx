@@ -150,6 +150,10 @@ export function ClientMeasurementsTab({ clientId }: { clientId: string }) {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [currentId, setCurrentId] = useState<string | null>(null)
+  // La lectura del historial va por RLS con el cliente de navegador. Si falla,
+  // el formulario queda en blanco igual que si el cliente no tuviera medidas, y
+  // guardar encima crearia una version vigente vacia: bloqueamos el guardado.
+  const [loadError, setLoadError] = useState(false)
 
   /** Normaliza el JSONB de la BD a Record<string, string> para los inputs controlados */
   const normalizeValues = useCallback((raw: Record<string, unknown> | null | undefined): Record<string, string> => {
@@ -163,12 +167,21 @@ export function ClientMeasurementsTab({ clientId }: { clientId: string }) {
 
   /** Carga o recarga el historial de medidas del cliente para el garment type body */
   const loadMeasurements = useCallback(async (bodyId: string) => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('client_measurements')
       .select('*')
       .eq('client_id', clientId)
       .eq('garment_type_id', bodyId)
       .order('created_at', { ascending: false })
+
+    if (error) {
+      // No vaciamos nada: un fallo de lectura no puede parecerse a "este cliente
+      // no tiene medidas", porque el siguiente Guardar pisaria la version vigente.
+      console.error('[ClientMeasurementsTab] loadMeasurements:', error)
+      setLoadError(true)
+      return
+    }
+    setLoadError(false)
 
     if (data && data.length > 0) {
       setHistory(data)
@@ -305,7 +318,12 @@ export function ClientMeasurementsTab({ clientId }: { clientId: string }) {
             </p>
           )}
         </div>
-        {canEdit && (
+        {loadError && (
+          <p className="flex items-center gap-1 text-sm text-red-600">
+            <AlertCircle className="h-4 w-4" /> No se pudieron cargar las medidas. Recarga la página antes de guardar.
+          </p>
+        )}
+        {canEdit && !loadError && (
           <div className="flex gap-2">
             <Button
               variant="outline"

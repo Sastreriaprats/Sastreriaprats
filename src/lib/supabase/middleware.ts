@@ -129,6 +129,12 @@ export async function updateSession(request: NextRequest) {
   const isSastreRoute   = pathname === '/sastre' || pathname.startsWith('/sastre/')
   const isAuthRoute     = pathname.startsWith('/auth')
   const isLoginPage     = pathname === '/auth/login'
+  // La página de nueva contraseña TIENE que poder abrirse con sesión: el enlace
+  // del email (que es también el de activación de cuenta de los clientes de la
+  // tienda) llega muchas veces a un navegador ya logueado, y el redirect de más
+  // abajo lo mandaba al panel quemando un token de un solo uso. Comparación
+  // exacta a propósito: no relaja nada más bajo /auth.
+  const isResetPage     = pathname === '/auth/restablecer'
 
   const { data: { user }, error } = await supabase.auth.getUser()
 
@@ -233,7 +239,7 @@ export async function updateSession(request: NextRequest) {
   }
 
   // Autenticado en ruta auth (otras que no son /auth/login) → dashboard
-  if (user && isAuthRoute && !isLoginPage) {
+  if (user && isAuthRoute && !isLoginPage && !isResetPage) {
     const url = request.nextUrl.clone()
     url.pathname = '/admin/dashboard'
     const redirectRes = NextResponse.redirect(url)
@@ -257,7 +263,11 @@ export async function updateSession(request: NextRequest) {
     // comisiones" (la página scopa en servidor por reports.view_own — mig 232;
     // sin esta excepción la vista era inalcanzable para ellos).
     const isReportingRoute     = pathname.startsWith('/admin/reporting')
-    if (hasSastreRole) {
+    // Los sastre_plus tienen reports.view_own igual que los vendedores: sin esta
+    // excepción su vista personal "Mis ventas y comisiones" era inalcanzable (el
+    // panel /sastre no la enlaza y la URL directa rebotaba). La página scopa en
+    // servidor con requireAnyPermission, así que no ven nada ajeno.
+    if (hasSastreRole && !isReportingRoute) {
       const url = request.nextUrl.clone()
       url.pathname = '/sastre'
       const redirectRes = NextResponse.redirect(url)

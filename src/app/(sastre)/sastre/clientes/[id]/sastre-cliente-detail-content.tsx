@@ -284,6 +284,8 @@ interface Props {
   totalSpent: number
   totalPending: number
   orderCount: number
+  /** Pestaña inicial: llega en ?tab= al volver desde un arreglo. */
+  initialTab?: string
 }
 
 const TABS = [
@@ -299,7 +301,7 @@ const TABS = [
   { value: 'citas', label: 'Citas' },
 ] as const
 
-export function SastreClienteDetailContent({ client, sastreName, totalSpent, totalPending, orderCount }: Props) {
+export function SastreClienteDetailContent({ client, sastreName, totalSpent, totalPending, orderCount, initialTab }: Props) {
   const clientId = String(client.id)
   const fullName = String(client.full_name || `${client.first_name || ''} ${client.last_name || ''}`).trim() || 'Sin nombre'
   const averageTicket = Number(client.average_ticket ?? 0)
@@ -363,7 +365,7 @@ export function SastreClienteDetailContent({ client, sastreName, totalSpent, tot
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="resumen">
+      <Tabs defaultValue={initialTab && TABS.some(t => t.value === initialTab) ? initialTab : 'resumen'}>
         <TabsList className="bg-white/[0.06] border border-white/10 h-auto p-1 gap-0.5 flex-wrap">
           {TABS.map(({ value, label }) => (
             <TabsTrigger

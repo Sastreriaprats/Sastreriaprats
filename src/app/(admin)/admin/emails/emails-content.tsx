@@ -588,7 +588,15 @@ export function EmailsContent() {
     setSendingId(id)
     const res = await sendCampaign(id)
     if (res.success) {
-      toast.success(`Enviados ${res.data?.sent ?? 0} de ${res.data?.total ?? 0} emails`)
+      const sent = res.data?.sent ?? 0
+      const total = res.data?.total ?? 0
+      // Antes decía "éxito" también con 199 de 1000: el aviso tiene que
+      // distinguir el envío completo del que se ha quedado a medias.
+      if (sent < total) {
+        toast.warning(`Enviados ${sent} de ${total} emails. Revisa el historial; si la campaña ha quedado como fallida puedes volver a pulsar Enviar para reintentar solo con los que faltan.`)
+      } else {
+        toast.success(`Enviados ${sent} de ${total} emails`)
+      }
       loadCampaigns()
     } else {
       toast.error(res.error ?? 'Error al enviar')
@@ -738,12 +746,17 @@ export function EmailsContent() {
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">
-                          {(c.status as string) === 'draft' && (
+                          {/* 'failed' = envío cortado a medias (cuota diaria
+                              agotada, p.ej.): hay que poder reintentar. Editar
+                              se queda deshabilitado porque updateEmailCampaign
+                              solo admite borradores. */}
+                          {['draft', 'failed'].includes(c.status as string) && (
                             <>
                               <Button
                                 size="sm"
                                 variant="outline"
                                 className="gap-1 text-xs"
+                                disabled={(c.status as string) !== 'draft'}
                                 onClick={() => openEditCampaign(c.id as string)}
                               >
                                 <Pencil className="h-3 w-3" /> Editar
@@ -770,7 +783,7 @@ export function EmailsContent() {
                                 {sendingId === (c.id as string)
                                   ? <Loader2 className="h-3 w-3 animate-spin" />
                                   : <Send className="h-3 w-3" />}
-                                Enviar
+                                {(c.status as string) === 'failed' ? 'Reintentar' : 'Enviar'}
                               </Button>
                             </>
                           )}

@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDate, formatCurrency } from '@/lib/utils'
+import { todayLocalISODate } from '@/lib/dates'
 import { downloadExcel } from '@/lib/excel/export'
 import { useList } from '@/hooks/use-list'
 import { useActiveStore } from '@/hooks/use-store'
@@ -376,7 +377,9 @@ function NewAlterationDialog({
   const [phone, setPhone] = useState('')
   const [garmentType, setGarmentType] = useState('')
   const [description, setDescription] = useState('')
-  const [alterationDate, setAlterationDate] = useState(new Date().toISOString().split('T')[0])
+  // Fecha LOCAL: con toISOString() un arreglo dado de alta de noche se
+  // guardaba con la fecha del día anterior (UTC).
+  const [alterationDate, setAlterationDate] = useState(todayLocalISODate())
   const [estimated, setEstimated] = useState('')
   const [officialId, setOfficialId] = useState('')
   const [costPrice, setCostPrice] = useState('')
@@ -440,7 +443,7 @@ function NewAlterationDialog({
     setClientId(''); setClientName('')
     setOrders([]); setOrderId('')
     setPhone(''); setGarmentType(''); setDescription('')
-    setAlterationDate(new Date().toISOString().split('T')[0])
+    setAlterationDate(todayLocalISODate())
     setEstimated(''); setOfficialId(''); setCostPrice(''); setSalePrice(''); setNotes('')
   }
 

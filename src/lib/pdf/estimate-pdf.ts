@@ -84,6 +84,8 @@ export async function generateEstimatePdf(estimateId: string): Promise<string> {
     buildTotals({
       subtotal: n(estimate.subtotal),
       taxRate: n(estimate.tax_rate),
+      // El rótulo del IVA se deriva de las líneas: la cabecera está fijada a 21%.
+      lines,
       taxAmount: n(estimate.tax_amount),
       irpfRate: n(estimate.irpf_rate),
       irpfAmount: n(estimate.irpf_amount),

@@ -257,10 +257,12 @@ function renderClients(data: AnyRec | null): string {
   const sources = (data.sources as Record<string, number>) || {}
   const topClients = (data.topClients as AnyRec[]) || []
 
+  // getClientsAnalytics devuelve el histórico como `totalClientsHistorical`;
+  // leer `totalClients` (clave inexistente) imprimía siempre 0 en el KPI.
   const kpis = `
 <div class="kpi-grid">
   <div class="kpi"><div class="kpi-value">${data.newClients || 0}</div><div class="kpi-label">Nuevos clientes</div></div>
-  <div class="kpi"><div class="kpi-value">${data.totalClients || 0}</div><div class="kpi-label">Total clientes</div></div>
+  <div class="kpi"><div class="kpi-value">${data.totalClientsHistorical || 0}</div><div class="kpi-label">Total clientes</div></div>
   <div class="kpi"><div class="kpi-value">${data.clientsWithPurchases || 0}</div><div class="kpi-label">Con compras</div></div>
 </div>`
 

@@ -162,6 +162,8 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const [pendingWorkDialogOpen, setPendingWorkDialogOpen] = useState(false)
   const [showCloseReminderDialog, setShowCloseReminderDialog] = useState(false)
   const [lineToRemove, setLineToRemove] = useState<{ id: string; description: string } | null>(null)
+  // Anular vacía el ticket entero: se confirma igual que quitar una sola línea.
+  const [showCancelTicket, setShowCancelTicket] = useState(false)
   const [showStockWarning, setShowStockWarning] = useState(false)
   const [paymentTab, setPaymentTab] = useState<'integro' | 'mixto' | 'parcial'>('integro')
   const [paymentStep, setPaymentStep] = useState<'salesperson' | 'choose_type' | 'details'>('salesperson')
@@ -229,6 +231,11 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
           const sorted: any[] = []
           for (const arr of byProduct.values()) sorted.push(...sortBySize(arr))
           setSearchResults(sorted)
+        } else {
+          // Un fallo de consulta se veía igual que "no hay artículos" y el
+          // vendedor daba la venta por perdida.
+          setSearchResults([])
+          toast.error(result.error ?? 'No se pudo buscar productos')
         }
       } catch (e) {
         console.error('[TPV search]', e)
@@ -259,7 +266,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
           barcodeBufferRef.current = { digits: '', firstAt: 0 }
           getProductByBarcode({ barcode: captured, storeId: activeStoreId ?? undefined }).then((result) => {
             if (result.success && result.data && result.data.variant) {
-              addToTicket(result.data.variant)
+              addToTicketRef.current(result.data.variant)
               const v = result.data.variant as any
               const name = v.products?.name || v.product_name || 'Producto'
               const size = v.size ? ` · Talla ${v.size}` : ''
@@ -520,6 +527,14 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
     setSearchResults([])
     searchRef.current?.focus()
   }
+
+  // El listener global de la pistola se registra una sola vez (deps [activeStoreId])
+  // y se quedaba con la copia de `addToTicket` del primer render, que cierra sobre un
+  // `ticketLines` vacio: por eso cada escaneo abria linea nueva en vez de sumar
+  // cantidad, y como cada linea llevaba quantity 1 no saltaba ningun aviso de stock.
+  // Este ref le da siempre la version fresca sin re-registrar el listener.
+  const addToTicketRef = useRef(addToTicket)
+  useEffect(() => { addToTicketRef.current = addToTicket })
 
   const addManualLine = () => {
     setTicketLines(prev => [...prev, {
@@ -1696,7 +1711,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
           </button>
           <button
             type="button"
-            onClick={() => { setTicketLines([]); setPayments([]); setSaleNotes(''); setSaleDate(''); toast.success('Ticket anulado'); }}
+            onClick={() => { if (ticketLines.length === 0) return; setShowCancelTicket(true) }}
             className="flex flex-col items-center justify-center gap-0.5 min-w-[4rem] py-2 text-rose-300 hover:text-rose-200 hover:bg-white/5 rounded transition-colors"
           >
             <X className="h-5 w-5" />
@@ -2567,6 +2582,43 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
               }}
             >
               Quitar línea
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showCancelTicket} onOpenChange={setShowCancelTicket}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Anular el ticket completo?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se borran {ticketLines.length} líneas ({formatCurrency(total)}) y se quitan el descuento y el Tax Free aplicados.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 text-white"
+              onClick={(e) => {
+                e.preventDefault()
+                setTicketLines([])
+                setPayments([])
+                setSaleNotes('')
+                setSaleDate('')
+                // El descuento global, su código y el Tax Free se quedaban puestos:
+                // la siguiente venta salía rebajada o con IVA 0 sin que nadie lo viera.
+                setGlobalDiscount(0)
+                setDiscountCodeApplied(null)
+                setDiscountCodeInput('')
+                setIsTaxFree(false)
+                setVoucherCodeInput('')
+                setVoucherInfo(null)
+                setShowCancelTicket(false)
+                toast.success('Ticket anulado')
+                searchRef.current?.focus()
+              }}
+            >
+              Anular ticket
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

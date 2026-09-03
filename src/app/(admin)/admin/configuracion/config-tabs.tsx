@@ -3,13 +3,12 @@
 import { useState, useCallback } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/components/providers/auth-provider'
-import { Users, Shield, Store, Settings, Shirt, UserCog, Target, Layers, CalendarDays, Ruler, Percent, Truck } from 'lucide-react'
+import { Users, Shield, Store, Shirt, UserCog, Target, Layers, CalendarDays, Ruler, Percent, Truck } from 'lucide-react'
 import { UsersSection } from './sections/users-section'
 import { RolesSection } from './sections/roles-section'
 import { StoresSection } from './sections/stores-section'
 import { StoreEmployeesSection } from './sections/store-employees-section'
 import { GarmentTypesSection } from './sections/garment-types-section'
-import { SettingsSection } from './sections/settings-section'
 import { GoalsSection } from './sections/goals-section'
 import { CommissionsSection } from './sections/commissions-section'
 import { CollectionsSection } from './sections/collections-section'
@@ -86,12 +85,9 @@ const ALL_TABS = [
     icon: Ruler,
     perms: ['products.view', 'products.edit', 'config.edit', 'config.view', 'config.access'],
   },
-  {
-    value: 'settings',
-    label: 'Parámetros',
-    icon: Settings,
-    perms: ['config.view', 'config.access'],
-  },
+  // La pestaña "Parámetros" se retiró: nadie lee system_config (el IVA vive en las
+  // líneas, la serie en nextSeriesNumber, el fondo de caja en stores y el envío
+  // gratis en shipping_zones), así que editarla daba un "guardado" falso.
 ]
 
 export function ConfigTabs({ activeTab }: { activeTab: string }) {
@@ -157,7 +153,6 @@ export function ConfigTabs({ activeTab }: { activeTab: string }) {
         <TabsContent value="collections"><CollectionsSection /></TabsContent>
         <TabsContent value="seasons"><SeasonsSection /></TabsContent>
         <TabsContent value="size-guides"><SizeGuidesSection /></TabsContent>
-        <TabsContent value="settings"><SettingsSection /></TabsContent>
       </div>
     </Tabs>
   )

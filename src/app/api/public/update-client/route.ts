@@ -38,9 +38,20 @@ export async function PUT(request: NextRequest) {
     .single()
 
   if (!ownerCheck) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  // first_name/last_name son NOT NULL, pero la cadena vacía los satisface: sin
+  // esto, vaciar los campos en Mi perfil dejaba la ficha sin nombre en todo el
+  // back-office (full_name es generada) y fuera del buscador. El trim cubre
+  // además el body parcial, que escribiría NULL y daría un 500 opaco.
+  const firstName = typeof first_name === 'string' ? first_name.trim() : ''
+  const lastName = typeof last_name === 'string' ? last_name.trim() : ''
+  if (!firstName || !lastName) {
+    return NextResponse.json({ error: 'El nombre y los apellidos son obligatorios' }, { status: 400 })
+  }
+
   const { error } = await admin.from('clients').update({
-    first_name,
-    last_name,
+    first_name: firstName,
+    last_name: lastName,
     phone: phone || null,
     address: address || null,
     city: city || null,

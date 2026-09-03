@@ -372,7 +372,10 @@ export function PosSummaryContent() {
           </CardContent></Card>
           <Card><CardContent className="pt-4 pb-3">
             <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1"><ShoppingBag className="h-3 w-3" /> N&ordm; tickets</div>
-            <p className="text-2xl font-bold">{sales.length}</p>
+            {/* Solo ventas reales: los cobros de pedido/reserva, los movimientos manuales
+                y las devoluciones no son tickets. Mismo recuento que usa el ticket medio,
+                que si no se contradice con esta tarjeta. */}
+            <p className="text-2xl font-bold">{salesCount}</p>
           </CardContent></Card>
           <Card><CardContent className="pt-4 pb-3">
             <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1"><CreditCard className="h-3 w-3" /> Ticket medio</div>

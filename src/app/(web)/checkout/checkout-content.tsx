@@ -35,7 +35,7 @@ type ClientProfile = {
 }
 
 export function CheckoutContent() {
-  const { items, subtotal, clearCart } = useCart()
+  const { items, subtotal } = useCart()
   const [isProcessing, setIsProcessing] = useState(false)
   const [deliveryMethod, setDeliveryMethod] = useState<'home' | 'store'>('home')
   const [clientProfile, setClientProfile] = useState<ClientProfile | null>(null)
@@ -76,7 +76,11 @@ export function CheckoutContent() {
   const freeShipping = !shippingPending && !shippingUnavailable && shippingCost === 0
   const discountAmount = appliedDiscount?.discount_amount || 0
   const afterDiscount = subtotal - discountAmount
-  const taxAmount = Math.round(afterDiscount * 0.21 * 100) / 100
+  // Los precios de la web YA llevan IVA (unit_price = products.price_with_tax),
+  // así que aquí el IVA se EXTRAE del importe, no se suma encima: el resumen
+  // enseñaba "IVA 21,00 €" junto a un total de 100 € que no cuadraba. Misma
+  // fórmula que el servidor en /api/public/checkout (el tax_amount que se guarda).
+  const taxAmount = Math.round((afterDiscount - afterDiscount / 1.21) * 100) / 100
   const total = afterDiscount + shippingCost
 
   useEffect(() => {
@@ -237,7 +241,10 @@ export function CheckoutContent() {
       const data = await res.json()
 
       if (data.checkout_url) {
-        clearCart()
+        // El carrito NO se vacía aquí: tener la URL de la pasarela no es haber
+        // pagado. Si el cliente cancela en Redsys vuelve a /carrito (UrlKO) y
+        // debe encontrar sus prendas. El vaciado del camino bueno lo hace
+        // <ClearCartOnConfirm /> en /checkout/confirmacion.
         window.location.href = data.checkout_url
       } else if (data.error) {
         toast.error(data.error)
@@ -523,7 +530,7 @@ export function CheckoutContent() {
                 </p>
               )}
               <div className="flex justify-between">
-                <span className="text-gray-500">IVA (21%)</span>
+                <span className="text-gray-500">IVA (21%) incluido</span>
                 <span>{formatPrice(taxAmount)}</span>
               </div>
               <Separator />

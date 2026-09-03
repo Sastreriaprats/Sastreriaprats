@@ -416,7 +416,10 @@ export function ReservationsTab() {
         return
       }
       toast.success(`Borrador ${res.data.invoice_number} creado. Redirigiendo al editor…`)
-      router.push(`/admin/contabilidad?tab=facturas&edit=${res.data.id}`)
+      // /admin/contabilidad exige accounting.view y el middleware lo veta a los
+      // vendedores: se les expulsaba a /vendedor con el borrador ya creado.
+      // /admin/facturas monta el MISMO editor y solo pide accounting.manage_invoices.
+      router.push(`/admin/facturas?edit=${res.data.id}`)
     } catch (err) {
       console.error('Error generando factura de reserva:', err)
       toast.error(err instanceof Error ? err.message : 'Error al generar la factura')

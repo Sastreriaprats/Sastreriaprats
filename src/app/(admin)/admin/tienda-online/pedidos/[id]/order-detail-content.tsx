@@ -152,7 +152,16 @@ export function AdminOrderDetailContent() {
       toast.error('error' in res ? res.error : 'No se pudo cambiar el estado')
       return
     }
-    toast.success(`Estado cambiado a "${STATUS_LABELS[pendingStatus] ?? pendingStatus}"`)
+    // El cambio de estado ha ido bien, pero el aviso al cliente puede no haber
+    // salido: el diálogo promete el email con el seguimiento, así que si no se
+    // ha enviado hay que decirlo en vez de dar un visto bueno en verde.
+    if (res.data.emailSent === false) {
+      toast.warning(
+        `Estado cambiado a "${STATUS_LABELS[pendingStatus] ?? pendingStatus}", pero NO se ha podido avisar al cliente: ${res.data.emailError ?? 'error al enviar el email'}`
+      )
+    } else {
+      toast.success(`Estado cambiado a "${STATUS_LABELS[pendingStatus] ?? pendingStatus}"`)
+    }
     setPendingStatus(null)
     setTrackingInput('')
     setCarrierInput('')

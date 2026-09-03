@@ -855,7 +855,9 @@ export const getTopProducts = protectedAction<
         q = q.gte('sales.created_at', `${start_date}T00:00:00`).lte('sales.created_at', `${end_date}T23:59:59`)
         if (store_id) q = q.eq('sales.store_id', store_id)
       }
-      const { data } = await q.range(from, from + PAGE - 1)
+      // Orden estable: LIMIT/OFFSET sin ORDER BY no garantiza el mismo reparto
+      // entre páginas, así que una línea podía salir dos veces o ninguna.
+      const { data } = await q.order('id', { ascending: true }).range(from, from + PAGE - 1)
       if (!data?.length) break
       // Excluir las líneas de ticket que son COBROS, no género vendido:
       //   - "Pedido sastrería - PIN-…" / "Cobro pendiente - PIN|WEL-…" → cobro de un pedido
@@ -925,6 +927,8 @@ export const getTopProducts = protectedAction<
         .from('stock_levels')
         .select('quantity, product_variants!inner(size, product_id, products(id, name, sku, cost_price, category_id))')
         .gt('quantity', 0)
+        // Orden estable: son >2.500 filas, o sea varias páginas.
+        .order('id', { ascending: true })
         .range(from, from + STOCK_PAGE - 1)
       if (!data?.length) break
       for (const row of data as any[]) {
@@ -954,6 +958,8 @@ export const getTopProducts = protectedAction<
         .from('products')
         .select('id, name, sku, cost_price, category_id')
         .eq('is_active', true)
+        // Orden estable: son >1.600 productos activos, o sea varias páginas.
+        .order('id', { ascending: true })
         .range(from, from + PAGE - 1)
       if (!data?.length) break
       for (const p of data as any[]) {
@@ -1671,14 +1677,19 @@ export const getOfficialsCommissions = protectedAction<
     if (dErr) return failure(dErr.message || 'Error al consultar líneas devengadas', 'INTERNAL')
 
     // B) ASIGNADAS activas (sin acotar por finished_at) → guía sin-tarifa
-    let assigned = ctx.adminClient
-      .from('tailoring_order_lines')
-      .select('id, official_id, quantity, line_type, garment_types(name)')
-      .not('official_id', 'is', null)
-      .not('status', 'in', '("cancelled","incident")')
-    if (official_id) assigned = assigned.eq('official_id', official_id)
-    const { data: asgLines, error: aErr } = await assigned
-    if (aErr) return failure(aErr.message || 'Error al consultar líneas asignadas', 'INTERNAL')
+    // Paginado: este escaneo no tiene cota temporal y la tabla sólo crece; sin
+    // paginar, PostgREST lo cortaba en 1000 filas y el aviso "prendas sin tarifa"
+    // habría dejado de contar oficiales enteros sin dar ningún error. El .order('id')
+    // es imprescindible: sin orden estable el paginado repite o pierde filas.
+    const asgLines = await readAllPaged<any>((f, t) => {
+      let q = ctx.adminClient
+        .from('tailoring_order_lines')
+        .select('id, official_id, quantity, line_type, garment_types(name)')
+        .not('official_id', 'is', null)
+        .not('status', 'in', '("cancelled","incident")')
+      if (official_id) q = q.eq('official_id', official_id)
+      return q.order('id', { ascending: true }).range(f, t)
+    }, 'getOfficialsCommissions.asignadas')
 
     // C) YA LIQUIDADO en el periodo (contexto "pendiente / liquidado"): settlements pagados con paid_at en [start,end]
     let settledQ = ctx.adminClient
@@ -1992,20 +2003,30 @@ export const getExpensesReport = protectedAction<
   { permission: 'reports.view', auditModule: 'reports' },
   async (ctx, { start_date, end_date, tax_mode = 'with_tax' }) => {
     const net = tax_mode === 'without_tax'
-    const { data } = await ctx.adminClient
+    // Paginado: el servidor corta en 1.000 filas y, al venir ordenado por fecha
+    // DESCENDENTE, lo que se perdía eran justo los gastos del principio del rango.
+    // El segundo orden por id es el desempate estable que el paginado necesita:
+    // 'date' es un DATE y hay varios gastos el mismo día.
+    const data = await readAllPaged<any>((f, t) => ctx.adminClient
       .from('manual_transactions')
       .select('category, amount, total, description, date, withdrawal_id, ap_supplier_invoice_id')
       .eq('type', 'expense')
       .gte('date', start_date)
       .lte('date', end_date)
       .order('date', { ascending: false })
+      .order('id', { ascending: false })
+      .range(f, t), 'getExpensesReport.manual_transactions')
 
     // Excluir retiradas de efectivo de tipo 'extraccion' (sacar/entregar dinero):
     // no son gasto. Su espejo en manual_transactions se conserva (ledger de caja),
     // pero no debe contar en el informe de gastos. Las de tipo 'gasto' (compras
     // pagadas con caja) sí cuentan.
-    const { data: extr } = await ctx.adminClient
+    // Paginado: si el histórico de retiradas pasa de 1.000 filas el Set queda
+    // incompleto y las extracciones antiguas se colarían como gasto.
+    const extr = await readAllPaged<any>((f, t) => ctx.adminClient
       .from('cash_withdrawals').select('id').eq('withdrawal_type', 'extraccion')
+      .order('id', { ascending: true })
+      .range(f, t), 'getExpensesReport.cash_withdrawals')
     const extractionIds = new Set((extr ?? []).map((r: any) => r.id as string))
     const expenses = (data || []).filter((tx: any) => !tx.withdrawal_id || !extractionIds.has(tx.withdrawal_id))
 
@@ -2112,20 +2133,27 @@ export const getExpensesComparison = protectedAction<
     const net = tax_mode === 'without_tax'
     const cols = net ? 'amount' : 'total'
     // Excluir retiradas 'extraccion' (no son gasto) — igual que getExpensesReport.
-    const { data: extr } = await ctx.adminClient
+    // Paginado por el mismo motivo: un Set incompleto dejaría pasar extracciones.
+    const extr = await readAllPaged<any>((f, t) => ctx.adminClient
       .from('cash_withdrawals').select('id').eq('withdrawal_type', 'extraccion')
+      .order('id', { ascending: true })
+      .range(f, t), 'getExpensesComparison.cash_withdrawals')
     const extractionIds = new Set((extr ?? []).map((r: any) => r.id as string))
-    const [currentRes, previousRes] = await Promise.all([
-      ctx.adminClient.from('manual_transactions')
-        .select(`${cols}, withdrawal_id`).eq('type', 'expense').gte('date', current_start).lte('date', current_end),
-      ctx.adminClient.from('manual_transactions')
-        .select(`${cols}, withdrawal_id`).eq('type', 'expense').gte('date', previous_start).lte('date', previous_end),
+    // Paginado: sin él el servidor corta en 1.000 filas y el comparativo daría
+    // menos gasto del real en rangos largos, igual que el informe.
+    const [currentRows, previousRows] = await Promise.all([
+      readAllPaged<any>((f, t) => ctx.adminClient.from('manual_transactions')
+        .select(`${cols}, withdrawal_id`).eq('type', 'expense').gte('date', current_start).lte('date', current_end)
+        .order('id', { ascending: true }).range(f, t), 'getExpensesComparison.current'),
+      readAllPaged<any>((f, t) => ctx.adminClient.from('manual_transactions')
+        .select(`${cols}, withdrawal_id`).eq('type', 'expense').gte('date', previous_start).lte('date', previous_end)
+        .order('id', { ascending: true }).range(f, t), 'getExpensesComparison.previous'),
     ])
     const sumField = (rows: any[] | null) => (rows || [])
       .filter((t: any) => !t.withdrawal_id || !extractionIds.has(t.withdrawal_id))
       .reduce((s, t) => s + (Number(net ? t.amount : t.total) || 0), 0)
-    const current = sumField(currentRes.data as any[])
-    const previous = sumField(previousRes.data as any[])
+    const current = sumField(currentRows)
+    const previous = sumField(previousRows)
     const change = previous === 0 ? (current > 0 ? 100 : 0) : ((current - previous) / previous) * 100
     return success({ current, previous, change })
   }

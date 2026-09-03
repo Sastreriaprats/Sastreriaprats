@@ -463,7 +463,14 @@ export const getPendingPayments = protectedAction<
     try {
       const rows: PendingPaymentRow[] = []
       const today = new Date()
-      const searchTerm = (search ?? '').trim()
+      // Se sanean los caracteres que rompen el parser .or() de PostgREST (coma,
+      // parentesis...): con ellos la consulta devolvia 400, el error se tragaba con
+      // un console.error y el listado salia vacio sin avisar. Mismo saneo que
+      // listAlterations (alterations.ts).
+      const searchTerm = normalizeSearchTerm(search ?? '')
+        .replace(/[,()*%:/\\]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
 
       // Búsqueda por cliente: patrón inteligente central (tokens AND sin acentos
       // sobre clients.search_text + fallback difuso), como pedidos/arreglos/etc.
@@ -533,8 +540,13 @@ export const getPendingPayments = protectedAction<
       if (type === 'all' || type === 'sales') {
         let query = ctx.adminClient
           .from('sales')
-          .select('id, ticket_number, total, amount_paid, payment_status, created_at, client_id, clients(id, full_name), stores(id, name)')
+          // La devolucion (mig 267) marca `status` y acumula `total_returned`, pero
+          // NO toca `payment_status`: sin mirarlos, un ticket ya devuelto seguia
+          // figurando aqui como deuda. Mismo criterio que la ficha del cliente.
+          .select('id, ticket_number, total, amount_paid, payment_status, status, total_returned, created_at, client_id, clients(id, full_name), stores(id, name)')
           .in('payment_status', ['pending', 'partial'])
+          .neq('status', 'fully_returned')
+          .neq('status', 'voided')
           .order('created_at', { ascending: false })
           .limit(500)
 
@@ -555,6 +567,12 @@ export const getPendingPayments = protectedAction<
             const store = Array.isArray(s.stores) ? s.stores[0] : s.stores
             const amountPaid = Number(s.amount_paid ?? 0)
             const total = Number(s.total)
+            // Lo ya devuelto no se debe. La RPC de devolucion solo acumula
+            // `total_returned`, asi que hay que restarlo aqui igual que hace el
+            // agregado de la ficha del cliente (clients.ts).
+            const returned = Number(s.total_returned ?? 0)
+            const totalPending = Math.max(0, total - returned - amountPaid)
+            if (totalPending <= 0) continue
             const created = new Date(s.created_at)
             const days = Math.floor((today.getTime() - created.getTime()) / (1000 * 60 * 60 * 24))
 
@@ -574,7 +592,7 @@ export const getPendingPayments = protectedAction<
               client_id: client?.id ?? '',
               total,
               total_paid: amountPaid,
-              total_pending: Math.max(0, total - amountPaid),
+              total_pending: totalPending,
               last_payment_date: lastSalePay?.created_at ?? null,
               next_payment_date: lastSalePay?.next_payment_date ?? null,
               created_at: s.created_at,
@@ -760,9 +778,13 @@ export const getClientPendingDebt = protectedAction<
 
       const { data: sales } = await ctx.adminClient
         .from('sales')
-        .select('id, ticket_number, total, amount_paid, payment_status, created_at, client_id, clients(id, full_name), stores(id, name)')
+        // Mismo criterio que getPendingPayments y que la ficha del cliente: lo ya
+        // devuelto no es deuda (la RPC de devolucion no toca `payment_status`).
+        .select('id, ticket_number, total, amount_paid, payment_status, status, total_returned, created_at, client_id, clients(id, full_name), stores(id, name)')
         .eq('client_id', client_id)
         .in('payment_status', ['pending', 'partial'])
+        .neq('status', 'fully_returned')
+        .neq('status', 'voided')
         .order('created_at', { ascending: false })
         .limit(50)
 
@@ -771,7 +793,10 @@ export const getClientPendingDebt = protectedAction<
         const store = Array.isArray(s.stores) ? s.stores[0] : s.stores
         const amountPaid = Number(s.amount_paid ?? 0)
         const total = Number(s.total)
-        const totalPending = Math.max(0, total - amountPaid)
+        // Igual que en getPendingPayments: se resta lo devuelto (mig 267 solo
+        // actualiza `total_returned`, nunca `payment_status`).
+        const returned = Number(s.total_returned ?? 0)
+        const totalPending = Math.max(0, total - returned - amountPaid)
         if (totalPending <= 0) continue
         const { data: lastSalePay } = await ctx.adminClient
           .from('sale_payments')
@@ -900,29 +925,89 @@ export const getOverduePaymentsCount = protectedAction<
     try {
       const today = new Date().toISOString().split('T')[0]
 
-      // Pedidos con next_payment_date <= hoy (y > since si se proporciona)
+      // El badge tiene que contar lo MISMO que enseña /admin/cobros?vencidos=1:
+      // ENTIDADES con saldo vivo cuyo ÚLTIMO cobro dejó una próxima fecha ya
+      // pasada. Antes contaba FILAS de cobro, así que un pedido ya liquidado
+      // seguía sumando y el usuario pulsaba el badge y no había nada que ver.
       let orderQ = ctx.adminClient
         .from('tailoring_order_payments')
-        .select('tailoring_order_id', { count: 'exact', head: true })
+        .select('tailoring_order_id')
         .lte('next_payment_date', today)
         .not('next_payment_date', 'is', null)
 
       if (since) orderQ = orderQ.gt('next_payment_date', since)
 
-      const { count: orderCount } = await orderQ
+      const { data: orderRows } = await orderQ
+      const orderIds = Array.from(new Set((orderRows ?? [])
+        .map((r: { tailoring_order_id: string | null }) => r.tailoring_order_id)
+        .filter((id): id is string => !!id)))
 
-      // Ventas con next_payment_date <= hoy
+      let orderCount = 0
+      if (orderIds.length > 0) {
+        // Mismo criterio que getPendingPayments: pendiente > 0 y sin cancelar.
+        const { data: aliveOrders } = await ctx.adminClient
+          .from('tailoring_orders')
+          .select('id')
+          .in('id', orderIds)
+          .gt('total_pending', 0)
+          .neq('status', 'cancelled')
+        const aliveOrderIds = (aliveOrders ?? []).map((o: { id: string }) => o.id)
+        if (aliveOrderIds.length > 0) {
+          // La lista se queda con el ÚLTIMO cobro: si uno posterior ya no dejó
+          // próxima fecha, el pedido no sale como vencido.
+          const { data: pays } = await ctx.adminClient
+            .from('tailoring_order_payments')
+            .select('tailoring_order_id, payment_date, next_payment_date')
+            .in('tailoring_order_id', aliveOrderIds)
+            .order('payment_date', { ascending: false })
+          const seenOrders = new Set<string>()
+          for (const p of (pays ?? []) as Array<{ tailoring_order_id: string; next_payment_date: string | null }>) {
+            if (seenOrders.has(p.tailoring_order_id)) continue
+            seenOrders.add(p.tailoring_order_id)
+            if (p.next_payment_date && p.next_payment_date <= today) orderCount++
+          }
+        }
+      }
+
+      // Ventas: idéntico criterio (sale_payments ordena por created_at, no tiene
+      // payment_date; es lo que usa la lista).
       let saleQ = ctx.adminClient
         .from('sale_payments')
-        .select('sale_id', { count: 'exact', head: true })
+        .select('sale_id')
         .lte('next_payment_date', today)
         .not('next_payment_date', 'is', null)
 
       if (since) saleQ = saleQ.gt('next_payment_date', since)
 
-      const { count: saleCount } = await saleQ
+      const { data: saleRows } = await saleQ
+      const saleIds = Array.from(new Set((saleRows ?? [])
+        .map((r: { sale_id: string | null }) => r.sale_id)
+        .filter((id): id is string => !!id)))
 
-      return success((orderCount ?? 0) + (saleCount ?? 0))
+      let saleCount = 0
+      if (saleIds.length > 0) {
+        const { data: aliveSales } = await ctx.adminClient
+          .from('sales')
+          .select('id')
+          .in('id', saleIds)
+          .in('payment_status', ['pending', 'partial'])
+        const aliveSaleIds = (aliveSales ?? []).map((s: { id: string }) => s.id)
+        if (aliveSaleIds.length > 0) {
+          const { data: pays } = await ctx.adminClient
+            .from('sale_payments')
+            .select('sale_id, created_at, next_payment_date')
+            .in('sale_id', aliveSaleIds)
+            .order('created_at', { ascending: false })
+          const seenSales = new Set<string>()
+          for (const p of (pays ?? []) as Array<{ sale_id: string; next_payment_date: string | null }>) {
+            if (seenSales.has(p.sale_id)) continue
+            seenSales.add(p.sale_id)
+            if (p.next_payment_date && p.next_payment_date <= today) saleCount++
+          }
+        }
+      }
+
+      return success(orderCount + saleCount)
     } catch (e) {
       console.error('[getOverduePaymentsCount] unexpected:', e)
       return failure('Error al obtener conteo')

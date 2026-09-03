@@ -207,6 +207,14 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
   const handleStatusChange = async (newStatus: string) => {
     if (!order?.id || newStatus === order.status) return
     const res = await updateOrderStatus({ orderId: order.id, newStatus })
+    // Sin este aviso el <select> se quedaba mostrando el estado elegido y la BD
+    // con el anterior (p. ej. al reactivar un pedido cancelado): el sastre creía
+    // haberlo avanzado. refreshOrder devuelve el desplegable al estado real.
+    if (!res?.success) {
+      toast.error(res && 'error' in res ? String(res.error) : 'No se pudo cambiar el estado del pedido')
+      await refreshOrder()
+      return
+    }
     if (res?.success) {
       statusChangeToast((res.data as { ahead_lines_count?: number })?.ahead_lines_count ?? 0)
       await refreshOrder()
@@ -223,6 +231,13 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
 
   const handleLineStatusChange = async (lineId: string, newStatus: string) => {
     const res = await updateOrderStatus({ orderId: order.id, lineId, newStatus })
+    // Mismo motivo que en el estado del pedido: el fallo era invisible y la
+    // prenda se quedaba en el estado antiguo.
+    if (!res?.success) {
+      toast.error(res && 'error' in res ? String(res.error) : 'No se pudo cambiar el estado de la prenda')
+      await refreshOrder()
+      return
+    }
     if (res?.success) await refreshOrder()
   }
 
@@ -608,7 +623,7 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
         preselectedOrderId={order.id}
       />
 
-      <EditOrderDialog
+      <EditOrderDialog /* Remonta el diálogo al cambiar updated_at (se bumpea en CADA guardado, incluido el de "Editar ficha"): sin esto reenviaba un snapshot viejo de las líneas y pisaba tejido, precios, costes y notas. Misma defensa que la ruta admin. */ key={String((order as { updated_at?: string })?.updated_at ?? order?.id ?? '')}
         open={editDialogOpen}
         onOpenChange={setEditDialogOpen}
         order={order}

@@ -739,8 +739,30 @@ export const deleteVariantAction = protectedAction<string, { auditEntityId: stri
       .single()
     if (fetchErr || !variant) return failure('Variante no encontrada', 'NOT_FOUND')
 
+    // Las FK a product_variants con ON DELETE RESTRICT (product_reservations,
+    // product_reservation_lines, stock_transfer_lines e inventory_lines) hacen
+    // fallar el DELETE de la variante. Hay que comprobarlas ANTES de borrar los
+    // movimientos: no hay transacción, así que borrando primero el histórico y
+    // fallando después se pierde el histórico sin haber borrado la variante.
+    const [reservas, lineasReserva, traspasos, inventarios] = await Promise.all([
+      ctx.adminClient.from('product_reservations').select('id', { count: 'exact', head: true }).eq('product_variant_id', variantId),
+      ctx.adminClient.from('product_reservation_lines').select('id', { count: 'exact', head: true }).eq('product_variant_id', variantId),
+      ctx.adminClient.from('stock_transfer_lines').select('id', { count: 'exact', head: true }).eq('product_variant_id', variantId),
+      ctx.adminClient.from('inventory_lines').select('id', { count: 'exact', head: true }).eq('product_variant_id', variantId),
+    ])
+    const bloqueos = [
+      (reservas.count || 0) > 0 ? 'reservas' : null,
+      (lineasReserva.count || 0) > 0 ? 'líneas de reserva' : null,
+      (traspasos.count || 0) > 0 ? 'traspasos' : null,
+      (inventarios.count || 0) > 0 ? 'inventarios' : null,
+    ].filter(Boolean)
+    if (bloqueos.length) {
+      return failure(`No se puede borrar la variante: tiene ${bloqueos.join(', ')} asociados.`, 'CONFLICT')
+    }
+
     // Eliminar movimientos de stock asociados para evitar restrict
-    await ctx.adminClient.from('stock_movements').delete().eq('product_variant_id', variantId)
+    const { error: movErr } = await ctx.adminClient.from('stock_movements').delete().eq('product_variant_id', variantId)
+    if (movErr) return failure(movErr.message || 'No se pudieron borrar los movimientos de stock de la variante')
 
     // stock_levels se eliminan en cascada
     const { error } = await ctx.adminClient.from('product_variants').delete().eq('id', variantId)
@@ -930,12 +952,23 @@ export const moveStockBetweenWarehouses = protectedAction<
 
     const { data: fromLevel } = await ctx.adminClient
       .from('stock_levels')
-      .select('id, quantity')
+      .select('id, quantity, reserved')
       .eq('product_variant_id', variantId)
       .eq('warehouse_id', fromWarehouseId)
       .single()
     if (!fromLevel) return failure('No hay stock en el almacén de origen')
-    if (fromLevel.quantity < quantity) return failure(`Solo hay ${fromLevel.quantity} unidades en el almacén de origen`)
+    // Mismo criterio que listTransferCandidates y createStockTransfer: lo que está
+    // reservado para un cliente no puede irse a otro almacén, o la reserva sigue
+    // "activa" con la mercancía en otra tienda y el origen queda en negativo.
+    const disponibleOrigen = Math.max(0, Number(fromLevel.quantity || 0) - Number((fromLevel as any).reserved || 0))
+    if (disponibleOrigen < quantity) {
+      const reservadasOrigen = Number((fromLevel as any).reserved || 0)
+      return failure(
+        `Solo hay ${disponibleOrigen} unidades disponibles en el almacén de origen` +
+        (reservadasOrigen > 0 ? ` (${reservadasOrigen} reservadas para clientes)` : ''),
+        'CONFLICT',
+      )
+    }
 
     const { data: toLevelExisting } = await ctx.adminClient
       .from('stock_levels')
@@ -1087,15 +1120,24 @@ export const moveStockBetweenWarehouses = protectedAction<
 export const getStockDashboardStats = protectedAction<void, { totalProducts: number; lowStock: number; outOfStock: number; pendingOrders: number }>(
   { permission: 'products.view', auditModule: 'stock' },
   async (ctx) => {
-    const [products, lowStock, outOfStock, pendingOrders] = await Promise.all([
+    const [products, lowRows, outOfStock, pendingOrders] = await Promise.all([
       ctx.adminClient.from('products').select('id', { count: 'exact', head: true }).eq('is_active', true),
-      ctx.adminClient.from('stock_levels').select('id', { count: 'exact', head: true }).not('min_stock', 'is', null).filter('quantity', 'lte', 'min_stock'),
+      // PostgREST no sabe comparar dos columnas: 'min_stock' viajaba como literal
+      // y Postgres respondía 400, así que la tarjeta se quedaba clavada en 0 sin
+      // que nadie lo viera. La comparación quantity <= min_stock se hace aquí,
+      // sobre las filas con mínimo informado (paginadas, por el tope de 1.000).
+      readAllPaged<{ quantity: number | null; min_stock: number | null }>((from, to) => ctx.adminClient
+        .from('stock_levels')
+        .select('quantity, min_stock')
+        .not('min_stock', 'is', null)
+        .order('id', { ascending: true })
+        .range(from, to), 'getStockDashboardStats.lowStock'),
       ctx.adminClient.from('stock_levels').select('id', { count: 'exact', head: true }).eq('quantity', 0),
       ctx.adminClient.from('supplier_orders').select('id', { count: 'exact', head: true }).in('status', ['draft', 'sent', 'confirmed', 'partially_received']),
     ])
     return success({
       totalProducts: products.count || 0,
-      lowStock: lowStock.count || 0,
+      lowStock: lowRows.filter((r) => Number(r.quantity ?? 0) <= Number(r.min_stock ?? 0)).length,
       outOfStock: outOfStock.count || 0,
       pendingOrders: pendingOrders.count || 0,
     })
@@ -1127,14 +1169,19 @@ export const listTransferCandidates = protectedAction<
     if (!warehouseId) return failure('Almacén de origen obligatorio', 'VALIDATION')
     const max = Math.min(Math.max(Number(limit) || 300, 1), 1500)
 
-    const { data: levels, error: levelsError } = await ctx.adminClient
+    // Paginado obligatorio: PostgREST corta en 1.000 filas y un almacén como
+    // Pinzón tiene más de 1.600 variantes con stock. Sin paginar el recorte
+    // ocurría ANTES de filtrar por categoría o por búsqueda, así que el filtro
+    // se aplicaba sobre un trozo arbitrario del almacén.
+    const levels = await readAllPaged<any>((from, to) => ctx.adminClient
       .from('stock_levels')
       .select('product_variant_id, quantity, reserved')
       .eq('warehouse_id', warehouseId)
       .gt('quantity', 0)
+      .order('product_variant_id', { ascending: true })
+      .range(from, to), 'listTransferCandidates.stock_levels')
 
-    if (levelsError) return failure(levelsError.message || 'Error al cargar stock de origen', 'INTERNAL')
-    if (!levels?.length) return success([])
+    if (!levels.length) return success([])
 
     const stockMap = new Map<string, number>()
     for (const l of levels) {
@@ -1347,13 +1394,14 @@ export const createStockTransfer = protectedAction<
     if ((warehouses || []).length < 2) return failure('Almacén origen o destino no válido', 'VALIDATION')
 
     const variantIds = Array.from(grouped.keys())
-    const { data: levels, error: levelsError } = await ctx.adminClient
+    // Trocear el .in(...): con más de 1.000 variantes PostgREST devuelve solo
+    // 1.000 filas y el resto se validaría como "disponible 0", rechazando un
+    // traspaso masivo que sí tiene stock de sobra.
+    const levels = await readAllByIds<any>(variantIds, (chunk) => ctx.adminClient
       .from('stock_levels')
       .select('product_variant_id, quantity, reserved')
       .eq('warehouse_id', fromWarehouseId)
-      .in('product_variant_id', variantIds)
-
-    if (levelsError) return failure(levelsError.message || 'Error al validar stock de origen', 'INTERNAL')
+      .in('product_variant_id', chunk), 'createStockTransfer.stock_levels')
 
     const availableMap = new Map<string, number>()
     for (const row of levels || []) {
@@ -2188,13 +2236,21 @@ export const listStockByWarehouse = protectedAction<{ warehouseId?: string; sear
 
 /** Genera EAN-13 para todas las variantes que no tienen barcode (cada talla tiene su propio código). */
 export const generateBarcodesForAllVariants = protectedAction<void, { generated: number; errors: string[]; auditDescription: string }>(
-  { permission: 'products.edit', auditModule: 'stock', auditAction: 'update', auditEntity: 'product' },
+  // barcodes.manage es el permiso con el que se entra a esta pantalla (page.tsx) y
+  // el único que tiene vendedor_avanzado: sin él aquí, quien la abre no puede usarla.
+  { permission: ['products.edit', 'barcodes.manage'], auditModule: 'stock', auditAction: 'update', auditEntity: 'product' },
   async (ctx) => {
-    const { data: activeProductIds } = await ctx.adminClient
+    // Paginar también AQUÍ: este es el universo, y PostgREST lo cortaba en 1.000
+    // de los más de 1.600 productos activos, así que las variantes de los últimos
+    // ~600 no recibían código por mucho que se repitiese la generación. El bloque
+    // de abajo ya estaba paginado; faltaba el paso que decide sobre qué trabajar.
+    const activeProductIds = await readAllPaged<{ id: string }>((from, to) => ctx.adminClient
       .from('products')
       .select('id')
       .eq('is_active', true)
-    const ids = (activeProductIds ?? []).map((p: { id: string }) => p.id)
+      .order('id', { ascending: true })
+      .range(from, to), 'generateBarcodesForAllVariants.products')
+    const ids = activeProductIds.map((p) => p.id)
     if (!ids.length) return success({ generated: 0, errors: [], auditDescription: 'Generados 0 códigos de barras de variantes' })
 
     // Paginar — Supabase limita a 1000 filas por query. Obtener TODAS las variantes sin barcode en chunks por lotes de product_ids.
@@ -2485,7 +2541,9 @@ export const generateBarcodeForProduct = protectedAction<
 /** Actualiza el barcode de una variante (producto + talla). */
 export const updateVariantBarcode = protectedAction<{ variantId: string; barcode: string }, any>(
   {
-    permission: 'products.edit',
+    // Mismo motivo que en generateBarcodesForAllVariants: barcodes.manage abre la
+    // pantalla, así que también tiene que poder corregir un código.
+    permission: ['products.edit', 'barcodes.manage'],
     auditModule: 'stock',
     auditAction: 'update',
     auditEntity: 'product',

@@ -95,6 +95,13 @@ export interface GroupBonusResult {
   name: string
   quarter_label: string
   applies: boolean
+  /**
+   * true si el bonus se ha SUMADO a la «Comisión total» del rango consultado.
+   * El bonus es del trimestre entero: solo se cuenta cuando el rango lo cubre
+   * completo, para que consultar abril, mayo y junio por separado no lo pague
+   * tres veces. Si es false la tarjeta lo sigue mostrando, pero informativo.
+   */
+  counted: boolean
   rate: number
   base_type: string
   stores: { store_id: string; store_name: string; target: number; actual: number; beat: boolean }[]
@@ -285,6 +292,12 @@ export const getEmployeeCommissions = protectedAction<
         const qStart = `${qy}-${pad(months[0])}-01`
         const qEndMonth = months[2]
         const qEnd = `${qy}-${pad(qEndMonth)}-${pad(new Date(qy, qEndMonth, 0).getDate())}`
+        // El bonus es del TRIMESTRE completo: solo se suma a la comisión del
+        // rango cuando el rango cubre el trimestre entero. Antes se sumaba
+        // íntegro a cualquier rango que rozara el trimestre, así que mes a mes
+        // aparecía tres veces y quien liquidara mensualmente lo pagaría tres
+        // veces. Comparar cadenas vale: las fechas llegan como 'YYYY-MM-DD'.
+        const coversQuarter = start_date <= qStart && end_date >= qEnd
 
         const [sgRes, ssRows] = await Promise.all([
           admin.from('store_monthly_goals')
@@ -335,12 +348,12 @@ export const getEmployeeCommissions = protectedAction<
         groupBonuses.push({
           bonus_id: bonus.id, name: bonus.name,
           quarter_label: `T${q} ${qy}`,
-          applies, rate: Number(bonus.rate) || 0, base_type: bonus.base_type,
+          applies, counted: applies && coversQuarter, rate: Number(bonus.rate) || 0, base_type: bonus.base_type,
           stores: storeRows, pool, per_member: perMember,
           members: bMembers.map(emp => ({ employee_id: emp, employee_name: emp, amount: perMember })),
         })
 
-        if (applies) {
+        if (applies && coversQuarter) {
           for (const emp of bMembers) {
             const existing = result.get(emp)
             if (existing) {

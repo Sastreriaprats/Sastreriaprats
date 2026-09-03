@@ -415,7 +415,7 @@ export const getOnlineOrderDetail = protectedAction<string, OnlineOrderDetail | 
 
 export const updateOnlineOrderStatusAction = protectedAction<
   { orderId: string; status: OnlineOrderStatus; trackingNumber?: string | null; carrier?: string | null },
-  { id: string; status: OnlineOrderStatus }
+  { id: string; status: OnlineOrderStatus; emailSent?: boolean; emailError?: string }
 >(
   {
     permission: 'orders.edit',
@@ -467,7 +467,12 @@ export const updateOnlineOrderStatusAction = protectedAction<
       .eq('id', orderId)
     if (updErr) return failure(updErr.message)
 
-    // Email de envío al pasar a 'shipped'
+    // Email de envío al pasar a 'shipped'. Su resultado se devuelve al caller:
+    // si el aviso no sale (pedido sin email, Resend caído o con la cuota
+    // agotada) la pantalla debe advertirlo en vez de dejar que en tienda den
+    // por hecho que el cliente ya tiene el número de seguimiento.
+    let emailSent: boolean | undefined
+    let emailError: string | undefined
     if (status === 'shipped' && oldStatus !== 'shipped') {
       try {
         let clientEmail: string | null = null
@@ -496,7 +501,23 @@ export const updateOnlineOrderStatusAction = protectedAction<
             if (composed) clientName = composed
           }
         }
+        if (!clientEmail) {
+          // Sin destinatario no hay aviso posible. Se deja rastro en el
+          // historial de emails, como cualquier otro fallo de envío.
+          emailSent = false
+          emailError = 'El pedido no tiene email de cliente ni email en la dirección de envío'
+          await ctx.adminClient.from('email_logs').insert({
+            recipient_email: '(sin email)',
+            client_id: (beforeRec.client_id as string | null) ?? null,
+            subject: `Tu pedido ${String(beforeRec.order_number ?? '')} ha sido enviado`,
+            email_type: 'transactional',
+            status: 'failed',
+            error_message: emailError,
+          })
+        }
         if (clientEmail) {
+          // Optimista: si sendShippingConfirmation lanza, el catch lo corrige.
+          emailSent = true
           await sendShippingConfirmation({
             order_number: String(beforeRec.order_number ?? ''),
             client_name: clientName,
@@ -509,12 +530,18 @@ export const updateOnlineOrderStatusAction = protectedAction<
         }
       } catch (e) {
         console.error('[updateOnlineOrderStatusAction] sendShippingConfirmation failed:', e)
+        // El cambio de estado NO se revierte: solo se informa de que el aviso
+        // al cliente no ha salido.
+        emailSent = false
+        emailError = e instanceof Error ? e.message : 'Error desconocido al enviar el email'
       }
     }
 
     return success({
       id: orderId,
       status,
+      emailSent,
+      emailError,
       auditDescription: `Pedido online ${beforeRec.order_number}: ${oldStatus} → ${status}`,
       auditOldData: { status: oldStatus },
       auditNewData: { status, ...(patch.shipping_tracking_number ? { shipping_tracking_number: patch.shipping_tracking_number } : {}) },

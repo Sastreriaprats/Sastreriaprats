@@ -934,7 +934,7 @@ export const receiveSupplierOrderLines = protectedAction<
   async (ctx, { orderId, lines: inputLines, warehouseId: warehouseOverride }) => {
     if (!orderId?.trim()) return failure('Pedido obligatorio', 'VALIDATION')
     const linesToProcess = (inputLines || []).filter(
-      (l) => l.lineId?.trim() && l.referenceId?.trim() && Number(l.quantityReceived) > 0
+      (l) => l.lineId?.trim() && Number(l.quantityReceived) > 0 // sin exigir referenceId: las líneas "libres" no mueven stock pero sí deben poder recepcionarse
     )
     if (linesToProcess.length === 0) return failure('Indica al menos una línea con cantidad recibida', 'VALIDATION')
 
@@ -1067,8 +1067,9 @@ export const receiveSupplierOrderLines = protectedAction<
           console.error('[receiveSupplierOrderLines] fn_activate_pending_reservations:', e)
         }
       } else {
+        // Línea sin stock asociado (línea "libre"): no hay nada que mover, pero se
+        // sigue adelante para guardar su cantidad recibida y poder cerrar el pedido.
         stockWarnings += 1
-        continue
       }
 
       const isFullyReceived = newTotalReceived >= qtyOrdered

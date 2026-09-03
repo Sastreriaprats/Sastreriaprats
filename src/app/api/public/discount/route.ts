@@ -30,8 +30,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Código no válido o no activo' }, { status: 404 })
     }
 
-    // Verificar fechas
-    const now = new Date().toISOString().split('T')[0]
+    // Verificar fechas. El día se saca en hora de MADRID: con toISOString() se
+    // pasaba a UTC y entre las 00:00 y las 02:00 locales "hoy" era el día de AYER,
+    // así que un cupón caducado seguía valiendo y uno que entraba en vigor ese
+    // mismo día se rechazaba. valid_from/valid_until son columnas DATE ('YYYY-MM-DD'),
+    // y 'en-CA' devuelve justo ese formato.
+    const now = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
     if (dc.valid_from && now < dc.valid_from) {
       return NextResponse.json({ error: 'Este código aún no es válido' }, { status: 400 })
     }

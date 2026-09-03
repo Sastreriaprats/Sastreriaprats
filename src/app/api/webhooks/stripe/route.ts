@@ -21,12 +21,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No signature' }, { status: 400 })
     }
 
+    // Fallar CERRADO, igual que el webhook de Redsys: sin el secreto no se puede
+    // verificar la firma, así que se rechaza. Antes se caía a un JSON.parse crudo
+    // y cualquiera que conociera la URL podía crear pedidos "pagados" (descuento
+    // de stock, asiento contable y factura de la serie W).
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET
+    if (!webhookSecret) {
+      console.error('[Stripe webhook] STRIPE_WEBHOOK_SECRET no configurada')
+      return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 })
+    }
+
     let event: Stripe.Event
-    if (process.env.STRIPE_WEBHOOK_SECRET) {
-      const stripe = getStripe()
-      event = stripe.webhooks.constructEvent(body, signature, process.env.STRIPE_WEBHOOK_SECRET)
-    } else {
-      event = JSON.parse(body) as Stripe.Event
+    try {
+      event = getStripe().webhooks.constructEvent(body, signature, webhookSecret)
+    } catch {
+      // 400 y no 500 (que es lo que daría el catch global) para que Stripe no
+      // reintente eternamente un evento cuya firma nunca va a validar.
+      console.error('[Stripe webhook] firma inválida')
+      return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
     }
 
     const admin = createAdminClient()
@@ -53,6 +65,20 @@ export async function POST(request: NextRequest) {
           const taxAmount = parseFloat(meta.tax_amount || '0')
           const total = parseFloat(meta.total || '0')
           const subtotal = total - shippingCost
+
+          // Idempotencia: Stripe entrega "al menos una vez" y reintenta ante
+          // cualquier respuesta no-2xx o timeout. Sin este guard el 2.º intento
+          // choca con online_orders.order_number UNIQUE, se responde 500 y Stripe
+          // reintenta en bucle. Mismo patrón que el webhook de Redsys.
+          const { data: alreadyCreated } = await admin
+            .from('online_orders')
+            .select('id')
+            .eq('stripe_session_id', session.id)
+            .maybeSingle()
+          if (alreadyCreated?.id) {
+            console.warn('[Stripe webhook] evento duplicado, pedido ya creado:', orderNumber)
+            return NextResponse.json({ ok: true, duplicate: true })
+          }
 
           const { data: order, error: orderError } = await admin.from('online_orders').insert({
             order_number: orderNumber,

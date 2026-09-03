@@ -15,7 +15,7 @@ import { useAuth } from '@/components/providers/auth-provider'
 export function PosCloseCash({ session, onClosed, onCancel }: {
   session: any; onClosed: () => void; onCancel: () => void
 }) {
-  const { isAdmin } = useAuth()
+  const { isAdmin, profile } = useAuth()
   const openingBreakdown: Record<string, number> | null =
     session.opening_breakdown && typeof session.opening_breakdown === 'object'
       ? session.opening_breakdown
@@ -59,9 +59,10 @@ export function PosCloseCash({ session, onClosed, onCancel }: {
       // Generar PDF de arqueo
       try {
         await generateCashSessionReport({
-          storeName: '—',
-          openedBy: session.opened_by ?? '—',
-          closedBy: '—',
+          // El arqueo se firma y se archiva: nunca imprimir el uuid del responsable.
+          storeName: session.stores?.name ?? '—',
+          openedBy: session.opened_by_profile?.full_name ?? '—',
+          closedBy: profile?.fullName ?? '—',
           openedAt: session.opened_at ?? '',
           closedAt: result.data?.closed_at ?? new Date().toISOString(),
           openingAmount: session.opening_amount || 0,

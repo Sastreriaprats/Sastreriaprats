@@ -1,4 +1,10 @@
-'use server'
+// OJO: este módulo NO lleva 'use server' a propósito. Con esa directiva, cada
+// función exportada se publicaba como endpoint HTTP de server action SIN sesión
+// ni permiso: se podían crear asientos y facturas desde fuera. Solo lo importa
+// código de servidor (actions y webhooks de Redsys/Stripe), que lo sigue
+// llamando igual, en proceso. Envolverlas en protectedAction no vale: los
+// webhooks no tienen sesión de usuario.
+import 'server-only'
 
 import { createAdminClient } from '@/lib/supabase/admin'
 import { toCountryCode, countryName } from '@/lib/countries'

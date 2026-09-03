@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -18,8 +18,12 @@ import {
   Scissors,
   MapPin,
   UserCheck,
+  TrendingUp,
 } from 'lucide-react'
 import { useActiveStore } from '@/hooks/use-store'
+import { useRequireStore } from '@/hooks/use-require-store'
+import { checkCashSessionOpen } from '@/actions/pos'
+import { toast } from 'sonner'
 import {
   Select,
   SelectContent,
@@ -43,9 +47,15 @@ export function SastreLayoutWithSidebar({ sastreName, isSastrePlus = false, chil
   const pathname = usePathname()
   const router = useRouter()
   const { activeStoreId, switchStore } = useActiveStore()
-  const [allStores, setAllStores] = useState<{ id: string; name: string }[]>([])
+  // El lateral ofrecía TODAS las tiendas activas y cambiaba de tienda sin mirar la
+  // caja: se unifica con la cabecera (mismas tiendas y mismo bloqueo).
+  const { availableStores, selectStore } = useRequireStore()
+  const [fallbackStores, setFallbackStores] = useState<{ id: string; name: string }[]>([])
 
   useEffect(() => {
+    // Red de seguridad, igual que en la cabecera: si el usuario no tiene tiendas
+    // asignadas seguimos ofreciendo las físicas activas para no dejarlo sin selector.
+    if (availableStores.length > 0) return
     createClient()
       .from('stores')
       .select('id, name')
@@ -53,9 +63,32 @@ export function SastreLayoutWithSidebar({ sastreName, isSastrePlus = false, chil
       .neq('store_type', 'online')
       .order('name')
       .then(({ data }) => {
-        if (data) setAllStores(data)
+        if (data) setFallbackStores(data)
       })
-  }, [])
+  }, [availableStores])
+
+  const allStores = useMemo(
+    () => (availableStores.length > 0
+      ? availableStores.map((s) => ({ id: s.storeId, name: s.storeName }))
+      : fallbackStores),
+    [availableStores, fallbackStores],
+  )
+
+  // Cambiar de tienda con la caja abierta imputaría los cobros siguientes a la
+  // caja de la otra tienda: mismo aviso y mismo corte que en sastre-header.
+  const handleSwitchStore = async (newStoreId: string) => {
+    if (!newStoreId || newStoreId === activeStoreId) return
+    if (activeStoreId) {
+      const r = await checkCashSessionOpen({ storeId: activeStoreId })
+      if (r.success && r.data.open) {
+        const currentName = allStores.find((s) => s.id === activeStoreId)?.name ?? 'la tienda actual'
+        toast.error(`Debes cerrar la caja de ${currentName} antes de cambiar de tienda`)
+        return
+      }
+    }
+    // selectStore persiste además la confirmación de tienda de la sesión.
+    selectStore(newStoreId)
+  }
 
   useEffect(() => {
     if (!activeStoreId && allStores.length > 0) switchStore(allStores[0].id)
@@ -134,13 +167,20 @@ export function SastreLayoutWithSidebar({ sastreName, isSastrePlus = false, chil
                 <CircleDollarSign className="h-5 w-5 shrink-0" />
                 <span className="text-center leading-tight">Cobros</span>
               </Link>
+              {/* sastre_plus tiene reports.view_own: su vista personal de ventas
+                  y comisiones vive en /admin/reporting, igual que la de los
+                  vendedores. Sin este enlace el permiso no servía de nada. */}
+              <Link href="/admin/reporting" className={navClass(false)}>
+                <TrendingUp className="h-5 w-5 shrink-0" />
+                <span className="text-center leading-tight">Mis comisiones</span>
+              </Link>
             </>
           )}
         </nav>
         <div className="flex-1" />
         <div className="p-2 border-t border-[#c9a96e]/20 flex flex-col gap-1.5">
           {allStores.length > 0 && (
-            <Select value={activeStoreId ?? ''} onValueChange={switchStore}>
+            <Select value={activeStoreId ?? ''} onValueChange={handleSwitchStore}>
               <SelectTrigger className="h-7 w-full text-xs bg-transparent border-[rgba(201,169,110,0.3)] text-white/80 [&>svg:last-child]:hidden">
                 <span className="flex items-center gap-1 truncate">
                   <MapPin className="h-3 w-3 shrink-0" />

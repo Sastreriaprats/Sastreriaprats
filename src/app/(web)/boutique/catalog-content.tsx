@@ -102,8 +102,13 @@ export function CatalogContent({
     e.preventDefault()
     e.stopPropagation()
     const variants = product.product_variants as Record<string, unknown>[] | undefined
-    const variant = variants?.[0]
-    if (!variant || (variant.total_stock as number) <= 0) return
+    // Nunca meter en el carrito una talla que el cliente no ha elegido: el
+    // catálogo devuelve las variantes SIN ordenar, así que variants[0] era una
+    // talla cualquiera (y a veces agotada). Solo se añade si hay exactamente
+    // una variante comprable; con varias, el cliente elige en la ficha.
+    const inStockVariants = (variants ?? []).filter((v) => (v.total_stock as number) > 0)
+    if (inStockVariants.length !== 1) return
+    const variant = inStockVariants[0]
     addItem({
       variant_id: variant.id as string,
       product_id: product.id as string,
@@ -189,6 +194,9 @@ export function CatalogContent({
               const variants = product.product_variants as Record<string, unknown>[] | undefined
               const minPrice = product.price_with_tax as number
               const hasStock = variants?.some((v) => (v.total_stock as number) > 0)
+              // Variantes realmente comprables: el añadido rápido solo tiene
+              // sentido cuando no hay que elegir talla (una sola con stock).
+              const inStockVariants = (variants ?? []).filter((v) => (v.total_stock as number) > 0)
               const productId = product.id as string
               const isFavorite = favoriteIds.has(productId)
               // Título web del admin si lo hay; si no, el nombre interno.
@@ -236,8 +244,9 @@ export function CatalogContent({
                       </div>
                     )}
 
-                    {/* Quick add */}
-                    {hasStock && (
+                    {/* Quick add: solo con UNA talla comprable. Con varias el
+                        clic debe llevar a la ficha para elegir talla. */}
+                    {inStockVariants.length === 1 && (
                       <button
                         type="button"
                         onClick={(e) => handleQuickAdd(e, product)}

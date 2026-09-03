@@ -27,13 +27,18 @@ export function useInvoiceSources() {
   const [orderIds, setOrderIds] = useState<string[]>([])
   const [reservationIds, setReservationIds] = useState<string[]>([])
 
-  const reset = useCallback(() => { setOrderIds([]); setReservationIds([]) }, [])
-  const init = useCallback((o: string[], r: string[]) => { setOrderIds(o); setReservationIds(r) }, [])
+  // ¿Conocemos ya los orígenes reales de la factura? Si la carga falla, el editor
+  // NO debe enviar [] al guardar: syncInvoiceSources lo lee como "vaciar" y borra
+  // los pedidos/reservas que la factura sí cubre.
+  const [loaded, setLoaded] = useState(false)
+
+  const reset = useCallback(() => { setOrderIds([]); setReservationIds([]); setLoaded(true) }, [])
+  const init = useCallback((o: string[], r: string[]) => { setOrderIds(o); setReservationIds(r); setLoaded(true) }, [])
 
   return {
     orderIds, reservationIds,
     setOrderIds, setReservationIds,
-    reset, init,
+    reset, init, loaded,
     /** ¿La factura declara cubrir algún pedido/reserva? */
     get hasAny() { return orderIds.length > 0 || reservationIds.length > 0 },
   }
@@ -70,8 +75,12 @@ export function InvoiceSourcesSection({
       listTailoringOrdersForInvoice({ clientId: clientId || undefined }),
       listReservationsForInvoice({ clientId: clientId || undefined }),
     ])
+    // Un fallo (permiso, red) se tragaba en silencio y el diálogo parecía decir
+    // "este cliente no tiene pedidos": ahora se distingue el error del vacío real.
     if (ro.success) setOrders(ro.data.map(o => ({ id: o.id, number: o.order_number, total: o.total, client_name: o.client_name, already_invoiced: o.already_invoiced })))
+    else toast.error(ro.error || 'No se pudieron cargar los pedidos')
     if (rr.success) setReservations(rr.data.map(o => ({ id: o.id, number: o.reservation_number, total: o.total, client_name: o.client_name, already_invoiced: o.already_invoiced })))
+    else toast.error(rr.error || 'No se pudieron cargar las reservas')
     setLoadingLists(false)
   }
 

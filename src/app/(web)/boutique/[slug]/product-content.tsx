@@ -72,6 +72,11 @@ export function ProductContent({ slug }: { slug: string }) {
       (!selectedSize || v.size === selectedSize) && (!selectedColor || v.color === selectedColor)
     )
     setSelectedVariant(variant || null)
+    // Al cambiar de talla/color cambia el stock: si la cantidad ya elegida no cabe
+    // en la nueva variante hay que recortarla. Si no, se podían añadir 3 unidades
+    // de una talla con 1 y el fallo no salía hasta pulsar Pagar.
+    const stockVariante = (variant?.total_stock as number) || 0
+    setQuantity(q => (stockVariante > 0 ? Math.min(q, stockVariante) : 1))
   }, [product, selectedSize, selectedColor])
 
   useEffect(() => {

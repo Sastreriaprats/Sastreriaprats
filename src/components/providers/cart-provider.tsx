@@ -54,7 +54,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         const newQty = Math.min(existing.quantity + (newItem.quantity || 1), newItem.max_stock)
         return prev.map(i => i.variant_id === newItem.variant_id ? { ...i, quantity: newQty } : i)
       }
-      return [...prev, { ...newItem, quantity: newItem.quantity || 1 }]
+      // Primer alta: recortar también al stock. Antes solo se recortaba al sumar
+      // sobre un artículo YA existente, así que el carrito podía nacer con más
+      // unidades de las que hay. max_stock ausente o 0 = sin tope conocido.
+      const max = newItem.max_stock > 0 ? newItem.max_stock : Infinity
+      return [...prev, { ...newItem, quantity: Math.min(Math.max(1, newItem.quantity || 1), max) }]
     })
   }, [])
 

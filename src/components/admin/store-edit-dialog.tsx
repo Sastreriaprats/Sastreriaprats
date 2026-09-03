@@ -94,23 +94,28 @@ export function StoreEditDialog({ open, onOpenChange, store, onSaved }: Props) {
 
   const handleSave = async () => {
     setIsSaving(true)
+    // Vaciar un campo tiene que poder BORRARLO. Con `undefined` la clave no
+    // viaja en el JSON y PostgREST deja la columna intacta: un NIF o una razón
+    // social equivocados (que salen en documentos) no había forma de quitarlos.
+    // `null` sí viaja y escribe NULL.
+    const opt = (v: string) => v.trim() || null
     const payload = {
       code: form.code.toUpperCase(), name: form.name,
       display_name: form.display_name || form.name,
-      store_type: form.store_type, address: form.address || undefined,
-      city: form.city, postal_code: form.postal_code || undefined,
+      store_type: form.store_type, address: opt(form.address),
+      city: form.city, postal_code: opt(form.postal_code),
       province: form.province, country: form.country,
-      phone: form.phone || undefined, email: form.email || undefined,
+      phone: opt(form.phone), email: opt(form.email),
       opening_hours: form.opening_hours,
       default_cash_fund: parseFloat(form.default_cash_fund) || 300,
       order_prefix: form.order_prefix || form.code.toUpperCase(),
       slug: form.slug || form.name.toLowerCase().replace(/\s+/g, '-'),
-      fiscal_name: form.fiscal_name || undefined,
-      fiscal_nif: form.fiscal_nif || undefined,
-      fiscal_address: form.fiscal_address || undefined,
-      latitude: form.latitude ? parseFloat(form.latitude) : undefined,
-      longitude: form.longitude ? parseFloat(form.longitude) : undefined,
-      google_maps_url: form.google_maps_url || undefined,
+      fiscal_name: opt(form.fiscal_name),
+      fiscal_nif: opt(form.fiscal_nif),
+      fiscal_address: opt(form.fiscal_address),
+      latitude: form.latitude ? parseFloat(form.latitude) : null,
+      longitude: form.longitude ? parseFloat(form.longitude) : null,
+      google_maps_url: opt(form.google_maps_url),
     }
 
     const result = store

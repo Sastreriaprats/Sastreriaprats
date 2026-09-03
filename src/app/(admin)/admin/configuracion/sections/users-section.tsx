@@ -44,11 +44,21 @@ export function UsersSection() {
   const [tempPassword, setTempPassword] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [salesUser, setSalesUser] = useState<UserRow | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     const u = await listAdminUsers()
-    if (u.data) setUsers(u.data)
+    // Ignorar u.error dejaba la tabla vacía con "Sin usuarios": un fallo de
+    // permisos o de la consulta parecía que la empresa no tuviera empleados.
+    if (u.error) {
+      setLoadError(u.error)
+      setUsers([])
+      toast.error(u.error)
+    } else {
+      setLoadError(null)
+      setUsers(u.data ?? [])
+    }
     setLoading(false)
   }, [])
 
@@ -153,7 +163,9 @@ export function UsersSection() {
               </TableHeader>
               <TableBody>
                 {users.length === 0 && (
-                  <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">Sin usuarios</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                    {loadError ? `No se han podido cargar los usuarios: ${loadError}` : 'Sin usuarios'}
+                  </TableCell></TableRow>
                 )}
                 {users.map(u => {
                   const role = u.roles[0]
@@ -368,6 +380,8 @@ function CreateUserForm({ roles, stores, onSuccess }: {
     setLoading(false)
     if (res.error) { toast.error(res.error); return }
     toast.success('Usuario creado')
+    // El alta puede terminar "bien" y dejar al empleado sin ninguna tienda.
+    if (res.data?.storesWarning) toast.error(res.data.storesWarning, { duration: 20000 })
     onSuccess(res.data!.tempPassword)
   }
 

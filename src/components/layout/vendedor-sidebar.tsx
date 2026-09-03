@@ -19,15 +19,21 @@ const navItems = [
   { label: 'Caja TPV', href: '/vendedor/caja', icon: ShoppingCart },
   { label: 'Mis ventas', href: '/vendedor/mis-ventas', icon: Receipt },
   { label: 'Albaranes', href: '/admin/almacen/albaranes', icon: ClipboardList },
+  // El middleware ya deja entrar a vendedor_avanzado en /admin/facturas y el rol
+  // tiene accounting.manage_invoices, pero no había enlace: solo se llegaba
+  // escribiendo la URL. El filtro por permiso lo oculta a quien no lo tenga.
+  { label: 'Facturas', href: '/admin/facturas', icon: Receipt, permission: 'accounting.manage_invoices' as const },
   { label: 'Etiquetas y códigos', href: '/admin/stock/codigos-barras', icon: Tag, permission: 'barcodes.manage' as const },
-  // Vista personal "Mis ventas y comisiones" (el servidor scopa a su fila
-  // por reports.view_own; el middleware ya permite /admin/reporting).
-  { label: 'Mis comisiones', href: '/admin/reporting', icon: TrendingUp, permission: 'reports.view_own' as const },
+  // Vista personal de informes (el servidor scopa a su fila por
+  // reports.view_own; el middleware ya permite /admin/reporting). Se rotula
+  // "Mis ventas (informe)" y no "Mis comisiones" porque esa pantalla oculta
+  // las comisiones a propósito mientras se revisa el cálculo.
+  { label: 'Mis ventas (informe)', href: '/admin/reporting', icon: TrendingUp, permission: 'reports.view_own' as const },
 ]
 
 export function VendedorSidebar({ collapsed = false }: { collapsed?: boolean }) {
   const pathname = usePathname()
-  const { profile } = useAuth()
+  const { profile, hasRole, isAdmin } = useAuth()
   const { can } = usePermissions()
 
   const isActive = (href: string) => {
@@ -35,7 +41,15 @@ export function VendedorSidebar({ collapsed = false }: { collapsed?: boolean }) 
     return pathname.startsWith(href)
   }
 
-  const visibleItems = navItems.filter((item) => !('permission' in item) || can((item as { permission?: string }).permission!))
+  // El middleware solo abre /admin/pedidos y /admin/almacen/albaranes al
+  // vendedor avanzado; al básico lo devuelve a /vendedor. Sin este filtro el
+  // menú enseñaba dos enlaces que no llevaban a ninguna parte ni avisaban.
+  const isAdvanced = hasRole('vendedor_avanzado') || isAdmin
+  const restrictedToAdvanced = ['/admin/pedidos', '/admin/almacen/albaranes']
+  const visibleItems = navItems.filter((item) => {
+    if (restrictedToAdvanced.includes(item.href) && !isAdvanced) return false
+    return !('permission' in item) || can((item as { permission?: string }).permission!)
+  })
 
   return (
     <aside className={cn(

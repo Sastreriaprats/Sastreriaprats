@@ -247,6 +247,11 @@ export function TransfersTab() {
       selected: true,
     })) as TransferLine[]
     setLines(loaded)
+    // El servidor recorta a `limit`: avisar en vez de traspasar en silencio menos
+    // referencias de las que hay con stock en el almacén de origen.
+    if (loaded.length >= 1200) {
+      toast.warning(`Se han cargado ${loaded.length} referencias, el máximo por carga. Puede haber más con stock en ese almacén: afina por categoría o búsqueda.`)
+    }
     if (!loaded.length) toast.warning('No hay productos con stock para ese filtro')
   }
 

@@ -66,6 +66,12 @@ export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus,
     onSuccess: (data: any) => {
       if (!wholeOrder) {
         toast.success(selectedIds.size === 1 ? 'Estado actualizado' : `Estado actualizado (${selectedIds.size} prendas)`)
+      } else if ((data?.changed_lines_count ?? 0) === 0 && newStatus !== 'cancelled' && newStatus !== 'incident') {
+        // Ruta "todo el pedido": las prendas ya ENTREGADAS nunca retroceden por aquí, así
+        // que el cambio puede acabar sin tocar ninguna prenda. Antes salía "Estado cambiado"
+        // y parecía que la entrega se había deshecho; ahora se avisa y se indica el camino
+        // que sí funciona (el chip de estado de cada prenda).
+        toast.warning('Ninguna prenda ha cambiado: las prendas entregadas no retroceden desde este diálogo. Cámbialas una a una con el chip de estado de la pestaña Prendas.')
       } else {
         statusChangeToast(data?.ahead_lines_count ?? 0)
       }

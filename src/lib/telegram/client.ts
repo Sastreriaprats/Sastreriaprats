@@ -48,6 +48,12 @@ export async function sendMessage(
     if (!res.ok) {
       const body = await res.text().catch(() => '')
       console.error('[Telegram] sendMessage falló:', res.status, body)
+      // Propagar el fallo: tragárselo hacía que el cron del reporte diario
+      // respondiera {ok:true} con el mensaje rechazado (bot expulsado del grupo,
+      // chat_id migrado a supergrupo, token rotado, 429) y nadie se enteraba de
+      // que el reporte había dejado de llegar. Los dos llamantes ya envuelven la
+      // llamada en try/catch y el webhook sigue devolviendo 200 a Telegram.
+      throw new Error(`Telegram sendMessage ${res.status}: ${body.slice(0, 300)}`)
     }
   }
 }

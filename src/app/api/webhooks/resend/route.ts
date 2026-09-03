@@ -112,10 +112,25 @@ export async function POST(request: NextRequest) {
         break
       }
       case 'email.complained': {
-        await admin
+        // Marcar como spam es una negativa expresa: además del log hay que dar de
+        // baja al cliente, o volvía a entrar en la siguiente campaña agravando el
+        // daño a la reputación del dominio. Se usa `unsubscribed_at` y no
+        // `email_bounced` porque es voluntad del cliente, no un problema de
+        // entrega, y así queda en Suscriptores > Dados de baja. Con esa marca sale
+        // de applyMarketingBaseFilter y también del segmento de invitación opt-in.
+        const { data: log } = await admin
           .from('email_logs')
           .update({ status: 'complained' })
           .eq('resend_id', emailId)
+          .select('client_id')
+          .maybeSingle()
+        if (log?.client_id) {
+          await admin.from('clients').update({
+            unsubscribed_at: now,
+            unsubscribe_reason: 'Marcado como spam',
+            newsletter_subscribed: false,
+          }).eq('id', log.client_id)
+        }
         break
       }
       default:

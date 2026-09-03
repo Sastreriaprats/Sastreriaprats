@@ -450,32 +450,54 @@ export const getJournalEntries = protectedAction<
   { permission: 'accounting.view', auditModule: 'accounting' },
   async (ctx, { year, month }) => {
     const y = year ?? new Date().getFullYear()
-    let q = ctx.adminClient
-      .from('journal_entries')
-      .select(`
-        id, entry_number, fiscal_year, fiscal_month, entry_date, description, entry_type, status, total_debit, total_credit, reference_type, is_period_closed
-      `)
-      .eq('fiscal_year', y)
-      .order('entry_date', { ascending: false })
+    // Cabeceras paginadas: PostgREST corta en 1.000 filas y el Diario de un año
+    // entero ya ronda ese tope (559 asientos en 2026), así que sin paginar el
+    // listado y su Excel empezarían a perder asientos sin avisar.
+    const list = await readAllPaged<Record<string, unknown>>((f, t) => {
+      let q = ctx.adminClient
+        .from('journal_entries')
+        .select(`
+          id, entry_number, fiscal_year, fiscal_month, entry_date, description, entry_type, status, total_debit, total_credit, reference_type, is_period_closed
+        `)
+        .eq('fiscal_year', y)
+        .order('entry_date', { ascending: false })
+        .order('id', { ascending: false })
+      if (month) q = q.eq('fiscal_month', month)
+      return q.range(f, t)
+    }, 'getJournalEntries')
 
-    if (month) q = q.eq('fiscal_month', month)
+    // Antes se hacía UNA consulta por asiento (559 idas y vueltas encadenadas al
+    // abrir el tab). Ahora las líneas se leen por lotes y se agrupan en memoria.
+    type JournalLine = NonNullable<JournalEntryRow['lines']>[number]
+    const linesByEntry = new Map<string, JournalLine[]>()
+    const entryIds = list.map((e) => String(e.id))
+    const ENTRY_BATCH = 200
+    for (let i = 0; i < entryIds.length; i += ENTRY_BATCH) {
+      const chunk = entryIds.slice(i, i + ENTRY_BATCH)
+      const lineRows = await readAllPaged<Record<string, unknown>>((f, t) => ctx.adminClient
+        .from('journal_entry_lines')
+        .select('journal_entry_id, account_code, debit, credit, description, sort_order')
+        .in('journal_entry_id', chunk)
+        .order('journal_entry_id', { ascending: true })
+        .order('sort_order', { ascending: true })
+        .range(f, t), 'getJournalEntries.lines')
+      for (const l of lineRows) {
+        const key = String(l.journal_entry_id)
+        const arr = linesByEntry.get(key) ?? []
+        arr.push({
+          account_code: String(l.account_code),
+          name: undefined as string | undefined,
+          debit: Number(l.debit ?? 0),
+          credit: Number(l.credit ?? 0),
+          description: (l.description as string) ?? null,
+        })
+        linesByEntry.set(key, arr)
+      }
+    }
 
-    const { data: entries } = await q
-    const list = (entries || []) as Record<string, unknown>[]
     const withLines: JournalEntryRow[] = []
     for (const e of list) {
-      const { data: lines } = await ctx.adminClient
-        .from('journal_entry_lines')
-        .select('account_code, debit, credit, description')
-        .eq('journal_entry_id', e.id as string)
-        .order('sort_order')
-      const lineList = (lines || []).map((l: Record<string, unknown>) => ({
-        account_code: String(l.account_code),
-        name: undefined as string | undefined,
-        debit: Number(l.debit ?? 0),
-        credit: Number(l.credit ?? 0),
-        description: (l.description as string) ?? null,
-      }))
+      const lineList = linesByEntry.get(String(e.id)) ?? []
       withLines.push({
         id: String(e.id),
         entry_number: Number(e.entry_number),
@@ -1125,7 +1147,10 @@ export const listTailoringOrdersForInvoice = protectedAction<
   { clientId?: string },
   { id: string; order_number: string; total: number; client_name: string; already_invoiced: boolean }[]
 >(
-  { permission: 'accounting.edit', auditModule: 'accounting' },
+  // accounting.edit solo la tiene administrador; quien factura de verdad
+  // (vendedor_avanzado) tiene accounting.manage_invoices y el diálogo de orígenes
+  // le salía vacío sin decir nada. Mismo par que getClientsForInvoice.
+  { permission: ['accounting.edit', 'accounting.manage_invoices'], auditModule: 'accounting' },
   async (ctx, { clientId }) => {
     let q = ctx.adminClient
       .from('tailoring_orders')
@@ -1157,7 +1182,8 @@ export const listReservationsForInvoice = protectedAction<
   { clientId?: string },
   { id: string; reservation_number: string; total: number; client_name: string; already_invoiced: boolean }[]
 >(
-  { permission: 'accounting.edit', auditModule: 'accounting' },
+  // Mismo permiso que el resto del diálogo de orígenes (ver listTailoringOrdersForInvoice).
+  { permission: ['accounting.edit', 'accounting.manage_invoices'], auditModule: 'accounting' },
   async (ctx, { clientId }) => {
     let q = ctx.adminClient
       .from('product_reservations')
@@ -1187,7 +1213,8 @@ export const getReservationLinesForInvoice = protectedAction<
   string,
   { description: string; quantity: number; unit_price: number; tax_rate: number; line_total: number }[]
 >(
-  { permission: 'accounting.edit', auditModule: 'accounting' },
+  // Mismo permiso que el resto del diálogo de orígenes (ver listTailoringOrdersForInvoice).
+  { permission: ['accounting.edit', 'accounting.manage_invoices'], auditModule: 'accounting' },
   async (ctx, reservationId) => {
     const { data: resLines } = await ctx.adminClient
       .from('product_reservation_lines')
@@ -1225,7 +1252,8 @@ export const getInvoiceSourcesAction = protectedAction<
   string,
   { orderIds: string[]; reservationIds: string[] }
 >(
-  { permission: 'accounting.edit', auditModule: 'accounting' },
+  // Mismo permiso que el resto del diálogo de orígenes (ver listTailoringOrdersForInvoice).
+  { permission: ['accounting.edit', 'accounting.manage_invoices'], auditModule: 'accounting' },
   async (ctx, invoiceId) => {
     const [{ data: orders }, { data: reservations }] = await Promise.all([
       ctx.adminClient.from('invoice_tailoring_orders').select('tailoring_order_id').eq('invoice_id', invoiceId),
@@ -1243,7 +1271,8 @@ export const getTailoringOrderLinesForInvoice = protectedAction<
   string,
   { description: string; quantity: number; unit_price: number; tax_rate: number; line_total: number }[]
 >(
-  { permission: 'accounting.edit', auditModule: 'accounting' },
+  // Mismo permiso que el resto del diálogo de orígenes (ver listTailoringOrdersForInvoice).
+  { permission: ['accounting.edit', 'accounting.manage_invoices'], auditModule: 'accounting' },
   async (ctx, orderId) => {
     const { data: orderLines } = await ctx.adminClient
       .from('tailoring_order_lines')
@@ -1302,6 +1331,9 @@ export type AccountingMovementRow = {
   referenceId?: string
   referenceNumber?: string
   isManual: boolean
+  /** Solo true en movimientos tecleados a mano. Los espejos automáticos de caja
+   *  y de pagos no se pueden editar ni borrar: romperían el arqueo. */
+  canEdit?: boolean
   journalEntryId?: string
   storeId?: string | null
   storeName?: string | null
@@ -1332,7 +1364,11 @@ export const getAccountingMovements = protectedAction<
       .gte('entry_date', dateFrom)
       .lte('entry_date', dateTo)
       .eq('status', 'posted')
-      .not('reference_type', 'in', '("sale","invoice","online_order")')
+      // 'manual_transaction' se excluye porque ese movimiento ya se lista más abajo desde
+      // su propia tabla (con lápiz y papelera); si no, el asiento generado por el interruptor
+      // "Generar asiento contable automáticamente" lo duplicaba y doblaba los totales.
+      // El asiento se sigue viendo donde corresponde: en el tab Diario.
+      .not('reference_type', 'in', '("sale","invoice","online_order","manual_transaction")')
       .order('entry_date', { ascending: false })
       .order('id', { ascending: false })
       .range(f, t), 'getAccountingMovements.journal_entries')
@@ -1395,6 +1431,7 @@ export const getAccountingMovements = protectedAction<
       invoice: 'Factura',
       supplier_order: 'Compra',
       online_order: 'Pedido online',
+      sale_return: 'Devolución',
     }
 
     for (const e of entriesList) {
@@ -1406,7 +1443,9 @@ export const getAccountingMovements = protectedAction<
       else if (refType === 'supplier_order' && refId) referenceNumber = numberByOrderId[refId]
       else if (refType === 'online_order' && refId) referenceNumber = numberByOnlineId[refId]
 
-      const movementType = e.entry_type === 'purchase' ? 'expense' : 'income'
+      // Una devolución de venta es dinero que SALE: su asiento es el inverso del de
+      // la venta pero conserva entry_type='sale', así que se contaba como ingreso.
+      const movementType = (e.entry_type === 'purchase' || e.reference_type === 'sale_return') ? 'expense' : 'income'
       if (type && movementType !== type) continue
 
       const total = Number(e.total_debit ?? e.total_credit ?? 0)
@@ -1433,7 +1472,7 @@ export const getAccountingMovements = protectedAction<
     const manual = await readAllPaged<Record<string, unknown>>((f, t) => {
       let q = ctx.adminClient
         .from('manual_transactions')
-        .select('id, type, date, description, category, amount, tax_rate, tax_amount, total, notes, created_at, ap_supplier_invoice_id, cash_sessions(store_id, stores(name))')
+        .select('id, type, date, description, category, amount, tax_rate, tax_amount, total, notes, created_at, ap_supplier_invoice_id, cash_session_id, withdrawal_id, sale_id, sale_payment_id, tailoring_order_payment_id, product_reservation_payment_id, cash_sessions(store_id, stores(name))')
         .gte('date', dateFrom)
         .lte('date', dateTo)
         .order('date', { ascending: false })
@@ -1467,6 +1506,11 @@ export const getAccountingMovements = protectedAction<
         total: Number(m.total),
         category: String(m.category),
         isManual: true,
+        // Espejo automático (venta de TPV, apertura/retirada de caja, cobro de
+        // pedido, pago de factura de proveedor): no se toca desde Movimientos.
+        canEdit: !(m as any).cash_session_id && !(m as any).withdrawal_id && !apInvoiceId
+          && !(m as any).sale_id && !(m as any).sale_payment_id
+          && !(m as any).tailoring_order_payment_id && !(m as any).product_reservation_payment_id,
         storeId,
         storeName,
         supplierName: apInvoiceId ? (supplierNameByInvoiceId.get(apInvoiceId) || null) : null,
@@ -1599,9 +1643,18 @@ export const updateManualTransaction = protectedAction<
 
     const { data: current } = await ctx.adminClient
       .from('manual_transactions')
-      .select('notes')
+      .select('notes, cash_session_id, withdrawal_id, ap_supplier_invoice_id, sale_id, sale_payment_id, tailoring_order_payment_id, product_reservation_payment_id')
       .eq('id', id)
       .single()
+
+    // Mismo cerrojo que al borrar: un espejo de caja o de pago no se reescribe
+    // desde Movimientos (descuadraría el arqueo y el pago de origen).
+    const link = current as Record<string, unknown> | null
+    if (link && (link.cash_session_id || link.withdrawal_id || link.ap_supplier_invoice_id
+      || link.sale_id || link.sale_payment_id || link.tailoring_order_payment_id
+      || link.product_reservation_payment_id)) {
+      return failure('Este movimiento es el espejo contable de una operación de caja o de un pago: no se puede editar desde aquí', 'FORBIDDEN')
+    }
 
     const paymentLabel: Record<string, string> = {
       cash: 'Efectivo', card: 'Tarjeta', bizum: 'Bizum', transfer: 'Transferencia',
@@ -1628,7 +1681,21 @@ export const updateManualTransaction = protectedAction<
 export const deleteManualTransaction = protectedAction<{ id: string }, void>(
   { permission: 'accounting.edit', auditModule: 'accounting' },
   async (ctx, { id }) => {
-    await ctx.adminClient.from('manual_transactions').delete().eq('id', id)
+    // Los espejos automáticos (caja, ventas, cobros, pagos de proveedor) no se
+    // borran desde Movimientos: destruirían el arqueo de esa sesión de caja.
+    const { data: row } = await ctx.adminClient
+      .from('manual_transactions')
+      .select('cash_session_id, withdrawal_id, ap_supplier_invoice_id, sale_id, sale_payment_id, tailoring_order_payment_id, product_reservation_payment_id')
+      .eq('id', id)
+      .maybeSingle()
+    const link = row as Record<string, unknown> | null
+    if (link && (link.cash_session_id || link.withdrawal_id || link.ap_supplier_invoice_id
+      || link.sale_id || link.sale_payment_id || link.tailoring_order_payment_id
+      || link.product_reservation_payment_id)) {
+      return failure('Este movimiento es el espejo contable de una operación de caja o de un pago: no se puede borrar desde aquí', 'FORBIDDEN')
+    }
+    const { error } = await ctx.adminClient.from('manual_transactions').delete().eq('id', id)
+    if (error) return failure(error.message)
     return success(undefined)
   }
 )
@@ -2608,10 +2675,11 @@ export const updateInvoiceAction = protectedAction<UpdateInvoiceInput, { id: str
 export const issueInvoiceAction = protectedAction<string, { id: string; auditEntityId: string; auditDescription: string }>(
   { permission: 'accounting.manage_invoices', auditModule: 'accounting', auditAction: 'state_change', auditEntity: 'invoice' },
   async (ctx, invoiceId) => {
+    // Emitir NO es enviar: no existe envío de facturas por email. Marcar aquí
+    // sent_to_client disparaba el cerrojo fiscal de cancelInvoiceAction y dejaba
+    // la factura imposible de anular nada más emitirla.
     const { error } = await ctx.adminClient.from('invoices').update({
       status: 'issued',
-      sent_to_client: true,
-      sent_at: new Date().toISOString(),
     }).eq('id', invoiceId)
     if (error) return failure(error.message)
 
@@ -3433,7 +3501,10 @@ export const convertEstimateToInvoiceAction = protectedAction<{ estimateId: stri
       invoiced_at: new Date().toISOString(),
     }).eq('id', estimateId)
 
-    createInvoiceJournalEntry(inv.id).catch(() => {})
+    // El asiento NO se crea aquí: la factura nace en borrador y issueInvoiceAction lo
+    // genera al pulsar «Emitir» (misma política que el alta manual, que la UI ya
+    // anuncia). Creándolo antes, borrar el borrador —cosa que la UI permite— dejaba
+    // el asiento huérfano en el Diario acreditando la 700 sin documento detrás.
     return success({
       invoiceId: inv.id as string,
       invoice_number,

@@ -149,7 +149,7 @@ function buildStoreAssignments(
   }
 }
 
-export async function createAdminUser(input: CreateUserInput): Promise<{ data?: { userId: string; tempPassword: string }; error?: string }> {
+export async function createAdminUser(input: CreateUserInput): Promise<{ data?: { userId: string; tempPassword: string; storesWarning?: string }; error?: string }> {
   try {
     const supabase = await createServerSupabaseClient()
     const { data: { user: currentUser } } = await supabase.auth.getUser()
@@ -201,8 +201,13 @@ export async function createAdminUser(input: CreateUserInput): Promise<{ data?: 
   }
   const storeRows = (assignments.rows ?? []).map((r) => ({ ...r, user_id: userId }))
   const { error: storeErr } = await admin.from('user_stores').insert(storeRows)
+  // No abortamos (el usuario y su rol ya existen en Auth y no hay vuelta atrás),
+  // pero el fallo TIENE que llegar a la pantalla: sin tiendas el empleado no
+  // puede abrir caja ni vender y nadie relacionaba el problema con el alta.
+  let storesWarning: string | undefined
   if (storeErr) {
     console.error('[createAdminUser] Error asignando tiendas:', storeErr)
+    storesWarning = `El usuario se creó, pero NO se pudieron asignar las tiendas (${storeErr.message}). Asígnaselas en Editar usuario antes de que entre: sin tienda no puede abrir caja ni vender.`
   }
 
   const { data: role } = await admin.from('roles').select('name').eq('id', input.roleId).single()
@@ -218,7 +223,7 @@ export async function createAdminUser(input: CreateUserInput): Promise<{ data?: 
   })
 
     revalidatePath('/admin/configuracion')
-    return { data: { userId, tempPassword } }
+    return { data: { userId, tempPassword, storesWarning } }
   } catch (err) {
     console.error('[createAdminUser]', err)
     return { error: err instanceof Error ? err.message : 'Error al crear usuario' }

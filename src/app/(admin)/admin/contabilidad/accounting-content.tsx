@@ -112,7 +112,7 @@ function getPresetLabel(preset: DateRangePreset, from: string, to: string): stri
 }
 
 function addDays(isoDate: string, days: number): string {
-  const d = new Date(isoDate); d.setDate(d.getDate() + days)
+  const d = new Date(isoDate); d.setUTCDate(d.getUTCDate() + days) // en UTC: con setDate local el cambio de hora de marzo restaba un día
   return d.toISOString().slice(0, 10)
 }
 
@@ -1276,6 +1276,7 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
       setLines(r.data.lines.map(l => ({ description: l.description, quantity: l.quantity, unit_price: l.unit_price, tax_rate: l.tax_rate })))
     }
     if (sr.success) sources.init(sr.data.orderIds, sr.data.reservationIds)
+    else toast.error('No se pudieron cargar los pedidos/reservas de esta factura')
     if (cr.success && cr.data) {
       setSelectedClient(cr.data)
       // Si el client_name de la factura coincide con una empresa del cliente,
@@ -1392,8 +1393,10 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
           line_total: lineSubtotal * (1 + l.tax_rate / 100),
         }
       }),
-      tailoring_order_ids: sources.orderIds,
-      reservation_ids: sources.reservationIds,
+      // undefined = "no tocar los puentes"; [] los BORRARÍA. Si la carga de
+      // orígenes falló no sabemos qué cubre la factura: no se envía nada.
+      tailoring_order_ids: sources.loaded ? sources.orderIds : undefined,
+      reservation_ids: sources.loaded ? sources.reservationIds : undefined,
       conceptOnly,
     })
     setSaving(false)
@@ -3642,7 +3645,7 @@ function MovimientosTab() {
                             <ExternalLink className="h-3.5 w-3.5" />
                           </Button>
                         )}
-                        {r.isManual && can('accounting.edit') && (
+                        {r.canEdit && can('accounting.edit') && (
                           <>
                             <Button
                               size="icon" variant="ghost" className="h-7 w-7"
@@ -3991,12 +3994,22 @@ function CajaSessionsTab() {
       if (list.length > 0) {
         // Solo cobros VINCULADOS a la sesión (cash_session_id). Nada de fallbacks
         // por rango de fechas: mezclaban cobros de otras tiendas en el arqueo.
-        const ids = list.map((s: CashSession) => s.id).filter(Boolean)
         const bySession: Record<string, number> = {}
-        const { data: topSums } = await supabase
-          .from('tailoring_order_payments')
-          .select('cash_session_id, amount')
-          .in('cash_session_id', ids)
+        // Lectura paginada y sin .in(ids): PostgREST corta cualquier consulta en
+        // 1000 filas y, con cientos de sesiones, la URL del .in() se dispara y
+        // tumba la petición entera. Traemos los cobros ligados a caja por páginas.
+        const topSums: Array<{ cash_session_id: string | null; amount: number | null }> = []
+        for (let from = 0; ; from += PAGE) {
+          const { data: cobrosPage, error: cobrosErr } = await supabase
+            .from('tailoring_order_payments')
+            .select('cash_session_id, amount')
+            .not('cash_session_id', 'is', null)
+            .order('id', { ascending: true })
+            .range(from, from + PAGE - 1)
+          if (cobrosErr) { toast.error('Error al cargar los cobros de sastrería'); break }
+          topSums.push(...((cobrosPage ?? []) as Array<{ cash_session_id: string | null; amount: number | null }>))
+          if (!cobrosPage || cobrosPage.length < PAGE) break
+        }
         for (const row of topSums ?? []) {
           const id = row.cash_session_id
           if (id) bySession[id] = (bySession[id] ?? 0) + Number(row.amount ?? 0)

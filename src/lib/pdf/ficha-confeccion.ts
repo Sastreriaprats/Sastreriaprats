@@ -1222,7 +1222,14 @@ export function buildCamiseriaDocDefinition(
   // Fallback a la columna canónica `fabric_description` cuando config.tejido está
   // vacío (mismo criterio que la ficha no-camisa). El tejido vive en esa columna.
   const tejidoStr = String(cfg.tejido || line.fabric_description || '—').trim()
-  const precioLinea = Number(cfg.precio ?? 0)
+  // El PVP de camisería NO vive en la configuración: createFichaOrder borra la
+  // clave `precio` antes de guardar (src/actions/orders.ts), así que la ficha
+  // salía siempre a 0,00 €. Se cae a `unit_price`, que es el mismo PVP con IVA
+  // que se ve en pantalla. El wizard de admin sí manda cfg.precio y sigue mandando.
+  const precioCfg = cfg.precio
+  const precioLinea = precioCfg != null && String(precioCfg).trim() !== ''
+    ? Number(precioCfg)
+    : Number((line as { unit_price?: number | string | null }).unit_price ?? 0)
 
   // Tabla TEJIDO. Superior: 65/35 con bloque PRECIO. Inferior: ancho completo
   // (sin precio). Se construye como objeto para poder envolverlo, en la copia

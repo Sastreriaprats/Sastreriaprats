@@ -1,6 +1,7 @@
 'use server'
 
 import { protectedAction } from '@/lib/server/action-wrapper'
+import { readAllPaged } from '@/lib/server/paged'
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { normalizeSearchTerm } from '@/lib/utils'
@@ -75,13 +76,22 @@ function toRow(r: RawReturn): ReturnRow {
 export const listReturns = protectedAction<ListParams, ListResult<ReturnRow>>(
   { permission: 'returns.view', auditModule: 'pos' },
   async (ctx, params) => {
-    const { data, error } = await ctx.adminClient
-      .from('returns')
-      .select(SELECT)
-      .order('created_at', { ascending: false })
-    if (error) return failure(error.message)
+    // PostgREST corta cualquier consulta en 1.000 filas: sin paginar de verdad,
+    // el listado (y su total, y sus filtros, que se resuelven abajo en memoria)
+    // solo verian las 1.000 devoluciones mas recientes en cuanto se supere ese
+    // tope. El `.order('id')` es el desempate que hace determinista el reparto
+    // entre paginas.
+    const rawRows = (await readAllPaged(
+      (from, to) => ctx.adminClient
+        .from('returns')
+        .select(SELECT)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to),
+      'listReturns',
+    )) as unknown as RawReturn[]
 
-    let rows = (data as unknown as RawReturn[]).map(toRow)
+    let rows = rawRows.map(toRow)
 
     const f = params.filters || {}
     if (f.from) rows = rows.filter((r) => r.created_at >= String(f.from))

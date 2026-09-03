@@ -5,6 +5,14 @@ import { isRateLimited } from '@/lib/rate-limit'
 import { generateRedsysOrder } from '@/lib/payments/redsys'
 import { computeShipping } from '@/lib/shipping'
 import { countryName } from '@/lib/countries'
+import { escapeLikePattern, pickPreferredClient } from '@/lib/clients/email-lookup'
+
+// Día 'YYYY-MM-DD' en hora de MADRID. Las columnas valid_from/valid_until son
+// DATE y se comparan como cadena; sacar "hoy" con toISOString() lo pasaba a UTC
+// y entre las 00:00 y las 02:00 locales devolvía el día de AYER, dejando pasar
+// cupones ya caducados. 'en-CA' formatea directamente en ISO.
+const _madridDayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })
+const madridToday = () => _madridDayFmt.format(new Date())
 
 function getStripe() {
   return new Stripe(process.env.STRIPE_SECRET_KEY!, {
@@ -112,10 +120,18 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (dc) {
-      const now = new Date().toISOString().split('T')[0]
+      const now = madridToday()
       const notExpired = !dc.valid_until || now <= dc.valid_until
       const notMaxed = !dc.max_uses || dc.current_uses < dc.max_uses
-      if (notExpired && notMaxed) {
+      // Este POST es el que de verdad descuenta y solo miraba caducidad y usos:
+      // un POST directo (sin pasar por el GET de /api/public/discount) se saltaba
+      // la fecha de alta, la compra mínima y el ámbito del cupón. Mismos criterios
+      // que el GET, pero calculados sobre el `subtotal` de SERVIDOR, no el que
+      // manda el navegador por query string.
+      const hasStarted = !dc.valid_from || now >= dc.valid_from
+      const meetsMin = !dc.min_purchase || subtotal >= parseFloat(dc.min_purchase)
+      const appliesOnline = !dc.applies_to || ['all', 'online', 'boutique'].includes(dc.applies_to)
+      if (notExpired && hasStarted && notMaxed && meetsMin && appliesOnline) {
         if (dc.discount_type === 'percentage') {
           validatedDiscount = Math.round(subtotal * (parseFloat(dc.discount_value) / 100) * 100) / 100
         } else {
@@ -157,22 +173,35 @@ export async function POST(request: NextRequest) {
   const total = afterDiscount + effectiveShipping
 
   let clientId: string | null = null
-  const { data: existingClient } = await admin
+  // La ficha se busca sin distinguir mayúsculas y TOLERANDO varias filas:
+  // clients.email no es único, así que con `.eq(...).single()` bastaba que
+  // hubiera un duplicado para que la consulta fallase (data null, error
+  // ignorado) y el checkout creara OTRA ficha en cada compra — ha pasado de
+  // verdad en producción. Se prefiere la ficha "oficial" de tienda (con
+  // client_code) y, si no, la más antigua: mismo criterio que
+  // findLinkableClientsByEmail en src/actions/auth.ts.
+  const rawEmail = String(customer.email ?? '').trim()
+  const emailPattern = escapeLikePattern(rawEmail)
+  const { data: emailMatches, error: emailLookupError } = await admin
     .from('clients')
-    .select('id')
-    .eq('email', customer.email)
-    .single()
+    .select('id, client_code')
+    .ilike('email', emailPattern)
+    .order('created_at', { ascending: true })
+  if (emailLookupError) console.error('[checkout] búsqueda de cliente por email', emailLookupError)
+  const matchedRows = emailMatches ?? []
+  const existingClient = pickPreferredClient(matchedRows)
 
   if (existingClient) {
     clientId = existingClient.id
   } else {
-    const { data: newClient } = await admin.from('clients').insert({
+    const { data: newClient, error: newClientError } = await admin.from('clients').insert({
       first_name: customer.first_name,
       last_name: customer.last_name,
-      email: customer.email,
+      email: rawEmail,
       phone: customer.phone || null,
       source: 'web_shop',
     }).select('id').single()
+    if (newClientError) console.error('[checkout] alta de cliente en el checkout', newClientError)
     clientId = newClient?.id || null
   }
 
@@ -236,7 +265,7 @@ export async function POST(request: NextRequest) {
     // TAMBIÉN como token del pending: así el webhook y la página de éxito
     // pueden encontrar el pedido por el mismo identificador sin columnas extra.
     const dsOrder = generateRedsysOrder()
-    await admin.from('pending_online_orders').insert({
+    const { error: pendingError } = await admin.from('pending_online_orders').insert({
       token: dsOrder,
       order_number: orderNumber,
       client_id: clientId,
@@ -248,6 +277,16 @@ export async function POST(request: NextRequest) {
       total,
       locale: locale || 'es',
     })
+    // Si el pendiente no se ha guardado NO hay pago posible: el redirect de RedSys
+    // no encontraría la fila y mandaría al cliente a /carrito (que el frontend
+    // acaba de vaciar) sin ningún aviso. Mejor cortar aquí con un mensaje.
+    if (pendingError) {
+      console.error('[checkout] pending_online_orders insert', pendingError)
+      return NextResponse.json(
+        { error: 'No hemos podido iniciar el pago. Vuelve a intentarlo en unos segundos.' },
+        { status: 500 }
+      )
+    }
     // El frontend hace window.location.href = checkout_url. Devolvemos una URL
     // a un endpoint nuestro que sirve el form HTML autosubmit con la firma —
     // RedSys exige POST con Ds_SignatureVersion + Ds_MerchantParameters +

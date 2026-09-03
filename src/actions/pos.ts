@@ -173,7 +173,9 @@ export const getCurrentSession = protectedAction<string, any>(
   async (ctx, storeId) => {
     const { data: session } = await ctx.adminClient
       .from('cash_sessions')
-      .select('*')
+      // El arqueo que imprime el TPV al cerrar necesita el NOMBRE de la tienda y
+      // del que abrió la caja: con select('*') solo teníamos el uuid de opened_by.
+      .select('*, stores(name), opened_by_profile:profiles!cash_sessions_opened_by_fkey(full_name)')
       .eq('store_id', storeId)
       .eq('status', 'open')
       .single()
@@ -506,7 +508,7 @@ export const getSaleForTicket = protectedAction<string, {
     const { data: sale, error } = await ctx.adminClient
       .from('sales')
       .select(`
-        id, ticket_number, created_at, client_id, subtotal, discount_amount, discount_percentage,
+        id, ticket_number, created_at, client_id, store_id, subtotal, discount_amount, discount_percentage,
         tax_amount, total, payment_method, is_tax_free, status, notes,
         stores(name),
         profiles!sales_salesperson_id_fkey(full_name)
@@ -863,12 +865,30 @@ export const cashWithdrawal = protectedAction<{
     // 'gasto' = compra pagada con efectivo (cuenta como gasto). 'extraccion' =
     // sacar/entregar dinero (NO es gasto). Por defecto 'extraccion' (conservador).
     const withdrawalType = input.withdrawal_type === 'gasto' ? 'gasto' : 'extraccion'
+    // Un importe negativo se guardaba tal cual y, como el arqueo RESTA
+    // total_withdrawals, subía el efectivo esperado en vez de bajarlo. Mismo
+    // criterio que ya aplica updateWithdrawal.
+    const cleanAmount = Math.round((Number(input.amount) || 0) * 100) / 100
+    if (cleanAmount <= 0) return failure('El importe debe ser mayor que 0', 'VALIDATION')
+    const cleanReason = (input.reason ?? '').trim()
+    if (!cleanReason) return failure('El motivo no puede estar vacío', 'VALIDATION')
+    // La caja pudo cerrarse desde otro dispositivo con el diálogo abierto:
+    // apuntar la retirada en una sesión ya cerrada descuadra un arqueo firmado.
+    const { data: openSession, error: sessionError } = await ctx.adminClient
+      .from('cash_sessions')
+      .select('id')
+      .eq('id', input.session_id)
+      .eq('status', 'open')
+      .maybeSingle()
+    if (sessionError) return failure(sessionError.message)
+    if (!openSession) return failure('La caja ya no está abierta', 'CONFLICT')
+
     const { data: withdrawal, error } = await ctx.adminClient
       .from('cash_withdrawals')
       .insert({
         cash_session_id: input.session_id,
-        amount: input.amount,
-        reason: input.reason,
+        amount: cleanAmount,
+        reason: cleanReason,
         withdrawn_by: ctx.userId,
         withdrawal_type: withdrawalType,
       })
@@ -886,7 +906,7 @@ export const cashWithdrawal = protectedAction<{
     if (session) {
       const { error: totalsError } = await ctx.adminClient
         .from('cash_sessions')
-        .update({ total_withdrawals: (session.total_withdrawals || 0) + input.amount })
+        .update({ total_withdrawals: (session.total_withdrawals || 0) + cleanAmount })
         .eq('id', input.session_id)
       if (totalsError) console.error(`[cashWithdrawal] total_withdrawals no actualizado (sesión ${input.session_id}): ${totalsError.message}`)
     }
@@ -894,13 +914,14 @@ export const cashWithdrawal = protectedAction<{
     const { error: mirrorError } = await ctx.adminClient.from('manual_transactions').insert({
       type: 'expense',
       date: new Date().toISOString().split('T')[0],
-      description: `Retirada de caja: ${input.reason}`,
+      description: `Retirada de caja: ${cleanReason}`,
       category: 'caja',
-      amount: input.amount,
+      amount: cleanAmount,
       tax_rate: 0,
       tax_amount: 0,
-      total: input.amount,
+      total: cleanAmount,
       notes: `Retirada manual - Sesión ${input.session_id}`,
+      // (importe y motivo ya normalizados arriba: cleanAmount / cleanReason)
       created_by: ctx.userId,
       cash_session_id: input.session_id,
       withdrawal_id: withdrawal.id,
@@ -908,7 +929,7 @@ export const cashWithdrawal = protectedAction<{
     if (mirrorError) console.error(`[cashWithdrawal] espejo de retirada no registrado (retirada ${withdrawal.id}): ${mirrorError.message}`)
 
     const tipoEs = withdrawalType === 'gasto' ? 'Gasto' : 'Extracción'
-    const auditDescription = `${tipoEs} de caja · ${Number(input.amount).toFixed(2)}€ · Motivo: ${input.reason}`
+    const auditDescription = `${tipoEs} de caja · ${cleanAmount.toFixed(2)}€ · Motivo: ${cleanReason}`
     return success({ ...(withdrawal as Record<string, unknown>), auditDescription })
   }
 )
@@ -1069,24 +1090,34 @@ export const findSaleByBarcode = protectedAction<
     // 2) Buscar líneas de venta con esa variante (traer venta para filtrar completadas y ordenar)
     const { data: linesWithSale } = await ctx.adminClient
       .from('sale_lines')
-      .select('sale_id, sales!inner(created_at, status)')
+      .select('sale_id, sales!inner(created_at, status, store_id)')
       .eq('product_variant_id', variantId)
+      // Una venta ya devuelta en parte SIGUE siendo devolvible: mismo criterio
+      // que findSaleByTicketNumber y searchSalesByTicketPrefix.
+      .in('sales.status', ['completed', 'partially_returned'])
 
     if (!linesWithSale?.length) return success(null)
 
-    type LineWithSale = { sale_id: string; sales: { created_at: string; status: string }[] | { created_at: string; status: string } }
-    const completed = (linesWithSale as LineWithSale[])
+    type LineWithSale = { sale_id: string; sales: { created_at: string; status: string; store_id: string | null }[] | { created_at: string; status: string; store_id: string | null } }
+    const returnable = (linesWithSale as LineWithSale[])
       .filter((row) => {
         const s = Array.isArray(row.sales) ? row.sales[0] : row.sales
-        return s?.status === 'completed'
+        return s?.status === 'completed' || s?.status === 'partially_returned'
       })
-    if (!completed.length) return success(null)
+    if (!returnable.length) return success(null)
 
-    // Quedarnos con la venta más reciente (por created_at)
-    const ordered = [...completed].sort(
+    // La etiqueta no dice de qué ticket es: se prefiere la venta de la tienda
+    // donde se está devolviendo (preferencia, no exclusión: si el artículo solo
+    // se vendió en la otra tienda se sigue encontrando) y, dentro, la más reciente.
+    const ordered = [...returnable].sort(
       (a, b) => {
         const sa = Array.isArray(a.sales) ? a.sales[0] : a.sales
         const sb = Array.isArray(b.sales) ? b.sales[0] : b.sales
+        if (storeId) {
+          const ma = sa?.store_id === storeId ? 0 : 1
+          const mb = sb?.store_id === storeId ? 0 : 1
+          if (ma !== mb) return ma - mb
+        }
         return new Date(sb?.created_at ?? 0).getTime() - new Date(sa?.created_at ?? 0).getTime()
       }
     )
@@ -1327,15 +1358,20 @@ export const searchProductsForPos = protectedAction<{
 }, any[]>(
   { permission: 'pos.access', auditModule: 'pos' },
   async (ctx, { query, storeId }) => {
-    const q = (query || '').trim()
+    // El término viaja dentro de un `.or()` de PostgREST: una coma rompe el árbol
+    // lógico, la consulta responde 400 y el TPV se quedaba sin resultados sin
+    // decir nada. Mismo saneado que orders.ts y alterations.ts.
+    const q = (query || '').replace(/[,()*%:/\\]/g, ' ').replace(/\s+/g, ' ').trim()
     if (!q) return success([])
     if (!storeId) return success([])
 
-    const { data: warehouse } = await ctx.adminClient
+    const { data: warehouse, error: whErr } = await ctx.adminClient
       .from('warehouses').select('id')
-      .eq('store_id', storeId).eq('is_main', true).single()
+      .eq('store_id', storeId).eq('is_main', true).maybeSingle()
 
-    if (!warehouse) return success([])
+    // Sin almacén principal se devolvía lista vacía y el vendedor daba el
+    // artículo por no dado de alta. Mejor decir qué ha pasado.
+    if (whErr || !warehouse) return failure('No se ha podido determinar el almacén principal de esta tienda')
 
     // Búsqueda inteligente en dos pasadas (sustituye a la vieja RPC
     // search_pos_products, que hacía ILIKE de un patrón único sin unaccent y
@@ -1356,6 +1392,9 @@ export const searchProductsForPos = protectedAction<{
 
     const results: any[] = []
     const seen = new Set<string>()
+    // Se recuerda el fallo de consulta para no responder "0 resultados" cuando
+    // en realidad la búsqueda ha reventado.
+    let searchError: string | null = null
     const pushAll = (rows: any[] | null) => {
       for (const v of rows || []) {
         if (seen.has(v.id)) continue
@@ -1379,7 +1418,10 @@ export const searchProductsForPos = protectedAction<{
       const { data: byCode, error: codeErr } = await baseQuery()
         .or(`variant_sku.ilike.%${q}%,barcode.ilike.%${q}%`)
         .limit(20)
-      if (codeErr) console.error('[searchProductsForPos] code search:', codeErr.message)
+      if (codeErr) {
+        console.error('[searchProductsForPos] code search:', codeErr.message)
+        searchError = codeErr.message
+      }
       pushAll(byCode)
     }
 
@@ -1392,10 +1434,17 @@ export const searchProductsForPos = protectedAction<{
           tq = tq.or(`search_text.ilike.%${t}%,brand.ilike.%${t}%`, { referencedTable: 'products' })
         }
         const { data: byText, error: textErr } = await tq.limit(20)
-        if (textErr) console.error('[searchProductsForPos] text search:', textErr.message)
+        if (textErr) {
+          console.error('[searchProductsForPos] text search:', textErr.message)
+          searchError = textErr.message
+        }
         pushAll(byText)
       }
     }
+
+    // Solo se falla si además no hay NADA que enseñar: si una de las dos pasadas
+    // trajo resultados, se devuelven igual.
+    if (searchError && results.length === 0) return failure('No se pudo buscar productos. Inténtalo de nuevo.')
 
     return success(results.slice(0, 20))
   }
@@ -1403,7 +1452,7 @@ export const searchProductsForPos = protectedAction<{
 
 export const checkCashSessionOpen = protectedAction<
   { storeId?: string },
-  { open: boolean; sessionId: string | null }
+  { open: boolean; sessionId: string | null; covered: boolean }
 >(
   { permission: 'pos.access', auditModule: 'pos' },
   async (ctx, { storeId }) => {
@@ -1414,7 +1463,27 @@ export const checkCashSessionOpen = protectedAction<
       .limit(1)
     if (storeId) query = query.eq('store_id', storeId)
     const { data } = await query.maybeSingle()
-    return success({ open: !!data, sessionId: data?.id ?? null })
+    // `covered`: ademas de la caja abierta, ¿hay alguna sesion (aunque ya este
+    // cerrada) que cubra HOY? Es la condicion exacta que exige addSalePayment para
+    // aceptar el cobro de una VENTA; sin ella la UI prometia cobros que el servidor
+    // rechazaba. Campo NUEVO: `open` y `sessionId` se dejan intactos porque los leen
+    // otros cuatro llamantes (cabeceras de sastre y vendedor, gate del sastre y
+    // devoluciones).
+    let covered = !!data
+    if (!covered) {
+      const today = new Date().toISOString().split('T')[0]
+      let q2 = ctx.adminClient
+        .from('cash_sessions')
+        .select('id')
+        .neq('status', 'open')
+        .lte('opened_at', `${today}T23:59:59`)
+        .gte('closed_at', `${today}T00:00:00`)
+        .limit(1)
+      if (storeId) q2 = q2.eq('store_id', storeId)
+      const { data: closedToday } = await q2.maybeSingle()
+      covered = !!closedToday
+    }
+    return success({ open: !!data, sessionId: data?.id ?? null, covered })
   }
 )
 

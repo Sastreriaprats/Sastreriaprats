@@ -15,14 +15,23 @@ export function WishlistContent({ items, clientId }: {
   const router = useRouter()
 
   const removeItem = async (id: string) => {
-    const res = await fetch('/api/public/wishlist', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    })
-    if (res.ok) {
-      toast.success('Eliminado de favoritos')
-      router.refresh()
+    // Sin rama de error el botón quedaba mudo: con la sesión caducada (401) o un
+    // fallo de red, el favorito seguía en pantalla y nadie sabía por qué.
+    try {
+      const res = await fetch('/api/public/wishlist', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      if (res.ok) {
+        toast.success('Eliminado de favoritos')
+        router.refresh()
+        return
+      }
+      const data = await res.json().catch(() => ({}))
+      toast.error(data?.error || 'No se pudo quitar de favoritos')
+    } catch {
+      toast.error('No se pudo conectar. Revisa tu conexión.')
     }
   }
 

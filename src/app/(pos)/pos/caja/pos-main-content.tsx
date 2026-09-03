@@ -145,7 +145,23 @@ export function PosMainContent() {
     }
   }
 
-  const handleCloseCash = () => setView('close_cash')
+  // El arqueo se calcula con los totales de `session`, y `session` solo se cargaba
+  // al entrar en el TPV: tras un dia vendiendo llegaban congelados (casi todo a 0),
+  // el arqueo salia descuadrado y el boton "Cerrar caja" quedaba deshabilitado. Se
+  // relee la sesion antes de pintar el cierre; si la relectura falla se sigue con la
+  // cacheada, porque la vista close_cash solo se pinta si hay `session`.
+  const handleCloseCash = async () => {
+    const storeId = session?.store_id ?? activeStoreId
+    if (!storeId) { setView('close_cash'); return }
+    setView('loading')
+    try {
+      const result = await getCurrentSession(storeId)
+      if (result.success && result.data) setSession(result.data)
+    } catch (err) {
+      console.error('[pos-main] handleCloseCash refresh:', err)
+    }
+    setView('close_cash')
+  }
 
   const handleCashClosed = () => {
     setSession(null)

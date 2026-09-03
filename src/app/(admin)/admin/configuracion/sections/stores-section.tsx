@@ -149,9 +149,12 @@ export function StoresSection() {
               <div className="space-y-2"><Label>Nombre *</Label><Input value={warehouseForm.name} onChange={(e) => setWarehouseForm(p => ({ ...p, name: e.target.value }))} /></div>
             </div>
             <div className="space-y-2"><Label>Tienda vinculada</Label>
-              <Select value={warehouseForm.store_id} onValueChange={(v) => setWarehouseForm(p => ({ ...p, store_id: v }))}>
+              <Select value={warehouseForm.store_id || '__none__'} onValueChange={(v) => setWarehouseForm(p => ({ ...p, store_id: v === '__none__' ? '' : v }))}>
                 <SelectTrigger><SelectValue placeholder="Independiente" /></SelectTrigger>
                 <SelectContent>
+                  {/* "Independiente" era solo el placeholder: no había forma de
+                      elegirlo. Radix prohíbe SelectItem value="", de ahí el centinela. */}
+                  <SelectItem value="__none__">Independiente (sin tienda)</SelectItem>
                   {stores.map(s => (<SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>))}
                 </SelectContent>
               </Select>
@@ -165,9 +168,18 @@ export function StoresSection() {
             <Button variant="outline" onClick={() => setShowWarehouseDialog(false)}>Cancelar</Button>
             <Button onClick={async () => {
               setIsSaving(true)
-              const res = await createWarehouseAction(warehouseForm)
+              // store_id vacío = almacén independiente: hay que mandar undefined,
+              // porque la columna es uuid y '' revienta con 22P02.
+              const res = await createWarehouseAction({ ...warehouseForm, store_id: warehouseForm.store_id || undefined })
               if (res.error) toast.error(res.error)
-              else { toast.success('Almacén creado'); setShowWarehouseDialog(false); fetchWarehouses() }
+              else {
+                toast.success('Almacén creado')
+                // El formulario no se reseteaba: al reabrir el diálogo seguían
+                // los datos del almacén anterior.
+                setWarehouseForm({ code: '', name: '', store_id: '', is_main: false, accepts_online_stock: false })
+                setShowWarehouseDialog(false)
+                fetchWarehouses()
+              }
               setIsSaving(false)
             }} disabled={isSaving || !warehouseForm.code || !warehouseForm.name} className="bg-prats-navy hover:bg-prats-navy-light">
               {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Crear almacén

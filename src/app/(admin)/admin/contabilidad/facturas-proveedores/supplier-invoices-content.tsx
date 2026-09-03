@@ -142,13 +142,26 @@ function today() {
 }
 
 function addDays(dateStr: string, days: number) {
+  // Aritmética en UTC: 'yyyy-MM-dd' se parsea como medianoche UTC y con setDate
+  // (hora local) el cambio de hora de marzo restaba un día al volver a ISO.
   const d = new Date(dateStr)
-  d.setDate(d.getDate() + days)
+  d.setUTCDate(d.getUTCDate() + days)
   return d.toISOString().slice(0, 10)
 }
 
 function computeDueFromSupplier(invoiceDate: string, supplier: SupplierOptionForInvoice | null): string {
   if (!supplier) return addDays(invoiceDate, 30)
+  // "Días de pago" (payment_days) es la fuente de verdad, igual que en el servidor
+  // (computeDueDate). Sin esto el alta proponía el preset (30 días) y el recálculo
+  // posterior al editar el proveedor movía esa misma factura a los días reales (45).
+  // El plan personalizado va ANTES a propósito: para 'custom' payment_days vale 0 en
+  // BD y devolvería la propia fecha de factura.
+  if (supplier.payment_terms !== 'custom') {
+    const days = Number(supplier.payment_days)
+    if (supplier.payment_days !== null && Number.isFinite(days) && days >= 0) {
+      return addDays(invoiceDate, days)
+    }
+  }
   switch (supplier.payment_terms) {
     case 'immediate': return invoiceDate
     case 'net_15': return addDays(invoiceDate, 15)
@@ -1235,8 +1248,8 @@ export function SupplierInvoicesContent() {
                             variant="ghost"
                             className="h-8 text-destructive hover:text-destructive"
                             onClick={() => setDeleteTarget(row)}
-                            disabled={deletingId === row.id || row.status === 'pagada'}
-                            title={row.status === 'pagada' ? 'Factura pagada (bloqueada)' : 'Eliminar factura'}
+                            disabled={deletingId === row.id || row.status === 'pagada' || paid > 0}
+                            title={row.status === 'pagada' ? 'Factura pagada (bloqueada)' : paid > 0 ? 'Tiene pagos registrados: elimínalos primero' : 'Eliminar factura'}
                           >
                             {deletingId === row.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                           </Button>

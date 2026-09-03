@@ -70,6 +70,19 @@ const EMPTY_POST: BlogPost = {
   og_image_url: '',
 }
 
+/**
+ * Valor "YYYY-MM-DDTHH:mm" en hora LOCAL para un <input type="datetime-local">.
+ * Cortar el ISO de Supabase (que viene en UTC) metía la hora UTC como si fuera
+ * local y, al guardar con toISOString(), cada edición restaba 1-2 h a la
+ * publicación. `toLocalISODate` de @/lib/dates no vale aquí: solo da la fecha.
+ */
+function toLocalDateTimeInput(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
 function slugify(text: string): string {
   return text
     .toLowerCase()
@@ -111,7 +124,7 @@ export function BlogPostEditor({ id }: { id: string }) {
         category: (d.category as string) || '',
         tags: (d.tags as string[]) || [],
         status: (d.status as string) || 'draft',
-        published_at: d.published_at ? (d.published_at as string).slice(0, 16) : '',
+        published_at: d.published_at ? toLocalDateTimeInput(d.published_at as string) : '',
         seo_title: (d.seo_title as string) || '',
         seo_description: (d.seo_description as string) || '',
         og_image_url: (d.og_image_url as string) || '',

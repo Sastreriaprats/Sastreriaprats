@@ -3,7 +3,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { checkUserPermission } from '@/actions/auth'
+import { checkUserPermission, checkUserAnyPermission } from '@/actions/auth'
 import { saleNetBase, fetchVoucherPaidBySale, fetchReturnedLeftBySale } from '@/lib/server/commission-base'
 import { readAllPaged } from '@/lib/server/paged'
 
@@ -49,6 +49,13 @@ export async function getStoreGoalsForMonth(
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
+    // Estar autenticado no basta: esto devuelve los objetivos y la facturación
+    // real de TODAS las tiendas, y se consulta con service-role (salta RLS). Se
+    // pide el mismo permiso que la pestaña que lo pinta (Configuración →
+    // Objetivos) y no 'config.edit', para que quien solo puede VERLA pueda leerla.
+    if (!(await checkUserAnyPermission(user.id, ['config.view', 'config.edit']))) {
+      return { error: 'Sin permisos para consultar objetivos' }
+    }
 
     const admin = createAdminClient()
     const pad = (n: number) => String(n).padStart(2, '0')
@@ -228,6 +235,12 @@ export async function getEmployeeGoals(input: {
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
+    // Igual que getStoreGoalsForMonth, y aquí con más motivo: devuelve el nombre
+    // y las ventas del mes de cada empleado, el dato que el proyecto reserva con
+    // reports.view_all_employees. Sin esto lo veía cualquier sesión iniciada.
+    if (!(await checkUserAnyPermission(user.id, ['config.view', 'config.edit']))) {
+      return { error: 'Sin permisos para consultar objetivos' }
+    }
 
     const admin = createAdminClient()
     const pad = (n: number) => String(n).padStart(2, '0')

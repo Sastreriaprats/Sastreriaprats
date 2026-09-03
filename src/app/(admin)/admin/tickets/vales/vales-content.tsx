@@ -470,12 +470,14 @@ export function VouchersContent() {
               <CardTitle className="text-base">Filtros</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-wrap gap-4">
+              {/* Cada filtro vuelve a la página 1: si no, al filtrar desde la página 2
+                  se pedía una página que ya no existe y la tabla salía vacía. */}
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-muted-foreground">Cliente</label>
                 <Input
                   placeholder="Nombre o código..."
                   value={clientSearch}
-                  onChange={(e) => setClientSearch(e.target.value)}
+                  onChange={(e) => { setClientSearch(e.target.value); setPage(1) }}
                   className="w-48"
                 />
               </div>
@@ -484,13 +486,13 @@ export function VouchersContent() {
                 <Input
                   placeholder="ABC123..."
                   value={codeSearch}
-                  onChange={(e) => setCodeSearch(e.target.value)}
+                  onChange={(e) => { setCodeSearch(e.target.value); setPage(1) }}
                   className="w-40 uppercase"
                 />
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-muted-foreground">Estado</label>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1) }}>
                   <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todos</SelectItem>
@@ -504,7 +506,7 @@ export function VouchersContent() {
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-muted-foreground">Tipo</label>
-                <Select value={kindFilter} onValueChange={setKindFilter}>
+                <Select value={kindFilter} onValueChange={(v) => { setKindFilter(v); setPage(1) }}>
                   <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todos</SelectItem>
@@ -516,7 +518,7 @@ export function VouchersContent() {
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-muted-foreground">Tienda</label>
-                <Select value={storeFilter} onValueChange={setStoreFilter}>
+                <Select value={storeFilter} onValueChange={(v) => { setStoreFilter(v); setPage(1) }}>
                   <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todas</SelectItem>
@@ -531,7 +533,7 @@ export function VouchersContent() {
                 <DatePickerPopover
                   containerClassName="w-40"
                   value={dateFrom}
-                  onChange={(d) => setDateFrom(d)}
+                  onChange={(d) => { setDateFrom(d); setPage(1) }}
                 />
               </div>
               <div className="flex flex-col gap-1">
@@ -539,7 +541,7 @@ export function VouchersContent() {
                 <DatePickerPopover
                   containerClassName="w-40"
                   value={dateTo}
-                  onChange={(d) => setDateTo(d)}
+                  onChange={(d) => { setDateTo(d); setPage(1) }}
                 />
               </div>
               <div className="flex items-end gap-2">
@@ -704,7 +706,7 @@ export function VouchersContent() {
             <CardContent className="flex flex-wrap gap-4">
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-muted-foreground">Tienda</label>
-                <Select value={storeFilter} onValueChange={setStoreFilter}>
+                <Select value={storeFilter} onValueChange={(v) => { setStoreFilter(v); setPage(1) }}>
                   <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todas</SelectItem>
@@ -719,7 +721,7 @@ export function VouchersContent() {
                 <DatePickerPopover
                   containerClassName="w-40"
                   value={dateFrom}
-                  onChange={(d) => setDateFrom(d)}
+                  onChange={(d) => { setDateFrom(d); setPage(1) }}
                 />
               </div>
               <div className="flex flex-col gap-1">
@@ -727,7 +729,7 @@ export function VouchersContent() {
                 <DatePickerPopover
                   containerClassName="w-40"
                   value={dateTo}
-                  onChange={(d) => setDateTo(d)}
+                  onChange={(d) => { setDateTo(d); setPage(1) }}
                 />
               </div>
               <div className="flex items-end">

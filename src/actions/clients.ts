@@ -40,6 +40,21 @@ async function computeClientAggregates(
   const map = new Map<string, ClientAggregates>()
   if (clientIds.length === 0) return map
 
+  // Un `.in('client_id', [...])` con muchos uuids desborda la URL de PostgREST:
+  // medido contra produccion, a partir de ~400 ids la peticion ya falla. Al
+  // exportar Clientes a Excel se pedian 1.000 de golpe, las cinco consultas
+  // fallaban y (como abajo solo se leia `.data`) TODAS las filas salian con 0 €
+  // gastado y 0 compras. Troceamos en lotes: cada cliente cae en uno solo, asi
+  // que fusionar los mapas parciales da el mismo resultado.
+  const ID_CHUNK = 200
+  if (clientIds.length > ID_CHUNK) {
+    for (let i = 0; i < clientIds.length; i += ID_CHUNK) {
+      const partial = await computeClientAggregates(admin, clientIds.slice(i, i + ID_CHUNK))
+      for (const [id, agg] of partial) map.set(id, agg)
+    }
+    return map
+  }
+
   const [ordersRes, salesRes, onlineRes, reservationsRes, alterationsRes] = await Promise.all([
     admin
       .from('tailoring_orders')
@@ -84,6 +99,15 @@ async function computeClientAggregates(
       // Corte: los arreglos anteriores se dan por saldados (ver debt-cutoff).
       .gte('created_at', ALTERATION_DEBT_SINCE),
   ])
+
+  // Antes solo se leia `.data`: si una fuente fallaba, el cliente salia con 0 €
+  // gastado y 0 pendiente como si fuera el dato bueno. Mejor romper y que la
+  // pantalla avise (el wrapper de la action lo convierte en {success:false}).
+  const failedSource = [ordersRes, salesRes, onlineRes, reservationsRes, alterationsRes].find((r) => r.error)
+  if (failedSource?.error) {
+    console.error('[computeClientAggregates]', failedSource.error)
+    throw new Error(failedSource.error.message || 'No se pudieron calcular los totales del cliente')
+  }
 
   for (const o of (ordersRes.data ?? []) as Array<Record<string, unknown>>) {
     const id = String(o.client_id || '')

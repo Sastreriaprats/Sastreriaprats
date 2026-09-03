@@ -12,6 +12,11 @@ import {
   verifyRedsysSignature,
 } from '@/lib/payments/redsys'
 
+// El handler hace mucho trabajo en una sola función (pedido, líneas, asiento,
+// factura W, notificaciones, stock y email): con el presupuesto por defecto podía
+// agotarse el tiempo a medias. Mismo valor que el webhook de Telegram.
+export const maxDuration = 60
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.formData()
@@ -122,6 +127,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: linesInsertError.message }, { status: 500 })
     }
 
+    // El pending se borra AQUÍ, en cuanto el pedido y sus líneas están a salvo, y
+    // ya no al final: si algo posterior (asiento, factura, stock, email) fallaba o
+    // se agotaba el tiempo, el pending sobrevivía y cada reintento de Redsys
+    // chocaba con el UNIQUE de order_number, devolviendo 500 para siempre. Con el
+    // borrado aquí, el reintento entra por la rama de idempotencia de arriba
+    // (busca el pedido por redsys_order_code) y responde 200.
+    await admin.from('pending_online_orders').delete().eq('token', dsOrder)
+
     await createOnlineOrderJournalEntry(order.id)
       .then((r) => { if (!r.ok) console.error('[redsys webhook] asiento:', r.error) })
       .catch((e) => console.error('[redsys webhook] asiento:', e))
@@ -138,15 +151,21 @@ export async function POST(request: NextRequest) {
       console.error('[redsys webhook] notifyNewOnlineOrder', e)
     }
 
-    // Decremento de stock (mismo patrón que el webhook Stripe).
-    for (const line of orderLines) {
-      if (!line.variant_id) continue
-      await deductOnlineOrderStock(admin, {
-        variantId: line.variant_id,
-        quantity: line.quantity,
-        orderId: order.id,
-        orderNumber: pending.order_number,
-      })
+    // Decremento de stock (mismo patrón que el webhook Stripe). Con try/catch
+    // propio: un fallo de red aquí no debe impedir el email de confirmación al
+    // cliente, que va justo después.
+    try {
+      for (const line of orderLines) {
+        if (!line.variant_id) continue
+        await deductOnlineOrderStock(admin, {
+          variantId: line.variant_id,
+          quantity: line.quantity,
+          orderId: order.id,
+          orderNumber: pending.order_number,
+        })
+      }
+    } catch (e) {
+      console.error('[redsys webhook] deductOnlineOrderStock', e)
     }
 
     // Email de confirmación al cliente.
@@ -165,10 +184,6 @@ export async function POST(request: NextRequest) {
         console.error('[redsys webhook] sendOrderConfirmation', e)
       }
     }
-
-    // Limpiar pending (idempotencia: si el webhook se repite, ya no existirá
-    // y el lookup por redsys_order_code de arriba lo detecta como duplicado).
-    await admin.from('pending_online_orders').delete().eq('token', dsOrder)
 
     void amount  // disponible si se quiere registrar la cantidad concreta
     return NextResponse.json({ ok: true, orderId: order.id })
