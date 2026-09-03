@@ -352,7 +352,13 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
 
   const openApPayment = (row: SupplierVencimientoRow) => {
     setApPaymentInvoice({
-      id: row.id,
+      // `row.id` es el id de la CUOTA, no el de la factura (asi lo consume la
+      // pantalla de Vencimientos). El dialogo de pago espera un id de factura:
+      // con el de la cuota, el historial salia vacio y guardar respondia
+      // "Factura no encontrada", asi que este boton no podia pagar nunca.
+      // `amount_pending` sigue siendo el de la cuota a proposito: es lo que
+      // prerrellena el importe a pagar.
+      id: row.supplier_invoice_id,
       supplier_name: row.supplier_name,
       invoice_number: row.invoice_number,
       total_amount: row.total_amount,
