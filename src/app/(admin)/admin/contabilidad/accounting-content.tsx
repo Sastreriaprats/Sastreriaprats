@@ -3650,7 +3650,7 @@ function MovimientosTab() {
                             <Button
                               size="icon" variant="ghost" className="h-7 w-7"
                               title="Editar movimiento"
-                              onClick={() => setEditRow({ id: r.id, total: r.total, payment_method: 'cash' })}
+                              onClick={() => setEditRow({ id: r.id, total: r.total, payment_method: r.paymentMethod ?? 'cash' })}
                             >
                               <Pencil className="h-3.5 w-3.5" />
                             </Button>

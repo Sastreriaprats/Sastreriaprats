@@ -1334,12 +1334,27 @@ export type AccountingMovementRow = {
   /** Solo true en movimientos tecleados a mano. Los espejos automáticos de caja
    *  y de pagos no se pueden editar ni borrar: romperían el arqueo. */
   canEdit?: boolean
+  /** Forma de pago del movimiento manual, sacada de sus notas ("Método: ..."),
+   *  que es donde se guarda. Sin esto el diálogo de edición abría siempre en
+   *  "Efectivo" y al guardar machacaba el método real. */
+  paymentMethod?: string | null
   journalEntryId?: string
   storeId?: string | null
   storeName?: string | null
   // Nombre del proveedor asociado (compras de supplier_order y pagos de factura de
   // proveedor). Permite buscar/filtrar por proveedor en el listado de movimientos.
   supplierName?: string | null
+}
+
+/** Lee la forma de pago de las notas de un movimiento manual ("Método: Tarjeta"). */
+function methodFromNotes(notes: string): string | null {
+  const m = notes.match(/Método:\s*([^\n]+)/)
+  if (!m) return null
+  const etiqueta = m[1].trim().toLowerCase()
+  const porEtiqueta: Record<string, string> = {
+    'efectivo': 'cash', 'tarjeta': 'card', 'bizum': 'bizum', 'transferencia': 'transfer',
+  }
+  return porEtiqueta[etiqueta] ?? etiqueta
 }
 
 export const getAccountingMovements = protectedAction<
@@ -1506,6 +1521,7 @@ export const getAccountingMovements = protectedAction<
         total: Number(m.total),
         category: String(m.category),
         isManual: true,
+        paymentMethod: methodFromNotes(String((m as Record<string, unknown>).notes ?? '')),
         // Espejo automático (venta de TPV, apertura/retirada de caja, cobro de
         // pedido, pago de factura de proveedor): no se toca desde Movimientos.
         canEdit: !(m as any).cash_session_id && !(m as any).withdrawal_id && !apInvoiceId
@@ -1638,12 +1654,9 @@ export const updateManualTransaction = protectedAction<
 >(
   { permission: 'accounting.edit', auditModule: 'accounting' },
   async (ctx, { id, total, payment_method }) => {
-    const amount = total / 1.21
-    const tax_amount = total - amount
-
     const { data: current } = await ctx.adminClient
       .from('manual_transactions')
-      .select('notes, cash_session_id, withdrawal_id, ap_supplier_invoice_id, sale_id, sale_payment_id, tailoring_order_payment_id, product_reservation_payment_id')
+      .select('notes, tax_rate, cash_session_id, withdrawal_id, ap_supplier_invoice_id, sale_id, sale_payment_id, tailoring_order_payment_id, product_reservation_payment_id')
       .eq('id', id)
       .single()
 
@@ -1655,6 +1668,13 @@ export const updateManualTransaction = protectedAction<
       || link.product_reservation_payment_id)) {
       return failure('Este movimiento es el espejo contable de una operación de caja o de un pago: no se puede editar desde aquí', 'FORBIDDEN')
     }
+
+    // La base se recalcula con el IVA QUE TENIA el movimiento, no con un 21%
+    // cableado: al editar el total de un gasto al 10%, al 4% o exento, la cuota
+    // se reescribia como si fuera del 21% y el resumen de IVA dejaba de cuadrar.
+    const rate = Number((current as Record<string, unknown> | null)?.tax_rate ?? 21)
+    const amount = rate > 0 ? total / (1 + rate / 100) : total
+    const tax_amount = total - amount
 
     const paymentLabel: Record<string, string> = {
       cash: 'Efectivo', card: 'Tarjeta', bizum: 'Bizum', transfer: 'Transferencia',

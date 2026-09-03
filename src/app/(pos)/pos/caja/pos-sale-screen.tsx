@@ -266,7 +266,8 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
           barcodeBufferRef.current = { digits: '', firstAt: 0 }
           getProductByBarcode({ barcode: captured, storeId: activeStoreId ?? undefined }).then((result) => {
             if (result.success && result.data && result.data.variant) {
-              addToTicketRef.current(result.data.variant)
+              // Se pasa el stock que la accion ya calculo para ESTA tienda.
+              addToTicketRef.current(result.data.variant, result.data.stock)
               const v = result.data.variant as any
               const name = v.products?.name || v.product_name || 'Producto'
               const size = v.size ? ` · Talla ${v.size}` : ''
@@ -482,8 +483,11 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const change = totalPaid > total ? totalPaid - total : 0
   const canCobrar = ticketLines.length > 0 && (!!selectedClientId || saleWithoutClient)
 
-  const addToTicket = (variant: any) => {
-    const stock = Array.isArray(variant.stock_levels) ? (variant.stock_levels[0]?.available ?? 0) : 0
+  // `stockDisponible` lo pasa quien ya lo ha calculado para la tienda de la
+  // caja. Sin él se cogía `stock_levels[0]`, que es un almacén cualquiera de la
+  // lista: el aviso de "sin stock" miraba las existencias de otra tienda.
+  const addToTicket = (variant: any, stockDisponible?: number) => {
+    const stock = stockDisponible ?? (Array.isArray(variant.stock_levels) ? (variant.stock_levels[0]?.available ?? 0) : 0)
     const productName = variant.products?.name ?? 'Producto'
     const variantLabel = `${productName}${variant.size ? ` T.${variant.size}` : ''}${variant.color ? ` ${variant.color}` : ''}`
     const existing = ticketLines.find(l => l.product_variant_id === variant.id)
