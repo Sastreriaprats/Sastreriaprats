@@ -221,6 +221,7 @@ export function SupplierInvoicesContent() {
     tax_rate: '21',
     shipping_amount: '',
     retention_rate: '0',
+    retention_amount: '',
     total_amount: '',
     payment_method: '',
     notes: '',
@@ -234,6 +235,11 @@ export function SupplierInvoicesContent() {
   const [deliveryNotesLoading, setDeliveryNotesLoading] = useState(false)
   const [selectedDeliveryNoteIds, setSelectedDeliveryNoteIds] = useState<string[]>([])
   const [totalTouched, setTotalTouched] = useState(false)
+  // El IRPF se calcula sobre la base imponible total. Cuando la retencion solo
+  // afecta a una parte de la factura (p. ej. alquiler + manutencion en el mismo
+  // documento), la usuaria escribe el importe a mano y este flag impide que el
+  // calculo automatico se lo pise.
+  const [retentionTouched, setRetentionTouched] = useState(false)
 
   const [attachmentUploading, setAttachmentUploading] = useState(false)
   const [attachmentName, setAttachmentName] = useState<string | null>(null)
@@ -446,6 +452,7 @@ export function SupplierInvoicesContent() {
       tax_rate: '21',
       shipping_amount: '',
       retention_rate: '0',
+      retention_amount: '',
       total_amount: '',
       payment_method: '',
       notes: '',
@@ -455,6 +462,7 @@ export function SupplierInvoicesContent() {
     setSelectedDeliveryNoteIds([])
     setDeliveryNotes([])
     setTotalTouched(false)
+    setRetentionTouched(false)
     setAttachmentName(null)
     setSplitPayment(false)
     setInstallments([])
@@ -482,6 +490,7 @@ export function SupplierInvoicesContent() {
       tax_rate: String(reconstructedTaxRate),
       shipping_amount: row.shipping_amount ? String(row.shipping_amount) : '',
       retention_rate: String(row.retention_rate ?? 0),
+      retention_amount: String(row.retention_amount ?? 0),
       total_amount: String(row.total_amount),
       payment_method: row.payment_method || '',
       notes: row.notes || '',
@@ -489,6 +498,10 @@ export function SupplierInvoicesContent() {
       is_proforma: row.is_proforma === true,
     })
     setTotalTouched(true)
+    // Si el IRPF guardado no cuadra con tipo x base, es una retencion manual:
+    // se conserva tal cual en vez de recalcularla al abrir el dialogo.
+    const autoRetention = Math.round((row.amount * Number(row.retention_rate ?? 0) / 100) * 100) / 100
+    setRetentionTouched(Math.abs(autoRetention - Number(row.retention_amount ?? 0)) > 0.005)
     setAttachmentName(deriveFilenameFromUrl(row.attachment_url))
     setDialogOpen(true)
     // Cargar líneas existentes. Si la factura es legacy (sin filas en
@@ -585,7 +598,16 @@ export function SupplierInvoicesContent() {
   const taxAmountNum = Math.round(linesTax * 100) / 100
   const shippingNum = parseFloat(String(form.shipping_amount).replace(',', '.')) || 0
   const retentionRateNum = parseFloat(String(form.retention_rate).replace(',', '.')) || 0
-  const retentionAmountNum = Math.round((amountNum * retentionRateNum / 100) * 100) / 100
+  const retentionAutoAmount = Math.round((amountNum * retentionRateNum / 100) * 100) / 100
+  // Importe manual solo con tipo > 0: una retencion sin tipo no se puede declarar.
+  // Campo vacio con importe manual = 0: lo que se ve es lo que se guarda.
+  const retentionAmountNum = retentionRateNum > 0 && retentionTouched
+    ? Math.round((parseFloat(String(form.retention_amount).replace(',', '.')) || 0) * 100) / 100
+    : retentionAutoAmount
+  // Base sobre la que se ha retenido de hecho (la que va al modelo 115).
+  const retentionBaseNum = retentionRateNum > 0
+    ? Math.round((retentionAmountNum / retentionRateNum) * 100 * 100) / 100
+    : 0
   const computedTotal = amountNum + taxAmountNum + shippingNum - retentionAmountNum
   const totalNum = totalTouched && form.total_amount.trim() !== ''
     ? parseFloat(String(form.total_amount).replace(',', '.')) || computedTotal
@@ -598,6 +620,12 @@ export function SupplierInvoicesContent() {
     const total = Math.round(computedTotal * 100) / 100
     setForm((f) => ({ ...f, total_amount: total > 0 ? String(total) : '' }))
   }, [computedTotal, totalTouched])
+
+  // Espejo del IRPF calculado en su input mientras la usuaria no lo escriba a mano.
+  useEffect(() => {
+    if (retentionTouched) return
+    setForm((f) => ({ ...f, retention_amount: retentionAutoAmount > 0 ? String(retentionAutoAmount) : '' }))
+  }, [retentionAutoAmount, retentionTouched])
 
   // Si hay albaranes seleccionados y solo hay 1 línea, auto-rellenar su base
   // con el total de los albaranes. Con N líneas no tocamos (el usuario gestiona).
@@ -672,6 +700,13 @@ export function SupplierInvoicesContent() {
       .filter((l) => l.base > 0)
     if (!editingIsRectifying && cleanedLines.length === 0) {
       toast.error('Añade al menos una línea con base imponible mayor que 0')
+      return
+    }
+
+    // La retencion nunca puede exceder la base imponible (un abono va en negativo
+    // y no genera retencion, por eso queda fuera de la comprobacion).
+    if (!editingIsRectifying && (retentionAmountNum < 0 || retentionAmountNum > amountNum + 0.005)) {
+      toast.error('La retención de IRPF no puede ser negativa ni superar la base imponible')
       return
     }
 
@@ -1526,25 +1561,67 @@ export function SupplierInvoicesContent() {
                   </Button>
                 </div>
               </div>
-              <div>
-                <Label>IRPF %</Label>
-                <Select
-                  value={form.retention_rate}
-                  onValueChange={(v) => {
-                    setForm((f) => ({ ...f, retention_rate: v }))
-                    setTotalTouched(false)
-                  }}
-                >
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {[0, 7, 10, 15, 19].map((n) => (
-                      <SelectItem key={n} value={String(n)}>{n}%</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {retentionAmountNum > 0 && (
-                  <p className="text-xs text-muted-foreground mt-1">−{formatCurrency(retentionAmountNum)}</p>
-                )}
+              <div className="col-span-2 rounded-md border bg-muted/20 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-medium">Retención IRPF</Label>
+                  {retentionAmountNum > 0 && (
+                    <span className="text-xs text-muted-foreground">
+                      Base retenida: {formatCurrency(retentionBaseNum)} de {formatCurrency(amountNum)}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground -mt-1">
+                  Se calcula sobre la base imponible total. Si la retención solo afecta a parte de la
+                  factura (p. ej. alquiler + manutención), escribe el importe a mano.
+                </p>
+                <div className="grid grid-cols-2 gap-3 items-start">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Tipo %</Label>
+                    <Select
+                      value={form.retention_rate}
+                      onValueChange={(v) => {
+                        setForm((f) => ({ ...f, retention_rate: v }))
+                        setTotalTouched(false)
+                        setRetentionTouched(false)
+                      }}
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {[0, 7, 10, 15, 19].map((n) => (
+                          <SelectItem key={n} value={String(n)}>{n}%</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">IRPF (€)</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      disabled={retentionRateNum <= 0}
+                      value={retentionRateNum > 0 ? form.retention_amount : ''}
+                      onChange={(e) => {
+                        setRetentionTouched(true)
+                        setTotalTouched(false)
+                        setForm((f) => ({ ...f, retention_amount: e.target.value }))
+                      }}
+                      placeholder='0'
+                    />
+                    {retentionRateNum > 0 && (
+                      Math.abs(retentionAmountNum - retentionAutoAmount) > 0.005 ? (
+                        <button
+                          type="button"
+                          className="text-xs text-primary hover:underline mt-1 text-left"
+                          onClick={() => setRetentionTouched(false)}
+                        >
+                          Importe manual · recalcular sobre la base total ({formatCurrency(retentionAutoAmount)})
+                        </button>
+                      ) : (
+                        <p className="text-xs text-muted-foreground mt-1">−{formatCurrency(retentionAmountNum)}</p>
+                      )
+                    )}
+                  </div>
+                </div>
               </div>
               <div>
                 <Label>Total (€) *</Label>
