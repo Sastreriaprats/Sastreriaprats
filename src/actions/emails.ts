@@ -11,6 +11,7 @@ import {
   type NewsletterRecipient,
   type NewsletterTemplate,
 } from '@/lib/email/newsletter-render'
+import { readAllPaged } from '@/lib/server/paged'
 
 const STRUCTURED_CODES = new Set(['newsletter_default', 'newsletter_optin'])
 
@@ -473,8 +474,12 @@ export const sendCampaign = protectedAction<
                 .eq('id', clientId)
             } else {
               unsubUrl = `${publicUrl}/newsletter/baja?token=${tok}`
+              // La cabecera apunta al endpoint que acepta POST: declarar
+              // List-Unsubscribe-Post obliga a ello (RFC 8058) y el boton
+              // "Cancelar suscripcion" de Gmail hace POST, no GET. El enlace
+              // del cuerpo del email sigue llevando a la pagina.
               unsubscribeHeaders = {
-                'List-Unsubscribe': `<${unsubUrl}>`,
+                'List-Unsubscribe': `<${publicUrl}/api/public/newsletter/baja?token=${tok}>`,
                 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
               }
             }
@@ -806,6 +811,9 @@ async function getOptInInvitationRecipients(
     .neq('email', 'info@sastreriaprats.com')
     .eq('accepts_marketing', false)
     .eq('email_bounced', false)
+    // Quien se dio de baja NO vuelve a recibir marketing, tampoco una
+    // invitacion a suscribirse: la baja es una negativa expresa.
+    .is('unsubscribed_at', null)
     .or(`opt_in_sent_at.is.null,opt_in_sent_at.lt.${sixMonthsAgo}`)
     .order('created_at', { ascending: false })
 
@@ -855,14 +863,16 @@ async function getSegmentRecipients(
     return getOptInInvitationRecipients(client)
   }
 
-  let query = client.from('clients').select('id, first_name, last_name, full_name, email')
-  query = applyMarketingBaseFilter(query)
-  query = applySegmentSpecificFilter(query, segment)
-
-  if (filters?.min_spent) query = query.gte('total_spent', filters.min_spent as number)
-
-  const { data } = await query
-  return data || []
+  // Paginado: sin esto la campaña se enviaba como mucho a 1.000 destinatarios
+  // aunque la pantalla (que si cuenta con count:'exact') anunciara mas, y la
+  // diferencia no se notaba en ningun sitio.
+  return readAllPaged<Record<string, unknown>>((from, to) => {
+    let query = client.from('clients').select('id, first_name, last_name, full_name, email')
+    query = applyMarketingBaseFilter(query)
+    query = applySegmentSpecificFilter(query, segment)
+    if (filters?.min_spent) query = query.gte('total_spent', filters.min_spent as number)
+    return query.order('id', { ascending: true }).range(from, to)
+  }, 'getSegmentRecipients')
 }
 
 /**

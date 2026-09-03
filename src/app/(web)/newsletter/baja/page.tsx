@@ -1,6 +1,5 @@
 import Link from 'next/link'
-import { createAdminClient } from '@/lib/supabase/admin'
-import { verifyOptInToken } from '@/lib/newsletter/tokens'
+import { processUnsubscribe } from '@/lib/newsletter/unsubscribe'
 import { buildMetadata } from '@/lib/seo/metadata'
 import { UnsubscribeReasonForm } from './unsubscribe-reason-form'
 
@@ -12,35 +11,6 @@ export const metadata = buildMetadata({
 })
 
 export const dynamic = 'force-dynamic'
-
-type Outcome =
-  | { kind: 'ok'; token: string }
-  | { kind: 'expired' }
-  | { kind: 'invalid' }
-
-async function processUnsubscribe(token: string | undefined): Promise<Outcome> {
-  if (!token || !token.trim()) return { kind: 'invalid' }
-
-  const result = verifyOptInToken(token)
-  if (!result.valid) {
-    return result.expired ? { kind: 'expired' } : { kind: 'invalid' }
-  }
-
-  const admin = createAdminClient()
-  const { error } = await admin
-    .from('clients')
-    .update({
-      newsletter_subscribed: false,
-      unsubscribed_at: new Date().toISOString(),
-    })
-    .eq('id', result.clientId)
-
-  if (error) {
-    console.error('[newsletter/baja] update error:', error)
-    return { kind: 'invalid' }
-  }
-  return { kind: 'ok', token }
-}
 
 export default async function BajaPage({
   searchParams,
