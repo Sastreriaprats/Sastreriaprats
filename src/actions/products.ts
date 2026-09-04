@@ -340,13 +340,48 @@ export const listProductsForBarcodes = protectedAction<ListParams, ListResult<an
 export const listProducts = protectedAction<ListParams, ListResult<any>>(
   { permission: 'products.view', auditModule: 'stock' },
   async (ctx, params) => {
+    // Filtro por existencias: se resuelve en la BD contra `v_products_stock_filter`
+    // (mig 282), que expone el stock agregado del producto sumando solo los
+    // almacenes activos. Antes se filtraba en el navegador sobre la pagina ya
+    // cargada, asi que "Sin stock" enseñaba dos filas de las 25 visibles
+    // mientras el pie seguia anunciando 1.602 productos y 64 paginas.
+    // La vista tiene las mismas columnas que `products`, asi que el filtro, el
+    // orden, el contador y la paginacion salen bien sin duplicar logica: solo
+    // se pide de ella la pagina de ids y luego se traen esos productos con su
+    // detalle (variantes, almacenes) desde la tabla.
+    const stockFilter = params.filters?.stock_filter as string | undefined
+    const baseFilters = {
+      ...(params.filters?.product_type === undefined ? { product_type: '!=tailoring_fabric' } : {}),
+      ...params.filters,
+    }
+    delete (baseFilters as Record<string, unknown>).stock_filter
+
+    let idsDeLaPagina: string[] | null = null
+    let totalFiltrado: { total: number; page: number; pageSize: number; totalPages: number } | null = null
+    if (stockFilter && stockFilter !== 'all') {
+      const rango =
+        stockFilter === 'out' ? { lte: 0 } :
+        stockFilter === 'low' ? { gt: 0, lte: 5 } :
+        { gt: 0 }
+      const idsRes = await queryList<{ id: string }>('v_products_stock_filter', {
+        ...params,
+        searchFields: ['search_text'],
+        filters: { ...baseFilters, stock_total: rango },
+      }, 'id')
+      idsDeLaPagina = (idsRes.data ?? []).map((r) => r.id)
+      totalFiltrado = { total: idsRes.total, page: idsRes.page, pageSize: idsRes.pageSize, totalPages: idsRes.totalPages }
+      if (idsDeLaPagina.length === 0) {
+        return success({ data: [], ...totalFiltrado })
+      }
+    }
+
     const result = await queryList('products', {
       ...params,
       searchFields: ['search_text'],
-      filters: {
-        ...(params.filters?.product_type === undefined ? { product_type: '!=tailoring_fabric' } : {}),
-        ...params.filters,
-      },
+      // Con filtro de existencias, la pagina ya la decidio la vista: aqui solo
+      // se piden esos ids concretos (25 como mucho).
+      ...(idsDeLaPagina ? { page: 1, pageSize: idsDeLaPagina.length, search: undefined } : {}),
+      filters: idsDeLaPagina ? { id: idsDeLaPagina } : baseFilters,
     }, `
       id, sku, name, product_type, brand, collection, season,
       base_price, price_with_tax, cost_price, main_image_url, color, fabric_meters_used,
@@ -367,6 +402,14 @@ export const listProducts = protectedAction<ListParams, ListResult<any>>(
       for (const row of result.data as Record<string, unknown>[]) {
         row.cost_price = null
       }
+    }
+    // Con filtro de existencias se respeta el orden que dio la vista (el `.in()`
+    // no lo garantiza) y se devuelven su total y su paginacion, no los de la
+    // consulta por ids.
+    if (idsDeLaPagina && totalFiltrado) {
+      const porId = new Map((result.data as Record<string, unknown>[]).map((r) => [String(r.id), r]))
+      const ordenados = idsDeLaPagina.map((id) => porId.get(id)).filter(Boolean)
+      return success({ data: ordenados, ...totalFiltrado })
     }
     return success(result)
   }
@@ -540,12 +583,25 @@ export const listProductIdsByFilters = protectedAction<
     is_visible_web?: boolean | null
     collection?: string | null
     season?: string | null
+    /** 'out' | 'low' | 'in'. Mismo criterio que el listado. */
+    stock_filter?: string | null
   },
   string[]
 >(
   { permission: 'products.view', auditModule: 'stock' },
   async (ctx, input) => {
-    let q = ctx.adminClient.from('products').select('id')
+    // Se consulta la vista con el stock agregado (mig 282) para que
+    // "seleccionar todos los filtrados" respete tambien el filtro de
+    // existencias: antes lo ignoraba y seleccionaba productos que la pantalla
+    // no estaba mostrando. La vista expone las mismas columnas que `products`.
+    const tabla = input.stock_filter && input.stock_filter !== 'all'
+      ? 'v_products_stock_filter'
+      : 'products'
+    let q = ctx.adminClient.from(tabla).select('id')
+
+    if (input.stock_filter === 'out') q = q.lte('stock_total', 0)
+    else if (input.stock_filter === 'low') q = q.gt('stock_total', 0).lte('stock_total', 5)
+    else if (input.stock_filter === 'in') q = q.gt('stock_total', 0)
 
     if (input.product_type) q = q.eq('product_type', input.product_type)
     else q = q.neq('product_type', 'tailoring_fabric')
@@ -558,9 +614,11 @@ export const listProductIdsByFilters = protectedAction<
       q = q.or(`sku.ilike.${like},name.ilike.${like},brand.ilike.${like},barcode.ilike.${like}`)
     }
 
-    const { data, error } = await q.limit(10000)
-    if (error) return failure(error.message)
-    return success((data || []).map((r: any) => r.id as string))
+    // Paginado: `.limit(10000)` NO evita el tope de 1.000 filas de PostgREST, asi
+    // que "seleccionar todos" se quedaba en los 1.000 primeros de los 1.602.
+    const filas = await readAllPaged<{ id: string }>((from, to) =>
+      q.order('id', { ascending: true }).range(from, to), 'listProductIdsByFilters')
+    return success(filas.map((r) => r.id))
   }
 )
 

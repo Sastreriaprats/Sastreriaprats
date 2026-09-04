@@ -224,9 +224,15 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
     /* ya existe */
   }
 
+  // El nombre lleva un tramo del id (un uuid aleatorio) para que la ruta NO sea
+  // adivinable: con `factura-F2026-0001.pdf` en un bucket público bastaba
+  // contar hacia arriba para descargarse el histórico entero de facturas sin
+  // sesión. El id es estable, así que el slug sigue siéndolo: `upsert` sigue
+  // sobrescribiendo el mismo objeto al reeditar la factura y las URLs ya
+  // enviadas por email no caducan.
   const slug = isDraft
     ? `invoices/factura-borrador-${invoice.id.slice(0, 8)}-${Date.now()}.pdf`
-    : `invoices/factura-${(invoice.invoice_number ?? '').replace(/\//g, '-')}.pdf`
+    : `invoices/factura-${(invoice.invoice_number ?? '').replace(/\//g, '-')}-${invoice.id.slice(0, 12)}.pdf`
   const { error: uploadError } = await admin.storage.from(BUCKET).upload(slug, pdfBuffer, {
     contentType: 'application/pdf',
     upsert: true,
