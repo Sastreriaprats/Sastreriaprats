@@ -49,3 +49,6 @@ import-log.json
 # Previsualizaciones de plantillas de email generadas a mano para revisarlas
 # en el navegador: son artefactos locales, no forman parte de la aplicación.
 /email-previews/
+
+# Configuracion local de Claude Code (permisos personales, no compartidos)
+.claude/settings.local.json
