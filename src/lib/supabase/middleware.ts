@@ -190,6 +190,17 @@ export async function updateSession(request: NextRequest) {
   const hasVendedorRole = userRoles.some(n => VENDEDOR_ROLES.includes(n))
   const hasStaffRole    = userRoles.some(n => STAFF_ROLES.includes(n))
 
+  // Cuenta de CLIENTE de la tienda online: su sitio es /mi-cuenta. Hasta ahora
+  // /admin y /pos solo desviaban a sastres y vendedores, así que un cliente con
+  // sesión abría el panel de administración y el TPV: las pantallas cargaban
+  // enteras (los datos ya los frenan los permisos de cada acción, pero la
+  // estructura, los menús y los formularios se veían igual).
+  //
+  // Se comprueba que TENGA roles y que todos sean 'client': si la lectura de
+  // roles fallara y devolviera [], no se bloquea a nadie por un fallo de red
+  // -la defensa de verdad es el permiso que exige cada server action-.
+  const isClientOnly = userRoles.length > 0 && userRoles.every(n => n === 'client')
+
   // Ruta /mi-cuenta: staff no debe entrar → redirigir a su panel
   if (user && isClientRoute) {
     if (hasSastreRole) {
@@ -242,6 +253,16 @@ export async function updateSession(request: NextRequest) {
   if (user && isAuthRoute && !isLoginPage && !isResetPage) {
     const url = request.nextUrl.clone()
     url.pathname = '/admin/dashboard'
+    const redirectRes = NextResponse.redirect(url)
+    copySupabaseCookies(redirectRes, supabaseResponse)
+    setSecurityHeaders(redirectRes)
+    return redirectRes
+  }
+
+  // Un cliente de la tienda no entra en el area de trabajo (/admin, /pos).
+  if (user && isClientOnly && (isAdminRoute || isPosRoute)) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/mi-cuenta'
     const redirectRes = NextResponse.redirect(url)
     copySupabaseCookies(redirectRes, supabaseResponse)
     setSecurityHeaders(redirectRes)

@@ -18,4 +18,4 @@
  * los arreglos creados entre esta fecha y el despliegue aparecerían como deuda
  * sin que nadie hubiera podido marcarlos como cobrados.
  */
-export const ALTERATION_DEBT_SINCE = '2026-09-03'
+export const ALTERATION_DEBT_SINCE = '2026-09-04'
