@@ -14,8 +14,12 @@
  * Los posteriores sí, porque ya se crean con la pantalla que permite marcarlos
  * como cobrados.
  *
- * AJUSTAR AL DÍA EN QUE ESTO ENTRE EN PRODUCCIÓN: si se despliega más tarde,
- * los arreglos creados entre esta fecha y el despliegue aparecerían como deuda
- * sin que nadie hubiera podido marcarlos como cobrados.
+ * Se pone el día SIGUIENTE al despliegue (4-sep-2026 a las 22:00), no el mismo
+ * día: los arreglos creados durante la jornada del despliegue se cobraron sin
+ * que el personal tuviera todavía la pantalla para marcarlos, así que contarlos
+ * como deuda sería inventar deuda. Cuentan desde el primer día completo con la
+ * función disponible.
+ *
+ * AJUSTAR SI EL DESPLIEGUE SE MUEVE DE FECHA.
  */
-export const ALTERATION_DEBT_SINCE = '2026-09-04'
+export const ALTERATION_DEBT_SINCE = '2026-09-05'
