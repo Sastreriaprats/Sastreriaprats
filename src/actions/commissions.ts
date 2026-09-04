@@ -269,13 +269,29 @@ export const getEmployeeCommissions = protectedAction<
       const arr = membersByBonus.get(r.bonus_id) ?? []; arr.push(r.employee_id); membersByBonus.set(r.bonus_id, arr)
     }
 
-    // Trimestres que solapan el rango.
-    const quarters = new Map<string, { qy: number; q: number; months: number[] }>()
-    for (const mk of monthKeys) {
-      const y = Number(mk.slice(0, 4)), m = Number(mk.slice(5, 7))
-      const q = Math.floor((m - 1) / 3) + 1
-      const key = `${y}-Q${q}`
-      if (!quarters.has(key)) quarters.set(key, { qy: y, q, months: [(q - 1) * 3 + 1, (q - 1) * 3 + 2, (q - 1) * 3 + 3] })
+    // Periodos que solapan el rango, SEGUN el period_type de cada bonus. Antes
+    // se derivaban siempre trimestres, asi que un bonus configurado como
+    // Mensual o Anual se calculaba y se rotulaba como trimestral sin avisar.
+    const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+    const periodsFor = (periodType: string) => {
+      const out = new Map<string, { py: number; months: number[]; label: string }>()
+      for (const mk of monthKeys) {
+        const y = Number(mk.slice(0, 4)), m = Number(mk.slice(5, 7))
+        if (periodType === 'month') {
+          out.set(`${y}-M${m}`, { py: y, months: [m], label: `${MESES[m - 1]} ${y}` })
+        } else if (periodType === 'year') {
+          out.set(`${y}`, { py: y, months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], label: `Año ${y}` })
+        } else {
+          const q = Math.floor((m - 1) / 3) + 1
+          out.set(`${y}-Q${q}`, {
+            py: y,
+            months: [(q - 1) * 3 + 1, (q - 1) * 3 + 2, (q - 1) * 3 + 3],
+            label: `T${q} ${y}`,
+          })
+        }
+      }
+      return out
     }
 
     const groupBonuses: GroupBonusResult[] = []
@@ -288,15 +304,17 @@ export const getEmployeeCommissions = protectedAction<
       bMembers.forEach(m => needNames.add(m))
       if (bStores.length === 0 || bMembers.length === 0) continue
 
-      for (const { qy, q, months } of quarters.values()) {
-        const qStart = `${qy}-${pad(months[0])}-01`
-        const qEndMonth = months[2]
-        const qEnd = `${qy}-${pad(qEndMonth)}-${pad(new Date(qy, qEndMonth, 0).getDate())}`
-        // El bonus es del TRIMESTRE completo: solo se suma a la comisión del
-        // rango cuando el rango cubre el trimestre entero. Antes se sumaba
-        // íntegro a cualquier rango que rozara el trimestre, así que mes a mes
-        // aparecía tres veces y quien liquidara mensualmente lo pagaría tres
-        // veces. Comparar cadenas vale: las fechas llegan como 'YYYY-MM-DD'.
+      for (const { py, months, label } of periodsFor(String(bonus.period_type || 'quarter')).values()) {
+        const qy = py
+        const qStart = `${py}-${pad(months[0])}-01`
+        const qEndMonth = months[months.length - 1]
+        const qEnd = `${py}-${pad(qEndMonth)}-${pad(new Date(py, qEndMonth, 0).getDate())}`
+        // El bonus es del PERIODO completo (mes, trimestre o año, segun su
+        // configuracion): solo se suma a la comision del rango cuando el rango
+        // cubre el periodo entero. Antes se sumaba integro a cualquier rango que
+        // lo rozara, asi que mes a mes aparecia tres veces y quien liquidara
+        // mensualmente lo pagaria tres veces. Comparar cadenas vale: las fechas
+        // llegan como 'YYYY-MM-DD'.
         const coversQuarter = start_date <= qStart && end_date >= qEnd
 
         const [sgRes, ssRows] = await Promise.all([
@@ -347,7 +365,9 @@ export const getEmployeeCommissions = protectedAction<
 
         groupBonuses.push({
           bonus_id: bonus.id, name: bonus.name,
-          quarter_label: `T${q} ${qy}`,
+          // Rotulo del periodo real ("Marzo 2026", "T1 2026", "Año 2026"). El
+          // campo conserva el nombre por compatibilidad con la UI.
+          quarter_label: label,
           applies, counted: applies && coversQuarter, rate: Number(bonus.rate) || 0, base_type: bonus.base_type,
           stores: storeRows, pool, per_member: perMember,
           members: bMembers.map(emp => ({ employee_id: emp, employee_name: emp, amount: perMember })),

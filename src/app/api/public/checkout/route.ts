@@ -160,12 +160,11 @@ export async function POST(request: NextRequest) {
   }
   const effectiveShipping = quote.shipping_cost
 
-  if (couponToConsume) {
-    await admin
-      .from('discount_codes')
-      .update({ current_uses: couponToConsume.current_uses + 1, updated_at: new Date().toISOString() })
-      .eq('id', couponToConsume.id)
-  }
+  // El cupon NO se consume aqui: pulsar "Pagar" no es pagar. Si el cliente se
+  // echaba atras en la pasarela el uso quedaba gastado igualmente, y el
+  // incremento era ademas un lee-y-escribe que dos checkouts simultaneos se
+  // pisaban. Ahora viaja en el pendiente y lo consume el webhook de Redsys
+  // -el unico con autoridad para dar el pago por bueno- de forma atomica.
 
   const afterDiscount = subtotal - validatedDiscount
   // afterDiscount ya incluye IVA (unit_price = price_with_tax). Extraemos el IVA contenido.
@@ -276,6 +275,8 @@ export async function POST(request: NextRequest) {
       shipping_cost: effectiveShipping,
       total,
       locale: locale || 'es',
+      // Lo consume el webhook cuando Redsys confirma el pago (mig 279).
+      discount_code_id: couponToConsume ? couponToConsume.id : null,
     })
     // Si el pendiente no se ha guardado NO hay pago posible: el redirect de RedSys
     // no encontraría la fila y mandaría al cliente a /carrito (que el frontend

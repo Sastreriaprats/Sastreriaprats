@@ -127,6 +127,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: linesInsertError.message }, { status: 500 })
     }
 
+    // Consumir el cupón AHORA, con el pago ya confirmado y el pedido a salvo.
+    // Antes lo gastaba el checkout al pulsar "Pagar", así que un pago
+    // abandonado se comía un uso igualmente. Se hace antes de borrar el
+    // pendiente, que es donde viaja el cupón, y con una función que incrementa
+    // de forma atómica (mig 279): dos pagos a la vez suman dos, no uno.
+    const discountCodeId = (pending as { discount_code_id?: string | null }).discount_code_id
+    if (discountCodeId) {
+      const { error: couponError } = await admin.rpc('fn_consume_discount_code', { p_code_id: discountCodeId })
+      // Un fallo aquí NO invalida el pago: el pedido ya está cobrado y creado.
+      // Se registra para poder cuadrar el contador a mano si hiciera falta.
+      if (couponError) console.error('[redsys webhook] consumir cupón', discountCodeId, couponError)
+    }
+
     // El pending se borra AQUÍ, en cuanto el pedido y sus líneas están a salvo, y
     // ya no al final: si algo posterior (asiento, factura, stock, email) fallaba o
     // se agotaba el tiempo, el pending sobrevivía y cada reintento de Redsys

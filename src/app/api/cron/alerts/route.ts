@@ -46,8 +46,12 @@ export async function GET(request: NextRequest) {
     .from('ap_supplier_invoices')
     .select('id, supplier_name, total_amount, due_date')
     .eq('is_proforma', false) // las proformas no generan avisos de vencimiento
-    .in('status', ['pendiente', 'vencida'])
-    .gte('due_date', today)
+    // Sin tope INFERIOR de fecha: antes exigía `due_date >= hoy` a la vez que
+    // admitía el estado 'vencida', que por definición tiene la fecha pasada, así
+    // que ese valor era inalcanzable y una factura que se pasaba de fecha no
+    // avisaba nunca. Ahora avisa todo lo no pagado que venza de aquí a 7 días,
+    // incluido lo ya vencido; `payment_alert_sent` evita repetir el aviso.
+    .in('status', ['pendiente', 'vencida', 'parcial'])
     .lte('due_date', in7)
     .eq('payment_alert_sent', false)
     .or('alert_on_payment.is.null,alert_on_payment.eq.true')
@@ -59,7 +63,9 @@ export async function GET(request: NextRequest) {
       await createNotification({
         type: 'payment_due',
         title: `Factura proveedor vence: ${inv.supplier_name}`,
-        message: `${Number(inv.total_amount).toFixed(2)}€ vence el ${inv.due_date}`,
+        message: inv.due_date < today
+          ? `${Number(inv.total_amount).toFixed(2)}€ VENCIDA el ${inv.due_date}`
+          : `${Number(inv.total_amount).toFixed(2)}€ vence el ${inv.due_date}`,
         link: '/admin/contabilidad/facturas-proveedores',
         module: 'accounting',
       })
@@ -71,7 +77,8 @@ export async function GET(request: NextRequest) {
   const { data: supplierOrdersDelivery, error: supplierOrdersError } = await admin
     .from('supplier_orders')
     .select('id, order_number, estimated_delivery_date, suppliers(name)')
-    .not('status', 'in', '("received","cancelled")')
+    // 'closed' es el pedido ZANJADO (mig 266): tampoco espera entrega.
+    .not('status', 'in', '("received","cancelled","closed")')
     .gte('estimated_delivery_date', today)
     .lte('estimated_delivery_date', in7)
     .eq('delivery_alert_sent', false)

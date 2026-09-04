@@ -696,7 +696,9 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
       if (client) clientName = (client as any).full_name || [ (client as any).first_name, (client as any).last_name ].filter(Boolean).join(' ') || 'Sin nombre'
     }
     const auditDescription = `Pedido ${orderNumber} · Cliente: ${clientName}`
-    return success({ ...order, auditDescription })
+    // El asistente lo usa para avisar de que el pedido ha nacido sin prendas
+    // (flujo industrial/oficial: primero la cabecera, las prendas despues).
+    return success({ ...order, lines_count: linesInput.length, auditDescription })
   }
 )
 
@@ -861,13 +863,30 @@ export const changeOrderStatus = protectedAction<any, any>(
         // propagación forward y, a partir de ahí, el estado del pedido se DERIVA
         // del mínimo de las prendas (no se fija a mano).
         const prop = classifyLinesForStatusChange(new_status, (order as any).order_type, lines)
-        if (prop.toUpdate.length > 0) {
-          await ctx.adminClient
-            .from('tailoring_order_lines').update({ status: new_status }).in('id', prop.toUpdate)
+        if (lines.length === 0) {
+          // Pedido SIN prendas todavía (el asistente industrial crea primero la
+          // cabecera y las prendas se añaden después). Sin líneas no hay mínimo
+          // del que derivar el estado, así que se fija en la cabecera: antes el
+          // botón respondía "Estado cambiado" y el pedido no se movía de
+          // "Creado", sin forma de sacarlo de ahí.
+          const { error: hdrErr } = await ctx.adminClient
+            .from('tailoring_orders').update({ status: new_status }).eq('id', order_id)
+          if (hdrErr) return failure(hdrErr.message || 'No se pudo cambiar el estado del pedido')
+          await ctx.adminClient.from('tailoring_order_state_history').insert({
+            tailoring_order_id: order_id, from_status: fromStatus, to_status: new_status,
+            notes, changed_by: ctx.userId, changed_by_name: ctx.userName,
+          })
+          changedLinesCount = 0
+          aheadLinesCount = 0
+        } else {
+          if (prop.toUpdate.length > 0) {
+            await ctx.adminClient
+              .from('tailoring_order_lines').update({ status: new_status }).in('id', prop.toUpdate)
+          }
+          changedLinesCount = prop.toUpdate.length
+          aheadLinesCount = prop.aheadCount
+          await recalcOrderStatusFromLines(ctx.adminClient, order_id, ctx, 'Avanzar prendas (derivado)')
         }
-        changedLinesCount = prop.toUpdate.length
-        aheadLinesCount = prop.aheadCount
-        await recalcOrderStatusFromLines(ctx.adminClient, order_id, ctx, 'Avanzar prendas (derivado)')
       }
       fromStatus = fromStatus ?? (order as any).status ?? null
     }
