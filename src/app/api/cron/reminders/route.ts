@@ -4,13 +4,14 @@ import { isAuthorizedCron } from '@/lib/cron-auth'
 import { sendAppointmentReminder } from '@/lib/email/transactional'
 import { formalGreeting } from '@/lib/email/greeting'
 
-// "2026-07-18" → "18 de julio de 2026". Mediodía UTC para que el día no
+// "2026-07-18" → "Viernes, 18 de julio de 2026". Mediodía UTC para que el día no
 // se desplace formatee donde formatee el servidor.
 function formatApptDate(dateStr: string): string {
   try {
-    return new Intl.DateTimeFormat('es-ES', {
-      day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Madrid',
+    const formatted = new Intl.DateTimeFormat('es-ES', {
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Madrid',
     }).format(new Date(`${dateStr}T12:00:00Z`))
+    return formatted.charAt(0).toUpperCase() + formatted.slice(1)
   } catch {
     return dateStr
   }

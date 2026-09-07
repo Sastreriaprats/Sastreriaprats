@@ -427,6 +427,9 @@ export async function sendWelcomeEmail(client: { name: string; email: string; pa
   await sendFromTemplate('welcome', client.email, {
     client_name: client.name,
     login_url: loginUrl,
+    // La plantilla viva ya no pinta el boton "Descubrir coleccion" (peticion de
+    // Isma, sep-2026), pero se sigue pasando la variable: si algun dia se vuelve
+    // a añadir el boton desde la pantalla de plantillas, estara disponible.
     boutique_url: `${PUBLIC_URL}/boutique`,
     credentials_block: credentialsBlock,
   }, {
@@ -437,20 +440,11 @@ export async function sendWelcomeEmail(client: { name: string; email: string; pa
         <p style="margin:0 0 12px;font-size:14px;color:#555555;">Gracias por crear tu cuenta en Sastrería Prats.</p>
         <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#555555;">Desde tu área personal podrás:</p>
         <ul style="margin:0 0 20px;padding:0 0 0 24px;font-size:13px;line-height:1.7;color:#333333;text-align:left;">
-          <li>Consultar tus pedidos y su estado</li>
-          <li>Ver tus medidas corporales</li>
           <li>Gestionar tu lista de favoritos</li>
           <li>Reservar citas online</li>
         </ul>
       </td></tr>
       {{credentials_block}}
-      <tr><td align="center" style="padding:8px 16px 24px;">
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto;">
-          <tr><td align="center" style="border:1px solid #333333;padding:14px 32px;">
-            <a href="{{boutique_url}}" target="_blank" rel="noopener" style="font-size:11px;letter-spacing:2px;color:#333333;text-decoration:none;text-transform:uppercase;">DESCUBRIR COLECCIÓN</a>
-          </td></tr>
-        </table>
-      </td></tr>
     `,
   })
 }
