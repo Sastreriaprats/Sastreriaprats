@@ -73,13 +73,15 @@ export function StockDashboard() {
     // Al cambiar de pestaña, resetear paginación
     params.delete('page')
     params.delete('search')
-    router.replace(`/admin/stock?${params.toString()}`, { scroll: false })
+    // Esta misma pantalla se monta en /admin/stock y en /vendedor/stock: navegar
+    // a la ruta actual evita sacar al vendedor de su panel al cambiar de pestaña.
+    router.replace(`${window.location.pathname}?${params.toString()}`, { scroll: false })
   }
 
   const goToOutOfStock = () => {
     setOutOfStockFilter(true)
     setActiveTab('almacenes')
-    router.replace('/admin/stock?tab=almacenes', { scroll: false })
+    router.replace(`${window.location.pathname}?tab=almacenes`, { scroll: false })
   }
 
   useEffect(() => {

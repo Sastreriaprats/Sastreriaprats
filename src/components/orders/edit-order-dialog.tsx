@@ -198,6 +198,14 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
     })),
   )
 
+  // Ids de las prendas que había al montar el diálogo (de donde sale `lines`).
+  // Se mandan al guardar: `lines` viaja como estado COMPLETO y el servidor borra
+  // lo que no venga, así que si otro usuario añadió una prenda mientras tanto la
+  // borraríamos. Con esto el servidor rechaza el guardado y pide recargar.
+  const [knownLineIds] = useState<string[]>(() =>
+    ((order?.tailoring_order_lines ?? []) as any[]).map((l: any) => String(l.id)).filter(Boolean),
+  )
+
   const [garmentTypes, setGarmentTypes] = useState<GarmentType[]>([])
   const [stores, setStores] = useState<StoreOpt[]>([])
   const [saving, setSaving] = useState(false)
@@ -254,11 +262,11 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
     const sb = createClient()
     sb.from('officials')
       .select('id, name, specialty')
-      .not('specialty', 'ilike', '%Cortador%')
+      // Sin filtro de especialidad en servidor: `specialty` es una LISTA separada por comas, y el NOT ILIKE '%Cortador%' escondia a los talleres que cortan Y confeccionan (SHIRTMANN, PIERLORENZO, DROP ZERO, MARI); sus 57 prendas ya asignadas no se podian volver a seleccionar. El reparto se hace abajo, dejando fuera solo a quien SOLO corta.
       .eq('is_active', true)
       .order('name')
       .then(({ data }) => {
-        if (data) setOficialAll(data as OfficialOption[])
+        if (data) setOficialAll((data as OfficialOption[]).filter((o) => { const esp = (o.specialty ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean); return esp.length === 0 || esp.some((s) => s !== 'cortador') }))
         setIsSearchingOficial(false)
       })
   }, [oficialPopoverFor, oficialAll.length])
@@ -593,6 +601,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
       discount_percentage: discountPct,
       internal_notes: internalNotes.trim() || null,
       client_notes: clientNotes.trim() || null,
+      knownLineIds,
       lines: lines.map((l, i) => ({
         id: l.id,
         garment_type_id: l.garment_type_id,
@@ -990,16 +999,16 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                                   <Command shouldFilter={false}>
                                     <CommandInput
                                       placeholder="Buscar cortador..."
-                                      value={cortadorSearch}
+                                      value={cortadorSearch} onKeyDown={(e) => { if (e.key === 'Enter' && (!cortadorResults.length || !cortadorSearch.trim())) { e.preventDefault(); updateLine(l._key, 'cortador', cortadorSearch.trim()); setCortadorPopoverFor(null) } }}
                                       onValueChange={(v) => {
                                         setCortadorSearch(v)
-                                        updateLine(l._key, 'cortador', v)
+                                        // Solo mueve el BUSCADOR: teclear ya NO escribe en la linea (un nombre a medias quedaba guardado con official_id NULL). Se confirma con Enter.
                                       }}
                                     />
                                     <CommandList>
                                       {isSearchingCortador && <Loader2 className="h-3 w-3 animate-spin mx-auto my-2" />}
                                       <CommandEmpty className="py-2 px-3 text-[11px] text-muted-foreground">
-                                        Sin cortadores. Texto libre se guarda.
+                                        Sin cortadores. Pulsa Enter para guardar lo escrito.
                                       </CommandEmpty>
                                       <CommandGroup>
                                         {cortadorResults.map((o) => {
@@ -1055,16 +1064,16 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                                   <Command shouldFilter={false}>
                                     <CommandInput
                                       placeholder="Buscar oficial..."
-                                      value={oficialSearch}
+                                      value={oficialSearch} onKeyDown={(e) => { if (e.key === 'Enter' && (!oficialResults.length || !oficialSearch.trim())) { e.preventDefault(); updateLine(l._key, 'oficial', oficialSearch.trim()); setOficialPopoverFor(null) } }}
                                       onValueChange={(v) => {
                                         setOficialSearch(v)
-                                        updateLine(l._key, 'oficial', v)
+                                        // Solo mueve el BUSCADOR: teclear ya NO escribe en la linea (asi quedaron 'pierlo' y 'shi', con official_id NULL y sin comision). Se confirma con Enter.
                                       }}
                                     />
                                     <CommandList>
                                       {isSearchingOficial && <Loader2 className="h-3 w-3 animate-spin mx-auto my-2" />}
                                       <CommandEmpty className="py-2 px-3 text-[11px] text-muted-foreground">
-                                        Sin oficiales. Texto libre se guarda.
+                                        Sin oficiales. Pulsa Enter para guardar lo escrito.
                                       </CommandEmpty>
                                       <CommandGroup>
                                         {oficialResults.map((o) => {

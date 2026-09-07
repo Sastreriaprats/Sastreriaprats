@@ -2,6 +2,7 @@
 
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
+import { todayLocalISODate } from '@/lib/dates'
 
 export interface ScheduleBlock {
   id: string
@@ -17,10 +18,10 @@ export interface ScheduleBlock {
   store_name?: string | null
 }
 
-export const listScheduleBlocks = protectedAction<{ from_date?: string; store_id?: string }, ScheduleBlock[]>(
-  { auditModule: 'calendar' },
-  async (ctx, { from_date, store_id }) => {
-    const today = from_date || new Date().toISOString().split('T')[0]
+export const listScheduleBlocks = protectedAction<{ from_date?: string; to_date?: string; store_id?: string }, ScheduleBlock[]>(
+  { permission: 'calendar.view', auditModule: 'calendar' },
+  async (ctx, { from_date, to_date, store_id }) => {
+    const today = from_date || todayLocalISODate()
     let query = ctx.adminClient
       .from('schedule_blocks')
       .select('*, stores ( name )')
@@ -28,6 +29,11 @@ export const listScheduleBlocks = protectedAction<{ from_date?: string; store_id
       .gte('block_date', today)
       .order('block_date')
       .limit(100)
+
+    // `to_date` permite pedir los bloqueos del rango que se está viendo en el
+    // calendario, no solo los futuros: sin él las vistas no podían pintarlos y
+    // una franja bloqueada solo se descubría al intentar guardar la cita.
+    if (to_date) query = query.lte('block_date', to_date)
 
     if (store_id) {
       query = query.or(`store_id.eq.${store_id},store_id.is.null`)

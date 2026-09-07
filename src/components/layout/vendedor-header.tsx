@@ -25,23 +25,34 @@ import {
 } from '@/components/ui/select'
 import { logoutAction } from '@/actions/auth'
 import { cn } from '@/lib/utils'
-import { LayoutDashboard, Users, Package, CircleDollarSign, ShoppingCart, ClipboardList } from 'lucide-react'
+import { LayoutDashboard, Users, Package, CircleDollarSign, ShoppingCart, ClipboardList, Ruler, Receipt } from 'lucide-react'
 
 const breadcrumbLabels: Record<string, string> = {
   vendedor: '', clientes: 'Clientes', stock: 'Productos y Stock', cobros: 'Cobros', caja: 'Caja TPV',
 }
 
+// Por debajo de 1024 px el sidebar no se monta (vendedor-layout-client.tsx), así
+// que este menú es la ÚNICA vía: sin Arreglos ni Mis ventas esas pantallas eran
+// inalcanzables en iPad vertical y en móvil.
 const mobileNavItems = [
   { label: 'Dashboard', href: '/vendedor', icon: LayoutDashboard },
   { label: 'Clientes', href: '/vendedor/clientes', icon: Users },
+  { label: 'Arreglos', href: '/vendedor/arreglos', icon: Ruler },
   { label: 'Productos y Stock', href: '/vendedor/stock', icon: Package },
   { label: 'Cobros', href: '/vendedor/cobros', icon: CircleDollarSign },
   { label: 'Caja TPV', href: '/vendedor/caja', icon: ShoppingCart },
+  { label: 'Mis ventas', href: '/vendedor/mis-ventas', icon: Receipt },
   { label: 'Albaranes', href: '/admin/almacen/albaranes', icon: ClipboardList },
 ]
 
 function MobileSidebar() {
   const pathname = usePathname()
+  const { hasRole, isAdmin } = useAuth()
+  // Albaranes lo reserva el middleware al vendedor avanzado: al básico el enlace
+  // le devolvía a /vendedor sin ningún mensaje.
+  const visibleItems = mobileNavItems.filter(
+    (i) => i.href !== '/admin/almacen/albaranes' || hasRole('vendedor_avanzado') || isAdmin
+  )
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-3 px-4 py-3 border-b bg-[#1a2744]">
@@ -49,7 +60,7 @@ function MobileSidebar() {
         <span className="text-[11px] font-medium text-white/70 tracking-widest uppercase">Panel vendedor</span>
       </div>
       <nav className="flex-1 p-2 space-y-0.5">
-        {mobileNavItems.map(item => {
+        {visibleItems.map(item => {
           const Icon = item.icon
           const active = pathname === item.href || (item.href !== '/vendedor' && pathname.startsWith(item.href))
           return (

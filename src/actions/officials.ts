@@ -45,6 +45,17 @@ const FINISHED_LINE_STATUSES = new Set(['finished', 'delivered', 'received_in_st
 /** Prendas fuera del trabajo del oficial: ni pendientes ni terminadas. */
 const EXCLUDED_LINE_STATUSES = new Set(['cancelled'])
 
+/**
+ * Estados de PRENDA que están EN MANOS del oficial. Son los que acotan el
+ * universo del panel, porque acotarlo por el estado de la CABECERA escondía
+ * trabajo real: el pedido hereda el estado de su prenda MENOS avanzada
+ * (deriveOrderStatusFromLines), así que una sola prenda esperando tejido tapaba
+ * a todas las demás aunque ya estuvieran en confección. Además
+ * `pendiente_terminacion` (mig 207) entró después del rediseño de Ismael y se
+ * había quedado fuera de la lista, dejando invisibles pedidos enteros.
+ */
+const PENDING_LINE_STATUSES: string[] = ['in_production', 'in_fitting', 'pendiente_terminacion']
+
 // Sin `export`: este módulo es 'use server' y ahí solo pueden exportarse
 // funciones async (server actions). Solo se usa dentro de este fichero.
 function isFinishedGarment(lineStatus: string | null | undefined): boolean {
@@ -82,11 +93,15 @@ export const getOfficialsLoad = protectedAction<void, OfficialLoad[]>(
     type OfficialRow = { id: string; name: string; specialty: string | null }
     const officials = (officialsRows ?? []) as OfficialRow[]
 
-    // 2. Líneas en pedidos activos (cabecera in_production o in_fitting)
+    // 2. Prendas VIVAS acotadas por el estado de la LÍNEA, no por el de la
+    // cabecera: así no se pierde la prenda que el oficial ya tiene en confección
+    // dentro de un pedido cuyo estado general va por detrás. El join al pedido
+    // se conserva solo para el order_type y para dejar fuera los cancelados.
     const { data: linesRows, error: linesErr } = await ctx.adminClient
       .from('tailoring_order_lines')
       .select('id, status, configuration, tailoring_orders!inner(status, order_type)')
-      .in('tailoring_orders.status', ['in_production', 'in_fitting'])
+      .in('status', PENDING_LINE_STATUSES)
+      .neq('tailoring_orders.status', 'cancelled')
     if (linesErr) return failure(linesErr.message)
 
     type LineRow = {
@@ -118,12 +133,14 @@ export const getOfficialsLoad = protectedAction<void, OfficialLoad[]>(
       const parent = Array.isArray(l.tailoring_orders) ? l.tailoring_orders[0] : l.tailoring_orders
       if (!parent) continue
 
-      const { status, order_type } = parent
+      const { order_type } = parent
       const isArtesanal = ARTESANAL_TYPES.has(order_type)
       const isIndustrial = INDUSTRIAL_TYPES.has(order_type)
 
-      // Filtros del cuadro de Ismael
-      if (isIndustrial && status !== 'in_production') continue
+      // Ya no se mira el estado de la CABECERA: el universo lo acota el estado de
+      // la LÍNEA (arriba). Lo que excluía el cuadro de Ismael (industrial fuera de
+      // confección) lo cubre solo ese filtro: un pedido industrial no tiene prendas
+      // en `in_fitting`, ese estado no está en su pipeline (statuses.ts).
       if (!isArtesanal && !isIndustrial) continue // proveedor, oficial, otros: fuera
 
       // La CARGA es lo que le queda por hacer: las prendas ya terminadas (o
@@ -218,7 +235,22 @@ export const getOfficialInProgressItems = protectedAction<
 
     const normalizedName = normalizeName((official as { name: string }).name)
 
-    // 2. Líneas en pedidos activos con todos los datos necesarios
+    // 2. Universo = pedidos con ALGUNA prenda viva, mirando el estado de la
+    // LÍNEA. El de la cabecera no sirve: el pedido hereda el estado de su prenda
+    // MENOS avanzada, así que una prenda esperando tejido escondía del panel al
+    // resto del pedido, ya en manos del oficial.
+    const { data: liveRows, error: liveErr } = await ctx.adminClient
+      .from('tailoring_order_lines')
+      .select('tailoring_order_id, tailoring_orders!inner(status)')
+      .in('status', PENDING_LINE_STATUSES)
+      .neq('tailoring_orders.status', 'cancelled')
+    if (liveErr) return failure(liveErr.message)
+    const liveOrderIds = [
+      ...new Set((liveRows ?? []).map((r) => (r as { tailoring_order_id: string }).tailoring_order_id)),
+    ]
+
+    // Aquí sí se piden TODAS las prendas de esos pedidos, no solo las vivas: el
+    // bloque «Terminadas» del detalle necesita las que el oficial ya acabó.
     const { data: linesRows, error: linesErr } = await ctx.adminClient
       .from('tailoring_order_lines')
       .select(
@@ -227,7 +259,7 @@ export const getOfficialInProgressItems = protectedAction<
           'fabrics(name, fabric_code), ' +
           'tailoring_orders!inner(id, order_number, order_type, status, estimated_delivery_date, updated_at, clients(full_name, first_name, last_name))'
       )
-      .in('tailoring_orders.status', ['in_production', 'in_fitting'])
+      .in('tailoring_order_id', liveOrderIds)
     if (linesErr) return failure(linesErr.message)
 
     type LineRow = {
@@ -255,9 +287,11 @@ export const getOfficialInProgressItems = protectedAction<
 
       const isArtesanal = ARTESANAL_TYPES.has(parent.order_type)
       const isIndustrial = INDUSTRIAL_TYPES.has(parent.order_type)
-      if (isIndustrial && parent.status !== 'in_production') continue
       if (!isArtesanal && !isIndustrial) continue
-      if (EXCLUDED_LINE_STATUSES.has(l.status)) continue
+      // Solo prendas vivas (bloque «En confección») y terminadas (bloque
+      // «Terminadas»). Las que aún no han llegado al taller (created,
+      // fabric_ordered, cut, fabric_received_store) y las canceladas, fuera.
+      if (!PENDING_LINE_STATUSES.includes(l.status) && !isFinishedGarment(l.status)) continue
 
       const lineCortador = normalizeName(l.configuration?.cortador)
       const lineOficial = normalizeName(l.configuration?.oficial)

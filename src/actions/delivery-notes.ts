@@ -917,7 +917,10 @@ export const markSupplierDeliveryNoteReceived = protectedAction<
         .update({ status: 'recibido' })
         .eq('id', id)
       if (statusErr) return failure(statusErr.message || 'Error al marcar recibido', 'INTERNAL')
-      return success({ id, stock_warnings: 0, stock_update_skipped: true, auditEntityId: String(id), auditDescription: `Albarán de proveedor ${(note as any).supplier_reference || id} recibido` })
+      // stock_already_applied: aquí no se aplica stock porque YA se aplicó antes,
+      // que no es lo mismo que no haberlo aplicado nunca. La pantalla lo usa para
+      // no avisar en falso de que no ha entrado mercancía.
+      return success({ id, stock_warnings: 0, stock_update_skipped: true, stock_already_applied: true, auditEntityId: String(id), auditDescription: `Albarán de proveedor ${(note as any).supplier_reference || id} recibido` })
     }
 
     let destinationStoreId: string | null = (note as any).store_id || null
@@ -947,6 +950,10 @@ export const markSupplierDeliveryNoteReceived = protectedAction<
     if (linesErr) return failure(linesErr.message || 'Error al cargar líneas del albarán', 'INTERNAL')
 
     let stockWarnings = 0
+    // Líneas que de verdad han movido stock. Sin este contador se sellaba
+    // stock_updated_at con solo haber encontrado almacén, aunque no entrase ni
+    // una unidad, y el albarán quedaba bloqueado para siempre.
+    let stockApplied = 0
     const now = new Date().toISOString()
     const reasonLabel = `Recepción albarán ${(note as any).supplier_reference || id}`
 
@@ -1017,6 +1024,7 @@ export const markSupplierDeliveryNoteReceived = protectedAction<
             store_id: destinationStoreId,
           })
         if (movErr) return failure(movErr.message || 'Error al registrar movimiento de stock', 'INTERNAL')
+        stockApplied += 1
 
         // Activar reservas pendientes de esta variante (si el stock recibido
         // cubre ahora la cantidad reservada) y notificar a los admins.
@@ -1066,7 +1074,9 @@ export const markSupplierDeliveryNoteReceived = protectedAction<
       .from('supplier_delivery_notes')
       .update({
         status: 'recibido',
-        stock_updated_at: warehouseId ? now : null,
+        // Solo se sella si de verdad entró stock: si no, el albarán sigue
+        // pendiente de aplicar y se puede reintentar desde el botón.
+        stock_updated_at: stockApplied > 0 ? now : null,
       })
       .eq('id', id)
     if (updateErr) return failure(updateErr.message || 'Error al marcar recibido', 'INTERNAL')

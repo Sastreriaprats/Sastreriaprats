@@ -3,20 +3,7 @@
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
-
-/** Lee todas las páginas (evita el tope silencioso de 1000 filas de Supabase). */
-async function readAllPaged<T = Record<string, unknown>>(
-  build: (from: number, to: number) => PromiseLike<{ data: T[] | null }>,
-): Promise<T[]> {
-  const out: T[] = []
-  for (let from = 0; ; from += 1000) {
-    const { data } = await build(from, from + 999)
-    const batch = data ?? []
-    out.push(...batch)
-    if (batch.length < 1000) break
-  }
-  return out
-}
+import { readAllPaged } from '@/lib/server/paged'
 
 interface DashboardStats {
   salesToday: number
@@ -39,29 +26,8 @@ interface DashboardStats {
   deliveriesToday: number
 }
 
-const DEFAULT_DASHBOARD_STATS: DashboardStats = {
-  salesToday: 0,
-  salesThisMonth: 0,
-  salesLastMonth: 0,
-  monthGrowth: 0,
-  activeOrders: 0,
-  ordersInProduction: 0,
-  ordersPendingDelivery: 0,
-  ordersOverdue: 0,
-  clientsTotal: 0,
-  clientsNewThisMonth: 0,
-  avgTicket: 0,
-  cashSessionOpen: false,
-  cashSessionTotal: 0,
-  lowStockCount: 0,
-  supplierDebtTotal: 0,
-  overduePayments: 0,
-  fittingsToday: 0,
-  deliveriesToday: 0,
-}
-
 export const getDashboardStats = protectedAction<string | undefined, DashboardStats>(
-  { auditModule: 'dashboard' },
+  { permission: 'reports.view', auditModule: 'dashboard' },
   async (ctx, _storeId) => {
     try {
       const admin = ctx.adminClient
@@ -111,6 +77,16 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
         // duplicar el total con tailoring_order_payments (mismo criterio que Contabilidad).
         loadPedidoCobroBaseBySale(admin, `${lastMonthStart}T00:00:00`, todayEnd),
       ])
+
+      // Un error de consulta NO es "cero": estas siete no lanzan, devuelven
+      // {data:null, error}, y consumir .data/.count a ciegas pintaba el panel
+      // entero a 0 como si el negocio no hubiera vendido nada. Se propaga al
+      // catch de abajo, que ya devuelve failure y hace que la pantalla avise.
+      // `cashRes` usa maybeSingle(): que no haya caja abierta no es error, por
+      // eso aquí solo se mira `error`, nunca `data`.
+      const firstErr = [ordersRes, clientsTotalRes, clientsNewRes, cashRes, stockRes, supplierRes, fittingsRes]
+        .find((r) => r.error != null)?.error
+      if (firstErr) throw new Error(firstErr.message)
 
       const ordersRows = ordersRes.data
       const cashRow = cashRes.data
@@ -214,15 +190,23 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
       }
       return success(JSON.parse(JSON.stringify(result)))
     } catch (queryErr) {
+      // Antes se devolvian todos los contadores a CERO como si fueran buenos:
+      // el panel decia "0,00 €" de ventas y "0" de pedidos, indistinguible de
+      // un dia flojo de verdad. Mejor decir que ha fallado.
       console.error('[getDashboardStats] Error en consultas:', queryErr)
-      return success({ ...DEFAULT_DASHBOARD_STATS })
+      return failure(
+        queryErr instanceof Error
+          ? `No se pudieron cargar los indicadores del panel: ${queryErr.message}`
+          : 'No se pudieron cargar los indicadores del panel',
+        'INTERNAL',
+      )
     }
   }
 )
 
 /** Ventas del mes actual: un día por entrada desde día 1 hasta hoy. */
 export const getSalesChartData = protectedAction<void, { date: string; label: string; total: number }[]>(
-  { auditModule: 'dashboard' },
+  { permission: 'reports.view', auditModule: 'dashboard' },
   async (ctx) => {
     try {
       const admin = ctx.adminClient
@@ -298,7 +282,7 @@ export interface DashboardAlerts {
 }
 
 export const getDashboardAlerts = protectedAction<void, DashboardAlerts>(
-  { auditModule: 'dashboard' },
+  { permission: ['reports.view', 'orders.view', 'stock.view'], auditModule: 'dashboard' },
   async (ctx) => {
     const admin = ctx.adminClient
     const today = new Date().toISOString().split('T')[0]
@@ -317,7 +301,7 @@ export const getDashboardAlerts = protectedAction<void, DashboardAlerts>(
 )
 
 export const getRecentActivity = protectedAction<void, { id: string; action: string; module: string; entity_display: string | null; description: string | null; created_at: string; user_full_name: string | null }[]>(
-  { auditModule: 'dashboard' },
+  { permission: 'audit.view', auditModule: 'dashboard' },
   async (ctx) => {
     const { data } = await ctx.adminClient
       .from('audit_logs')
@@ -363,7 +347,7 @@ const ONLINE_COUNTED_STATUSES = ['paid', 'processing', 'shipped', 'delivered']
 const ONLINE_HOST_STORE_CODE = 'PIN'
 
 export const getStoresWithStats = protectedAction<{ includeInactive?: boolean } | undefined, StoreStats[]>(
-  { auditModule: 'dashboard' },
+  { permission: ['config.view', 'reports.view'], auditModule: 'dashboard' },
   async (ctx, input) => {
     const admin = ctx.adminClient
     const includeInactive = input?.includeInactive === true
@@ -388,8 +372,11 @@ export const getStoresWithStats = protectedAction<{ includeInactive?: boolean } 
       onlineMonthRes,
       tailoringPaymentsRes,
     ] = await Promise.all([
-      admin.from('sales').select('store_id, total').in('store_id', storeIds).gte('created_at', `${today}T00:00:00`).eq('status', 'completed'),
-      admin.from('sales').select('store_id, total, tax_amount, sale_type').in('store_id', storeIds).gte('created_at', `${monthStart}T00:00:00`).eq('status', 'completed'),
+      // Incluye partially_returned: antes una venta con devolución parcial se caía
+      // ENTERA del cálculo. Se netea fila a fila con total_returned (mismo criterio
+      // que store-goals.ts, que es la referencia de los objetivos).
+      admin.from('sales').select('store_id, total, total_returned').in('store_id', storeIds).gte('created_at', `${today}T00:00:00`).in('status', ['completed', 'partially_returned']),
+      admin.from('sales').select('store_id, total, total_returned, tax_amount, sale_type').in('store_id', storeIds).gte('created_at', `${monthStart}T00:00:00`).in('status', ['completed', 'partially_returned']),
       admin.from('warehouses').select('id, store_id').in('store_id', storeIds),
       admin.from('store_monthly_goals').select('store_id, goal_type, target_amount').in('store_id', storeIds).eq('year', year).eq('month', month),
       admin.from('online_orders').select('total, tax_amount').in('status', ONLINE_COUNTED_STATUSES).gte('created_at', `${monthStart}T00:00:00`),
@@ -406,8 +393,19 @@ export const getStoresWithStats = protectedAction<{ includeInactive?: boolean } 
 
     let levelsData: { warehouse_id: string; quantity?: number; available?: number; min_stock?: number }[] = []
     if (warehouseIds.length > 0) {
-      const { data: levels } = await admin.from('stock_levels').select('warehouse_id, quantity, available, min_stock').in('warehouse_id', warehouseIds)
-      levelsData = (levels || []) as typeof levelsData
+      // Paginado: `stock_levels` tiene una fila por (variante × almacén) —16.112
+      // hoy— y sin `.range()` el servidor devolvía solo las 1.000 primeras, así
+      // que las unidades por tienda salían por una fracción de lo real (169 en
+      // vez de 2.774 en Pinzón) y bailaban entre recargas al no haber orden.
+      // El `.or` descarta las filas que no aportan nada: ni suman unidades ni
+      // pueden estar bajo mínimo (16.112 → 2.540 filas, 3 páginas en vez de 17).
+      levelsData = await readAllPaged<{ warehouse_id: string; quantity?: number; available?: number; min_stock?: number }>((f, t) =>
+        admin.from('stock_levels')
+          .select('warehouse_id, quantity, available, min_stock')
+          .in('warehouse_id', warehouseIds)
+          .or('quantity.neq.0,min_stock.not.is.null')
+          .order('id', { ascending: true })
+          .range(f, t), 'getStoresWithStats.stock_levels')
     }
 
     const salesTodayByStore: Record<string, number> = {}
@@ -420,16 +418,22 @@ export const getStoresWithStats = protectedAction<{ includeInactive?: boolean } 
       boutiqueByStore[s.id] = 0
       sastreriaByStore[s.id] = 0
     }
-    for (const r of (salesTodayRes.data || []) as { store_id: string; total?: number }[]) {
-      if (r.store_id) salesTodayByStore[r.store_id] = (salesTodayByStore[r.store_id] ?? 0) + (r.total ?? 0)
+    for (const r of (salesTodayRes.data || []) as { store_id: string; total?: number; total_returned?: number | string | null }[]) {
+      if (!r.store_id) continue
+      // Descuenta lo devuelto: el ticket cuenta por lo que se queda el cliente.
+      const t = Number(r.total) || 0
+      salesTodayByStore[r.store_id] = (salesTodayByStore[r.store_id] ?? 0) + Math.max(0, t - (Number(r.total_returned) || 0))
     }
     // salesMonthByStore mantiene el importe bruto (para widgets históricos).
     // boutique/sastreria usan base imponible (sin IVA) para comparar con objetivos.
-    for (const r of (salesMonthRes.data || []) as { store_id: string; total?: number; tax_amount?: number | string | null; sale_type?: string }[]) {
+    for (const r of (salesMonthRes.data || []) as { store_id: string; total?: number; total_returned?: number | string | null; tax_amount?: number | string | null; sale_type?: string }[]) {
       if (!r.store_id) continue
       const t = Number(r.total) || 0
-      const net = t - (Number(r.tax_amount) || 0)
-      salesMonthByStore[r.store_id] = (salesMonthByStore[r.store_id] ?? 0) + t
+      // Prorrateo por la parte NO devuelta, idéntico a store-goals.ts:103-105: sin él,
+      // incorporar las partially_returned las metería por su importe íntegro.
+      const proportion = t > 0 ? Math.max(0, (t - (Number(r.total_returned) || 0)) / t) : 0
+      const net = (t - (Number(r.tax_amount) || 0)) * proportion
+      salesMonthByStore[r.store_id] = (salesMonthByStore[r.store_id] ?? 0) + t * proportion
       const st = r.sale_type ?? ''
       if (BOUTIQUE_SALE_TYPES.includes(st)) {
         boutiqueByStore[r.store_id] = (boutiqueByStore[r.store_id] ?? 0) + net
@@ -528,7 +532,7 @@ export interface DashboardAppointment {
 }
 
 export const getDashboardAppointments = protectedAction<void, { appointments: DashboardAppointment[]; todayCount: number; weekCount: number }>(
-  { auditModule: 'dashboard' },
+  { permission: 'calendar.view', auditModule: 'dashboard' },
   async (ctx) => {
     const today = new Date().toISOString().split('T')[0]
     // Calcular fin de semana (domingo)

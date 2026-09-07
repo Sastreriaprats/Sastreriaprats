@@ -179,6 +179,8 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
     buildTotals({
       subtotal: n(invoice.subtotal),
       taxRate: n(invoice.tax_rate),
+      // El rótulo del IVA se deriva de las líneas: la cabecera está fijada a 21%.
+      lines,
       taxAmount: n(invoice.tax_amount),
       irpfRate: n(invoice.irpf_rate),
       irpfAmount: n(invoice.irpf_amount),
@@ -222,16 +224,32 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
     /* ya existe */
   }
 
+  // El nombre lleva un tramo del id (un uuid aleatorio) para que la ruta NO sea
+  // adivinable: con `factura-F2026-0001.pdf` en un bucket público bastaba
+  // contar hacia arriba para descargarse el histórico entero de facturas sin
+  // sesión. El id es estable, así que el slug sigue siéndolo: `upsert` sigue
+  // sobrescribiendo el mismo objeto al reeditar la factura y las URLs ya
+  // enviadas por email no caducan.
   const slug = isDraft
     ? `invoices/factura-borrador-${invoice.id.slice(0, 8)}-${Date.now()}.pdf`
-    : `invoices/factura-${(invoice.invoice_number ?? '').replace(/\//g, '-')}.pdf`
+    : `invoices/factura-${(invoice.invoice_number ?? '').replace(/\//g, '-')}-${invoice.id.slice(0, 12)}.pdf`
   const { error: uploadError } = await admin.storage.from(BUCKET).upload(slug, pdfBuffer, {
     contentType: 'application/pdf',
     upsert: true,
+    // Las facturas EMITIDAS se suben a un slug ESTABLE (factura-F2026-XXXX.pdf) y
+    // se sobrescriben con upsert al reeditarlas. Sin esto, Supabase sirve el objeto
+    // con Cache-Control por defecto (3600s) y el navegador/CDN seguían mostrando el
+    // PDF ANTIGUO tras editar la factura (p. ej. cambiar la forma de pago y verla
+    // igual). max-age=0 fuerza revalidación en cada acceso.
+    cacheControl: '0',
   })
   if (uploadError) throw new Error(`Error al subir PDF: ${uploadError.message}`)
 
   const { data: urlData } = admin.storage.from(BUCKET).getPublicUrl(slug)
-  await admin.from('invoices').update({ pdf_url: urlData.publicUrl }).eq('id', invoiceId)
-  return urlData.publicUrl
+  // Cache-buster por versión: aunque el slug sea estable, la URL cambia en cada
+  // regeneración, así que invalida cualquier copia ya cacheada por el navegador o
+  // el CDN de la edición anterior. El PDF se regenera fresco en cada acceso.
+  const publicUrl = `${urlData.publicUrl}?v=${Date.now()}`
+  await admin.from('invoices').update({ pdf_url: publicUrl }).eq('id', invoiceId)
+  return publicUrl
 }

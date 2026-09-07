@@ -77,7 +77,7 @@ export function PaymentHistory({
   entityStoreId, entityStoreName,
 }: PaymentHistoryProps) {
   const { activeStoreId } = useActiveStore()
-  const { can, isSuperAdmin } = usePermissions()
+  const { can, canAny, isSuperAdmin } = usePermissions()
   // Tienda efectiva donde cae el cobro: SIEMPRE la del pedido/venta si la
   // conocemos. Solo si no la sabemos (callers antiguos) se recurre a la
   // tienda activa del operador. Esto evita que un cobro de un pedido de
@@ -95,6 +95,11 @@ export function PaymentHistory({
   // Columna "Registrado por": quién registró el cobro (created_by del pago), NO el
   // vendedor de la venta. Solo pedidos de sastrería (sale_payments no guarda created_by).
   const showSeller = entityType === 'tailoring_order'
+  // El boton de registrar cobro solo se ofrece a quien la accion se lo va a
+  // permitir: antes se pintaba siempre y el cobro moria en "Sin permisos".
+  const canRegisterPayment = entityType === 'sale'
+    ? canAny(['sales.edit', 'pos.sell'])
+    : canAny(['orders.edit', 'pos.sell'])
   const [payments, setPayments] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -102,6 +107,11 @@ export function PaymentHistory({
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [cashSessionOpen, setCashSessionOpen] = useState<boolean | null>(null)
+  // ¿Hay alguna caja (abierta o ya cerrada) que cubra HOY? Es la condicion que exige
+  // addSalePayment para aceptar el cobro de una VENTA. Sin saberla, el dialogo
+  // ofrecia la casilla "entiendo que no entrara en ningun arqueo" y luego el
+  // servidor rechazaba el cobro.
+  const [cashSessionCovered, setCashSessionCovered] = useState<boolean | null>(null)
 
   // Editar cobro
   const [editTarget, setEditTarget] = useState<any | null>(null)
@@ -143,8 +153,11 @@ export function PaymentHistory({
   useEffect(() => {
     if (readonly) return
     checkCashSessionOpen({ storeId: effectiveStoreId })
-      .then(r => setCashSessionOpen(r.success ? r.data.open : null))
-      .catch(() => setCashSessionOpen(null))
+      .then(r => {
+        setCashSessionOpen(r.success ? r.data.open : null)
+        setCashSessionCovered(r.success ? r.data.covered : null)
+      })
+      .catch(() => { setCashSessionOpen(null); setCashSessionCovered(null) })
   }, [effectiveStoreId, readonly])
 
   const totalPaid = payments.reduce((s, p) => s + Number(p.amount), 0)
@@ -311,7 +324,7 @@ export function PaymentHistory({
       {/* Cabecera + botón */}
       <div className="flex items-center justify-between">
         <h4 className={`text-sm font-medium${variant === 'sastre' ? ' text-white/70' : ''}`}>Historial de pagos</h4>
-        {!readonly && totalPending > 0 && (
+        {!readonly && totalPending > 0 && canRegisterPayment && (
           <Button
             size="sm"
             onClick={() => { resetForm(); setDialogOpen(true) }}
@@ -486,15 +499,25 @@ export function PaymentHistory({
                     {' '}para hoy. El cobro se registrará pero no entrará en ningún arqueo.
                   </span>
                 </div>
-                <label className="flex items-center gap-2 cursor-pointer select-none pl-6">
-                  <input
-                    type="checkbox"
-                    checked={confirmNoSession}
-                    onChange={(e) => setConfirmNoSession(e.target.checked)}
-                    className="h-3.5 w-3.5 accent-amber-700"
-                  />
-                  <span className="font-medium">Entiendo que el cobro no entrará en ningún arqueo</span>
-                </label>
+                {/* En una VENTA el servidor (addSalePayment) rechaza el cobro si hoy no
+                    hay ninguna caja que lo cubra, asi que no se ofrece la casilla:
+                    prometia algo que despues fallaba. En pedidos si se admite, porque
+                    rpc_add_order_payment acepta cash_session_id NULL (mig 135). */}
+                {entityType === 'sale' && cashSessionCovered === false ? (
+                  <p className="font-medium pl-6">
+                    Abre la caja{entityStoreName ? <> de <strong>{entityStoreName}</strong></> : null} antes de registrar este cobro.
+                  </p>
+                ) : (
+                  <label className="flex items-center gap-2 cursor-pointer select-none pl-6">
+                    <input
+                      type="checkbox"
+                      checked={confirmNoSession}
+                      onChange={(e) => setConfirmNoSession(e.target.checked)}
+                      className="h-3.5 w-3.5 accent-amber-700"
+                    />
+                    <span className="font-medium">Entiendo que el cobro no entrará en ningún arqueo</span>
+                  </label>
+                )}
               </div>
             )}
             {entityType === 'tailoring_order' && (

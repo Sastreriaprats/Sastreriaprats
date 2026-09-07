@@ -9,8 +9,10 @@ export type SupplierPaymentConfig = {
 export type InstallmentSpec = { due_date: string; amount: number; sort_order: number }
 
 export function addDaysISO(dateStr: string, days: number): string {
+  // En UTC: si el runtime no corriera en UTC, setDate (hora local) restaría un día
+  // en los plazos que cruzan el cambio de hora de marzo.
   const d = new Date(dateStr)
-  d.setDate(d.getDate() + days)
+  d.setUTCDate(d.getUTCDate() + days)
   return d.toISOString().slice(0, 10)
 }
 
@@ -161,18 +163,23 @@ export async function recalculatePendingInvoicesForSupplier(
       supplier.payment_days ?? null,
       supplier.payment_terms ?? null,
     )
-    const { error: upErr } = await adminClient
-      .from('ap_supplier_invoices')
-      .update({ due_date: newDue, updated_at: new Date().toISOString() })
-      .eq('id', invId)
-    if (upErr) continue
-
+    // La cabecera lleva la PRIMERA cuota del plan, igual que al crear/editar la
+    // factura. Con payment_terms='custom' el vencimiento genérico sale de
+    // payment_days=0, o sea la propia fecha de factura, y dejaba todas las
+    // facturas del proveedor como "vencidas" y descuadradas con sus cuotas.
     const installments = buildInstallments(
       String(inv.invoice_date),
       newDue,
       Number(inv.total_amount ?? 0),
       supplier,
     )
+    const headlineDue = earliestInstallmentDate(installments) ?? newDue
+
+    const { error: upErr } = await adminClient
+      .from('ap_supplier_invoices')
+      .update({ due_date: headlineDue, updated_at: new Date().toISOString() })
+      .eq('id', invId)
+    if (upErr) continue
     await replaceInvoiceInstallments(adminClient, invId, installments)
     updated++
   }

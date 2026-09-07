@@ -133,12 +133,17 @@ export function TiendasContent({ initialStores = [] }: { initialStores?: StoreSt
                   </CardTitle>
                   <div className="flex items-center gap-1">
                     <span className="text-xs text-muted-foreground">{s.code}</span>
+                    {/* Las tiendas inactivas no están en la caché de useStores
+                        (getStoresList solo devuelve activas), así que openEdit no
+                        encontraba la fila y el lápiz no hacía nada: se deshabilita
+                        y se dice qué hay que hacer en vez de morir en silencio. */}
                     <Button
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7"
+                      disabled={isInactive}
                       onClick={(e) => { e.stopPropagation(); openEdit(s.id) }}
-                      title="Editar tienda"
+                      title={isInactive ? 'Reactiva la tienda para poder editarla' : 'Editar tienda'}
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>

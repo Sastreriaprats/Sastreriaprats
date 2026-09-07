@@ -6,6 +6,7 @@
 import type { Content } from 'pdfmake'
 import { getOrderStatusLabel } from '@/lib/utils'
 import { getLineRef, getLineRefSuffix, type RefLine } from '@/lib/orders/line-refs'
+import { buildMedidasPrefixes } from '@/lib/measurements/garment-prefixes'
 
 /** Tipo del documento para pdfmake (no exportado por @types/pdfmake). */
 interface PdfDocDefinition {
@@ -106,20 +107,32 @@ const MEDIDAS_LABELS: Record<string, string> = {
   puno_izquierdo: 'Puño izq',
 }
 
-function getMedidasStr(
+/** Aviso al pie de las medidas cuando alguna viene de la ficha de camisería. */
+const AVISO_MEDIDAS_CAMISERIA =
+  '* medida tomada en la ficha de CAMISERÍA — faltan las medidas propias de esta prenda'
+
+/** Exportada para poder verificarla sin arrancar pdfmake (ver scripts de prueba). */
+export function getMedidasStr(
   clientMeasurementsValues?: Record<string, unknown>,
-  prefix: string = 'americana_',
-  keys: readonly string[] = MEDIDAS_KEYS_POR_PRENDA['americana']
+  prefixes: readonly string[] = ['americana_', ''],
+  keys: readonly string[] = MEDIDAS_KEYS_POR_PRENDA['americana'],
+  /** Prefijo cuyas medidas son de OTRA prenda (las de camisería van sin
+   *  prefijo). Lo que salga de ahí se marca con `*` en vez de ocultarse: el
+   *  taller ve el número, pero sabe que no es de esta prenda. */
+  prefijoPrestado?: string,
 ): string {
   if (!clientMeasurementsValues || typeof clientMeasurementsValues !== 'object') return '—'
   const cfg = clientMeasurementsValues as Record<string, unknown>
   const parts: string[] = []
+  let hayPrestadas = false
   for (const baseKey of keys) {
-    const keysToTry = [`${prefix}${baseKey}`, baseKey]
     let val: unknown = undefined
-    for (const k of keysToTry) {
-      if (cfg[k] !== undefined && cfg[k] !== null && cfg[k] !== '') {
-        val = cfg[k]
+    let prefijoUsado: string | undefined = undefined
+    for (const p of prefixes) {
+      const v = cfg[`${p}${baseKey}`]
+      if (v !== undefined && v !== null && v !== '') {
+        val = v
+        prefijoUsado = p
         break
       }
     }
@@ -127,13 +140,17 @@ function getMedidasStr(
     const raw = typeof val === 'number' ? val : String(val).replace(',', '.')
     const n = typeof raw === 'number' ? raw : Number(raw)
     if (typeof n === 'number' && Number.isFinite(n)) {
-      parts.push(`${label}: ${n}`)
+      const prestada = prefijoPrestado !== undefined && prefijoUsado === prefijoPrestado
+      if (prestada) hayPrestadas = true
+      parts.push(`${label}: ${n}${prestada ? ' *' : ''}`)
     } else {
       parts.push(`${label}: —`)
     }
   }
   const allDash = parts.every((p) => p.endsWith(': —'))
-  return allDash ? '—' : parts.join(' - ')
+  if (allDash) return '—'
+  const linea = parts.join(' - ')
+  return hayPrestadas ? `${linea}\n${AVISO_MEDIDAS_CAMISERIA}` : linea
 }
 
 const LABELS_BOTONES: Record<string, string> = {
@@ -372,11 +389,24 @@ function getFichaFromOrder(order: FichaConfeccionOrder): Record<string, unknown>
   // la rama "americana" y la ficha salía vacía para pantalón/chaleco/etc.
   const garmentName = (first?.garment_types?.name as string | undefined) ?? undefined
   const prendaSlug = resolvePrendaSlug(config, garmentName)
-  const isCamiseria = prendaSlug.includes('camiseria')
-  const medidasPrefix = isCamiseria ? 'camiseria_' : (prendaSlug ? `${prendaSlug}_` : 'americana_')
+  // Prefijos en cascada: la prenda, la pestaña donde se mide y sin prefijo.
+  // Un chaqué o una teba no tienen pestaña propia en el formulario de medidas
+  // (se miden en "Americana"), así que buscar solo por `chaque_` dejaba la
+  // ficha sin medidas.
+  const medidasPrefixes = buildMedidasPrefixes(prendaSlug)
   const medidasKeys = MEDIDAS_KEYS_POR_PRENDA[prendaSlug] ?? MEDIDAS_KEYS_POR_PRENDA['americana']
   const clientMeasValues = order.clientMeasurements?.values
-  const medidasStr = getMedidasStr(clientMeasValues, medidasPrefix, medidasKeys)
+  // Las medidas sin prefijo son las de camisería y comparten nombre con 6 de
+  // las 9 de la americana (pecho, cintura, hombro…). En una prenda de
+  // sastrería se siguen mostrando, pero marcadas con `*`, para que el taller
+  // no las tome por medidas de esta prenda.
+  const esCamiseria = prendaSlug.includes('camiseria') || prendaSlug === 'camisa'
+  const medidasStr = getMedidasStr(
+    clientMeasValues,
+    medidasPrefixes,
+    medidasKeys,
+    esCamiseria ? undefined : '',
+  )
   const prendaLabel = slugToPrendaLabel(prendaSlug)
 
   // Fallback a la columna canónica `fabric_description` cuando la configuration
@@ -1047,10 +1077,14 @@ export function buildCamiseriaDocDefinition(
       if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim()
     }
     // 2) Fallback: medidas vigentes del cliente (pedidos creados sin medidas o
-    //    actualizadas después de crear el pedido)
+    //    actualizadas después de crear el pedido). Las de camisería se guardan
+    //    sin prefijo, pero algunos registros antiguos las traen bajo
+    //    `camiseria_`, así que se prueban las dos formas.
     for (const k of candidates) {
-      const v = clientMeasValues[k]
-      if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim()
+      for (const key of [k, `camiseria_${k}`]) {
+        const v = clientMeasValues[key]
+        if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim()
+      }
     }
     return '—'
   })
@@ -1188,7 +1222,14 @@ export function buildCamiseriaDocDefinition(
   // Fallback a la columna canónica `fabric_description` cuando config.tejido está
   // vacío (mismo criterio que la ficha no-camisa). El tejido vive en esa columna.
   const tejidoStr = String(cfg.tejido || line.fabric_description || '—').trim()
-  const precioLinea = Number(cfg.precio ?? 0)
+  // El PVP de camisería NO vive en la configuración: createFichaOrder borra la
+  // clave `precio` antes de guardar (src/actions/orders.ts), así que la ficha
+  // salía siempre a 0,00 €. Se cae a `unit_price`, que es el mismo PVP con IVA
+  // que se ve en pantalla. El wizard de admin sí manda cfg.precio y sigue mandando.
+  const precioCfg = cfg.precio
+  const precioLinea = precioCfg != null && String(precioCfg).trim() !== ''
+    ? Number(precioCfg)
+    : Number((line as { unit_price?: number | string | null }).unit_price ?? 0)
 
   // Tabla TEJIDO. Superior: 65/35 con bloque PRECIO. Inferior: ancho completo
   // (sin precio). Se construye como objeto para poder envolverlo, en la copia

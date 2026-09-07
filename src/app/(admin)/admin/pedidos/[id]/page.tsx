@@ -1,7 +1,8 @@
 import { Metadata } from 'next'
 import { notFound } from 'next/navigation'
-import { requirePermission } from '@/actions/auth'
+import { requirePermission, checkUserPermission } from '@/actions/auth'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { OrderDetailContent } from './order-detail-content'
 
 export const metadata: Metadata = { title: 'Ficha de pedido' }
@@ -31,6 +32,27 @@ export default async function OrderDetailPage(props: { params: Promise<{ id: str
     .single()
 
   if (!order) notFound()
+
+  // Defensa en profundidad, mismo criterio que getOrder (actions/orders.ts): el
+  // gateo en UI no basta. Sin esto, coste y margen del pedido y de cada prenda
+  // viajaban íntegros en la respuesta RSC de la página y se leían desde la
+  // pestaña Red con un rol que no puede verlos (vendedor_avanzado entra a
+  // /admin/pedidos por la excepción del middleware y NO tiene orders.view_costs).
+  const supabase = await createServerSupabaseClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  const canViewCosts = user ? await checkUserPermission(user.id, 'orders.view_costs') : false
+  if (!canViewCosts) {
+    const o = order as Record<string, unknown>
+    o.total_material_cost = null
+    o.total_labor_cost = null
+    o.total_factory_cost = null
+    o.total_cost = null
+    for (const line of (o.tailoring_order_lines ?? []) as Record<string, unknown>[]) {
+      line.material_cost = null
+      line.labor_cost = null
+      line.factory_cost = null
+    }
+  }
 
   // Cargar clientMeasurements (mismo patrón que getOrder en actions/orders.ts).
   // Sin esto, el PDF de Camisería no puede hacer fallback a las medidas vigentes

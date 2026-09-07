@@ -40,7 +40,12 @@ export async function generateTicketComplemento(order: any, line: any): Promise<
   const tax_amount = lineTotal - subtotal
   const total = lineTotal
   const now = new Date().toISOString()
-  const paymentMethodKey = order?.payment_method ?? order?.payment ?? 'card'
+  // `tailoring_orders` no tiene payment_method: el fallback 'card' se aplicaba
+  // SIEMPRE y el ticket decía "Tarjeta" aunque se cobrara en efectivo o no se
+  // hubiera cobrado. El método real está en los cobros del pedido (getOrder los
+  // adjunta, el más reciente primero); si no hay ninguno, no se inventa.
+  const orderPayments = (order?.tailoring_order_payments ?? []) as Array<{ payment_method?: string; amount?: number }>
+  const paymentMethodKey = orderPayments[0]?.payment_method ?? 'Pendiente de cobro'
 
   const storeConfig = getStorePdfData(getOrderStoreName(order))
   await generateTicketPdf({
@@ -62,7 +67,7 @@ export async function generateTicketComplemento(order: any, line: any): Promise<
         line_total: Math.round(lineTotal * 100) / 100,
       },
     ],
-    payments: [{ payment_method: paymentMethodKey, amount: total }],
+    payments: orderPayments.map((p) => ({ payment_method: String(p.payment_method ?? ''), amount: Number(p.amount ?? 0) })),
     clientName: getClientName(order),
     clientCode: getClientCode(order),
     storeAddress: storeConfig.address,
@@ -103,7 +108,10 @@ export async function generateTicketBoutiquePDF(order: any): Promise<void> {
   const total = Math.round(totalWithTax * 100) / 100
   const subtotal = Math.round((total / 1.21) * 100) / 100
   const tax_amount = Math.round((total - subtotal) * 100) / 100
-  const paymentMethodKey = order?.payment_method ?? order?.payment ?? 'card'
+  // Mismo criterio que generateTicketComplemento: el método sale de los cobros
+  // reales del pedido, nunca del 'card' por defecto (columna inexistente).
+  const orderPayments = (order?.tailoring_order_payments ?? []) as Array<{ payment_method?: string; amount?: number }>
+  const paymentMethodKey = orderPayments[0]?.payment_method ?? 'Pendiente de cobro'
 
   const storeConfig2 = getStorePdfData(getOrderStoreName(order))
   await generateTicketPdf({
@@ -117,7 +125,7 @@ export async function generateTicketBoutiquePDF(order: any): Promise<void> {
       payment_method: paymentMethodKey,
     },
     lines,
-    payments: [{ payment_method: paymentMethodKey, amount: total }],
+    payments: orderPayments.map((p) => ({ payment_method: String(p.payment_method ?? ''), amount: Number(p.amount ?? 0) })),
     clientName: getClientName(order),
     clientCode: getClientCode(order),
     storeAddress: storeConfig2.address,

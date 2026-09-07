@@ -159,14 +159,21 @@ export function ProductDetailContent({
     if (!variantId || !subtractMetersForm.warehouseId || subtractMetersForm.quantity <= 0) return
     const qty = Math.round(subtractMetersForm.quantity)
     if (qty <= 0) return
-    await doAdjust({
+    const ajuste = await doAdjust({
       variantId,
       warehouseId: subtractMetersForm.warehouseId,
       quantity: qty,
       reason: subtractMetersForm.reason.trim() || 'Metros usados (tejido)',
       movementType: 'adjustment_negative',
     })
-    const used = (product?.fabric_meters_used != null ? Number(product.fabric_meters_used) : 0) + subtractMetersForm.quantity
+    // useAction devuelve null si la action falló (stock negativo, stock no
+    // encontrado…). Sin este corte salía el toast rojo del error y detrás el
+    // verde "Producto actualizado" con los metros ya sumados sin descontar nada.
+    if (!ajuste) return
+    // Se suma `qty`, lo realmente descontado del stock, y no la cifra tecleada:
+    // stock_levels.quantity es INTEGER, así que con 2,5 el stock bajaba 3 y los
+    // metros gastados subían 2,5, y las dos cifras del tejido dejaban de cuadrar.
+    const used = (product?.fabric_meters_used != null ? Number(product.fabric_meters_used) : 0) + qty
     await doUpdateProduct({ id: product.id, data: { fabric_meters_used: used } })
     setShowSubtractMeters(false)
     setSubtractMetersForm({ variantId: '', warehouseId: '', quantity: 0, reason: '' })
@@ -506,13 +513,16 @@ export function ProductDetailContent({
               </div>
               <div className="space-y-2">
                 <Label>Metros a descontar</Label>
+                {/* Metros enteros: stock_levels.quantity es INTEGER, así que ofrecer
+                    decimales prometía una precisión que la BD no puede guardar (y con
+                    0,4 el redondeo daba 0 y el diálogo no hacía nada, sin avisar). */}
                 <Input
                   type="number"
-                  min={0.01}
-                  step={0.01}
+                  min={1}
+                  step={1}
                   value={subtractMetersForm.quantity || ''}
-                  onChange={(e) => setSubtractMetersForm((f) => ({ ...f, quantity: parseFloat(e.target.value) || 0 }))}
-                  placeholder="Ej. 2,5"
+                  onChange={(e) => setSubtractMetersForm((f) => ({ ...f, quantity: parseInt(e.target.value, 10) || 0 }))}
+                  placeholder="Ej. 3"
                 />
               </div>
               <div className="space-y-2">

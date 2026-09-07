@@ -15,6 +15,7 @@ import { useCart } from '@/components/providers/cart-provider'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { ProductSchema, BreadcrumbSchema } from '@/components/seo/schema-org'
+import { publicProductName, publicProductDescription } from '@/lib/products/public-display'
 import { buildBreadcrumbs } from '@/lib/seo/metadata'
 import { trackViewItem, trackAddToCart } from '@/lib/analytics/events'
 import { sortSizeStrings } from '@/lib/utils/sort-sizes'
@@ -42,9 +43,21 @@ export function ProductContent({ slug }: { slug: string }) {
   useEffect(() => {
     fetch('/api/auth/me')
       .then((r) => r.json())
-      .then((data) => { if (data.clientId) setClientId(data.clientId) })
+      .then((data) => {
+        if (!data.clientId) return
+        setClientId(data.clientId)
+        // El corazon nacia siempre vacio aunque el producto ya estuviera
+        // guardado: no habia forma de consultar los favoritos del cliente.
+        return fetch('/api/public/wishlist')
+          .then((r) => r.json())
+          .then((w) => {
+            if (Array.isArray(w?.productIds) && product?.id) {
+              setIsInWishlist(w.productIds.includes(product.id))
+            }
+          })
+      })
       .catch(() => {})
-  }, [])
+  }, [product?.id])
 
   useEffect(() => {
     fetch(`/api/public/catalog/${slug}`)
@@ -71,6 +84,11 @@ export function ProductContent({ slug }: { slug: string }) {
       (!selectedSize || v.size === selectedSize) && (!selectedColor || v.color === selectedColor)
     )
     setSelectedVariant(variant || null)
+    // Al cambiar de talla/color cambia el stock: si la cantidad ya elegida no cabe
+    // en la nueva variante hay que recortarla. Si no, se podían añadir 3 unidades
+    // de una talla con 1 y el fallo no salía hasta pulsar Pagar.
+    const stockVariante = (variant?.total_stock as number) || 0
+    setQuantity(q => (stockVariante > 0 ? Math.min(q, stockVariante) : 1))
   }, [product, selectedSize, selectedColor])
 
   useEffect(() => {
@@ -116,11 +134,16 @@ export function ProductContent({ slug }: { slug: string }) {
     return <div className="text-center py-32 text-gray-400">Producto no encontrado</div>
   }
 
+  // Escaparate: si el producto tiene Título/Descripción web (admin → pestaña
+  // Web), mandan sobre el nombre y la descripción internos.
+  const displayName = publicProductName(product)
+  const displayDescription = publicProductDescription(product)
+
   const rawImages = product.images as string[] | { url: string; alt_text?: string }[] | null
   const images = rawImages && rawImages.length > 0
-    ? rawImages.map((img) => typeof img === 'string' ? { url: img, alt_text: product.name as string } : img)
+    ? rawImages.map((img) => typeof img === 'string' ? { url: img, alt_text: displayName } : img)
     : product.main_image_url
-      ? [{ url: product.main_image_url as string, alt_text: product.name as string }]
+      ? [{ url: product.main_image_url as string, alt_text: displayName }]
       : []
 
   const hasMultiple = images.length > 1
@@ -138,25 +161,28 @@ export function ProductContent({ slug }: { slug: string }) {
   const stock = (selectedVariant?.total_stock as number) || 0
   const canAdd = selectedVariant && stock > 0 && (sizes.length === 0 || selectedSize)
 
+  // Alterna: si ya esta en favoritos lo quita. Antes solo sabia añadir, asi que
+  // desde la tienda no habia manera de deshacerlo.
   const handleAddToWishlist = async () => {
     if (!product?.id) return
     if (!clientId) {
       toast.error('Inicia sesión para guardar favoritos')
       return
     }
+    const quitar = isInWishlist
     setWishlistLoading(true)
     const res = await fetch('/api/public/wishlist', {
-      method: 'POST',
+      method: quitar ? 'DELETE' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ product_id: product.id }),
     })
     setWishlistLoading(false)
     const data = await res.json().catch(() => ({}))
     if (res.ok) {
-      setIsInWishlist(true)
-      toast.success('Añadido a favoritos')
+      setIsInWishlist(!quitar)
+      toast.success(quitar ? 'Quitado de favoritos' : 'Añadido a favoritos')
     } else {
-      toast.error(data.error || 'Error al añadir')
+      toast.error(data.error || (quitar ? 'Error al quitar' : 'Error al añadir'))
     }
   }
 
@@ -189,7 +215,7 @@ export function ProductContent({ slug }: { slug: string }) {
       <ProductSchema product={product as Parameters<typeof ProductSchema>[0]['product']} />
       <BreadcrumbSchema items={buildBreadcrumbs([
         { label: 'Boutique', path: '/boutique' },
-        { label: product.name as string, path: `/boutique/${slug}` },
+        { label: displayName, path: `/boutique/${slug}` },
       ])} />
       <button
         type="button"
@@ -213,7 +239,7 @@ export function ProductContent({ slug }: { slug: string }) {
                 >
                   <Image
                     src={images[activeImage].url}
-                    alt={images[activeImage].alt_text || (product.name as string)}
+                    alt={images[activeImage].alt_text || displayName}
                     fill
                     className="object-cover"
                     sizes="(max-width: 1024px) 100vw, 50vw"
@@ -282,7 +308,7 @@ export function ProductContent({ slug }: { slug: string }) {
 
         {/* Product info */}
         <div>
-          <h1 className="text-3xl md:text-4xl font-display text-prats-navy mb-4 leading-tight">{product.name as string}</h1>
+          <h1 className="text-3xl md:text-4xl font-display text-prats-navy mb-4 leading-tight">{displayName}</h1>
           <p className="text-2xl text-gray-900 mb-10">{formatPrice(price)}</p>
 
           {colors && colors.length > 0 && (
@@ -411,9 +437,9 @@ export function ProductContent({ slug }: { slug: string }) {
             </p>
           )}
 
-          {(product.description as string) && (
+          {displayDescription && (
             <div className="mb-8">
-              <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line">{product.description as string}</p>
+              <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line">{displayDescription}</p>
             </div>
           )}
 
@@ -519,7 +545,7 @@ export function ProductContent({ slug }: { slug: string }) {
             >
               <Image
                 src={images[activeImage].url}
-                alt={images[activeImage].alt_text || (product.name as string)}
+                alt={images[activeImage].alt_text || displayName}
                 fill
                 className="object-contain select-none"
                 sizes="92vw"

@@ -23,7 +23,8 @@ import {
   ExternalLink, FileDown, Printer, Download,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { formatDate } from '@/lib/utils'
+import { formatDate, formatCurrency } from '@/lib/utils'
+import { todayLocalISODate } from '@/lib/dates'
 import { downloadExcel } from '@/lib/excel/export'
 import { useList } from '@/hooks/use-list'
 import { useActiveStore } from '@/hooks/use-store'
@@ -235,17 +236,18 @@ export function ArreglosListContent({ basePath = '/admin' }: { basePath?: string
               <TableHead>Prenda</TableHead>
               <TableHead>Oficial</TableHead>
               <TableHead>Estado</TableHead>
+              <TableHead>Cobro</TableHead>
               <TableHead className="w-12 text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               Array.from({ length: 8 }).map((_, i) => (
-                <TableRow key={i}>{Array.from({ length: 8 }).map((_, j) => <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>)}</TableRow>
+                <TableRow key={i}>{Array.from({ length: 9 }).map((_, j) => <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>)}</TableRow>
               ))
             ) : alterations.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground py-12">
+                <TableCell colSpan={9} className="text-center text-muted-foreground py-12">
                   <Shirt className="mx-auto h-10 w-10 mb-3 opacity-30" />
                   No hay arreglos{search ? ` para "${search}"` : ''}
                 </TableCell>
@@ -284,6 +286,19 @@ export function ArreglosListContent({ basePath = '/admin' }: { basePath?: string
                           ))}
                         </SelectContent>
                       </Select>
+                    </TableCell>
+                    <TableCell>
+                      {/* Un arreglo con precio y sin marca de cobro cuenta como deuda
+                          del cliente (aviso del TPV, ficha y Cobros pendientes). */}
+                      {Number(a.sale_price ?? 0) <= 0 || a.status === 'cancelled' || a.is_included ? (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      ) : a.sale_id || a.payment_method ? (
+                        <Badge variant="outline" className="text-xs bg-green-100 text-green-700 border-green-200">Cobrado</Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-xs bg-amber-100 text-amber-700 border-amber-200 tabular-nums">
+                          Debe {formatCurrency(Number(a.sale_price))}
+                        </Badge>
+                      )}
                     </TableCell>
                     <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>
@@ -362,7 +377,9 @@ function NewAlterationDialog({
   const [phone, setPhone] = useState('')
   const [garmentType, setGarmentType] = useState('')
   const [description, setDescription] = useState('')
-  const [alterationDate, setAlterationDate] = useState(new Date().toISOString().split('T')[0])
+  // Fecha LOCAL: con toISOString() un arreglo dado de alta de noche se
+  // guardaba con la fecha del día anterior (UTC).
+  const [alterationDate, setAlterationDate] = useState(todayLocalISODate())
   const [estimated, setEstimated] = useState('')
   const [officialId, setOfficialId] = useState('')
   const [costPrice, setCostPrice] = useState('')
@@ -426,7 +443,7 @@ function NewAlterationDialog({
     setClientId(''); setClientName('')
     setOrders([]); setOrderId('')
     setPhone(''); setGarmentType(''); setDescription('')
-    setAlterationDate(new Date().toISOString().split('T')[0])
+    setAlterationDate(todayLocalISODate())
     setEstimated(''); setOfficialId(''); setCostPrice(''); setSalePrice(''); setNotes('')
   }
 

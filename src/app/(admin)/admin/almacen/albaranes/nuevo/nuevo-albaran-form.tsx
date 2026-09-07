@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Trash2, Plus, Search } from 'lucide-react'
+import { Trash2, Plus, Search, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { listPhysicalWarehouses } from '@/actions/products'
 import {
@@ -36,6 +36,9 @@ export function NuevoAlbaranForm() {
   const [lines, setLines] = useState<Line[]>([])
   const [variantSearch, setVariantSearch] = useState('')
   const [variantOptions, setVariantOptions] = useState<any[]>([])
+  // Envío en vuelo: el alta tarda uno o dos segundos y sin esta bandera el
+  // segundo clic creaba un albarán duplicado (y confirmado, moviendo stock).
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     listPhysicalWarehouses().then((r) => {
@@ -86,7 +89,9 @@ export function NuevoAlbaranForm() {
   }
 
   const save = async (confirm: boolean) => {
+    if (saving) return
     if (!canSubmit) return toast.error('Completa líneas y almacenes antes de guardar')
+    setSaving(true)
     const payload = {
       type,
       from_warehouse_id: fromWarehouseId || null,
@@ -101,14 +106,28 @@ export function NuevoAlbaranForm() {
         sort_order: idx,
       })),
     }
-    const created = await createDeliveryNote(payload)
-    if (!created.success || !created.data?.id) return toast.error(created.success ? 'No se pudo crear albarán' : created.error)
-    if (confirm) {
-      const confirmed = await confirmDeliveryNote(created.data.id)
-      if (!confirmed.success) return toast.error(confirmed.error || 'No se pudo confirmar')
+    try {
+      const created = await createDeliveryNote(payload)
+      if (!created.success || !created.data?.id) {
+        setSaving(false)
+        return toast.error(created.success ? 'No se pudo crear albarán' : created.error)
+      }
+      if (confirm) {
+        const confirmed = await confirmDeliveryNote(created.data.id)
+        if (!confirmed.success) {
+          setSaving(false)
+          return toast.error(confirmed.error || 'No se pudo confirmar')
+        }
+      }
+      toast.success(confirm ? 'Albarán confirmado' : 'Borrador guardado')
+      // A propósito no se reactiva la bandera: el botón sigue bloqueado
+      // mientras se navega a la ficha del albarán recién creado.
+      router.push(`/admin/almacen/albaranes/${created.data.id}`)
+    } catch (err) {
+      // Si la llamada revienta (red), hay que devolverle el botón al usuario.
+      setSaving(false)
+      toast.error(err instanceof Error ? err.message : 'Error al guardar el albarán')
     }
-    toast.success(confirm ? 'Albarán confirmado' : 'Borrador guardado')
-    router.push(`/admin/almacen/albaranes/${created.data.id}`)
   }
 
   return (
@@ -240,11 +259,11 @@ export function NuevoAlbaranForm() {
 
       <div className="flex justify-end gap-2">
         <Button variant="outline" onClick={() => router.back()}>Cancelar</Button>
-        <Button variant="outline" className="gap-2" onClick={() => save(false)}>
-          <Plus className="h-4 w-4" /> Guardar borrador
+        <Button variant="outline" className="gap-2" disabled={saving} onClick={() => save(false)}>
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Guardar borrador
         </Button>
-        <Button className="gap-2 bg-prats-navy hover:bg-prats-navy-light" onClick={() => save(true)}>
-          <Search className="h-4 w-4" /> Confirmar albarán
+        <Button className="gap-2 bg-prats-navy hover:bg-prats-navy-light" disabled={saving} onClick={() => save(true)}>
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Confirmar albarán
         </Button>
       </div>
     </div>

@@ -17,11 +17,15 @@ const FULL_ADMIN_ROLES = ['administrador', 'super_admin']
 
 export async function checkUserPermission(userId: string, permissionCode: string): Promise<boolean> {
   const admin = createAdminClient()
-  const { data: userRoles } = await admin
+  const { data: userRoles, error: rolesError } = await admin
     .from('user_roles')
     .select('role_id, roles!inner(name)')
     .eq('user_id', userId)
 
+  // Un fallo de consulta no es "sin roles": devolver false aqui negaria el
+  // acceso a quien si lo tiene. Se propaga y el wrapper de acciones lo
+  // distingue ("Error al verificar permisos", no "Sin permisos").
+  if (rolesError) throw new Error(`No se pudieron verificar los permisos: ${rolesError.message}`)
   if (!userRoles || userRoles.length === 0) return false
 
   // Administrador tiene acceso a todo sin necesidad de que el permiso esté en la BD
@@ -74,11 +78,15 @@ export async function checkUserAnyPermission(userId: string, permissionCodes: st
 
   const admin = createAdminClient()
 
-  const { data: userRoles } = await admin
+  const { data: userRoles, error: rolesError } = await admin
     .from('user_roles')
     .select('role_id, roles!inner(name)')
     .eq('user_id', userId)
 
+  // Un fallo de consulta no es "sin roles": devolver false aqui negaria el
+  // acceso a quien si lo tiene. Se propaga y el wrapper de acciones lo
+  // distingue ("Error al verificar permisos", no "Sin permisos").
+  if (rolesError) throw new Error(`No se pudieron verificar los permisos: ${rolesError.message}`)
   if (!userRoles || userRoles.length === 0) return false
 
   // Administrador → acceso total
@@ -719,11 +727,19 @@ export async function requirePermission(permissionCode: string) {
 
   // Consulta directa con admin client (salta RLS, sin depender de RPC)
   const admin = createAdminClient()
-  const { data: match } = await admin
+  const { data: match, error: rolesError } = await admin
     .from('user_roles')
     .select('role_id, roles!inner(name, role_permissions!inner(permissions!inner(code)))')
     .eq('user_id', user.id)
     .limit(100)
+
+  // Un fallo de la consulta NO es "este usuario no tiene permisos": si se
+  // ignora, `match` queda null, no se detecta el rol y hasta un administrador
+  // acaba en /admin/sin-permisos. Mejor romper con un error visible que negar
+  // el acceso a quien si lo tiene.
+  if (rolesError) {
+    throw new Error(`No se pudieron verificar los permisos: ${rolesError.message}`)
+  }
 
   // Extraer todos los códigos de permiso del usuario y los nombres de rol
   const codes = new Set<string>()
@@ -755,11 +771,19 @@ export async function requireAnyPermission(permissionCodes: string[]) {
   if (!user) redirect('/auth/login')
 
   const admin = createAdminClient()
-  const { data: match } = await admin
+  const { data: match, error: rolesError } = await admin
     .from('user_roles')
     .select('role_id, roles!inner(name, role_permissions!inner(permissions!inner(code)))')
     .eq('user_id', user.id)
     .limit(100)
+
+  // Un fallo de la consulta NO es "este usuario no tiene permisos": si se
+  // ignora, `match` queda null, no se detecta el rol y hasta un administrador
+  // acaba en /admin/sin-permisos. Mejor romper con un error visible que negar
+  // el acceso a quien si lo tiene.
+  if (rolesError) {
+    throw new Error(`No se pudieron verificar los permisos: ${rolesError.message}`)
+  }
 
   const codes = new Set<string>()
   const roleCodes = new Set<string>()

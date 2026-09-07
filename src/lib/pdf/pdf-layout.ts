@@ -228,8 +228,20 @@ export function buildTotals(params: {
   irpfRate: number
   irpfAmount: number
   total: number
+  /** Líneas del documento: de ellas se deriva el tipo de IVA que se rotula. */
+  lines?: PdfLine[]
 }): Content {
-  const { subtotal, taxRate, taxAmount, irpfRate, irpfAmount, total } = params
+  const { subtotal, taxRate, taxAmount, irpfRate, irpfAmount, total, lines } = params
+  // El rótulo del IVA se saca de las LÍNEAS, no de la cabecera: `invoices.tax_rate`
+  // se fija a 21 al crear la factura y ya no se recalcula, así que un documento con
+  // líneas al 0% o al 10% imprimía "IVA (21%)" contradiciendo su propia tabla de
+  // conceptos. Sin líneas se mantiene el tipo de cabecera (comportamiento previo).
+  const rates = [...new Set((lines ?? []).map((l) => n(l.tax_rate)))]
+  const ivaLabel = rates.length === 1
+    ? `IVA (${rates[0]}%)`
+    : rates.length > 1
+      ? 'IVA (varios tipos)'
+      : `IVA (${n(taxRate)}%)`
   return {
     columns: [
       { text: '', width: '*' },
@@ -243,7 +255,7 @@ export function buildTotals(params: {
             fontSize: 10,
           },
           {
-            text: `IVA (${n(taxRate)}%):         ${eurFormat(n(taxAmount))}`,
+            text: `${ivaLabel}:         ${eurFormat(n(taxAmount))}`,
             alignment: 'right',
             margin: [0, 0, 0, 4] as [number, number, number, number],
             fontSize: 10,

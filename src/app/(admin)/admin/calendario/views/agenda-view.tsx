@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { CheckCircle2, XCircle, Ban, Plus, CalendarDays } from 'lucide-react'
 import type { CalendarEvent } from '../calendar-content'
+import { toLocalISODate, todayLocalISODate } from '@/lib/dates'
 
 const WEEKDAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
 const WEEKDAYS_LONG = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
@@ -32,7 +33,7 @@ export function AgendaView({ events, onSlotClick, onEventClick }: {
   onSlotClick: (date: string, time: string) => void
   onEventClick: (event: CalendarEvent) => void
 }) {
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayLocalISODate()
 
   // Agrupar por fecha, ordenar días y citas
   const byDate = new Map<string, CalendarEvent[]>()

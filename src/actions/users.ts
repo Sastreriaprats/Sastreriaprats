@@ -149,7 +149,7 @@ function buildStoreAssignments(
   }
 }
 
-export async function createAdminUser(input: CreateUserInput): Promise<{ data?: { userId: string; tempPassword: string }; error?: string }> {
+export async function createAdminUser(input: CreateUserInput): Promise<{ data?: { userId: string; tempPassword: string; storesWarning?: string }; error?: string }> {
   try {
     const supabase = await createServerSupabaseClient()
     const { data: { user: currentUser } } = await supabase.auth.getUser()
@@ -201,8 +201,13 @@ export async function createAdminUser(input: CreateUserInput): Promise<{ data?: 
   }
   const storeRows = (assignments.rows ?? []).map((r) => ({ ...r, user_id: userId }))
   const { error: storeErr } = await admin.from('user_stores').insert(storeRows)
+  // No abortamos (el usuario y su rol ya existen en Auth y no hay vuelta atrás),
+  // pero el fallo TIENE que llegar a la pantalla: sin tiendas el empleado no
+  // puede abrir caja ni vender y nadie relacionaba el problema con el alta.
+  let storesWarning: string | undefined
   if (storeErr) {
     console.error('[createAdminUser] Error asignando tiendas:', storeErr)
+    storesWarning = `El usuario se creó, pero NO se pudieron asignar las tiendas (${storeErr.message}). Asígnaselas en Editar usuario antes de que entre: sin tienda no puede abrir caja ni vender.`
   }
 
   const { data: role } = await admin.from('roles').select('name').eq('id', input.roleId).single()
@@ -218,7 +223,7 @@ export async function createAdminUser(input: CreateUserInput): Promise<{ data?: 
   })
 
     revalidatePath('/admin/configuracion')
-    return { data: { userId, tempPassword } }
+    return { data: { userId, tempPassword, storesWarning } }
   } catch (err) {
     console.error('[createAdminUser]', err)
     return { error: err instanceof Error ? err.message : 'Error al crear usuario' }
@@ -229,7 +234,14 @@ export interface UpdateUserInput {
   userId: string
   firstName?: string
   lastName?: string
+  /** Rol unico (compatibilidad). Reemplaza TODOS los roles del usuario. */
   roleId?: string
+  /**
+   * Lista completa de roles del usuario. Preferido sobre `roleId`: el formulario
+   * solo enseña un rol, pero hay usuarios con dos (p.ej. administrador +
+   * informes_comisiones) y con `roleId` el segundo se perdia al guardar.
+   */
+  roleIds?: string[]
   /** Si se pasa, reemplaza todas las tiendas asignadas. Si es undefined, no se toca user_stores. */
   storeIds?: string[]
   /** Tienda principal al reemplazar. Debe estar en storeIds. */
@@ -265,7 +277,9 @@ export async function updateAdminUser(input: UpdateUserInput): Promise<{ data?: 
   }
 
   if (input.isActive !== undefined) {
-    if (input.userId === currentUser.id) return { error: 'No puedes desactivarte a ti mismo' }
+    if (input.isActive === false && input.userId === currentUser.id) {
+      return { error: 'No puedes desactivarte a ti mismo' }
+    }
     await admin.from('profiles').update({
       is_active: input.isActive,
       status: input.isActive ? 'active' : 'inactive',
@@ -276,24 +290,35 @@ export async function updateAdminUser(input: UpdateUserInput): Promise<{ data?: 
     changes.is_active = { old: !input.isActive, new: input.isActive }
   }
 
-  if (input.roleId) {
-    // Guardamos los roles actuales ANTES de borrar: si el insert del nuevo rol
-    // fallara, se restauran (antes el usuario podía quedarse sin ningún rol).
+  // `roleIds` es la lista COMPLETA de roles; `roleId` se mantiene por
+  // compatibilidad y equivale a una lista de uno.
+  const nextRoleIds = input.roleIds ?? (input.roleId ? [input.roleId] : undefined)
+  if (nextRoleIds && nextRoleIds.length > 0) {
+    const wanted = [...new Set(nextRoleIds)]
+    // Guardamos los roles actuales ANTES de borrar: si el insert fallara, se
+    // restauran (antes el usuario podía quedarse sin ningún rol).
     const { data: prevRoles } = await admin.from('user_roles').select('role_id').eq('user_id', input.userId)
-    const { error: delRoleErr } = await admin.from('user_roles').delete().eq('user_id', input.userId)
-    if (delRoleErr) return { error: 'Error al actualizar el rol: ' + delRoleErr.message }
-    const { error: insRoleErr } = await admin.from('user_roles').insert({ user_id: input.userId, role_id: input.roleId })
-    if (insRoleErr) {
-      if (prevRoles?.length) {
-        const { error: restoreErr } = await admin.from('user_roles').insert(
-          (prevRoles as { role_id: string }[]).map((r) => ({ user_id: input.userId, role_id: r.role_id }))
-        )
-        if (restoreErr) console.error('[updateAdminUser] restauración de roles falló:', restoreErr)
+    const prevIds = (prevRoles as { role_id: string }[] | null ?? []).map((r) => r.role_id)
+    const sameSet = prevIds.length === wanted.length && prevIds.every((id) => wanted.includes(id))
+    if (!sameSet) {
+      const { error: delRoleErr } = await admin.from('user_roles').delete().eq('user_id', input.userId)
+      if (delRoleErr) return { error: 'Error al actualizar el rol: ' + delRoleErr.message }
+      const { error: insRoleErr } = await admin.from('user_roles').insert(
+        wanted.map((role_id) => ({ user_id: input.userId, role_id }))
+      )
+      if (insRoleErr) {
+        if (prevIds.length) {
+          const { error: restoreErr } = await admin.from('user_roles').insert(
+            prevIds.map((role_id) => ({ user_id: input.userId, role_id }))
+          )
+          if (restoreErr) console.error('[updateAdminUser] restauración de roles falló:', restoreErr)
+        }
+        return { error: 'Error al asignar el rol: ' + insRoleErr.message }
       }
-      return { error: 'Error al asignar el rol: ' + insRoleErr.message }
+      const { data: roleRows } = await admin.from('roles').select('id, name').in('id', [...new Set([...wanted, ...prevIds])])
+      const nameOf = (id: string) => (roleRows as { id: string; name: string }[] | null ?? []).find((r) => r.id === id)?.name ?? id
+      changes.role = { old: prevIds.map(nameOf).join(', '), new: wanted.map(nameOf).join(', ') }
     }
-    const { data: role } = await admin.from('roles').select('name').eq('id', input.roleId).single()
-    changes.role = { old: '?', new: role?.name ?? input.roleId }
   }
 
   if (input.storeIds !== undefined) {
@@ -351,18 +376,23 @@ export async function deleteAdminUser(userId: string): Promise<{ error?: string 
     // Obtener datos del usuario antes de eliminar (para auditoría)
     const { data: profile } = await admin.from('profiles').select('full_name, email').eq('id', userId).single()
 
-    // Eliminar relaciones
-    await admin.from('user_roles').delete().eq('user_id', userId)
-    await admin.from('user_stores').delete().eq('user_id', userId)
-
-    // Eliminar perfil
-    await admin.from('profiles').delete().eq('id', userId)
-
-    // Eliminar usuario de auth
+    // Basta con eliminar el usuario de auth: `profiles` cuelga de auth.users con
+    // ON DELETE CASCADE, y `user_roles` / `user_stores` cuelgan de profiles
+    // igual (mig 001), asi que Postgres limpia todo de una vez.
+    //
+    // Antes se borraban las relaciones A MANO y sin mirar el error, y solo
+    // despues se intentaba el borrado real: cuando este fallaba -cualquier
+    // empleado con ventas, pedidos o cobros asociados- el usuario se quedaba
+    // sin rol ni tiendas pero seguia existiendo, sin poder entrar y sin forma
+    // evidente de arreglarlo. Ahora, si no se puede borrar, no se toca nada.
     const { error: authErr } = await admin.auth.admin.deleteUser(userId)
     if (authErr) {
       console.error('[deleteAdminUser] Error eliminando auth user:', authErr)
-      return { error: 'Error al eliminar usuario de autenticación: ' + authErr.message }
+      return {
+        error: 'No se puede eliminar este usuario porque tiene registros asociados '
+          + '(ventas, pedidos, cobros...). Desactivalo en su lugar para impedirle el acceso. '
+          + `Detalle: ${authErr.message}`,
+      }
     }
 
     await logAudit({

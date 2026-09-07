@@ -14,11 +14,20 @@ export default async function WishlistPage() {
     .eq('profile_id', user.id)
     .single()
 
-  const { data: wishlist } = await admin
+  // Sin ficha enlazada no hay client_id: la consulta mandaba
+  // client_id=eq.undefined a PostgREST (22P02 sobre columna uuid) y el error se
+  // tragaba, quedando un falso "no tienes favoritos".
+  if (!client?.id) {
+    return <WishlistContent items={[]} clientId="" />
+  }
+
+  const { data: wishlist, error: wishlistError } = await admin
     .from('client_wishlist')
     .select('*, products(id, name, web_slug, base_price, price_with_tax, main_image_url, brand)')
-    .eq('client_id', client?.id)
+    .eq('client_id', client.id)
     .order('created_at', { ascending: false })
 
-  return <WishlistContent items={wishlist || []} clientId={client?.id || ''} />
+  if (wishlistError) console.error('[favoritos] client_wishlist:', wishlistError.message)
+
+  return <WishlistContent items={wishlist || []} clientId={client.id} />
 }

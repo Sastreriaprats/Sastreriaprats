@@ -74,6 +74,11 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
   // registro. Permiten que handleSave detecte qué tab cambió y guarde TODOS los
   // registros tocados (body + camisería), no solo el de la pestaña activa.
   const loadedBodyRef = useRef<Record<string, string>>({})
+  // Solo TRUE si el usuario ha escrito de verdad en un campo de camiseria en
+  // esta sesion. Comparar los valores contra los cargados no vale: "Nuevas
+  // medidas" vacia el formulario y esa comparacion daba "cambiado", asi que
+  // se guardaba camiseria en blanco y se perdian las medidas del cliente.
+  const camisaDirtyRef = useRef(false)
   const loadedCamisaRef = useRef<Record<string, string>>({})
 
   const [garmentGroups, setGarmentGroups] = useState<GarmentGroup[]>([])
@@ -278,6 +283,7 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
   }, [currentGroup?.id, currentGroup?.name, loadCamiseriaMeasurements])
 
   const setValue = useCallback((key: string, val: string) => {
+    if (key.startsWith('camiseria_')) camisaDirtyRef.current = true
     setValues((prev) => ({ ...prev, [key]: val }))
     onValuesChange?.()
   }, [onValuesChange])
@@ -309,7 +315,6 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
       //    iniciales…, normalmente fijadas desde la ficha del pedido) se
       //    PRESERVAN para no borrarlas al guardar desde aquí.
       let camisaSavePayload: Record<string, string> | null = null
-      let camisaChanged = false
       if (camisaGroup) {
         const editableCodes = camisaGroup.fields
           .filter((f) => f.field_group === 'medidas' && (f.field_type === 'number' || f.field_type === 'decimal'))
@@ -320,9 +325,6 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
         edited.talla = tallaVal !== undefined ? String(tallaVal) : String(loadedCamisaRef.current.talla ?? '')
         const comentariosVal = values[valueKey('camiseria', 'comentarios')]
         edited.comentarios = comentariosVal !== undefined ? String(comentariosVal) : String(loadedCamisaRef.current.comentarios ?? '')
-        camisaChanged = [...editableCodes, 'talla', 'comentarios'].some(
-          (code) => String(edited[code] ?? '') !== String(loadedCamisaRef.current[code] ?? '')
-        )
         camisaSavePayload = { ...loadedCamisaRef.current, ...edited }
       }
 
@@ -332,7 +334,7 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
       // de camisería se perdían si el sastre cambiaba de pestaña antes de
       // guardar (el resto de prendas comparten el registro body y por eso sí
       // se conservaban).
-      const shouldSaveCamisa = camisaGroup != null && camisaSavePayload != null && (activeIsCamisa || camisaChanged)
+      const shouldSaveCamisa = camisaGroup != null && camisaSavePayload != null && (activeIsCamisa || camisaDirtyRef.current)
       const shouldSaveBody = activeIsCamisa ? bodyChanged : true
 
       if (shouldSaveCamisa && camisaGroup && camisaSavePayload) {
@@ -363,6 +365,7 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
       toast.success(
         activeIsCamisa && !shouldSaveBody ? 'Medidas de camisería guardadas' : 'Medidas guardadas correctamente'
       )
+      camisaDirtyRef.current = false
       if (shouldSaveCamisa && camisaGroup) await loadCamiseriaMeasurements(camisaGroup.id)
       if (shouldSaveBody) await loadMeasurements(bodyGarmentTypeId)
       return true
@@ -703,6 +706,7 @@ export function MedidasPageContent({ clientId, clientName, sastreName, saveRef, 
               type="button"
               onClick={() => {
                 setValues({})
+                camisaDirtyRef.current = false
                 setSelectedHistoryId(null)
                 toast.success('Formulario listo para medidas nuevas. Rellena los campos y guarda.')
               }}

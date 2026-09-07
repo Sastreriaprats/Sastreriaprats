@@ -19,6 +19,9 @@ export function ResetForm() {
   const [confirm, setConfirm] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  // ¿Ha canjeado ESTA página el token? Es lo único que autoriza a saltarse el
+  // verifyOtp en un reintento; que exista una sesión no prueba nada.
+  const [otpVerified, setOtpVerified] = useState(false)
 
   useEffect(() => {
     // Flujo actual: el email trae ?token_hash=… y se canjea con verifyOtp al
@@ -28,7 +31,14 @@ export function ResetForm() {
     const th = new URLSearchParams(window.location.search).get('token_hash')
     if (th) {
       setTokenHash(th)
-      setStage('ready')
+      // Si el navegador YA traía sesión, no puede ser la del token (el canje aún
+      // no ha ocurrido): es la de otra persona, o la de un intento anterior. Se
+      // cierra en local antes de enseñar el formulario para no acabar
+      // cambiándole la contraseña a quien no toca.
+      supabase.auth.getSession().then(async ({ data: { session } }) => {
+        if (session) await supabase.auth.signOut({ scope: 'local' })
+        setStage('ready')
+      })
       return
     }
 
@@ -61,21 +71,21 @@ export function ResetForm() {
       return
     }
     setIsSaving(true)
-    if (tokenHash) {
-      // Si un intento anterior ya canjeó el token, hay sesión: no repetir
-      // verifyOtp (fallaría por token consumido).
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) {
-        const { error: otpError } = await supabase.auth.verifyOtp({
-          type: 'recovery',
-          token_hash: tokenHash,
-        })
-        if (otpError) {
-          setIsSaving(false)
-          setStage('invalid')
-          return
-        }
+    if (tokenHash && !otpVerified) {
+      // "Hay sesión" NO prueba que sea la del token: sólo se salta el canje si lo
+      // hizo ESTA página (otpVerified), que es el caso de reintentar tras un
+      // updateUser fallido. Antes, una sesión ajena colaba directa a updateUser y
+      // cambiaba la contraseña del usuario equivocado.
+      const { error: otpError } = await supabase.auth.verifyOtp({
+        type: 'recovery',
+        token_hash: tokenHash,
+      })
+      if (otpError) {
+        setIsSaving(false)
+        setStage('invalid')
+        return
       }
+      setOtpVerified(true)
     }
     const { error } = await supabase.auth.updateUser({ password })
     setIsSaving(false)

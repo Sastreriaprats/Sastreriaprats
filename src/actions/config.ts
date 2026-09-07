@@ -53,25 +53,28 @@ export async function getStoresList(): Promise<{
   }
 }
 
+// Los campos anulables aceptan null (no solo undefined): el diálogo de tienda
+// manda null para poder VACIAR una columna, y usa el mismo payload para crear y
+// para editar.
 export async function createStoreAction(data: {
   code: string
   name: string
   display_name?: string
   store_type: string
-  address?: string
-  city?: string
-  postal_code?: string
-  province?: string
-  country?: string
-  phone?: string
-  email?: string
+  address?: string | null
+  city?: string | null
+  postal_code?: string | null
+  province?: string | null
+  country?: string | null
+  phone?: string | null
+  email?: string | null
   opening_hours?: Record<string, any>
-  latitude?: number
-  longitude?: number
-  google_maps_url?: string
-  fiscal_name?: string
-  fiscal_nif?: string
-  fiscal_address?: string
+  latitude?: number | null
+  longitude?: number | null
+  google_maps_url?: string | null
+  fiscal_name?: string | null
+  fiscal_nif?: string | null
+  fiscal_address?: string | null
   default_cash_fund?: number
   order_prefix?: string
   slug?: string
@@ -412,7 +415,11 @@ export async function createRoleAction(data: {
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
-    const hasPerm = await checkUserPermission(user.id, 'config.manage_roles')
+    // 'config.manage_roles' NO existe en el catálogo (76 permisos), así que
+    // exigirlo dejaba la acción reservada de facto al administrador, que sólo
+    // pasa por el bypass de rol. 'config.edit' es el código vivo, y es además el
+    // que ya abre la pestaña "Roles y Permisos" en Configuración.
+    const hasPerm = await checkUserPermission(user.id, 'config.edit')
     if (!hasPerm) return { error: 'Sin permisos para gestionar roles' }
 
     const admin = createAdminClient()
@@ -449,7 +456,8 @@ export async function updateRolePermissionsAction(
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
-    const hasPerm = await checkUserPermission(user.id, 'config.manage_roles')
+    // 'config.manage_roles' no existe en el catálogo: se usa 'config.edit'.
+    const hasPerm = await checkUserPermission(user.id, 'config.edit')
     if (!hasPerm) return { error: 'Sin permisos para gestionar roles' }
 
     const admin = createAdminClient()
@@ -614,7 +622,9 @@ export async function createGarmentTypeAction(data: {
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
-    const hasPerm = await checkUserPermission(user.id, 'config.manage_garment_types')
+    // 'config.manage_garment_types' no existe en el catálogo: se usa 'config.edit',
+    // que es el permiso con el que ya se abre la pestaña "Prendas y Medidas".
+    const hasPerm = await checkUserPermission(user.id, 'config.edit')
     if (!hasPerm) return { error: 'Sin permisos para gestionar tipos de prenda' }
 
     const admin = createAdminClient()
@@ -650,7 +660,8 @@ export async function updateGarmentTypeAction(
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
-    const hasPerm = await checkUserPermission(user.id, 'config.manage_garment_types')
+    // 'config.manage_garment_types' no existe en el catálogo: se usa 'config.edit'.
+    const hasPerm = await checkUserPermission(user.id, 'config.edit')
     if (!hasPerm) return { error: 'Sin permisos para gestionar tipos de prenda' }
 
     const admin = createAdminClient()
@@ -684,7 +695,9 @@ export async function createMeasurementFieldAction(data: {
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
-    const hasPerm = await checkUserPermission(user.id, 'config.manage_measurement_fields')
+    // 'config.manage_measurement_fields' no existe en el catálogo: se usa
+    // 'config.edit', el permiso con el que ya se abre "Prendas y Medidas".
+    const hasPerm = await checkUserPermission(user.id, 'config.edit')
     if (!hasPerm) return { error: 'Sin permisos para gestionar campos de medida' }
 
     const admin = createAdminClient()
@@ -707,7 +720,8 @@ export async function updateMeasurementFieldAction(
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
-    const hasPerm = await checkUserPermission(user.id, 'config.manage_measurement_fields')
+    // 'config.manage_measurement_fields' no existe en el catálogo: se usa 'config.edit'.
+    const hasPerm = await checkUserPermission(user.id, 'config.edit')
     if (!hasPerm) return { error: 'Sin permisos para gestionar campos de medida' }
 
     const admin = createAdminClient()
@@ -730,7 +744,8 @@ export async function deleteMeasurementFieldAction(id: string) {
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
-    const hasPerm = await checkUserPermission(user.id, 'config.manage_measurement_fields')
+    // 'config.manage_measurement_fields' no existe en el catálogo: se usa 'config.edit'.
+    const hasPerm = await checkUserPermission(user.id, 'config.edit')
     if (!hasPerm) return { error: 'Sin permisos para gestionar campos de medida' }
 
     const admin = createAdminClient()

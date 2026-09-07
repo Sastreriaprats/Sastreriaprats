@@ -74,9 +74,27 @@ const SELECT_ORDERS = `
   tailoring_order_lines ( id, sort_order, line_type, configuration, is_gift, unit_price, garment_types ( name, code ) )
 `
 
-/** Devuelve el siguiente número de talón (solo el número, ej. 46). */
-export async function getNextTalonNumber(): Promise<number> {
+/** Devuelve el siguiente número de talón (solo el número, ej. 46) de la SERIE de
+ *  la tienda. Antes miraba "el último pedido creado" de toda la tabla, así que un
+ *  pedido de Wellington hacía que la ficha de Pinzón propusiera el talón de la
+ *  otra serie (y dos tiendas podían acabar proponiendo el mismo número). Se
+ *  calcula con el MISMO helper que numera los pedidos (getNextNumber = máximo+1
+ *  de la serie del prefijo). Sin storeId se conserva el comportamiento anterior. */
+export async function getNextTalonNumber(storeId?: string): Promise<number> {
   const supabase = createAdminClient()
+  if (storeId) {
+    const { data: store } = await supabase
+      .from('stores')
+      .select('order_prefix')
+      .eq('id', storeId)
+      .single()
+    const prefix = (store as { order_prefix?: string } | null)?.order_prefix
+    if (prefix) {
+      const next = await getNextNumber('tailoring_orders', 'order_number', prefix)
+      const match = String(next).match(/(\d+)$/)
+      if (match) return parseInt(match[1], 10)
+    }
+  }
   const { data } = await supabase
     .from('tailoring_orders')
     .select('order_number')
@@ -175,8 +193,11 @@ export const listOrders = protectedAction<ListParams & { status?: string }, List
       const pageSize = params.pageSize || 25
       const { data: evalData, error: evalError } = await evalQuery.range(0, 99999)
       if (evalError) {
+        // Antes se devolvia un listado vacio con exito: la pantalla decia "no
+        // hay pedidos sin precio" y los contadores a 0 como si fuera el dato
+        // real. useList ya muestra el error y conserva la pagina anterior.
         console.error('[listOrders] unpriced eval:', evalError)
-        return success({ data: [], total: 0, page, pageSize, totalPages: 0, statusCounts: {}, totalAll: 0, aggregates: { total: 0, total_paid: 0, total_pending: 0 } })
+        return failure(evalError.message || 'No se pudo cargar el listado de pedidos')
       }
 
       const allUnpriced = (evalData || []).filter(
@@ -251,7 +272,7 @@ export const listOrders = protectedAction<ListParams & { status?: string }, List
       const { data, count, error } = await query.range(from, to)
       if (error) {
         console.error('[listOrders] overdue:', error)
-        return success({ data: [], total: 0, page, pageSize, totalPages: 0, statusCounts: {}, totalAll: 0 })
+        return failure(error.message || 'No se pudo cargar el listado de pedidos retrasados')
       }
       result = {
         data: (data || []) as any[],
@@ -341,7 +362,25 @@ export const listOrders = protectedAction<ListParams & { status?: string }, List
     }
     if (searchOr) sumsQuery = sumsQuery.or(searchOr)
     if (params.storeId) sumsQuery = sumsQuery.eq('store_id', params.storeId)
-    const { data: sumsData } = await sumsQuery.range(0, 99999)
+    // PostgREST corta toda consulta en 1.000 filas y `range(0, 99999)` NO lo
+    // evita (se traduce a offset+limit y el servidor lo vuelve a recortar): en
+    // cuanto los filtros dejasen pasar mas de 1.000 pedidos, la fila de Totales
+    // sumaba solo los 1.000 primeros. Leemos por paginas con un orden estable,
+    // porque sin `order` el reparto entre paginas no esta garantizado y se
+    // pueden repetir o perder filas. El `.order` va fuera del bucle: acumula.
+    const SUMS_PAGE = 1000
+    sumsQuery = sumsQuery.order('id', { ascending: true })
+    const sumsData: Array<{ total: number | string | null; total_paid: number | string | null; total_pending: number | string | null }> = []
+    for (let offset = 0; ; offset += SUMS_PAGE) {
+      const { data: sumsChunk, error: sumsError } = await sumsQuery.range(offset, offset + SUMS_PAGE - 1)
+      if (sumsError) {
+        console.error('[listOrders] sums:', sumsError)
+        return failure(sumsError.message || 'No se pudieron calcular los totales del listado')
+      }
+      const batch = (sumsChunk || []) as unknown as typeof sumsData
+      sumsData.push(...batch)
+      if (batch.length < SUMS_PAGE) break
+    }
     const aggregates = (sumsData || []).reduce(
       (
         acc: { total: number; total_paid: number; total_pending: number },
@@ -433,6 +472,16 @@ export const getOrder = protectedAction<string, any>(
     order.stores = storeData ?? null
     order.tailoring_order_state_history = stateHistory ?? []
     order.tailoring_fittings = fittings ?? []
+
+    // Cobros del pedido, el más reciente primero. `tailoring_orders` NO guarda
+    // forma de pago, así que sin esto el ticket de complementos/boutique no
+    // tenía de dónde sacarla y estampaba "Tarjeta" por defecto.
+    const { data: orderPaymentsRows } = await admin
+      .from('tailoring_order_payments')
+      .select('payment_method, amount, payment_date')
+      .eq('tailoring_order_id', orderId)
+      .order('payment_date', { ascending: false })
+    order.tailoring_order_payments = orderPaymentsRows ?? []
 
     // Enriquecer líneas con sus joins
     const lines = (orderLines ?? []) as Record<string, unknown>[]
@@ -647,7 +696,9 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
       if (client) clientName = (client as any).full_name || [ (client as any).first_name, (client as any).last_name ].filter(Boolean).join(' ') || 'Sin nombre'
     }
     const auditDescription = `Pedido ${orderNumber} · Cliente: ${clientName}`
-    return success({ ...order, auditDescription })
+    // El asistente lo usa para avisar de que el pedido ha nacido sin prendas
+    // (flujo industrial/oficial: primero la cabecera, las prendas despues).
+    return success({ ...order, lines_count: linesInput.length, auditDescription })
   }
 )
 
@@ -812,13 +863,30 @@ export const changeOrderStatus = protectedAction<any, any>(
         // propagación forward y, a partir de ahí, el estado del pedido se DERIVA
         // del mínimo de las prendas (no se fija a mano).
         const prop = classifyLinesForStatusChange(new_status, (order as any).order_type, lines)
-        if (prop.toUpdate.length > 0) {
-          await ctx.adminClient
-            .from('tailoring_order_lines').update({ status: new_status }).in('id', prop.toUpdate)
+        if (lines.length === 0) {
+          // Pedido SIN prendas todavía (el asistente industrial crea primero la
+          // cabecera y las prendas se añaden después). Sin líneas no hay mínimo
+          // del que derivar el estado, así que se fija en la cabecera: antes el
+          // botón respondía "Estado cambiado" y el pedido no se movía de
+          // "Creado", sin forma de sacarlo de ahí.
+          const { error: hdrErr } = await ctx.adminClient
+            .from('tailoring_orders').update({ status: new_status }).eq('id', order_id)
+          if (hdrErr) return failure(hdrErr.message || 'No se pudo cambiar el estado del pedido')
+          await ctx.adminClient.from('tailoring_order_state_history').insert({
+            tailoring_order_id: order_id, from_status: fromStatus, to_status: new_status,
+            notes, changed_by: ctx.userId, changed_by_name: ctx.userName,
+          })
+          changedLinesCount = 0
+          aheadLinesCount = 0
+        } else {
+          if (prop.toUpdate.length > 0) {
+            await ctx.adminClient
+              .from('tailoring_order_lines').update({ status: new_status }).in('id', prop.toUpdate)
+          }
+          changedLinesCount = prop.toUpdate.length
+          aheadLinesCount = prop.aheadCount
+          await recalcOrderStatusFromLines(ctx.adminClient, order_id, ctx, 'Avanzar prendas (derivado)')
         }
-        changedLinesCount = prop.toUpdate.length
-        aheadLinesCount = prop.aheadCount
-        await recalcOrderStatusFromLines(ctx.adminClient, order_id, ctx, 'Avanzar prendas (derivado)')
       }
       fromStatus = fromStatus ?? (order as any).status ?? null
     }
@@ -1250,6 +1318,11 @@ export interface UpdateOrderInput {
      *  trg_resolve_line_official_id desde configuration.oficial (mig 227). */
     official_id?: string | null
   }>
+  /** Ids de las prendas que el diálogo tenía al abrirse. Control de concurrencia
+   *  optimista: `lines` viaja como estado COMPLETO y lo que no venga se BORRA,
+   *  así que si otro usuario añadió una prenda mientras tanto este guardado la
+   *  haría desaparecer. Opcional: sin él, el comportamiento no cambia. */
+  knownLineIds?: string[]
 }
 
 const HEADER_EDITABLE_FIELDS = [
@@ -1473,6 +1546,21 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
 
     const linesBeforeArr = (linesBefore || []) as Array<Record<string, any>>
 
+    // 1.b Concurrencia: si en BD hay prendas que el diálogo no conocía, otro
+    // usuario las añadió después de abrirse la ventana y este guardado las
+    // borraría sin aviso (el bloque 3 elimina todo lo que no venga en `lines`).
+    // Se comprueba ANTES de escribir nada para no dejar el pedido a medias.
+    if (input.lines !== undefined && input.knownLineIds) {
+      const known = new Set(input.knownLineIds.map((id) => String(id)))
+      const desconocidas = linesBeforeArr.filter((l) => !known.has(String(l.id)))
+      if (desconocidas.length > 0) {
+        return failure(
+          'El pedido ha cambiado desde que abriste la ventana (tiene prendas nuevas). Recarga la página y vuelve a guardar.',
+          'CONFLICT',
+        )
+      }
+    }
+
     // 2. Aplicar cambios en cabecera
     const headerUpdate: Record<string, any> = {}
     const headerDiff: Record<string, { old: unknown; new: unknown }> = {}
@@ -1552,6 +1640,16 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
     if (input.lines !== undefined) {
       const incomingLines = input.lines
       const incomingIds = new Set(incomingLines.map((l) => l.id).filter(Boolean) as string[])
+
+      // Toda línea que venga con `id` tiene que ser de ESTE pedido: el UPDATE de
+      // más abajo filtra sólo por id y podía pisar la prenda de otro pedido (que
+      // además quedaría con la cabecera descuadrada, porque no se recalcula).
+      // Se valida el array ENTERO aquí: hacerlo dentro del bucle dejaría el
+      // pedido con las prendas ya borradas por el DELETE de justo debajo.
+      const beforeIds = new Set(linesBeforeArr.map((l) => String(l.id)))
+      if (incomingLines.some((l) => l.id && !beforeIds.has(String(l.id)))) {
+        return failure('Una de las prendas no pertenece a este pedido', 'VALIDATION')
+      }
 
       // DELETE: líneas que existían antes pero ya no están
       const toDelete = linesBeforeArr.filter((l) => !incomingIds.has(String(l.id)))
@@ -1724,6 +1822,9 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
             .from('tailoring_order_lines')
             .update(row)
             .eq('id', line.id)
+            // Cinturón, además de la validación previa del array: el id por sí
+            // solo no garantiza que la línea sea de este pedido.
+            .eq('tailoring_order_id', input.orderId)
           if (updErr) return failure(`Error al actualizar línea: ${updErr.message}`)
           if (changed) {
             lineChanges.modified++

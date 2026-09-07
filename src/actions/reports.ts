@@ -6,20 +6,7 @@ import { success, failure } from '@/lib/errors'
 import { BOUTIQUE_SALE_TYPE, GIFT_CARD_SALE_TYPE, accumulateByStore, compareSizes } from '@/lib/reports/dimensions'
 import { fetchEmployeeBilledLines } from '@/lib/reports/employee-billing'
 import { loadPedidoCobroBaseBySale, isPedidoCobroDescription } from '@/lib/accounting/pedido-cobro-lines'
-
-/** Lee todas las páginas (evita el tope silencioso de 1000 filas de Supabase). */
-async function readAllPaged<T = Record<string, unknown>>(
-  build: (from: number, to: number) => PromiseLike<{ data: unknown[] | null }>,
-): Promise<T[]> {
-  const out: T[] = []
-  for (let from = 0; ; from += 1000) {
-    const { data } = await build(from, from + 999)
-    const batch = (data ?? []) as T[]
-    out.push(...batch)
-    if (batch.length < 1000) break
-  }
-  return out
-}
+import { readAllPaged } from '@/lib/server/paged'
 
 export type ReportChannel = 'all' | 'boutique' | 'tailoring'
 export type TaxMode = 'with_tax' | 'without_tax'
@@ -82,31 +69,36 @@ export const getSalesReport = protectedAction<
 
     let saleLines: any[] | null = null
     if (wantBoutique) {
-      let salesQuery = ctx.adminClient
-        .from('sale_lines')
-        .select('quantity, quantity_returned, line_total, tax_rate, created_at, sales!inner(store_id, stores(name), status, created_at, sale_type, is_tax_free)')
-        // Excluye las líneas de cobro de pedido del TPV (mig 247/248): son sastrería,
-        // no boutique, y ya se cuentan por tailoring_order_payments.
-        .is('tailoring_order_id', null)
-        .gte('sales.created_at', start_date)
-        .lte('sales.created_at', end_date + 'T23:59:59')
-        // Netear devoluciones parciales (mismo criterio que el Dashboard y
-        // "Por empleado"): la parte devuelta se descuenta, el resto cuenta.
-        .in('sales.status', ['completed', 'partially_returned'])
-      if (store_id) salesQuery = salesQuery.eq('sales.store_id', store_id)
-      const res = await salesQuery
-      saleLines = res.data
+      // Paginado: sin esto el informe se calculaba sobre las primeras 1.000
+      // lineas de venta del rango y tanto el grafico de evolucion como los KPIs
+      // salian cortos. El `.order('id')` hace el paginado determinista.
+      saleLines = await readAllPaged<any>((f, t) => {
+        let q = ctx.adminClient
+          .from('sale_lines')
+          .select('quantity, quantity_returned, line_total, tax_rate, created_at, sales!inner(store_id, stores(name), status, created_at, sale_type, is_tax_free)')
+          // Excluye las líneas de cobro de pedido del TPV (mig 247/248): son sastrería,
+          // no boutique, y ya se cuentan por tailoring_order_payments.
+          .is('tailoring_order_id', null)
+          .gte('sales.created_at', start_date)
+          .lte('sales.created_at', end_date + 'T23:59:59')
+          // Netear devoluciones parciales (mismo criterio que el Dashboard y
+          // "Por empleado"): la parte devuelta se descuenta, el resto cuenta.
+          .in('sales.status', ['completed', 'partially_returned'])
+        if (store_id) q = q.eq('sales.store_id', store_id)
+        return q.order('id', { ascending: true }).range(f, t)
+      }, 'getSalesReport.saleLines')
     }
 
     let onlineOrders: any[] | null = null
     if (wantBoutique && !store_id) {
-      const res = await ctx.adminClient
+      onlineOrders = await readAllPaged<any>((f, t) => ctx.adminClient
         .from('online_orders')
         .select('subtotal, total, created_at, status')
         .gte('created_at', start_date)
         .lte('created_at', end_date + 'T23:59:59')
         .in('status', ['paid', 'processing', 'shipped', 'delivered'])
-      onlineOrders = res.data
+        .order('id', { ascending: true })
+        .range(f, t), 'getSalesReport.onlineOrders')
     }
 
     // Sastrería = COBROS (tailoring_order_payments por payment_date), no valor de
@@ -606,9 +598,13 @@ export const getTailoringByCategory = protectedAction<
       .lte('sales.created_at', end_date + 'T23:59:59')
     if (store_id) salesQ = salesQ.eq('sales.store_id', store_id)
 
-    const [{ data, error }, { data: slData, error: slError }] = await Promise.all([query.limit(20000), salesQ.limit(20000)])
-    if (error) return failure(error.message)
-    if (slError) return failure(slError.message)
+    // Paginado: `.limit(20000)` no evita el tope de 1.000 filas de PostgREST.
+    const [data, slData] = await Promise.all([
+      readAllPaged<any>((f, t) => query.order('id', { ascending: true }).range(f, t),
+        'getTailoringByCategory.lines'),
+      readAllPaged<any>((f, t) => salesQ.order('id', { ascending: true }).range(f, t),
+        'getTailoringByCategory.saleLines'),
+    ])
 
     // Clasificamos CADA línea a (categoría, tienda, importe neto, prendas) en una
     // lista única. De ahí salen tanto los totales globales como el desglose por
@@ -715,15 +711,28 @@ export const getComparePeriods = protectedAction<
     if (store_id) clientsQ = clientsQ.eq('home_store_id', store_id)
 
     const [saleLinesRes, onlineRes, paymentsRes, tailoringRes, clientsRes] = await Promise.all([
-      wantBoutique ? saleLinesQ.limit(20000) : Promise.resolve({ data: [] }),
-      wantBoutique && !store_id
-        ? ctx.adminClient.from('online_orders')
-          .select('subtotal, total, created_at')
-          .gte('created_at', minStart).lte('created_at', rangeEnd)
-          .in('status', ['paid', 'processing', 'shipped', 'delivered'])
+      // Paginado: `.limit(20000)` no evita el tope de 1.000 filas de PostgREST,
+      // asi que el % de variacion comparaba dos cifras incompletas.
+      wantBoutique
+        ? readAllPaged<any>((f, t) => saleLinesQ.order('id', { ascending: true }).range(f, t),
+            'getComparePeriods.saleLines').then((data) => ({ data }))
         : Promise.resolve({ data: [] }),
-      wantTailoring ? paymentsQ.limit(20000) : Promise.resolve({ data: [] }),
-      wantTailoring ? tailoringQ.limit(20000) : Promise.resolve({ data: [] }),
+      wantBoutique && !store_id
+        ? readAllPaged<any>((f, t) => ctx.adminClient.from('online_orders')
+            .select('subtotal, total, created_at')
+            .gte('created_at', minStart).lte('created_at', rangeEnd)
+            .in('status', ['paid', 'processing', 'shipped', 'delivered'])
+            .order('id', { ascending: true }).range(f, t),
+            'getComparePeriods.online').then((data) => ({ data }))
+        : Promise.resolve({ data: [] }),
+      wantTailoring
+        ? readAllPaged<any>((f, t) => paymentsQ.order('id', { ascending: true }).range(f, t),
+            'getComparePeriods.payments').then((data) => ({ data }))
+        : Promise.resolve({ data: [] }),
+      wantTailoring
+        ? readAllPaged<any>((f, t) => tailoringQ.order('id', { ascending: true }).range(f, t),
+            'getComparePeriods.tailoring').then((data) => ({ data }))
+        : Promise.resolve({ data: [] }),
       clientsQ,
     ])
 
@@ -846,7 +855,9 @@ export const getTopProducts = protectedAction<
         q = q.gte('sales.created_at', `${start_date}T00:00:00`).lte('sales.created_at', `${end_date}T23:59:59`)
         if (store_id) q = q.eq('sales.store_id', store_id)
       }
-      const { data } = await q.range(from, from + PAGE - 1)
+      // Orden estable: LIMIT/OFFSET sin ORDER BY no garantiza el mismo reparto
+      // entre páginas, así que una línea podía salir dos veces o ninguna.
+      const { data } = await q.order('id', { ascending: true }).range(from, from + PAGE - 1)
       if (!data?.length) break
       // Excluir las líneas de ticket que son COBROS, no género vendido:
       //   - "Pedido sastrería - PIN-…" / "Cobro pendiente - PIN|WEL-…" → cobro de un pedido
@@ -916,6 +927,8 @@ export const getTopProducts = protectedAction<
         .from('stock_levels')
         .select('quantity, product_variants!inner(size, product_id, products(id, name, sku, cost_price, category_id))')
         .gt('quantity', 0)
+        // Orden estable: son >2.500 filas, o sea varias páginas.
+        .order('id', { ascending: true })
         .range(from, from + STOCK_PAGE - 1)
       if (!data?.length) break
       for (const row of data as any[]) {
@@ -945,6 +958,8 @@ export const getTopProducts = protectedAction<
         .from('products')
         .select('id, name, sku, cost_price, category_id')
         .eq('is_active', true)
+        // Orden estable: son >1.600 productos activos, o sea varias páginas.
+        .order('id', { ascending: true })
         .range(from, from + PAGE - 1)
       if (!data?.length) break
       for (const p of data as any[]) {
@@ -1259,7 +1274,6 @@ export const getSalesByEmployee = protectedAction<
       // Excluye cobros de pedido del TPV (mig 247/248): sastrería, no boutique. Aquí
       // evita además el DOBLE conteo (el cobro ya cuenta en tailoring_total vía pagos).
       .is('tailoring_order_id', null)
-      .limit(20000)
     if (store_id) saleLinesQ = saleLinesQ.eq('sales.store_id', store_id)
 
     // Cobrado por payment_date (fecha real del cobro), no created_at (tecleo).
@@ -1285,7 +1299,6 @@ export const getSalesByEmployee = protectedAction<
       .gte('sales.created_at', start_date)
       .lte('sales.created_at', end_date + 'T23:59:59')
       .in('sales.status', ['completed', 'partially_returned'])
-      .limit(20000)
 
     let tailoringOrdersQ = ctx.adminClient
       .from('tailoring_orders')
@@ -1297,11 +1310,29 @@ export const getSalesByEmployee = protectedAction<
       .not('status', 'eq', 'cancelled')
     if (store_id) tailoringOrdersQ = tailoringOrdersQ.eq('store_id', store_id)
 
+    // Las cuatro lecturas van PAGINADAS. El `.limit(20000)` que llevaban dos de
+    // ellas no ampliaba nada: PostgREST recorta a 1.000 filas pase lo que pase
+    // (ya está documentado en commissions.ts, "verificado empíricamente"), así
+    // que la facturación por vendedor se calculaba sobre las primeras 1.000
+    // líneas del rango. El `.order()` estable evita que el paginado repita o se
+    // salte filas. Mismos filtros, mismo resultado al céntimo.
     const [saleLinesRes, paymentsRes, tailoringOrdersRes, cobroLinesRes] = await Promise.all([
-      wantBoutique ? saleLinesQ : Promise.resolve({ data: [] as any[] }),
-      wantTailoring ? paymentsQ : Promise.resolve({ data: [] as any[] }),
-      wantTailoring ? tailoringOrdersQ : Promise.resolve({ data: [] as any[] }),
-      wantTailoring ? cobroLinesQ : Promise.resolve({ data: [] as any[] }),
+      wantBoutique
+        ? readAllPaged<any>((f, t) => saleLinesQ.order('id', { ascending: true }).range(f, t),
+            'getSalesByEmployee.saleLines').then((data) => ({ data }))
+        : Promise.resolve({ data: [] as any[] }),
+      wantTailoring
+        ? readAllPaged<any>((f, t) => paymentsQ.order('id', { ascending: true }).range(f, t),
+            'getSalesByEmployee.payments').then((data) => ({ data }))
+        : Promise.resolve({ data: [] as any[] }),
+      wantTailoring
+        ? readAllPaged<any>((f, t) => tailoringOrdersQ.order('id', { ascending: true }).range(f, t),
+            'getSalesByEmployee.tailoringOrders').then((data) => ({ data }))
+        : Promise.resolve({ data: [] as any[] }),
+      wantTailoring
+        ? readAllPaged<any>((f, t) => cobroLinesQ.order('id', { ascending: true }).range(f, t),
+            'getSalesByEmployee.cobroLines').then((data) => ({ data }))
+        : Promise.resolve({ data: [] as any[] }),
     ])
 
     // Mapa (pedido | sesión | importe) → vendedor real, desde las líneas de cobro
@@ -1646,14 +1677,19 @@ export const getOfficialsCommissions = protectedAction<
     if (dErr) return failure(dErr.message || 'Error al consultar líneas devengadas', 'INTERNAL')
 
     // B) ASIGNADAS activas (sin acotar por finished_at) → guía sin-tarifa
-    let assigned = ctx.adminClient
-      .from('tailoring_order_lines')
-      .select('id, official_id, quantity, line_type, garment_types(name)')
-      .not('official_id', 'is', null)
-      .not('status', 'in', '("cancelled","incident")')
-    if (official_id) assigned = assigned.eq('official_id', official_id)
-    const { data: asgLines, error: aErr } = await assigned
-    if (aErr) return failure(aErr.message || 'Error al consultar líneas asignadas', 'INTERNAL')
+    // Paginado: este escaneo no tiene cota temporal y la tabla sólo crece; sin
+    // paginar, PostgREST lo cortaba en 1000 filas y el aviso "prendas sin tarifa"
+    // habría dejado de contar oficiales enteros sin dar ningún error. El .order('id')
+    // es imprescindible: sin orden estable el paginado repite o pierde filas.
+    const asgLines = await readAllPaged<any>((f, t) => {
+      let q = ctx.adminClient
+        .from('tailoring_order_lines')
+        .select('id, official_id, quantity, line_type, garment_types(name)')
+        .not('official_id', 'is', null)
+        .not('status', 'in', '("cancelled","incident")')
+      if (official_id) q = q.eq('official_id', official_id)
+      return q.order('id', { ascending: true }).range(f, t)
+    }, 'getOfficialsCommissions.asignadas')
 
     // C) YA LIQUIDADO en el periodo (contexto "pendiente / liquidado"): settlements pagados con paid_at en [start,end]
     let settledQ = ctx.adminClient
@@ -1967,20 +2003,30 @@ export const getExpensesReport = protectedAction<
   { permission: 'reports.view', auditModule: 'reports' },
   async (ctx, { start_date, end_date, tax_mode = 'with_tax' }) => {
     const net = tax_mode === 'without_tax'
-    const { data } = await ctx.adminClient
+    // Paginado: el servidor corta en 1.000 filas y, al venir ordenado por fecha
+    // DESCENDENTE, lo que se perdía eran justo los gastos del principio del rango.
+    // El segundo orden por id es el desempate estable que el paginado necesita:
+    // 'date' es un DATE y hay varios gastos el mismo día.
+    const data = await readAllPaged<any>((f, t) => ctx.adminClient
       .from('manual_transactions')
       .select('category, amount, total, description, date, withdrawal_id, ap_supplier_invoice_id')
       .eq('type', 'expense')
       .gte('date', start_date)
       .lte('date', end_date)
       .order('date', { ascending: false })
+      .order('id', { ascending: false })
+      .range(f, t), 'getExpensesReport.manual_transactions')
 
     // Excluir retiradas de efectivo de tipo 'extraccion' (sacar/entregar dinero):
     // no son gasto. Su espejo en manual_transactions se conserva (ledger de caja),
     // pero no debe contar en el informe de gastos. Las de tipo 'gasto' (compras
     // pagadas con caja) sí cuentan.
-    const { data: extr } = await ctx.adminClient
+    // Paginado: si el histórico de retiradas pasa de 1.000 filas el Set queda
+    // incompleto y las extracciones antiguas se colarían como gasto.
+    const extr = await readAllPaged<any>((f, t) => ctx.adminClient
       .from('cash_withdrawals').select('id').eq('withdrawal_type', 'extraccion')
+      .order('id', { ascending: true })
+      .range(f, t), 'getExpensesReport.cash_withdrawals')
     const extractionIds = new Set((extr ?? []).map((r: any) => r.id as string))
     const expenses = (data || []).filter((tx: any) => !tx.withdrawal_id || !extractionIds.has(tx.withdrawal_id))
 
@@ -2087,20 +2133,27 @@ export const getExpensesComparison = protectedAction<
     const net = tax_mode === 'without_tax'
     const cols = net ? 'amount' : 'total'
     // Excluir retiradas 'extraccion' (no son gasto) — igual que getExpensesReport.
-    const { data: extr } = await ctx.adminClient
+    // Paginado por el mismo motivo: un Set incompleto dejaría pasar extracciones.
+    const extr = await readAllPaged<any>((f, t) => ctx.adminClient
       .from('cash_withdrawals').select('id').eq('withdrawal_type', 'extraccion')
+      .order('id', { ascending: true })
+      .range(f, t), 'getExpensesComparison.cash_withdrawals')
     const extractionIds = new Set((extr ?? []).map((r: any) => r.id as string))
-    const [currentRes, previousRes] = await Promise.all([
-      ctx.adminClient.from('manual_transactions')
-        .select(`${cols}, withdrawal_id`).eq('type', 'expense').gte('date', current_start).lte('date', current_end),
-      ctx.adminClient.from('manual_transactions')
-        .select(`${cols}, withdrawal_id`).eq('type', 'expense').gte('date', previous_start).lte('date', previous_end),
+    // Paginado: sin él el servidor corta en 1.000 filas y el comparativo daría
+    // menos gasto del real en rangos largos, igual que el informe.
+    const [currentRows, previousRows] = await Promise.all([
+      readAllPaged<any>((f, t) => ctx.adminClient.from('manual_transactions')
+        .select(`${cols}, withdrawal_id`).eq('type', 'expense').gte('date', current_start).lte('date', current_end)
+        .order('id', { ascending: true }).range(f, t), 'getExpensesComparison.current'),
+      readAllPaged<any>((f, t) => ctx.adminClient.from('manual_transactions')
+        .select(`${cols}, withdrawal_id`).eq('type', 'expense').gte('date', previous_start).lte('date', previous_end)
+        .order('id', { ascending: true }).range(f, t), 'getExpensesComparison.previous'),
     ])
     const sumField = (rows: any[] | null) => (rows || [])
       .filter((t: any) => !t.withdrawal_id || !extractionIds.has(t.withdrawal_id))
       .reduce((s, t) => s + (Number(net ? t.amount : t.total) || 0), 0)
-    const current = sumField(currentRes.data as any[])
-    const previous = sumField(previousRes.data as any[])
+    const current = sumField(currentRows)
+    const previous = sumField(previousRows)
     const change = previous === 0 ? (current > 0 ? 100 : 0) : ((current - previous) / previous) * 100
     return success({ current, previous, change })
   }
@@ -2367,12 +2420,13 @@ export const getUserSalesSummary = protectedAction<
 
     // Sastrería cobrada en backoffice (serie separada, no comisionable):
     // atribuida a quien registró el cobro, por payment_date (fecha real).
-    const { data: tailoringPayments, error: tpErr } = await ctx.adminClient
+    // Paginado: `.limit(20000)` no evita el tope de 1.000 filas de PostgREST.
+    const tailoringPayments = await readAllPaged<any>((f, t) => ctx.adminClient
       .from('tailoring_order_payments')
       .select('amount, payment_date')
       .eq('created_by', user_id)
-      .limit(20000)
-    if (tpErr) return failure(tpErr.message || 'Error al consultar cobros de sastrería', 'INTERNAL')
+      .order('id', { ascending: true })
+      .range(f, t), 'getUserSalesSummary.tailoringPayments')
 
     // Agregar por venta
     type SaleAgg = {

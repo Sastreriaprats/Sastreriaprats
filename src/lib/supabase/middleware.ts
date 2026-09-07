@@ -129,6 +129,12 @@ export async function updateSession(request: NextRequest) {
   const isSastreRoute   = pathname === '/sastre' || pathname.startsWith('/sastre/')
   const isAuthRoute     = pathname.startsWith('/auth')
   const isLoginPage     = pathname === '/auth/login'
+  // La página de nueva contraseña TIENE que poder abrirse con sesión: el enlace
+  // del email (que es también el de activación de cuenta de los clientes de la
+  // tienda) llega muchas veces a un navegador ya logueado, y el redirect de más
+  // abajo lo mandaba al panel quemando un token de un solo uso. Comparación
+  // exacta a propósito: no relaja nada más bajo /auth.
+  const isResetPage     = pathname === '/auth/restablecer'
 
   const { data: { user }, error } = await supabase.auth.getUser()
 
@@ -184,6 +190,17 @@ export async function updateSession(request: NextRequest) {
   const hasVendedorRole = userRoles.some(n => VENDEDOR_ROLES.includes(n))
   const hasStaffRole    = userRoles.some(n => STAFF_ROLES.includes(n))
 
+  // Cuenta de CLIENTE de la tienda online: su sitio es /mi-cuenta. Hasta ahora
+  // /admin y /pos solo desviaban a sastres y vendedores, así que un cliente con
+  // sesión abría el panel de administración y el TPV: las pantallas cargaban
+  // enteras (los datos ya los frenan los permisos de cada acción, pero la
+  // estructura, los menús y los formularios se veían igual).
+  //
+  // Se comprueba que TENGA roles y que todos sean 'client': si la lectura de
+  // roles fallara y devolviera [], no se bloquea a nadie por un fallo de red
+  // -la defensa de verdad es el permiso que exige cada server action-.
+  const isClientOnly = userRoles.length > 0 && userRoles.every(n => n === 'client')
+
   // Ruta /mi-cuenta: staff no debe entrar → redirigir a su panel
   if (user && isClientRoute) {
     if (hasSastreRole) {
@@ -233,9 +250,19 @@ export async function updateSession(request: NextRequest) {
   }
 
   // Autenticado en ruta auth (otras que no son /auth/login) → dashboard
-  if (user && isAuthRoute && !isLoginPage) {
+  if (user && isAuthRoute && !isLoginPage && !isResetPage) {
     const url = request.nextUrl.clone()
     url.pathname = '/admin/dashboard'
+    const redirectRes = NextResponse.redirect(url)
+    copySupabaseCookies(redirectRes, supabaseResponse)
+    setSecurityHeaders(redirectRes)
+    return redirectRes
+  }
+
+  // Un cliente de la tienda no entra en el area de trabajo (/admin, /pos).
+  if (user && isClientOnly && (isAdminRoute || isPosRoute)) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/mi-cuenta'
     const redirectRes = NextResponse.redirect(url)
     copySupabaseCookies(redirectRes, supabaseResponse)
     setSecurityHeaders(redirectRes)
@@ -257,7 +284,11 @@ export async function updateSession(request: NextRequest) {
     // comisiones" (la página scopa en servidor por reports.view_own — mig 232;
     // sin esta excepción la vista era inalcanzable para ellos).
     const isReportingRoute     = pathname.startsWith('/admin/reporting')
-    if (hasSastreRole) {
+    // Los sastre_plus tienen reports.view_own igual que los vendedores: sin esta
+    // excepción su vista personal "Mis ventas y comisiones" era inalcanzable (el
+    // panel /sastre no la enlaza y la URL directa rebotaba). La página scopa en
+    // servidor con requireAnyPermission, así que no ven nada ajeno.
+    if (hasSastreRole && !isReportingRoute) {
       const url = request.nextUrl.clone()
       url.pathname = '/sastre'
       const redirectRes = NextResponse.redirect(url)

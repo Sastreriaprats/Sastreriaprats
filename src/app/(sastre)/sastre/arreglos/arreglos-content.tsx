@@ -15,6 +15,7 @@ import {
   Plus, Search, Loader2, Scissors, ChevronLeft, ChevronRight, FileDown,
 } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
+import { todayLocalISODate } from '@/lib/dates'
 import { toast } from 'sonner'
 import { useActiveStore } from '@/hooks/use-store'
 import { createClient } from '@/lib/supabase/client'
@@ -266,7 +267,9 @@ function NewAlterationDialog({
   const [phone, setPhone] = useState('')
   const [description, setDescription] = useState('')
   const [garmentType, setGarmentType] = useState('')
-  const [alterationDate, setAlterationDate] = useState(new Date().toISOString().split('T')[0])
+  // Fecha LOCAL: con toISOString() un arreglo dado de alta de noche se
+  // guardaba con la fecha del día anterior (UTC).
+  const [alterationDate, setAlterationDate] = useState(todayLocalISODate())
   const [estimatedCompletion, setEstimatedCompletion] = useState('')
   const [officialId, setOfficialId] = useState('')
   const [notes, setNotes] = useState('')
@@ -349,7 +352,7 @@ function NewAlterationDialog({
     setPhone(preselectedClientPhone ?? '')
     setDescription('')
     setGarmentType('')
-    setAlterationDate(new Date().toISOString().split('T')[0])
+    setAlterationDate(todayLocalISODate())
     setEstimatedCompletion('')
     setOfficialId('')
     setNotes('')

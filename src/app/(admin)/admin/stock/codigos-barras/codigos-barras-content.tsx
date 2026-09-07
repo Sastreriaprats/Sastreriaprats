@@ -39,7 +39,9 @@ type ProductGroup = {
 
 export function CodigosBarrasContent() {
   const router = useRouter()
-  const { can } = usePermissions()
+  // canAny y no can: quien abre esta pantalla lo hace con barcodes.manage, y
+  // vendedor_avanzado tiene ese permiso pero no products.edit.
+  const { canAny } = usePermissions()
   const [filter, setFilter] = useState<FilterBarcode>('all')
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -107,7 +109,7 @@ export function CodigosBarrasContent() {
   }, [debouncedSearch, filter])
 
   const handleGenerateAll = useCallback(async () => {
-    if (!can('products.edit')) return
+    if (!canAny(['products.edit', 'barcodes.manage'])) return
     setGenerating(true)
     try {
       const result = await generateBarcodesForAllVariants()
@@ -123,7 +125,7 @@ export function CodigosBarrasContent() {
     } finally {
       setGenerating(false)
     }
-  }, [can, fetchData])
+  }, [canAny, fetchData])
 
   const handleSaveBarcode = useCallback(async (variantId: string, currentBarcode?: string | null) => {
     const value = (editingBarcode[variantId] ?? '').trim()
@@ -229,7 +231,7 @@ export function CodigosBarrasContent() {
           <p className="text-muted-foreground">Cada variante (producto + talla) tiene su propio código EAN-13. Etiquetas Brother QL-700 (29x68mm)</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {can('products.edit') && (
+          {canAny(['products.edit', 'barcodes.manage']) && (
             <Button onClick={handleGenerateAll} disabled={generating} className="gap-2 bg-prats-navy hover:bg-prats-navy-light">
               {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Barcode className="h-4 w-4" />}
               Generar códigos para variantes sin código ({withoutBarcodeCount})
@@ -349,7 +351,7 @@ export function CodigosBarrasContent() {
                             {v.variant_sku}
                           </span>
                           <div className="flex-1 min-w-0 flex items-center gap-1">
-                            {can('products.edit') ? (
+                            {canAny(['products.edit', 'barcodes.manage']) ? (
                               <div className="flex items-center gap-1">
                                 <Input
                                   className="font-mono h-8 w-32 text-xs"

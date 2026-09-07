@@ -21,6 +21,9 @@ export function ClientesPageContent({ sastreName }: { sastreName: string }) {
   const {
     data: clients,
     total,
+    page,
+    totalPages,
+    setPage,
     search,
     setSearch,
     isLoading,
@@ -107,6 +110,33 @@ export function ClientesPageContent({ sastreName }: { sastreName: string }) {
                 </li>
               ))}
             </ul>
+          )}
+
+          {/* Paginación: la lista se cortaba en las 50 primeras fichas de 2.402
+              (el rótulo de arriba sí canta el total) y no había forma de pasar
+              de página. useList ya devolvía page/totalPages/setPage. */}
+          {!isLoading && totalPages > 1 && (
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-white/50">Página {page} de {totalPages}</p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={page <= 1}
+                  onClick={() => setPage(page - 1)}
+                  className="px-5 h-11 rounded-xl border border-[#c9a96e]/30 bg-[#c9a96e]/10 text-[#c9a96e] text-sm font-medium transition-colors hover:bg-[#c9a96e]/25 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation"
+                >
+                  Anterior
+                </button>
+                <button
+                  type="button"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage(page + 1)}
+                  className="px-5 h-11 rounded-xl border border-[#c9a96e]/30 bg-[#c9a96e]/10 text-[#c9a96e] text-sm font-medium transition-colors hover:bg-[#c9a96e]/25 disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation"
+                >
+                  Siguiente
+                </button>
+              </div>
+            </div>
           )}
 
           {!isLoading && clients.length === 0 && (

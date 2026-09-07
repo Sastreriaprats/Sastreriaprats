@@ -41,6 +41,11 @@ export async function POST(request: NextRequest) {
           newsletter_subscribed: true,
           accepts_marketing: true,
           marketing_consent_date: new Date().toISOString(),
+          // Limpiar la baja anterior: el filtro de envio exige
+          // unsubscribed_at IS NULL, asi que sin esto la pantalla decia
+          // "Suscripcion activada" y el cliente seguia sin recibir nada.
+          unsubscribed_at: null,
+          unsubscribe_reason: null,
           updated_at: new Date().toISOString(),
         })
         .eq('id', existing.id)

@@ -8,10 +8,15 @@ import { SastreClienteDetailContent } from './sastre-cliente-detail-content'
 
 export default async function SastreClientePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>
+  searchParams: Promise<{ tab?: string }>
 }) {
   const { id } = await params
+  // Al volver de un arreglo la URL trae ?tab=arreglos; si no se pasa a la
+  // ficha, las pestañas se montan siempre en "Resumen".
+  const { tab } = await searchParams
   const supabase = await createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
@@ -62,6 +67,7 @@ export default async function SastreClientePage({
             totalSpent={totalSpent}
             totalPending={totalPending}
             orderCount={orderCount}
+            initialTab={tab}
           />
         </main>
 

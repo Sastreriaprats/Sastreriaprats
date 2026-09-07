@@ -153,7 +153,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const [wantPartialPayment, setWantPartialPayment] = useState(false)
   const [downloadingInvoice, setDownloadingInvoice] = useState(false)
   const [invoiceConfirmOpen, setInvoiceConfirmOpen] = useState(false)
-  const [clientPendingDebt, setClientPendingDebt] = useState<Array<{ entity_type: 'tailoring_order' | 'sale'; entity_id: string; reference: string; total_pending: number }>>([])
+  const [clientPendingDebt, setClientPendingDebt] = useState<Array<{ entity_type: 'tailoring_order' | 'sale' | 'alteration'; entity_id: string; reference: string; total_pending: number }>>([])
   const [clientDebtLoading, setClientDebtLoading] = useState(false)
   const [clientReservations, setClientReservations] = useState<any[]>([])
   const [clientReservationsLoading, setClientReservationsLoading] = useState(false)
@@ -162,6 +162,8 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const [pendingWorkDialogOpen, setPendingWorkDialogOpen] = useState(false)
   const [showCloseReminderDialog, setShowCloseReminderDialog] = useState(false)
   const [lineToRemove, setLineToRemove] = useState<{ id: string; description: string } | null>(null)
+  // Anular vacía el ticket entero: se confirma igual que quitar una sola línea.
+  const [showCancelTicket, setShowCancelTicket] = useState(false)
   const [showStockWarning, setShowStockWarning] = useState(false)
   const [paymentTab, setPaymentTab] = useState<'integro' | 'mixto' | 'parcial'>('integro')
   const [paymentStep, setPaymentStep] = useState<'salesperson' | 'choose_type' | 'details'>('salesperson')
@@ -229,6 +231,11 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
           const sorted: any[] = []
           for (const arr of byProduct.values()) sorted.push(...sortBySize(arr))
           setSearchResults(sorted)
+        } else {
+          // Un fallo de consulta se veía igual que "no hay artículos" y el
+          // vendedor daba la venta por perdida.
+          setSearchResults([])
+          toast.error(result.error ?? 'No se pudo buscar productos')
         }
       } catch (e) {
         console.error('[TPV search]', e)
@@ -259,7 +266,8 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
           barcodeBufferRef.current = { digits: '', firstAt: 0 }
           getProductByBarcode({ barcode: captured, storeId: activeStoreId ?? undefined }).then((result) => {
             if (result.success && result.data && result.data.variant) {
-              addToTicket(result.data.variant)
+              // Se pasa el stock que la accion ya calculo para ESTA tienda.
+              addToTicketRef.current(result.data.variant, result.data.stock)
               const v = result.data.variant as any
               const name = v.products?.name || v.product_name || 'Producto'
               const size = v.size ? ` · Talla ${v.size}` : ''
@@ -362,7 +370,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
           setClientPendingDebt(result.data
             .filter((r) => r.entity_type !== 'reservation')
             .map((r) => ({
-              entity_type: r.entity_type as 'tailoring_order' | 'sale',
+              entity_type: r.entity_type as 'tailoring_order' | 'sale' | 'alteration',
               entity_id: r.id,
               reference: r.reference,
               total_pending: r.total_pending,
@@ -475,8 +483,11 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const change = totalPaid > total ? totalPaid - total : 0
   const canCobrar = ticketLines.length > 0 && (!!selectedClientId || saleWithoutClient)
 
-  const addToTicket = (variant: any) => {
-    const stock = Array.isArray(variant.stock_levels) ? (variant.stock_levels[0]?.available ?? 0) : 0
+  // `stockDisponible` lo pasa quien ya lo ha calculado para la tienda de la
+  // caja. Sin él se cogía `stock_levels[0]`, que es un almacén cualquiera de la
+  // lista: el aviso de "sin stock" miraba las existencias de otra tienda.
+  const addToTicket = (variant: any, stockDisponible?: number) => {
+    const stock = stockDisponible ?? (Array.isArray(variant.stock_levels) ? (variant.stock_levels[0]?.available ?? 0) : 0)
     const productName = variant.products?.name ?? 'Producto'
     const variantLabel = `${productName}${variant.size ? ` T.${variant.size}` : ''}${variant.color ? ` ${variant.color}` : ''}`
     const existing = ticketLines.find(l => l.product_variant_id === variant.id)
@@ -520,6 +531,14 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
     setSearchResults([])
     searchRef.current?.focus()
   }
+
+  // El listener global de la pistola se registra una sola vez (deps [activeStoreId])
+  // y se quedaba con la copia de `addToTicket` del primer render, que cierra sobre un
+  // `ticketLines` vacio: por eso cada escaneo abria linea nueva en vez de sumar
+  // cantidad, y como cada linea llevaba quantity 1 no saltaba ningun aviso de stock.
+  // Este ref le da siempre la version fresca sin re-registrar el listener.
+  const addToTicketRef = useRef(addToTicket)
+  useEffect(() => { addToTicketRef.current = addToTicket })
 
   const addManualLine = () => {
     setTicketLines(prev => [...prev, {
@@ -646,12 +665,17 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
       ...toAdd.map((p) => ({
         id: crypto.randomUUID(),
         product_variant_id: null as string | null,
-        description: `Cobro pendiente - ${p.reference}`,
+        description: p.entity_type === 'alteration'
+          ? `Arreglo - ${p.reference}`
+          : `Cobro pendiente - ${p.reference}`,
         sku: '',
         quantity: 1,
         unit_price: p.total_pending,
         discount_percentage: 0,
-        tax_rate: 0,
+        // Los arreglos son un servicio de sastrería que se factura aquí → 21%.
+        // Los cobros de pedido/ticket van al 0% porque su IVA se declara por el
+        // lado del pedido o de la venta original.
+        tax_rate: p.entity_type === 'alteration' ? 21 : 0,
         cost_price: 0,
         cobro_ref: { entity_type: p.entity_type, entity_id: p.entity_id } as const,
       })),
@@ -775,6 +799,16 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
       setShowPayment(false)
       setCompletedSale(data)
       setShowTicketModal(true)
+      // Avisos de cosas que fallaron DESPUES de cobrar. La venta es valida y no
+      // hay que repetirla, pero alguien tiene que enterarse: hasta ahora estos
+      // fallos solo iban a la consola del servidor y las ventas se quedaban sin
+      // asiento en el diario sin que nadie lo supiera.
+      if ((data as any)?.journal_error) {
+        toast.warning('Venta cobrada, pero NO se ha generado su asiento contable. Avisa a administracion. NO repitas la venta.', { duration: 15000 })
+      }
+      if ((data as any)?.residual_voucher_error) {
+        toast.warning(String((data as any).residual_voucher_error), { duration: 15000 })
+      }
       const cobroLines = lastCobroLinesRef.current
       lastCobroLinesRef.current = []
       if (cobroLines.length > 0) {
@@ -1198,6 +1232,12 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
         // (única fuente, cubre las 3 vías: deep-link + panel de cobros). Producto de
         // boutique y cobros de arreglo → null (NULL = boutique real). No toca sale_type.
         tailoring_order_id: l.cobro_ref?.entity_type === 'tailoring_order' ? l.cobro_ref.entity_id : null,
+        // (274) Cobro de un TICKET a plazos dentro de este ticket. Ese dinero
+        // vuelve a entrar en caja por addSalePayment -> rpc_add_sale_payment,
+        // asi que la RPC tiene que netearlo igual que hace con los cobros de
+        // pedido, o el arqueo espera el doble. Es solo un marcador del JSON:
+        // sale_lines no tiene esta columna y el INSERT la ignora.
+        cobro_sale_id: l.cobro_ref?.entity_type === 'sale' ? l.cobro_ref.entity_id : null,
         description: l.description,
         sku: l.sku,
         quantity: l.quantity,
@@ -1236,6 +1276,21 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
 
   const totalCashInDrawer = (session?.opening_amount ?? 0) + sessionTotals.total_cash_sales - (session?.total_returns ?? 0) - (session?.total_withdrawals ?? 0)
   const clientDebtTotal = clientPendingDebt.reduce((s, i) => s + i.total_pending, 0)
+  // Desglose del aviso ámbar: de dónde viene lo que debe (encargos, tickets a
+  // plazos, arreglos sin cobrar) para no tener que adivinarlo en caja.
+  const clientDebtBreakdown = ([
+    ['tailoring_order', 'encargo', 'encargos'],
+    ['sale', 'ticket', 'tickets'],
+    ['alteration', 'arreglo', 'arreglos'],
+  ] as const)
+    .map(([type, singular, plural]) => {
+      const rows = clientPendingDebt.filter((i) => i.entity_type === type)
+      if (rows.length === 0) return null
+      const amount = rows.reduce((s, i) => s + i.total_pending, 0)
+      return `${rows.length} ${rows.length === 1 ? singular : plural} ${formatCurrency(amount)}`
+    })
+    .filter(Boolean)
+    .join(' · ')
 
   return (
     <div className="flex flex-col h-screen bg-slate-50">
@@ -1348,7 +1403,9 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
             {!clientDebtLoading && clientPendingDebt.length > 0 && selectedClientId && (
               <div className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs">
                 <p className="font-semibold text-amber-800 tabular-nums">Pendiente: {formatCurrency(clientDebtTotal)}</p>
-                <p className="text-amber-700/90 mt-0.5 leading-tight">Puedes añadirlo al cobro actual.</p>
+                <p className="text-amber-700/90 mt-0.5 leading-tight">
+                  {clientDebtBreakdown || 'Puedes añadirlo al cobro actual.'}
+                </p>
                 <Button type="button" size="sm" variant="outline" className="mt-2 w-full h-auto min-h-8 py-2 text-xs font-medium border-amber-300 text-amber-800 hover:bg-amber-100 hover:border-amber-400 justify-center text-center whitespace-normal leading-tight" onClick={addPendingDebtToTicket}>
                   Incluir pendientes en este ticket
                 </Button>
@@ -1658,7 +1715,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
           </button>
           <button
             type="button"
-            onClick={() => { setTicketLines([]); setPayments([]); setSaleNotes(''); setSaleDate(''); toast.success('Ticket anulado'); }}
+            onClick={() => { if (ticketLines.length === 0) return; setShowCancelTicket(true) }}
             className="flex flex-col items-center justify-center gap-0.5 min-w-[4rem] py-2 text-rose-300 hover:text-rose-200 hover:bg-white/5 rounded transition-colors"
           >
             <X className="h-5 w-5" />
@@ -2529,6 +2586,43 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
               }}
             >
               Quitar línea
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showCancelTicket} onOpenChange={setShowCancelTicket}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Anular el ticket completo?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se borran {ticketLines.length} líneas ({formatCurrency(total)}) y se quitan el descuento y el Tax Free aplicados.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 text-white"
+              onClick={(e) => {
+                e.preventDefault()
+                setTicketLines([])
+                setPayments([])
+                setSaleNotes('')
+                setSaleDate('')
+                // El descuento global, su código y el Tax Free se quedaban puestos:
+                // la siguiente venta salía rebajada o con IVA 0 sin que nadie lo viera.
+                setGlobalDiscount(0)
+                setDiscountCodeApplied(null)
+                setDiscountCodeInput('')
+                setIsTaxFree(false)
+                setVoucherCodeInput('')
+                setVoucherInfo(null)
+                setShowCancelTicket(false)
+                toast.success('Ticket anulado')
+                searchRef.current?.focus()
+              }}
+            >
+              Anular ticket
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

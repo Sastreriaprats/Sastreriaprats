@@ -143,6 +143,31 @@ export function AppointmentDialog({
         store_id: activeStoreId || '',
       }))
       setSelectedClientName('')
+    } else {
+      // "Nueva cita" (sin hueco ni evento): faltaba esta rama, así que el
+      // formulario conservaba la cita que se acababa de consultar —cliente
+      // incluido— y al guardar se creaba un duplicado a nombre equivocado.
+      setForm({
+        type: 'fitting',
+        title: '',
+        date: '',
+        start_time: '10:00',
+        duration_minutes: 60,
+        tailor_id: '',
+        client_id: '',
+        client_name: '',
+        order_id: '',
+        store_id: activeStoreId || '',
+        description: '',
+        notes: '',
+      })
+      setSelectedClientName('')
+      setClientSearch('')
+      setClientResults([])
+      // El bloque de confirmación de cancelación no está condicionado a
+      // isEditing (línea ~462): sin esto seguiría visible sobre una cita nueva.
+      setShowCancelConfirm(false)
+      setCancelReason('')
     }
   }, [selectedEvent, selectedSlot, activeStoreId])
 

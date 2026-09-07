@@ -3,6 +3,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { fetchEmployeeBilledLines } from '@/lib/reports/employee-billing'
+import { checkUserPermission } from '@/actions/auth'
 
 export interface VendorTodaySaleRow {
   id: string
@@ -119,8 +120,13 @@ export async function getVendorDashboardStats(
     const todayCount = todaySales.length
 
     // Objetivo y ventas reales de la tienda activa (si se recibe storeId).
+    // El storeId llega del cliente y aquí se consulta con service-role (salta RLS):
+    // sin este permiso, cualquier usuario autenticado —incluidos los clientes de la
+    // tienda online— podía leer objetivo y facturación de CUALQUIER tienda pasando
+    // su UUID. pos.access lo tienen los roles de vendedor y sastre_plus; el
+    // administrador entra por el bypass de checkUserPermission.
     let storeGoal: VendorDashboardStats['storeGoal'] = null
-    if (storeId) {
+    if (storeId && await checkUserPermission(user.id, 'pos.access')) {
       const [storeRes, goalsRes, storeSalesRes] = await Promise.all([
         admin.from('stores').select('id, code, name').eq('id', storeId).maybeSingle(),
         admin
@@ -130,11 +136,16 @@ export async function getVendorDashboardStats(
           .eq('year', year)
           .eq('month', month)
           .eq('goal_type', 'boutique'),
+        // Misma vara que la pantalla de Objetivos (store-goals.ts): incluye los
+        // tickets con devolución PARCIAL y prorratea por lo no devuelto. Antes se
+        // filtraba solo por 'completed', así que un ticket al que se le devolvía
+        // una prenda desaparecía entero del progreso del vendedor aunque el
+        // cliente se quedara con el resto, y las dos pantallas no cuadraban.
         admin
           .from('sales')
-          .select('subtotal')
+          .select('total, total_returned, tax_amount')
           .eq('store_id', storeId)
-          .eq('status', 'completed')
+          .in('status', ['completed', 'partially_returned'])
           .eq('sale_type', 'boutique')
           .gte('created_at', monthStart)
           .lt('created_at', nextMonthStart),
@@ -150,8 +161,14 @@ export async function getVendorDashboardStats(
             acc + (Number(g.target_amount) || 0),
           0,
         )
+        // Base imponible prorrateada por la parte NO devuelta, idéntico a
+        // store-goals.ts (subtotal == total - tax_amount en todas las ventas).
         const actual = (storeSalesRes.data || []).reduce(
-          (acc: number, s: { subtotal: number | string | null }) => acc + (Number(s.subtotal) || 0),
+          (acc: number, s: { total: number | string | null; total_returned?: number | string | null; tax_amount: number | string | null }) => {
+            const total = Number(s.total) || 0
+            const proportion = total > 0 ? Math.max(0, (total - (Number(s.total_returned) || 0)) / total) : 0
+            return acc + (total - (Number(s.tax_amount) || 0)) * proportion
+          },
           0,
         )
         storeGoal = {

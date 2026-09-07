@@ -26,14 +26,15 @@ import { TopProductsChart } from './charts/top-products-chart'
 import { ClientsChart } from './charts/clients-chart'
 import { formatCurrency, normalizeSearchTerm } from '@/lib/utils'
 import { toast } from 'sonner'
+import { toLocalISODate, todayLocalISODate } from '@/lib/dates'
 
 function getDefaultStart() {
   const d = new Date()
   d.setDate(1)
-  return d.toISOString().split('T')[0]
+  return toLocalISODate(d)
 }
 function getDefaultEnd() {
-  return new Date().toISOString().split('T')[0]
+  return todayLocalISODate()
 }
 // Fecha corta para las tablas de detalle (acepta timestamp ISO o 'YYYY-MM-DD').
 function fmtReportDay(value: string | null): string {
@@ -228,16 +229,14 @@ export function ReportsContent() {
       case 'year': start = new Date(now.getFullYear(), 0, 1); break
       default: start = new Date(now.getFullYear(), now.getMonth(), 1)
     }
-    setDateRange({ start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] })
+    setDateRange({ start: toLocalISODate(start), end: toLocalISODate(end) })
   }
 
-  // Selector de mes natural completo (día 1 → último día). Formateo en hora LOCAL
-  // (no toISOString, que desplazaría un día por la zona horaria de Madrid).
-  const fmtLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  // Selector de mes natural completo (día 1 → último día), en hora LOCAL.
   const setMonth = (year: number, month: number) => {
     const start = new Date(year, month, 1)
     const end = new Date(year, month + 1, 0) // día 0 del mes siguiente = último día del mes
-    setDateRange({ start: fmtLocal(start), end: fmtLocal(end) })
+    setDateRange({ start: toLocalISODate(start), end: toLocalISODate(end) })
   }
 
   // Lista de los últimos 24 meses para el desplegable. value = `${year}-${monthIndex}`.
@@ -359,6 +358,15 @@ export function ReportsContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildExportPayload()),
       })
+      // Sin esta rama, un 403 (falta el permiso reports.export) o un 500 no mostraban
+      // NADA: ni fichero ni aviso, y el usuario repetía el clic creyendo que fallaba
+      // la descarga del navegador.
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        toast.error(body?.error === 'Forbidden' ? 'No tienes permiso para exportar informes' : 'No se pudo exportar el informe')
+        setIsExporting(false)
+        return
+      }
       if (res.ok) {
         const blob = await res.blob()
         const url = URL.createObjectURL(blob)
@@ -367,7 +375,9 @@ export function ReportsContent() {
         a.download = `informe-prats-${activeTab}-${dateRange.start}-${dateRange.end}.html`
         a.click()
         URL.revokeObjectURL(url)
-        toast.success('PDF descargado')
+        // La ruta devuelve HTML (text/html), no un PDF: el aviso dice la verdad
+        // para que nadie lo reenvíe a la gestoría creyendo que es un PDF.
+        toast.success('Informe descargado — ábrelo e imprime a PDF')
       }
     } catch {
       toast.error('Error al exportar')
@@ -383,6 +393,13 @@ export function ReportsContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildExportPayload()),
       })
+      // Mismo motivo que en el PDF: un 403/500 se tragaba en silencio.
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        toast.error(body?.error === 'Forbidden' ? 'No tienes permiso para exportar informes' : 'No se pudo exportar el informe')
+        setIsExporting(false)
+        return
+      }
       if (res.ok) {
         const blob = await res.blob()
         const url = URL.createObjectURL(blob)
@@ -421,7 +438,8 @@ export function ReportsContent() {
         {canSeeGlobal && (
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" className="gap-1" onClick={handleExportPDF} disabled={isExporting || isLoading}>
-              <FileText className="h-3 w-3" /> PDF
+              {/* La exportación genera HTML con estilos de impresión, no un PDF real. */}
+              <FileText className="h-3 w-3" /> Imprimir (HTML)
             </Button>
             <Button variant="outline" size="sm" className="gap-1" onClick={handleExportExcel} disabled={isExporting || isLoading}>
               <FileSpreadsheet className="h-3 w-3" /> Excel
@@ -1221,6 +1239,11 @@ function CommissionsBlock({ commissions, groupBonuses }: { commissions: Employee
                 <p>
                   Bonus de <strong>{formatCurrency(gb.pool)}</strong> ({gb.rate}% sobre {gb.base_type === 'total' ? 'la venta conjunta' : 'el exceso conjunto'}),
                   repartido entre {gb.members.length}: {gb.members.map(m => `${m.employee_name} (${formatCurrency(m.amount)})`).join(', ')}.
+                  {/* El bonus es trimestral: si el rango no cubre el trimestre entero no se
+                      suma arriba, y hay que decirlo o el gerente cree que falta dinero. */}
+                  {!gb.counted && (
+                    <> Es un bonus del <strong>trimestre completo</strong>, así que <strong>no</strong> se suma a la «Comisión total» de arriba: el rango consultado no cubre {gb.quarter_label} entero.</>
+                  )}
                 </p>
               ) : (
                 <p>Todas las tiendas listadas deben superar su objetivo del trimestre para que se active el bonus ({gb.rate}% sobre {gb.base_type === 'total' ? 'la venta conjunta' : 'el exceso conjunto'}).</p>

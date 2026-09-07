@@ -37,6 +37,12 @@ export interface Alteration {
   tailoring_order_id: string | null
   alteration_type: AlterationType
   estimated_completion: string | null
+  /** Venta del TPV que cobró el arreglo (null = no cobrado por caja). */
+  sale_id?: string | null
+  /** Forma de pago con la que se saldó. Junto a `sale_id` marca el arreglo como cobrado. */
+  payment_method?: string | null
+  /** Arreglo incluido en el precio del pedido: no genera deuda propia. */
+  is_included?: boolean
 }
 
 /** Arreglo con joins típicos de listados / detalle. */

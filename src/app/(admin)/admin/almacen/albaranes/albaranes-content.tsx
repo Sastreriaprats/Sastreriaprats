@@ -349,7 +349,15 @@ export function AlbaranesContent() {
                             onClick={async () => {
                               const r = await markSupplierDeliveryNoteReceived(row.id)
                               if (r.success) {
-                                toast.success('Marcado como recibido')
+                                // La action ya dice si aplicó stock; sin mirarlo salía un
+                                // verde "Marcado como recibido" aunque no entrase nada.
+                                const avisos = Number((r.data as any)?.stock_warnings || 0)
+                                const yaAplicado = Boolean((r.data as any)?.stock_already_applied)
+                                if (!yaAplicado && ((r.data as any)?.stock_update_skipped || avisos > 0)) {
+                                  toast.warning('Marcado como recibido, pero NO se ha aplicado stock desde el albarán. Registra la recepción desde el pedido a proveedor.')
+                                } else {
+                                  toast.success('Marcado como recibido')
+                                }
                                 loadSupplier()
                               } else {
                                 toast.error(r.error || 'No se pudo marcar recibido')

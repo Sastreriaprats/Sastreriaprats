@@ -1,7 +1,12 @@
-import { redirect } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { ClientDashboard } from './client-dashboard'
+import { AccountNotLinked } from './account-not-linked'
+
+/** Escapa los comodines de LIKE para que `ilike` compare el email literal. */
+function escapeLike(v: string): string {
+  return v.replace(/[\\%_]/g, (c) => `\\${c}`)
+}
 
 export default async function ClientAccountPage() {
   const supabase = await createServerSupabaseClient()
@@ -9,14 +14,42 @@ export default async function ClientAccountPage() {
   if (!user) return null
 
   const admin = createAdminClient()
-  const { data: client } = await admin
+  const { data: linked } = await admin
     .from('clients')
     .select('*')
     .eq('profile_id', user.id)
-    .single()
+    .order('created_at', { ascending: true })
+    .limit(1)
+  let client = linked?.[0] ?? null
 
+  // Cuenta sin ficha vinculada: se intenta enlazar por email, que Supabase Auth
+  // ya ha verificado. Solo si hay UNA candidata libre, para no enganchar la
+  // ficha equivocada cuando el mismo correo aparece duplicado.
+  if (!client && user.email) {
+    const { data: byEmail } = await admin
+      .from('clients')
+      .select('*')
+      .ilike('email', escapeLike(user.email))
+      .is('profile_id', null)
+      .limit(2)
+    const exact = (byEmail ?? []).filter(
+      (c: { email?: string | null }) => (c.email ?? '').toLowerCase() === user.email!.toLowerCase()
+    )
+    if (exact.length === 1) {
+      const { error: linkErr } = await admin
+        .from('clients')
+        .update({ profile_id: user.id })
+        .eq('id', exact[0].id)
+        .is('profile_id', null)
+      if (!linkErr) client = { ...exact[0], profile_id: user.id }
+    }
+  }
+
+  // Sin ficha que vincular se muestra una pagina explicativa. Antes se
+  // redirigia a /auth/login, pero el middleware devuelve al cliente ya
+  // autenticado a /mi-cuenta: era un bucle infinito de redirecciones.
   if (!client) {
-    redirect('/auth/login?mode=client&redirectTo=/mi-cuenta')
+    return <AccountNotLinked email={user.email ?? null} />
   }
 
   const clientId = client.id

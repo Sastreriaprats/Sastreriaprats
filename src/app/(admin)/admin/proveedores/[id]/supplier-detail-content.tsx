@@ -352,7 +352,13 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
 
   const openApPayment = (row: SupplierVencimientoRow) => {
     setApPaymentInvoice({
-      id: row.id,
+      // `row.id` es el id de la CUOTA, no el de la factura (asi lo consume la
+      // pantalla de Vencimientos). El dialogo de pago espera un id de factura:
+      // con el de la cuota, el historial salia vacio y guardar respondia
+      // "Factura no encontrada", asi que este boton no podia pagar nunca.
+      // `amount_pending` sigue siendo el de la cuota a proposito: es lo que
+      // prerrellena el importe a pagar.
+      id: row.supplier_invoice_id,
       supplier_name: row.supplier_name,
       invoice_number: row.invoice_number,
       total_amount: row.total_amount,
@@ -660,7 +666,10 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                             >
                               Registrar recepción
                             </Button>
-                          ) : o.status !== 'received' && o.status !== 'cancelled' ? (
+                          ) : o.status !== 'received' && o.status !== 'cancelled' && o.status !== 'closed' ? (
+                            // Un pedido zanjado ('closed') se cerró a propósito con líneas a medias:
+                            // updateSupplierOrderStatusAction ve stock_updated_at y NO toca el stock, así
+                            // que pasarlo a "Recibido" solo falsearía lo servido por el proveedor.
                             <Button
                               variant="outline"
                               size="sm"
@@ -672,7 +681,11 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                                 setMarkingReceivedOrderId(null)
                                 if (res?.success) {
                                   const warnings = Number((res.data as any)?.stock_warnings || 0)
-                                  if (warnings > 0) {
+                                  // Mismo criterio que el detalle del pedido: si el servidor se saltó el
+                                  // stock (ya actualizado antes), el toast no debe prometer lo contrario.
+                                  if ((res.data as any)?.stock_update_skipped) {
+                                    toast.success('Estado actualizado: Recibido (stock ya actualizado previamente)')
+                                  } else if (warnings > 0) {
                                     toast.warning('Pedido recibido. Algunas líneas no actualizaron stock (sin variante asociada).')
                                   } else {
                                     toast.success('Pedido marcado como recibido. Stock actualizado correctamente.')
@@ -2096,8 +2109,9 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                   if (!state?.selected) continue
                   const qty = Number(String(state.quantityReceived).replace(',', '.'))
                   if (!Number.isFinite(qty) || qty <= 0) continue
-                  const referenceId = line.fabric_id ?? line.product_id
-                  if (!referenceId) continue
+                  // Las líneas "libres" (sin producto ni tejido) también se envían:
+                  // se descartaban aquí y el pedido no llegaba nunca a "Recibido".
+                  const referenceId = line.fabric_id ?? line.product_id ?? ''
                   const type: 'fabric' | 'product' = line.fabric_id ? 'fabric' : 'product'
                   linesToSend.push({ lineId: line.id, quantityReceived: qty, type, referenceId })
                 }

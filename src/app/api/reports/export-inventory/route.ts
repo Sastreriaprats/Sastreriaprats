@@ -82,13 +82,24 @@ export async function GET() {
   const variants: VariantRow[] = []
   for (let i = 0; i < productIds.length; i += 200) {
     const chunk = productIds.slice(i, i + 200)
-    const { data, error } = await admin
-      .from('product_variants')
-      .select('id, product_id, size, color, variant_sku, barcode, price_override, cost_price_override, is_active')
-      .in('product_id', chunk)
-      .eq('is_active', true)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    variants.push(...((data ?? []) as VariantRow[]))
+    // Trocear por producto NO evita el tope de 1.000 filas de PostgREST: 200
+    // productos con varias tallas cada uno lo pasan de largo (hoy el primer
+    // lote suma ~1.970 variantes) y el Excel salia sin ellas, sin aviso. Hay
+    // que paginar DENTRO de cada lote, con orden estable para no repetir ni
+    // perder filas entre paginas.
+    for (let off = 0; ; off += PAGE) {
+      const { data, error } = await admin
+        .from('product_variants')
+        .select('id, product_id, size, color, variant_sku, barcode, price_override, cost_price_override, is_active')
+        .in('product_id', chunk)
+        .eq('is_active', true)
+        .order('id', { ascending: true })
+        .range(off, off + PAGE - 1)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      const batch = (data ?? []) as VariantRow[]
+      variants.push(...batch)
+      if (batch.length < PAGE) break
+    }
   }
   const variantsById = new Map<string, VariantRow>()
   for (const v of variants) variantsById.set(v.id, v)
@@ -102,12 +113,21 @@ export async function GET() {
   const stockRows: StockRow[] = []
   for (let i = 0; i < variantIds.length; i += 200) {
     const chunk = variantIds.slice(i, i + 200)
-    const { data, error } = await admin
-      .from('stock_levels')
-      .select('product_variant_id, warehouse_id, quantity, reserved, min_stock')
-      .in('product_variant_id', chunk)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    stockRows.push(...((data ?? []) as StockRow[]))
+    // Mismo tope: 200 variantes x 5 almacenes dan justo 1.000 filas, pegado al
+    // limite. Se pagina igual, ordenando por la PK para que el reparto entre
+    // paginas sea estable.
+    for (let off = 0; ; off += PAGE) {
+      const { data, error } = await admin
+        .from('stock_levels')
+        .select('product_variant_id, warehouse_id, quantity, reserved, min_stock')
+        .in('product_variant_id', chunk)
+        .order('id', { ascending: true })
+        .range(off, off + PAGE - 1)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      const batch = (data ?? []) as StockRow[]
+      stockRows.push(...batch)
+      if (batch.length < PAGE) break
+    }
   }
 
   const header = [

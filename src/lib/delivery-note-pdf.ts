@@ -67,31 +67,43 @@ export async function generateDeliveryNotePdf(data: DeliveryNotePdfData): Promis
   doc.text(toText, 110, y)
   y += 8
 
-  // Cabecera de tabla
+  // Cabecera de tabla. En funcion aparte porque hay que repetirla en cada
+  // pagina cuando el albaran tiene muchas lineas.
   const colX = { product: margin, sku: 92, qty: 126, unit: 146, total: 172 }
-  doc.setFillColor(238, 241, 246)
-  doc.rect(margin, y, right - margin, 8, 'F')
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(9)
-  doc.text('Producto', colX.product + 1, y + 5.4)
-  doc.text('SKU', colX.sku + 1, y + 5.4)
-  doc.text('Cantidad', colX.qty + 1, y + 5.4)
-  doc.text('P.Unit. (IVA)', colX.unit + 1, y + 5.4)
-  doc.text('Total (IVA)', colX.total + 1, y + 5.4)
-  y += 8
+  const drawTableHeader = () => {
+    doc.setFillColor(238, 241, 246)
+    doc.rect(margin, y, right - margin, 8, 'F')
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(9)
+    doc.text('Producto', colX.product + 1, y + 5.4)
+    doc.text('SKU', colX.sku + 1, y + 5.4)
+    doc.text('Cantidad', colX.qty + 1, y + 5.4)
+    doc.text('P.Unit. (IVA)', colX.unit + 1, y + 5.4)
+    doc.text('Total (IVA)', colX.total + 1, y + 5.4)
+    y += 8
+  }
+  drawTableHeader()
 
-  let grandTotal = 0
   doc.setFont('helvetica', 'normal')
   const lines = data.lines || []
-  for (const line of lines) {
+
+  const lineAmount = (line: typeof lines[number]) => {
     const qty = Number(line.quantity || 0)
     const net = Number(line.unit_price || 0)
     const taxRate = Number(line.tax_rate ?? 21)
     const unitPrice = line.unit_price_with_tax != null
       ? Number(line.unit_price_with_tax)
       : net * (1 + taxRate / 100)
-    const lineTotal = qty * unitPrice
-    grandTotal += lineTotal
+    return { qty, net, unitPrice, lineTotal: qty * unitPrice }
+  }
+
+  // El total se calcula sobre TODAS las lineas, no dentro del bucle de pintado:
+  // antes solo sumaba las que cabian en la pagina, asi que un albaran largo
+  // imprimia un "Total general" mas bajo que el real.
+  const grandTotal = lines.reduce((acc, line) => acc + lineAmount(line).lineTotal, 0)
+
+  for (const line of lines) {
+    const { qty, net, unitPrice, lineTotal } = lineAmount(line)
 
     doc.setFontSize(8.7)
     doc.text(String(line.product_name || '-').slice(0, 38), colX.product + 1, y + 5.2)
@@ -102,7 +114,14 @@ export async function generateDeliveryNotePdf(data: DeliveryNotePdfData): Promis
     doc.setDrawColor(230)
     doc.line(margin, y + 7, right, y + 7)
     y += 7
-    if (y > 255) break
+    // Salto de pagina en vez de cortar: antes se perdian las lineas a partir de
+    // la 28 y el albaran salia incompleto.
+    if (y > 250) {
+      doc.addPage()
+      y = 20
+      drawTableHeader()
+      doc.setFont('helvetica', 'normal')
+    }
   }
 
   y += 6

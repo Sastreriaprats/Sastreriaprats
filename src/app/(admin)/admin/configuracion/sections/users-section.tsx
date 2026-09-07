@@ -44,11 +44,21 @@ export function UsersSection() {
   const [tempPassword, setTempPassword] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [salesUser, setSalesUser] = useState<UserRow | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     const u = await listAdminUsers()
-    if (u.data) setUsers(u.data)
+    // Ignorar u.error dejaba la tabla vacía con "Sin usuarios": un fallo de
+    // permisos o de la consulta parecía que la empresa no tuviera empleados.
+    if (u.error) {
+      setLoadError(u.error)
+      setUsers([])
+      toast.error(u.error)
+    } else {
+      setLoadError(null)
+      setUsers(u.data ?? [])
+    }
     setLoading(false)
   }, [])
 
@@ -153,7 +163,9 @@ export function UsersSection() {
               </TableHeader>
               <TableBody>
                 {users.length === 0 && (
-                  <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">Sin usuarios</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                    {loadError ? `No se han podido cargar los usuarios: ${loadError}` : 'Sin usuarios'}
+                  </TableCell></TableRow>
                 )}
                 {users.map(u => {
                   const role = u.roles[0]
@@ -368,6 +380,8 @@ function CreateUserForm({ roles, stores, onSuccess }: {
     setLoading(false)
     if (res.error) { toast.error(res.error); return }
     toast.success('Usuario creado')
+    // El alta puede terminar "bien" y dejar al empleado sin ninguna tienda.
+    if (res.data?.storesWarning) toast.error(res.data.storesWarning, { duration: 20000 })
     onSuccess(res.data!.tempPassword)
   }
 
@@ -421,6 +435,9 @@ function EditUserForm({ user, roles, stores, onSuccess }: {
   const [firstName, setFirstName] = useState(user.first_name ?? fallbackFirst)
   const [lastName, setLastName] = useState(user.last_name ?? fallbackLast)
   const [roleId, setRoleId] = useState(user.roles[0]?.id ?? '')
+  // Roles que el usuario tiene ademas del que muestra el selector (p.ej.
+  // informes_comisiones sobre administrador). Se conservan al guardar.
+  const extraRoles = user.roles.slice(1)
   const [selectedStoreIds, setSelectedStoreIds] = useState<string[]>([])
   const [primaryStoreId, setPrimaryStoreId] = useState<string>('')
   const [storesDirty, setStoresDirty] = useState(false)
@@ -475,7 +492,7 @@ function EditUserForm({ user, roles, stores, onSuccess }: {
       userId: user.id,
       firstName,
       lastName,
-      roleId: roleId || undefined,
+      roleIds: roleId ? [roleId, ...extraRoles.map(r => r.id)] : undefined,
       storeIds: storesDirty ? selectedStoreIds : undefined,
       primaryStoreId: storesDirty ? (primaryStoreId || selectedStoreIds[0]) : undefined,
       isActive,
@@ -509,6 +526,11 @@ function EditUserForm({ user, roles, stores, onSuccess }: {
             {roles.map(r => <SelectItem key={r.id} value={r.id}>{r.display_name ?? r.name}</SelectItem>)}
           </SelectContent>
         </Select>
+        {extraRoles.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Conserva además: {extraRoles.map(r => r.display_name ?? r.name).join(', ')}
+          </p>
+        )}
       </div>
       <div className="space-y-1">
         <Label>Tiendas asignadas</Label>

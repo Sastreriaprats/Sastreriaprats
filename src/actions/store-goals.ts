@@ -3,8 +3,9 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { checkUserPermission } from '@/actions/auth'
+import { checkUserPermission, checkUserAnyPermission } from '@/actions/auth'
 import { saleNetBase, fetchVoucherPaidBySale, fetchReturnedLeftBySale } from '@/lib/server/commission-base'
+import { readAllPaged } from '@/lib/server/paged'
 
 export type GoalType = 'boutique' | 'sastreria' | 'online'
 
@@ -39,21 +40,6 @@ const SASTRERIA_SALE_TYPES = ['tailoring_deposit', 'tailoring_final', 'alteratio
 // Estados de online_orders que se consideran facturación realizada.
 const ONLINE_COUNTED_STATUSES = ['paid', 'processing', 'shipped', 'delivered']
 
-/** Lee TODAS las filas paginando de 1000 en 1000 (el tope del servidor no se
- *  evita con .limit(); solo .range() pagina de verdad). */
-async function readAllPagedGoals<T = Record<string, unknown>>(
-  build: (from: number, to: number) => PromiseLike<{ data: T[] | null }>,
-): Promise<T[]> {
-  const out: T[] = []
-  for (let from = 0; ; from += 1000) {
-    const { data } = await build(from, from + 999)
-    const batch = data ?? []
-    out.push(...batch)
-    if (batch.length < 1000) break
-  }
-  return out
-}
-
 /** Devuelve una fila por tienda con sus objetivos para el mes indicado. */
 export async function getStoreGoalsForMonth(
   year: number,
@@ -63,6 +49,13 @@ export async function getStoreGoalsForMonth(
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
+    // Estar autenticado no basta: esto devuelve los objetivos y la facturación
+    // real de TODAS las tiendas, y se consulta con service-role (salta RLS). Se
+    // pide el mismo permiso que la pestaña que lo pinta (Configuración →
+    // Objetivos) y no 'config.edit', para que quien solo puede VERLA pueda leerla.
+    if (!(await checkUserAnyPermission(user.id, ['config.view', 'config.edit']))) {
+      return { error: 'Sin permisos para consultar objetivos' }
+    }
 
     const admin = createAdminClient()
     const pad = (n: number) => String(n).padStart(2, '0')
@@ -76,7 +69,7 @@ export async function getStoreGoalsForMonth(
       // Paginado (el tope de 1000 filas del servidor no se evita con .limit())
       // e incluye partially_returned: las devoluciones restan del "actual",
       // misma vara que el motor de comisiones.
-      readAllPagedGoals((f, t) => admin.from('sales').select('store_id, total, total_returned, tax_amount, sale_type').in('status', ['completed', 'partially_returned']).gte('created_at', monthStart).lt('created_at', nextMonthStart).order('created_at', { ascending: true }).range(f, t)),
+      readAllPaged((f, t) => admin.from('sales').select('store_id, total, total_returned, tax_amount, sale_type').in('status', ['completed', 'partially_returned']).gte('created_at', monthStart).lt('created_at', nextMonthStart).order('created_at', { ascending: true }).range(f, t)),
       admin.from('online_orders').select('total, tax_amount').in('status', ONLINE_COUNTED_STATUSES).gte('created_at', monthStart).lt('created_at', nextMonthStart),
     ])
 
@@ -242,6 +235,12 @@ export async function getEmployeeGoals(input: {
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No autenticado' }
+    // Igual que getStoreGoalsForMonth, y aquí con más motivo: devuelve el nombre
+    // y las ventas del mes de cada empleado, el dato que el proyecto reserva con
+    // reports.view_all_employees. Sin esto lo veía cualquier sesión iniciada.
+    if (!(await checkUserAnyPermission(user.id, ['config.view', 'config.edit']))) {
+      return { error: 'Sin permisos para consultar objetivos' }
+    }
 
     const admin = createAdminClient()
     const pad = (n: number) => String(n).padStart(2, '0')
@@ -263,7 +262,7 @@ export async function getEmployeeGoals(input: {
       // Paginado + misma vara que el motor de comisiones: la base sigue al
       // DINERO QUE ENTRA (ver commission-base.ts). El canje de un vale no cuenta
       // y las devoluciones por vale/cambio no restan (solo los reintegros).
-      readAllPagedGoals((f, t) => admin
+      readAllPaged((f, t) => admin
         .from('sales')
         .select('id, salesperson_id, total, total_returned, tax_amount, sale_type')
         .eq('store_id', storeId)

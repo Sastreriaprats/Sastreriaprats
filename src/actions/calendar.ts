@@ -5,6 +5,7 @@ import { success, failure } from '@/lib/errors'
 import { getBusinessHours, isSlotBlocked, type ScheduleBlockLike } from '@/lib/schedule-utils'
 import { resolveClientIdsForSearch } from '@/lib/server/query-helpers'
 import { normalizeSearchTerm } from '@/lib/utils'
+import { todayLocalISODate } from '@/lib/dates'
 
 /**
  * Devuelve el bloqueo de agenda activo que choca con la franja indicada, o
@@ -112,7 +113,7 @@ export const findNextAppointmentByClient = protectedAction<{ query: string }, {
     if (error) return failure(error.message)
     if (!data || data.length === 0) return success({ appointment: null, hasPastOnly: false })
 
-    const today = new Date().toISOString().slice(0, 10)
+    const today = todayLocalISODate()
     const nowTime = new Date().toTimeString().slice(0, 5)
     const rows = data as Array<Record<string, unknown>>
     const upcoming = rows.find((a) => {
@@ -284,7 +285,7 @@ export const updateAppointment = protectedAction<{ id: string; data: Record<stri
     if (input.date || input.start_time) {
       const { data: current } = await ctx.adminClient
         .from('appointments')
-        .select('date, start_time, duration_minutes, store_id')
+        .select('date, start_time, duration_minutes, store_id, tailor_id')
         .eq('id', id)
         .single()
       if (current) {
@@ -298,6 +299,53 @@ export const updateAppointment = protectedAction<{ id: string; data: Record<stri
         const blocked = await findBlockingScheduleBlock(ctx.adminClient, date, storeId, startTime, endTime)
         if (blocked) {
           return failure(`Esa franja está bloqueada: ${blocked.title}. No se puede cambiar la cita a esa franja.`)
+        }
+
+        // Aforo y doble reserva del sastre: al editar no se comprobaban, así que
+        // la 3ª cita solapada o la 2ª del mismo sastre entraban simplemente
+        // moviendo una cita ya creada. Sólo se revalida si la cita CAMBIA de
+        // franja, duración, tienda o sastre: si sólo se tocan notas o título no
+        // se bloquea, porque hay citas antiguas ya por encima del aforo y no
+        // deben quedar inservibles.
+        const tailorId = (input.tailor_id ?? current.tailor_id) as string | null
+        const moved = date !== String(current.date)
+          || startTime !== String(current.start_time).slice(0, 5)
+          || duration !== (Number(current.duration_minutes) || 60)
+          || storeId !== (current.store_id as string | null)
+          || tailorId !== (current.tailor_id as string | null)
+
+        if (moved && tailorId) {
+          const { data: conflicts } = await ctx.adminClient
+            .from('appointments')
+            .select('id, title, start_time, end_time')
+            .eq('date', date)
+            .neq('id', id)
+            .neq('status', 'cancelled')
+            .eq('tailor_id', tailorId)
+            .lt('start_time', endTime)
+            .gt('end_time', startTime)
+
+          if (conflicts && conflicts.length > 0) {
+            return failure(`El sastre ya tiene una cita: ${conflicts.map((c: Record<string, unknown>) => `${c.title} (${String(c.start_time).slice(0, 5)}-${String(c.end_time).slice(0, 5)})`).join(', ')}`)
+          }
+        }
+
+        // Mismo aforo que createAppointment: 2 citas solapadas por tienda.
+        const STORE_CAPACITY = 2
+        if (moved && storeId) {
+          const { count } = await ctx.adminClient
+            .from('appointments')
+            .select('id', { count: 'exact', head: true })
+            .eq('date', date)
+            .eq('store_id', storeId)
+            .neq('id', id)
+            .neq('status', 'cancelled')
+            .lt('start_time', endTime)
+            .gt('end_time', startTime)
+
+          if ((count ?? 0) >= STORE_CAPACITY) {
+            return failure(`Esa franja ya tiene ${STORE_CAPACITY} citas en esta tienda. Elige otra hora o tienda.`)
+          }
         }
       }
     }

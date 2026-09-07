@@ -22,8 +22,9 @@ import {
 import { ArrowLeft, FileDown, Printer, Save, Ban, Trash2, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDate } from '@/lib/utils'
+import { usePermissions } from '@/hooks/use-permissions'
 import { createClient } from '@/lib/supabase/client'
-import { updateAlteration, cancelAlteration, deleteAlteration } from '@/actions/alterations'
+import { updateAlteration, cancelAlteration, deleteAlteration, markAlterationCharged, clearAlterationCharge } from '@/actions/alterations'
 import {
   type AlterationWithRelations,
   type AlterationStatus,
@@ -32,8 +33,20 @@ import {
 } from '@/types/alterations'
 import { downloadAlterationPdf, printAlterationPdf } from '@/lib/pdf/alteration-pdf'
 
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  cash: 'Efectivo',
+  card: 'Tarjeta',
+  transfer: 'Transferencia',
+  bizum: 'Bizum',
+}
+
 export function AlterationDetailContent({ alteration, basePath = '/admin' }: { alteration: AlterationWithRelations; basePath?: string }) {
   const router = useRouter()
+  const { can, isAdmin } = usePermissions()
+  // Marcar cobrado / dejar pendiente pide el mismo permiso que la action
+  // (pos.sell). El panel del sastre queda fuera: no maneja caja y su listado ni
+  // siquiera muestra el estado de cobro.
+  const canCharge = basePath !== '/sastre' && (isAdmin || can('pos.sell'))
 
   // ── Form state (todos los campos editables) ───────────────────────────────
   const [phone, setPhone] = useState(alteration.phone ?? '')
@@ -59,6 +72,13 @@ export function AlterationDetailContent({ alteration, basePath = '/admin' }: { a
   // ── Eliminar ──────────────────────────────────────────────────────────────
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+
+  // ── Cobro ─────────────────────────────────────────────────────────────────
+  // Mientras no esté marcado como cobrado, el arreglo cuenta como deuda del
+  // cliente (aviso del TPV, ficha del cliente y Cobros pendientes).
+  const isCharged = Boolean(alteration.sale_id) || Boolean(alteration.payment_method)
+  const [chargeMethod, setChargeMethod] = useState('cash')
+  const [charging, setCharging] = useState(false)
 
   // Cargar oficiales activos (mismo patrón que nueva-venta-ficha-client)
   useEffect(() => {
@@ -140,6 +160,36 @@ export function AlterationDetailContent({ alteration, basePath = '/admin' }: { a
       router.push(`${basePath}/clientes/${clientId}?tab=arreglos`)
     } finally {
       setDeleting(false)
+    }
+  }
+
+  const handleMarkCharged = async () => {
+    setCharging(true)
+    try {
+      const res = await markAlterationCharged({ alterationId: alteration.id, paymentMethod: chargeMethod })
+      if (!res.success) {
+        toast.error('error' in res ? res.error : 'Error al marcar como cobrado')
+        return
+      }
+      toast.success('Arreglo marcado como cobrado')
+      router.refresh()
+    } finally {
+      setCharging(false)
+    }
+  }
+
+  const handleClearCharge = async () => {
+    setCharging(true)
+    try {
+      const res = await clearAlterationCharge({ alterationId: alteration.id })
+      if (!res.success) {
+        toast.error('error' in res ? res.error : 'Error al dejarlo pendiente')
+        return
+      }
+      toast.success('Arreglo marcado como pendiente de cobro')
+      router.refresh()
+    } finally {
+      setCharging(false)
     }
   }
 
@@ -238,11 +288,69 @@ export function AlterationDetailContent({ alteration, basePath = '/admin' }: { a
               <p className="text-sm text-muted-foreground">{alteration.alteration_type}</p>
             </div>
 
+            {/* Cobro: sin marca de cobro el arreglo asoma como deuda del cliente.
+                El ESTADO tiene que verse también desde /vendedor: ahí el listado ya
+                pinta "Debe X €" y la ficha no ofrecía nada, así que el vendedor veía
+                la deuda y no podía ni consultarla ni saldarla. */}
+            {basePath !== '/sastre' && (
+              <div className="space-y-2 rounded-md border p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="text-muted-foreground text-xs">Cobro</Label>
+                  {isCharged ? (
+                    <Badge variant="outline" className="bg-green-100 text-green-700 border-green-200">
+                      Cobrado{alteration.payment_method ? ` · ${PAYMENT_METHOD_LABELS[alteration.payment_method] ?? alteration.payment_method}` : ''}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-200">
+                      Pendiente de cobro
+                    </Badge>
+                  )}
+                </div>
+                {canCharge && (isCharged ? (
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-muted-foreground">
+                      {alteration.sale_id ? 'Cobrado en un ticket de caja.' : 'Marcado como cobrado a mano.'}
+                    </p>
+                    {!alteration.sale_id && (
+                      <Button variant="ghost" size="sm" className="h-8 text-xs" disabled={charging} onClick={handleClearCharge}>
+                        {charging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Dejar pendiente'}
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-xs text-muted-foreground">
+                      Lo normal es cobrarlo en caja al entregarlo (sale como pendiente del cliente en el TPV).
+                      Usa esto solo si ya se cobró fuera del TPV.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Select value={chargeMethod} onValueChange={setChargeMethod}>
+                        <SelectTrigger className="h-8 text-xs w-36"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => (
+                            <SelectItem key={value} value={value}>{label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button variant="outline" size="sm" className="h-8 text-xs" disabled={charging} onClick={handleMarkCharged}>
+                        {charging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Marcar cobrado'}
+                      </Button>
+                    </div>
+                  </>
+                ))}
+              </div>
+            )}
+
             {alteration.tailoring_orders && (
               <div className="space-y-1">
                 <Label>Pedido vinculado</Label>
                 <Link
-                  href={`/admin/pedidos/${alteration.tailoring_orders.id}`}
+                  // El panel del sastre tiene su propia ruta de pedidos y el
+                  // middleware saca a /sastre cualquier /admin, asi que el
+                  // enlace fijo lo dejaba en el dashboard. El del vendedor NO
+                  // tiene /vendedor/pedidos: para el sigue valiendo /admin
+                  // (excepcion isPedidosRoute del middleware).
+                  href={`${basePath === '/sastre' ? '/sastre' : '/admin'}/pedidos/${alteration.tailoring_orders.id}`}
                   className="text-sm font-mono hover:underline block"
                 >
                   {alteration.tailoring_orders.order_number}
@@ -310,13 +418,17 @@ export function AlterationDetailContent({ alteration, basePath = '/admin' }: { a
               <Ban className="h-4 w-4" /> Cancelar arreglo
             </Button>
           )}
-          <Button
-            variant="outline"
-            onClick={() => setDeleteOpen(true)}
-            className="gap-1 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
-          >
-            <Trash2 className="h-4 w-4" /> Eliminar permanentemente
-          </Button>
+          {/* El borrado es fisico: solo lo ensenamos a quien puede borrar
+              clientes (el server action exige el mismo permiso). */}
+          {can('clients.delete') && (
+            <Button
+              variant="outline"
+              onClick={() => setDeleteOpen(true)}
+              className="gap-1 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+            >
+              <Trash2 className="h-4 w-4" /> Eliminar permanentemente
+            </Button>
+          )}
         </div>
         <Button onClick={handleSave} disabled={saving} className="gap-1">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}

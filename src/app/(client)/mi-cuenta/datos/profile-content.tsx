@@ -34,6 +34,12 @@ export function ProfileContent({ client, userEmail }: {
   const [showPassword, setShowPassword] = useState(false)
 
   const handleSave = async () => {
+    // Aviso antes de enviar: el servidor ya lo rechaza con un 400, pero así el
+    // cliente ve QUÉ falta en vez del "Error al guardar" genérico de la línea 59.
+    if (!form.first_name.trim() || !form.last_name.trim()) {
+      toast.error('El nombre y los apellidos son obligatorios')
+      return
+    }
     setIsSaving(true)
     try {
       const res = await fetch('/api/public/update-client', {

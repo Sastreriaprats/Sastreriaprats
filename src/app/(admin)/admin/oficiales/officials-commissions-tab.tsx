@@ -70,13 +70,16 @@ export function OfficialsCommissionsTab({ onGoToOficiales }: { onGoToOficiales: 
   const [form, setForm] = useState({ paid_at: today(), payment_method: '', reference: '', notes: '' })
   const [isSettling, setIsSettling] = useState(false)
 
+  // Sin setLoading aquí: si se vuelve a elegir la MISMA fecha, `range` no cambia,
+  // el efecto no se dispara y el spinner se quedaba girando para siempre. Marcar
+  // "cargando" lo hace el efecto, que es el único que garantiza apagarlo.
   const setRangeField = useCallback((field: 'start' | 'end', value: string) => {
-    setLoading(true)
     setRange((p) => ({ ...p, [field]: value }))
   }, [])
 
   useEffect(() => {
     let active = true
+    setLoading(true)
     getOfficialsCommissions({ start_date: range.start, end_date: range.end }).then((res) => {
       if (!active) return
       if (res.success) setData(res.data)
@@ -122,6 +125,9 @@ export function OfficialsCommissionsTab({ onGoToOficiales }: { onGoToOficiales: 
       const oid = settleTarget.official_id
       setSettleTarget(null)
       setHistory((h) => { const c = { ...h }; delete c[oid]; return c }) // invalidar historial
+      // Si la fila sigue desplegada nadie volvería a pedir el historial: sólo lo
+      // carga toggleExpand al abrir, y el bloque se quedaba en «Cargando…».
+      if (expanded === oid) loadHistory(oid)
       setReloadKey((k) => k + 1) // refetch del informe
     } else {
       // Mensaje legible (p.ej. guard anti-doble-pago), no error crudo.

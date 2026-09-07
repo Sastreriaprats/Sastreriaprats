@@ -410,7 +410,7 @@ export function PedidoDetailContent({
         type: (l.fabric_id ? 'fabric' : 'product') as 'fabric' | 'product',
         referenceId: (l.fabric_id || l.product_id) ?? '',
       }))
-      .filter((l) => l.referenceId)
+      .filter((l) => l.lineId) // las líneas "libres" (sin producto ni tejido) también se envían: antes se filtraban aquí y el pedido no llegaba nunca a "Recibido"
 
     if (lines.length === 0) {
       toast.error('Selecciona al menos una línea con cantidad recibida')

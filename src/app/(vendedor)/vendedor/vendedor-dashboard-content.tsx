@@ -54,15 +54,27 @@ export function VendedorDashboardContent() {
 
   const [stats, setStats] = useState<VendorDashboardStats | null>(null)
   const [loadingStats, setLoadingStats] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
     setLoadingStats(true)
-    getVendorDashboardStats(storeId).then((res) => {
-      if (cancelled) return
-      if (res.data) setStats(res.data)
-      setLoadingStats(false)
-    })
+    setLoadError(null)
+    getVendorDashboardStats(storeId)
+      .then((res) => {
+        if (cancelled) return
+        if (res.data) setStats(res.data)
+        // Un fallo de consulta pintaba 0,00 € en las cuatro tarjetas, idéntico a
+        // un día sin ventas. Hay que poder distinguirlo.
+        else setLoadError(res.error || 'Error desconocido')
+      })
+      .catch((e) => {
+        if (cancelled) return
+        console.error('[VendedorDashboard]', e)
+        setLoadError('Error de conexión')
+      })
+      // finally: si la promesa se rechaza, sin esto los esqueletos giraban para siempre.
+      .finally(() => { if (!cancelled) setLoadingStats(false) })
     return () => { cancelled = true }
   }, [storeId])
 
@@ -85,6 +97,13 @@ export function VendedorDashboardContent() {
           {new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
         </p>
       </div>
+
+      {/* Aviso de fallo: sin él, un error de servidor se veía como 0,00 € reales. */}
+      {!loadingStats && loadError && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          No se han podido cargar tus ventas ({loadError}). Los importes de abajo pueden no ser reales: recarga la página.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>

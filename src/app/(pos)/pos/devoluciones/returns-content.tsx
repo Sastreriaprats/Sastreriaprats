@@ -51,6 +51,7 @@ interface ReplacementItem {
   unitPrice: number
   quantity: number
   taxRate: number
+  costPrice: number
   imageUrl?: string
 }
 
@@ -219,9 +220,27 @@ export function ReturnsContent() {
     setSelectedLineIds(prev => prev.includes(lineId) ? prev.filter(id => id !== lineId) : [...prev, lineId])
   }
 
-  const selectedTotal = foundSale?.sale_lines
+  // Bruto de las lineas marcadas. OJO: sale_lines.line_total solo lleva el
+  // descuento DE LINEA; el descuento global del ticket vive en sales.discount_amount
+  // / discount_percentage y no esta prorrateado en las lineas.
+  const selectedGross = foundSale?.sale_lines
     ?.filter((l: any) => selectedLineIds.includes(l.id))
-    ?.reduce((sum: number, l: any) => sum + l.line_total, 0) || 0
+    ?.reduce((sum: number, l: any) => sum + Number(l.line_total ?? 0), 0) || 0
+  const grossAllLines = (foundSale?.sale_lines ?? [])
+    .reduce((sum: number, l: any) => sum + Number(l.line_total ?? 0), 0)
+  const saleDiscountAmount = Number(foundSale?.discount_amount ?? 0)
+  const saleDiscountPct = Number(foundSale?.discount_percentage ?? 0)
+  // Lo que de verdad se va a devolver: mismo prorrateo que hace rpc_create_return
+  // (mig 267). Antes la pantalla anunciaba el bruto (TICK-2026-0131: 1.390,00 EUR)
+  // y el vale salia por el neto (1.251,00 EUR), y el "Cambio directo" se bloqueaba
+  // porque la diferencia enviada no cuadraba con la que calcula la RPC.
+  const selectedTotal = selectedGross <= 0
+    ? 0
+    : saleDiscountAmount > 0 && grossAllLines > 0
+      ? Math.round(selectedGross * (1 - saleDiscountAmount / grossAllLines) * 100) / 100
+      : saleDiscountPct > 0
+        ? Math.round(selectedGross * (1 - saleDiscountPct / 100) * 100) / 100
+        : Math.round(selectedGross * 100) / 100
 
   // Cómo se pagó el ticket original (para mostrarlo y preseleccionar el reintegro)
   const salePayments: Array<{ payment_method: string; amount: number }> = (foundSale?.sale_payments ?? [])
@@ -289,6 +308,9 @@ export function ReturnsContent() {
         unitPrice: price,
         quantity: 1,
         taxRate,
+        // Sin coste, la venta del cambio salía con margen del 100 % en los
+        // informes de productos y márgenes. Coste UNITARIO, como el TPV.
+        costPrice: Number(variant.products?.cost_price) || 0,
         imageUrl: variant.products?.main_image_url,
       }])
     }
@@ -454,7 +476,7 @@ export function ReturnsContent() {
         quantity: r.quantity,
         unit_price: r.unitPrice,
         tax_rate: r.taxRate,
-        cost_price: 0,
+        cost_price: r.costPrice,
       })),
       diff_payment: priceDiff > 0.005 ? { payment_method: diffMethod, amount: Math.round(priceDiff * 100) / 100 } : null,
       reason,

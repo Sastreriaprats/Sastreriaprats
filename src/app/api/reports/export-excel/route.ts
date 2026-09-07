@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const hasPerm = await checkUserPermission(user.id, 'reporting.export')
+  const hasPerm = await checkUserPermission(user.id, 'reports.export')
   if (!hasPerm) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await request.json()
@@ -168,7 +168,9 @@ function sectionClients(rows: Row[], data: AnyRec | null) {
 
   rows.push(['RESUMEN CLIENTES'])
   rows.push(['Nuevos clientes', num(data.newClients)])
-  rows.push(['Total clientes', num(data.totalClients)])
+  // getClientsAnalytics devuelve el histórico como `totalClientsHistorical`;
+  // leer `totalClients` (clave inexistente) exportaba siempre 0.
+  rows.push(['Total clientes', num(data.totalClientsHistorical)])
   rows.push(['Clientes con compras', num(data.clientsWithPurchases)])
   rows.push([])
 

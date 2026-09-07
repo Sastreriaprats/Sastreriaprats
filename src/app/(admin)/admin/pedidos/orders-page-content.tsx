@@ -183,7 +183,12 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
     filters, setFilters, isLoading, refresh, pageSize,
     statusCounts: statusCountsFromApi, totalAll, aggregates,
   } = useList(listOrders, {
-    pageSize: 25,
+    // El Kanban no tiene paginador: con 25 solo pintaba la primera pagina y el
+    // resto de pedidos no aparecia en ninguna columna. `pageSize` esta en las
+    // dependencias del hook, asi que al cambiar de vista se recarga solo.
+    // 500 < 1000 (tope de PostgREST); si algun dia se pasa de ahi habra que
+    // paginar de verdad en bucle.
+    pageSize: view === 'pipeline' ? 500 : 25,
     defaultSort: 'order_date',
     defaultOrder: 'desc',
     // Los filtros persistidos (estado, subtipo, rango de fechas) se leen de la
@@ -206,7 +211,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
   }, [statusCountsFromApi, totalAll])
 
   // Si la búsqueda deja un único cliente en el listado, se carga su deuda
-  // total unificada (encargos + tickets + reservas) y se muestra en un banner:
+  // total unificada (encargos + tickets + reservas + arreglos) y se muestra en un banner:
   // así se ve todo lo que debe sin ir a la pestaña Reservas ni a Cobros.
   useEffect(() => {
     if (isLoading) return
@@ -552,6 +557,7 @@ export function OrdersPageContent({ initialView, initialStatus, initialType, ini
               ['tailoring_order', 'Encargos'],
               ['sale', 'Tickets'],
               ['reservation', 'Reservas'],
+              ['alteration', 'Arreglos'],
             ] as const).map(([type, label]) => {
               const rows = clientDebt.rows.filter((r) => r.entity_type === type)
               return { label, count: rows.length, amount: rows.reduce((s, r) => s + r.total_pending, 0) }

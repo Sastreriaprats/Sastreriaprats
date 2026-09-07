@@ -17,16 +17,22 @@ export default async function NewVentaConfirmacionPage({
   if (!user) return null
 
   const admin = createAdminClient()
-  const { data: profile } = await admin
-    .from('profiles')
-    .select('full_name, first_name, last_name')
-    .eq('id', user.id)
-    .single()
-
+  // El lateral solo pinta "Caja TPV" y "Cobros" si recibe isSastrePlus; sin
+  // cargar el rol aquí, los dos enlaces desaparecían a mitad de Nueva venta.
+  const [profileRes, rolesRes] = await Promise.all([
+    admin.from('profiles').select('full_name, first_name, last_name').eq('id', user.id).single(),
+    admin.from('user_roles').select('roles(name)').eq('user_id', user.id),
+  ])
+  const profile = profileRes?.data
   const sastreName = profile?.full_name || profile?.first_name || profile?.last_name || 'Sastre'
+  const roleNames: string[] = (rolesRes?.data ?? []).flatMap((ur: { roles?: { name: string } | { name: string }[] | null }) => {
+    if (!ur?.roles) return []
+    return Array.isArray(ur.roles) ? ur.roles.map((r: { name: string }) => r.name) : [ur.roles.name]
+  })
+  const isSastrePlus = roleNames.includes('sastre_plus')
 
   return (
-    <SastreLayoutWithSidebar sastreName={sastreName}>
+    <SastreLayoutWithSidebar sastreName={sastreName} isSastrePlus={isSastrePlus}>
       <NuevaVentaConfirmacionClient orderId={orderId ?? ''} />
     </SastreLayoutWithSidebar>
   )

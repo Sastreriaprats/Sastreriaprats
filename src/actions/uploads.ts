@@ -8,6 +8,13 @@ const DEFAULT_FOLDER = 'uploads'
 const DEFAULT_MAX_SIZE_MB = 5
 const DEFAULT_ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/webp']
 
+// TOPES del servidor. Lo que manda el cliente en el FormData solo puede
+// RESTRINGIR mas, nunca ampliar: antes bucket, tamaño y tipos MIME se leian del
+// propio formulario, asi que quien llamara a la accion elegia sus limites.
+const ALLOWED_BUCKETS = ['web-content']
+const MAX_ALLOWED_SIZE_MB = 10
+const ALLOWED_MIMES_WHITELIST = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+
 /**
  * Normaliza el nombre original del fichero a un slug seguro para usar como
  * parte del path en Storage. Elimina path traversal, espacios, caracteres
@@ -44,21 +51,29 @@ export const uploadImage = protectedAction<
   FormData,
   { url: string; path: string }
 >(
-  { auditModule: 'uploads' },
+  // Sin `permission` bastaba con estar autenticado -incluidas las cuentas de
+  // cliente de la tienda- para subir ficheros al bucket publico. Los permisos
+  // cubren a los tres consumidores reales: blog (cms.edit), newsletter
+  // (emails.edit) y productos (products.edit).
+  { permission: ['cms.edit', 'emails.edit', 'products.edit'], auditModule: 'uploads' },
   async (ctx, formData) => {
     const file = formData.get('file') as File | null
     if (!file || !file.size) return failure('No se ha enviado ningún archivo')
 
-    const bucket = (formData.get('bucket') as string | null)?.trim() || DEFAULT_BUCKET
+    const requestedBucket = (formData.get('bucket') as string | null)?.trim() || DEFAULT_BUCKET
+    const bucket = ALLOWED_BUCKETS.includes(requestedBucket) ? requestedBucket : DEFAULT_BUCKET
     const folder = ((formData.get('folder') as string | null) || DEFAULT_FOLDER)
       .replace(/^\/+|\/+$/g, '')
       .replace(/\.\.+/g, '')
 
-    const maxSizeMB = Number(formData.get('maxSizeMB')) || DEFAULT_MAX_SIZE_MB
+    const requestedMaxMB = Number(formData.get('maxSizeMB')) || DEFAULT_MAX_SIZE_MB
+    const maxSizeMB = Math.min(requestedMaxMB, MAX_ALLOWED_SIZE_MB)
     const allowedRaw = (formData.get('allowedMimeTypes') as string | null)?.trim()
-    const allowed = allowedRaw
+    const requestedMimes = allowedRaw
       ? allowedRaw.split(',').map((s) => s.trim()).filter(Boolean)
       : DEFAULT_ALLOWED_MIMES
+    // Interseccion con la lista blanca: el cliente puede pedir menos, no mas.
+    const allowed = requestedMimes.filter((m) => ALLOWED_MIMES_WHITELIST.includes(m))
 
     if (file.size > maxSizeMB * 1024 * 1024) {
       return failure(`El archivo supera el máximo de ${maxSizeMB} MB`)

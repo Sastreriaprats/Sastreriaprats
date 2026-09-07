@@ -4,6 +4,7 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { success, failure } from '@/lib/errors'
 import { serializeForServerAction } from '@/lib/server/serialize'
+import { isSlotBlocked, type ScheduleBlockLike } from '@/lib/schedule-utils'
 
 export async function bookAppointment(input: {
   date: string
@@ -34,6 +35,22 @@ export async function bookAppointment(input: {
   const [h, m] = input.start_time.split(':').map(Number)
   const endDate = new Date(2000, 0, 1, h, m + 60)
   const end_time = `${endDate.getHours().toString().padStart(2, '0')}:${endDate.getMinutes().toString().padStart(2, '0')}`
+
+  // Bloqueo duro de agenda: esta ruta sólo miraba choques con otras citas, así
+  // que una franja bloqueada (festivo, viaje, evento privado) se reservaba
+  // igualmente desde la web. Misma comprobación que el panel y que el POST
+  // público (api/public/appointments/route.ts).
+  const { data: blocks, error: blocksError } = await admin
+    .from('schedule_blocks')
+    .select('all_day, start_time, end_time')
+    .eq('block_date', input.date)
+    .eq('is_active', true)
+    .or(`store_id.eq.${input.store_id},store_id.is.null`)
+
+  if (blocksError) return failure('No se pudo comprobar la disponibilidad. Inténtalo de nuevo.')
+  if (isSlotBlocked((blocks || []) as ScheduleBlockLike[], input.start_time, end_time)) {
+    return failure('Ese horario ya no está disponible. Por favor selecciona otro.')
+  }
 
   // Verificar conflictos
   const { data: conflicts } = await admin

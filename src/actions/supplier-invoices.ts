@@ -3,6 +3,7 @@
 import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { normalizeSearchTerm } from '@/lib/utils'
+import { readAllPaged } from '@/lib/server/paged'
 import {
   buildInstallments,
   computeDueDate,
@@ -182,17 +183,25 @@ export const getSupplierInvoicesKpis = protectedAction<void, SupplierInvoicesKpi
     in30.setDate(in30.getDate() + 30)
     const in30Str = in30.toISOString().slice(0, 10)
 
-    const [{ data: all }, { data: schedAll }] = await Promise.all([
-      ctx.adminClient
+    // Paginado: PostgREST corta cualquier consulta en 1.000 filas y estas tarjetas
+    // SUMAN importes sobre el array. La tabla es acumulativa (no filtra por año) y
+    // ya va por 639 facturas, así que sin paginar la deuda con proveedores
+    // empezaría a salir corta sin ningún aviso.
+    const [all, schedAll] = await Promise.all([
+      readAllPaged<{ total_amount: number; status: string; due_date: string; payment_date: string | null }>((f, t) => ctx.adminClient
         .from(TABLE)
         .select('total_amount, status, due_date, payment_date')
-        .eq('is_proforma', false), // las proformas no son deuda
-      ctx.adminClient
+        .eq('is_proforma', false) // las proformas no son deuda
+        .order('id', { ascending: true })
+        .range(f, t), 'getSupplierInvoicesKpis.invoices'),
+      readAllPaged<{ amount: number; is_paid: boolean; due_date: string; paid_at: string | null }>((f, t) => ctx.adminClient
         .from('supplier_order_payment_schedule')
-        .select('amount, is_paid, due_date, paid_at'),
+        .select('amount, is_paid, due_date, paid_at')
+        .order('id', { ascending: true })
+        .range(f, t), 'getSupplierInvoicesKpis.schedule'),
     ])
 
-    const rows = (all || []) as { total_amount: number; status: string; due_date: string; payment_date: string | null }[]
+    const rows = all
     // KPIs de facturas (ap_supplier_invoices) — separadas de cuotas de pedidos
     let totalPendiente = 0
     let countVencidas = 0
@@ -212,7 +221,7 @@ export const getSupplierInvoicesKpis = protectedAction<void, SupplierInvoicesKpi
     }
 
     // KPIs separados de cuotas de pedidos a proveedor (supplier_order_payment_schedule)
-    const schedRows = (schedAll || []) as { amount: number; is_paid: boolean; due_date: string; paid_at: string | null }[]
+    const schedRows = schedAll
     let totalPendientePedidos = 0
     let countVencidasPedidos = 0
     let countProximas30Pedidos = 0
@@ -1041,7 +1050,7 @@ export const markSupplierInvoicePaidAction = protectedAction<
   async (ctx, { id, payment_date, payment_method }) => {
     const { data: inv } = await ctx.adminClient
       .from(TABLE)
-      .select('invoice_number, supplier_name')
+      .select('invoice_number, supplier_name, total_amount')
       .eq('id', id)
       .maybeSingle()
 
@@ -1050,18 +1059,69 @@ export const markSupplierInvoicePaidAction = protectedAction<
       .update({
         status: 'pagada',
         payment_date,
-        payment_method: payment_method || null,
+        payment_method: toPaymentMethodSlug(payment_method) ?? 'transfer', // el calendario manda la etiqueta 'Transferencia'
         updated_at: new Date().toISOString(),
       })
       .eq('id', id)
 
     if (error) return failure(error.message)
 
+    // Registrar el dinero que sale, igual que al pagar desde Vencimientos. Sin esta
+    // fila la factura quedaba "pagada" con pendiente = total y sin gasto en
+    // contabilidad: el gasto por proveedor cambiaba según por dónde se hubiera pagado.
+    const slugPago = toPaymentMethodSlug(payment_method) ?? 'transfer'
+    const totalFactura = Number((inv as any)?.total_amount ?? 0)
+    const { data: prevPays } = await ctx.adminClient
+      .from('ap_supplier_invoice_payments')
+      .select('amount')
+      .eq('supplier_invoice_id', id)
+    const yaPagado = ((prevPays ?? []) as Array<{ amount: number | null }>)
+      .reduce((s, p) => s + Number(p.amount ?? 0), 0)
+    const pendiente = Math.round((totalFactura - yaPagado) * 100) / 100
+    if (pendiente > 0.005) {
+      let manualTransactionId: string | null = null
+      const { data: mt } = await ctx.adminClient
+        .from('manual_transactions')
+        .insert({
+          type: 'expense',
+          date: payment_date,
+          description: `Pago factura ${(inv as any)?.invoice_number ?? ''} · ${(inv as any)?.supplier_name ?? ''}`,
+          category: 'proveedores',
+          // FK estructural a la factura: sin ella el gasto cae en "Sin clasificar".
+          ap_supplier_invoice_id: id,
+          amount: pendiente,
+          tax_rate: 0,
+          tax_amount: 0,
+          total: pendiente,
+          notes: `Método: ${PAYMENT_METHOD_ALIASES[slugPago]?.[1] ?? slugPago}`,
+          created_by: ctx.userId,
+        })
+        .select('id')
+        .single()
+      if (mt) manualTransactionId = String((mt as any).id)
+      const { error: payErr } = await ctx.adminClient
+        .from('ap_supplier_invoice_payments')
+        .insert({
+          supplier_invoice_id: id,
+          payment_date,
+          payment_method: slugPago,
+          amount: pendiente,
+          manual_transaction_id: manualTransactionId,
+          created_by: ctx.userId,
+        })
+      if (payErr) {
+        if (manualTransactionId) {
+          await ctx.adminClient.from('manual_transactions').delete().eq('id', manualTransactionId)
+        }
+        return failure(payErr.message || 'Error al registrar el pago')
+      }
+    }
+
     // Marcar TODAS las cuotas pendientes como pagadas, si no la pantalla de
     // Vencimientos sigue mostrando la factura como pendiente.
     const { error: cuotasErr } = await ctx.adminClient
       .from('ap_supplier_invoice_due_dates')
-      .update({ is_paid: true, paid_at: payment_date, payment_method: payment_method || null })
+      .update({ is_paid: true, paid_at: payment_date, payment_method: slugPago })
       .eq('supplier_invoice_id', id)
       .eq('is_paid', false)
     if (cuotasErr) {
@@ -1111,6 +1171,28 @@ export const markSupplierOrderScheduleItemPaidAction = protectedAction<
   }
 )
 
+/**
+ * Resuelve el proveedor de una fila de CSV: primero por CIF exacto y, si no,
+ * por nombre exacto (sin distinguir mayúsculas) y solo cuando es inequívoco.
+ * Sin `supplier_id` la factura importada no cuenta como deuda en la ficha del
+ * proveedor, que filtra por ese campo.
+ */
+async function resolveSupplierIdFromCsv(
+  adminClient: AdminClient,
+  cif: string | null,
+  name: string,
+): Promise<string | null> {
+  if (cif) {
+    const { data } = await adminClient.from('suppliers').select('id').eq('nif_cif', cif).limit(2)
+    if (data && data.length === 1) return String((data[0] as any).id)
+  }
+  if (name) {
+    const { data } = await adminClient.from('suppliers').select('id').ilike('name', name).limit(2)
+    if (data && data.length === 1) return String((data[0] as any).id)
+  }
+  return null
+}
+
 export const importSupplierInvoicesCsvAction = protectedAction<
   { rows: Array<Record<string, string>> },
   { created: number; errors: string[]; auditEntityId: string; auditDescription: string }
@@ -1152,21 +1234,35 @@ export const importSupplierInvoicesCsvAction = protectedAction<
         continue
       }
 
-      const { error } = await ctx.adminClient.from(TABLE).insert({
+      // El alta manual resuelve el proveedor y genera cuotas en
+      // ap_supplier_invoice_due_dates; el CSV no hacía ninguna de las dos cosas, así
+      // que la factura importada quedaba invisible en Vencimientos y fuera del
+      // pendiente del proveedor. Se replica aquí el mismo criterio.
+      const supplierId = await resolveSupplierIdFromCsv(ctx.adminClient, cif, supplier_name)
+      const supplierDefaults = await resolveSupplierDefaults(ctx.adminClient, supplierId)
+      const installments = buildInstallments(invoice_date, due_date, total_amount, supplierDefaults)
+      // Cabecera = primera cuota, para que due_date y cuotas nunca diverjan.
+      const headlineDueDate = earliestInstallmentDate(installments) ?? due_date
+
+      const { data: inserted, error } = await ctx.adminClient.from(TABLE).insert({
+        supplier_id: supplierId,
         supplier_name,
         supplier_cif: cif,
         invoice_number,
         invoice_date,
-        due_date,
+        due_date: headlineDueDate,
         amount: base,
         tax_amount,
         total_amount,
         notes,
+        is_proforma: false,
         created_by: ctx.userId,
-      })
-      if (error) {
-        errors.push(`Fila ${i + 2}: ${error.message}`)
+      }).select('id').single()
+      if (error || !inserted) {
+        errors.push(`Fila ${i + 2}: ${error?.message ?? 'no se pudo crear la factura'}`)
       } else {
+        const schedErr = await replaceInvoiceInstallments(ctx.adminClient, String((inserted as any).id), installments)
+        if (schedErr) errors.push(`Fila ${i + 2}: factura creada pero sin cuotas de vencimiento (${schedErr})`)
         created++
       }
     }
@@ -1284,6 +1380,21 @@ export const deleteSupplierInvoiceAction = protectedAction<{ id: string }, { aud
       .maybeSingle()
     if ((current as { status?: string } | null)?.status === 'pagada') {
       return failure('La factura está pagada y no puede eliminarse', 'VALIDATION')
+    }
+
+    // Una factura 'parcial' también tiene pagos. Al borrarla, los pagos caen en cascada
+    // (mig 113) pero su gasto espejo en manual_transactions sobrevive: ap_supplier_invoice_id
+    // es ON DELETE SET NULL por diseño (mig 206). Quedaría un gasto contabilizado sin factura
+    // a la que atribuirlo. Se bloquea en vez de borrarlo: quitar los pagos uno a uno SÍ limpia
+    // su gasto (deleteSupplierInvoicePayment), y así no se destruye contabilidad ya cerrada.
+    const { data: pagos, error: pagosError } = await ctx.adminClient
+      .from('ap_supplier_invoice_payments')
+      .select('id')
+      .eq('supplier_invoice_id', id)
+      .limit(1)
+    if (pagosError) return failure(pagosError.message || 'Error al comprobar los pagos de la factura', 'INTERNAL')
+    if ((pagos ?? []).length > 0) {
+      return failure('La factura tiene pagos registrados: elimínalos primero', 'VALIDATION')
     }
 
     const { error } = await ctx.adminClient

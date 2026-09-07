@@ -780,8 +780,10 @@ export function NuevaVentaFichaClient({
   }, [])
 
   useEffect(() => {
-    getNextTalonNumber().then((n) => setFichaField('numeroTalon', String(n).padStart(4, '0')))
-  }, [setFichaField])
+    // El talón sigue la serie de la TIENDA (PIN/WEL). Sin storeId se proponía el
+    // número del último pedido creado en cualquier tienda, que mezclaba las dos.
+    getNextTalonNumber(defaultStoreId).then((n) => setFichaField('numeroTalon', String(n).padStart(4, '0')))
+  }, [setFichaField, defaultStoreId])
 
   // ── Camisa ops ────────────────────────────────────────────────────────────
   /** Añade una camisa nueva. Para las MEDIDAS, lógica híbrida:
@@ -1115,6 +1117,11 @@ export function NuevaVentaFichaClient({
       })
       if (res?.success && res.data) {
         toast.success(`Pedido ${res.data.orderNumber} creado.`)
+        // createFichaOrder devuelve payment_error cuando la entrega a cuenta NO
+        // llegó a registrarse (rpc_add_order_payment falló). Nadie lo leía: el
+        // sastre veía solo "Pedido creado" y daba el anticipo por cobrado.
+        const paymentError = (res.data as { payment_error?: string | null }).payment_error
+        if (paymentError) toast.error(paymentError, { duration: 15000 })
         try {
           const orderRes = await getOrder(res.data.orderId)
           if (orderRes?.success && orderRes.data) {

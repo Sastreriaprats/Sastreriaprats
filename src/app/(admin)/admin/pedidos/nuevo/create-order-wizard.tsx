@@ -550,7 +550,19 @@ export function CreateOrderWizard({
 
   const { execute: submitOrder, isLoading: isSubmitting } = useAction(createOrderAction, {
     successMessage: 'Pedido creado correctamente',
-    onSuccess: (data: any) => router.push(fromSastre ? `/sastre/pedidos/${data.id}` : `/admin/pedidos/${data.id}`),
+    onSuccess: (data: any) => {
+      // El asistente industrial (y el de oficial) crean solo la CABECERA: sus
+      // pasos no tienen dónde añadir prendas, así que el pedido nace con 0
+      // líneas y total 0 €. Es el flujo real -las prendas se añaden luego en la
+      // ficha-, pero antes nada lo decía y el pedido parecía terminado.
+      if (data?.lines_count === 0) {
+        toast.warning(
+          'Pedido creado SIN prendas y con total 0 €. Añádelas ahora en la ficha para que cuente en producción y en los informes.',
+          { duration: 12000 },
+        )
+      }
+      router.push(fromSastre ? `/sastre/pedidos/${data.id}` : `/admin/pedidos/${data.id}`)
+    },
   })
 
   const { execute: submitSupplierOrder, isLoading: isSubmittingSupplier } = useAction(createSupplierOrderAction, {

@@ -31,7 +31,12 @@ export function PrinterSettings() {
   useEffect(() => {
     const saved = localStorage.getItem('prats_printer_config')
     if (saved) {
-      try { setConfig(JSON.parse(saved)) } catch { /* ignore */ }
+      // Una configuración vieja con type:'network' dejaría la pantalla sin
+      // tarjeta seleccionada y sin forma de imprimir: se degrada a "Navegador".
+      try {
+        const parsed = JSON.parse(saved)
+        setConfig(parsed?.type === 'network' ? { ...parsed, type: 'browser' } : parsed)
+      } catch { /* ignore */ }
     }
   }, [])
 
@@ -111,7 +116,10 @@ export function PrinterSettings() {
                 { type: 'browser' as const, label: 'Navegador', desc: 'Imprimir vía ventana del navegador' },
                 { type: 'usb' as const, label: 'USB', desc: 'Conexión directa Web USB' },
                 { type: 'serial' as const, label: 'Serial', desc: 'Puerto serie / COM' },
-                { type: 'network' as const, label: 'Red', desc: 'IP de red (TCP/IP)' },
+                // "Red (TCP/IP)" retirada: printService.printNetwork llama a
+                // /api/print/network, que no existe (y no puede existir con el
+                // servidor fuera de la LAN de la impresora), así que el test
+                // fallaba siempre sin explicar por qué.
               ]).map(p => {
                 const Icon = connectionIcons[p.type]
                 return (

@@ -527,7 +527,9 @@ export function OfficialsPageContent() {
             </div>
             <div className="space-y-2">
               <Label>Condiciones de pago</Label>
-              <Select value={form.payment_terms || 'net_30'} onValueChange={(v) => setForm((f) => ({ ...f, payment_terms: v }))}>
+              {/* undefined (no 'net_30'): pintar un valor por defecto que no está
+                  guardado hacía creer que el oficial tenía 30 días pactados. */}
+              <Select value={form.payment_terms || undefined} onValueChange={(v) => setForm((f) => ({ ...f, payment_terms: v }))}>
                 <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
                 <SelectContent>
                   {PAYMENT_TERMS_OPTIONS.map((opt) => (

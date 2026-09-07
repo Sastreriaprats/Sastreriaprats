@@ -652,7 +652,7 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
         const sb = createClient()
         const { data } = await sb.from('officials')
           .select('id, name, specialty')
-          .not('specialty', 'ilike', '%Cortador%')
+          // Sin filtro de especialidad en servidor: `specialty` es una LISTA separada por comas, y el NOT ILIKE '%Cortador%' escondia a los talleres que cortan Y confeccionan (SHIRTMANN, PIERLORENZO, DROP ZERO, MARI); sus prendas ya asignadas no se podian volver a seleccionar. Se reparte abajo, dejando fuera solo a quien SOLO corta.
           .eq('is_active', true)
           .order('name')
           .limit(200)
@@ -660,7 +660,7 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
         if (!cancelled) setAllOficiales(pool)
       }
       if (!cancelled) {
-        setOficialResults(fuzzyFilterSort(pool, term, (o) => o.name || '').slice(0, 10))
+        setOficialResults(fuzzyFilterSort(pool.filter((o) => { const esp = (o.specialty ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean); return esp.length === 0 || esp.some((s) => s !== 'cortador') }), term, (o) => o.name || '').slice(0, 10))
         setIsSearchingOficial(false)
       }
     }, term ? 300 : 0)
@@ -715,6 +715,10 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
     const res = await updateOrderAction({
       orderId: order.id,
       lines: payloadLines,
+      // Ids que este diálogo conocía al construir el payload: el servidor borra
+      // las prendas que no vengan, así que si en BD hay alguna más (la añadió
+      // otro usuario) rechaza el guardado en vez de hacerla desaparecer.
+      knownLineIds: allLines.map((l: any) => String(l.id)).filter(Boolean),
     })
     setSaving(false)
     if (!res.success) { toast.error(res.error || 'No se pudo guardar la ficha'); return }
@@ -763,18 +767,18 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
                     <Command shouldFilter={false}>
                       <CommandInput
                         placeholder="Buscar cortador..."
-                        value={cortadorSearch}
+                        value={cortadorSearch} onKeyDown={(e) => { if (e.key === 'Enter' && (!cortadorResults.length || !cortadorSearch.trim())) { e.preventDefault(); set('cortador', cortadorSearch.trim()); setCortadorPopoverOpen(false) } }}
                         onValueChange={(v) => {
                           setCortadorSearch(v)
-                          // Texto libre: lo escrito se guarda como cfg.cortador
-                          // aunque no matchee a ninguno de la lista.
-                          set('cortador', v)
+                          // Solo mueve el BUSCADOR: antes cada tecla escribia en cfg.cortador,
+                          // asi un nombre a medias ('shi') se guardaba con official_id NULL, sin comision.
+                          // El texto libre se confirma con Enter cuando no hay resultados (onKeyDown del input).
                         }}
                       />
                       <CommandList>
                         {isSearchingCortador && <Loader2 className="h-4 w-4 animate-spin mx-auto my-2" />}
                         <CommandEmpty className="py-3 px-3 text-xs text-muted-foreground">
-                          Sin cortadores con ese texto. Lo escrito se guarda como texto libre.
+                          Sin cortadores con ese texto. Pulsa Enter para guardarlo tal cual.
                         </CommandEmpty>
                         <CommandGroup>
                           {cortadorResults.map((o) => {
@@ -830,16 +834,16 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
                     <Command shouldFilter={false}>
                       <CommandInput
                         placeholder="Buscar oficial..."
-                        value={oficialSearch}
+                        value={oficialSearch} onKeyDown={(e) => { if (e.key === 'Enter' && (!oficialResults.length || !oficialSearch.trim())) { e.preventDefault(); set('oficial', oficialSearch.trim()); setOficialPopoverOpen(false) } }}
                         onValueChange={(v) => {
                           setOficialSearch(v)
-                          set('oficial', v)
+                          // Solo mueve el BUSCADOR: teclear ya NO escribe en la ficha (un nombre a medias, 'pierlo', quedaba guardado con official_id NULL y sin comision). Se confirma con Enter.
                         }}
                       />
                       <CommandList>
                         {isSearchingOficial && <Loader2 className="h-4 w-4 animate-spin mx-auto my-2" />}
                         <CommandEmpty className="py-3 px-3 text-xs text-muted-foreground">
-                          Sin oficiales con ese texto. Lo escrito se guarda como texto libre.
+                          Sin oficiales con ese texto. Pulsa Enter para guardarlo tal cual.
                         </CommandEmpty>
                         <CommandGroup>
                           {oficialResults.map((o) => {

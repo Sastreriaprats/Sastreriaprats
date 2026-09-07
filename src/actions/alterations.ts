@@ -23,7 +23,7 @@ const SELECT_ALTERATIONS = `
   official_id, official_name, description,
   cost_price, sale_price,
   alteration_date, workshop_sent_date, client_delivery_date,
-  status, notes,
+  status, notes, payment_method, is_included,
   store_id, created_by, created_at, updated_at,
   tailoring_order_id, sale_id, alteration_type, estimated_completion,
   clients ( id, full_name, phone ),
@@ -107,11 +107,27 @@ export const listAlterations = protectedAction<
     let countsQuery = ctx.adminClient.from('alterations').select('status')
     if (params.clientId) countsQuery = countsQuery.eq('client_id', params.clientId)
     if (storeId) countsQuery = countsQuery.eq('store_id', storeId)
-    const { data: countsRaw } = await countsQuery
+    // PostgREST corta en 1.000 filas: sin paginar, las chapas por estado dejaban
+    // de crecer al pasar de 1.000 arreglos y no cuadraban con el total de la
+    // cabecera (que si usa count:'exact'). Ademas se ignoraba el error, que
+    // pintaba los cinco contadores a 0 como si fuese el dato bueno. El orden
+    // estable hace falta para no repetir ni perder filas entre paginas, y va
+    // fuera del bucle porque order() acumula.
+    const COUNTS_PAGE = 1000
+    countsQuery = countsQuery.order('id', { ascending: true })
     const statusCounts: Record<string, number> = {}
-    for (const row of countsRaw || []) {
-      const s = (row as { status: string }).status
-      statusCounts[s] = (statusCounts[s] || 0) + 1
+    for (let offset = 0; ; offset += COUNTS_PAGE) {
+      const { data: countsRaw, error: countsError } = await countsQuery.range(offset, offset + COUNTS_PAGE - 1)
+      if (countsError) {
+        console.error('[listAlterations] statusCounts', countsError)
+        return failure(countsError.message)
+      }
+      const batch = countsRaw || []
+      for (const row of batch) {
+        const s = (row as { status: string }).status
+        statusCounts[s] = (statusCounts[s] || 0) + 1
+      }
+      if (batch.length < COUNTS_PAGE) break
     }
 
     const total = count ?? 0
@@ -374,7 +390,10 @@ export const cancelAlteration = protectedAction<{ id: string; reason?: string },
 
 export const deleteAlteration = protectedAction<{ id: string }, { ok: boolean; client_id: string | null }>(
   {
-    permission: 'clients.view',
+    // Borrado FISICO e irreversible: exige el mismo permiso que el borrado
+    // permanente de un cliente (hoy solo el rol administrador). Con
+    // 'clients.view' lo tenia cualquiera que pudiese abrir la ficha del arreglo.
+    permission: 'clients.delete',
     auditModule: 'alterations',
     auditAction: 'delete',
     auditEntity: 'alteration',
@@ -504,7 +523,15 @@ export const markAlterationCharged = protectedAction<
   { alterationId: string; saleId?: string | null; paymentMethod?: string | null },
   { id: string }
 >(
-  { permission: 'sales.create', auditModule: 'alterations' },
+  {
+    permission: 'pos.sell',
+    auditModule: 'alterations',
+    // Simetria con clearAlterationCharge: marcar cobrado es LO QUE HACE
+    // desaparecer la deuda del cliente, asi que tiene que dejar el mismo rastro
+    // que el deshacer. Sin auditAction el wrapper no escribe en audit_log.
+    auditAction: 'update',
+    auditEntity: 'alteration',
+  },
   async (ctx, { alterationId, saleId, paymentMethod }) => {
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
     if (saleId) patch.sale_id = saleId
@@ -517,7 +544,63 @@ export const markAlterationCharged = protectedAction<
       console.error('[markAlterationCharged]', error)
       return failure(error.message)
     }
-    return success({ id: alterationId })
+    const { data: alt } = await ctx.adminClient
+      .from('alterations')
+      .select('alteration_number')
+      .eq('id', alterationId)
+      .maybeSingle()
+    // La forma de pago es lo que hay que poder reconstruir despues: un arreglo
+    // saldado 'en efectivo fuera del TPV' no deja ningun otro rastro.
+    const METODOS: Record<string, string> = {
+      cash: 'efectivo', card: 'tarjeta', transfer: 'transferencia', bizum: 'Bizum',
+    }
+    const via = saleId
+      ? 'en un ticket'
+      : (METODOS[String(paymentMethod ?? '')] || String(paymentMethod ?? 'sin forma de pago'))
+    return success({
+      id: alterationId,
+      auditDescription: `Arreglo ${alt?.alteration_number ?? alterationId}: marcado como cobrado (${via})`,
+    })
+  }
+)
+
+// ─── clearAlterationCharge ────────────────────────────────────────────────
+// Deshace la marca de cobrado de un arreglo (vuelve a contar como deuda del
+// cliente). Solo para arreglos saldados a mano: si el cobro entró por un ticket
+// (`sale_id`), hay que anular/devolver esa venta, no desmarcar el arreglo.
+
+export const clearAlterationCharge = protectedAction<
+  { alterationId: string },
+  { id: string }
+>(
+  {
+    permission: 'pos.sell',
+    auditModule: 'alterations',
+    auditAction: 'update',
+    auditEntity: 'alteration',
+  },
+  async (ctx, { alterationId }) => {
+    const { data: alt } = await ctx.adminClient
+      .from('alterations')
+      .select('sale_id, alteration_number')
+      .eq('id', alterationId)
+      .maybeSingle()
+    if (alt?.sale_id) {
+      return failure('Este arreglo se cobró en un ticket: anula o devuelve esa venta para dejarlo pendiente')
+    }
+    const { error } = await ctx.adminClient
+      .from('alterations')
+      .update({ payment_method: null, updated_at: new Date().toISOString() })
+      .eq('id', alterationId)
+    if (error) {
+      console.error('[clearAlterationCharge]', error)
+      return failure(error.message)
+    }
+    return success({
+      id: alterationId,
+      auditEntityId: alterationId,
+      auditDescription: `Arreglo ${alt?.alteration_number ?? ''}: marcado como pendiente de cobro`,
+    })
   }
 )
 

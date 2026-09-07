@@ -69,7 +69,7 @@ function getProductStockSummary(product: any): { total: number; reserved: number
 type StockFilterValue = 'all' | 'out' | 'low' | 'in'
 type WebFilterValue = 'all' | 'yes' | 'no'
 
-const URL_FILTER_KEYS = ['product_type', 'is_visible_web', 'collection', 'season'] as const
+const URL_FILTER_KEYS = ['product_type', 'is_visible_web', 'collection', 'season', 'stock_filter'] as const
 
 export function ProductsTab() {
   const router = useRouter()
@@ -218,7 +218,7 @@ export function ProductsTab() {
     if (!res.success) { toast.error(res.error || 'No se pudieron cargar los productos'); return }
     setSelectedIds(new Set(res.data as string[]))
     toast.success(`${(res.data as string[]).length} productos seleccionados`)
-  }, [search, typeFilter, webFilter, collectionFilter, seasonFilter])
+  }, [search, typeFilter, webFilter, collectionFilter, seasonFilter, stockFilter])
 
   // ─── Acciones masivas ─────────────────────────────────────────
   const runBulk = async (publish: boolean) => {
