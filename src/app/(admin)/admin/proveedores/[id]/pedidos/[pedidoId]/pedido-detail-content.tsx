@@ -32,7 +32,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { ArrowLeft, Loader2, Truck, FileText, Trash2, AlertTriangle, Check, Pencil, Plus, Search, Printer } from 'lucide-react'
-import { buildReceivedLabelsUrl } from '@/lib/utils/received-labels'
+import { buildReceivedLabelsUrl, buildLabelsUrlFromReceivedLines } from '@/lib/utils/received-labels'
 import { toast } from 'sonner'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import {
@@ -530,6 +530,37 @@ export function PedidoDetailContent({
 
         {/* Acciones */}
         <div className="flex flex-wrap items-center gap-2">
+          {/* Reimprimir etiquetas de lo ya recibido: el dialogo de etiquetas solo
+              aparece justo tras registrar la recepcion, y si se cierra no habia
+              forma de volver a sacarlas desde el pedido. */}
+          {(currentStatus === 'received' || currentStatus === 'closed' || currentStatus === 'partially_received') && (
+            <Button
+              variant="outline"
+              onClick={() => {
+                const url = buildLabelsUrlFromReceivedLines(
+                  lines.map((l) => ({
+                    id: l.id,
+                    supplier_order_id: order.id,
+                    fabric_id: l.fabric_id ?? null,
+                    product_id: l.product_id ?? null,
+                    product_variant_id: l.product_variant_id ?? null,
+                    description: l.description ?? '',
+                    reference: l.reference ?? null,
+                    quantity: Number(l.quantity) || 0,
+                    quantity_received: Number(l.quantity_received) || 0,
+                    unit: l.unit ?? null,
+                  })),
+                )
+                if (!url) {
+                  toast.info('Este pedido no tiene prendas con talla recibidas: los tejidos y las lineas libres no llevan etiqueta.')
+                  return
+                }
+                window.open(url, '_blank')
+              }}
+            >
+              <Printer className="h-4 w-4 mr-2" /> Imprimir etiquetas
+            </Button>
+          )}
           <Select
             value={currentStatus}
             disabled={loading !== null}

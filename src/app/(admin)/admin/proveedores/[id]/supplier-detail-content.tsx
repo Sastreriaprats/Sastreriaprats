@@ -27,7 +27,7 @@ import { searchSupplierFabrics, searchSupplierProducts } from '@/actions/supplie
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { createSupplierDeliveryNote, uploadSupplierDeliveryNoteAttachment, upsertSupplierDeliveryNoteForOrder, getSupplierDeliveryNote } from '@/actions/delivery-notes'
 import { useActiveStore } from '@/hooks/use-store'
-import { buildReceivedLabelsUrl } from '@/lib/utils/received-labels'
+import { buildReceivedLabelsUrl, buildLabelsUrlFromReceivedLines } from '@/lib/utils/received-labels'
 import { SIZE_TEMPLATES, variantSkuFromSize } from '@/lib/constants-sizes'
 import { sortBySize } from '@/lib/utils/sort-sizes'
 import { Badge } from '@/components/ui/badge'
@@ -79,6 +79,7 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
   const [newOrderOpen, setNewOrderOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [markingReceivedOrderId, setMarkingReceivedOrderId] = useState<string | null>(null)
+  const [labelsOrderId, setLabelsOrderId] = useState<string | null>(null)
   const [receptionDialogOpen, setReceptionDialogOpen] = useState(false)
   const [receptionOrderId, setReceptionOrderId] = useState<string | null>(null)
   const [receptionLines, setReceptionLines] = useState<SupplierOrderLineForReceipt[]>([])
@@ -701,6 +702,39 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                             </Button>
                           ) : null}
                           <div className="flex gap-1">
+                            {/* Reimprimir etiquetas de lo ya recibido. El dialogo de
+                                "¿imprimir etiquetas?" solo sale al registrar la recepcion:
+                                si se cerraba o se pulsaba "Ahora no", no habia forma de
+                                volver a sacarlas y tocaba buscar variante por variante en
+                                Codigos de barras. */}
+                            {(o.status === 'received' || o.status === 'closed' || o.status === 'partially_received') && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-xs"
+                                disabled={labelsOrderId === o.id}
+                                onClick={async () => {
+                                  setLabelsOrderId(o.id)
+                                  const res = await getSupplierOrderLines(o.id)
+                                  setLabelsOrderId(null)
+                                  if (!res.success || !res.data) {
+                                    toast.error((res as any)?.error ?? 'No se pudieron cargar las lineas del pedido')
+                                    return
+                                  }
+                                  const url = buildLabelsUrlFromReceivedLines(res.data)
+                                  if (!url) {
+                                    toast.info('Este pedido no tiene prendas con talla recibidas: los tejidos y las lineas libres no llevan etiqueta.')
+                                    return
+                                  }
+                                  window.open(url, '_blank')
+                                }}
+                              >
+                                {labelsOrderId === o.id
+                                  ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  : <Printer className="h-3 w-3 mr-1" />}
+                                Imprimir etiquetas
+                              </Button>
+                            )}
                             {o.supplier_delivery_notes?.[0] && (
                               <>
                                 <Button
