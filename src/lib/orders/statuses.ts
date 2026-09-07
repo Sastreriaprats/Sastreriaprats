@@ -138,8 +138,11 @@ export interface ForwardPropagation {
  *      ya están más adelantadas se MANTIENEN (`aheadCount` las cuenta).
  *  - RETROCEDER (destino < estado actual del pedido): se arrastran TODAS las
  *      líneas del pipeline hacia atrás al destino, para que el pedido pueda
- *      volver a un estado anterior. Se dejan intactas las terminales
- *      (`delivered`/`cancelled`/`incident`) y las de estado ajeno al pipeline.
+ *      volver a un estado anterior. Esto incluye las prendas ya `delivered`:
+ *      marcar un pedido como entregado por error es el fallo más común y antes
+ *      obligaba a deshacerlo prenda a prenda con el chip de la pestaña Prendas.
+ *      Se dejan intactas las transversales (`cancelled`/`incident`) y las de
+ *      estado ajeno al pipeline.
  */
 export function classifyLinesForStatusChange(
   targetStatus: string,
@@ -172,7 +175,10 @@ export function classifyLinesForStatusChange(
   let aheadCount = 0
   for (const l of lines) {
     if (NON_PIPELINE_STATUSES.includes(l.status as OrderStatus)) continue // transversales: intactas
-    if (l.status === 'delivered') { aheadCount++; continue }              // entregada: nunca retrocede
+    // Entregada: en un AVANCE se mantiene (ya está en el final del pipeline);
+    // en un RETROCESO explícito sí se arrastra — es la única forma de deshacer
+    // una entrega marcada por error desde el diálogo del pedido.
+    if (l.status === 'delivered' && !retreating) { aheadCount++; continue }
     const idxLine = getStatusIndex(l.status, orderType)
     if (idxLine < 0) continue            // estado ajeno al pipeline del tipo: no tocar
     if (idxLine === idxTarget) continue  // ya está en el destino

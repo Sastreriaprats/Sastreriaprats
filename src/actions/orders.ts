@@ -5,7 +5,7 @@ import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { queryList, queryById, getNextNumber, resolveClientIdsForSearch } from '@/lib/server/query-helpers'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createTailoringOrderSchema, tailoringOrderLineSchema, changeOrderStatusSchema } from '@/lib/validations/orders'
-import { ALL_VISIBLE_STATUSES, classifyLinesForStatusChange, deriveOrderStatusFromLines, type OrderStatus } from '@/lib/orders/statuses'
+import { ALL_VISIBLE_STATUSES, classifyLinesForStatusChange, deriveOrderStatusFromLines, getStatusIndex, type OrderStatus } from '@/lib/orders/statuses'
 import { getDefaultDeliveryDate } from '@/lib/orders/production-times'
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
@@ -708,7 +708,14 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
  * transición en el historial con `note` (por defecto "Automático…") e incluye los
  * efectos de los estados terminales: `delivered` → fecha de entrega + email al
  * cliente; `cancelled` (todas las prendas canceladas) → repone stock de tejido.
- * No reactiva pedidos ya `cancelled`. Lo usan las dos acciones (admin y sastre).
+ *
+ * REACTIVACIÓN (sep-2026): un pedido `cancelled` vuelve a la vida en cuanto
+ * alguna de sus prendas deja de estar cancelada. Antes era terminal y una
+ * cancelación por error solo se arreglaba tocando la base de datos. Al
+ * reactivar se deshace la reposición de tejido; los cobros que se reembolsaran
+ * al cancelar NO se recrean (habría que volver a registrarlos a mano).
+ *
+ * Lo usan las dos acciones (admin y sastre).
  */
 async function recalcOrderStatusFromLines(
   admin: AdminClient,
@@ -720,8 +727,6 @@ async function recalcOrderStatusFromLines(
     .from('tailoring_orders').select('status, order_type').eq('id', orderId).single()
   if (!order) return null
   const fromStatus = (order as any).status as string
-  // 'cancelled' es terminal: no se reactiva por derivación.
-  if (fromStatus === 'cancelled') return fromStatus
   const { data: lines } = await admin
     .from('tailoring_order_lines').select('status').eq('tailoring_order_id', orderId)
   const derived = deriveOrderStatusFromLines((order as any).order_type, (lines ?? []).map((l: any) => l.status))
@@ -729,8 +734,17 @@ async function recalcOrderStatusFromLines(
 
   await admin.from('tailoring_orders').update({
     status: derived,
-    ...(derived === 'delivered' ? { actual_delivery_date: new Date().toISOString().split('T')[0] } : {}),
+    // La fecha de entrega sigue al estado en los dos sentidos: al derivar
+    // 'delivered' se sella y al salir de ahí (entrega deshecha) se borra.
+    ...(derived === 'delivered'
+      ? { actual_delivery_date: new Date().toISOString().split('T')[0] }
+      : (fromStatus === 'delivered' ? { actual_delivery_date: null } : {})),
   }).eq('id', orderId)
+
+  // Reactivación: el pedido sale de 'cancelled' → el tejido vuelve a consumirse.
+  if (fromStatus === 'cancelled' && derived !== 'cancelled') {
+    await restoreFabricStockForOrder(admin, orderId, ctx.userId)
+  }
 
   // Todas las prendas canceladas → repone stock de tejido (coherente con el
   // cancelar manual; revertFabricStockForOrder es idempotente).
@@ -803,6 +817,20 @@ export const changeOrderStatus = protectedAction<any, any>(
         .from('tailoring_order_lines').update({ status: new_status })
         .in('id', lines.map((l) => l.id))
 
+      // Retroceso: borra los sellos de entrega/terminación que dejó el estado
+      // anterior (si no, la prenda vuelve a confección pero sigue devengando
+      // comisión de oficial por `finished_at`).
+      const { data: orderTypeRow } = await ctx.adminClient
+        .from('tailoring_orders').select('order_type').eq('id', order_id).single()
+      const retreatingLineIds = lines
+        .filter((l) => {
+          const iFrom = getStatusIndex(l.status, (orderTypeRow as any)?.order_type)
+          const iTo = getStatusIndex(new_status, (orderTypeRow as any)?.order_type)
+          return iFrom >= 0 && iTo >= 0 && iTo < iFrom
+        })
+        .map((l) => l.id)
+      await clearCompletionStamps(ctx.adminClient, retreatingLineIds, new_status, (orderTypeRow as any)?.order_type)
+
       await ctx.adminClient.from('tailoring_order_state_history').insert(
         lines.map((l) => ({
           tailoring_order_id: order_id,
@@ -824,14 +852,55 @@ export const changeOrderStatus = protectedAction<any, any>(
       if (!order) return failure('Pedido no encontrado')
       fromStatus = (order as any).status ?? null
 
-      // 'cancelled' es estado TERMINAL: no se puede reactivar.
-      if (fromStatus === 'cancelled' && new_status !== 'cancelled') {
-        return failure('No se puede reactivar un pedido cancelado. Crea un pedido nuevo si es necesario.', 'VALIDATION')
-      }
-
       const { data: lineRows } = await ctx.adminClient
         .from('tailoring_order_lines').select('id, status').eq('tailoring_order_id', order_id)
       const lines = (lineRows ?? []) as { id: string; status: string }[]
+
+      // REACTIVAR un pedido cancelado: se sacan también las prendas de
+      // 'cancelled' (si no, el estado derivado volvería a caer a cancelado) y se
+      // vuelve a consumir el tejido que repuso la cancelación. Los cobros
+      // reembolsados al cancelar NO se recrean: hay que registrarlos de nuevo.
+      if (fromStatus === 'cancelled' && new_status !== 'cancelled') {
+        const cancelledLineIds = lines.filter((l) => l.status === 'cancelled').map((l) => l.id)
+        if (cancelledLineIds.length > 0) {
+          await ctx.adminClient
+            .from('tailoring_order_lines').update({ status: new_status }).in('id', cancelledLineIds)
+          await ctx.adminClient.from('tailoring_order_state_history').insert(
+            cancelledLineIds.map((id) => ({
+              tailoring_order_id: order_id, tailoring_order_line_id: id,
+              from_status: 'cancelled', to_status: new_status,
+              notes: notes ?? 'Reactivación del pedido',
+              changed_by: ctx.userId, changed_by_name: ctx.userName,
+            }))
+          )
+          await clearCompletionStamps(ctx.adminClient, cancelledLineIds, new_status, (order as any).order_type)
+        }
+        await ctx.adminClient
+          .from('tailoring_orders').update({ status: new_status }).eq('id', order_id)
+        await restoreFabricStockForOrder(ctx.adminClient, order_id, ctx.userId)
+        await ctx.adminClient.from('tailoring_order_state_history').insert({
+          tailoring_order_id: order_id, from_status: 'cancelled', to_status: new_status,
+          notes: notes ?? 'Pedido reactivado', changed_by: ctx.userId, changed_by_name: ctx.userName,
+        })
+        // Si alguna prenda seguía viva y más atrasada, el pedido baja a ese
+        // mínimo: el estado del pedido siempre es el de la prenda menos avanzada.
+        await recalcOrderStatusFromLines(ctx.adminClient, order_id, ctx, 'Reactivación (derivado)')
+        changedLinesCount = cancelledLineIds.length
+        aheadLinesCount = 0
+        const { data: reactivated } = await ctx.adminClient
+          .from('tailoring_orders').select('order_number').eq('id', order_id).single()
+        return success({
+          order_id,
+          new_status,
+          changed_lines_count: changedLinesCount,
+          ahead_lines_count: 0,
+          reactivated: true,
+          auditEntityId: order_id,
+          auditDescription: `Pedido ${(reactivated as any)?.order_number ?? order_id} REACTIVADO: Cancelado → ${getOrderStatusLabel(new_status)}`,
+          auditOldData: { estado: 'cancelled' },
+          auditNewData: { estado: new_status },
+        })
+      }
 
       if (new_status === 'cancelled' || new_status === 'incident') {
         // Acciones MANUALES a nivel pedido (no derivables del mínimo de prendas).
@@ -880,8 +949,17 @@ export const changeOrderStatus = protectedAction<any, any>(
           aheadLinesCount = 0
         } else {
           if (prop.toUpdate.length > 0) {
+            // Estado ANTERIOR de cada prenda: hace falta para saber cuáles
+            // retroceden (deshacer una entrega, p. ej.) y limpiarles los sellos.
+            const movedFrom = new Map(lines.map((l) => [l.id, l.status]))
             await ctx.adminClient
               .from('tailoring_order_lines').update({ status: new_status }).in('id', prop.toUpdate)
+            const retreatingLineIds = prop.toUpdate.filter((id) => {
+              const iFrom = getStatusIndex(movedFrom.get(id) ?? '', (order as any).order_type)
+              const iTo = getStatusIndex(new_status, (order as any).order_type)
+              return iFrom >= 0 && iTo >= 0 && iTo < iFrom
+            })
+            await clearCompletionStamps(ctx.adminClient, retreatingLineIds, new_status, (order as any).order_type)
           }
           changedLinesCount = prop.toUpdate.length
           aheadLinesCount = prop.aheadCount
@@ -1197,6 +1275,15 @@ export const updateOrderStatus = protectedAction<
         .eq('tailoring_order_id', orderId.trim())
       if (error) return failure(error.message, 'INTERNAL')
 
+      // Retroceso: quitar los sellos de entrega/terminación (ver clearCompletionStamps).
+      const { data: otRow } = await ctx.adminClient
+        .from('tailoring_orders').select('order_type').eq('id', orderId.trim()).single()
+      const iFrom = getStatusIndex(fromStatus ?? '', (otRow as any)?.order_type)
+      const iTo = getStatusIndex(trimmedStatus, (otRow as any)?.order_type)
+      if (iFrom >= 0 && iTo >= 0 && iTo < iFrom) {
+        await clearCompletionStamps(ctx.adminClient, [lineId.trim()], trimmedStatus, (otRow as any)?.order_type)
+      }
+
       // Historial de la transición de la prenda.
       await ctx.adminClient.from('tailoring_order_state_history').insert({
         tailoring_order_id: orderId.trim(), tailoring_order_line_id: lineId.trim(),
@@ -1210,9 +1297,10 @@ export const updateOrderStatus = protectedAction<
         .from('tailoring_orders').select('status, order_type').eq('id', orderId.trim()).single()
       fromStatus = (prevOrder as any)?.status ?? null
 
-      // 'cancelled' es estado TERMINAL: no se puede reactivar.
+      // Reactivar un pedido cancelado toca stock de tejido y cobros: se hace
+      // desde la ficha del pedido (admin), no desde el panel del sastre.
       if (fromStatus === 'cancelled' && trimmedStatus !== 'cancelled') {
-        return failure('No se puede reactivar un pedido cancelado. Crea un pedido nuevo si es necesario.', 'VALIDATION')
+        return failure('Este pedido está cancelado. Para reactivarlo, hazlo desde la ficha del pedido en Administración.', 'VALIDATION')
       }
 
       const { data: lineRows } = await ctx.adminClient
@@ -1249,8 +1337,15 @@ export const updateOrderStatus = protectedAction<
         // "Avanzar todas las prendas a X" + derivar el estado del pedido.
         const prop = classifyLinesForStatusChange(trimmedStatus, (prevOrder as any)?.order_type, lines)
         if (prop.toUpdate.length > 0) {
+          const movedFrom = new Map(lines.map((l) => [l.id, l.status]))
           await ctx.adminClient
             .from('tailoring_order_lines').update({ status: trimmedStatus }).in('id', prop.toUpdate)
+          const retreatingLineIds = prop.toUpdate.filter((id) => {
+            const iFrom = getStatusIndex(movedFrom.get(id) ?? '', (prevOrder as any)?.order_type)
+            const iTo = getStatusIndex(trimmedStatus, (prevOrder as any)?.order_type)
+            return iFrom >= 0 && iTo >= 0 && iTo < iFrom
+          })
+          await clearCompletionStamps(ctx.adminClient, retreatingLineIds, trimmedStatus, (prevOrder as any)?.order_type)
         }
         changedLinesCount = prop.toUpdate.length
         aheadLinesCount = prop.aheadCount
@@ -1461,6 +1556,94 @@ async function revertFabricStockForOrder(
     .from('tailoring_orders')
     .update({ fabric_stock_reverted_at: new Date().toISOString() })
     .eq('id', orderId)
+}
+
+/**
+ * Inverso de `revertFabricStockForOrder`: vuelve a descontar del stock los
+ * metros de las prendas VIVAS cuando un pedido cancelado se REACTIVA. Sin esto
+ * el tejido se quedaba contado dos veces (la cancelación lo repuso y el pedido
+ * vuelve a consumirlo).
+ *
+ * Idempotente por el mismo flag: si `fabric_stock_reverted_at` es NULL no hay
+ * reposición que deshacer y no hace nada. Llamarlo DESPUÉS de actualizar el
+ * estado de las líneas, para que "vivas" ya sea el conjunto definitivo.
+ */
+async function restoreFabricStockForOrder(
+  admin: AdminClient,
+  orderId: string,
+  userId: string | null,
+): Promise<void> {
+  const { data: order, error: fetchErr } = await admin
+    .from('tailoring_orders')
+    .select('fabric_stock_reverted_at')
+    .eq('id', orderId)
+    .single()
+  if (fetchErr || !order) {
+    console.error('[restoreFabricStockForOrder] order fetch failed', orderId, fetchErr)
+    return
+  }
+  if (!(order as { fabric_stock_reverted_at?: string | null }).fabric_stock_reverted_at) return
+
+  const { data: lines } = await admin
+    .from('tailoring_order_lines')
+    .select('fabric_id, fabric_meters, status')
+    .eq('tailoring_order_id', orderId)
+
+  const deltas = new Map<string, number>()
+  for (const l of (lines ?? []) as Array<{ fabric_id: string | null; fabric_meters: number | string | null; status: string }>) {
+    if (l.status === 'cancelled') continue
+    const fId = l.fabric_id
+    const m = Number(l.fabric_meters) || 0
+    if (fId && m > 0) deltas.set(fId, (deltas.get(fId) || 0) + m)
+  }
+
+  // applyFabricStockDelta resta lo que recibe: positivo = consumo.
+  if (deltas.size > 0) await applyFabricStockDelta(admin, deltas, { orderId, userId })
+
+  await admin
+    .from('tailoring_orders')
+    .update({ fabric_stock_reverted_at: null })
+    .eq('id', orderId)
+}
+
+/**
+ * Borra los sellos de terminación/entrega de las prendas que RETROCEDEN por
+ * debajo de `finished`/`delivered`. Sin esto, deshacer una entrega marcada por
+ * error dejaba la prenda "en confección" pero con `finished_at` puesto — y ese
+ * campo es el DEVENGO de la comisión del oficial (mig 226), así que la prenda
+ * seguía contando como terminada en el informe y en la liquidación.
+ *
+ * `finished_at` solo se limpia si la línea NO está liquidada (`settlement_id`
+ * nulo): lo ya pagado al oficial no se toca nunca.
+ */
+async function clearCompletionStamps(
+  admin: AdminClient,
+  lineIds: string[],
+  targetStatus: string,
+  orderType: string | null | undefined,
+): Promise<void> {
+  if (lineIds.length === 0) return
+  // Solo aplica a retrocesos dentro del pipeline: 'delivered' es el destino que
+  // pone los sellos, y 'cancelled'/'incident' son transversales (no los tocan).
+  if (targetStatus === 'delivered' || targetStatus === 'cancelled' || targetStatus === 'incident') return
+
+  // Las entregadas que retroceden pierden el sello de entrega.
+  await admin
+    .from('tailoring_order_lines')
+    .update({ delivered_at: null, delivered_by: null })
+    .in('id', lineIds)
+
+  // Y el de terminación solo si el destino queda por DEBAJO de 'finished'.
+  const idxTarget = getStatusIndex(targetStatus, orderType)
+  const idxFinished = getStatusIndex('finished', orderType)
+  const beforeFinished = idxTarget >= 0 && idxFinished >= 0 && idxTarget < idxFinished
+  if (!beforeFinished) return
+
+  await admin
+    .from('tailoring_order_lines')
+    .update({ finished_at: null })
+    .in('id', lineIds)
+    .is('settlement_id', null)
 }
 
 function round2(n: number): number {

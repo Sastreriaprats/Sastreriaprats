@@ -93,12 +93,16 @@ export function LineStatusChip({ orderId, line, orderType, disabled = false }: {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {confirmStatus === 'cancelled' ? '¿Cancelar esta prenda?' : '¿Retroceder el estado?'}
+              {confirmStatus === 'cancelled'
+                ? '¿Cancelar esta prenda?'
+                : line.status === 'cancelled' ? '¿Reactivar esta prenda?' : '¿Retroceder el estado?'}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {confirmStatus === 'cancelled'
                 ? 'La prenda pasará a Cancelada. Si es la última prenda viva, el pedido entero quedará cancelado (y se repondrá el tejido). Los cobros NO se reembolsan automáticamente.'
-                : `La prenda volverá a "${confirmStatus ? getOrderStatusLabel(confirmStatus) : ''}". El estado del pedido se recalculará al de la prenda menos avanzada.`}
+                : line.status === 'cancelled'
+                  ? `La prenda vuelve a "${confirmStatus ? getOrderStatusLabel(confirmStatus) : ''}" y su tejido se descuenta otra vez del stock. Si el pedido estaba cancelado, se reactiva. Los cobros que se devolvieran al cancelar hay que registrarlos de nuevo.`
+                  : `La prenda volverá a "${confirmStatus ? getOrderStatusLabel(confirmStatus) : ''}". El estado del pedido se recalculará al de la prenda menos avanzada.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

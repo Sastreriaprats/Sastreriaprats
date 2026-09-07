@@ -66,12 +66,12 @@ export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus,
     onSuccess: (data: any) => {
       if (!wholeOrder) {
         toast.success(selectedIds.size === 1 ? 'Estado actualizado' : `Estado actualizado (${selectedIds.size} prendas)`)
+      } else if (data?.reactivated) {
+        toast.success('Pedido reactivado')
       } else if ((data?.changed_lines_count ?? 0) === 0 && newStatus !== 'cancelled' && newStatus !== 'incident') {
-        // Ruta "todo el pedido": las prendas ya ENTREGADAS nunca retroceden por aquí, así
-        // que el cambio puede acabar sin tocar ninguna prenda. Antes salía "Estado cambiado"
-        // y parecía que la entrega se había deshecho; ahora se avisa y se indica el camino
-        // que sí funciona (el chip de estado de cada prenda).
-        toast.warning('Ninguna prenda ha cambiado: las prendas entregadas no retroceden desde este diálogo. Cámbialas una a una con el chip de estado de la pestaña Prendas.')
+        // Ruta "todo el pedido": el cambio puede acabar sin tocar ninguna prenda
+        // (p. ej. todas en un estado ajeno al pipeline de este tipo de pedido).
+        toast.warning('Ninguna prenda ha cambiado de estado. Revisa el estado de cada prenda en la pestaña Prendas.')
       } else {
         statusChangeToast(data?.ahead_lines_count ?? 0)
       }
@@ -112,6 +112,21 @@ export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus,
               El estado del pedido se calcula solo: sigue al de la prenda <strong>menos avanzada</strong>. No llega a un estado hasta que todas las prendas lo alcanzan.
             </p>
           </div>
+
+          {currentStatus === 'cancelled' && newStatus && newStatus !== 'cancelled' && (
+            <div className="rounded-md border border-blue-300 bg-blue-50 p-3 text-xs text-blue-900">
+              Vas a <strong>reactivar</strong> un pedido cancelado: sus prendas vuelven a <strong>{getOrderStatusLabel(newStatus)}</strong> y
+              el tejido se descuenta otra vez del stock. Si al cancelarlo se devolvió algún cobro, ese dinero <strong>no vuelve solo</strong>:
+              hay que registrarlo de nuevo en la pestaña Pagos.
+            </div>
+          )}
+
+          {currentStatus === 'delivered' && newStatus && newStatus !== 'delivered' && newStatus !== 'cancelled' && newStatus !== 'incident' && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+              Vas a <strong>deshacer la entrega</strong>: las prendas vuelven a {getOrderStatusLabel(newStatus)} y se borra la fecha de
+              entrega del pedido. El email de &quot;pedido entregado&quot; que se enviara al cliente no se puede retirar.
+            </div>
+          )}
 
           {newStatus === 'cancelled' && currentStatus === 'delivered' && (Number(totalPaid) || 0) > 0 && (
             <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">

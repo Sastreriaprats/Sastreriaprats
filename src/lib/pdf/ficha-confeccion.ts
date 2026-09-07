@@ -32,6 +32,9 @@ const MEDIDAS_KEYS_POR_PRENDA: Record<string, readonly string[]> = {
   chaleco:   ['talle', 'largo', 'escote', 'largo_delantero', 'pecho', 'cintura'],
   camiseria: ['cuello', 'canesu', 'largo_manga', 'frente_pecho', 'pecho', 'cintura', 'cadera', 'largo_cuerpo', 'hombro', 'puno_derecho', 'puno_izquierdo'],
   camiseria_industrial: ['cuello', 'canesu', 'largo_manga', 'frente_pecho', 'pecho', 'cintura', 'cadera', 'largo_cuerpo', 'hombro', 'puno_derecho', 'puno_izquierdo'],
+  // El pijama se toma en la pestaña de Camisería (mismas medidas de cuerpo y
+  // manga); sin esto la ficha caía a las claves de americana y salía vacía.
+  pijama: ['cuello', 'canesu', 'largo_manga', 'frente_pecho', 'pecho', 'cintura', 'cadera', 'largo_cuerpo', 'hombro', 'puno_derecho', 'puno_izquierdo'],
 }
 
 export interface FichaConfeccionOrder {
@@ -400,7 +403,7 @@ function getFichaFromOrder(order: FichaConfeccionOrder): Record<string, unknown>
   // las 9 de la americana (pecho, cintura, hombro…). En una prenda de
   // sastrería se siguen mostrando, pero marcadas con `*`, para que el taller
   // no las tome por medidas de esta prenda.
-  const esCamiseria = prendaSlug.includes('camiseria') || prendaSlug === 'camisa'
+  const esCamiseria = prendaSlug.includes('camiseria') || prendaSlug === 'camisa' || prendaSlug === 'pijama'
   const medidasStr = getMedidasStr(
     clientMeasValues,
     medidasPrefixes,
@@ -898,6 +901,8 @@ function isLineCamiseria(line: TailoringOrderLine): boolean {
   if (cfg.tipo === 'camiseria' || cfg.tipo === 'camiseria_industrial') return true
   const name = (line?.garment_types?.name ?? '').toString().toLowerCase()
   if (name.includes('camiseria')) return true
+  // El pijama se confecciona y se mide como camisería: misma ficha.
+  if (name.includes('pijama') || String(cfg.prendaSlug ?? cfg.prenda ?? '').toLowerCase() === 'pijama') return true
   if (cfg.puno !== undefined) return true
   return false
 }

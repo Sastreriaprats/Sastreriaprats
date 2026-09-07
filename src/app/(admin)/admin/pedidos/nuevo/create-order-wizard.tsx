@@ -211,6 +211,9 @@ export function CreateOrderWizard({
   /** Estado para flujo Pedido de camisería (paso 3: ficha) */
   const [camiseriaConfig, setCamiseriaConfig] = useState<Record<string, string>>({})
   const [camiseriaPvpConIva, setCamiseriaPvpConIva] = useState<number>(0)
+  // Prenda del pedido de camisería: camisa (por defecto) o pijama — ambas usan
+  // la misma ficha de medidas y el mismo flujo.
+  const [camiseriaPrenda, setCamiseriaPrenda] = useState<'Camisería' | 'Pijama'>('Camisería')
   const [camiseriaEntregado, setCamiseriaEntregado] = useState('')
   const [camiseriaObservaciones, setCamiseriaObservaciones] = useState('')
   /** Cliente para el que ya cargamos medidas por defecto (para no pisar ediciones al volver a paso 3) */
@@ -626,7 +629,10 @@ export function CreateOrderWizard({
         measurement_id: l.measurement_id,
         official_id: l.official_id,
       })) : isCamiseriaType(orderType) ? (() => {
-        const camiseriaType = garmentTypes.find((g: any) => g.name === 'Camisería')
+        // La prenda elegida en la ficha (camisa o pijama); si el tipo no existe
+        // en la tabla se cae a Camisería para no bloquear el pedido.
+        const camiseriaType = garmentTypes.find((g: any) => g.name === camiseriaPrenda)
+          ?? garmentTypes.find((g: any) => g.name === 'Camisería')
         if (!camiseriaType) return []
         const pvpConIva = camiseriaPvpConIva || 0
         const observaciones = [camiseriaObservaciones, camiseriaEntregado ? `Entregado a cuenta: ${camiseriaEntregado}` : ''].filter(Boolean).join('\n') || null
@@ -635,6 +641,8 @@ export function CreateOrderWizard({
         // configuración de la línea. Los guardamos aquí para que aparezcan tanto
         // en la ficha que se imprime al crear como en la que se descarga después.
         const camiseriaLineConfig: Record<string, unknown> = { ...camiseriaConfig, precio: pvpConIva }
+        // La ficha PDF resuelve la prenda por aquí antes que por el garment_type.
+        if (camiseriaPrenda === 'Pijama') camiseriaLineConfig.prendaSlug = 'pijama'
         if (camiseriaObservaciones.trim()) camiseriaLineConfig.obs = camiseriaObservaciones.trim()
         if (entregadoNum > 0) camiseriaLineConfig.entregado = entregadoNum
         return [{
@@ -675,7 +683,8 @@ export function CreateOrderWizard({
         toast.error('Indica el PVP (precio con IVA)')
         return
       }
-      const camiseriaType = garmentTypes.find((g: any) => g.name === 'Camisería')
+      const camiseriaType = garmentTypes.find((g: any) => g.name === camiseriaPrenda)
+        ?? garmentTypes.find((g: any) => g.name === 'Camisería')
       if (!camiseriaType) {
         toast.error('No se encontró el tipo de prenda Camisería. Ejecuta la migración 050.')
         return
@@ -957,6 +966,19 @@ export function CreateOrderWizard({
             </p>
           </CardHeader>
           <CardContent className="space-y-6">
+            {/* Prenda: el pijama se mide y se confecciona igual que una camisa,
+                así que comparte esta ficha; solo cambia el tipo de prenda que se
+                guarda (antes había que meterlo como "Camisería"). */}
+            <div className="space-y-2 max-w-xs">
+              <Label>Prenda</Label>
+              <Select value={camiseriaPrenda} onValueChange={(v: any) => setCamiseriaPrenda(v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Camisería">Camisa</SelectItem>
+                  <SelectItem value="Pijama">Pijama</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div className="grid grid-cols-3 gap-3">
               {['cuello', 'canesu', 'largo_manga', 'frente_pecho', 'pecho', 'cintura', 'cadera', 'largo_cuerpo', 'hombro', 'puno_derecho', 'puno_izquierdo'].map((key) => (
                 <div key={key} className="space-y-1">
