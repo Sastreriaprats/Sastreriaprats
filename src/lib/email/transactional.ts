@@ -17,6 +17,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { sendEmail, renderTemplate } from '@/lib/email/send'
 import { EMAIL_LOGO_URL, EMAIL_PUBLIC_URL } from './branding'
+import { STORE_LOCATIONS } from '@/lib/constants'
 
 /* ── Layout común ────────────────────────────────────────────────────────── */
 
@@ -373,38 +374,50 @@ export async function sendAppointmentReminder(appt: {
   }
 }
 
-export async function sendTailoringStatusUpdate(order: {
-  client_name: string; client_email: string; order_number: string; new_status: string; message?: string
+/**
+ * ÚNICO email automático de estado que recibe el cliente de sastrería: el de la
+ * ENTREGA. Las actualizaciones intermedias (tejido encargado, en confección,
+ * terminado…) NO se envían — decisión de Sastrería Prats, sep-2026: al cliente
+ * se le informa en tienda, y el correo automático solo se usa para agradecer la
+ * confianza y pedir la reseña.
+ *
+ * `store_review_url` es el enlace de la tienda del pedido. La plantilla lo usa
+ * a través del campo editable `review_url`, cuyo valor por defecto es
+ * `{{store_review_url}}`: escribir una URL fija en ese campo (Configuración →
+ * Emails) manda sobre el enlace de la tienda.
+ */
+export async function sendOrderDeliveredThanks(order: {
+  client_name: string; client_email: string; order_number: string; store_review_url?: string | null
 }) {
-  const statusMessages: Record<string, string> = {
-    fabric_ordered: 'El tejido de tu pedido ha sido encargado al proveedor.',
-    fabric_received_store: 'El tejido ha llegado a tienda. Pronto empezaremos a confeccionar.',
-    fabric_received_factory: 'El tejido ha llegado a fábrica. Pronto empezarán a confeccionar.',
-    cut: 'Hemos cortado las piezas de tu pedido.',
-    in_production: 'Tu pedido está en confección. Nuestros sastres están trabajando en él.',
-    in_fitting: 'Tu pedido está listo para la prueba. Te contactaremos para programar la cita.',
-    received_in_store: 'Tu pedido ha llegado a tienda y está listo para los últimos detalles.',
-    finished: '¡Tu pedido está terminado! Contacta con nosotros para recogerlo.',
-  }
-  const msg = order.message || statusMessages[order.new_status] || 'El estado de tu pedido ha sido actualizado.'
+  const reviewUrl = order.store_review_url || STORE_LOCATIONS.pinzon.mapsUrl
 
-  await sendFromTemplate('status_update', order.client_email, {
+  await sendFromTemplate('order_delivered', order.client_email, {
     client_name: order.client_name,
     order_number: order.order_number,
-    message: escapeHtml(msg),
+    store_review_url: reviewUrl,
+    review_url: reviewUrl,
   }, {
-    subject: `Actualización pedido {{order_number}}`,
+    subject: `Gracias por confiar en Sastrería Prats`,
     bodyHtml: `
       <tr><td align="center" style="padding:0 60px 24px;">
-        <h2 style="margin:0 0 12px;font-size:18px;font-weight:bold;color:#1a2942;">Actualización de tu pedido</h2>
+        <h2 style="margin:0 0 12px;font-size:18px;font-weight:bold;color:#1a2942;">Gracias por tu confianza</h2>
         <p style="margin:0 0 16px;font-size:14px;color:#555555;">Hola {{client_name}},</p>
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f0e8;border-radius:6px;margin:0 0 20px;">
-          <tr><td align="center" style="padding:16px;">
-            <p style="margin:0;font-size:11px;letter-spacing:1.5px;color:#888888;text-transform:uppercase;">Pedido</p>
-            <p style="margin:4px 0 0;font-size:18px;font-weight:bold;color:#1a2942;">{{order_number}}</p>
+        <p style="margin:0 0 20px;font-size:13px;line-height:1.6;color:#333333;">
+          Tu pedido <strong>{{order_number}}</strong> ya está entregado. Gracias por confiar en nosotros
+          para vestirte: es un gusto tenerte como cliente.
+        </p>
+        <p style="margin:0 0 20px;font-size:13px;line-height:1.6;color:#333333;">
+          Si has quedado satisfecho, nos ayudarías mucho dejándonos una reseña. Nos lleva un minuto leerla
+          y nos sirve para seguir mejorando.
+        </p>
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto 20px;">
+          <tr><td align="center" style="background:#1a2942;border-radius:4px;">
+            <a href="{{review_url}}" style="display:inline-block;padding:12px 28px;font-size:13px;font-weight:bold;color:#ffffff;text-decoration:none;letter-spacing:0.5px;">Dejar una reseña</a>
           </td></tr>
         </table>
-        <p style="margin:0;font-size:13px;line-height:1.6;color:#333333;">{{message}}</p>
+        <p style="margin:0;font-size:13px;line-height:1.6;color:#555555;">
+          Cualquier ajuste o duda, estamos en la tienda para lo que necesites.
+        </p>
       </td></tr>
     `,
   })

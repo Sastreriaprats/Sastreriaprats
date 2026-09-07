@@ -9,7 +9,8 @@ import { ALL_VISIBLE_STATUSES, classifyLinesForStatusChange, deriveOrderStatusFr
 import { getDefaultDeliveryDate } from '@/lib/orders/production-times'
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
-import { sendOrderConfirmation, sendTailoringStatusUpdate } from '@/lib/email/transactional'
+import { sendOrderDeliveredThanks } from '@/lib/email/transactional'
+import { STORE_LOCATIONS } from '@/lib/constants'
 import { normalizeSearchTerm, getOrderStatusLabel, formatDateTimeMadrid, countUnpricedGarments } from '@/lib/utils'
 import { checkUserPermission } from '@/actions/auth'
 import { syncOrderLineMeasurementsToClient } from '@/lib/measurements/sync-from-order'
@@ -646,38 +647,11 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
       await applyFabricStockDelta(ctx.adminClient, fabricUsage, { orderId: order.id, userId: ctx.userId })
     }
 
-    if (order.client_id) {
-      const { data: client } = await ctx.adminClient
-        .from('clients')
-        .select('email, full_name, first_name, last_name')
-        .eq('id', order.client_id)
-        .single()
-      const clientEmail = (client as { email?: string } | null)?.email
-      if (clientEmail) {
-        const { data: linesWithTypes } = await ctx.adminClient
-          .from('tailoring_order_lines')
-          .select('garment_types(name)')
-          .eq('tailoring_order_id', order.id)
-          .limit(100)
-        const items = (linesWithTypes ?? []).map((l: unknown) => {
-          const gt = (l as { garment_types?: { name?: string } | null }).garment_types
-          return (typeof gt === 'object' && gt && 'name' in gt ? gt.name : null) ?? 'Prenda'
-        })
-        const clientName = (client as { full_name?: string; first_name?: string; last_name?: string })?.full_name ||
-          [(client as { first_name?: string })?.first_name, (client as { last_name?: string })?.last_name].filter(Boolean).join(' ') || 'Cliente'
-        try {
-          await sendOrderConfirmation({
-            order_number: order.order_number,
-            client_name: clientName,
-            client_email: clientEmail,
-            total: Number(order.total),
-            items: items.length ? items : ['Pedido sastrería'],
-          })
-        } catch (e) {
-          console.error('[createOrderAction] sendOrderConfirmation:', e)
-        }
-      }
-    }
+    // Sin email de confirmación al crear el pedido: en sastrería el cliente sale
+    // de la tienda sabiendo lo que ha encargado y lo comentamos en persona. El
+    // ÚNICO correo automático de este flujo es el de la entrega
+    // (sendOrderDeliveredThanks). Decisión de Sastrería Prats, sep-2026.
+    // La tienda online sigue con su confirmación propia (webhooks Stripe/RedSys).
 
     await ctx.adminClient.from('tailoring_order_state_history').insert({
       tailoring_order_id: order.id,
@@ -701,6 +675,16 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
     return success({ ...order, lines_count: linesInput.length, auditDescription })
   }
 )
+
+/**
+ * Enlace donde el cliente deja la reseña, según la tienda del pedido. La ficha
+ * de Google Maps del negocio es donde está el botón de reseñas; si la tienda
+ * tiene `google_maps_url` en su configuración, ese manda sobre este.
+ */
+function getStoreReviewUrl(storeCode: string | null | undefined): string {
+  if (storeCode === 'WEL') return STORE_LOCATIONS.wellington.mapsUrl
+  return STORE_LOCATIONS.pinzon.mapsUrl
+}
 
 /**
  * Recalcula el estado del PEDIDO a partir del de sus prendas (regla derivada,
@@ -761,18 +745,22 @@ async function recalcOrderStatusFromLines(
     changed_by_name: ctx.userName,
   })
 
+  // Al cliente solo se le escribe cuando el pedido queda ENTREGADO: agradecer y
+  // pedir reseña. Los estados intermedios no generan ningún email (sep-2026).
   if (derived === 'delivered') {
     const { data: ow } = await admin
       .from('tailoring_orders')
-      .select('order_number, clients(email, full_name, first_name, last_name)')
+      .select('order_number, clients(email, full_name, first_name, last_name), stores(code, google_maps_url)')
       .eq('id', orderId).single()
     const client = (ow as { clients?: { email?: string; full_name?: string; first_name?: string; last_name?: string } | null } | null)?.clients
     if (client?.email) {
       const clientName = client.full_name || [client.first_name, client.last_name].filter(Boolean).join(' ') || 'Cliente'
+      const store = (ow as { stores?: { code?: string | null; google_maps_url?: string | null } | null } | null)?.stores
       try {
-        await sendTailoringStatusUpdate({
+        await sendOrderDeliveredThanks({
           client_name: clientName, client_email: client.email,
-          order_number: (ow as { order_number: string }).order_number, new_status: 'delivered',
+          order_number: (ow as { order_number: string }).order_number,
+          store_review_url: store?.google_maps_url || getStoreReviewUrl(store?.code),
         })
       } catch (e) { console.error('[recalcOrderStatusFromLines] email:', e) }
     }

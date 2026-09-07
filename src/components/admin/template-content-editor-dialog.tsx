@@ -53,6 +53,9 @@ const FIELD_LABELS: Record<string, string> = {
   date_label: 'Etiqueta "Fecha"',
   time_label: 'Etiqueta "Hora"',
   store_label: 'Etiqueta "Tienda"',
+  review_text: 'Texto de la petición de reseña',
+  review_url: 'Enlace para dejar la reseña',
+  closing_text: 'Texto de cierre',
   // ── Opt-in newsletter (mig 153) ──
   optin_title_kicker: 'Pretítulo',
   optin_title: 'Título principal',
@@ -64,6 +67,7 @@ const FIELD_LABELS: Record<string, string> = {
 /** Pistas adicionales por campo (mostradas como texto pequeño debajo del input). */
 const FIELD_HINTS: Record<string, string> = {
   optin_body: 'Puedes usar {{first_name}} para incluir el nombre del cliente. Cada línea en blanco creará un párrafo nuevo.',
+  review_url: 'Déjalo en {{store_review_url}} para que apunte a la ficha de Google de la tienda del pedido, o pega aquí una dirección fija para todos los envíos.',
 }
 
 /** Filas de textarea por campo (override de la heurística). */
