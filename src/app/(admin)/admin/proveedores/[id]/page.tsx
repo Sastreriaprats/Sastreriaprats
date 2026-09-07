@@ -87,13 +87,74 @@ export default async function SupplierDetailPage(props: { params: Promise<{ id: 
       invoiceByOrder[k] = inv
     }
   }
+
+  // El vínculo REAL entre factura y pedido va por los albaranes: al registrar la
+  // factura se marcan los albaranes que cubre (ap_supplier_invoice_delivery_notes)
+  // y cada albarán conoce su pedido. `ap_supplier_invoices.supplier_order_id`
+  // existe pero no lo rellena ningún flujo (0 de 650 facturas), así que mirar
+  // solo esa columna dejaba TODOS los pedidos como "No pagado" aunque su factura
+  // estuviera cobrada (aviso de Mónica, 7-sep-2026, con los pedidos de Gimeno).
+  const invoicesByOrder: Record<string, any[]> = {}
+  for (const [orderId, inv] of Object.entries(invoiceByOrder)) invoicesByOrder[orderId] = [inv]
+
+  const noteIdsOfOrders = (allSupplierNotes || [])
+    .filter((n: any) => n.supplier_order_id && orderIds.includes(String(n.supplier_order_id)))
+    .map((n: any) => String(n.id))
+
+  if (noteIdsOfOrders.length > 0) {
+    const { data: links } = await admin
+      .from('ap_supplier_invoice_delivery_notes')
+      .select('supplier_invoice_id, supplier_delivery_note_id')
+      .in('supplier_delivery_note_id', noteIdsOfOrders)
+
+    const linkedInvoiceIds = Array.from(new Set((links || []).map((l: any) => String(l.supplier_invoice_id))))
+    if (linkedInvoiceIds.length > 0) {
+      const { data: linkedInvoices } = await admin
+        .from('ap_supplier_invoices')
+        .select('id, invoice_number, status, due_date, payment_date, total_amount')
+        .eq('is_proforma', false)
+        .in('id', linkedInvoiceIds)
+
+      const invoiceById = new Map((linkedInvoices || []).map((i: any) => [String(i.id), i]))
+      const orderIdByNote = new Map(
+        (allSupplierNotes || [])
+          .filter((n: any) => n.supplier_order_id)
+          .map((n: any) => [String(n.id), String(n.supplier_order_id)]),
+      )
+      for (const l of links || []) {
+        const orderId = orderIdByNote.get(String((l as any).supplier_delivery_note_id))
+        const inv = invoiceById.get(String((l as any).supplier_invoice_id))
+        if (!orderId || !inv) continue
+        const list = (invoicesByOrder[orderId] ??= [])
+        if (!list.some((x) => String(x.id) === String(inv.id))) list.push(inv)
+      }
+    }
+  }
+
+  /** Un pedido está pagado cuando TODAS sus facturas lo están; sin facturas no
+   *  se afirma nada (antes salía "No pagado", que era falso). */
+  const paymentStatusFor = (orderId: string): 'pagado' | 'parcial' | 'no_pagado' | 'sin_factura' => {
+    const list = invoicesByOrder[orderId] || []
+    if (list.length === 0) return 'sin_factura'
+    const pagadas = list.filter((i) => String(i.status) === 'pagada').length
+    if (pagadas === list.length) return 'pagado'
+    return pagadas > 0 ? 'parcial' : 'no_pagado'
+  }
   const orderNumberById = new Map((supplier.supplier_orders || []).map((o: any) => [String(o.id), o.order_number]))
-  supplier.supplier_orders = (supplier.supplier_orders || []).map((o: any) => ({
-    ...o,
-    supplier_delivery_notes: notesByOrder[o.id] || [],
-    ap_supplier_invoice: invoiceByOrder[o.id] || null,
-    payment_status: (invoiceByOrder[o.id]?.status === 'pagada') ? 'pagado' : 'no_pagado',
-  }))
+  supplier.supplier_orders = (supplier.supplier_orders || []).map((o: any) => {
+    const invoices = invoicesByOrder[o.id] || []
+    // La fecha de pago que se enseña es la REAL de la factura (la última, si son
+    // varias); `payment_due_date` del pedido queda como previsión.
+    const paidDates = invoices.map((i) => i.payment_date).filter(Boolean).sort()
+    return {
+      ...o,
+      supplier_delivery_notes: notesByOrder[o.id] || [],
+      ap_supplier_invoice: invoiceByOrder[o.id] || invoices[0] || null,
+      ap_supplier_invoices_linked: invoices,
+      payment_status: paymentStatusFor(o.id),
+      actual_payment_date: paidDates.length > 0 ? paidDates[paidDates.length - 1] : null,
+    }
+  })
   supplier.supplier_delivery_notes_all = (allSupplierNotes || []).map((n: any) => ({
     ...n,
     order_number: n.supplier_order_id ? (orderNumberById.get(String(n.supplier_order_id)) || null) : null,

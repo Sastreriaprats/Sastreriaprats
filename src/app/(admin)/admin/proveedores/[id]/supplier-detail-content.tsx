@@ -597,7 +597,9 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                 <TableHeader><TableRow>
                   <TableHead className="w-8" />
                   <TableHead>N&ordm; Pedido</TableHead><TableHead>Estado</TableHead><TableHead>Total</TableHead>
-                  <TableHead>Pago</TableHead><TableHead>Fecha</TableHead><TableHead>Fecha pago</TableHead><TableHead>Entrega est.</TableHead><TableHead className="w-28">Acciones</TableHead>
+                  <TableHead>Pago</TableHead><TableHead>Fecha</TableHead>
+                  <TableHead title="Fecha real de pago de la factura. En gris, la fecha prevista de vencimiento del pedido.">Fecha pago</TableHead>
+                  <TableHead>Entrega est.</TableHead><TableHead className="w-28">Acciones</TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
                   {orders.length === 0 ? (
@@ -627,12 +629,37 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                       <TableCell><Badge className={`text-xs ${orderStatusColors[o.status] || ''}`}>{orderStatusLabels[o.status] || o.status}</Badge></TableCell>
                       <TableCell className="font-medium">{formatCurrency(o.total)}</TableCell>
                       <TableCell>
-                        <Badge variant={o.payment_status === 'pagado' ? 'default' : 'destructive'} className="text-xs">
-                          {o.payment_status === 'pagado' ? 'Pagado' : 'No pagado'}
-                        </Badge>
+                        {/* El pago sale de las facturas vinculadas al pedido (por sus
+                            albaranes). Sin factura registrada no se afirma que esté
+                            impagado: solo que todavía no ha llegado. */}
+                        <div className="flex flex-col gap-0.5">
+                          <Badge
+                            variant={
+                              o.payment_status === 'pagado' ? 'default'
+                                : o.payment_status === 'sin_factura' ? 'outline'
+                                : o.payment_status === 'parcial' ? 'secondary'
+                                : 'destructive'
+                            }
+                            className="text-xs w-fit"
+                          >
+                            {o.payment_status === 'pagado' ? 'Pagado'
+                              : o.payment_status === 'sin_factura' ? 'Sin factura'
+                              : o.payment_status === 'parcial' ? 'Pago parcial'
+                              : 'No pagado'}
+                          </Badge>
+                          {(o.ap_supplier_invoices_linked?.length ?? 0) > 0 && (
+                            <span className="text-[10px] text-muted-foreground font-mono">
+                              {o.ap_supplier_invoices_linked.map((i: any) => i.invoice_number).filter(Boolean).join(', ')}
+                            </span>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="text-sm">{formatDate(o.created_at)}</TableCell>
-                      <TableCell className="text-sm">{o.payment_due_date ? formatDate(o.payment_due_date) : '-'}</TableCell>
+                      <TableCell className="text-sm">
+                        {o.actual_payment_date
+                          ? formatDate(o.actual_payment_date)
+                          : (o.payment_due_date ? <span className="text-muted-foreground">{formatDate(o.payment_due_date)}</span> : '-')}
+                      </TableCell>
                       <TableCell className="text-sm">{formatDate(o.estimated_delivery_date)}</TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <div className="flex flex-col gap-1">
