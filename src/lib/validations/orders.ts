@@ -35,6 +35,8 @@ export const tailoringOrderLineSchema = z.object({
   discount_percentage: z.number().min(0).max(100).default(0),
   tax_rate: z.number().default(21),
   material_cost: z.number().default(0),
+  /** Coste del forro (mig 284). Va aparte del tejido pero suma como material. */
+  lining_cost: z.number().default(0),
   labor_cost: z.number().default(0),
   factory_cost: z.number().default(0),
   model_name: z.string().optional().nullable(),

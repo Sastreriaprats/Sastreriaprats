@@ -49,6 +49,7 @@ export default async function OrderDetailPage(props: { params: Promise<{ id: str
     o.total_cost = null
     for (const line of (o.tailoring_order_lines ?? []) as Record<string, unknown>[]) {
       line.material_cost = null
+      line.lining_cost = null
       line.labor_cost = null
       line.factory_cost = null
     }

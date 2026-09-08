@@ -51,6 +51,8 @@ interface OrderLine {
   discount_percentage: number
   tax_rate: number
   material_cost: number
+  /** Coste del forro, aparte del tejido (mig 284). */
+  lining_cost: number
   labor_cost: number
   factory_cost: number
   model_name: string
@@ -196,7 +198,7 @@ export function CreateOrderWizard({
   const [showAddLine, setShowAddLine] = useState(false)
   const [lineForm, setLineForm] = useState<Partial<OrderLine>>({
     garment_type_id: '', line_type: 'artesanal', unit_price: 0, discount_percentage: 0,
-    tax_rate: 21, material_cost: 0, labor_cost: 0, factory_cost: 0,
+    tax_rate: 21, material_cost: 0, lining_cost: 0, labor_cost: 0, factory_cost: 0,
     fabric_description: '', fabric_meters: 0, model_name: '', model_size: '', finishing_notes: '',
     configuration: {}, official_id: null, official_name: '',
   })
@@ -474,7 +476,7 @@ export function CreateOrderWizard({
     return sum + afterDiscounts * tr / (100 + tr)
   }, 0)
   const subtotal = total - taxAmount
-  const totalCost = lines.reduce((sum, l) => sum + l.material_cost + l.labor_cost + l.factory_cost, 0)
+  const totalCost = lines.reduce((sum, l) => sum + l.material_cost + l.lining_cost + l.labor_cost + l.factory_cost, 0)
   const margin = total > 0 ? ((total - totalCost) / total * 100) : 0
 
   const addLine = (keepOpen = false) => {
@@ -504,6 +506,7 @@ export function CreateOrderWizard({
       discount_percentage: lineForm.discount_percentage || 0,
       tax_rate: lineForm.tax_rate || 21,
       material_cost: lineForm.material_cost || 0,
+      lining_cost: lineForm.lining_cost || 0,
       labor_cost: lineForm.labor_cost || 0,
       factory_cost: lineForm.factory_cost || 0,
       model_name: lineForm.model_name || '',
@@ -519,7 +522,7 @@ export function CreateOrderWizard({
     setLineForm({
       garment_type_id: keepOpen ? currentGarmentId : '',
       line_type: orderType === 'artesanal' || orderType === 'industrial' ? orderType : 'artesanal',
-      unit_price: 0, discount_percentage: 0, tax_rate: 21, material_cost: 0, labor_cost: 0, factory_cost: 0,
+      unit_price: 0, discount_percentage: 0, tax_rate: 21, material_cost: 0, lining_cost: 0, labor_cost: 0, factory_cost: 0,
       fabric_description: '', fabric_meters: 0, model_name: '', model_size: '', finishing_notes: '', configuration: {},
       official_id: null, official_name: '',
     })
@@ -621,6 +624,7 @@ export function CreateOrderWizard({
         discount_percentage: l.discount_percentage,
         tax_rate: l.tax_rate,
         material_cost: l.material_cost,
+        lining_cost: l.lining_cost,
         labor_cost: l.labor_cost,
         factory_cost: l.factory_cost,
         model_name: l.model_name || null,
@@ -657,6 +661,7 @@ export function CreateOrderWizard({
           discount_percentage: 0,
           tax_rate: 21,
           material_cost: 0,
+          lining_cost: 0,
           labor_cost: 0,
           factory_cost: 0,
           model_name: null,
@@ -1309,8 +1314,9 @@ export function CreateOrderWizard({
                   </div>
                 </div>
                 {canViewCosts && (
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div className="space-y-2"><Label>Coste material</Label><Input type="number" step="0.01" value={lineForm.material_cost || ''} onChange={(e) => setLineForm(p => ({ ...p, material_cost: parseFloat(e.target.value) || 0 }))} /></div>
+                    <div className="space-y-2"><Label>Coste forro</Label><Input type="number" step="0.01" value={lineForm.lining_cost || ''} onChange={(e) => setLineForm(p => ({ ...p, lining_cost: parseFloat(e.target.value) || 0 }))} /></div>
                     <div className="space-y-2"><Label>Mano obra</Label><Input type="number" step="0.01" value={lineForm.labor_cost || ''} onChange={(e) => setLineForm(p => ({ ...p, labor_cost: parseFloat(e.target.value) || 0 }))} /></div>
                     <div className="space-y-2"><Label>Fábrica</Label><Input type="number" step="0.01" value={lineForm.factory_cost || ''} onChange={(e) => setLineForm(p => ({ ...p, factory_cost: parseFloat(e.target.value) || 0 }))} /></div>
                   </div>

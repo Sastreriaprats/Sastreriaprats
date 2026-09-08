@@ -1134,6 +1134,9 @@ export const tailoringOrderLines = pgTable('tailoring_order_lines', {
   // Prenda regalada: PVP 0 permitido, etiquetada "Regalo" en UI y ficha (mig 261).
   isGift: boolean('is_gift').default(false).notNull(),
   materialCost: decimal('material_cost', { precision: 10, scale: 2 }).default('0.00'),
+  // Coste del FORRO, separado del tejido (mig 284). Es material: suma dentro de
+  // tailoring_orders.total_material_cost vía fn_sync_order_costs.
+  liningCost: decimal('lining_cost', { precision: 10, scale: 2 }).default('0.00'),
   laborCost: decimal('labor_cost', { precision: 10, scale: 2 }).default('0.00'),
   factoryCost: decimal('factory_cost', { precision: 10, scale: 2 }).default('0.00'),
   modelName: text('model_name'),

@@ -287,20 +287,25 @@ export function OrderGarmentsTab({ order }: { order: any }) {
             )}
 
             <Separator />
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-4 text-sm">
               <div><span className="text-muted-foreground block text-xs">PVP</span><span className="font-medium">{line.is_gift ? <span className="text-amber-700">Regalo</span> : formatCurrency(line.unit_price)}</span></div>
               {line.discount_percentage > 0 && <div><span className="text-muted-foreground block text-xs">Dto.</span>-{line.discount_percentage}%</div>}
               {canViewCosts && (() => {
                 const material = Number(line.material_cost) || 0
+                // Coste del FORRO (mig 284): casilla propia, aparte del tejido.
+                const lining = Number(line.lining_cost) || 0
                 const labor = Number(line.labor_cost) || 0
                 const factory = Number(line.factory_cost) || 0
-                const anyCost = material > 0 || labor > 0 || factory > 0
+                const anyCost = material > 0 || lining > 0 || labor > 0 || factory > 0
                 if (!anyCost) return null
-                const totalCost = Math.round((material + labor + factory) * 100) / 100
+                const totalCost = Math.round((material + lining + labor + factory) * 100) / 100
                 return (
                   <>
                     {material > 0 && (
                       <div><span className="text-muted-foreground block text-xs">Material</span>{formatCurrency(material)}</div>
+                    )}
+                    {lining > 0 && (
+                      <div><span className="text-muted-foreground block text-xs">Forro</span>{formatCurrency(lining)}</div>
                     )}
                     {labor > 0 && (
                       <div><span className="text-muted-foreground block text-xs">Mano de obra</span>{formatCurrency(labor)}</div>

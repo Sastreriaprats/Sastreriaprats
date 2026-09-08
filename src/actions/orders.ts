@@ -540,6 +540,7 @@ export const getOrder = protectedAction<string, any>(
       if (Array.isArray(linesArr)) {
         for (const line of linesArr) {
           line.material_cost = null
+          line.lining_cost = null
           line.labor_cost = null
           line.factory_cost = null
         }
@@ -1386,6 +1387,8 @@ export interface UpdateOrderInput {
     discount_percentage?: number
     tax_rate?: number
     material_cost?: number
+    /** Coste del forro, separado del tejido (mig 284). */
+    lining_cost?: number
     labor_cost?: number
     factory_cost?: number
     fabric_id?: string | null
@@ -1420,7 +1423,7 @@ const HEADER_EDITABLE_FIELDS = [
 // SIEMPRE como modificada cualquier línea con la FK poblada).
 const LINE_EDITABLE_FIELDS = [
   'garment_type_id', 'line_type', 'unit_price', 'is_gift', 'discount_percentage', 'tax_rate',
-  'material_cost', 'labor_cost', 'factory_cost',
+  'material_cost', 'lining_cost', 'labor_cost', 'factory_cost',
   'fabric_id', 'fabric_description', 'fabric_meters', 'supplier_id',
   'model_name', 'model_size', 'finishing_notes', 'configuration', 'sort_order',
 ] as const
@@ -1848,9 +1851,19 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
       // pero cuyo material_cost quedó a 0 (ver red de seguridad más abajo).
       // Reunimos los fabric_id entrantes y los de BD (el diálogo puede reenviar
       // un fabric_id sin tocarlo). Una sola consulta, tolerante a fallo.
+      // Idem para el FORRO de stock (mig 284): su id vive en configuration
+      // (forroStockId), no en columna propia, pero el precio sale del mismo
+      // catálogo de tejidos.
+      const liningFabricIdOf = (configuration: unknown): string | null => {
+        const cfg = (configuration ?? {}) as Record<string, unknown>
+        const raw = cfg.forroStockId
+        return typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : null
+      }
       const fabricIdsForCost = new Set<string>()
       for (const l of incomingLines) if (l.fabric_id) fabricIdsForCost.add(String(l.fabric_id))
       for (const l of linesBeforeArr) if ((l as any).fabric_id) fabricIdsForCost.add(String((l as any).fabric_id))
+      for (const l of incomingLines) { const id = liningFabricIdOf(l.configuration); if (id) fabricIdsForCost.add(id) }
+      for (const l of linesBeforeArr) { const id = liningFabricIdOf((l as any).configuration); if (id) fabricIdsForCost.add(id) }
       const fabricPriceById = new Map<string, number>()
       if (fabricIdsForCost.size > 0) {
         const { data: fabricRows } = await admin
@@ -1941,6 +1954,7 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
           is_gift: line.is_gift !== undefined ? line.is_gift === true : ((before as any)?.is_gift ?? false),
           tax_rate: Number(line.tax_rate ?? 21),
           material_cost: costFrom(line.material_cost, (before as any)?.material_cost),
+          lining_cost: costFrom(line.lining_cost, (before as any)?.lining_cost),
           labor_cost: costFrom(line.labor_cost, (before as any)?.labor_cost),
           factory_cost: costFrom(line.factory_cost, (before as any)?.factory_cost),
           // Escalares descriptivos: si el caller NO manda el campo (undefined) se
@@ -1976,6 +1990,25 @@ export const updateOrderAction = protectedAction<UpdateOrderInput, any>(
           const ppm = fabricPriceById.get(String(row.fabric_id)) || 0
           if (meters > 0 && ppm > 0) {
             row.material_cost = round2(ppm * meters)
+          }
+        }
+
+        // Misma red de seguridad para el coste del FORRO (mig 284). La ficha del
+        // sastre ya calcula forroCosteMaterial (€/m × metros del forro de stock)
+        // y hasta ahora ese importe se quedaba muerto dentro de configuration.
+        // Si la línea acaba sin coste de forro, se deriva: primero del catálogo
+        // vivo (precio actual × metros), y si no, del importe que calculó la
+        // ficha. Solo RELLENA el hueco: nunca pisa un coste ya introducido.
+        if ((Number(row.lining_cost) || 0) <= 0) {
+          const cfg = (row.configuration ?? {}) as Record<string, unknown>
+          const liningId = liningFabricIdOf(cfg)
+          const liningMeters = Number(cfg.forroMetros) || 0
+          const liningPpm = liningId ? (fabricPriceById.get(liningId) || 0) : 0
+          if (liningMeters > 0 && liningPpm > 0) {
+            row.lining_cost = round2(liningPpm * liningMeters)
+          } else {
+            const fromFicha = Number(cfg.forroCosteMaterial) || 0
+            if (fromFicha > 0) row.lining_cost = round2(fromFicha)
           }
         }
 
@@ -2167,6 +2200,7 @@ function cloneLineForDuplicate(l: Record<string, any>, targetOrderId: string, so
     tax_rate: l.tax_rate ?? 21,
     line_total: l.line_total,
     material_cost: l.material_cost ?? 0,
+    lining_cost: l.lining_cost ?? 0,
     labor_cost: l.labor_cost ?? 0,
     factory_cost: l.factory_cost ?? 0,
     model_name: l.model_name ?? null,
@@ -2750,6 +2784,11 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
       // ya lo trae, gana sobre el material_cost previo de la línea.
       const cfgCosteRaw = Number(cfg.tejidoCosteMaterial as unknown as number)
       const cfgCoste = Number.isFinite(cfgCosteRaw) && cfgCosteRaw > 0 ? cfgCosteRaw : null
+      // Coste del FORRO (mig 284): la ficha lo calcula igual que el del tejido
+      // (€/m × metros del forro de stock). Antes se perdía dentro del JSON:
+      // ninguna columna lo recogía y no sumaba al coste del pedido.
+      const liningCostRaw = Number(cfg.forroCosteMaterial as unknown as number)
+      const liningCost = Number.isFinite(liningCostRaw) && liningCostRaw > 0 ? liningCostRaw : 0
       return {
         tailoring_order_id: l.tailoring_order_id,
         garment_type_id: l.garment_type_id,
@@ -2758,6 +2797,7 @@ export const createFichaOrder = protectedAction<CreateFichaOrderInput, { orderId
         line_total: l.line_total,
         is_gift: l.is_gift,
         material_cost: cfgCoste ?? l.material_cost ?? 0,
+        lining_cost: liningCost,
         finishing_notes: l.finishing_notes,
         configuration: l.configuration,
         sort_order: l.sort_order,
