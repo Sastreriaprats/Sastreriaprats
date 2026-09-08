@@ -75,6 +75,11 @@ export const listReservations = protectedAction<ListReservationsInput, ListResul
     if (input.onlyPending) {
       query = query.eq('status', 'pending_stock')
     }
+    // Se filtra en SERVIDOR, no sobre la página cargada: si no, el contador y la
+    // paginación seguirían contando las pagadas y el Excel las arrastraría.
+    if (input.excludePaid) {
+      query = query.neq('payment_status', 'paid')
+    }
     if (input.clientId) query = query.eq('client_id', input.clientId)
     if (input.storeId) query = query.eq('store_id', input.storeId)
     if (input.dateFrom) query = query.gte('created_at', input.dateFrom)

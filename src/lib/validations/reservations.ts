@@ -78,6 +78,13 @@ export const listReservationsSchema = z.object({
   warehouseId: z.string().uuid().optional(),
   storeId: z.string().uuid().optional(),
   onlyPending: z.boolean().optional(),
+  /**
+   * Oculta las reservas ya cobradas por completo (payment_status = 'paid').
+   * Una reserva pagada sigue viva mientras no se entrega, así que no basta con
+   * filtrar por estado: para trabajar el pendiente de cobro hay que poder
+   * quitarlas de en medio.
+   */
+  excludePaid: z.boolean().optional(),
   search: z.string().optional(),
   /** Rango de fechas de CREACIÓN de la reserva (YYYY-MM-DD, inclusivo). */
   dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),

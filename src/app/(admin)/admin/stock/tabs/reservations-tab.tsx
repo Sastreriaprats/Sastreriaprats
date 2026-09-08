@@ -13,9 +13,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFoo
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Loader2, Plus, ChevronLeft, ChevronRight, X, Check, Pencil, Bookmark, Clock, Printer, Euro, Banknote, CreditCard, Smartphone, ArrowRightLeft, Eye, RotateCcw, FileText } from 'lucide-react'
+import { Loader2, Plus, ChevronLeft, ChevronRight, X, Check, Pencil, Bookmark, Clock, Printer, Euro, Banknote, CreditCard, Smartphone, ArrowRightLeft, Eye, RotateCcw, FileText, Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
+import { todayLocalISODate } from '@/lib/dates'
+import { downloadExcelMulti } from '@/lib/excel/export'
 import {
   listReservations,
   cancelReservation,
@@ -134,6 +136,10 @@ export function ReservationsTab() {
 
   const [status, setStatus] = useState<string>('all')
   const [onlyPending, setOnlyPending] = useState(false)
+  // Ocultar las ya cobradas: una reserva pagada sigue "activa" hasta que se
+  // entrega, y para revisar lo pendiente de cobro estorban.
+  const [excludePaid, setExcludePaid] = useState(false)
+  const [exporting, setExporting] = useState(false)
   // ?rsearch= permite deep-link con el buscador precargado (p.ej. desde Cobros
   // pendientes: fila de reserva → esta pestaña filtrada por su número).
   const [search, setSearch] = useState(() => {
@@ -176,6 +182,7 @@ export function ReservationsTab() {
       const result = await listReservations({
         status: status as any,
         onlyPending: onlyPending || undefined,
+        excludePaid: excludePaid || undefined,
         search: search.trim() || undefined,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
@@ -197,9 +204,106 @@ export function ReservationsTab() {
     } finally {
       setLoading(false)
     }
-  }, [page, status, onlyPending, search, dateFrom, dateTo])
+  }, [page, status, onlyPending, excludePaid, search, dateFrom, dateTo])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  /**
+   * Descarga a Excel TODO lo que cumple los filtros actuales, no solo la página
+   * en pantalla. `pageSize` está topado a 200 por el validador (y PostgREST
+   * corta a 1000 pase lo que pase), así que se pide por tandas hasta agotar.
+   *
+   * Dos hojas: "Reservas" (una fila por reserva) y "Artículos" (una fila por
+   * prenda reservada), porque para saber qué stock hay comprometido no basta
+   * con el total de la reserva.
+   */
+  const handleExportExcel = async () => {
+    setExporting(true)
+    try {
+      const BATCH = 200
+      const all: Reservation[] = []
+      for (let p = 0; ; p++) {
+        const res = await listReservations({
+          status: status as any,
+          onlyPending: onlyPending || undefined,
+          excludePaid: excludePaid || undefined,
+          search: search.trim() || undefined,
+          dateFrom: dateFrom || undefined,
+          dateTo: dateTo || undefined,
+          page: p,
+          pageSize: BATCH,
+        })
+        if (!res.success || !res.data) {
+          toast.error('error' in res ? res.error : 'No se pudieron exportar las reservas')
+          return
+        }
+        const batch = res.data.data as Reservation[]
+        all.push(...batch)
+        if (batch.length < BATCH || all.length >= res.data.total) break
+      }
+
+      if (all.length === 0) {
+        toast.error('No hay reservas para exportar con los filtros aplicados')
+        return
+      }
+
+      const cabecera = all.map((r) => {
+        const vivas = (r.lines || []).filter((l) => l.status !== 'cancelled')
+        return {
+          'Nº reserva': r.reservation_number,
+          'Fecha': formatDate(r.created_at),
+          'Cliente': getClientName(r.client),
+          'Teléfono': r.client?.phone ?? '',
+          'Tienda': r.store?.display_name || r.store?.name || '',
+          'Artículos': vivas.map((l) => `${getLineDescription(l)} x${Number(l.quantity || 0)}`).join(' | '),
+          'Unidades': getTotalQuantity(r),
+          'Total (€)': Number(r.total ?? 0),
+          'Pagado (€)': Number(r.total_paid ?? 0),
+          'Pendiente (€)': Number(r.total ?? 0) - Number(r.total_paid ?? 0),
+          'Estado de pago': PAYMENT_STATUS_BADGE[r.payment_status]?.label ?? r.payment_status,
+          'Estado': STATUS_BADGE[r.status]?.label ?? r.status,
+          'Caduca': r.expires_at ? formatDate(r.expires_at) : '',
+          'Vendedor': r.employee?.full_name || r.created_by_profile?.full_name || '',
+          'Motivo': r.reason ?? '',
+          'Notas': r.notes ?? '',
+        }
+      })
+
+      const articulos = all.flatMap((r) =>
+        (r.lines || [])
+          .filter((l) => l.status !== 'cancelled')
+          .map((l) => ({
+            'Nº reserva': r.reservation_number,
+            'Fecha': formatDate(r.created_at),
+            'Cliente': getClientName(r.client),
+            'Producto': l.product_variant?.product?.name ?? '',
+            'Talla': l.product_variant?.size ?? '',
+            'Color': l.product_variant?.color ?? '',
+            'Referencia': l.product_variant?.variant_sku ?? '',
+            'Almacén': l.warehouse?.name || l.warehouse?.code || '',
+            'Unidades': Number(l.quantity || 0),
+            'Precio (€)': Number(l.unit_price ?? 0),
+            'Importe (€)': Number(l.line_total ?? 0),
+            'Estado': STATUS_BADGE[l.status]?.label ?? l.status,
+          })),
+      )
+
+      // El nombre dice qué se está descargando: al abrirlo semanas después,
+      // "reservas-activas" y "reservas-todas" no son lo mismo.
+      const sufijo = status === 'all' ? 'todas' : (STATUS_LABELS[status] ?? status).toLowerCase().replace(/\s+/g, '-')
+      const nombre = `reservas-${sufijo}${excludePaid ? '-sin-pagadas' : ''}-${todayLocalISODate()}`
+      await downloadExcelMulti([
+        { name: 'Reservas', rows: cabecera },
+        { name: 'Artículos', rows: articulos },
+      ], nombre)
+      toast.success(`${all.length} reservas exportadas a Excel`)
+    } catch (err) {
+      console.error('Error exportando reservas:', err)
+      toast.error(err instanceof Error ? err.message : 'Error al exportar las reservas')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -472,6 +576,10 @@ export function ReservationsTab() {
             <Checkbox id="only-pending" checked={onlyPending} onCheckedChange={(v) => { setOnlyPending(Boolean(v)); setPage(0) }} />
             <Label htmlFor="only-pending" className="text-sm">Solo pendientes de stock</Label>
           </div>
+          <div className="flex items-center gap-2">
+            <Checkbox id="exclude-paid" checked={excludePaid} onCheckedChange={(v) => { setExcludePaid(Boolean(v)); setPage(0) }} />
+            <Label htmlFor="exclude-paid" className="text-sm">Ocultar pagadas</Label>
+          </div>
           <Input
             placeholder="Buscar por nº reserva o cliente..."
             className="w-64"
@@ -494,9 +602,15 @@ export function ReservationsTab() {
             )}
           </div>
         </div>
-        <Button className="gap-1" onClick={() => setCreating(true)}>
-          <Plus className="h-4 w-4" /> Nueva reserva
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" className="gap-1" onClick={handleExportExcel} disabled={exporting || loading}>
+            {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            Exportar a Excel
+          </Button>
+          <Button className="gap-1" onClick={() => setCreating(true)}>
+            <Plus className="h-4 w-4" /> Nueva reserva
+          </Button>
+        </div>
       </div>
 
       <div className="rounded-lg border">
