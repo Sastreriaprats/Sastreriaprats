@@ -94,6 +94,13 @@ export type ApSupplierInvoiceInput = {
   /** Cuotas explícitas para esta factura. Si viene con datos sustituye al
    * cálculo automático (buildInstallments). */
   installments?: Array<{ amount: number; due_date: string }>
+  /**
+   * Motivo de corrección de una factura YA PAGADA. Solo se admite (y es
+   * obligatorio) al editar una factura en estado 'pagada': es la llave que
+   * levanta el bloqueo, y queda escrito en la auditoría. Sin él, una pagada
+   * sigue siendo intocable.
+   */
+  correction_reason?: string | null
   /** Líneas con base + IVA por factura. Si llega y tiene datos, se persisten
    * en ap_supplier_invoice_lines y la cabecera (amount/tax_amount) se
    * recalcula como Σ de las líneas. Si no llega o está vacío, comportamiento
@@ -829,7 +836,7 @@ export const updateSupplierInvoiceNotesAction = protectedAction<{ id: string; no
   }
 )
 
-export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInput & { id: string }, { auditEntityId: string; auditDescription: string }>(
+export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInput & { id: string }, { auditEntityId: string; auditDescription: string; warning?: string }>(
   {
     permission: PERMISSION,
     auditModule: 'accounting',
@@ -839,15 +846,26 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
   async (ctx, input) => {
     const { id, ...rest } = input
 
-    // Bloqueo: una factura ya pagada no puede modificarse desde aquí.
+    // Una factura pagada no se edita por accidente: hace falta pasar un motivo
+    // explícito (`correction_reason`). Antes estaba tapiada del todo y cualquier
+    // error de tecleo -4 céntimos en un total- obligaba a corregirlo por SQL
+    // desde soporte. El permiso ya restringe quién entra aquí; lo que faltaba
+    // era dejar rastro de por qué se toca algo ya cobrado.
     const { data: current } = await ctx.adminClient
       .from(TABLE)
-      .select('status, is_rectifying')
+      .select('status, is_rectifying, total_amount, invoice_number')
       .eq('id', id)
       .maybeSingle()
-    if ((current as { status?: string } | null)?.status === 'pagada') {
-      return failure('La factura está pagada y no puede editarse', 'VALIDATION')
+    const currentRow = current as { status?: string; is_rectifying?: boolean; total_amount?: number | string; invoice_number?: string } | null
+    const wasPaid = currentRow?.status === 'pagada'
+    const correctionReason = (rest.correction_reason ?? '').trim()
+    if (wasPaid && correctionReason.length < 10) {
+      return failure(
+        'Esta factura está pagada. Para corregirla hay que indicar el motivo (mínimo 10 caracteres), que queda registrado en la auditoría.',
+        'VALIDATION',
+      )
     }
+    const oldTotal = Math.round(Number(currentRow?.total_amount ?? 0) * 100) / 100
     const isRectifying = (current as { is_rectifying?: boolean } | null)?.is_rectifying === true || rest.is_rectifying === true
     if (rest.is_proforma && isRectifying) {
       return failure('Una factura no puede ser proforma y abono a la vez', 'VALIDATION')
@@ -1006,9 +1024,88 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
       }
     }
 
+    // ── Corrección de una factura PAGADA ──────────────────────────────────
+    // El importe vive replicado en 5 sitios y el update de arriba solo toca
+    // tres (cabecera, líneas y -si no hay cuotas pagadas- el calendario).
+    // Faltan la cuota ya pagada, el pago y su espejo en manual_transactions,
+    // que es la fila que ve Contabilidad. Sin esto la factura queda descuadrada
+    // por dentro: la cabecera dice un importe y el gasto sigue diciendo otro.
+    const newTotal = Math.round(Number(rest.total_amount) * 100) / 100
+    let warning: string | undefined
+    if (wasPaid && newTotal !== oldTotal) {
+      const eq = (v: unknown) => Math.round(Number(v ?? 0) * 100) / 100 === oldTotal
+
+      // Cuota: solo se ajusta sola si era una única cuota por el importe
+      // completo. Con un calendario repartido no hay forma de adivinar en cuál
+      // cae la diferencia, así que se avisa y lo reparte una persona.
+      const { data: cuotas } = await ctx.adminClient
+        .from('ap_supplier_invoice_due_dates')
+        .select('id, amount')
+        .eq('supplier_invoice_id', id)
+      const unicaCuota = (cuotas ?? []).length === 1 && eq((cuotas as any[])[0]?.amount)
+      if (unicaCuota) {
+        await ctx.adminClient
+          .from('ap_supplier_invoice_due_dates')
+          .update({ amount: newTotal, updated_at: new Date().toISOString() })
+          .eq('id', (cuotas as any[])[0].id)
+      } else if ((cuotas ?? []).length > 0) {
+        warning = 'La factura tiene varias cuotas: repasa el calendario de vencimientos, no se han tocado.'
+      }
+
+      // Pago + espejo. Mismo criterio: un único pago que cubría exactamente el
+      // total anterior es el mismo error de tecleo y se corrige con él. Si hay
+      // varios pagos, o el pago no cuadraba con el total, NO se inventa nada:
+      // el trigger recalculará el estado (parcial/pagada) y se avisa.
+      const { data: pagos } = await ctx.adminClient
+        .from('ap_supplier_invoice_payments')
+        .select('id, amount, manual_transaction_id')
+        .eq('supplier_invoice_id', id)
+      const unicoPago = (pagos ?? []).length === 1 && eq((pagos as any[])[0]?.amount)
+      if (unicoPago) {
+        const pago = (pagos as any[])[0]
+        // Si el gasto ya está asentado en el libro diario, tocarlo aquí dejaría
+        // el asiento descuadrado. Se para y lo revisa una persona.
+        const { data: espejo } = await ctx.adminClient
+          .from('manual_transactions')
+          .select('id, journal_entry_id')
+          .eq('ap_supplier_invoice_id', id)
+        const asentado = (espejo ?? []).some((m: any) => m.journal_entry_id)
+        if (asentado) {
+          warning = 'El gasto ya tiene asiento contable: el pago no se ha modificado, revísalo en Contabilidad.'
+        } else {
+          await ctx.adminClient
+            .from('manual_transactions')
+            .update({ amount: newTotal, total: newTotal })
+            .eq('ap_supplier_invoice_id', id)
+          // El pago va el ÚLTIMO: su trigger recalcula estado y fecha de pago
+          // comparando la suma de pagos contra total_amount, que ya es el nuevo.
+          await ctx.adminClient
+            .from('ap_supplier_invoice_payments')
+            .update({ amount: newTotal })
+            .eq('id', pago.id)
+        }
+      } else if ((pagos ?? []).length > 0) {
+        warning = 'La factura tiene varios pagos registrados: no se han modificado, revisa el pendiente.'
+      }
+
+      // Recalcular el estado SIEMPRE. El trigger de los pagos solo salta si se
+      // tocan los pagos, así que en los casos en que no se han tocado (varios
+      // pagos, gasto asentado) la factura se quedaría marcada como 'pagada'
+      // debiendo la diferencia. La función es idempotente: si el pago sí se
+      // ajustó, el trigger ya la ejecutó y volver a llamarla no cambia nada.
+      const { error: recalcErr } = await ctx.adminClient
+        .rpc('recalc_ap_supplier_invoice_payment_status', { p_invoice_id: id })
+      if (recalcErr) console.error('[updateSupplierInvoiceAction] recalc estado:', recalcErr)
+    }
+
+    const importes = wasPaid && newTotal !== oldTotal
+      ? ` · importe ${oldTotal.toFixed(2)} € → ${newTotal.toFixed(2)} €`
+      : ''
     return success({
       auditEntityId: id,
-      auditDescription: `Factura ${rest.invoice_number.trim()} · ${supplierName}`,
+      auditDescription: `Factura ${rest.invoice_number.trim()} · ${supplierName}`
+        + (wasPaid ? ` · CORRECCIÓN DE FACTURA PAGADA${importes} · Motivo: ${correctionReason}` : ''),
+      warning,
     })
   }
 )

@@ -221,6 +221,11 @@ export function SupplierInvoicesContent() {
   const [editingIsRectifying, setEditingIsRectifying] = useState(false)
   // Factura pagada: el diálogo se abre en modo lectura con solo notas/PDF editables.
   const [editingIsPaid, setEditingIsPaid] = useState(false)
+  // Corrección de una factura ya pagada: hay que activarla a propósito y dar un
+  // motivo. Mientras esté apagada, la factura pagada se comporta como siempre
+  // (solo notas y adjunto).
+  const [correcting, setCorrecting] = useState(false)
+  const [correctionReason, setCorrectionReason] = useState('')
   const [hideProformas, setHideProformas] = useState(false)
 
   const [form, setForm] = useState({
@@ -454,6 +459,8 @@ export function SupplierInvoicesContent() {
     setEditingId(null)
     setEditingIsRectifying(false)
     setEditingIsPaid(false)
+    setCorrecting(false)
+    setCorrectionReason('')
     setForm({
       supplier_id: '',
       supplier_name: '',
@@ -487,6 +494,8 @@ export function SupplierInvoicesContent() {
     setEditingId(row.id)
     setEditingIsRectifying(row.is_rectifying === true)
     setEditingIsPaid(row.status === 'pagada')
+    setCorrecting(false)
+    setCorrectionReason('')
     // Reconstruir el IVA % real a partir de los importes guardados (los datos
     // de la factura solo guardan los importes, no el porcentaje).
     const reconstructedTaxRate = row.amount > 0
@@ -653,7 +662,14 @@ export function SupplierInvoicesContent() {
   const handleSave = async () => {
     // Factura pagada: solo notas y PDF adjunto son editables (el resto de campos
     // viaja bloqueado en la UI y el update completo del servidor la rechazaría).
-    if (editingId && editingIsPaid) {
+    // Pagada + modo corrección activo: sigue el camino normal de guardado, que
+    // ahora acepta `correction_reason` y ajusta también cuota, pago y el espejo
+    // del gasto. Sin el modo activo, se conserva el comportamiento de siempre.
+    if (editingId && editingIsPaid && correcting && correctionReason.trim().length < 10) {
+      toast.error('Explica el motivo de la corrección (mínimo 10 caracteres)')
+      return
+    }
+    if (editingId && editingIsPaid && !correcting) {
       setSaving(true)
       const r = await updateSupplierInvoiceNotesAction({
         id: editingId,
@@ -773,9 +789,16 @@ export function SupplierInvoicesContent() {
     }
 
     if (editingId) {
-      const r = await updateSupplierInvoiceAction({ ...payload, id: editingId })
+      const r = await updateSupplierInvoiceAction({
+        ...payload,
+        id: editingId,
+        correction_reason: correcting ? correctionReason.trim() : undefined,
+      })
       if (r.success) {
-        toast.success('Factura actualizada')
+        toast.success(correcting ? 'Factura corregida' : 'Factura actualizada')
+        // El servidor avisa cuando no ha podido cuadrar solo el pago o las
+        // cuotas (varios pagos, calendario repartido, gasto ya asentado).
+        if (r.data?.warning) toast.warning(r.data.warning, { duration: 10000 })
         setDialogOpen(false)
         loadList()
         loadKpis()
@@ -1207,7 +1230,7 @@ export function SupplierInvoicesContent() {
                           variant="ghost"
                           className="h-8"
                           onClick={() => openEdit(row)}
-                          title={row.status === 'pagada' ? 'Ver factura / editar notas (pagada: importes bloqueados)' : 'Editar factura'}
+                          title={row.status === 'pagada' ? 'Ver factura · notas y PDF; para tocar importes hay que indicar el motivo' : 'Editar factura'}
                         >
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
@@ -1322,15 +1345,58 @@ export function SupplierInvoicesContent() {
             <DialogTitle>{editingId ? 'Editar factura proveedor' : 'Nueva factura proveedor'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            {editingIsPaid && (
+            {editingIsPaid && !correcting && (
               <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                Factura pagada: los importes y cuotas están bloqueados, pero puedes
-                ver todo y editar las notas y el PDF adjunto.
+                <div className="flex items-start justify-between gap-3">
+                  <p>
+                    Factura pagada: los importes y cuotas están bloqueados, pero puedes
+                    ver todo y editar las notas y el PDF adjunto.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0 border-amber-400 bg-white text-amber-900 hover:bg-amber-100"
+                    onClick={() => setCorrecting(true)}
+                  >
+                    Corregir importes
+                  </Button>
+                </div>
+              </div>
+            )}
+            {editingIsPaid && correcting && (
+              <div className="space-y-2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
+                <p className="font-medium">Estás corrigiendo una factura ya pagada.</p>
+                <p className="text-xs">
+                  Al guardar se actualizan a la vez la cabecera, las líneas, el vencimiento,
+                  el pago y el gasto de Contabilidad. Si hay varios pagos o cuotas, esos no se
+                  tocan y te avisaremos para que los repases. Queda registrado en la auditoría.
+                </p>
+                <div>
+                  <Label className="text-xs">Motivo de la corrección *</Label>
+                  <Input
+                    value={correctionReason}
+                    onChange={(e) => setCorrectionReason(e.target.value)}
+                    placeholder="Ej.: error de tecleo, el PDF del proveedor dice 808,89 €"
+                    maxLength={200}
+                    className="bg-white"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs text-red-800 hover:bg-red-100"
+                  onClick={() => { setCorrecting(false); setCorrectionReason('') }}
+                >
+                  Cancelar la corrección
+                </Button>
               </div>
             )}
             {/* Los campos contables van dentro del fieldset: con la factura pagada
-                quedan todos deshabilitados de golpe; notas y adjunto quedan fuera. */}
-            <fieldset disabled={editingIsPaid} className="space-y-4">
+                quedan todos deshabilitados de golpe; notas y adjunto quedan fuera.
+                En modo corrección se desbloquean a propósito. */}
+            <fieldset disabled={editingIsPaid && !correcting} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2 sm:col-span-1">
                 <Label>Proveedor *</Label>
