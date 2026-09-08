@@ -33,6 +33,7 @@ import { listFabrics } from '@/actions/fabrics'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency, fuzzyFilterSort } from '@/lib/utils'
 import { usePermissions } from '@/hooks/use-permissions'
+import { isLineCamiseria } from '@/lib/orders/line-groups'
 
 type EditableLine = {
   id?: string
@@ -43,6 +44,8 @@ type EditableLine = {
   discount_percentage: number
   tax_rate: number
   material_cost: number
+  /** Coste del forro, aparte del tejido (mig 284). */
+  lining_cost: number
   labor_cost: number
   factory_cost: number
   fabric_id?: string | null
@@ -179,6 +182,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
       discount_percentage: Number(l.discount_percentage ?? 0),
       tax_rate: Number(l.tax_rate ?? 21),
       material_cost: Number(l.material_cost ?? 0),
+      lining_cost: Number(l.lining_cost ?? 0),
       labor_cost: Number(l.labor_cost ?? 0),
       factory_cost: Number(l.factory_cost ?? 0),
       fabric_id: l.fabric_id ?? null,
@@ -414,7 +418,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
     const total = Math.round(afterHeaderDiscount * 100) / 100
     const subtotal = Math.round((total - taxAmount) * 100) / 100
     const totalCost = lines.reduce(
-      (s, l) => s + Number(l.material_cost || 0) + Number(l.labor_cost || 0) + Number(l.factory_cost || 0),
+      (s, l) => s + Number(l.material_cost || 0) + Number(l.lining_cost || 0) + Number(l.labor_cost || 0) + Number(l.factory_cost || 0),
       0,
     )
     const margin = total - totalCost
@@ -469,7 +473,16 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
 
   // Helpers para líneas
   const addLine = () => {
-    const defaultGarment = garmentTypes[0]
+    // La prenda por defecto sigue al pedido, no al catálogo: en un pedido de
+    // camisería la nueva prenda nace como camisa. Antes cogía siempre
+    // garmentTypes[0] y una camisa añadida aquí quedaba como "Americana", con
+    // su ficha y su plantilla de impresión equivocadas.
+    const camiseriaGarmentId = lines.find((l) => {
+      const code = garmentTypes.find((g) => g.id === l.garment_type_id)?.code
+      return isLineCamiseria({ ...l, garment_types: code ? { code } : null })
+    })?.garment_type_id
+    const defaultGarment = (camiseriaGarmentId && garmentTypes.find((g) => g.id === camiseriaGarmentId))
+      || garmentTypes[0]
     const defaultGarmentId = defaultGarment?.id ?? ''
     const preloadMeasurements = measurementsRef.current[defaultGarmentId] ?? {}
     setLines((prev) => [
@@ -482,6 +495,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
         discount_percentage: 0,
         tax_rate: 21,
         material_cost: 0,
+        lining_cost: 0,
         labor_cost: 0,
         factory_cost: 0,
         fabric_id: null,
@@ -516,12 +530,24 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
       if (field === 'garment_type_id') {
         const newMeasurements = measurementsRef.current[value as string] ?? {}
         next.configuration = { ...l.configuration, ...newMeasurements }
-        // Solo en líneas NUEVAS (creadas en este modal): si la prenda elegida es
-        // camisería, sembrar los defaults estructurales (tipo/puno) sin pisar lo
-        // que ya hubiera. Las líneas existentes no se tocan (edge case).
-        if (l._key.startsWith('new-')) {
-          const code = garmentTypesRef.current.find((g) => g.id === value)?.code
-          next.configuration = { ...camiseriaDefaultsForCode(code), ...next.configuration }
+        // La configuration tiene que quedar COHERENTE con la prenda elegida:
+        // `tipo`/`puno` son las claves por las que toda la aplicación reconoce
+        // una camisa (qué ficha se abre, qué plantilla se imprime, en qué bloque
+        // sale). Antes solo se sembraban en líneas nuevas, así que cambiar la
+        // prenda de una línea existente dejaba el dato mintiendo en los dos
+        // sentidos: una americana con `tipo: 'camiseria'` heredado seguía
+        // abriendo la ficha de camisa, y una camisa recién convertida no la
+        // abría. Se siembra al pasar A camisería y se limpia al salir de ella.
+        const code = garmentTypesRef.current.find((g) => g.id === value)?.code
+        const defaults = camiseriaDefaultsForCode(code)
+        if (defaults.tipo) {
+          // `tipo` sigue SIEMPRE a la prenda elegida (artesanal vs industrial);
+          // `puno` solo se siembra si la prenda no traía uno, para no pisar el
+          // que el sastre hubiera puesto.
+          next.configuration = { puno: defaults.puno, ...next.configuration, tipo: defaults.tipo }
+        } else {
+          const { tipo: _tipo, puno: _puno, ...restCfg } = next.configuration as Record<string, unknown>
+          next.configuration = restCfg
         }
       }
       // Al cambiar los metros recalculamos material_cost si hay €/m.
@@ -614,7 +640,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
         // tendría como 0: NO se envían (undefined) y el servidor conserva los de
         // BD. Con permiso, viajan tal cual (0 explícito incluido).
         ...(canViewCosts
-          ? { material_cost: l.material_cost, labor_cost: l.labor_cost, factory_cost: l.factory_cost }
+          ? { material_cost: l.material_cost, lining_cost: l.lining_cost, labor_cost: l.labor_cost, factory_cost: l.factory_cost }
           : {}),
         fabric_id: l.fabric_id || null,
         fabric_description: l.fabric_description || null,
@@ -819,7 +845,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
             </div>
             {priceLocked && (
               <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-                El precio no se puede editar porque el pedido tiene una factura emitida (evita descuadrarla). Para cambiar importes, anula antes la factura (se generará una nota de abono) y volverás a poder editarlos. El resto de datos (tejido, cortador, medidas, notas…) sí se puede editar.
+                El precio no se puede editar porque el pedido tiene una factura emitida (evita descuadrarla). Para cambiar importes, anula antes la factura (se generará una nota de abono) y volverás a poder editarlos. Si la factura ya se envió al cliente no se puede anular: el importe se quita emitiendo una factura rectificativa (abono) desde Contabilidad. El resto de datos (tejido, cortador, medidas, notas…) sí se puede editar.
               </p>
             )}
             {linesMissingPrice.length > 0 && (
@@ -848,12 +874,16 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                     <TableRow>
                       <TableHead className="w-[180px] text-xs whitespace-nowrap">Prenda</TableHead>
                       <TableHead className="w-[100px] text-xs whitespace-nowrap">Tipo</TableHead>
-                      <TableHead className="w-[100px] text-xs whitespace-nowrap">PVP (€)</TableHead>
+                      <TableHead className="w-[110px] text-xs whitespace-nowrap">PVP (€)</TableHead>
                       <TableHead className="w-[60px] text-xs whitespace-nowrap">Dto. %</TableHead>
-                      <TableHead className="w-[60px] text-xs whitespace-nowrap">IVA %</TableHead>
+                      {/* La columna de IVA se retiró a petición de Teresa y Mónica
+                          (sep-2026) para dejar sitio al FORRO: en sastrería el tipo
+                          es 21% salvo excepción, así que el input vive ahora bajo el
+                          PVP, donde sigue siendo editable pero no come ancho. */}
                       {canViewCosts && (
                         <>
                           <TableHead className="w-[100px] text-xs whitespace-nowrap">Material</TableHead>
+                          <TableHead className="w-[100px] text-xs whitespace-nowrap">Forro</TableHead>
                           <TableHead className="w-[70px] text-xs whitespace-nowrap">M. Obra</TableHead>
                           <TableHead className="w-[70px] text-xs whitespace-nowrap">Fábrica</TableHead>
                         </>
@@ -907,20 +937,47 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                               onChange={(e) => updateLine(l._key, 'is_gift', e.target.checked)} />
                             Regalo
                           </label>
+                          <label className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground whitespace-nowrap">
+                            IVA
+                            <Input
+                              className="h-6 w-11 px-1 text-[10px] tabular-nums"
+                              type="number" min={0} max={100} step={0.01} disabled={priceLocked}
+                              value={l.tax_rate}
+                              onChange={(e) => updateLine(l._key, 'tax_rate', parseFloat(e.target.value) || 0)} />
+                            %
+                          </label>
                         </TableCell>
                         <TableCell>
                           <Input className="h-8 text-xs" type="number" min={0} max={100} step={0.01} disabled={priceLocked}
                             value={l.discount_percentage} onChange={(e) => updateLine(l._key, 'discount_percentage', parseFloat(e.target.value) || 0)} />
-                        </TableCell>
-                        <TableCell>
-                          <Input className="h-8 text-xs" type="number" min={0} max={100} step={0.01} disabled={priceLocked}
-                            value={l.tax_rate} onChange={(e) => updateLine(l._key, 'tax_rate', parseFloat(e.target.value) || 0)} />
                         </TableCell>
                         {canViewCosts && (
                           <>
                             <TableCell>
                               <Input className="h-8 text-xs" type="number" min={0} step={0.01} disabled={priceLocked}
                                 value={l.material_cost} onChange={(e) => updateLine(l._key, 'material_cost', parseFloat(e.target.value) || 0)} />
+                            </TableCell>
+                            {/* Coste del FORRO (mig 284). Debajo, de qué forro se
+                                trata según la ficha, para no tener que abrirla. */}
+                            <TableCell>
+                              <Input className="h-8 text-xs" type="number" min={0} step={0.01} disabled={priceLocked}
+                                value={l.lining_cost} onChange={(e) => updateLine(l._key, 'lining_cost', parseFloat(e.target.value) || 0)} />
+                              {(() => {
+                                const cfg = (l.configuration ?? {}) as Record<string, unknown>
+                                const nombre = String(cfg.forroStockNombre || cfg.forroCatalogo || '').trim()
+                                const metros = Number(cfg.forroMetros) || 0
+                                if (nombre || metros > 0) {
+                                  return (
+                                    <p className="text-[10px] text-muted-foreground mt-0.5 truncate" title={nombre || undefined}>
+                                      {nombre || 'Forro'}{metros > 0 ? ` · ${metros} m` : ''}
+                                    </p>
+                                  )
+                                }
+                                if (cfg.forro === 'sin_forro') {
+                                  return <p className="text-[10px] text-muted-foreground mt-0.5">Sin forro</p>
+                                }
+                                return null
+                              })()}
                             </TableCell>
                             <TableCell>
                               <Input className="h-8 text-xs" type="number" min={0} step={0.01} disabled={priceLocked}

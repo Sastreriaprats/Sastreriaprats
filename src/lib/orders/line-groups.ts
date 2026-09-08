@@ -33,7 +33,33 @@ function capitalizar(s: string | undefined): string {
 // Códigos de garment_type que se consideran camisería para el grupo visual.
 // Coexisten en BBDD: 'camisa' (artesanal), 'camiseria' (artesanal alt.),
 // 'camiseria_industrial' (industrial). Verificado en producción.
-const CAMISERIA_GARMENT_CODES = new Set(['camisa', 'camiseria', 'camiseria_industrial'])
+// 'pijama' se confecciona y se mide como camisería (sep-2026).
+export const CAMISERIA_GARMENT_CODES = new Set(['camisa', 'camiseria', 'camiseria_industrial', 'pijama'])
+
+/**
+ * ¿Esta línea es de camisería? Criterio ÚNICO para toda la aplicación: primero
+ * la `configuration` (lo que rellena el formulario de camisería) y, si no es
+ * concluyente, el `garment_types.code` real de la prenda.
+ *
+ * Existía duplicado y divergente en el detalle del sastre y en el diálogo de
+ * "Editar ficha", cada uno con su propia heurística: una camisa cuya
+ * configuration no traía `tipo`/`puno` se clasificaba distinto en cada sitio y
+ * podía acabar abriendo la ficha de americana.
+ */
+export function isLineCamiseria(line: unknown): boolean {
+  const l = line as {
+    configuration?: Record<string, unknown> | null
+    garment_types?: { code?: string | null; name?: string | null } | null
+  } | null | undefined
+  const cfg = l?.configuration ?? {}
+  if (cfg.tipo === 'camiseria' || cfg.tipo === 'camiseria_industrial' || cfg.puno !== undefined) return true
+  const slug = String(cfg.prendaSlug ?? cfg.prenda ?? '').trim().toLowerCase()
+  if (CAMISERIA_GARMENT_CODES.has(slug)) return true
+  const code = String(l?.garment_types?.code ?? '').trim().toLowerCase()
+  if (code && CAMISERIA_GARMENT_CODES.has(code)) return true
+  const name = String(l?.garment_types?.name ?? '').trim().toLowerCase()
+  return name.includes('camis') || name.includes('pijama')
+}
 
 /**
  * Clasifica una línea en uno de los 3 grupos. La heurística mira primero el
@@ -52,9 +78,7 @@ export function getLineGroup(line: unknown): LineGroup {
   } | null | undefined
   const cfg = l?.configuration ?? {}
   if (cfg.product_name !== undefined) return 'complementos'
-  if (cfg.tipo === 'camiseria' || cfg.puno !== undefined) return 'camiseria'
-  const code = l?.garment_types?.code
-  if (code && CAMISERIA_GARMENT_CODES.has(code)) return 'camiseria'
+  if (isLineCamiseria(l)) return 'camiseria'
   return 'sastreria'
 }
 

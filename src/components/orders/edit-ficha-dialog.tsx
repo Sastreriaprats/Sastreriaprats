@@ -24,6 +24,7 @@ import { useFileDropzone } from '@/hooks/use-file-dropzone'
 import { preparePhotoForUpload } from '@/lib/image/prepare-photo-upload'
 import { createClient } from '@/lib/supabase/client'
 import { fuzzyFilterSort } from '@/lib/utils'
+import { isLineCamiseria } from '@/lib/orders/line-groups'
 
 type OfficialOption = { id: string; name: string; specialty?: string | null }
 
@@ -38,15 +39,23 @@ interface SectionProps {
   str: (v: unknown) => string
 }
 
+/**
+ * Qué ficha se abre para esta prenda. La camisería la decide `isLineCamiseria`
+ * (criterio único de la aplicación, en line-groups.ts) y va PRIMERO: abrir la
+ * ficha de americana sobre una camisa no solo enseña los campos equivocados,
+ * es que al guardar escribe esa configuración sobre la prenda.
+ *
+ * El resto se resuelve por el slug de la configuration y, si no dice nada, por
+ * el `garment_types` real de la línea. 'americana' es el último recurso.
+ */
 function detectType(line: any, cfg: Cfg): 'pantalon' | 'chaleco' | 'camiseria' | 'americana' {
-  const slug = (cfg.prendaSlug as string) ?? (cfg.prenda as string) ?? ''
-  if (slug === 'pantalon') return 'pantalon'
+  if (isLineCamiseria({ ...line, configuration: cfg })) return 'camiseria'
+  const slug = String((cfg.prendaSlug as string) ?? (cfg.prenda as string) ?? '').trim().toLowerCase()
+  if (slug.includes('pantalon')) return 'pantalon'
   if (slug === 'chaleco') return 'chaleco'
-  if (cfg.tipo === 'camiseria' || cfg.puno !== undefined) return 'camiseria'
   const garment = (line?.garment_types?.code ?? line?.garment_types?.name ?? '').toString().toLowerCase()
   if (garment.includes('pantal')) return 'pantalon'
   if (garment.includes('chaleco')) return 'chaleco'
-  if (garment.includes('camis')) return 'camiseria'
   return 'americana'
 }
 
@@ -458,10 +467,12 @@ function CamiseriaSection({ cfg, set, bool, str }: SectionProps) {
             { v: 'mixto', label: 'Mixto' }, { v: 'mosquetero', label: 'Mosquetero' }, { v: 'otro', label: 'Otro' },
           ]} />
       </div>
-      <div className="space-y-1">
-        <Label>Tejido</Label>
-        <Input value={str(cfg.tejido)} onChange={(e) => set('tejido', e.target.value)} />
-      </div>
+      {/* El TEJIDO se edita en el buscador de "Datos comunes" (arriba), que es el
+          único que sincroniza las 4 claves (tejidoStockId/Nombre/Catalogo/tejido).
+          Aquí había un segundo Input libre que escribía solo `tejido`: al usarlo
+          sobre una prenda DUPLICADA, la descripción cambiaba pero el
+          tejidoStockId heredado seguía apuntando al tejido de la prenda original
+          y "Ref. tejido" mostraba el antiguo (PIN-2026-0302 CAM2, Teresa). */}
       <div className="space-y-1">
         <Label>Observaciones de camisa</Label>
         <Textarea rows={2} value={str(cfg.obs)} onChange={(e) => set('obs', e.target.value)} />
@@ -667,6 +678,12 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
     return () => { cancelled = true; clearTimeout(timeout) }
   }, [oficialPopoverOpen, oficialSearch, allOficiales])
 
+  /** Normaliza un nombre de tejido para comparar: sin mayúsculas, con los
+   *  guiones (— – -) y espacios colapsados, porque el mismo tejido se escribe
+   *  indistintamente "AT00252 — ROYAL BLANCA" o "AT00252 - Royal Blanca". */
+  const normFabricText = (v: unknown) =>
+    String(v ?? '').toLowerCase().replace(/[—–-]/g, ' ').replace(/\s+/g, ' ').trim()
+
   const set = <T,>(field: string, value: T) => setCfg((prev) => ({ ...prev, [field]: value }))
   const str = (v: unknown) => (v === null || v === undefined ? '' : String(v))
   const bool = (v: unknown) => !!v
@@ -680,15 +697,32 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
       const isEdited = l.id === line.id
       // Para la línea editada, sincronizamos también las columnas
       // fabric_id / fabric_description con lo elegido en el buscador.
-      const editedFabricId = isEdited
-        ? (cfg.tejidoStockId ? String(cfg.tejidoStockId) : null)
-        : (l.fabric_id ?? null)
+      // OJO: el vinculo con el catalogo (fabric_id) solo se conserva si la
+      // descripción que vamos a guardar sigue siendo la de ESE tejido de stock.
+      // Una prenda duplicada hereda el tejidoStockId de la original: si luego se
+      // le escribe otro tejido a mano, el id viejo hacía que "Ref. tejido"
+      // siguiera mostrando el de la prenda original (PIN-2026-0302 CAM2, Teresa),
+      // además de descontar metros y coste del tejido equivocado.
+      const stockId = cfg.tejidoStockId ? String(cfg.tejidoStockId) : null
       // OJO: cadena con || (no ??): estas claves suelen existir como '' (cadena
       // vacía, que NO es nullish), y con ?? un tejidoStockNombre='' cortaba la
       // cadena y borraba fabric_description aunque tejidoCatalogo tuviera valor.
       const editedFabricDescription = isEdited
         ? String(cfg.tejidoStockNombre || cfg.tejidoCatalogo || cfg.tejido || '').trim() || null
         : (l.fabric_description ?? null)
+      const stockFabric = stockId ? fabricsStock.find((f) => f.id === stockId) : null
+      const stockLabel = stockFabric ? `${stockFabric.fabric_code ?? ''} ${stockFabric.name}` : ''
+      const descNorm = normFabricText(editedFabricDescription)
+      // Se mantiene el id si (a) la descripción es la del tejido de stock elegido
+      // o (b) la descripción no ha cambiado respecto a la de BD (el tejido puede
+      // estar inactivo y no venir en la lista: no lo desvinculamos porque sí).
+      const keepStockLink = !!stockId && (
+        (!!stockFabric && (descNorm === normFabricText(stockLabel) || descNorm.includes(normFabricText(stockFabric.name)))) ||
+        descNorm === normFabricText(l.fabric_description)
+      )
+      const editedFabricId = isEdited
+        ? (keepStockLink ? stockId : null)
+        : (l.fabric_id ?? null)
       return {
         id: l.id,
         garment_type_id: l.garment_type_id,
@@ -697,6 +731,7 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
         discount_percentage: Number(l.discount_percentage ?? 0),
         tax_rate: Number(l.tax_rate ?? 21),
         material_cost: Number(l.material_cost ?? 0),
+        lining_cost: Number(l.lining_cost ?? 0),
         labor_cost: Number(l.labor_cost ?? 0),
         factory_cost: Number(l.factory_cost ?? 0),
         fabric_id: editedFabricId,
@@ -918,6 +953,10 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
                               tejidoStockId: '',
                               tejidoStockNombre: '',
                               tejidoCatalogo: v,
+                              // `tejido` es la clave legacy de camisería y es la que
+                              // pinta el chip "Tejido" de la ficha: si no se
+                              // sincroniza, la tarjeta sigue mostrando el anterior.
+                              tejido: v,
                             }))
                           }
                         }}
@@ -941,6 +980,7 @@ export function EditFichaDialog({ open, onOpenChange, order, line, onSaved }: Ed
                                     tejidoStockId: f.id,
                                     tejidoStockNombre: nombre,
                                     tejidoCatalogo: '',
+                                    tejido: nombre,
                                   }))
                                   setTejidoSearch(nombre)
                                   setTejidoPopoverOpen(false)

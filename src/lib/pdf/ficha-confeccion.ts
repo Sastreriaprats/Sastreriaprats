@@ -7,6 +7,7 @@ import type { Content } from 'pdfmake'
 import { getOrderStatusLabel } from '@/lib/utils'
 import { getLineRef, getLineRefSuffix, type RefLine } from '@/lib/orders/line-refs'
 import { buildMedidasPrefixes } from '@/lib/measurements/garment-prefixes'
+import { isLineCamiseria as isLineCamiseriaShared } from '@/lib/orders/line-groups'
 
 /** Tipo del documento para pdfmake (no exportado por @types/pdfmake). */
 interface PdfDocDefinition {
@@ -896,15 +897,10 @@ export type TailoringOrderLine = {
   fabric_description?: string | null
 }
 
+/** Criterio único de la aplicación (line-groups.ts): configuration primero,
+ *  garment_type real después. Aquí decide qué PLANTILLA de ficha se imprime. */
 function isLineCamiseria(line: TailoringOrderLine): boolean {
-  const cfg = line?.configuration ?? {}
-  if (cfg.tipo === 'camiseria' || cfg.tipo === 'camiseria_industrial') return true
-  const name = (line?.garment_types?.name ?? '').toString().toLowerCase()
-  if (name.includes('camiseria')) return true
-  // El pijama se confecciona y se mide como camisería: misma ficha.
-  if (name.includes('pijama') || String(cfg.prendaSlug ?? cfg.prenda ?? '').toLowerCase() === 'pijama') return true
-  if (cfg.puno !== undefined) return true
-  return false
+  return isLineCamiseriaShared(line)
 }
 
 function getPrendaNameForLine(line: TailoringOrderLine): string {

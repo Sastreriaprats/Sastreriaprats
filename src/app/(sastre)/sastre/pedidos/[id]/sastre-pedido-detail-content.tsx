@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatCurrency, formatDate, getOrderStatusLabel } from '@/lib/utils'
 import { getStatusesFor } from '@/lib/orders/statuses'
-import { getLineGroup, getLineName, type LineGroup } from '@/lib/orders/line-groups'
+import { getLineGroup, getLineName, isLineCamiseria, type LineGroup } from '@/lib/orders/line-groups'
 import { buildLineRefSuffixes, sortLinesForDisplay } from '@/lib/orders/line-refs'
 import { PaymentHistory } from '@/components/payments/payment-history'
 import { getOrder, markLineDelivered, updateOrderStatus } from '@/actions/orders'
@@ -35,10 +35,10 @@ function normalizeSearch(s: unknown): string {
     .replace(/[̀-ͯ]/g, '')
 }
 
-function isLineCamiseria(line: any): boolean {
-  const cfg = line?.configuration ?? {}
-  return cfg.tipo === 'camiseria' || cfg.puno !== undefined
-}
+// isLineCamiseria vive en '@/lib/orders/line-groups' (criterio único). Aquí
+// había una copia que solo miraba configuration.tipo/puno: una camisa cuya
+// configuration no traía esas claves se clasificaba como sastrería en este
+// panel y como camisería en el admin.
 
 /** True si la línea es "camisa" por prenda/prendaLabel (línea principal camisería sin tipo/puno). */
 function isLineCamisaByPrenda(line: any): boolean {

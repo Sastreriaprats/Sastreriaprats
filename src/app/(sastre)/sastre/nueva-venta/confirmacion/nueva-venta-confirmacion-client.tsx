@@ -6,6 +6,7 @@ import { Printer, Eye, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { getOrder } from '@/actions/orders'
 import { generateFichaForLine, generateFichaForLineCamiseria } from '@/lib/pdf/ficha-confeccion'
+import { isLineCamiseria } from '@/lib/orders/line-groups'
 import { generateTicketBoutiquePDF } from '@/lib/pdf/ticket-boutique'
 import { generateTailoringOrderTicketPdf } from '@/lib/pdf/tailoring-order-ticket'
 
@@ -30,12 +31,9 @@ function isLineComplement(line: any): boolean {
   return cfg.tipo === 'complemento' || cfg.product_name !== undefined
 }
 
-function isLineCamiseria(line: any): boolean {
-  const cfg = line?.configuration ?? {}
-  if (cfg.tipo === 'camiseria') return true
-  if (cfg.puno !== undefined) return true
-  return false
-}
+// isLineCamiseria: criterio único en '@/lib/orders/line-groups' (importado
+// arriba). La copia local solo miraba configuration y dejaba fuera las camisas
+// que se reconocen por su garment_type.
 
 /** Líneas con ficha: sastrería o camisería (no complementos). Si hay alguna línea de camisería, solo se devuelven esas (no se mezclan con sastrería). */
 function getFichaLines(lines: any[]): any[] {
