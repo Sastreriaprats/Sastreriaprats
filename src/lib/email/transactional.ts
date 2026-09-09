@@ -17,7 +17,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { sendEmail, renderTemplate } from '@/lib/email/send'
 import { EMAIL_LOGO_URL, EMAIL_PUBLIC_URL } from './branding'
-import { STORE_LOCATIONS } from '@/lib/constants'
+import { GOOGLE_REVIEW_URL } from '@/lib/constants'
 
 /* ── Layout común ────────────────────────────────────────────────────────── */
 
@@ -389,7 +389,7 @@ export async function sendAppointmentReminder(appt: {
 export async function sendOrderDeliveredThanks(order: {
   client_name: string; client_email: string; order_number: string; store_review_url?: string | null
 }) {
-  const reviewUrl = order.store_review_url || STORE_LOCATIONS.pinzon.mapsUrl
+  const reviewUrl = order.store_review_url || GOOGLE_REVIEW_URL
 
   await sendFromTemplate('order_delivered', order.client_email, {
     client_name: order.client_name,

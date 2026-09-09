@@ -10,7 +10,7 @@ import { getDefaultDeliveryDate } from '@/lib/orders/production-times'
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { sendOrderDeliveredThanks } from '@/lib/email/transactional'
-import { STORE_LOCATIONS } from '@/lib/constants'
+import { GOOGLE_REVIEW_URL } from '@/lib/constants'
 import { normalizeSearchTerm, getOrderStatusLabel, formatDateTimeMadrid, countUnpricedGarments } from '@/lib/utils'
 import { checkUserPermission } from '@/actions/auth'
 import { syncOrderLineMeasurementsToClient } from '@/lib/measurements/sync-from-order'
@@ -683,8 +683,11 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
  * tiene `google_maps_url` en su configuración, ese manda sobre este.
  */
 function getStoreReviewUrl(storeCode: string | null | undefined): string {
-  if (storeCode === 'WEL') return STORE_LOCATIONS.wellington.mapsUrl
-  return STORE_LOCATIONS.pinzon.mapsUrl
+  // Enlace directo al formulario de reseña (el mismo para las dos tiendas: solo
+  // hay una ficha de Google). Si algún día Wellington tiene el suyo, basta con
+  // rellenar `google_maps_url` de esa tienda, que manda sobre este.
+  void storeCode
+  return GOOGLE_REVIEW_URL
 }
 
 /**

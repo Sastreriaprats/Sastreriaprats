@@ -138,6 +138,15 @@ export const STORE_LOCATIONS = {
   },
 } as const
 
+/**
+ * Enlace corto de Google que abre directamente el formulario de reseña de
+ * Sastrería Prats. Lo usa el email de entrega (`order_delivered`); allí el
+ * campo editable `review_url` de la plantilla manda sobre este, que actúa de
+ * respaldo. Antes se caía a la ficha de Google Maps de la tienda, que obliga al
+ * cliente a buscar el botón de reseñar.
+ */
+export const GOOGLE_REVIEW_URL = 'https://g.page/r/Cc_T5cYLBia1EAE/review'
+
 export const SOCIAL_LINKS = {
   instagram: 'https://www.instagram.com/sastreriaprats/',
   facebook: 'https://www.facebook.com/sastreriafprats/',
