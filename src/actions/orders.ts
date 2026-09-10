@@ -2300,10 +2300,13 @@ export const duplicateOrderAction = protectedAction<string, { orderId: string; o
         total_material_cost: (src as any).total_material_cost,
         total_labor_cost: (src as any).total_labor_cost,
         total_factory_cost: (src as any).total_factory_cost,
-        total_cost: (src as any).total_cost,
         internal_notes: (src as any).internal_notes,
         client_notes: (src as any).client_notes,
-        // RESET / NUEVO (total_pending es columna generada: no se incluye)
+        // RESET / NUEVO. OJO: `total_pending` y `total_cost` son columnas
+        // GENERADAS en la base de datos (total_cost = material + obra + fábrica)
+        // y Postgres rechaza el insert entero si se les da valor:
+        // "cannot insert a non-DEFAULT value into column total_cost". Se copian
+        // los tres componentes y el total lo calcula ella sola.
         status: 'created',
         order_number: orderNumber,
         estimated_delivery_date: null,
