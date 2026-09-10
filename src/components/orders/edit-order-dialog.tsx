@@ -31,7 +31,7 @@ import { listClients, getClientMeasurements } from '@/actions/clients'
 import { updateOrderAction, renumberOrderToStore } from '@/actions/orders'
 import { listFabrics } from '@/actions/fabrics'
 import { createClient } from '@/lib/supabase/client'
-import { formatCurrency, fuzzyFilterSort } from '@/lib/utils'
+import { formatCurrency, fuzzyFilterSort, unpricedLineIndexes } from '@/lib/utils'
 import { usePermissions } from '@/hooks/use-permissions'
 import { isLineCamiseria } from '@/lib/orders/line-groups'
 
@@ -462,9 +462,25 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
   // pedido con varias prendas donde a alguna se le olvidó poner el importe
   // arrastra un total incompleto (p. ej. camisas a 0 y el total solo refleja el
   // traje). Lo hacemos visible para que no pase desapercibido.
+  // Se aplica la regla del conjunto (la misma del badge del listado): en un
+  // traje el PVP va en la chaqueta y el pantalón queda a 0 A PROPÓSITO, así que
+  // no es una prenda "sin precio". Antes se miraba línea a línea y el aviso
+  // saltaba en cada traje, con el campo del pantalón en rojo.
+  const missingPriceIdx = useMemo(
+    () =>
+      unpricedLineIndexes(
+        lines.map((l) => ({
+          unit_price: l.unit_price,
+          is_gift: l.is_gift,
+          configuration: l.configuration,
+          garment_types: { code: garmentTypes.find((g) => g.id === l.garment_type_id)?.code ?? null },
+        })),
+      ),
+    [lines, garmentTypes],
+  )
   const linesMissingPrice = useMemo(
-    () => lines.filter((l) => !l.is_gift && (Number(l.unit_price) || 0) === 0),
-    [lines],
+    () => lines.filter((_, i) => missingPriceIdx.has(i)),
+    [lines, missingPriceIdx],
   )
   const missingPriceLabels = useMemo(
     () => linesMissingPrice.map(lineLabel),
@@ -896,7 +912,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {lines.map((l) => (
+                    {lines.map((l, li) => (
                       <TableRow key={l._key}>
                         <TableCell>
                           {l.id && lineRefs.get(String(l.id)) && (
@@ -924,11 +940,11 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                         </TableCell>
                         <TableCell>
                           <Input
-                            className={`h-8 text-xs ${!l.is_gift && (Number(l.unit_price) || 0) === 0 ? 'border-red-400 bg-red-50 focus-visible:ring-red-400' : ''}`}
+                            className={`h-8 text-xs ${missingPriceIdx.has(li) ? 'border-red-400 bg-red-50 focus-visible:ring-red-400' : ''}`}
                             type="number" min={0} step={0.01} disabled={priceLocked || l.is_gift}
                             value={l.is_gift ? '' : l.unit_price} placeholder={l.is_gift ? 'Regalo' : undefined}
                             onChange={(e) => updateLine(l._key, 'unit_price', parseFloat(e.target.value) || 0)} />
-                          {!l.is_gift && (Number(l.unit_price) || 0) === 0 && (
+                          {missingPriceIdx.has(li) && (
                             <p className="mt-0.5 text-[10px] font-semibold text-red-600 whitespace-nowrap">Sin precio</p>
                           )}
                           <label className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground cursor-pointer select-none whitespace-nowrap">

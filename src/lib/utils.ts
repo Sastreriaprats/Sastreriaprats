@@ -326,17 +326,48 @@ const isLinePriced = (l: PricingLine) => Number(l.unit_price ?? 0) > 0
  * Permite avisar en el panel de pedidos sin abrir el pedido.
  */
 export function countUnpricedGarments(lines: PricingLine[] | null | undefined): number {
-  if (!lines || lines.length === 0) return 0
+  return analyzeUnpricedGarments(lines).count
+}
+
+/**
+ * Posiciones (índice dentro del array) de las líneas que están REALMENTE
+ * pendientes de precio, con la regla del conjunto ya aplicada: el pantalón de
+ * un traje cuya chaqueta lleva el PVP NO sale aquí.
+ *
+ * Existe para que el formulario de alta y el de edición dejen de pedir precio
+ * pieza a pieza. El badge del listado ya respetaba la regla del traje desde
+ * julio, pero el alta y "Editar pedido" seguían mirando línea a línea, así que
+ * al crear un traje avisaban del pantalón a 0 € en cada guardado. Un solo motor
+ * para los cuatro sitios evita que vuelvan a divergir.
+ */
+export function unpricedLineIndexes(lines: PricingLine[] | null | undefined): Set<number> {
+  return analyzeUnpricedGarments(lines).indexes
+}
+
+/**
+ * Motor único de la regla. Devuelve las dos lecturas que necesita la
+ * aplicación:
+ *  - `count`: cuántas prendas quedan pendientes, contando un CONJUNTO como una
+ *    sola (es lo que enseña el badge del listado).
+ *  - `indexes`: qué líneas concretas hay que señalar o reclamar. De un conjunto
+ *    sin precio se señalan todas sus piezas, porque a ninguna se le puso el PVP
+ *    y cualquiera de ellas vale para arreglarlo.
+ */
+function analyzeUnpricedGarments(
+  lines: PricingLine[] | null | undefined,
+): { count: number; indexes: Set<number> } {
+  const indexes = new Set<number>()
+  if (!lines || lines.length === 0) return { count: 0, indexes }
 
   // Miembros por conjunto explícito (solo cuenta como conjunto si tiene ≥2 piezas).
-  const groupMembers = new Map<string, PricingLine[]>()
-  for (const l of lines) {
-    if (getLineGroup(l) !== 'sastreria') continue
+  const groupMembers = new Map<string, { line: PricingLine; idx: number }[]>()
+  lines.forEach((l, idx) => {
+    if (getLineGroup(l) !== 'sastreria') return
     const g = unpricedGroupLabelOf(l)
-    if (!g) continue
+    if (!g) return
     if (!groupMembers.has(g)) groupMembers.set(g, [])
-    groupMembers.get(g)!.push(l)
-  }
+    groupMembers.get(g)!.push({ line: l, idx })
+  })
 
   // ¿El pedido lleva alguna chaqueta de conjunto CON precio? (para la excepción
   // del traje implícito en pedidos antiguos sin prendaLabel).
@@ -347,34 +378,38 @@ export function countUnpricedGarments(lines: PricingLine[] | null | undefined): 
   let count = 0
   const countedGroups = new Set<string>()
 
-  for (const l of lines) {
+  lines.forEach((l, idx) => {
     const isSastreria = getLineGroup(l) === 'sastreria'
     const g = isSastreria ? unpricedGroupLabelOf(l) : null
     const members = g ? groupMembers.get(g) : undefined
 
     // Pieza de un CONJUNTO explícito (≥2 piezas): el precio va al conjunto entero.
     if (g && members && members.length > 1) {
-      if (countedGroups.has(g)) continue
+      if (countedGroups.has(g)) return
       countedGroups.add(g)
       // El conjunto está cubierto si alguna pieza tiene PVP o es regalo, o bien si
       // TODAS sus piezas son secundarias (pantalón/chaleco) y la chaqueta con
       // precio quedó fuera del grupo (etiqueta sin sufijo, p.ej. "Chaqué" suelto).
       const satisfied =
-        members.some(isLinePriced) ||
-        members.some((m) => !!m.is_gift) ||
-        (hasPricedSuitJacket && members.every((m) => SUIT_COMPANION_SLUGS.has(garmentSlugOf(m))))
-      if (!satisfied) count += 1
-      continue
+        members.some((m) => isLinePriced(m.line)) ||
+        members.some((m) => !!m.line.is_gift) ||
+        (hasPricedSuitJacket && members.every((m) => SUIT_COMPANION_SLUGS.has(garmentSlugOf(m.line))))
+      if (!satisfied) {
+        count += 1
+        for (const m of members) indexes.add(m.idx)
+      }
+      return
     }
 
     // Prenda suelta / camisería / complemento: PVP por línea.
-    if (l.is_gift) continue
-    if (isLinePriced(l)) continue
+    if (l.is_gift) return
+    if (isLinePriced(l)) return
     // Conjunto IMPLÍCITO: pantalón/chaleco a 0€ con una chaqueta con precio en el
     // mismo pedido → pieza secundaria del traje, no cuenta.
-    if (isSastreria && SUIT_COMPANION_SLUGS.has(garmentSlugOf(l)) && hasPricedSuitJacket) continue
+    if (isSastreria && SUIT_COMPANION_SLUGS.has(garmentSlugOf(l)) && hasPricedSuitJacket) return
     count += 1
-  }
+    indexes.add(idx)
+  })
 
-  return count
+  return { count, indexes }
 }

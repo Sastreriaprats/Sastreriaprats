@@ -26,7 +26,7 @@ import { useGarmentTypes } from '@/hooks/use-cached-queries'
 import { NuevaVentaSteps } from '../nueva-venta-steps'
 import { generateFichaConfeccionPDF, generateFichaForLine } from '@/lib/pdf/ficha-confeccion'
 import { toast } from 'sonner'
-import { getOrderStatusLabel } from '@/lib/utils'
+import { getOrderStatusLabel, unpricedLineIndexes } from '@/lib/utils'
 import { getDefaultDeliveryDate, getLeadTimeLabel } from '@/lib/orders/production-times'
 import { FichaPantalonConfig } from './components/ficha-pantalon-config'
 import { FichaChalecoConfig } from './components/ficha-chaleco-config'
@@ -1060,8 +1060,22 @@ export function NuevaVentaFichaClient({
     if (!clientId || !defaultStoreId) { toast.error('Faltan cliente o tienda.'); return }
     const hayRegalos = cartItems.some(c => c.regalo === true)
     if (total <= 0 && !hayRegalos) { toast.error('El total debe ser mayor que 0 (o marca las prendas como regalo).'); return }
-    // Con regalos marcados, las prendas NO regalo siguen necesitando precio.
-    if (cartItems.some(c => !c.regalo && (Number(c.precio) || 0) <= 0)) {
+    // Con regalos marcados, las prendas NO regalo siguen necesitando precio...
+    // salvo las piezas secundarias de un conjunto: en un traje el PVP va en la
+    // chaqueta y el pantalón queda a 0 a propósito. Misma regla que el badge del
+    // listado y que el alta en admin.
+    const sinPrecio = unpricedLineIndexes(
+      cartItems.map(c => ({
+        unit_price: c.precio,
+        is_gift: c.regalo,
+        // Sin prendaLabel a propósito: aquí las etiquetas son "Pantalón 1", sin
+        // sufijo de conjunto, así que la pieza se resuelve por la vía implícita
+        // (secundaria a 0 € + chaqueta con precio en la misma ficha).
+        configuration: { prendaSlug: c.slug },
+        garment_types: { code: c.slug },
+      })),
+    )
+    if (sinPrecio.size > 0) {
       toast.error('Hay prendas sin precio: indica el PVP o márcalas como regalo.')
       return
     }

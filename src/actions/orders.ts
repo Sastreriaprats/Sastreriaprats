@@ -11,7 +11,7 @@ import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
 import { sendOrderDeliveredThanks } from '@/lib/email/transactional'
 import { GOOGLE_REVIEW_URL } from '@/lib/constants'
-import { normalizeSearchTerm, getOrderStatusLabel, formatDateTimeMadrid, countUnpricedGarments } from '@/lib/utils'
+import { normalizeSearchTerm, getOrderStatusLabel, formatDateTimeMadrid, countUnpricedGarments, unpricedLineIndexes } from '@/lib/utils'
 import { checkUserPermission } from '@/actions/auth'
 import { syncOrderLineMeasurementsToClient } from '@/lib/measurements/sync-from-order'
 
@@ -566,12 +566,35 @@ export const createOrderAction = protectedAction<{ order: any; lines: any[] }, a
     for (const line of linesInput) {
       const parsed = tailoringOrderLineSchema.safeParse(line)
       if (!parsed.success) return failure(`Línea inválida: ${parsed.error.issues[0].message}`, 'VALIDATION')
-      // Un 0 € solo es válido si la prenda es regalo (evita pedidos a 0 por
-      // error de tecleo); un regalo, a su vez, siempre va a 0.
-      if (!line.is_gift && Number(line.unit_price) <= 0) {
-        return failure('Hay una prenda sin precio: indica el PVP o márcala como regalo', 'VALIDATION')
-      }
+      // Un regalo siempre va a 0.
       if (line.is_gift) line.unit_price = 0
+    }
+
+    // Un 0 € solo es válido si la prenda es regalo... O si es la pieza
+    // secundaria de un conjunto: en un traje el PVP se pone en la chaqueta y el
+    // pantalón va a 0 A PROPÓSITO. Antes se exigía precio pieza a pieza, así que
+    // crear un traje obligaba a marcar el pantalón como "regalo" (falso) o a
+    // inventarse un importe. Se usa la MISMA regla que el badge del listado, para
+    // que la plataforma diga lo mismo en todas partes.
+    const { slugById } = await buildGarmentMaps(
+      ctx.adminClient,
+      linesInput.map((l: any) => l.garment_type_id),
+    )
+    const pendientes = unpricedLineIndexes(
+      linesInput.map((l: any) => ({
+        unit_price: l.unit_price,
+        is_gift: l.is_gift,
+        configuration: l.configuration as Record<string, unknown> | null,
+        garment_types: { code: slugById.get(String(l.garment_type_id)) ?? null },
+      })),
+    )
+    if (pendientes.size > 0) {
+      return failure(
+        pendientes.size === 1
+          ? 'Hay una prenda sin precio: indica el PVP o márcala como regalo'
+          : `Hay ${pendientes.size} prendas sin precio: indica el PVP o márcalas como regalo`,
+        'VALIDATION',
+      )
     }
 
     const { data: store } = await ctx.adminClient
