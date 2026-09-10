@@ -64,6 +64,29 @@ export function OrderGarmentsTab({ order }: { order: any }) {
 
   const canEdit = !LOCKED_STATUSES.has(order?.status)
 
+  // ¿El total del pedido ya excluye las prendas canceladas? Cancelar una prenda
+  // NO recalcula la cabecera, y el recálculo de "Editar pedido" suma TODAS las
+  // líneas (incluidas las canceladas), así que el único modo de saberlo es
+  // comparar. En un pedido cancelado entero el total es histórico: no se compara.
+  const r2 = (n: number) => Math.round(n * 100) / 100
+  const cancelledLines = lines.filter((l) => String(l.status) === 'cancelled')
+  const orderDiscountPct = Number(order?.discount_percentage) || 0
+  const liveLinesTotal = r2(
+    lines
+      .filter((l) => String(l.status) !== 'cancelled')
+      .reduce((acc: number, l) => acc + (Number(l.line_total) || 0), 0) *
+      (1 - orderDiscountPct / 100),
+  )
+  const cancelledAmount = r2(
+    cancelledLines.reduce((acc: number, l) => acc + (Number(l.line_total) || 0), 0) *
+      (1 - orderDiscountPct / 100),
+  )
+  const orderTotal = Number(order?.total) || 0
+  const cancelledStillCounted =
+    cancelledLines.length > 0 &&
+    String(order?.status) !== 'cancelled' &&
+    Math.abs(liveLinesTotal - orderTotal) > 0.01
+
   const handleDownload = async (line: any, group: LineGroup, idx: number) => {
     if (group === 'complementos') return
     setPdfLoadingId(line.id)
@@ -80,9 +103,31 @@ export function OrderGarmentsTab({ order }: { order: any }) {
 
   return (
     <div className="space-y-4">
+      {cancelledStillCounted && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+          <p className="font-semibold">El total del pedido todavía incluye prendas canceladas</p>
+          <p className="text-xs mt-1">
+            Total del pedido: <strong>{formatCurrency(orderTotal)}</strong> · prendas vivas:{' '}
+            <strong>{formatCurrency(liveLinesTotal)}</strong> ·{' '}
+            {cancelledLines.length === 1 ? '1 prenda cancelada' : `${cancelledLines.length} prendas canceladas`} por{' '}
+            <strong>{formatCurrency(cancelledAmount)}</strong>.
+          </p>
+          <p className="text-xs mt-1">
+            Si el pedido no está facturado, corrígelo en «Editar pedido» (pon el PVP a 0 o quita la línea). Si ya
+            está facturado, el importe se quita emitiendo una factura rectificativa desde Contabilidad.
+          </p>
+        </div>
+      )}
       {lines.map((line: any, idx: number) => {
         const group = getLineGroup(line)
         const canPrintFicha = group !== 'complementos'
+        // Una prenda cancelada NO se fabrica ni se cobra: su PVP queda como
+        // histórico. Antes se pintaba igual que una viva (mismo PVP a pelo), así
+        // que en tienda parecía que seguía sumando y se pedía "borrarla" —
+        // imposible cuando el pedido ya está facturado (cerrojo fiscal: el importe
+        // se quita con la rectificativa, no borrando la línea). Si el total ya la
+        // excluye de verdad lo dice cancelledStillCounted, calculado arriba.
+        const isCancelled = String(line.status) === 'cancelled'
         // getLineName muestra el vínculo de conjunto ("Americana — Traje 1");
         // el nombre pelado del garment_type perdía esa relación.
         const displayName = group === 'complementos'
@@ -93,12 +138,12 @@ export function OrderGarmentsTab({ order }: { order: any }) {
           ? 'Boutique'
           : (line.line_type === 'artesanal' ? 'Artesanal' : 'Industrial')
         return (
-        <Card key={line.id}>
+        <Card key={line.id} className={isCancelled ? 'border-dashed bg-muted/30' : undefined}>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <CardTitle className="text-base flex items-center gap-2">
                 <span className="text-muted-foreground text-sm">#{idx + 1}</span>
-                {displayName}
+                <span className={isCancelled ? 'line-through text-muted-foreground' : undefined}>{displayName}</span>
                 {lineRef && (
                   <span className="font-mono text-xs font-normal text-muted-foreground bg-muted rounded px-1.5 py-0.5">
                     {order.order_number}-{lineRef}
@@ -288,7 +333,21 @@ export function OrderGarmentsTab({ order }: { order: any }) {
 
             <Separator />
             <div className="grid grid-cols-2 md:grid-cols-6 gap-4 text-sm">
-              <div><span className="text-muted-foreground block text-xs">PVP</span><span className="font-medium">{line.is_gift ? <span className="text-amber-700">Regalo</span> : formatCurrency(line.unit_price)}</span></div>
+              <div>
+                <span className="text-muted-foreground block text-xs">PVP</span>
+                {line.is_gift ? (
+                  <span className="font-medium text-amber-700">Regalo</span>
+                ) : isCancelled ? (
+                  <>
+                    <span className="font-medium line-through text-muted-foreground">{formatCurrency(line.unit_price)}</span>
+                    <span className={`block text-xs ${cancelledStillCounted ? 'text-amber-700' : 'text-muted-foreground'}`}>
+                      {cancelledStillCounted ? 'El total aún la incluye' : 'No cuenta en el total'}
+                    </span>
+                  </>
+                ) : (
+                  <span className="font-medium">{formatCurrency(line.unit_price)}</span>
+                )}
+              </div>
               {line.discount_percentage > 0 && <div><span className="text-muted-foreground block text-xs">Dto.</span>-{line.discount_percentage}%</div>}
               {canViewCosts && (() => {
                 const material = Number(line.material_cost) || 0
