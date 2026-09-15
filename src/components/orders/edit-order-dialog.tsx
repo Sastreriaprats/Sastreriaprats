@@ -188,6 +188,13 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
       fabric_id: l.fabric_id ?? null,
       fabric_description: l.fabric_description ?? '',
       fabric_meters: l.fabric_meters ?? null,
+      // €/m guardado en la prenda (el que se tecleó, o el que fijó la ficha del
+      // sastre al darla de alta). Manda sobre el precio actual del catálogo, que
+      // solo se usa para rellenar el hueco: el pedido conserva el precio al que
+      // se hizo aunque el catálogo cambie después.
+      fabric_price_per_meter: Number(l.configuration?.tejidoPrecioMetro) > 0
+        ? Number(l.configuration.tejidoPrecioMetro)
+        : null,
       supplier_id: l.supplier_id ?? null,
       model_name: l.model_name ?? '',
       model_size: l.model_size ?? '',
@@ -566,6 +573,17 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
           next.configuration = restCfg
         }
       }
+      // Al cambiar el €/m tecleado, el coste del tejido se rehace con los metros
+      // que haya. Es lo que pedía Teresa: el 80 % de las prendas llevan tejido de
+      // fabricante (Loro Piana, Scabal…), que no tiene precio en el catálogo, y el
+      // total se estaba multiplicando a mano.
+      if (field === 'fabric_price_per_meter') {
+        const price = Number(next.fabric_price_per_meter ?? 0)
+        const meters = Number(next.fabric_meters ?? 0)
+        if (price > 0 && meters > 0) {
+          next.material_cost = Math.round(price * meters * 100) / 100
+        }
+      }
       // Al cambiar los metros recalculamos material_cost si hay €/m.
       // Si el cache aún no llegó (precarga async), buscamos el precio en el catálogo.
       // No tocamos si el usuario edita material_cost directamente — eso es override manual.
@@ -671,6 +689,10 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
           ...(l.configuration ?? {}),
           cortador: l.cortador ?? '',
           oficial: l.oficial ?? '',
+          // El €/m viaja en la misma clave que ya usa la ficha del sastre, así
+          // que no hace falta migración y al reabrir se ve lo tecleado. Solo lo
+          // escribe quien ve costes; si no, se conserva el que hubiera.
+          ...(canViewCosts ? { tejidoPrecioMetro: l.fabric_price_per_meter ?? 0 } : {}),
         },
         sort_order: i,
         official_id: l.official_id || null,
@@ -964,49 +986,57 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                           </label>
                         </TableCell>
                         <TableCell>
-                          <Input className="h-8 text-xs" type="number" min={0} max={100} step={0.01} disabled={priceLocked}
+                          <Input className="h-8 min-w-[52px] text-xs" type="number" min={0} max={100} step={0.01} disabled={priceLocked}
                             value={l.discount_percentage} onChange={(e) => updateLine(l._key, 'discount_percentage', parseFloat(e.target.value) || 0)} />
                         </TableCell>
                         {canViewCosts && (
                           <>
                             <TableCell>
-                              <Input className="h-8 text-xs" type="number" min={0} step={0.01} disabled={priceLocked}
+                              <Input className="h-8 min-w-[72px] text-xs" type="number" min={0} step={0.01} disabled={priceLocked}
                                 value={l.material_cost} onChange={(e) => updateLine(l._key, 'material_cost', parseFloat(e.target.value) || 0)} />
                             </TableCell>
                             {/* Coste del FORRO (mig 284). Debajo, de qué forro se
-                                trata según la ficha, para no tener que abrirla. */}
+                                trata según la ficha, para no tener que abrirla.
+                                El ancho va FIJO: la tabla reparte las columnas
+                                según su contenido y un nombre de forro largo en
+                                una sola línea ensanchaba esta hasta aplastar
+                                Material, Tejido, Metros… (aviso de Teresa). El
+                                nombre completo queda en el tooltip. */}
                             <TableCell>
-                              <Input className="h-8 text-xs" type="number" min={0} step={0.01} disabled={priceLocked}
-                                value={l.lining_cost} onChange={(e) => updateLine(l._key, 'lining_cost', parseFloat(e.target.value) || 0)} />
-                              {(() => {
-                                const cfg = (l.configuration ?? {}) as Record<string, unknown>
-                                const nombre = String(cfg.forroStockNombre || cfg.forroCatalogo || '').trim()
-                                const metros = Number(cfg.forroMetros) || 0
-                                if (nombre || metros > 0) {
-                                  return (
-                                    <p className="text-[10px] text-muted-foreground mt-0.5 truncate" title={nombre || undefined}>
-                                      {nombre || 'Forro'}{metros > 0 ? ` · ${metros} m` : ''}
-                                    </p>
-                                  )
-                                }
-                                if (cfg.forro === 'sin_forro') {
-                                  return <p className="text-[10px] text-muted-foreground mt-0.5">Sin forro</p>
-                                }
-                                return null
-                              })()}
+                              <div className="w-[96px]">
+                                <Input className="h-8 text-xs" type="number" min={0} step={0.01} disabled={priceLocked}
+                                  value={l.lining_cost} onChange={(e) => updateLine(l._key, 'lining_cost', parseFloat(e.target.value) || 0)} />
+                                {(() => {
+                                  const cfg = (l.configuration ?? {}) as Record<string, unknown>
+                                  const nombre = String(cfg.forroStockNombre || cfg.forroCatalogo || '').trim()
+                                  const metros = Number(cfg.forroMetros) || 0
+                                  if (nombre || metros > 0) {
+                                    const texto = `${nombre || 'Forro'}${metros > 0 ? ` · ${metros} m` : ''}`
+                                    return (
+                                      <p className="text-[10px] leading-tight text-muted-foreground mt-0.5 whitespace-normal break-words line-clamp-2" title={texto}>
+                                        {texto}
+                                      </p>
+                                    )
+                                  }
+                                  if (cfg.forro === 'sin_forro') {
+                                    return <p className="text-[10px] text-muted-foreground mt-0.5">Sin forro</p>
+                                  }
+                                  return null
+                                })()}
+                              </div>
                             </TableCell>
                             <TableCell>
-                              <Input className="h-8 text-xs" type="number" min={0} step={0.01} disabled={priceLocked}
+                              <Input className="h-8 min-w-[64px] text-xs" type="number" min={0} step={0.01} disabled={priceLocked}
                                 value={l.labor_cost} onChange={(e) => updateLine(l._key, 'labor_cost', parseFloat(e.target.value) || 0)} />
                             </TableCell>
                             <TableCell>
-                              <Input className="h-8 text-xs" type="number" min={0} step={0.01} disabled={priceLocked}
+                              <Input className="h-8 min-w-[64px] text-xs" type="number" min={0} step={0.01} disabled={priceLocked}
                                 value={l.factory_cost} onChange={(e) => updateLine(l._key, 'factory_cost', parseFloat(e.target.value) || 0)} />
                             </TableCell>
                           </>
                         )}
                         <TableCell>
-                          <div className="flex items-center gap-1">
+                          <div className="flex min-w-[150px] items-center gap-1">
                             <Input
                               className="h-8 text-xs flex-1"
                               placeholder="Descripción"
@@ -1024,14 +1054,36 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                               <Scissors className="h-3.5 w-3.5" />
                             </Button>
                           </div>
-                          {l.fabric_price_per_meter != null && l.fabric_price_per_meter > 0 && (
-                            <p className="text-[10px] text-muted-foreground mt-0.5 tabular-nums">
-                              {formatCurrency(Number(l.fabric_price_per_meter))} / m
-                            </p>
+                          {canViewCosts ? (
+                            // €/m EDITABLE. Antes era un texto de solo lectura que
+                            // solo salía con tejido de stock; con tejido de
+                            // fabricante no había dónde ponerlo. Con tejido de stock
+                            // viene precargado del catálogo y se puede corregir.
+                            <div className="mt-1 flex items-center gap-1">
+                              <Input
+                                className="h-7 w-20 text-[11px] tabular-nums"
+                                type="number" min={0} step={0.01}
+                                placeholder="0,00"
+                                value={l.fabric_price_per_meter ?? ''}
+                                onChange={(e) => updateLine(
+                                  l._key,
+                                  'fabric_price_per_meter',
+                                  e.target.value === '' ? null : (parseFloat(e.target.value) || 0),
+                                )}
+                                title="Precio del tejido por metro: multiplicado por los metros da el coste del tejido (columna Material)"
+                              />
+                              <span className="text-[10px] text-muted-foreground whitespace-nowrap">€/m</span>
+                            </div>
+                          ) : (
+                            l.fabric_price_per_meter != null && l.fabric_price_per_meter > 0 && (
+                              <p className="text-[10px] text-muted-foreground mt-0.5 tabular-nums">
+                                {formatCurrency(Number(l.fabric_price_per_meter))} / m
+                              </p>
+                            )
                           )}
                         </TableCell>
                         <TableCell>
-                          <Input className="h-8 text-xs" type="number" min={0} step={0.1}
+                          <Input className="h-8 min-w-[60px] text-xs" type="number" min={0} step={0.1}
                             value={l.fabric_meters ?? ''} onChange={(e) => updateLine(l._key, 'fabric_meters', e.target.value === '' ? null : (parseFloat(e.target.value) || 0))} />
                           {l.fabric_price_per_meter != null && l.fabric_price_per_meter > 0 && l.fabric_meters && l.fabric_meters > 0 && (
                             <p className="text-[10px] text-amber-700 mt-0.5 tabular-nums">
@@ -1040,7 +1092,7 @@ export function EditOrderDialog({ open, onOpenChange, order, onSaved }: EditOrde
                           )}
                         </TableCell>
                         <TableCell>
-                          <Input className="h-8 text-xs"
+                          <Input className="h-8 min-w-[100px] text-xs"
                             value={l.finishing_notes ?? ''} onChange={(e) => updateLine(l._key, 'finishing_notes', e.target.value)} />
                         </TableCell>
                         <TableCell>
