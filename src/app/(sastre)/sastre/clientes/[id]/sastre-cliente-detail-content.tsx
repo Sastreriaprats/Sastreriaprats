@@ -14,6 +14,7 @@ import { ClientAlterationsTab } from '@/app/(admin)/admin/clientes/[id]/tabs/cli
 import { ClientAppointmentsTab } from '@/app/(admin)/admin/clientes/[id]/tabs/client-appointments-tab'
 import { addClientNote } from '@/actions/clients'
 import { useAction } from '@/hooks/use-action'
+import { useClientCategories } from '@/hooks/use-cached-queries'
 import { toast } from 'sonner'
 
 // Wrapper que fuerza el tema oscuro de shadcn en componentes admin reutilizados
@@ -302,6 +303,7 @@ const TABS = [
 ] as const
 
 export function SastreClienteDetailContent({ client, sastreName, totalSpent, totalPending, orderCount, initialTab }: Props) {
+  const clientCategories = useClientCategories()
   const clientId = String(client.id)
   const fullName = String(client.full_name || `${client.first_name || ''} ${client.last_name || ''}`).trim() || 'Sin nombre'
   const averageTicket = Number(client.average_ticket ?? 0)
@@ -338,8 +340,8 @@ export function SastreClienteDetailContent({ client, sastreName, totalSpent, tot
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="font-serif text-xl text-white">{fullName}</h1>
               {!!client.category && (
-                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${CATEGORY_BADGE[cat] ?? CATEGORY_BADGE.standard}`}>
-                  {cat.toUpperCase()}
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${CATEGORY_BADGE[cat] ?? 'bg-sky-500/20 text-sky-300 border-sky-500/30'}`}>
+                  {clientCategories.labelOf(cat).toUpperCase()}
                 </span>
               )}
               {!!client.client_code && (

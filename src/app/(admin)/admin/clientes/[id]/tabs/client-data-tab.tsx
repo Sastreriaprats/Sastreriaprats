@@ -10,10 +10,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Loader2, Save } from 'lucide-react'
 import { useAction } from '@/hooks/use-action'
+import { useClientCategories } from '@/hooks/use-cached-queries'
 import { updateClientAction } from '@/actions/clients'
 import { usePermissions } from '@/hooks/use-permissions'
 
 export function ClientDataTab({ client }: { client: any }) {
+  const clientCategories = useClientCategories()
   const { can } = usePermissions()
   const canEdit = can('clients.edit')
   const [form, setForm] = useState({ ...client })
@@ -76,8 +78,13 @@ export function ClientDataTab({ client }: { client: any }) {
                 <Select value={form.category} onValueChange={(v) => set('category', v)} disabled={!canEdit}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="standard">Normal</SelectItem>
-                    <SelectItem value="vip">VIP</SelectItem>
+                    {/* Activas + la del cliente aunque se haya desactivado, para que
+                        no se quede el desplegable en blanco. */}
+                    {clientCategories.all
+                      .filter((c) => c.is_active || c.code === form.category)
+                      .map((c) => (
+                        <SelectItem key={c.code} value={c.code}>{c.name}{c.is_active ? '' : ' (desactivada)'}</SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>

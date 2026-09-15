@@ -23,13 +23,12 @@ import { Plus, Search, MoreHorizontal, Eye, Pencil, UserX, Trash2, Download, Che
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from 'sonner'
 import { useList } from '@/hooks/use-list'
+import { useClientCategories } from '@/hooks/use-cached-queries'
 import { usePermissions } from '@/hooks/use-permissions'
 import { listClients, deleteClientAction, hardDeleteClientAction } from '@/actions/clients'
 import { getInitials, formatCurrency, formatDate } from '@/lib/utils'
 import { downloadExcel } from '@/lib/excel/export'
 import { CreateClientDialog } from './create-client-dialog'
-
-const CATEGORY_LABELS: Record<string, string> = { standard: 'Estándar', vip: 'VIP' }
 
 const categoryColors: Record<string, string> = {
   standard: 'bg-gray-100 text-gray-700',
@@ -37,6 +36,7 @@ const categoryColors: Record<string, string> = {
 }
 
 export function ClientsPageContent({ basePath = '/admin' }: { basePath?: string }) {
+  const clientCategories = useClientCategories()
   const router = useRouter()
   const searchParams = useSearchParams()
   const { can } = usePermissions()
@@ -123,7 +123,7 @@ export function ClientsPageContent({ basePath = '/admin' }: { basePath?: string 
         'Nombre': c.full_name ?? '',
         'Email': c.email ?? '',
         'Teléfono': c.phone ?? '',
-        'Categoría': CATEGORY_LABELS[c.category] ?? c.category ?? '',
+        'Categoría': clientCategories.labelOf(c.category),
         'Total gastado (€)': Number(c.total_spent ?? 0),
         'Pendiente (€)': Number(c.total_pending ?? 0),
         'Nº compras': Number(c.purchase_count ?? 0),
@@ -174,8 +174,9 @@ export function ClientsPageContent({ basePath = '/admin' }: { basePath?: string 
           <SelectTrigger className="w-40"><SelectValue placeholder="Categoría" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todas las categorías</SelectItem>
-            <SelectItem value="standard">Normal</SelectItem>
-            <SelectItem value="vip">VIP</SelectItem>
+            {clientCategories.all.map((c) => (
+              <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <Select value={statusFilter} onValueChange={applyStatus}>
@@ -251,8 +252,8 @@ export function ClientsPageContent({ basePath = '/admin' }: { basePath?: string 
                   </div>
                 </TableCell>
                 <TableCell>
-                  <Badge className={`text-xs ${categoryColors[client.category] || categoryColors.standard}`}>
-                    {client.category === 'standard' ? 'Estándar' : client.category?.toUpperCase()}
+                  <Badge className={`text-xs ${categoryColors[client.category] || 'bg-sky-100 text-sky-800'}`}>
+                    {clientCategories.labelOf(client.category)}
                   </Badge>
                 </TableCell>
                 <TableCell className="font-medium">{formatCurrency(client.total_spent)}</TableCell>

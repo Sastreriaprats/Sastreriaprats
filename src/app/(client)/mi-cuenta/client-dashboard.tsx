@@ -88,8 +88,12 @@ export function ClientDashboard({ client, recentOnline, recentTailoring }: {
         <Card>
           <CardContent className="pt-4 pb-3 text-center">
             <Package className="h-5 w-5 mx-auto text-prats-gold mb-1" />
-            <p className="text-2xl font-bold text-prats-navy capitalize">
-              {(client?.category as string) || 'standard'}
+            <p className="text-2xl font-bold text-prats-navy">
+              {/* Las categorías las crea la tienda para uso INTERNO (mig 285):
+                  al cliente solo se le enseña si es VIP. Antes salía el código
+                  en bruto ("Standard") y una nueva como "La fábrica" habría
+                  aparecido tal cual en su cuenta. */}
+              {client?.category === 'vip' ? 'VIP' : 'Normal'}
             </p>
             <p className="text-xs text-gray-400">Categoría</p>
           </CardContent>

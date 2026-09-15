@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/components/providers/auth-provider'
-import { Users, Shield, Store, Shirt, UserCog, Target, Layers, CalendarDays, Ruler, Percent, Truck } from 'lucide-react'
+import { Users, Shield, Store, Shirt, UserCog, Target, Layers, CalendarDays, Ruler, Percent, Truck, Tags } from 'lucide-react'
 import { UsersSection } from './sections/users-section'
 import { RolesSection } from './sections/roles-section'
 import { StoresSection } from './sections/stores-section'
@@ -15,6 +15,7 @@ import { CollectionsSection } from './sections/collections-section'
 import { SeasonsSection } from './sections/seasons-section'
 import { SizeGuidesSection } from './sections/size-guides-section'
 import { ShippingSection } from './sections/shipping-section'
+import { ClientCategoriesSection } from './sections/client-categories-section'
 
 // Cada pestaña acepta cualquiera de los posibles códigos de permiso que puedan existir
 // según la migración activa (001 usa nombres distintos a 010).
@@ -85,6 +86,12 @@ const ALL_TABS = [
     icon: Ruler,
     perms: ['products.view', 'products.edit', 'config.edit', 'config.view', 'config.access'],
   },
+  {
+    value: 'client-categories',
+    label: 'Categorías de cliente',
+    icon: Tags,
+    perms: ['clients.edit', 'config.edit', 'config.view', 'config.access'],
+  },
   // La pestaña "Parámetros" se retiró: nadie lee system_config (el IVA vive en las
   // líneas, la serie en nextSeriesNumber, el fondo de caja en stores y el envío
   // gratis en shipping_zones), así que editarla daba un "guardado" falso.
@@ -153,6 +160,7 @@ export function ConfigTabs({ activeTab }: { activeTab: string }) {
         <TabsContent value="collections"><CollectionsSection /></TabsContent>
         <TabsContent value="seasons"><SeasonsSection /></TabsContent>
         <TabsContent value="size-guides"><SizeGuidesSection /></TabsContent>
+        <TabsContent value="client-categories"><ClientCategoriesSection /></TabsContent>
       </div>
     </Tabs>
   )

@@ -315,7 +315,8 @@ export const clients = pgTable('clients', {
   profileId: uuid('profile_id').references(() => profiles.id, { onDelete: 'set null' }),
   clientCode: varchar('client_code', { length: 20 }).unique(),
   clientType: clientTypeEnum('client_type').default('individual').notNull(),
-  category: clientCategoryEnum('category').default('standard').notNull(), // DB: client_category enum
+  // Texto con FK a client_categories.code desde la mig 285 (antes enum client_category).
+  category: text('category').default('standard').notNull(),
   firstName: text('first_name').notNull(),
   lastName: text('last_name').notNull(),
   fullName: text('full_name'),

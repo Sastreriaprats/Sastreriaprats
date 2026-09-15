@@ -8,6 +8,52 @@ import { getRolesAndPermissionsAction } from '@/actions/config'
 import { getCurrentProfileAction } from '@/actions/auth'
 import type { UserWithRoles } from '@/lib/types/auth'
 
+// ─── useClientCategories ─────────────────────────────────────────────────────
+
+export type ClientCategoryRow = {
+  code: string
+  name: string
+  sort_order: number
+  is_active: boolean
+}
+
+const FALLBACK_CLIENT_CATEGORIES: ClientCategoryRow[] = [
+  { code: 'standard', name: 'Normal', sort_order: 0, is_active: true },
+  { code: 'vip', name: 'VIP', sort_order: 1, is_active: true },
+]
+
+/**
+ * Categorías de cliente (mig 285), editables en Configuración. Trae también las
+ * INACTIVAS: hacen falta para poner nombre a un cliente que aún conserva una
+ * categoría desactivada. Los selectores filtran con `active`.
+ */
+export function useClientCategories() {
+  const supabase = useMemo(() => createClient(), [])
+  const query = useQuery({
+    queryKey: ['client-categories'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('client_categories')
+        .select('code, name, sort_order, is_active')
+        .order('sort_order')
+      if (error) throw error
+      return (data ?? []) as ClientCategoryRow[]
+    },
+  })
+  // Respaldo si el catálogo no responde (p. ej. código desplegado antes que la
+  // mig 285): las dos de siempre, para que ningún desplegable se quede vacío.
+  const all = query.data && query.data.length > 0 ? query.data : FALLBACK_CLIENT_CATEGORIES
+  return {
+    all,
+    active: all.filter((c) => c.is_active),
+    /** Nombre visible de un code; si no está en el catálogo, el propio code. */
+    labelOf: (code: string | null | undefined) =>
+      all.find((c) => c.code === code)?.name ?? (code === 'standard' ? 'Normal' : (code ?? '')),
+    isLoading: query.isLoading,
+    refetch: query.refetch,
+  }
+}
+
 // ─── useGarmentTypes ─────────────────────────────────────────────────────────
 
 export type GarmentTypeRow = {

@@ -17,6 +17,7 @@ import {
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAction } from '@/hooks/use-action'
+import { useClientCategories } from '@/hooks/use-cached-queries'
 import { createClientAction } from '@/actions/clients'
 import { CLIENT_SOURCES } from '@/lib/clients/sources'
 
@@ -70,6 +71,7 @@ interface CreateClientDialogProps {
 }
 
 export function CreateClientDialog({ open, onOpenChange, onSuccess, onSuccessWithId, onSuccessWithData, onCancel }: CreateClientDialogProps) {
+  const clientCategories = useClientCategories()
   const [activeTab, setActiveTab] = useState('personal')
   const [form, setForm] = useState({
     first_name: '', last_name: '', email: '', phone: '', phone_secondary: '',
@@ -163,8 +165,9 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess, onSuccessWit
                 <Select value={form.category} onValueChange={(v) => set('category', v)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="standard">Estándar</SelectItem>
-                    <SelectItem value="vip">VIP</SelectItem>
+                    {clientCategories.active.map((c) => (
+                      <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

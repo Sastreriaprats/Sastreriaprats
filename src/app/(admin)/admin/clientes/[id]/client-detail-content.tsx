@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { usePermissions } from '@/hooks/use-permissions'
+import { useClientCategories } from '@/hooks/use-cached-queries'
 import { hardDeleteClientAction, deleteClientAction, reactivateClientAction } from '@/actions/clients'
 import { MergeClientDialog } from './merge-client-dialog'
 import { clientSourceLabel } from '@/lib/clients/sources'
@@ -145,6 +146,7 @@ function ClientSummaryTab({ client }: { client: any }) {
 }
 
 export function ClientDetailContent({ client, initialTab, basePath = '/admin' }: { client: any; initialTab: string; basePath?: string }) {
+  const clientCategories = useClientCategories()
   const router = useRouter()
   const { can } = usePermissions()
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
@@ -200,8 +202,8 @@ export function ClientDetailContent({ client, initialTab, basePath = '/admin' }:
                   {client.salutation && <span className="text-muted-foreground font-semibold">{salutationLabels[client.salutation]} </span>}
                   {client.full_name}
                 </h1>
-                <Badge className={`text-xs ${categoryColors[client.category] || ''}`}>
-                  {client.category?.toUpperCase()}
+                <Badge className={`text-xs ${categoryColors[client.category] || 'bg-sky-100 text-sky-800'}`}>
+                  {clientCategories.labelOf(client.category)}
                 </Badge>
                 {!client.is_active && <Badge variant="destructive" className="text-xs">Inactivo</Badge>}
               </div>

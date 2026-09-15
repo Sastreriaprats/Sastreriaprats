@@ -13,7 +13,9 @@ export const createClientSchema = z.object({
   gender: z.enum(['male', 'female', 'other', 'unspecified']).nullable().optional(),
   salutation: z.enum(['sr', 'sra']).nullable().optional(),
   client_type: z.enum(['individual', 'company']).nullable().optional(),
-  category: z.enum(['standard', 'vip', 'premium', 'gold', 'ambassador']).nullable().optional(),
+  // Categorías editables desde Configuración (mig 285): la base de datos valida
+  // con una FK a client_categories.code, aquí solo la forma.
+  category: z.string().trim().min(1).max(60).nullable().optional(),
   document_type: z.enum(['DNI', 'NIE', 'NIF', 'CIF', 'passport', 'other']).nullable().optional(),
   document_number: z.string().nullable().optional(),
   company_name: z.string().nullable().optional(),

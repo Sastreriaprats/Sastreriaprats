@@ -34,7 +34,8 @@ export interface ClientSummary {
   email: string | null
   phone: string | null
   client_type: 'individual' | 'company'
-  category: 'standard' | 'vip' | 'premium' | 'gold' | 'ambassador'
+  /** code de client_categories (mig 285): 'standard', 'vip', 'fabrica'… */
+  category: string
   tags: string[] | null
   total_spent: string | null
   total_pending: string | null
