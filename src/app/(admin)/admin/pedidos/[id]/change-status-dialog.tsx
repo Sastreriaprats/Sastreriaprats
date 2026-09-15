@@ -14,7 +14,7 @@ import { toast } from 'sonner'
 import { useAction } from '@/hooks/use-action'
 import { changeOrderStatus } from '@/actions/orders'
 import { getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
-import { getStatusesFor } from '@/lib/orders/statuses'
+import { getStatusesFor, resolveStatusPipeline } from '@/lib/orders/statuses'
 import { statusChangeToast } from '@/lib/orders/status-toast'
 import { getLineName } from '@/lib/orders/line-groups'
 import { buildLineRefSuffixes, sortLinesForDisplay } from '@/lib/orders/line-refs'
@@ -42,7 +42,9 @@ export function ChangeStatusDialog({ open, onOpenChange, orderId, currentStatus,
   // ruta de prendas concretas (`line_ids`).
   const wholeOrder = selectedIds.size === 0 || selectedIds.size === lines.length
 
-  const allStatuses = getStatusesFor(orderType)
+  // Flujo según las PRENDAS, no solo el order_type: un pedido industrial con una
+  // americana artesanal tiene que ofrecer "Pendiente 1ª prueba" (flujo 'mixto').
+  const allStatuses = getStatusesFor(resolveStatusPipeline(orderType, rawLines))
   // Estado a EXCLUIR del desplegable: si las prendas afectadas comparten un mismo
   // estado, se oculta ese (no tiene sentido "cambiar" a donde ya están). Si están
   // en estados distintos, se muestran todos.

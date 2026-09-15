@@ -12,6 +12,8 @@
  * + ALTER TYPE en transacción atómica.
  */
 
+import { getLineGroup } from './line-groups'
+
 export type OrderStatus =
   | 'created'
   | 'fabric_ordered'
@@ -46,6 +48,12 @@ export const ORDER_STATUSES_BY_TYPE: Record<string, OrderStatus[]> = {
   camiseria_industrial: ['created', 'fabric_ordered', 'fabric_received_factory', 'in_production', 'received_in_store', 'pendiente_terminacion', 'finished', 'delivered', 'incident', 'cancelled'],
   oficial:              ['created', 'in_production', 'pendiente_terminacion', 'finished', 'delivered', 'cancelled'],
   proveedor:            ['created', 'fabric_ordered', 'fabric_received_store', 'cancelled'],
+  // Pedido MIXTO (prendas artesanales e industriales, o prendas que no cuadran
+  // con el order_type guardado): unión de los dos flujos. Es una superserie
+  // ordenada de ambos, así que el rango relativo de cada estado se conserva y
+  // el derivado "prenda menos avanzada" sigue funcionando. No es un order_type
+  // real: lo resuelve `resolveStatusPipeline` a partir de las líneas.
+  mixto:                ['created', 'fabric_ordered', 'fabric_received_store', 'fabric_received_factory', 'cut', 'in_production', 'in_fitting', 'received_in_store', 'pendiente_terminacion', 'finished', 'delivered', 'incident', 'cancelled'],
 }
 
 /** Flat union de TODOS los estados visibles en UI. Modelo final post-mig 169. */
@@ -73,6 +81,53 @@ export const TAILORING_PIPELINE_STATUSES: OrderStatus[] = [
 export function getStatusesFor(orderType: string | null | undefined): OrderStatus[] {
   if (!orderType) return ORDER_STATUSES_BY_TYPE.artesanal
   return ORDER_STATUSES_BY_TYPE[orderType] ?? ORDER_STATUSES_BY_TYPE.artesanal
+}
+
+/** Eje artesanal/industrial de un order_type; null si no tiene (oficial, proveedor). */
+function manufacturingFamily(orderType: string): 'artesanal' | 'industrial' | null {
+  if (orderType === 'artesanal' || orderType === 'camiseria') return 'artesanal'
+  if (orderType === 'industrial' || orderType === 'camiseria_industrial') return 'industrial'
+  return null
+}
+
+/**
+ * Tipo de flujo de estados EFECTIVO de un pedido, mirando sus prendas y no solo
+ * el `order_type` guardado (sep-2026, PIN-2026-0288): un pedido industrial con
+ * una americana artesanal no ofrecía "Pendiente 1ª prueba". Si alguna prenda de
+ * sastrería/camisería es de la otra familia (`line_type`) que el pedido, se usa
+ * el flujo 'mixto' (unión de ambos). Los complementos no cuentan, igual que en
+ * `getOrderManufacturingLabel`. Las líneas sin `line_type` (select que no lo
+ * trae) se ignoran: nunca fuerzan 'mixto' por error.
+ */
+export function resolveStatusPipeline(
+  orderType: string | null | undefined,
+  lines: unknown,
+): string {
+  const base = orderType || 'artesanal'
+  const family = manufacturingFamily(base)
+  if (!family) return base
+  for (const line of Array.isArray(lines) ? lines : []) {
+    if (getLineGroup(line) === 'complementos') continue
+    const lt = (line as { line_type?: string | null } | null)?.line_type
+    if (lt !== 'artesanal' && lt !== 'industrial') continue
+    if (lt !== family) return 'mixto'
+  }
+  return base
+}
+
+/**
+ * Estados que se ofrecen para UNA prenda. En un pedido mixto cada prenda ve el
+ * flujo de su propia familia (la americana artesanal, el de artesanal); fuera
+ * de ese caso, el del pedido.
+ */
+export function getLineStatuses(
+  pipelineType: string | null | undefined,
+  line: { line_type?: string | null } | null | undefined,
+): OrderStatus[] {
+  if (pipelineType === 'mixto' && (line?.line_type === 'artesanal' || line?.line_type === 'industrial')) {
+    return getStatusesFor(line.line_type)
+  }
+  return getStatusesFor(pipelineType)
 }
 
 /** Estados transversales/terminales que NO participan en el orden lineal del pipeline. */

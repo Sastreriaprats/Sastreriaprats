@@ -15,7 +15,7 @@ import { toast } from 'sonner'
 import { useAction } from '@/hooks/use-action'
 import { changeOrderStatus } from '@/actions/orders'
 import { getOrderStatusColor, getOrderStatusLabel } from '@/lib/utils'
-import { getStatusesFor, getStatusIndex } from '@/lib/orders/statuses'
+import { getLineStatuses, getStatusIndex } from '@/lib/orders/statuses'
 
 /**
  * Chip de estado de UNA prenda, clicable: abre un menú con los estados del
@@ -28,7 +28,8 @@ import { getStatusesFor, getStatusIndex } from '@/lib/orders/statuses'
  */
 export function LineStatusChip({ orderId, line, orderType, disabled = false }: {
   orderId: string
-  line: { id: string; status: string }
+  line: { id: string; status: string; line_type?: string | null }
+  /** Flujo efectivo del pedido (`resolveStatusPipeline`), no el order_type crudo. */
   orderType: string | null | undefined
   disabled?: boolean
 }) {
@@ -50,7 +51,7 @@ export function LineStatusChip({ orderId, line, orderType, disabled = false }: {
     )
   }
 
-  const options = getStatusesFor(orderType).filter((s) => s !== line.status)
+  const options = getLineStatuses(orderType, line).filter((s) => s !== line.status)
   // Delicado = cancelación o retroceso real dentro del pipeline (incident es
   // transversal y reversible: aplica directo).
   const isDelicate = (target: string) => {

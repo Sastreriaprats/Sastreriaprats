@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatCurrency, formatDate, getOrderStatusLabel } from '@/lib/utils'
-import { getStatusesFor } from '@/lib/orders/statuses'
+import { getLineStatuses, getStatusesFor, resolveStatusPipeline } from '@/lib/orders/statuses'
 import { getLineGroup, getLineName, isLineCamiseria, type LineGroup } from '@/lib/orders/line-groups'
 import { buildLineRefSuffixes, sortLinesForDisplay } from '@/lib/orders/line-refs'
 import { PaymentHistory } from '@/components/payments/payment-history'
@@ -199,10 +199,18 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
 
   // Fuente única compartida con el admin (src/lib/orders/statuses.ts) — el
   // sastre ve exactamente los mismos estados que el admin para el mismo tipo.
-  const typeStatuses = getStatusesFor(order?.order_type)
+  // Flujo según las PRENDAS (pedido mixto → unión artesanal + industrial).
+  const pipelineType = resolveStatusPipeline(order?.order_type, order?.tailoring_order_lines)
+  const typeStatuses = getStatusesFor(pipelineType)
   const statusOptions = (typeStatuses as readonly string[]).includes(order?.status)
     ? [...typeStatuses]
     : [order?.status, ...typeStatuses].filter(Boolean) as string[]
+  // Cada prenda ve el flujo de su familia (en un mixto, la americana artesanal
+  // ofrece "Pendiente 1ª prueba"); se añade su estado actual si no está.
+  const lineStatusOptions = (line: any): string[] => {
+    const opts = getLineStatuses(pipelineType, line) as string[]
+    return opts.includes(line.status) ? opts : [line.status, ...opts].filter(Boolean)
+  }
 
   const handleStatusChange = async (newStatus: string) => {
     if (!order?.id || newStatus === order.status) return
@@ -387,10 +395,7 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
                       onChange={(e) => handleLineStatusChange(line.id, e.target.value)}
                       className="bg-white/[0.07] text-white border border-white/15 rounded-lg px-2 py-1 text-xs font-medium hover:bg-white/10 cursor-pointer focus:outline-none focus:border-[#c9a96e]/50 transition-all shrink-0 ml-2 [&>option]:bg-[#0d1629] [&>option]:text-white"
                     >
-                      {((typeStatuses as readonly string[]).includes(line.status)
-                        ? typeStatuses
-                        : [line.status, ...typeStatuses].filter(Boolean) as string[]
-                      ).map((s) => (
+                      {lineStatusOptions(line).map((s) => (
                         <option key={s} value={s}>{getOrderStatusLabel(s)}</option>
                       ))}
                     </select>
@@ -459,10 +464,7 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
                         onChange={(e) => handleLineStatusChange(line.id, e.target.value)}
                         className="bg-white/[0.07] text-white border border-white/15 rounded-lg px-2 py-1 text-xs font-medium hover:bg-white/10 cursor-pointer focus:outline-none focus:border-[#c9a96e]/50 transition-all shrink-0 ml-2 [&>option]:bg-[#0d1629] [&>option]:text-white"
                       >
-                        {((typeStatuses as readonly string[]).includes(line.status)
-                          ? typeStatuses
-                          : [line.status, ...typeStatuses].filter(Boolean) as string[]
-                        ).map((s) => (
+                        {lineStatusOptions(line).map((s) => (
                           <option key={s} value={s}>{getOrderStatusLabel(s)}</option>
                         ))}
                       </select>

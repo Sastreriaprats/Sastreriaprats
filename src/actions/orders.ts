@@ -5,7 +5,7 @@ import { protectedAction, type AdminClient } from '@/lib/server/action-wrapper'
 import { queryList, queryById, getNextNumber, resolveClientIdsForSearch } from '@/lib/server/query-helpers'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createTailoringOrderSchema, tailoringOrderLineSchema, changeOrderStatusSchema } from '@/lib/validations/orders'
-import { ALL_VISIBLE_STATUSES, classifyLinesForStatusChange, deriveOrderStatusFromLines, getStatusIndex, type OrderStatus } from '@/lib/orders/statuses'
+import { ALL_VISIBLE_STATUSES, classifyLinesForStatusChange, deriveOrderStatusFromLines, getStatusIndex, resolveStatusPipeline, type OrderStatus } from '@/lib/orders/statuses'
 import { getDefaultDeliveryDate } from '@/lib/orders/production-times'
 import { success, failure } from '@/lib/errors'
 import type { ListParams, ListResult } from '@/lib/server/query-helpers'
@@ -728,6 +728,18 @@ function getStoreReviewUrl(storeCode: string | null | undefined): string {
  *
  * Lo usan las dos acciones (admin y sastre).
  */
+/**
+ * Flujo de estados efectivo del pedido (order_type + prendas): 'mixto' si mezcla
+ * prendas artesanales e industriales. Ver `resolveStatusPipeline`.
+ */
+async function getOrderPipelineType(admin: AdminClient, orderId: string): Promise<string> {
+  const [{ data: order }, { data: lines }] = await Promise.all([
+    admin.from('tailoring_orders').select('order_type').eq('id', orderId).single(),
+    admin.from('tailoring_order_lines').select('line_type, configuration').eq('tailoring_order_id', orderId),
+  ])
+  return resolveStatusPipeline((order as any)?.order_type, lines ?? [])
+}
+
 async function recalcOrderStatusFromLines(
   admin: AdminClient,
   orderId: string,
@@ -739,8 +751,9 @@ async function recalcOrderStatusFromLines(
   if (!order) return null
   const fromStatus = (order as any).status as string
   const { data: lines } = await admin
-    .from('tailoring_order_lines').select('status').eq('tailoring_order_id', orderId)
-  const derived = deriveOrderStatusFromLines((order as any).order_type, (lines ?? []).map((l: any) => l.status))
+    .from('tailoring_order_lines').select('status, line_type, configuration').eq('tailoring_order_id', orderId)
+  const pipelineType = resolveStatusPipeline((order as any).order_type, lines ?? [])
+  const derived = deriveOrderStatusFromLines(pipelineType, (lines ?? []).map((l: any) => l.status))
   if (!derived || derived === fromStatus) return fromStatus
 
   await admin.from('tailoring_orders').update({
@@ -835,16 +848,15 @@ export const changeOrderStatus = protectedAction<any, any>(
       // Retroceso: borra los sellos de entrega/terminación que dejó el estado
       // anterior (si no, la prenda vuelve a confección pero sigue devengando
       // comisión de oficial por `finished_at`).
-      const { data: orderTypeRow } = await ctx.adminClient
-        .from('tailoring_orders').select('order_type').eq('id', order_id).single()
+      const pipelineType = await getOrderPipelineType(ctx.adminClient, order_id)
       const retreatingLineIds = lines
         .filter((l) => {
-          const iFrom = getStatusIndex(l.status, (orderTypeRow as any)?.order_type)
-          const iTo = getStatusIndex(new_status, (orderTypeRow as any)?.order_type)
+          const iFrom = getStatusIndex(l.status, pipelineType)
+          const iTo = getStatusIndex(new_status, pipelineType)
           return iFrom >= 0 && iTo >= 0 && iTo < iFrom
         })
         .map((l) => l.id)
-      await clearCompletionStamps(ctx.adminClient, retreatingLineIds, new_status, (orderTypeRow as any)?.order_type)
+      await clearCompletionStamps(ctx.adminClient, retreatingLineIds, new_status, pipelineType)
 
       await ctx.adminClient.from('tailoring_order_state_history').insert(
         lines.map((l) => ({
@@ -868,8 +880,9 @@ export const changeOrderStatus = protectedAction<any, any>(
       fromStatus = (order as any).status ?? null
 
       const { data: lineRows } = await ctx.adminClient
-        .from('tailoring_order_lines').select('id, status').eq('tailoring_order_id', order_id)
+        .from('tailoring_order_lines').select('id, status, line_type, configuration').eq('tailoring_order_id', order_id)
       const lines = (lineRows ?? []) as { id: string; status: string }[]
+      const pipelineType = resolveStatusPipeline((order as any).order_type, lines)
 
       // REACTIVAR un pedido cancelado: se sacan también las prendas de
       // 'cancelled' (si no, el estado derivado volvería a caer a cancelado) y se
@@ -888,7 +901,7 @@ export const changeOrderStatus = protectedAction<any, any>(
               changed_by: ctx.userId, changed_by_name: ctx.userName,
             }))
           )
-          await clearCompletionStamps(ctx.adminClient, cancelledLineIds, new_status, (order as any).order_type)
+          await clearCompletionStamps(ctx.adminClient, cancelledLineIds, new_status, pipelineType)
         }
         await ctx.adminClient
           .from('tailoring_orders').update({ status: new_status }).eq('id', order_id)
@@ -928,7 +941,7 @@ export const changeOrderStatus = protectedAction<any, any>(
         }
         await ctx.adminClient
           .from('tailoring_orders').update({ status: new_status }).eq('id', order_id)
-        const prop = classifyLinesForStatusChange(new_status, (order as any).order_type, lines)
+        const prop = classifyLinesForStatusChange(new_status, pipelineType, lines)
         if (prop.toUpdate.length > 0) {
           await ctx.adminClient
             .from('tailoring_order_lines').update({ status: new_status }).in('id', prop.toUpdate)
@@ -946,7 +959,7 @@ export const changeOrderStatus = protectedAction<any, any>(
         // Botón "Cambiar estado" reconvertido a "avanzar TODAS las prendas a X":
         // propagación forward y, a partir de ahí, el estado del pedido se DERIVA
         // del mínimo de las prendas (no se fija a mano).
-        const prop = classifyLinesForStatusChange(new_status, (order as any).order_type, lines)
+        const prop = classifyLinesForStatusChange(new_status, pipelineType, lines)
         if (lines.length === 0) {
           // Pedido SIN prendas todavía (el asistente industrial crea primero la
           // cabecera y las prendas se añaden después). Sin líneas no hay mínimo
@@ -970,11 +983,11 @@ export const changeOrderStatus = protectedAction<any, any>(
             await ctx.adminClient
               .from('tailoring_order_lines').update({ status: new_status }).in('id', prop.toUpdate)
             const retreatingLineIds = prop.toUpdate.filter((id) => {
-              const iFrom = getStatusIndex(movedFrom.get(id) ?? '', (order as any).order_type)
-              const iTo = getStatusIndex(new_status, (order as any).order_type)
+              const iFrom = getStatusIndex(movedFrom.get(id) ?? '', pipelineType)
+              const iTo = getStatusIndex(new_status, pipelineType)
               return iFrom >= 0 && iTo >= 0 && iTo < iFrom
             })
-            await clearCompletionStamps(ctx.adminClient, retreatingLineIds, new_status, (order as any).order_type)
+            await clearCompletionStamps(ctx.adminClient, retreatingLineIds, new_status, pipelineType)
           }
           changedLinesCount = prop.toUpdate.length
           aheadLinesCount = prop.aheadCount
@@ -1291,12 +1304,11 @@ export const updateOrderStatus = protectedAction<
       if (error) return failure(error.message, 'INTERNAL')
 
       // Retroceso: quitar los sellos de entrega/terminación (ver clearCompletionStamps).
-      const { data: otRow } = await ctx.adminClient
-        .from('tailoring_orders').select('order_type').eq('id', orderId.trim()).single()
-      const iFrom = getStatusIndex(fromStatus ?? '', (otRow as any)?.order_type)
-      const iTo = getStatusIndex(trimmedStatus, (otRow as any)?.order_type)
+      const pipelineType = await getOrderPipelineType(ctx.adminClient, orderId.trim())
+      const iFrom = getStatusIndex(fromStatus ?? '', pipelineType)
+      const iTo = getStatusIndex(trimmedStatus, pipelineType)
       if (iFrom >= 0 && iTo >= 0 && iTo < iFrom) {
-        await clearCompletionStamps(ctx.adminClient, [lineId.trim()], trimmedStatus, (otRow as any)?.order_type)
+        await clearCompletionStamps(ctx.adminClient, [lineId.trim()], trimmedStatus, pipelineType)
       }
 
       // Historial de la transición de la prenda.
@@ -1319,8 +1331,9 @@ export const updateOrderStatus = protectedAction<
       }
 
       const { data: lineRows } = await ctx.adminClient
-        .from('tailoring_order_lines').select('id, status').eq('tailoring_order_id', orderId.trim())
+        .from('tailoring_order_lines').select('id, status, line_type, configuration').eq('tailoring_order_id', orderId.trim())
       const lines = (lineRows ?? []) as { id: string; status: string }[]
+      const pipelineType = resolveStatusPipeline((prevOrder as any)?.order_type, lines)
 
       if (trimmedStatus === 'cancelled' || trimmedStatus === 'incident') {
         // Acciones MANUALES a nivel pedido (no derivables del mínimo).
@@ -1333,7 +1346,7 @@ export const updateOrderStatus = protectedAction<
         const { error } = await ctx.adminClient
           .from('tailoring_orders').update({ status: trimmedStatus }).eq('id', orderId.trim())
         if (error) return failure(error.message, 'INTERNAL')
-        const prop = classifyLinesForStatusChange(trimmedStatus, (prevOrder as any)?.order_type, lines)
+        const prop = classifyLinesForStatusChange(trimmedStatus, pipelineType, lines)
         if (prop.toUpdate.length > 0) {
           await ctx.adminClient
             .from('tailoring_order_lines').update({ status: trimmedStatus }).in('id', prop.toUpdate)
@@ -1350,17 +1363,17 @@ export const updateOrderStatus = protectedAction<
         })
       } else {
         // "Avanzar todas las prendas a X" + derivar el estado del pedido.
-        const prop = classifyLinesForStatusChange(trimmedStatus, (prevOrder as any)?.order_type, lines)
+        const prop = classifyLinesForStatusChange(trimmedStatus, pipelineType, lines)
         if (prop.toUpdate.length > 0) {
           const movedFrom = new Map(lines.map((l) => [l.id, l.status]))
           await ctx.adminClient
             .from('tailoring_order_lines').update({ status: trimmedStatus }).in('id', prop.toUpdate)
           const retreatingLineIds = prop.toUpdate.filter((id) => {
-            const iFrom = getStatusIndex(movedFrom.get(id) ?? '', (prevOrder as any)?.order_type)
-            const iTo = getStatusIndex(trimmedStatus, (prevOrder as any)?.order_type)
+            const iFrom = getStatusIndex(movedFrom.get(id) ?? '', pipelineType)
+            const iTo = getStatusIndex(trimmedStatus, pipelineType)
             return iFrom >= 0 && iTo >= 0 && iTo < iFrom
           })
-          await clearCompletionStamps(ctx.adminClient, retreatingLineIds, trimmedStatus, (prevOrder as any)?.order_type)
+          await clearCompletionStamps(ctx.adminClient, retreatingLineIds, trimmedStatus, pipelineType)
         }
         changedLinesCount = prop.toUpdate.length
         aheadLinesCount = prop.aheadCount

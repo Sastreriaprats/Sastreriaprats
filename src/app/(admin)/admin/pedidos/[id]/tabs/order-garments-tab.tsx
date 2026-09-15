@@ -18,6 +18,7 @@ import { usePermissions } from '@/hooks/use-permissions'
 import { toast } from 'sonner'
 import { getLineGroup, getLineName, type LineGroup } from '@/lib/orders/line-groups'
 import { buildLineRefSuffixes, sortLinesForDisplay } from '@/lib/orders/line-refs'
+import { resolveStatusPipeline } from '@/lib/orders/statuses'
 
 const LOCKED_STATUSES = new Set(['delivered', 'cancelled'])
 
@@ -34,6 +35,7 @@ export function OrderGarmentsTab({ order }: { order: any }) {
   const lines: any[] = sortLinesForDisplay<any>(order.tailoring_order_lines || [])
   // Referencia por prenda (misma que imprime la boleta): PIN-…-AMER-TRJ1
   const lineRefs = buildLineRefSuffixes(lines)
+  const pipelineType = resolveStatusPipeline(order.order_type, lines)
   const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null)
   const [editingLine, setEditingLine] = useState<any | null>(null)
   const [duplicatingLineId, setDuplicatingLineId] = useState<string | null>(null)
@@ -158,7 +160,7 @@ export function OrderGarmentsTab({ order }: { order: any }) {
                 <LineStatusChip
                   orderId={order.id}
                   line={line}
-                  orderType={order.order_type}
+                  orderType={pipelineType}
                   disabled={!canChangeStatus}
                 />
                 {canPrintFicha && (
