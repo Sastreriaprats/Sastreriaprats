@@ -37,18 +37,30 @@ export type SaleBaseRow = {
   tax_amount: number | string | null
 }
 
-/** Base imponible (sin IVA) del dinero NUEVO que la venta aportó al negocio. */
+/**
+ * Base imponible (sin IVA) del dinero NUEVO que la venta aportó al negocio.
+ *
+ * `cobroBaseBySale` (loadPedidoCobroBaseBySale): cobros de pedido de sastrería
+ * metidos en el ticket ("Cobro pendiente - PIN-…", al 0%). No son venta de
+ * boutique: ese dinero es del pedido y ya cuenta por tailoring_order_payments.
+ * Se quitan del total antes de calcular la fracción de IVA, que así es la de la
+ * parte de boutique (la única que lleva IVA en el ticket).
+ */
 export function saleNetBase(
   row: SaleBaseRow,
   voucherPaidBySale: Map<string, number>,
   returnedLeftBySale: Map<string, number>,
+  cobroBaseBySale?: Map<string, number>,
 ): number {
   const total = Number(row.total) || 0
   if (total <= 0) return 0
-  const taxFraction = (Number(row.tax_amount) || 0) / total
+  const cobro = Math.min(total, cobroBaseBySale?.get(row.id) || 0)
+  const ownTotal = total - cobro
+  if (ownTotal <= 0) return 0
+  const taxFraction = Math.min(1, (Number(row.tax_amount) || 0) / ownTotal)
   const voucherPaid = voucherPaidBySale.get(row.id) || 0
   const returnedLeft = returnedLeftBySale.get(row.id) || 0
-  const newMoney = Math.max(0, total - returnedLeft - voucherPaid)
+  const newMoney = Math.max(0, ownTotal - returnedLeft - voucherPaid)
   return newMoney * (1 - taxFraction)
 }
 

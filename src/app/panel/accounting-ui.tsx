@@ -406,6 +406,7 @@ export function MonthlyFullExpandable({ year, view, rows }: { year: number; view
 export const TYPE_BADGE: Record<string, string> = {
   Ticket: 'bg-emerald-50 text-emerald-700',
   'Sastrería': 'bg-violet-50 text-violet-700',
+  Reserva: 'bg-amber-50 text-amber-700',
   Factura: 'bg-blue-50 text-blue-700',
   'Factura recibida': 'bg-red-50 text-red-700',
   Compra: 'bg-red-50 text-red-700',

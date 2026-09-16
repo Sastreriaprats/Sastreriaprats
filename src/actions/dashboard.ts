@@ -3,6 +3,7 @@
 import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
+import { loadReservationPayments } from '@/lib/accounting/reservation-payments'
 import { readAllPaged } from '@/lib/server/paged'
 
 interface DashboardStats {
@@ -55,6 +56,7 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
         fittingsRes,
         onlineInvRows,
         cobroBaseBySale,
+        reservationPayments,
       ] = await Promise.all([
         readAllPaged<{ id?: string; total?: number; subtotal?: number; tax_amount?: number; total_returned?: number; created_at?: string }>((f, t) =>
           admin.from('sales').select('id, total, subtotal, tax_amount, total_returned, created_at').gte('created_at', `${lastMonthStart}T00:00:00`).lte('created_at', todayEnd).in('status', ['completed', 'partially_returned']).order('created_at', { ascending: true }).range(f, t)),
@@ -76,6 +78,8 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
         // Cobros de pedido embebidos en tickets: se restan a la venta para no
         // duplicar el total con tailoring_order_payments (mismo criterio que Contabilidad).
         loadPedidoCobroBaseBySale(admin, `${lastMonthStart}T00:00:00`, todayEnd),
+        // Señales de reserva por payment_date (no están en `sales`; mismo criterio que Contabilidad).
+        loadReservationPayments(admin, lastMonthStart, today),
       ])
 
       // Un error de consulta NO es "cero": estas siete no lanzan, devuelven
@@ -137,6 +141,11 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
         if (date === today) salesToday += base
         if (date >= monthStart) salesThisMonth += base
         if (date >= lastMonthStart && date < monthStart) salesLastMonth += base
+      }
+      for (const p of reservationPayments) {
+        if (p.paymentDate === today) salesToday += p.base
+        if (p.paymentDate >= monthStart) salesThisMonth += p.base
+        if (p.paymentDate >= lastMonthStart && p.paymentDate < monthStart) salesLastMonth += p.base
       }
       for (const inv of onlineInvRows || []) {
         const date = String(inv.invoice_date ?? '').split('T')[0]
@@ -217,7 +226,7 @@ export const getSalesChartData = protectedAction<void, { date: string; label: st
       // Mismo criterio que la tarjeta "Ventas mes" y Contabilidad: base neta de
       // TPV (sales) + cobros de sastrería backoffice (tailoring_order_payments),
       // para que el total del gráfico cuadre con el KPI.
-      const [sales, tailoringPays, onlineInvs, cobroBaseBySale] = await Promise.all([
+      const [sales, tailoringPays, onlineInvs, cobroBaseBySale, reservationPayments] = await Promise.all([
         readAllPaged<{ id?: string; total?: number; subtotal?: number; total_returned?: number; created_at?: string }>((f, t) =>
           admin.from('sales').select('id, total, subtotal, total_returned, created_at').gte('created_at', `${monthStart}T00:00:00`).lte('created_at', `${today}T23:59:59`).in('status', ['completed', 'partially_returned']).order('created_at').range(f, t)),
         readAllPaged((f, t) =>
@@ -225,6 +234,7 @@ export const getSalesChartData = protectedAction<void, { date: string; label: st
         readAllPaged<{ subtotal?: number; invoice_date?: string }>((f, t) =>
           admin.from('invoices').select('subtotal, invoice_date').eq('invoice_type', 'issued').is('sale_id', null).is('tailoring_order_id', null).is('reservation_id', null).not('status', 'in', '(draft,cancelled)').gte('invoice_date', monthStart).lte('invoice_date', today).order('invoice_date').range(f, t)),
         loadPedidoCobroBaseBySale(admin, `${monthStart}T00:00:00`, `${today}T23:59:59`),
+        loadReservationPayments(admin, monthStart, today),
       ])
 
       const dailyMap: Record<string, number> = {}
@@ -256,6 +266,9 @@ export const getSalesChartData = protectedAction<void, { date: string; label: st
           const oSub = Number(o.subtotal) || 0
           dailyMap[day] += amount * (oTotal > 0 ? oSub / oTotal : 1)
         }
+      }
+      for (const p of reservationPayments) {
+        if (dailyMap[p.paymentDate] !== undefined) dailyMap[p.paymentDate] += p.base
       }
       for (const inv of onlineInvs || []) {
         const day = String(inv.invoice_date ?? '').split('T')[0]
@@ -371,12 +384,14 @@ export const getStoresWithStats = protectedAction<{ includeInactive?: boolean } 
       goalsRes,
       onlineMonthRes,
       tailoringPaymentsRes,
+      cobroBaseBySale,
+      reservationPayments,
     ] = await Promise.all([
       // Incluye partially_returned: antes una venta con devolución parcial se caía
       // ENTERA del cálculo. Se netea fila a fila con total_returned (mismo criterio
       // que store-goals.ts, que es la referencia de los objetivos).
       admin.from('sales').select('store_id, total, total_returned').in('store_id', storeIds).gte('created_at', `${today}T00:00:00`).in('status', ['completed', 'partially_returned']),
-      admin.from('sales').select('store_id, total, total_returned, tax_amount, sale_type').in('store_id', storeIds).gte('created_at', `${monthStart}T00:00:00`).in('status', ['completed', 'partially_returned']),
+      admin.from('sales').select('id, store_id, total, total_returned, tax_amount, sale_type').in('store_id', storeIds).gte('created_at', `${monthStart}T00:00:00`).in('status', ['completed', 'partially_returned']),
       admin.from('warehouses').select('id, store_id').in('store_id', storeIds),
       admin.from('store_monthly_goals').select('store_id, goal_type, target_amount').in('store_id', storeIds).eq('year', year).eq('month', month),
       admin.from('online_orders').select('total, tax_amount').in('status', ONLINE_COUNTED_STATUSES).gte('created_at', `${monthStart}T00:00:00`),
@@ -385,6 +400,12 @@ export const getStoresWithStats = protectedAction<{ includeInactive?: boolean } 
         .select('amount, tailoring_orders!inner(store_id, total, tax_amount)')
         .gte('payment_date', monthStart)
         .lte('payment_date', today),
+      // Cobros de pedido cobrados en un ticket: son sastrería (ya van por
+      // tailoring_order_payments), no boutique. Sin restarlos la boutique salía
+      // inflada (Pinzón sep-2026: 16.584 € mostrados, 4.969 € reales).
+      loadPedidoCobroBaseBySale(admin, `${monthStart}T00:00:00`, `${today}T23:59:59`),
+      // Señales de reserva: boutique cobrada ese día (el ticket de recogida va neto).
+      loadReservationPayments(admin, monthStart, today),
     ])
 
     const warehouses = (warehousesRes.data || []) as { id: string; store_id: string }[]
@@ -426,13 +447,15 @@ export const getStoresWithStats = protectedAction<{ includeInactive?: boolean } 
     }
     // salesMonthByStore mantiene el importe bruto (para widgets históricos).
     // boutique/sastreria usan base imponible (sin IVA) para comparar con objetivos.
-    for (const r of (salesMonthRes.data || []) as { store_id: string; total?: number; total_returned?: number | string | null; tax_amount?: number | string | null; sale_type?: string }[]) {
+    for (const r of (salesMonthRes.data || []) as { id: string; store_id: string; total?: number; total_returned?: number | string | null; tax_amount?: number | string | null; sale_type?: string }[]) {
       if (!r.store_id) continue
       const t = Number(r.total) || 0
-      // Prorrateo por la parte NO devuelta, idéntico a store-goals.ts:103-105: sin él,
+      // Prorrateo por la parte NO devuelta, idéntico a store-goals.ts: sin él,
       // incorporar las partially_returned las metería por su importe íntegro.
       const proportion = t > 0 ? Math.max(0, (t - (Number(r.total_returned) || 0)) / t) : 0
-      const net = (t - (Number(r.tax_amount) || 0)) * proportion
+      // Las líneas de cobro de pedido van al 0%: se restan de la base sin tocar el IVA.
+      const cobro = cobroBaseBySale.get(String(r.id)) || 0
+      const net = Math.max(0, t - (Number(r.tax_amount) || 0) - cobro) * proportion
       salesMonthByStore[r.store_id] = (salesMonthByStore[r.store_id] ?? 0) + t * proportion
       const st = r.sale_type ?? ''
       if (BOUTIQUE_SALE_TYPES.includes(st)) {
@@ -457,6 +480,11 @@ export const getStoresWithStats = protectedAction<{ includeInactive?: boolean } 
       const orderTax = Number(order.tax_amount) || 0
       const netFactor = orderTotal > 0 ? (orderTotal - orderTax) / orderTotal : 1
       sastreriaByStore[order.store_id] = (sastreriaByStore[order.store_id] ?? 0) + amount * netFactor
+    }
+
+    for (const p of reservationPayments) {
+      if (!p.storeId || boutiqueByStore[p.storeId] === undefined) continue
+      boutiqueByStore[p.storeId] += p.base
     }
 
     const onlineMonthTotal = (onlineMonthRes.data || []).reduce(

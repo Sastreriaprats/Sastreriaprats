@@ -2,6 +2,7 @@
 
 import { createAdminClient } from '@/lib/supabase/admin'
 import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
+import { loadReservationPayments } from '@/lib/accounting/reservation-payments'
 import { getViewerAccess, assertScope, assertCanManage, type ViewerAccess } from '@/lib/ops/access'
 import { seal, open, dedupTag } from '@/lib/ops/crypto'
 import {
@@ -138,13 +139,16 @@ async function computeYear(year: number) {
   // Lecturas independientes en paralelo. `deposited` = cobros ya ingresados al
   // banco: salen de B y pasan a C (A = B + C se mantiene). Si esa lectura falla,
   // computeYear falla entero: mejor sin datos que contar doble en B.
-  const [sales, cashFrac, tailoringPayments, cobroBaseBySale, deposited, { data: apInv }, apLines, { data: clpRows }, { data: stInv }] = await Promise.all([
+  const [sales, cashFrac, tailoringPayments, cobroBaseBySale, reservationPayments, deposited, { data: apInv }, apLines, { data: clpRows }, { data: stInv }] = await Promise.all([
     readAllSales(admin, start, end),
     readCashFractions(admin, start, end),
     readAllTailoringPayments(admin, year),
     // Base de cobros de pedido embebidos en tickets: se resta al ticket para no
     // duplicar el total (el pedido ya la cuenta en el bucle de sastrería).
     loadPedidoCobroBaseBySale(admin, start, end),
+    // Señales de reserva (mismo criterio que el Resumen de la capa A): sin ellas
+    // A dejaría de ser B + C.
+    loadReservationPayments(admin, `${year}-01-01`, `${year}-12-31`),
     listDepositTags(),
     // Gastos / IVA soportado = FACTURAS RECIBIDAS (ap_supplier_invoices)
     admin.from('ap_supplier_invoices')
@@ -275,6 +279,24 @@ async function computeYear(year: number) {
       cashMoves.push({ kind: 'order_payment', paymentId: pid, orderId, date: d.slice(0, 10), ref: num, concept, method: 'efectivo', client, base: r2(base), vat: r2(vat), total: r2(base + vat) })
     } else {
       incomeLedger.push({ date: d.slice(0, 10), type: 'Sastrería', concept, client, base: r2(base), vat: r2(vat), total: r2(base + vat), orderId })
+    }
+  }
+
+  // Ingresos por SEÑALES DE RESERVA (product_reservation_payments). No están en
+  // `sales`: el ticket de recogida solo lleva lo pendiente. Efectivo → capa B;
+  // resto → C, igual que los cobros de sastrería.
+  for (const p of reservationPayments) {
+    const month = p.paymentDate.slice(0, 7)
+    const q = Math.ceil(Number(p.paymentDate.slice(5, 7)) / 3)
+    let isCash = p.method === 'cash'
+    if (isCash && takeDeposited('reservation_payment', p.id, p.amount)) isCash = false
+    addIncome(isCash, p.base, p.vat, month, q)
+    const concept = `Reserva ${p.reservationNumber}`
+    const client = p.clientName || undefined
+    if (isCash) {
+      cashMoves.push({ kind: 'reservation_payment', paymentId: p.id, date: p.paymentDate, ref: p.reservationNumber, concept, method: 'efectivo', client, base: r2(p.base), vat: r2(p.vat), total: r2(p.amount) })
+    } else {
+      incomeLedger.push({ date: p.paymentDate, type: 'Reserva', concept, client, base: r2(p.base), vat: r2(p.vat), total: r2(p.amount) })
     }
   }
 

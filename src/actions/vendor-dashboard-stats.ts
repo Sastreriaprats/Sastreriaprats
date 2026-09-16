@@ -4,6 +4,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { fetchEmployeeBilledLines } from '@/lib/reports/employee-billing'
 import { checkUserPermission } from '@/actions/auth'
+import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
+import { loadReservationPayments, lastDayOfMonth } from '@/lib/accounting/reservation-payments'
 
 export interface VendorTodaySaleRow {
   id: string
@@ -127,7 +129,8 @@ export async function getVendorDashboardStats(
     // administrador entra por el bypass de checkUserPermission.
     let storeGoal: VendorDashboardStats['storeGoal'] = null
     if (storeId && await checkUserPermission(user.id, 'pos.access')) {
-      const [storeRes, goalsRes, storeSalesRes] = await Promise.all([
+      const monthEndDate = lastDayOfMonth(year, month)
+      const [storeRes, goalsRes, storeSalesRes, cobroBaseBySale, reservationPayments] = await Promise.all([
         admin.from('stores').select('id, code, name').eq('id', storeId).maybeSingle(),
         admin
           .from('store_monthly_goals')
@@ -143,12 +146,15 @@ export async function getVendorDashboardStats(
         // cliente se quedara con el resto, y las dos pantallas no cuadraban.
         admin
           .from('sales')
-          .select('total, total_returned, tax_amount')
+          .select('id, total, total_returned, tax_amount')
           .eq('store_id', storeId)
           .in('status', ['completed', 'partially_returned'])
           .eq('sale_type', 'boutique')
           .gte('created_at', monthStart)
           .lt('created_at', nextMonthStart),
+        // Mismo criterio que Objetivos: sin cobros de pedido y con señales de reserva.
+        loadPedidoCobroBaseBySale(admin, monthStart, `${monthEndDate}T23:59:59`),
+        loadReservationPayments(admin, monthStart, monthEndDate, { storeId }),
       ])
 
       if (storeRes.error) return { error: storeRes.error.message }
@@ -164,13 +170,14 @@ export async function getVendorDashboardStats(
         // Base imponible prorrateada por la parte NO devuelta, idéntico a
         // store-goals.ts (subtotal == total - tax_amount en todas las ventas).
         const actual = (storeSalesRes.data || []).reduce(
-          (acc: number, s: { total: number | string | null; total_returned?: number | string | null; tax_amount: number | string | null }) => {
+          (acc: number, s: { id: string; total: number | string | null; total_returned?: number | string | null; tax_amount: number | string | null }) => {
             const total = Number(s.total) || 0
             const proportion = total > 0 ? Math.max(0, (total - (Number(s.total_returned) || 0)) / total) : 0
-            return acc + (total - (Number(s.tax_amount) || 0)) * proportion
+            const cobro = cobroBaseBySale.get(String(s.id)) || 0
+            return acc + Math.max(0, total - (Number(s.tax_amount) || 0) - cobro) * proportion
           },
           0,
-        )
+        ) + reservationPayments.reduce((acc, p) => acc + p.base, 0)
         storeGoal = {
           storeId: storeRes.data.id,
           storeName: storeRes.data.name,

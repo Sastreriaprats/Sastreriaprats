@@ -6,6 +6,8 @@ import { revalidatePath } from 'next/cache'
 import { checkUserPermission, checkUserAnyPermission } from '@/actions/auth'
 import { saleNetBase, fetchVoucherPaidBySale, fetchReturnedLeftBySale } from '@/lib/server/commission-base'
 import { readAllPaged } from '@/lib/server/paged'
+import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
+import { loadReservationPayments, lastDayOfMonth } from '@/lib/accounting/reservation-payments'
 
 export type GoalType = 'boutique' | 'sastreria' | 'online'
 
@@ -63,14 +65,23 @@ export async function getStoreGoalsForMonth(
     const nextMonth = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 }
     const nextMonthStart = `${nextMonth.y}-${pad(nextMonth.m)}-01T00:00:00`
 
-    const [storesRes, goalsRes, salesRows, onlineRes] = await Promise.all([
+    const monthEndDate = lastDayOfMonth(year, month)
+    const [storesRes, goalsRes, salesRows, onlineRes, cobroBaseBySale, reservationPayments, tailoringPayRows] = await Promise.all([
       admin.from('stores').select('id, code, name, store_type').eq('is_active', true).order('name'),
       admin.from('store_monthly_goals').select('store_id, goal_type, target_amount').eq('year', year).eq('month', month),
       // Paginado (el tope de 1000 filas del servidor no se evita con .limit())
       // e incluye partially_returned: las devoluciones restan del "actual",
       // misma vara que el motor de comisiones.
-      readAllPaged((f, t) => admin.from('sales').select('store_id, total, total_returned, tax_amount, sale_type').in('status', ['completed', 'partially_returned']).gte('created_at', monthStart).lt('created_at', nextMonthStart).order('created_at', { ascending: true }).range(f, t)),
+      readAllPaged((f, t) => admin.from('sales').select('id, store_id, total, total_returned, tax_amount, sale_type').in('status', ['completed', 'partially_returned']).gte('created_at', monthStart).lt('created_at', nextMonthStart).order('created_at', { ascending: true }).range(f, t)),
       admin.from('online_orders').select('total, tax_amount').in('status', ONLINE_COUNTED_STATUSES).gte('created_at', monthStart).lt('created_at', nextMonthStart),
+      // Cobros de pedido cobrados dentro de un ticket: son sastrería, no boutique.
+      loadPedidoCobroBaseBySale(admin, monthStart, `${monthEndDate}T23:59:59`),
+      // Señales de reserva: boutique cobrada ese mes (el ticket de recogida va neto).
+      loadReservationPayments(admin, monthStart, monthEndDate),
+      // Sastrería real de la tienda = cobros de pedidos (backoffice o TPV), base
+      // imponible prorrateada con el IVA del pedido. Mismo criterio que el widget
+      // de objetivos del Dashboard (getStoresWithStats).
+      readAllPaged((f, t) => admin.from('tailoring_order_payments').select('amount, tailoring_orders!inner(store_id, total, tax_amount)').gte('payment_date', monthStart.slice(0, 10)).lte('payment_date', monthEndDate).order('id', { ascending: true }).range(f, t)),
     ])
 
     if (storesRes.error) return { error: storesRes.error.message }
@@ -87,16 +98,34 @@ export async function getStoreGoalsForMonth(
     // Los objetivos se miden en base imponible (sin IVA): total - tax_amount,
     // prorrateando por lo NO devuelto (las devoluciones restan).
     const actualByStore = new Map<string, { boutique: number; sastreria: number }>()
-    for (const r of (salesRows || []) as { store_id: string | null; total: number | string | null; total_returned?: number | string | null; tax_amount: number | string | null; sale_type: string | null }[]) {
+    for (const r of (salesRows || []) as { id: string; store_id: string | null; total: number | string | null; total_returned?: number | string | null; tax_amount: number | string | null; sale_type: string | null }[]) {
       if (!r.store_id) continue
       const entry = actualByStore.get(r.store_id) ?? { boutique: 0, sastreria: 0 }
       const total = Number(r.total) || 0
       const proportion = total > 0 ? Math.max(0, (total - (Number(r.total_returned) || 0)) / total) : 0
-      const net = (total - (Number(r.tax_amount) || 0)) * proportion
+      // Las líneas de cobro de pedido van al 0%: se restan de la base sin tocar el IVA.
+      const cobro = cobroBaseBySale.get(String(r.id)) || 0
+      const net = Math.max(0, total - (Number(r.tax_amount) || 0) - cobro) * proportion
       const st = r.sale_type ?? ''
       if (BOUTIQUE_SALE_TYPES.includes(st)) entry.boutique += net
       else if (SASTRERIA_SALE_TYPES.includes(st)) entry.sastreria += net
       actualByStore.set(r.store_id, entry)
+    }
+    for (const p of reservationPayments) {
+      if (!p.storeId) continue
+      const entry = actualByStore.get(p.storeId) ?? { boutique: 0, sastreria: 0 }
+      entry.boutique += p.base
+      actualByStore.set(p.storeId, entry)
+    }
+    for (const p of (tailoringPayRows || []) as { amount: number | string | null; tailoring_orders: { store_id: string | null; total: number | string | null; tax_amount: number | string | null } | null }[]) {
+      const order = p.tailoring_orders
+      if (!order?.store_id) continue
+      const amount = Number(p.amount) || 0
+      const orderTotal = Number(order.total) || 0
+      const netFactor = orderTotal > 0 ? (orderTotal - (Number(order.tax_amount) || 0)) / orderTotal : 1
+      const entry = actualByStore.get(order.store_id) ?? { boutique: 0, sastreria: 0 }
+      entry.sastreria += amount * netFactor
+      actualByStore.set(order.store_id, entry)
     }
 
     const onlineActualTotal = (onlineRes.data || []).reduce(
@@ -274,7 +303,8 @@ export async function getEmployeeGoals(input: {
     ])
     const salesRes = { data: salesRows, error: null as null }
 
-    const [voucherPaidBySale, returnedLeftBySale] = await Promise.all([
+    const monthEndDate = lastDayOfMonth(year, month)
+    const [voucherPaidBySale, returnedLeftBySale, cobroBaseBySale, reservationPayments] = await Promise.all([
       fetchVoucherPaidBySale(admin, monthStart, nextMonthStart),
       fetchReturnedLeftBySale(
         admin,
@@ -282,6 +312,8 @@ export async function getEmployeeGoals(input: {
           .filter(r => (Number(r.total_returned) || 0) > 0)
           .map(r => r.id),
       ),
+      loadPedidoCobroBaseBySale(admin, monthStart, `${monthEndDate}T23:59:59`),
+      loadReservationPayments(admin, monthStart, monthEndDate, { storeId }),
     ])
 
     if (assignedRes.error) return { error: assignedRes.error.message }
@@ -303,6 +335,9 @@ export async function getEmployeeGoals(input: {
         extraSalesperson.add(s.salesperson_id)
       }
     }
+    for (const p of reservationPayments) {
+      if (p.employeeId && !employees.has(p.employeeId)) extraSalesperson.add(p.employeeId)
+    }
     if (extraSalesperson.size > 0) {
       const { data: extraProfiles } = await admin
         .from('profiles')
@@ -323,12 +358,21 @@ export async function getEmployeeGoals(input: {
     const actuals = new Map<string, { boutique: number; sastreria: number }>()
     for (const r of (salesRes.data || []) as { id: string; salesperson_id: string | null; total: number | string | null; total_returned?: number | string | null; tax_amount: number | string | null; sale_type: string | null }[]) {
       if (!r.salesperson_id) continue
-      const net = saleNetBase(r, voucherPaidBySale, returnedLeftBySale)
+      const net = saleNetBase(r, voucherPaidBySale, returnedLeftBySale, cobroBaseBySale)
       const e = actuals.get(r.salesperson_id) ?? { boutique: 0, sastreria: 0 }
       const st = r.sale_type ?? ''
       if (BOUTIQUE_SALE_TYPES.includes(st)) e.boutique += net
       else if (SASTRERIA_SALE_TYPES.includes(st)) e.sastreria += net
       actuals.set(r.salesperson_id, e)
+    }
+    // Señales de reserva → a quien RESERVÓ (misma atribución que el ticket de
+    // recogida, mig 245). Pagadas con vale no cuentan: ese dinero ya se
+    // comisionó a quien vendió el vale (commission-base.ts).
+    for (const p of reservationPayments) {
+      if (!p.employeeId || p.method === 'voucher') continue
+      const e = actuals.get(p.employeeId) ?? { boutique: 0, sastreria: 0 }
+      e.boutique += p.base
+      actuals.set(p.employeeId, e)
     }
 
     const rows: EmployeeGoalRow[] = Array.from(employees.entries())

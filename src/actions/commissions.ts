@@ -7,6 +7,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { checkUserPermission, checkUserExplicitPermission } from '@/actions/auth'
 import { saleNetBase, fetchVoucherPaidBySale, fetchReturnedLeftBySale } from '@/lib/server/commission-base'
+import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
+import { loadReservationPayments } from '@/lib/accounting/reservation-payments'
 import { revalidatePath } from 'next/cache'
 import { readAllPaged } from '@/lib/server/paged'
 
@@ -181,9 +183,14 @@ export const getEmployeeCommissions = protectedAction<
     const returnedSaleIds = (salesRows as any[])
       .filter(r => (Number(r.total_returned) || 0) > 0)
       .map(r => r.id as string)
-    const [voucherPaidBySale, returnedLeftBySale] = await Promise.all([
+    // Cobros de pedido metidos en un ticket: no son venta de boutique (se restan
+    // de la base). Señales de reserva: dinero de boutique que entra ese día y que
+    // el ticket de recogida ya no lleva (va neto) → se suman a quien RESERVÓ.
+    const [voucherPaidBySale, returnedLeftBySale, cobroBaseBySale, reservationPayments] = await Promise.all([
       fetchVoucherPaidBySale(admin, start_date, endExclusive),
       fetchReturnedLeftBySale(admin, returnedSaleIds),
+      loadPedidoCobroBaseBySale(admin, start_date, end_date + 'T23:59:59'),
+      loadReservationPayments(admin, start_date, end_date),
     ])
 
     // Ventas netas por empleado, mes y bucket.
@@ -194,7 +201,7 @@ export const getEmployeeCommissions = protectedAction<
       if (!emp) continue
       const mk = madridMonthKey(r.created_at)
       if (!monthKeys.has(mk)) continue
-      const net = saleNetBase(r, voucherPaidBySale, returnedLeftBySale)
+      const net = saleNetBase(r, voucherPaidBySale, returnedLeftBySale, cobroBaseBySale)
       const st = (r.sale_type ?? '') as string
       let byMonth = empSales.get(emp)
       if (!byMonth) { byMonth = new Map(); empSales.set(emp, byMonth) }
@@ -202,6 +209,17 @@ export const getEmployeeCommissions = protectedAction<
       if (st === BOUTIQUE_SALE_TYPE) b.boutique += net
       else if (st === GIFT_CARD_SALE_TYPE) b.gift_cards += net
       else if (SASTRERIA_SALE_TYPES.includes(st)) b.sastreria += net
+      byMonth.set(mk, b)
+    }
+    for (const p of reservationPayments) {
+      // Una señal pagada con vale no es dinero nuevo (ver commission-base.ts).
+      if (!p.employeeId || p.method === 'voucher') continue
+      const mk = p.paymentDate.slice(0, 7)
+      if (!monthKeys.has(mk)) continue
+      let byMonth = empSales.get(p.employeeId)
+      if (!byMonth) { byMonth = new Map(); empSales.set(p.employeeId, byMonth) }
+      const b = byMonth.get(mk) ?? { boutique: 0, gift_cards: 0, sastreria: 0 }
+      b.boutique += p.base
       byMonth.set(mk, b)
     }
 
@@ -317,7 +335,7 @@ export const getEmployeeCommissions = protectedAction<
         // llegan como 'YYYY-MM-DD'.
         const coversQuarter = start_date <= qStart && end_date >= qEnd
 
-        const [sgRes, ssRows] = await Promise.all([
+        const [sgRes, ssRows, qCobroBaseBySale, qReservationPayments] = await Promise.all([
           admin.from('store_monthly_goals')
             .select('store_id, goal_type, target_amount')
             .eq('year', qy).in('month', months).in('store_id', bStores).in('goal_type', goalTypes),
@@ -325,11 +343,17 @@ export const getEmployeeCommissions = protectedAction<
           // facilidad y el tope del servidor truncaba el "actual" en silencio
           // (bonus que no se activaba o pool menor).
           readAllPaged((f, t) => admin.from('sales')
-            .select('store_id, total, total_returned, tax_amount, sale_type')
+            .select('id, store_id, total, total_returned, tax_amount, sale_type')
             .in('status', ['completed', 'partially_returned']).in('store_id', bStores)
             .gte('created_at', qStart).lte('created_at', qEnd + 'T23:59:59')
             .order('created_at', { ascending: true })
             .range(f, t)),
+          goalTypes.includes('boutique')
+            ? loadPedidoCobroBaseBySale(admin, qStart, qEnd + 'T23:59:59')
+            : Promise.resolve(new Map<string, number>()),
+          goalTypes.includes('boutique')
+            ? loadReservationPayments(admin, qStart, qEnd)
+            : Promise.resolve([]),
         ])
 
         const targetByStore = new Map<string, number>()
@@ -344,8 +368,14 @@ export const getEmployeeCommissions = protectedAction<
           if (!inGoal) continue
           const total = Number(r.total) || 0
           const proportion = total > 0 ? Math.max(0, (total - (Number(r.total_returned) || 0)) / total) : 0
-          const net = (total - (Number(r.tax_amount) || 0)) * proportion
+          // Cobros de pedido del ticket (al 0%): sastrería, fuera de la boutique.
+          const cobro = st === BOUTIQUE_SALE_TYPE ? (qCobroBaseBySale.get(String(r.id)) || 0) : 0
+          const net = Math.max(0, total - (Number(r.tax_amount) || 0) - cobro) * proportion
           actualByStore.set(r.store_id, (actualByStore.get(r.store_id) || 0) + net)
+        }
+        for (const p of qReservationPayments) {
+          if (!p.storeId || !bStores.includes(p.storeId)) continue
+          actualByStore.set(p.storeId, (actualByStore.get(p.storeId) || 0) + p.base)
         }
 
         const storeRows = bStores.map(sid => {

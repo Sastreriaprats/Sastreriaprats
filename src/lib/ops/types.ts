@@ -30,13 +30,13 @@ export type QuarterRow = {
 }
 
 // Tipo de origen de un cobro en efectivo (para depósitos bancarios y PDF)
-export type MovementKind = 'sale' | 'order_payment' | 'invoice' | 'manual'
+export type MovementKind = 'sale' | 'order_payment' | 'reservation_payment' | 'invoice' | 'manual'
 
 export type MovementRow = {
   kind: MovementKind
   saleId?: string         // venta TPV → PDF de ticket
   orderId?: string        // pedido de sastrería → PDF de ticket de pedido
-  paymentId?: string      // id del cobro de sastrería (item de depósito)
+  paymentId?: string      // id del cobro de sastrería o de la señal de reserva (item de depósito)
   invoiceId?: string      // id de la factura (item de depósito)
   pdfUrl?: string         // PDF ya generado (facturas)
   date: string
@@ -85,7 +85,7 @@ export type ManualSummary = {
 //     Contenido cifrado en aux.deposits / aux.deposit_items.
 export type DepositItemPayload = {
   kind: Exclude<MovementKind, 'manual'>
-  itemId: string          // sale_id | tailoring_order_payments.id | invoices.id
+  itemId: string          // sale_id | tailoring_order_payments.id | product_reservation_payments.id | invoices.id
   amount: number          // parte en efectivo del cobro (IVA incluido)
   ref: string             // nº ticket / pedido / factura
   client?: string

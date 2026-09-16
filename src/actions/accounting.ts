@@ -11,6 +11,7 @@ import { formalGreeting } from '@/lib/email/greeting'
 import { createInvoiceJournalEntry, reverseInvoiceJournalEntry, createManualTransactionJournalEntry } from '@/actions/accounting-triggers'
 import { formatClientAddress, resolveInvoiceParty } from '@/lib/clients/format'
 import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
+import { loadReservationPayments } from '@/lib/accounting/reservation-payments'
 import { readAllPaged } from '@/lib/server/paged'
 import { toLocalISODate } from '@/lib/dates'
 
@@ -49,7 +50,7 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
     const start = `${fromDate}T00:00:00`
     const end = `${toDate}T23:59:59`
 
-    const [sales, purchasesRaw, invoicesRes, tailoringPayments, storesRes, pendOrdersRows, pendSalesRows, pendDueRows, otherInvoices, cobroBaseBySale] = await Promise.all([
+    const [sales, purchasesRaw, invoicesRes, tailoringPayments, storesRes, pendOrdersRows, pendSalesRows, pendDueRows, otherInvoices, cobroBaseBySale, reservationPayments] = await Promise.all([
       // Ventas de TPV (boutique + TPV + sastrería-POS). Paginado: sin esto, un año
       // con >1000 tickets se truncaba silenciosamente e infravaloraba ingresos.
       readAllPaged((f, t) => ctx.adminClient.from('sales').select('id, total, total_returned, subtotal, tax_amount, created_at, store_id').gte('created_at', start).lte('created_at', end).in('status', ['completed', 'partially_returned']).order('created_at', { ascending: true }).range(f, t)),
@@ -85,6 +86,9 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
       // Base de cobros de pedido de sastrería embebidos en tickets: se resta al
       // ticket (netSale) para no duplicar el total con `tailoring_order_payments`.
       loadPedidoCobroBaseBySale(ctx.adminClient, start, end),
+      // Señales de reserva por payment_date: no están en `sales` (el ticket de
+      // recogida va neto de lo ya pagado). Ver reservation-payments.ts.
+      loadReservationPayments(ctx.adminClient, fromDate, toDate),
     ])
 
     // Excluimos proformas (no son facturas reales).
@@ -128,10 +132,12 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
     const income =
       sales.reduce((s: number, x: Record<string, unknown>) => s + netSale(x).netBase, 0) +
       tailoringPayments.reduce((s: number, p: Record<string, unknown>) => s + netTailoringPayment(p).netBase, 0) +
+      reservationPayments.reduce((s, p) => s + p.base, 0) +
       otherInvBase
     const vatCollected =
       sales.reduce((s: number, x: Record<string, unknown>) => s + netSale(x).netVat, 0) +
       tailoringPayments.reduce((s: number, p: Record<string, unknown>) => s + netTailoringPayment(p).netVat, 0) +
+      reservationPayments.reduce((s, p) => s + p.vat, 0) +
       otherInvVat
     const expenses = purchases.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).amount) || 0), 0)
     const vatPaid = purchases.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).tax_amount) || 0), 0)
@@ -163,6 +169,11 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
         if (!byMonth[key]) byMonth[key] = { income: 0, expenses: 0 }
         byMonth[key].income += netTailoringPayment(p).netBase
       }
+    }
+    for (const p of reservationPayments) {
+      const key = p.paymentDate.slice(0, 7)
+      if (!byMonth[key]) byMonth[key] = { income: 0, expenses: 0 }
+      byMonth[key].income += p.base
     }
     for (const x of otherInvoices) {
       const d = (x as any).invoice_date
@@ -219,6 +230,9 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
       const order = ((p as any).tailoring_order as Record<string, unknown>) || {}
       const sid = (order as any).store_id ? String((order as any).store_id) : NO_STORE
       bucket(sid).income += netTailoringPayment(p).netBase
+    }
+    for (const p of reservationPayments) {
+      bucket(p.storeId ?? NO_STORE).income += p.base
     }
     for (const x of purchases) {
       const sid = (x as any).store_id ? String((x as any).store_id) : NO_STORE
@@ -723,7 +737,7 @@ export const getVatQuarterly = protectedAction<
     // factura, independientemente del estado de pago.
     // Paginado con readAllPaged: sin esto, un año con >1000 filas en cualquiera
     // de estas tablas truncaba el IVA de los últimos trimestres en silencio.
-    const [salesRows, purchasesRows, tailoringPaymentsRows, otherInvoicesRows, cobroBaseBySale] = await Promise.all([
+    const [salesRows, purchasesRows, tailoringPaymentsRows, otherInvoicesRows, cobroBaseBySale, reservationPayments] = await Promise.all([
       readAllPaged((f, t) => ctx.adminClient.from('sales').select('id, total, total_returned, subtotal, tax_amount, created_at').gte('created_at', yearStart).lte('created_at', yearEnd).in('status', ['completed', 'partially_returned']).order('created_at', { ascending: true }).range(f, t)),
       readAllPaged((f, t) => ctx.adminClient.from('ap_supplier_invoices').select('amount, tax_amount, invoice_date').eq('is_proforma', false).gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`).order('invoice_date', { ascending: true }).range(f, t)),
       // Cobros de sastrería (backoffice): mismo criterio que el Resumen. amount
@@ -739,6 +753,9 @@ export const getVatQuarterly = protectedAction<
       // va al 0% (la cuota ya era correcta) pero su BASE no debe declararse dos
       // veces (aquí como ticket y otra vez como cobro de sastrería).
       loadPedidoCobroBaseBySale(ctx.adminClient, yearStart, yearEnd),
+      // Señales de reserva: IVA devengado al cobrarlas (payment_date), como los
+      // cobros de sastrería. El ticket de recogida solo lleva lo pendiente.
+      loadReservationPayments(ctx.adminClient, `${year}-01-01`, `${year}-12-31`),
     ])
     const sales = salesRows as Array<{ id?: string; total?: number; total_returned?: number; subtotal?: number; tax_amount?: number; created_at?: string }>
     const purchases = purchasesRows as Array<{ amount?: number; tax_amount?: number; invoice_date?: string }>
@@ -787,6 +804,12 @@ export const getVatQuarterly = protectedAction<
         byQuarter[q].ivaRepercutido += amount - base
         byQuarter[q].salesCount += 1
       }
+    }
+    for (const p of reservationPayments) {
+      const q = quarterFromMonth(Number(p.paymentDate.slice(5, 7)))
+      byQuarter[q].baseSales += p.base
+      byQuarter[q].ivaRepercutido += p.vat
+      byQuarter[q].salesCount += 1
     }
     for (const x of otherInvoices) {
       const d = x.invoice_date

@@ -6,6 +6,7 @@ import { success, failure } from '@/lib/errors'
 import { BOUTIQUE_SALE_TYPE, GIFT_CARD_SALE_TYPE, accumulateByStore, compareSizes } from '@/lib/reports/dimensions'
 import { fetchEmployeeBilledLines } from '@/lib/reports/employee-billing'
 import { loadPedidoCobroBaseBySale, isPedidoCobroDescription } from '@/lib/accounting/pedido-cobro-lines'
+import { loadReservationPayments, type ReservationPaymentIncome } from '@/lib/accounting/reservation-payments'
 import { readAllPaged } from '@/lib/server/paged'
 
 export type ReportChannel = 'all' | 'boutique' | 'tailoring'
@@ -89,6 +90,12 @@ export const getSalesReport = protectedAction<
       }, 'getSalesReport.saleLines')
     }
 
+    // Señales de reserva (boutique) por fecha de cobro: el ticket de recogida solo
+    // lleva lo pendiente, así que sin ellas faltaría ese dinero (reservation-payments.ts).
+    const reservationPays: ReservationPaymentIncome[] = wantBoutique
+      ? await loadReservationPayments(ctx.adminClient, start_date, end_date, { storeId: store_id })
+      : []
+
     let onlineOrders: any[] | null = null
     if (wantBoutique && !store_id) {
       onlineOrders = await readAllPaged<any>((f, t) => ctx.adminClient
@@ -129,6 +136,9 @@ export const getSalesReport = protectedAction<
       if (valueField === 'total') {
         return net ? (Number(item.subtotal) || 0) : (Number(item.total) || 0)
       }
+      if (valueField === 'reservation') {
+        return net ? item.base : item.amount
+      }
       if (valueField === 'payment') {
         // Cobro de sastrería: amount es bruto; a base con el ratio del pedido padre.
         const amt = Number(item.amount) || 0
@@ -160,6 +170,9 @@ export const getSalesReport = protectedAction<
     }
 
     const posGrouped = groupData(saleLines || [], 'line_total', 'sales')
+    for (const [k, v] of Object.entries(groupData(reservationPays as unknown as Record<string, unknown>[], 'reservation', undefined, 'paymentDate'))) {
+      posGrouped[k] = (posGrouped[k] || 0) + v
+    }
     const onlineGrouped = groupData(onlineOrders || [], 'total')
     const tailoringGrouped = groupData(tailoringPays || [], 'payment', undefined, 'payment_date')
 
@@ -173,10 +186,11 @@ export const getSalesReport = protectedAction<
     }))
 
     const totalPos = (saleLines || []).reduce((s, l) => s + valueOf(l, 'line_total'), 0)
+      + reservationPays.reduce((s, p) => s + valueOf(p, 'reservation'), 0)
     const totalOnline = (onlineOrders || []).reduce((s, o) => s + valueOf(o, 'total'), 0)
     const totalTailoring = (tailoringPays || []).reduce((s, p) => s + valueOf(p, 'payment'), 0)
     const saleIds = new Set((saleLines || []).map(l => (l.sales as unknown as Record<string, unknown>)?.created_at))
-    const ticketCount = saleIds.size + (onlineOrders || []).length + (tailoringPays || []).length
+    const ticketCount = saleIds.size + (onlineOrders || []).length + (tailoringPays || []).length + reservationPays.length
     const grandTotal = totalPos + totalOnline + totalTailoring
 
     // Desglose por tienda (solo en modo "Todas"): agrupa las filas YA cargadas con
@@ -186,7 +200,10 @@ export const getSalesReport = protectedAction<
     if (!store_id) {
       const lines = (saleLines || []) as any[]
       const pickLine = (l: any) => ({ storeId: l.sales?.store_id, storeName: l.sales?.stores?.name, value: valueOf(l, 'line_total') })
-      const boutiqueByStore = accumulateByStore(lines.filter((l) => l.sales?.sale_type === BOUTIQUE_SALE_TYPE), pickLine)
+      const boutiqueByStore = accumulateByStore([
+        ...lines.filter((l) => l.sales?.sale_type === BOUTIQUE_SALE_TYPE).map(pickLine),
+        ...reservationPays.map((p) => ({ storeId: p.storeId, storeName: p.storeName, value: valueOf(p, 'reservation') })),
+      ], (x) => x)
       const giftByStore = accumulateByStore(lines.filter((l) => l.sales?.sale_type === GIFT_CARD_SALE_TYPE), pickLine)
       const tailByStore = accumulateByStore(tailoringPays || [], (p: any) => ({
         storeId: p.tailoring_orders?.store_id, storeName: p.tailoring_orders?.stores?.name, value: valueOf(p, 'payment'),
@@ -293,7 +310,7 @@ export const getStoreSalesReport = protectedAction<
       .eq('store_type', 'physical')
       .order('name')
 
-    const [storesRes, salesRows, cobroBaseBySale, payRows, orderRows, onlineRows, invoiceRows] = await Promise.all([
+    const [storesRes, salesRows, cobroBaseBySale, payRows, orderRows, onlineRows, invoiceRows, reservationPays] = await Promise.all([
       storesQ,
       // 1) Cabeceras de ventas TPV (boutique + tarjetas). Cabeceras y no líneas:
       //    misma fórmula que el Dashboard → coincidencia al céntimo.
@@ -368,6 +385,9 @@ export const getStoreSalesReport = protectedAction<
             .lte('invoice_date', end_date)
             .order('invoice_date', { ascending: true })
             .range(f, t)),
+      // 6) Señales de reserva (boutique) por fecha de cobro: el ticket de recogida
+      //    solo lleva lo pendiente (reservation-payments.ts).
+      loadReservationPayments(ctx.adminClient, start_date, end_date, { storeId: store_id }),
     ])
 
     const rowsByStore = new Map<string, StoreSalesStoreRow>()
@@ -404,6 +424,9 @@ export const getStoreSalesReport = protectedAction<
       const row = ensureStore(sale.store_id, sale.stores?.name)
       if ((sale.sale_type ?? '') === GIFT_CARD_SALE_TYPE) row.gift_cards += value
       else row.boutique += value
+    }
+    for (const p of reservationPays) {
+      ensureStore(p.storeId, p.storeName).boutique += net ? p.base : p.amount
     }
 
     // ── Bloque 2: sastrería cobrada, desglosada en las 4 categorías ───────────
@@ -710,7 +733,7 @@ export const getComparePeriods = protectedAction<
       .gte('created_at', minStart).lte('created_at', rangeEnd)
     if (store_id) clientsQ = clientsQ.eq('home_store_id', store_id)
 
-    const [saleLinesRes, onlineRes, paymentsRes, tailoringRes, clientsRes] = await Promise.all([
+    const [saleLinesRes, onlineRes, paymentsRes, tailoringRes, clientsRes, reservationPays] = await Promise.all([
       // Paginado: `.limit(20000)` no evita el tope de 1.000 filas de PostgREST,
       // asi que el % de variacion comparaba dos cifras incompletas.
       wantBoutique
@@ -734,6 +757,10 @@ export const getComparePeriods = protectedAction<
             'getComparePeriods.tailoring').then((data) => ({ data }))
         : Promise.resolve({ data: [] }),
       clientsQ,
+      // Señales de reserva (boutique) por fecha de cobro, igual que getSalesReport.
+      wantBoutique
+        ? loadReservationPayments(ctx.adminClient, minStart, maxEnd, { storeId: store_id })
+        : Promise.resolve([] as ReservationPaymentIncome[]),
     ])
 
     const inCurrent = (d: string) => d >= current_start && d <= current_end + 'T23:59:59'
@@ -771,6 +798,11 @@ export const getComparePeriods = protectedAction<
       const v = net ? amt * (oTotal > 0 ? (Number(order?.subtotal) || 0) / oTotal : 1) : amt
       if (inCurrent(d)) currentRevenue += v
       if (inPrevious(d)) previousRevenue += v
+    }
+    for (const p of reservationPays) {
+      const v = net ? p.base : p.amount
+      if (inCurrent(p.paymentDate)) currentRevenue += v
+      if (inPrevious(p.paymentDate)) previousRevenue += v
     }
     let currentOrders = 0
     let previousOrders = 0
@@ -1316,7 +1348,7 @@ export const getSalesByEmployee = protectedAction<
     // que la facturación por vendedor se calculaba sobre las primeras 1.000
     // líneas del rango. El `.order()` estable evita que el paginado repita o se
     // salte filas. Mismos filtros, mismo resultado al céntimo.
-    const [saleLinesRes, paymentsRes, tailoringOrdersRes, cobroLinesRes] = await Promise.all([
+    const [saleLinesRes, paymentsRes, tailoringOrdersRes, cobroLinesRes, reservationPays] = await Promise.all([
       wantBoutique
         ? readAllPaged<any>((f, t) => saleLinesQ.order('id', { ascending: true }).range(f, t),
             'getSalesByEmployee.saleLines').then((data) => ({ data }))
@@ -1333,6 +1365,11 @@ export const getSalesByEmployee = protectedAction<
         ? readAllPaged<any>((f, t) => cobroLinesQ.order('id', { ascending: true }).range(f, t),
             'getSalesByEmployee.cobroLines').then((data) => ({ data }))
         : Promise.resolve({ data: [] as any[] }),
+      // Señales de reserva → boutique de quien RESERVÓ (misma atribución que la
+      // línea del ticket de recogida, que ya va neta de la señal).
+      wantBoutique
+        ? loadReservationPayments(ctx.adminClient, start_date, end_date, { storeId: store_id })
+        : Promise.resolve([] as ReservationPaymentIncome[]),
     ])
 
     // Mapa (pedido | sesión | importe) → vendedor real, desde las líneas de cobro
@@ -1392,6 +1429,14 @@ export const getSalesByEmployee = protectedAction<
       if (sId) { e.storeTotals[sId] = (e.storeTotals[sId] || 0) + amount; storeNames[sId] = sale?.stores?.name || storeNames[sId] || 'Sin tienda' }
     }
 
+    for (const p of reservationPays) {
+      const e = ensure(p.employeeId || 'unknown')
+      const amount = net ? p.base : p.amount
+      e.pos_total += amount
+      e.boutique_total += amount
+      if (p.storeId) { e.storeTotals[p.storeId] = (e.storeTotals[p.storeId] || 0) + amount; storeNames[p.storeId] = p.storeName || storeNames[p.storeId] || 'Sin tienda' }
+    }
+
     for (const payment of paymentsRes.data || []) {
       // Cobro embebido en ticket → vendedor de la línea de cobro; si no, created_by.
       const key = `${(payment as any).tailoring_order_id}|${(payment as any).cash_session_id ?? ''}|${(Number(payment.amount) || 0).toFixed(2)}`
@@ -1447,7 +1492,10 @@ export const getSalesByEmployee = protectedAction<
     if (!store_id) {
       const lines = (saleLinesRes.data || []) as any[]
       const pickLine = (l: any) => ({ storeId: l.sales?.store_id, storeName: l.sales?.stores?.name, value: lineAmount(l) })
-      const boutiqueByStore = accumulateByStore(lines.filter((l) => l.sales?.sale_type === BOUTIQUE_SALE_TYPE), pickLine)
+      const boutiqueByStore = accumulateByStore([
+        ...lines.filter((l) => l.sales?.sale_type === BOUTIQUE_SALE_TYPE).map(pickLine),
+        ...reservationPays.map((p) => ({ storeId: p.storeId, storeName: p.storeName, value: net ? p.base : p.amount })),
+      ], (x) => x)
       const giftByStore = accumulateByStore(lines.filter((l) => l.sales?.sale_type === GIFT_CARD_SALE_TYPE), pickLine)
       const tailByStore = accumulateByStore((paymentsRes.data || []) as any[], (p: any) => ({
         storeId: p.tailoring_orders?.store_id, storeName: p.tailoring_orders?.stores?.name,
