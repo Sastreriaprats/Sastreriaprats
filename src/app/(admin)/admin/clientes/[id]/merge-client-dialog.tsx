@@ -87,7 +87,10 @@ export function MergeClientDialog({ open, onOpenChange, source, basePath }: {
     }
   }
 
-  const canConfirm = !!target && preview?.can_merge === true && confirmText.trim() === source.full_name.trim() && !merging
+  // El navegador colapsa espacios al pintar el nombre: si full_name trae dobles espacios
+  // (first_name con espacio final) el usuario nunca podría teclearlo igual.
+  const normalizeName = (s: string) => s.replace(/\s+/g, ' ').trim().toLocaleUpperCase('es')
+  const canConfirm = !!target && preview?.can_merge === true && normalizeName(confirmText) === normalizeName(source.full_name) && !merging
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) reset(); onOpenChange(o) }}>
