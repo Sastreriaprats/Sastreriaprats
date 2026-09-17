@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
-import { ChevronDown, ChevronRight, Download, Loader2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Download, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { getViewC, getIssuedInvoicePdfUrls, getApInvoicePdfUrls } from '@/actions/ops'
 import type { ViewC, AccountingView, ApInvoiceLite, VatRateRow, InvoiceOriginKind } from '@/lib/ops/types'
 import { downloadExcelMulti } from '@/lib/excel/export'
 import { downloadZip, extFromUrl, type ZipItem } from '../bulk-download'
+import { ClientLedgerDialog, buildClientDetail, type ClientDetailTarget } from './client-ledger-dialog'
 import { Tabs, Kpis, QuarterTable, MonthVatTable, MONTH_NAMES, MonthlyFullExpandable, LedgerTable, DownloadBtn, TYPE_BADGE, TOTAL_ROW, PageHeader, YearSelect, eur, MONTH_LABELS, groupByMonth, monthKey } from '../accounting-ui'
 
 const thisYear = new Date().getFullYear()
@@ -118,6 +119,19 @@ function makeMatcher(query: string) {
 }
 
 const quarterOf = (date: string) => Math.ceil(Number(date.slice(5, 7)) / 3)
+
+// Adquisiciones intracomunitarias con INVERSIÓN DEL SUJETO PASIVO: el proveedor
+// UE factura sin IVA y la empresa autorrepercute el IVA español (devengado,
+// 303 casillas 10-11) y lo deduce a la vez (36-37 bienes corrientes / 28-29
+// servicios): efecto neto cero en el resultado, pero debe figurar en ambos lados.
+// Si el proveedor UE ya factura con IVA (p.ej. Adobe vía OSS) no hay ISP.
+// Tipo general del 21 %: el de los tejidos, avíos y servicios que se compran.
+const ISP_RATE = 21
+const isIsp = (f: ApInvoiceLite) => f.isIntraEU && Math.abs(f.vat) < 0.005
+const ispVat = (f: ApInvoiceLite) => n2((f.base * ISP_RATE) / 100)
+// Fila del desglose de IVA soportado por tipo; `isp` = adquisiciones intracomunitarias
+type VatRowView = VatRateRow & { isp?: boolean }
+const rateText = (r: { rate: number; isp?: boolean }) => (r.isp ? `ISP intracomunitaria ${pct(r.rate)}` : pct(r.rate))
 const qPeriod = (year: number, q: number) => `${String((q - 1) * 3 + 1).padStart(2, '0')}/${year} – ${String(q * 3).padStart(2, '0')}/${year}`
 const pct = (n: number) => `${Number(n) % 1 === 0 ? Number(n) : (Number(n) || 0).toLocaleString('es-ES')} %`
 // Tipo de IVA de un documento emitido. Solo devuelve un número cuando TODO el
@@ -151,12 +165,18 @@ export function ScenarioCView() {
   const [provenance, setProvenance] = useState<Provenance | ''>('')
   const [sortKey, setSortKey] = useState<SortKey>('date_desc')
   const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null)
+  // Facturas elegidas a mano para el ZIP: ids de factura emitida / adjuntos de proveedor
+  const [selInc, setSelInc] = useState<Set<string>>(new Set())
+  const [selExp, setSelExp] = useState<Set<string>>(new Set())
+  // Cliente abierto en el modal de facturación + libro mayor
+  const [clientTarget, setClientTarget] = useState<ClientDetailTarget | null>(null)
   // Pestaña IVA: desglose por trimestre o por mes
   const [ivaPeriod, setIvaPeriod] = useState<'trimestres' | 'meses'>('trimestres')
   const hasFilter = !!(fromDate || toDate || query.trim() || supplier || provenance)
 
   const load = useCallback(async () => {
     setLoading(true)
+    setSelInc(new Set()); setSelExp(new Set())
     const res = await getViewC(year)
     setData(res.ok ? res.data : null)
     setLoading(false)
@@ -249,6 +269,42 @@ export function ScenarioCView() {
     for (const f of retentionInvoices) arr[quarterOf(f.date) - 1] += f.retentionAmount
     return arr.map(n2)
   }, [retentionInvoices])
+  // Adquisiciones intracomunitarias con ISP: base y cuota autorrepercutida por
+  // trimestre (0..3) y por mes (0..11)
+  const isp = useMemo(() => {
+    const zero = () => ({ base: 0, vat: 0, count: 0 })
+    const q = [0, 1, 2, 3].map(zero), m = Array.from({ length: 12 }, zero)
+    for (const f of (data?.apInvoices ?? []).filter(isIsp)) {
+      const mo = Number(f.date.slice(5, 7))
+      if (mo < 1 || mo > 12) continue
+      for (const cell of [q[Math.ceil(mo / 3) - 1], m[mo - 1]]) {
+        cell.base = n2(cell.base + f.base); cell.vat = n2(cell.vat + ispVat(f)); cell.count += 1
+      }
+    }
+    const base = n2(q.reduce((s, c) => s + c.base, 0)), vat = n2(q.reduce((s, c) => s + c.vat, 0))
+    return { byQuarter: q, byMonth: m, base, vat, count: q.reduce((s, c) => s + c.count, 0) }
+  }, [data])
+  // IVA soportado por tipo: las compras con ISP salen de la fila del 0 % (llegan
+  // sin IVA) y van a una fila propia con su cuota autorrepercutida (deducible)
+  const vatRows = useMemo<VatRowView[]>(() => {
+    if (!data) return []
+    if (isp.count === 0) return data.vatByRate
+    const nearZero = (n: number) => Math.abs(n) < 0.005
+    const rows: VatRowView[] = data.vatByRate
+      .map((r) => r.rate !== 0 ? r : {
+        ...r,
+        byQuarter: r.byQuarter.map((c, i) => ({ base: n2(c.base - isp.byQuarter[i].base), vat: c.vat })),
+        byMonth: r.byMonth.map((c, i) => ({ base: n2(c.base - isp.byMonth[i].base), vat: c.vat })),
+        base: n2(r.base - isp.base),
+      })
+      .filter((r) => !(r.rate === 0 && nearZero(r.base) && nearZero(r.vat) && r.byMonth.every((c) => nearZero(c.base))))
+    rows.push({
+      rate: ISP_RATE, isp: true, base: isp.base, vat: isp.vat,
+      byQuarter: isp.byQuarter.map((c) => ({ base: c.base, vat: c.vat })),
+      byMonth: isp.byMonth.map((c) => ({ base: c.base, vat: c.vat })),
+    })
+    return rows
+  }, [data, isp])
   // Ídem por mes (índice 0..11 = enero..diciembre)
   const retentionsByMonth = useMemo(() => {
     const arr = Array(12).fill(0) as number[]
@@ -350,7 +406,9 @@ export function ScenarioCView() {
       })) },
       { name: 'Facturas intracomunitarias', rows: apIntraEU.map((f) => ({
         'Nº': f.number, Proveedor: f.supplier, 'NIF-IVA': f.cif ?? '', Fecha: f.date,
-        Base: n2(f.base), IVA: n2(f.vat), Total: n2(f.total),
+        Base: n2(f.base), 'Régimen': isIsp(f) ? `ISP ${ISP_RATE}%` : 'Con IVA',
+        'Cuota autorrepercutida (devengada y deducible)': isIsp(f) ? ispVat(f) : 0,
+        'IVA facturado': n2(f.vat), 'Total pagado': n2(f.total),
         Notas: f.note ?? '',
       })) },
     ]
@@ -373,21 +431,25 @@ export function ScenarioCView() {
         'Retenciones': n2(retentionsByMonth[i]), 'Total a liquidar': n2(m.resultado + retentionsByMonth[i]),
       })) },
       { name: 'IVA soportado por tipo', rows: [1, 2, 3, 4].flatMap((q) =>
-        data.vatByRate
+        vatRows
           .filter((r) => r.byQuarter[q - 1].base !== 0 || r.byQuarter[q - 1].vat !== 0)
           .map((r) => ({
-            Trimestre: `T${q}`, 'Tipo IVA %': r.rate,
+            Trimestre: `T${q}`, 'Tipo IVA': rateText(r),
             Base: n2(r.byQuarter[q - 1].base), 'Cuota IVA': n2(r.byQuarter[q - 1].vat),
           }))
       ) },
       { name: 'IVA soportado tipo (mes)', rows: MONTH_NAMES.flatMap((mes, i) =>
-        data.vatByRate
+        vatRows
           .filter((r) => r.byMonth[i].base !== 0 || r.byMonth[i].vat !== 0)
           .map((r) => ({
-            Trimestre: `T${Math.ceil((i + 1) / 3)}`, Mes: mes, 'Tipo IVA %': r.rate,
+            Trimestre: `T${Math.ceil((i + 1) / 3)}`, Mes: mes, 'Tipo IVA': rateText(r),
             Base: n2(r.byMonth[i].base), 'Cuota IVA': n2(r.byMonth[i].vat),
           }))
       ) },
+      { name: 'Intracomunitarias ISP', rows: [
+        ...data.C.quarters.map((q, i) => ispExcelRow(`${q.quarter} (${q.period})`, q, isp.byQuarter[i])),
+        ...data.C.monthlyVat.map((m, i) => ispExcelRow(MONTH_NAMES[i], m, isp.byMonth[i])),
+      ] },
       { name: 'Retenciones', rows: retentionInvoices.map((f) => ({
         Trimestre: `T${quarterOf(f.date)}`, Mes: f.date.slice(0, 7), Fecha: f.date,
         'Nº factura': f.number, Proveedor: f.supplier, Base: n2(f.base), 'IVA': n2(f.vat),
@@ -416,12 +478,34 @@ export function ScenarioCView() {
 
   const clearFilters = () => { setFromDate(''); setToDate(''); setQuery(''); setSupplier(''); setProvenance('') }
 
-  // Descarga en un ZIP de las facturas que se están viendo (con filtros y orden).
+  // Detalle del cliente abierto (facturas, cobros que las liquidan, sin factura y mayor)
+  const clientDetail = useMemo(() => {
+    if (!data || !clientTarget) return null
+    const noInvoiceDocs = incomeDocs.filter((d) => d.docType !== 'Factura' && d.client.trim().toUpperCase() === clientTarget.key)
+    return buildClientDetail(clientTarget, data.invoices, data.ledger, noInvoiceDocs)
+  }, [data, incomeDocs, clientTarget])
+
+  // Descarga en un ZIP: las facturas MARCADAS si hay alguna; si no, todas las
+  // que se están viendo (con filtros y orden).
   // Ingresos: facturas emitidas (los tickets/cobros sin factura no son factura).
   // Gastos: adjuntos de las facturas de proveedor que lo tengan.
-  const bulkIncome = useMemo(() => filteredIncomeDocs.filter((d) => d.docType === 'Factura' && d.invoiceId), [filteredIncomeDocs])
-  const bulkExpense = useMemo(() => filteredApInvoices.filter((f) => f.attachmentPath), [filteredApInvoices])
+  const visibleIncome = useMemo(() => filteredIncomeDocs.filter((d) => d.docType === 'Factura' && d.invoiceId), [filteredIncomeDocs])
+  const visibleExpense = useMemo(() => filteredApInvoices.filter((f) => f.attachmentPath), [filteredApInvoices])
+  const bulkIncome = useMemo(
+    () => (selInc.size ? incomeDocs.filter((d) => d.docType === 'Factura' && d.invoiceId && selInc.has(d.invoiceId)) : visibleIncome),
+    [selInc, incomeDocs, visibleIncome],
+  )
+  const bulkExpense = useMemo(
+    () => (selExp.size ? (data?.apInvoices ?? []).filter((f) => f.attachmentPath && selExp.has(f.attachmentPath)) : visibleExpense),
+    [selExp, data, visibleExpense],
+  )
   const bulkCount = docSide === 'ingresos' ? bulkIncome.length : bulkExpense.length
+  const selectedCount = docSide === 'ingresos' ? selInc.size : selExp.size
+  const toggleIn = (set: Set<string>, ids: string[], on: boolean) => {
+    const next = new Set(set)
+    for (const id of ids) { if (on) next.add(id); else next.delete(id) }
+    return next
+  }
   const onBulkDownload = async () => {
     if (bulk || bulkCount === 0) return
     if (bulkCount > 150 && !window.confirm(`Vas a descargar ${bulkCount} archivos en un ZIP. Puede tardar varios minutos. ¿Continuar?`)) return
@@ -584,7 +668,8 @@ export function ScenarioCView() {
           {ivaPeriod === 'meses'
             ? <MonthVatTable view={data.C} variant="full" retentions={retentionsByMonth} />
             : <QuarterTable view={data.C} variant="full" retentions={retentionsByQuarter} />}
-          <VatByRateTable rows={data.vatByRate} byMonth={ivaPeriod === 'meses'} />
+          {isp.count > 0 && <IntraIspCard view={data.C} isp={isp} byMonth={ivaPeriod === 'meses'} />}
+          <VatByRateTable rows={vatRows} byMonth={ivaPeriod === 'meses'} />
         </div>
       ) : tab === 'retenciones' ? (
         <RetentionsTab year={year} invoices={retentionInvoices} />
@@ -616,19 +701,35 @@ export function ScenarioCView() {
                 { key: 'gastos', label: 'Gastos' },
               ]}
             />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onBulkDownload}
-              disabled={!!bulk || bulkCount === 0}
-              title={docSide === 'ingresos'
-                ? 'Descarga en un ZIP las facturas emitidas que se ven en la lista (los tickets y cobros sin factura no se incluyen)'
-                : 'Descarga en un ZIP los PDF de las facturas de proveedor que se ven en la lista'}
-            >
-              {bulk
-                ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Descargando {bulk.done}/{bulk.total}…</>
-                : <><Download className="mr-1.5 h-3.5 w-3.5" />Descargar {bulkCount} {bulkCount === 1 ? 'factura' : 'facturas'} (ZIP)</>}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              {selectedCount > 0 && !bulk && (
+                <button
+                  onClick={() => (docSide === 'ingresos' ? setSelInc(new Set()) : setSelExp(new Set()))}
+                  className="text-xs text-slate-500 underline hover:text-slate-700"
+                >
+                  Quitar selección
+                </button>
+              )}
+              <Button
+                variant={selectedCount > 0 ? 'default' : 'outline'}
+                size="sm"
+                onClick={onBulkDownload}
+                disabled={!!bulk || bulkCount === 0}
+                title={selectedCount > 0
+                  ? 'Descarga en un ZIP solo las facturas marcadas'
+                  : docSide === 'ingresos'
+                    ? 'Descarga en un ZIP las facturas emitidas que se ven en la lista (marca casillas para elegir solo algunas; los tickets y cobros sin factura no se incluyen)'
+                    : 'Descarga en un ZIP los PDF de las facturas de proveedor que se ven en la lista (marca casillas para elegir solo algunas)'}
+              >
+                {bulk
+                  ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Descargando {bulk.done}/{bulk.total}…</>
+                  : <><Download className="mr-1.5 h-3.5 w-3.5" />
+                    {selectedCount > 0
+                      ? `Descargar ${bulkCount} ${bulkCount === 1 ? 'seleccionada' : 'seleccionadas'} (ZIP)`
+                      : `Descargar ${bulkCount === 1 ? 'la visible' : `las ${bulkCount} visibles`} (ZIP)`}
+                  </>}
+              </Button>
+            </div>
           </div>
           {(() => {
             const sortSelect = (
@@ -673,6 +774,14 @@ export function ScenarioCView() {
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                   <tr>
+                    <th className="w-8 pl-3 py-3">
+                      <SelectAllBox
+                        ids={visibleIncome.map((d) => d.invoiceId!)}
+                        selected={selInc}
+                        onChange={(ids, on) => setSelInc((s) => toggleIn(s, ids, on))}
+                        label="Marcar todas las facturas visibles"
+                      />
+                    </th>
                     <th className="text-left px-3 py-3">Tipo</th>
                     <th className="text-left px-3 py-3">Nº</th>
                     <th className="text-left px-3 py-3">Procedencia</th>
@@ -689,9 +798,20 @@ export function ScenarioCView() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredIncomeDocs.length === 0 ? (
-                    <tr><td colSpan={12} className="px-3 py-8 text-center text-slate-400">Sin documentos de ingreso.</td></tr>
+                    <tr><td colSpan={13} className="px-3 py-8 text-center text-slate-400">Sin documentos de ingreso.</td></tr>
                   ) : filteredIncomeDocs.map((d, i) => (
-                    <tr key={i} className="hover:bg-slate-50/50">
+                    <tr key={i} className={d.invoiceId && selInc.has(d.invoiceId) ? 'bg-sky-50/60' : 'hover:bg-slate-50/50'}>
+                      <td className="w-8 pl-3 py-2">
+                        {d.docType === 'Factura' && d.invoiceId && (
+                          <input
+                            type="checkbox"
+                            checked={selInc.has(d.invoiceId)}
+                            onChange={(e) => setSelInc((s) => toggleIn(s, [d.invoiceId!], e.target.checked))}
+                            aria-label={`Marcar ${d.number}`}
+                            className="h-4 w-4 cursor-pointer accent-prats-navy"
+                          />
+                        )}
+                      </td>
                       <td className="px-3 py-2">
                         <span className={`rounded px-1.5 py-0.5 text-xs ${TYPE_BADGE[d.docType] ?? 'bg-slate-100 text-slate-600'}`}>{d.docType}</span>
                       </td>
@@ -721,7 +841,7 @@ export function ScenarioCView() {
                   ))}
                   {filteredIncomeDocs.length > 0 && (
                     <tr className={TOTAL_ROW}>
-                      <td className="px-3 py-2.5" colSpan={5}>TOTAL ingresos ({filteredIncomeDocs.length} documentos)</td>
+                      <td className="px-3 py-2.5" colSpan={6}>TOTAL ingresos ({filteredIncomeDocs.length} documentos)</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{eur(filteredIncomeDocs.reduce((s, d) => s + d.base, 0))}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{eur(filteredIncomeDocs.reduce((s, d) => s + d.vat, 0))}</td>
                       <td className="px-3 py-2.5 text-right text-slate-400">—</td>
@@ -744,6 +864,8 @@ export function ScenarioCView() {
                 title="Facturas recibidas · nacionales y resto"
                 tag={`${apDomestic.length} facturas`}
                 rows={apDomestic}
+                selected={selExp}
+                onSelect={(ids, on) => setSelExp((s) => toggleIn(s, ids, on))}
                 footnote="Facturas recibidas de proveedores nacionales (y de fuera de la UE) del año, sin proformas. El total es el importe
                 del documento (base + IVA − retención); las retenciones se detallan en su pestaña. El tipo de IVA sale de las líneas de la
                 factura; en las registradas sin desglose se deriva del cociente IVA/base."
@@ -753,30 +875,46 @@ export function ScenarioCView() {
                 tag={`${apIntraEU.length} facturas`}
                 rows={apIntraEU}
                 intra
-                footnote="Proveedores con NIF-IVA de otro país de la UE (adquisiciones intracomunitarias). Llegan sin IVA (inversión del
-                sujeto pasivo: el IVA se autorrepercute y deduce a la vez en el 303) y se declaran en el modelo 349, no en el 347."
+                selected={selExp}
+                onSelect={(ids, on) => setSelExp((s) => toggleIn(s, ids, on))}
+                footnote={`Proveedores con NIF-IVA de otro país de la UE (adquisiciones intracomunitarias). Llegan sin IVA: régimen de
+                inversión del sujeto pasivo (ISP), la empresa autorrepercute el IVA al ${ISP_RATE} % (devengado, casillas 10-11 del 303) y lo
+                deduce a la vez (casillas 36-37 si son bienes corrientes, 28-29 si son servicios), sin efecto en el resultado. El total es lo
+                pagado al proveedor (sin IVA). Se declaran en el modelo 349, no en el 347. «Con IVA» = proveedor UE que ya factura IVA
+                español (sin ISP).`}
               />
             </div>
           )}
         </div>
       ) : (
-        <ThirdPartiesTab year={year} clients={clients347} suppliers={suppliers347} intra={suppliersIntra} />
+        <ThirdPartiesTab
+          year={year}
+          clients={clients347}
+          suppliers={suppliers347}
+          intra={suppliersIntra}
+          onClientClick={(r) => setClientTarget({ key: r.key, name: r.name, nif: r.nif })}
+        />
       )}
+      <ClientLedgerDialog year={year} target={clientTarget} detail={clientDetail} onClose={() => setClientTarget(null)} />
     </div>
   )
 }
 
-// Tabla de facturas recibidas de proveedor (gastos), con desglose base / tipo de
-// IVA / IVA / retención / total. `intra` = variante intracomunitaria (sin columna
-// de retención: esas facturas llegan sin IVA ni IRPF).
-function ApInvoicesCard({ title, tag, rows, footnote, intra = false }: {
+/// Tabla de facturas recibidas de proveedor (gastos), con desglose base / tipo de
+// IVA / IVA / retención / total y casilla para elegirlas en la descarga ZIP.
+// `intra` = variante intracomunitaria: sin retención y con el régimen de
+// inversión del sujeto pasivo (cuota autorrepercutida, que se deduce a la vez).
+function ApInvoicesCard({ title, tag, rows, footnote, intra = false, selected, onSelect }: {
   title: string
   tag: string
   rows: ApInvoiceLite[]
   footnote: string
   intra?: boolean
+  selected: Set<string>
+  onSelect: (paths: string[], on: boolean) => void
 }) {
-  const cols = intra ? 9 : 10
+  const cols = 11
+  const selectable = rows.filter((f) => f.attachmentPath).map((f) => f.attachmentPath!)
   return (
     <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-x-auto">
       <div className="flex items-baseline justify-between border-b border-slate-200 px-4 py-3">
@@ -786,13 +924,26 @@ function ApInvoicesCard({ title, tag, rows, footnote, intra = false }: {
       <table className="w-full text-sm">
         <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
           <tr>
+            <th className="w-8 pl-3 py-3">
+              <SelectAllBox ids={selectable} selected={selected} onChange={onSelect} label="Marcar todas las facturas visibles de esta tabla" />
+            </th>
             <th className="text-left px-3 py-3">Nº</th>
             <th className="text-left px-3 py-3">Proveedor</th>
             <th className="text-left px-3 py-3">Fecha</th>
             <th className="text-right px-3 py-3">Base</th>
-            <th className="text-right px-3 py-3">Tipo IVA</th>
-            <th className="text-right px-3 py-3">IVA</th>
-            {!intra && <th className="text-right px-3 py-3">Retención</th>}
+            {intra ? (
+              <>
+                <th className="text-left px-3 py-3">Régimen</th>
+                <th className="text-right px-3 py-3" title="IVA que se autorrepercute (devengado) y se deduce a la vez en el 303">Cuota autorrep.</th>
+                <th className="text-right px-3 py-3">IVA facturado</th>
+              </>
+            ) : (
+              <>
+                <th className="text-right px-3 py-3">Tipo IVA</th>
+                <th className="text-right px-3 py-3">IVA</th>
+                <th className="text-right px-3 py-3">Retención</th>
+              </>
+            )}
             <th className="text-right px-3 py-3">Total</th>
             <th className="text-left px-3 py-3">Notas</th>
             <th className="text-right px-3 py-3">PDF</th>
@@ -801,41 +952,76 @@ function ApInvoicesCard({ title, tag, rows, footnote, intra = false }: {
         <tbody className="divide-y divide-slate-100">
           {rows.length === 0 ? (
             <tr><td colSpan={cols} className="px-3 py-8 text-center text-slate-400">Sin facturas.</td></tr>
-          ) : rows.map((f, i) => (
-            <tr key={i} className="hover:bg-slate-50/50">
-              <td className="px-3 py-2 font-mono text-xs text-slate-700">{f.number}</td>
-              <td className="px-3 py-2">
-                {f.supplier}
-                {intra && f.cif && <span className="ml-1.5 text-[10px] font-mono text-slate-400">{f.cif}</span>}
-              </td>
-              <td className="px-3 py-2 text-slate-500">{f.date}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{eur(f.base)}</td>
-              <td className="px-3 py-2 text-right text-slate-500">{f.vatRate === null ? 'varios' : pct(f.vatRate)}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{eur(f.vat)}</td>
-              {!intra && (
-                <td className="px-3 py-2 text-right tabular-nums">
-                  {f.retentionAmount !== 0
-                    ? <span className="text-amber-700">−{eur(f.retentionAmount)} <span className="text-[10px] text-amber-600/80">({pct(f.retentionRate)})</span></span>
+          ) : rows.map((f, i) => {
+            const isSel = !!f.attachmentPath && selected.has(f.attachmentPath)
+            const isp = intra && isIsp(f)
+            return (
+              <tr key={i} className={isSel ? 'bg-sky-50/60' : 'hover:bg-slate-50/50'}>
+                <td className="w-8 pl-3 py-2">
+                  {f.attachmentPath && (
+                    <input
+                      type="checkbox"
+                      checked={isSel}
+                      onChange={(e) => onSelect([f.attachmentPath!], e.target.checked)}
+                      aria-label={`Marcar ${f.number}`}
+                      className="h-4 w-4 cursor-pointer accent-prats-navy"
+                    />
+                  )}
+                </td>
+                <td className="px-3 py-2 font-mono text-xs text-slate-700">{f.number}</td>
+                <td className="px-3 py-2">
+                  {f.supplier}
+                  {intra && f.cif && <span className="ml-1.5 text-[10px] font-mono text-slate-400">{f.cif}</span>}
+                </td>
+                <td className="px-3 py-2 text-slate-500">{f.date}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{eur(f.base)}</td>
+                {intra ? (
+                  <>
+                    <td className="px-3 py-2">
+                      {isp
+                        ? <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200">ISP {pct(ISP_RATE)}</span>
+                        : <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 ring-1 ring-inset ring-slate-200" title="El proveedor factura con IVA: no hay inversión del sujeto pasivo">Con IVA ({f.vatRate === null ? 'varios' : pct(f.vatRate)})</span>}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">{isp ? eur(ispVat(f)) : <span className="text-slate-300">—</span>}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{f.vat !== 0 ? eur(f.vat) : <span className="text-slate-300">—</span>}</td>
+                  </>
+                ) : (
+                  <>
+                    <td className="px-3 py-2 text-right text-slate-500">{f.vatRate === null ? 'varios' : pct(f.vatRate)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{eur(f.vat)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {f.retentionAmount !== 0
+                        ? <span className="text-amber-700">−{eur(f.retentionAmount)} <span className="text-[10px] text-amber-600/80">({pct(f.retentionRate)})</span></span>
+                        : <span className="text-slate-300">—</span>}
+                    </td>
+                  </>
+                )}
+                <td className="px-3 py-2 text-right font-medium tabular-nums">{eur(f.total)}</td>
+                <td className="px-3 py-2 max-w-[18rem] text-slate-600">
+                  {f.note
+                    ? <span className="block truncate" title={f.note}>{f.note}</span>
                     : <span className="text-slate-300">—</span>}
                 </td>
-              )}
-              <td className="px-3 py-2 text-right font-medium tabular-nums">{eur(f.total)}</td>
-              <td className="px-3 py-2 max-w-[18rem] text-slate-600">
-                {f.note
-                  ? <span className="block truncate" title={f.note}>{f.note}</span>
-                  : <span className="text-slate-300">—</span>}
-              </td>
-              <td className="px-3 py-2 text-right"><DownloadBtn apPath={f.attachmentPath} /></td>
-            </tr>
-          ))}
+                <td className="px-3 py-2 text-right"><DownloadBtn apPath={f.attachmentPath} /></td>
+              </tr>
+            )
+          })}
           {rows.length > 0 && (
             <tr className={TOTAL_ROW}>
-              <td className="px-3 py-2.5" colSpan={3}>TOTAL ({rows.length} facturas)</td>
+              <td className="px-3 py-2.5" colSpan={4}>TOTAL ({rows.length} facturas)</td>
               <td className="px-3 py-2.5 text-right tabular-nums">{eur(rows.reduce((s, f) => s + f.base, 0))}</td>
-              <td />
-              <td className="px-3 py-2.5 text-right tabular-nums">{eur(rows.reduce((s, f) => s + f.vat, 0))}</td>
-              {!intra && (
-                <td className="px-3 py-2.5 text-right tabular-nums">{eur(rows.reduce((s, f) => s + f.retentionAmount, 0))}</td>
+              {intra ? (
+                <>
+                  <td />
+                  <td className="px-3 py-2.5 text-right tabular-nums">{eur(rows.reduce((s, f) => s + (isIsp(f) ? ispVat(f) : 0), 0))}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{eur(rows.reduce((s, f) => s + f.vat, 0))}</td>
+                </>
+              ) : (
+                <>
+                  <td />
+                  <td className="px-3 py-2.5 text-right tabular-nums">{eur(rows.reduce((s, f) => s + f.vat, 0))}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{eur(rows.reduce((s, f) => s + f.retentionAmount, 0))}</td>
+                </>
               )}
               <td className="px-3 py-2.5 text-right tabular-nums">{eur(rows.reduce((s, f) => s + f.total, 0))}</td>
               <td />
@@ -846,6 +1032,30 @@ function ApInvoicesCard({ title, tag, rows, footnote, intra = false }: {
       </table>
       <p className="border-t p-3 text-xs text-slate-400">{footnote}</p>
     </div>
+  )
+}
+
+// Casilla de cabecera: marca/desmarca todas las filas visibles (indeterminada si
+// solo hay algunas marcadas).
+function SelectAllBox({ ids, selected, onChange, label }: {
+  ids: string[]
+  selected: Set<string>
+  onChange: (ids: string[], on: boolean) => void
+  label: string
+}) {
+  const marked = ids.filter((id) => selected.has(id)).length
+  const all = ids.length > 0 && marked === ids.length
+  return (
+    <input
+      type="checkbox"
+      disabled={ids.length === 0}
+      checked={all}
+      ref={(el) => { if (el) el.indeterminate = marked > 0 && !all }}
+      onChange={() => onChange(ids, !all)}
+      aria-label={label}
+      title={label}
+      className="h-4 w-4 cursor-pointer accent-prats-navy disabled:cursor-default"
+    />
   )
 }
 
@@ -936,7 +1146,11 @@ function ThirdPartiesTab({ year, clients, suppliers, intra, onClientClick }: {
 }
 
 // Tabla genérica de agregado anual por tercero con desglose trimestral.
-function ThirdPartyTable({ title, tag, nameLabel, totalLabel, extraLabel, rows, footnote, noThreshold = false }: {
+type ThirdPartySortCol = 'name' | 'nif' | 'q0' | 'q1' | 'q2' | 'q3' | 'total' | 'extra' | 'count'
+const tpValue = (r: ThirdPartyRow, col: ThirdPartySortCol): string | number =>
+  col === 'name' ? r.name : col === 'nif' ? (r.nif ?? '') : col[0] === 'q' ? r.byQuarter[Number(col[1])] : r[col as 'total' | 'extra' | 'count']
+
+function ThirdPartyTable({ title, tag, nameLabel, totalLabel, extraLabel, rows: rawRows, footnote, noThreshold = false, onRowClick }: {
   title: string
   tag: string
   nameLabel: string
@@ -945,7 +1159,36 @@ function ThirdPartyTable({ title, tag, nameLabel, totalLabel, extraLabel, rows, 
   rows: ThirdPartyRow[]
   footnote: string
   noThreshold?: boolean
+  onRowClick?: (row: ThirdPartyRow) => void
 }) {
+  // Orden alfabético por defecto; pinchar una cabecera ordena por ella (otra vez = invierte)
+  const [sort, setSort] = useState<{ col: ThirdPartySortCol; dir: 1 | -1 }>({ col: 'name', dir: 1 })
+  const rows = useMemo(() => [...rawRows].sort((a, b) => {
+    const va = tpValue(a, sort.col), vb = tpValue(b, sort.col)
+    const cmp = typeof va === 'number' && typeof vb === 'number'
+      ? va - vb
+      : String(va).localeCompare(String(vb), 'es', { numeric: true, sensitivity: 'base' })
+    return cmp * sort.dir || a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })
+  }), [rawRows, sort])
+  const header = (col: ThirdPartySortCol, label: string, right = false) => {
+    const active = sort.col === col
+    const Icon = active ? (sort.dir === 1 ? ArrowUp : ArrowDown) : ArrowUpDown
+    return (
+      <th className={`px-3 py-3 ${right ? 'text-right' : 'text-left'}`} aria-sort={active ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none'}>
+        <button
+          type="button"
+          onClick={() => setSort((s) => (s.col === col
+            ? { col, dir: s.dir === 1 ? -1 : 1 }
+            // Texto empieza A→Z; importes, de mayor a menor
+            : { col, dir: col === 'name' || col === 'nif' ? 1 : -1 }))}
+          className={`inline-flex items-center gap-1 uppercase tracking-wider hover:text-prats-navy ${active ? 'text-prats-navy' : ''}`}
+        >
+          {label}
+          <Icon className={`h-3 w-3 ${active ? '' : 'opacity-40'}`} />
+        </button>
+      </th>
+    )
+  }
   const cols = 8 + (extraLabel ? 1 : 0)
   const sum = (fn: (r: ThirdPartyRow) => number) => rows.reduce((s, r) => s + fn(r), 0)
   return (
@@ -957,15 +1200,15 @@ function ThirdPartyTable({ title, tag, nameLabel, totalLabel, extraLabel, rows, 
       <table className="w-full text-sm">
         <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
           <tr>
-            <th className="text-left px-3 py-3">{nameLabel}</th>
-            <th className="text-left px-3 py-3">NIF</th>
-            <th className="text-right px-3 py-3">T1</th>
-            <th className="text-right px-3 py-3">T2</th>
-            <th className="text-right px-3 py-3">T3</th>
-            <th className="text-right px-3 py-3">T4</th>
-            <th className="text-right px-3 py-3">{totalLabel}</th>
-            {extraLabel && <th className="text-right px-3 py-3">{extraLabel}</th>}
-            <th className="text-right px-3 py-3">Nº docs</th>
+            {header('name', nameLabel)}
+            {header('nif', 'NIF')}
+            {header('q0', 'T1', true)}
+            {header('q1', 'T2', true)}
+            {header('q2', 'T3', true)}
+            {header('q3', 'T4', true)}
+            {header('total', totalLabel, true)}
+            {extraLabel && header('extra', extraLabel, true)}
+            {header('count', 'Nº docs', true)}
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
@@ -974,9 +1217,15 @@ function ThirdPartyTable({ title, tag, nameLabel, totalLabel, extraLabel, rows, 
           ) : rows.map((r, i) => {
             const over = !noThreshold && r.total > THRESHOLD_347
             return (
-              <tr key={i} className={over ? 'bg-prats-gold/5 hover:bg-prats-gold/10' : 'hover:bg-slate-50/50'}>
+              <tr
+                key={r.key || i}
+                onClick={onRowClick ? () => onRowClick(r) : undefined}
+                className={`${over ? 'bg-prats-gold/5 hover:bg-prats-gold/10' : 'hover:bg-slate-50/50'} ${onRowClick ? 'cursor-pointer' : ''}`}
+              >
                 <td className="px-3 py-2 font-medium text-slate-700">
-                  {r.name}
+                  {onRowClick
+                    ? <span className="underline decoration-slate-300 underline-offset-2 hover:text-prats-navy hover:decoration-prats-navy">{r.name}</span>
+                    : r.name}
                   {over && (
                     <span className="ml-1.5 rounded bg-prats-gold/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-prats-gold">347</span>
                   )}
@@ -1014,18 +1263,18 @@ function ThirdPartyTable({ title, tag, nameLabel, totalLabel, extraLabel, rows, 
 // Desglose del IVA soportado por tipo impositivo (0/10/21…) y trimestre.
 // Las facturas registradas con líneas usan su desglose real; las de solo
 // cabecera derivan el tipo del cociente IVA/base.
-function VatByRateTable({ rows, byMonth = false }: { rows: VatRateRow[]; byMonth?: boolean }) {
+function VatByRateTable({ rows, byMonth = false }: { rows: VatRowView[]; byMonth?: boolean }) {
   // `group` = etiqueta de la primera columna (T1… o Enero…); solo se pinta en la
   // primera fila de cada grupo.
   const cells = byMonth
     ? MONTH_NAMES.flatMap((mes, i) =>
       rows
         .filter((r) => r.byMonth[i].base !== 0 || r.byMonth[i].vat !== 0)
-        .map((r) => ({ group: mes, rate: r.rate, base: r.byMonth[i].base, vat: r.byMonth[i].vat })))
+        .map((r) => ({ group: mes, rate: r.rate, isp: r.isp, base: r.byMonth[i].base, vat: r.byMonth[i].vat })))
     : [1, 2, 3, 4].flatMap((q) =>
       rows
         .filter((r) => r.byQuarter[q - 1].base !== 0 || r.byQuarter[q - 1].vat !== 0)
-        .map((r) => ({ group: `T${q}`, rate: r.rate, base: r.byQuarter[q - 1].base, vat: r.byQuarter[q - 1].vat })))
+        .map((r) => ({ group: `T${q}`, rate: r.rate, isp: r.isp, base: r.byQuarter[q - 1].base, vat: r.byQuarter[q - 1].vat })))
   const totBase = rows.reduce((s, r) => s + r.base, 0)
   const totVat = rows.reduce((s, r) => s + r.vat, 0)
   return (
@@ -1049,7 +1298,7 @@ function VatByRateTable({ rows, byMonth = false }: { rows: VatRateRow[]; byMonth
           ) : cells.map((c, i) => (
             <tr key={i} className="hover:bg-slate-50/60">
               <td className="px-4 py-2.5 font-semibold text-slate-700">{i === 0 || cells[i - 1].group !== c.group ? c.group : ''}</td>
-              <td className="px-4 py-2.5 text-slate-600">{pct(c.rate)}</td>
+              <td className={`px-4 py-2.5 ${c.isp ? 'text-indigo-700' : 'text-slate-600'}`}>{rateText(c)}</td>
               <td className="px-4 py-2.5 text-right tabular-nums">{eur(c.base)}</td>
               <td className="px-4 py-2.5 text-right tabular-nums">{eur(c.vat)}</td>
             </tr>
@@ -1065,7 +1314,91 @@ function VatByRateTable({ rows, byMonth = false }: { rows: VatRateRow[]; byMonth
       </table>
       <p className="border-t p-3 text-xs text-slate-400">
         Desglose por tipo del IVA soportado en facturas recibidas. Las facturas registradas sin desglose de líneas se
-        clasifican por su tipo efectivo (IVA / base).
+        clasifican por su tipo efectivo (IVA / base). «ISP intracomunitaria» = compras a proveedores de la UE sin IVA: su cuota
+        es la autorrepercutida, que se deduce en la misma declaración.
+      </p>
+    </div>
+  )
+}
+
+type IspCell = { base: number; vat: number; count: number }
+type IvaRowLike = { baseSales: number; ivaRepercutido: number; basePurchases: number; ivaSoportado: number; resultado: number }
+// Fila del Excel "Intracomunitarias ISP": el 303 con la autorrepercusión sumada a
+// ambos lados (devengado y deducible); el resultado no cambia.
+function ispExcelRow(periodo: string, r: IvaRowLike, c: IspCell) {
+  return {
+    Periodo: periodo,
+    'Base adquisiciones intracom.': n2(c.base),
+    'Cuota autorrepercutida (cas. 11)': n2(c.vat),
+    'Cuota deducible intracom.': n2(c.vat),
+    'IVA devengado total': n2(r.ivaRepercutido + c.vat),
+    'IVA deducible total': n2(r.ivaSoportado + c.vat),
+    'Resultado IVA': n2(r.resultado),
+    'Nº facturas': c.count,
+  }
+}
+
+// Adquisiciones intracomunitarias con inversión del sujeto pasivo, por trimestre
+// o mes, y cómo quedan los totales del 303 al sumarlas: el IVA autorrepercutido
+// va al devengado y el mismo importe al deducible (resultado sin cambios).
+function IntraIspCard({ view, isp, byMonth }: {
+  view: AccountingView
+  isp: { byQuarter: IspCell[]; byMonth: IspCell[]; base: number; vat: number; count: number }
+  byMonth: boolean
+}) {
+  const periods = byMonth
+    ? view.monthlyVat.map((m, i) => ({ label: MONTH_NAMES[i], row: m as IvaRowLike, c: isp.byMonth[i] }))
+    : view.quarters.map((q, i) => ({ label: `${q.quarter} (${q.period})`, row: q as IvaRowLike, c: isp.byQuarter[i] }))
+  const TH = 'px-3 py-2.5 text-right'
+  const TD = 'px-3 py-2 text-right tabular-nums'
+  const tot = periods.reduce((a, p) => ({ rep: a.rep + p.row.ivaRepercutido, sop: a.sop + p.row.ivaSoportado, res: a.res + p.row.resultado }), { rep: 0, sop: 0, res: 0 })
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-x-auto">
+      <div className="flex items-baseline justify-between border-b border-slate-200 px-4 py-3">
+        <span className="text-sm font-semibold text-prats-navy">Adquisiciones intracomunitarias · inversión del sujeto pasivo</span>
+        <span className="text-[11px] uppercase tracking-wider text-slate-400">{isp.count} facturas · ISP {pct(ISP_RATE)}</span>
+      </div>
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          <tr>
+            <th className="px-3 py-2.5 text-left">{byMonth ? 'Mes' : 'Trimestre'}</th>
+            <th className={TH}>Base adquisiciones</th>
+            <th className={TH}>IVA autorrepercutido</th>
+            <th className={TH}>IVA deducible intracom.</th>
+            <th className={TH}>IVA devengado total</th>
+            <th className={TH}>IVA deducible total</th>
+            <th className={TH}>Resultado IVA</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {periods.map((p) => (
+            <tr key={p.label} className="hover:bg-slate-50/60">
+              <td className="px-3 py-2 font-medium text-slate-700">{p.label}</td>
+              <td className={TD}>{p.c.base !== 0 ? eur(p.c.base) : <span className="text-slate-300">—</span>}</td>
+              <td className={`${TD} text-indigo-700`}>{p.c.vat !== 0 ? eur(p.c.vat) : <span className="text-slate-300">—</span>}</td>
+              <td className={`${TD} text-indigo-700`}>{p.c.vat !== 0 ? eur(p.c.vat) : <span className="text-slate-300">—</span>}</td>
+              <td className={TD}>{eur(p.row.ivaRepercutido + p.c.vat)}</td>
+              <td className={TD}>{eur(p.row.ivaSoportado + p.c.vat)}</td>
+              <td className={`${TD} font-semibold`}>{eur(p.row.resultado)}</td>
+            </tr>
+          ))}
+          <tr className={TOTAL_ROW}>
+            <td className="px-3 py-2.5">TOTAL año</td>
+            <td className={TD}>{eur(isp.base)}</td>
+            <td className={TD}>{eur(isp.vat)}</td>
+            <td className={TD}>{eur(isp.vat)}</td>
+            <td className={TD}>{eur(tot.rep + isp.vat)}</td>
+            <td className={TD}>{eur(tot.sop + isp.vat)}</td>
+            <td className={TD}>{eur(tot.res)}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p className="border-t p-3 text-xs text-slate-400">
+        Compras a proveedores con NIF-IVA de otro país de la UE facturadas sin IVA. La empresa autorrepercute el IVA español al
+        {' '}{pct(ISP_RATE)} y lo deduce a la vez: modelo 303, IVA devengado casillas 10-11 (adquisiciones intracomunitarias) y
+        deducible casillas 36-37 (bienes corrientes; 38-39 si son bienes de inversión, 28-29 si son servicios). El resultado no
+        cambia, pero ambos importes deben declararse; las operaciones se relacionan además en el modelo 349. «IVA devengado / deducible
+        total» = importes de la tabla de IVA más la autorrepercusión. Se excluyen los proveedores UE que ya facturan con IVA.
       </p>
     </div>
   )
