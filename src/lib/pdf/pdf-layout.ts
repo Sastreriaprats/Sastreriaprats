@@ -90,8 +90,11 @@ export function buildInfoSection(params: {
   date1: string | null
   label2?: string
   date2?: string | null
+  // Filas extra bajo las fechas, ya formateadas (documento de origen: ticket,
+  // pedido, reserva o pedido web del que sale la factura).
+  extraRows?: { label: string; value: string }[]
 }): Content[] {
-  const { clientName, clientNif, clientAddress, clientEmail, clientPhone, label1, date1, label2, date2 } = params
+  const { clientName, clientNif, clientAddress, clientEmail, clientPhone, label1, date1, label2, date2, extraRows } = params
 
   const infoTable: Content = {
     table: {
@@ -175,8 +178,16 @@ export function buildInfoSection(params: {
                   { text: label2, fontSize: 8, color: '#666', width: 75 },
                   { text: formatDateDDMMYYYY(date2 ?? null), fontSize: 10, bold: true, color: 'black' },
                 ],
+                margin: [0, 0, 0, (extraRows?.length ?? 0) > 0 ? 3 : 0] as [number, number, number, number],
               }]
             : []),
+          ...(extraRows ?? []).map((r, i, arr) => ({
+            columns: [
+              { text: r.label, fontSize: 8, color: '#666', width: 75 },
+              { text: r.value, fontSize: 10, bold: true, color: 'black' },
+            ],
+            margin: [0, 0, 0, i < arr.length - 1 ? 3 : 0] as [number, number, number, number],
+          })),
         ],
       },
     ],

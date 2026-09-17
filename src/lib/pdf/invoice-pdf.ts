@@ -43,6 +43,53 @@ type InvoiceRecord = {
   is_rectifying: boolean
   rectifies_invoice_id: string | null
   rectification_reason: string | null
+  sale_id: string | null
+  online_order_id: string | null
+}
+
+/**
+ * Documento(s) del que sale la factura, para dejarlo impreso en el PDF: el
+ * ticket de la venta, los pedidos de sastrería o reservas (puente N:M, mig 269)
+ * y el pedido de la web. Sin origen (factura hecha a mano) devuelve [].
+ */
+async function loadOriginRows(
+  admin: ReturnType<typeof createAdminClient>,
+  invoice: Pick<InvoiceRecord, 'id' | 'sale_id' | 'online_order_id'>,
+): Promise<{ label: string; value: string }[]> {
+  const [saleRes, ordersRes, reservationsRes, onlineRes] = await Promise.all([
+    invoice.sale_id
+      ? admin.from('sales').select('ticket_number').eq('id', invoice.sale_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    admin.from('invoice_tailoring_orders').select('tailoring_orders(order_number)').eq('invoice_id', invoice.id),
+    admin.from('invoice_reservations').select('product_reservations(reservation_number)').eq('invoice_id', invoice.id),
+    invoice.online_order_id
+      ? admin.from('online_orders').select('order_number').eq('id', invoice.online_order_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ])
+
+  const rows: { label: string; value: string }[] = []
+  const ticket = (saleRes.data as { ticket_number?: string } | null)?.ticket_number
+  if (ticket) rows.push({ label: 'Ticket:', value: String(ticket) })
+
+  const nested = (res: { data: unknown }, embed: string, field: string): string[] => {
+    const list = (res.data ?? []) as Record<string, unknown>[]
+    return list
+      .map((r) => {
+        const e = r[embed] as Record<string, unknown> | Record<string, unknown>[] | null
+        const one = Array.isArray(e) ? e[0] : e
+        return String(one?.[field] ?? '').trim()
+      })
+      .filter(Boolean)
+  }
+  const orders = nested(ordersRes, 'tailoring_orders', 'order_number')
+  if (orders.length) rows.push({ label: orders.length > 1 ? 'Pedidos:' : 'Pedido:', value: orders.join(', ') })
+  const reservations = nested(reservationsRes, 'product_reservations', 'reservation_number')
+  if (reservations.length) rows.push({ label: reservations.length > 1 ? 'Reservas:' : 'Reserva:', value: reservations.join(', ') })
+
+  const online = (onlineRes.data as { order_number?: string } | null)?.order_number
+  if (online) rows.push({ label: 'Pedido web:', value: String(online) })
+
+  return rows
 }
 
 /**
@@ -59,7 +106,8 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
       company_name, company_nif, company_address,
       invoice_date, due_date, subtotal, tax_rate, tax_amount,
       irpf_rate, irpf_amount, total, notes,
-      is_rectifying, rectifies_invoice_id, rectification_reason`)
+      is_rectifying, rectifies_invoice_id, rectification_reason,
+      sale_id, online_order_id`)
     .eq('id', invoiceId)
     .single()
 
@@ -110,6 +158,10 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
     }
     return li
   }) as unknown as PdfLine[]
+
+  // Documento de origen (ticket / pedido / reserva / web): va impreso en la
+  // factura para poder casarla con su ticket sin entrar en la plataforma.
+  const originRows = await loadOriginRows(admin, invoice)
 
   const logoData = await getLogoBase64Processed()
 
@@ -168,6 +220,7 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
       date1: invoice.invoice_date,
       label2: 'Vencimiento:',
       date2: invoice.due_date,
+      extraRows: originRows,
     }),
     {
       table: {
