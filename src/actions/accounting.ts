@@ -12,6 +12,7 @@ import { createInvoiceJournalEntry, reverseInvoiceJournalEntry, createManualTran
 import { formatClientAddress, resolveInvoiceParty } from '@/lib/clients/format'
 import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
 import { loadReservationPayments } from '@/lib/accounting/reservation-payments'
+import { loadOnlineTicketIncome } from '@/lib/accounting/online-ticket-income'
 import { readAllPaged } from '@/lib/server/paged'
 import { toLocalISODate } from '@/lib/dates'
 
@@ -50,7 +51,7 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
     const start = `${fromDate}T00:00:00`
     const end = `${toDate}T23:59:59`
 
-    const [sales, purchasesRaw, invoicesRes, tailoringPayments, storesRes, pendOrdersRows, pendSalesRows, pendDueRows, otherInvoices, cobroBaseBySale, reservationPayments] = await Promise.all([
+    const [sales, purchasesRaw, invoicesRes, tailoringPayments, storesRes, pendOrdersRows, pendSalesRows, pendDueRows, otherInvoicesRaw, cobroBaseBySale, reservationPayments, onlineTickets] = await Promise.all([
       // Ventas de TPV (boutique + TPV + sastrería-POS). Paginado: sin esto, un año
       // con >1000 tickets se truncaba silenciosamente e infravaloraba ingresos.
       readAllPaged((f, t) => ctx.adminClient.from('sales').select('id, total, total_returned, subtotal, tax_amount, created_at, store_id').gte('created_at', start).lte('created_at', end).in('status', ['completed', 'partially_returned']).order('created_at', { ascending: true }).range(f, t)),
@@ -89,7 +90,14 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
       // Señales de reserva por payment_date: no están en `sales` (el ticket de
       // recogida va neto de lo ya pagado). Ver reservation-payments.ts.
       loadReservationPayments(ctx.adminClient, fromDate, toDate),
+      // Pedidos online con TICKET (mig 286): ya no generan factura W. Ver
+      // online-ticket-income.ts.
+      loadOnlineTicketIncome(ctx.adminClient, fromDate, toDate),
     ])
+    // Una factura W de un pedido con ticket no suma: el ingreso va por el ticket.
+    const otherInvoices = otherInvoicesRaw.filter((x: Record<string, unknown>) =>
+      !((x as any).online_order_id && onlineTickets.ticketedOrderIds.has(String((x as any).online_order_id))))
+    const onlineTicketRows = onlineTickets.rows
 
     // Excluimos proformas (no son facturas reales).
     const purchases = (purchasesRaw || []).filter((x: Record<string, unknown>) => !(x as any).is_proforma)
@@ -133,11 +141,13 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
       sales.reduce((s: number, x: Record<string, unknown>) => s + netSale(x).netBase, 0) +
       tailoringPayments.reduce((s: number, p: Record<string, unknown>) => s + netTailoringPayment(p).netBase, 0) +
       reservationPayments.reduce((s, p) => s + p.base, 0) +
+      onlineTicketRows.reduce((s, o) => s + o.base, 0) +
       otherInvBase
     const vatCollected =
       sales.reduce((s: number, x: Record<string, unknown>) => s + netSale(x).netVat, 0) +
       tailoringPayments.reduce((s: number, p: Record<string, unknown>) => s + netTailoringPayment(p).netVat, 0) +
       reservationPayments.reduce((s, p) => s + p.vat, 0) +
+      onlineTicketRows.reduce((s, o) => s + o.vat, 0) +
       otherInvVat
     const expenses = purchases.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).amount) || 0), 0)
     const vatPaid = purchases.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).tax_amount) || 0), 0)
@@ -174,6 +184,11 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
       const key = p.paymentDate.slice(0, 7)
       if (!byMonth[key]) byMonth[key] = { income: 0, expenses: 0 }
       byMonth[key].income += p.base
+    }
+    for (const o of onlineTicketRows) {
+      const key = o.date.slice(0, 7)
+      if (!byMonth[key]) byMonth[key] = { income: 0, expenses: 0 }
+      byMonth[key].income += o.base
     }
     for (const x of otherInvoices) {
       const d = (x as any).invoice_date
@@ -250,6 +265,7 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
         : (x as any).store_id ? String((x as any).store_id) : NO_STORE
       bucket(key).income += base
     }
+    for (const o of onlineTicketRows) bucket(ONLINE_STORE).income += o.base
 
     const r2 = (n: number) => Math.round(n * 100) / 100
     const byStore: StoreBreakdownRow[] = [...buckets.entries()].map(([key, v]) => ({
@@ -737,7 +753,7 @@ export const getVatQuarterly = protectedAction<
     // factura, independientemente del estado de pago.
     // Paginado con readAllPaged: sin esto, un año con >1000 filas en cualquiera
     // de estas tablas truncaba el IVA de los últimos trimestres en silencio.
-    const [salesRows, purchasesRows, tailoringPaymentsRows, otherInvoicesRows, cobroBaseBySale, reservationPayments] = await Promise.all([
+    const [salesRows, purchasesRows, tailoringPaymentsRows, otherInvoicesRows, cobroBaseBySale, reservationPayments, onlineTickets] = await Promise.all([
       readAllPaged((f, t) => ctx.adminClient.from('sales').select('id, total, total_returned, subtotal, tax_amount, created_at').gte('created_at', yearStart).lte('created_at', yearEnd).in('status', ['completed', 'partially_returned']).order('created_at', { ascending: true }).range(f, t)),
       readAllPaged((f, t) => ctx.adminClient.from('ap_supplier_invoices').select('amount, tax_amount, invoice_date').eq('is_proforma', false).gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`).order('invoice_date', { ascending: true }).range(f, t)),
       // Cobros de sastrería (backoffice): mismo criterio que el Resumen. amount
@@ -748,7 +764,7 @@ export const getVatQuarterly = protectedAction<
       // Facturas emitidas que son ingreso por sí mismas (online serie W +
       // sueltas), mismo criterio que el Resumen: se excluyen las ligadas a
       // ticket/pedido/reserva porque esos cobros ya se cuentan → sin doble conteo.
-      readAllPaged((f, t) => ctx.adminClient.from('invoices').select('subtotal, tax_amount, invoice_date').eq('invoice_type', 'issued').is('sale_id', null).is('tailoring_order_id', null).is('reservation_id', null).not('status', 'in', '(draft,cancelled)').gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`).order('invoice_date', { ascending: true }).range(f, t)),
+      readAllPaged((f, t) => ctx.adminClient.from('invoices').select('subtotal, tax_amount, invoice_date, online_order_id').eq('invoice_type', 'issued').is('sale_id', null).is('tailoring_order_id', null).is('reservation_id', null).not('status', 'in', '(draft,cancelled)').gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`).order('invoice_date', { ascending: true }).range(f, t)),
       // Base de los cobros de pedido embebidos en tickets: esa parte del ticket
       // va al 0% (la cuota ya era correcta) pero su BASE no debe declararse dos
       // veces (aquí como ticket y otra vez como cobro de sastrería).
@@ -756,11 +772,15 @@ export const getVatQuarterly = protectedAction<
       // Señales de reserva: IVA devengado al cobrarlas (payment_date), como los
       // cobros de sastrería. El ticket de recogida solo lleva lo pendiente.
       loadReservationPayments(ctx.adminClient, `${year}-01-01`, `${year}-12-31`),
+      // Pedidos online con TICKET (mig 286): IVA devengado al cobrarlos.
+      loadOnlineTicketIncome(ctx.adminClient, `${year}-01-01`, `${year}-12-31`),
     ])
     const sales = salesRows as Array<{ id?: string; total?: number; total_returned?: number; subtotal?: number; tax_amount?: number; created_at?: string }>
     const purchases = purchasesRows as Array<{ amount?: number; tax_amount?: number; invoice_date?: string }>
     const tailoringPayments = tailoringPaymentsRows as Array<{ amount?: number; payment_date?: string; tailoring_order?: { subtotal?: number; total?: number } }>
-    const otherInvoices = otherInvoicesRows as Array<{ subtotal?: number; tax_amount?: number; invoice_date?: string }>
+    // Las facturas W de pedidos con ticket no suman: el IVA va por el ticket.
+    const otherInvoices = (otherInvoicesRows as Array<{ subtotal?: number; tax_amount?: number; invoice_date?: string; online_order_id?: string | null }>)
+      .filter((x) => !(x.online_order_id && onlineTickets.ticketedOrderIds.has(String(x.online_order_id))))
 
     const quarterFromMonth = (m: number) => Math.ceil(m / 3) as 1 | 2 | 3 | 4
     const byQuarter: Record<number, {
@@ -809,6 +829,12 @@ export const getVatQuarterly = protectedAction<
       const q = quarterFromMonth(Number(p.paymentDate.slice(5, 7)))
       byQuarter[q].baseSales += p.base
       byQuarter[q].ivaRepercutido += p.vat
+      byQuarter[q].salesCount += 1
+    }
+    for (const o of onlineTickets.rows) {
+      const q = quarterFromMonth(Number(o.date.slice(5, 7)))
+      byQuarter[q].baseSales += o.base
+      byQuarter[q].ivaRepercutido += o.vat
       byQuarter[q].salesCount += 1
     }
     for (const x of otherInvoices) {

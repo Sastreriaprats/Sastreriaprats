@@ -3,7 +3,7 @@
 import { Fragment, useState } from 'react'
 import { toast } from 'sonner'
 import { TrendingUp, TrendingDown, Wallet, Receipt, Percent, Hash, Landmark, Download, Loader2, ChevronDown, ChevronRight, type LucideIcon } from 'lucide-react'
-import { getTicketData, getOrderTicketData, getApInvoicePdfUrl, getIssuedInvoicePdfUrls } from '@/actions/ops'
+import { getTicketData, getOrderTicketData, getOnlineTicketData, getApInvoicePdfUrl, getIssuedInvoicePdfUrls } from '@/actions/ops'
 import { generateTicketPdf } from '@/components/pos/ticket-pdf'
 import { generateTailoringOrderTicketPdf, type TailoringTicketOrder } from '@/lib/pdf/tailoring-order-ticket'
 import type { AccountingView, MovementRow, LedgerMovement } from '@/lib/ops/types'
@@ -244,9 +244,9 @@ export function MonthVatTable({ view, variant, retentions }: { view: AccountingV
 }
 
 // `invoiceId` (solo escenario C): factura emitida sin PDF guardado → se genera al pulsar.
-export function DownloadBtn({ saleId, orderId, pdfUrl, apPath, invoiceId }: { saleId?: string; orderId?: string; pdfUrl?: string; apPath?: string; invoiceId?: string }) {
+export function DownloadBtn({ saleId, orderId, onlineOrderId, pdfUrl, apPath, invoiceId }: { saleId?: string; orderId?: string; onlineOrderId?: string; pdfUrl?: string; apPath?: string; invoiceId?: string }) {
   const [loading, setLoading] = useState(false)
-  if (!saleId && !orderId && !pdfUrl && !apPath && !invoiceId) return <span className="text-slate-300">—</span>
+  if (!saleId && !orderId && !onlineOrderId && !pdfUrl && !apPath && !invoiceId) return <span className="text-slate-300">—</span>
   const go = async () => {
     setLoading(true)
     try {
@@ -259,6 +259,10 @@ export function DownloadBtn({ saleId, orderId, pdfUrl, apPath, invoiceId }: { sa
         const res = await getOrderTicketData(orderId)
         if (!res.ok) { toast.error('Pedido no disponible'); return }
         await generateTailoringOrderTicketPdf(res.data as unknown as TailoringTicketOrder)
+      } else if (onlineOrderId) {
+        const res = await getOnlineTicketData(onlineOrderId)
+        if (!res.ok) { toast.error('Ticket no disponible'); return }
+        await generateTicketPdf(res.data)
       } else if (pdfUrl) {
         window.open(pdfUrl, '_blank', 'noopener')
       } else if (apPath) {
@@ -469,7 +473,7 @@ export function MonthlyFullExpandable({ year, view, rows }: { year: number; view
                             <td className="px-2 py-1.5 text-slate-700">{m2.concept}</td>
                             <td className="px-2 py-1.5 text-slate-700">{m2.client ?? '—'}</td>
                             <td className={`px-2 py-1.5 text-right font-semibold tabular-nums ${m2.total >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{eur(m2.total)}</td>
-                            <td className="px-2 py-1.5 text-right"><DownloadBtn saleId={m2.saleId} orderId={m2.orderId} pdfUrl={m2.pdfUrl} apPath={m2.apPath} /></td>
+                            <td className="px-2 py-1.5 text-right"><DownloadBtn saleId={m2.saleId} orderId={m2.orderId} onlineOrderId={m2.onlineOrderId} pdfUrl={m2.pdfUrl} apPath={m2.apPath} /></td>
                           </tr>
                         ))}
                       </tbody>
@@ -525,7 +529,7 @@ export function LedgerTable({ rows }: { rows: LedgerMovement[] }) {
               <td className={TDR}>{eur(m.base)}</td>
               <td className={TDR}>{eur(m.vat)}</td>
               <td className={`${TDR} font-semibold ${m.total >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{eur(m.total)}</td>
-              <td className={`${TD} text-right`}><DownloadBtn saleId={m.saleId} orderId={m.orderId} pdfUrl={m.pdfUrl} apPath={m.apPath} /></td>
+              <td className={`${TD} text-right`}><DownloadBtn saleId={m.saleId} orderId={m.orderId} onlineOrderId={m.onlineOrderId} pdfUrl={m.pdfUrl} apPath={m.apPath} /></td>
             </tr>
           ))}
         </tbody>

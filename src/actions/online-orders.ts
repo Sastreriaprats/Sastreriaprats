@@ -5,6 +5,8 @@ import { success, failure } from '@/lib/errors'
 import { sendShippingConfirmation } from '@/lib/email/transactional'
 import { resolveClientIdsForSearch } from '@/lib/server/query-helpers'
 import { normalizeSearchTerm } from '@/lib/utils'
+import { buildOnlineTicketPdfData } from '@/lib/online/online-ticket-pdf-data'
+import type { TicketPdfData } from '@/components/pos/ticket-pdf'
 
 const ALLOWED_STATUSES = [
   'pending_payment', 'paid', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded',
@@ -104,15 +106,16 @@ export const getOnlineOrdersList = protectedAction<
 /**
  * Listado de VENTAS online para la pestaña Online de Tickets.
  *
- * Un pedido web no crea ninguna fila en `sales` ni pasa por caja: su documento
- * es la factura de la serie W. Esta lista es el equivalente al ticket para la
- * tienda online, con los mismos filtros que la pestaña Tienda.
+ * Un pedido web no crea ninguna fila en `sales` ni pasa por caja. Su documento
+ * es un TICKET de la serie CLP-T (`ticket_ref`, mig 286, desde sep-2026); los
+ * pedidos anteriores llevan factura de la serie W. Esta lista es el equivalente
+ * a la pestaña Tienda para la tienda online, con los mismos filtros.
  *
  * Criterio de inclusión = el de Informes/Contabilidad: solo pedidos con cobro
  * real (paid/processing/shipped/delivered/refunded) más los cancelados DESPUÉS
  * de haberse cobrado. Quedan fuera los carritos sin pagar (pending_payment y
  * cancelados sin `paid_at`), que no son ventas. La fecha mostrada es `paid_at`,
- * la fecha contable de la factura W.
+ * la fecha contable del ticket (y de la factura W en los antiguos).
  */
 export interface OnlineTicketRow {
   id: string
@@ -124,6 +127,8 @@ export interface OnlineTicketRow {
   client_name: string | null
   client_email: string | null
   products_summary: string
+  /** Nº de ticket CLP-T (pedidos desde la mig 286). */
+  ticket_ref: string | null
   invoice_id: string | null
   invoice_number: string | null
   invoice_status: string | null
@@ -147,7 +152,7 @@ export const listOnlineTickets = protectedAction<{
 
     let q = admin
       .from('online_orders')
-      .select('id, order_number, status, total, payment_method, paid_at, client_id, shipping_address, clients:client_id(email, first_name, last_name, full_name)', { count: 'exact' })
+      .select('id, order_number, ticket_ref, status, total, payment_method, paid_at, client_id, shipping_address, clients:client_id(email, first_name, last_name, full_name)', { count: 'exact' })
       .in('status', ONLINE_SALE_STATUSES)
       .not('paid_at', 'is', null) // sin cobro no es venta (descarta carritos abandonados)
       .order('paid_at', { ascending: false })
@@ -155,7 +160,9 @@ export const listOnlineTickets = protectedAction<{
     if (dateFrom) q = q.gte('paid_at', `${dateFrom}T00:00:00`)
     if (dateTo) q = q.lte('paid_at', `${dateTo}T23:59:59`)
     if (ticketSearch && ticketSearch.trim()) {
-      q = q.ilike('order_number', `%${ticketSearch.trim().replace(/[(),]/g, '')}%`)
+      // Por nº de pedido o por nº de ticket CLP.
+      const t = ticketSearch.trim().replace(/[(),]/g, '')
+      q = q.or(`order_number.ilike.%${t}%,ticket_ref.ilike.%${t}%`)
     }
 
     // Cliente: por ficha (tokens AND, mismo helper que el resto de buscadores) y,
@@ -205,7 +212,7 @@ export const listOnlineTickets = protectedAction<{
 
     type ClientRel = { email?: string | null; first_name?: string | null; last_name?: string | null; full_name?: string | null }
     type OrderRow = {
-      id: string; order_number: string; status: string; total: number | string | null
+      id: string; order_number: string; ticket_ref: string | null; status: string; total: number | string | null
       payment_method: string | null; paid_at: string | null
       shipping_address: Record<string, unknown> | null; clients: ClientRel | null
     }
@@ -256,6 +263,7 @@ export const listOnlineTickets = protectedAction<{
         client_name,
         client_email: c?.email ?? addr?.email ?? null,
         products_summary: (linesByOrder[o.id] ?? []).slice(0, 3).join(' · ') || '—',
+        ticket_ref: o.ticket_ref ?? null,
         invoice_id: inv?.id ?? null,
         invoice_number: inv?.invoice_number ?? null,
         invoice_status: inv?.status ?? null,
@@ -263,6 +271,19 @@ export const listOnlineTickets = protectedAction<{
     })
 
     return success({ data: rows, total, page, pageSize, totalPages: Math.ceil(total / pageSize) })
+  }
+)
+
+/**
+ * Datos del ticket (CLP-T) de un pedido online para generar su PDF en el
+ * navegador con generateTicketPdf. Mismo permiso que la pestaña Online.
+ */
+export const getOnlineOrderTicketData = protectedAction<string, TicketPdfData>(
+  { permission: 'pos.access', auditModule: 'pos' },
+  async (ctx, orderId) => {
+    const data = await buildOnlineTicketPdfData(ctx.adminClient, orderId)
+    if (!data) return failure('Este pedido no tiene ticket')
+    return success(data)
   }
 )
 

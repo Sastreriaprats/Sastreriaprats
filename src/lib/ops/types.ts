@@ -63,8 +63,9 @@ export type LedgerMovement = {
   total: number           // con signo: + ingreso, − gasto
   saleId?: string
   orderId?: string        // pedido de sastrería → PDF de ticket de pedido
+  onlineOrderId?: string  // pedido online con ticket (mig 286) → PDF de ticket
   pdfUrl?: string         // PDF ya generado (facturas)
-  apPath?: string         // adjunto de factura recibida (bucket supplier-invoices)
+  apPath?: string        // adjunto de factura recibida (bucket supplier-invoices)
 }
 
 export type AccountingView = {

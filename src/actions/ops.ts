@@ -3,6 +3,8 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
 import { loadReservationPayments } from '@/lib/accounting/reservation-payments'
+import { loadOnlineTicketIncome } from '@/lib/accounting/online-ticket-income'
+import { buildOnlineTicketPdfData } from '@/lib/online/online-ticket-pdf-data'
 import { generateInvoicePdf } from '@/lib/pdf/invoice-pdf'
 import { getViewerAccess, assertScope, assertCanManage, type ViewerAccess } from '@/lib/ops/access'
 import { seal, open, dedupTag } from '@/lib/ops/crypto'
@@ -146,7 +148,7 @@ async function computeYear(year: number) {
   // Lecturas independientes en paralelo. `deposited` = cobros ya ingresados al
   // banco: salen de B y pasan a C (A = B + C se mantiene). Si esa lectura falla,
   // computeYear falla entero: mejor sin datos que contar doble en B.
-  const [sales, cashFrac, tailoringPayments, cobroBaseBySale, reservationPayments, deposited, { data: apInv }, apLines, { data: clpRows }, { data: stInv }] = await Promise.all([
+  const [sales, cashFrac, tailoringPayments, cobroBaseBySale, reservationPayments, deposited, { data: apInv }, apLines, { data: clpRows }, { data: stInvRaw }, onlineTickets] = await Promise.all([
     readAllSales(admin, start, end),
     readCashFractions(admin, start, end),
     readAllTailoringPayments(admin, year),
@@ -171,14 +173,19 @@ async function computeYear(year: number) {
     // (accounting.ts): sin él, una factura emitida desde reserva contaba en el
     // escenario y no en A → B+C dejaba de cuadrar con A.
     admin.from('invoices')
-      .select('id, invoice_number, client_name, subtotal, tax_amount, total, payment_method, invoice_date, pdf_url')
+      .select('id, invoice_number, client_name, subtotal, tax_amount, total, payment_method, invoice_date, pdf_url, online_order_id')
       .eq('invoice_type', 'issued')
       .is('sale_id', null)
       .is('tailoring_order_id', null)
       .is('reservation_id', null)
       .not('status', 'in', '(draft,cancelled)')
       .gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`),
+    // Pedidos online con TICKET (mig 286): ya no tienen factura W.
+    loadOnlineTicketIncome(admin, `${year}-01-01`, `${year}-12-31`),
   ])
+  // La factura W de un pedido con ticket no suma: el ingreso va por el ticket.
+  const stInv = ((stInvRaw ?? []) as Record<string, unknown>[])
+    .filter((x) => !(x.online_order_id && onlineTickets.ticketedOrderIds.has(String(x.online_order_id))))
   const clpMap: Record<string, string> = {}
   for (const r of (clpRows ?? []) as Record<string, unknown>[]) {
     if (r.sale_id) clpMap[String(r.sale_id)] = String(r.ref)
@@ -306,6 +313,13 @@ async function computeYear(year: number) {
     } else {
       incomeLedger.push({ date: p.paymentDate, type: 'Reserva', concept, client, base: r2(p.base), vat: r2(p.vat), total: r2(p.amount) })
     }
+  }
+
+  // Ingresos por TICKETS DE LA TIENDA ONLINE (mig 286). Cobro por pasarela:
+  // nunca es efectivo → siempre escenario C.
+  for (const o of onlineTickets.rows) {
+    addIncome(false, o.base, o.vat, o.date.slice(0, 7), Math.ceil(Number(o.date.slice(5, 7)) / 3))
+    incomeLedger.push({ date: o.date, type: 'Ticket', concept: `Ticket ${o.ticketRef} (web ${o.orderNumber})`, client: o.clientName || undefined, base: o.base, vat: o.vat, total: o.total, onlineOrderId: o.orderId })
   }
 
   // Ingresos por FACTURAS emitidas NO asociadas a un ticket (sale_id null).
@@ -691,6 +705,19 @@ export async function getTicketData(saleId: string) {
       payments: payments ?? [],
       clientName,
     })
+  } catch { return fail() }
+}
+
+// ---------------------------------------------------------------------------
+// Datos del ticket de un pedido online (mig 286) para su PDF.
+// ---------------------------------------------------------------------------
+export async function getOnlineTicketData(onlineOrderId: string) {
+  try {
+    const a = await getViewerAccess()
+    if (a.scopes.length === 0) return fail()
+    const data = await buildOnlineTicketPdfData(createAdminClient(), onlineOrderId)
+    if (!data) return fail()
+    return ok(data)
   } catch { return fail() }
 }
 

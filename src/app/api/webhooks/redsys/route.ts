@@ -4,7 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { deductOnlineOrderStock } from '@/lib/stock/online-order-stock'
-import { createOnlineOrderJournalEntry, createOnlineOrderInvoice } from '@/actions/accounting-triggers'
+import { createOnlineOrderJournalEntry, createOnlineOrderTicket } from '@/actions/accounting-triggers'
 import { sendOrderConfirmation } from '@/lib/email/transactional'
 import { notifyNewOnlineOrder } from '@/lib/notifications/create-notification'
 import {
@@ -13,7 +13,7 @@ import {
 } from '@/lib/payments/redsys'
 
 // El handler hace mucho trabajo en una sola función (pedido, líneas, asiento,
-// factura W, notificaciones, stock y email): con el presupuesto por defecto podía
+// ticket, notificaciones, stock y email): con el presupuesto por defecto podía
 // agotarse el tiempo a medias. Mismo valor que el webhook de Telegram.
 export const maxDuration = 60
 
@@ -152,11 +152,11 @@ export async function POST(request: NextRequest) {
       .then((r) => { if (!r.ok) console.error('[redsys webhook] asiento:', r.error) })
       .catch((e) => console.error('[redsys webhook] asiento:', e))
 
-    // Factura serie W automática (control en Contabilidad y escenario C).
-    // Si falla no bloquea el pedido: se puede regenerar con el backfill.
-    await createOnlineOrderInvoice(order.id)
-      .then((r) => { if (!r.ok) console.error('[redsys webhook] factura W:', r.error) })
-      .catch((e) => console.error('[redsys webhook] factura W:', e))
+    // Ticket CLP-T (mig 286; antes, factura W automática). Si falla no bloquea
+    // el pedido: la RPC es idempotente y se puede volver a lanzar.
+    await createOnlineOrderTicket(order.id)
+      .then((r) => { if (!r.ok) console.error('[redsys webhook] ticket:', r.error) })
+      .catch((e) => console.error('[redsys webhook] ticket:', e))
 
     try {
       await notifyNewOnlineOrder(pending.order_number, Number(pending.total) || 0)

@@ -367,8 +367,32 @@ export async function createOnlineOrderJournalEntry(onlineOrderId: string): Prom
 }
 
 /**
+ * Asigna el TICKET de un pedido online pagado: nº oficial de la serie CLP-T,
+ * tienda "Tienda Online", sin caja (mig 286). Sustituye desde sep-2026 a la
+ * factura W automática: la llaman los webhooks de Redsys/Stripe al confirmar el
+ * cobro. Idempotente (la RPC devuelve el ticket ya asignado) y se niega si el
+ * pedido ya tiene factura W vigente. Los motores de ingresos lo leen con
+ * loadOnlineTicketIncome.
+ */
+export async function createOnlineOrderTicket(onlineOrderId: string): Promise<{ ok: boolean; ticketRef?: string; error?: string; skipped?: boolean }> {
+  try {
+    const admin = createAdminClient()
+    const { data, error } = await admin.rpc('rpc_issue_online_order_ticket', { p_order_id: onlineOrderId })
+    if (error) return { ok: false, error: error.message }
+    const r = (data ?? {}) as { ok?: boolean; ticket_ref?: string; error?: string; skipped?: boolean; reason?: string }
+    if (!r.ok) return { ok: false, error: r.error ?? 'No se pudo asignar el ticket' }
+    return { ok: true, ticketRef: r.ticket_ref, skipped: r.skipped }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Error desconocido'
+    return { ok: false, error: msg }
+  }
+}
+
+/**
  * Emite la factura de un pedido online pagado (serie W, W2026-0001…).
- * La llaman los webhooks de Redsys/Stripe al confirmar el cobro (y el backfill).
+ * Hasta sep-2026 la llamaban los webhooks al confirmar el cobro; desde la mig
+ * 286 el pedido lleva TICKET (createOnlineOrderTicket) y esta función queda
+ * para facturar a petición del cliente o para el backfill.
  *
  * - Idempotente: si ya existe factura vigente para el pedido, la devuelve
  *   (los webhooks reintentan; además la protege el índice único parcial

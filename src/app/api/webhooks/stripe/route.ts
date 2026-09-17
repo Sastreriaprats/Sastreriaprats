@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { deductOnlineOrderStock } from '@/lib/stock/online-order-stock'
-import { createOnlineOrderJournalEntry, createOnlineOrderInvoice } from '@/actions/accounting-triggers'
+import { createOnlineOrderJournalEntry, createOnlineOrderTicket } from '@/actions/accounting-triggers'
 import { sendOrderConfirmation } from '@/lib/email/transactional'
 import { notifyNewOnlineOrder } from '@/lib/notifications/create-notification'
 import Stripe from 'stripe'
@@ -124,10 +124,10 @@ export async function POST(request: NextRequest) {
             .then((r) => { if (!r.ok) console.error('[Stripe webhook] asiento:', r.error) })
             .catch((e) => console.error('[Stripe webhook] asiento:', e))
 
-          // Factura serie W automática (control en Contabilidad y escenario C).
-          await createOnlineOrderInvoice(order.id)
-            .then((r) => { if (!r.ok) console.error('[Stripe webhook] factura W:', r.error) })
-            .catch((e) => console.error('[Stripe webhook] factura W:', e))
+          // Ticket CLP-T del pedido (mig 286; antes, factura W automática).
+          await createOnlineOrderTicket(order.id)
+            .then((r) => { if (!r.ok) console.error('[Stripe webhook] ticket:', r.error) })
+            .catch((e) => console.error('[Stripe webhook] ticket:', e))
 
           try {
             await notifyNewOnlineOrder(orderNumber, total)
@@ -178,10 +178,10 @@ export async function POST(request: NextRequest) {
             .then((r) => { if (!r.ok) console.error('[Stripe webhook] asiento:', r.error) })
             .catch((e) => console.error('[Stripe webhook] asiento:', e))
 
-          // Factura serie W automática (control en Contabilidad y escenario C).
-          await createOnlineOrderInvoice(orderId)
-            .then((r) => { if (!r.ok) console.error('[Stripe webhook] factura W:', r.error) })
-            .catch((e) => console.error('[Stripe webhook] factura W:', e))
+          // Ticket CLP-T del pedido (mig 286; antes, factura W automática).
+          await createOnlineOrderTicket(orderId)
+            .then((r) => { if (!r.ok) console.error('[Stripe webhook] ticket:', r.error) })
+            .catch((e) => console.error('[Stripe webhook] ticket:', e))
 
           try {
             const sessionTotal = (session.amount_total || 0) / 100

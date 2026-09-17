@@ -36,8 +36,9 @@ type IncomeDoc = {
   method?: string
   saleId?: string
   orderId?: string
+  onlineOrderId?: string
   invoiceId?: string
-  origin?: string   // factura: ticket/pedidos/reservas/web a los que va asociada
+  origin?: string  // factura: ticket/pedidos/reservas/web a los que va asociada
   provenance: Provenance[]
   pdfUrl?: string
 }
@@ -84,6 +85,7 @@ function sortDocs<T>(rows: T[], key: SortKey, get: (r: T) => { date: string; num
 
 // Agregado anual por tercero (cliente o proveedor) para el modelo 347/349
 type ThirdPartyRow = {
+  key: string                   // NIF (o nombre) en mayúsculas: agrupa y abre su detalle
   name: string
   nif?: string
   byQuarter: [number, number, number, number]
@@ -189,6 +191,7 @@ export function ScenarioCView() {
         total: m.total,
         saleId: m.saleId,
         orderId: m.orderId,
+        onlineOrderId: m.onlineOrderId,
         provenance: ['sin_factura'],
       })
     }
@@ -261,7 +264,7 @@ export function ScenarioCView() {
     const map = new Map<string, ThirdPartyRow>()
     const rowFor = (key: string, name: string, nif?: string) => {
       let row = map.get(key)
-      if (!row) { row = { name, nif, byQuarter: [0, 0, 0, 0], total: 0, count: 0, extra: 0 }; map.set(key, row) }
+      if (!row) { row = { key, name, nif, byQuarter: [0, 0, 0, 0], total: 0, count: 0, extra: 0 }; map.set(key, row) }
       if (!row.nif && nif) row.nif = nif
       return row
     }
@@ -292,7 +295,7 @@ export function ScenarioCView() {
       const name = f.supplier.trim() || '(sin nombre)'
       const key = (f.cif || name).toUpperCase()
       let row = map.get(key)
-      if (!row) { row = { name, nif: f.cif, byQuarter: [0, 0, 0, 0], total: 0, count: 0, extra: 0 }; map.set(key, row) }
+      if (!row) { row = { key, name, nif: f.cif, byQuarter: [0, 0, 0, 0], total: 0, count: 0, extra: 0 }; map.set(key, row) }
       if (!row.nif && f.cif) row.nif = f.cif
       const amount = f.base + f.vat
       const q = quarterOf(f.date)
@@ -313,7 +316,7 @@ export function ScenarioCView() {
       const name = f.supplier.trim() || '(sin nombre)'
       const key = (f.cif || name).toUpperCase()
       let row = map.get(key)
-      if (!row) { row = { name, nif: f.cif, byQuarter: [0, 0, 0, 0], total: 0, count: 0, extra: 0 }; map.set(key, row) }
+      if (!row) { row = { key, name, nif: f.cif, byQuarter: [0, 0, 0, 0], total: 0, count: 0, extra: 0 }; map.set(key, row) }
       if (!row.nif && f.cif) row.nif = f.cif
       const q = quarterOf(f.date)
       if (q >= 1 && q <= 4) row.byQuarter[q - 1] = n2(row.byQuarter[q - 1] + f.base)
@@ -712,7 +715,7 @@ export function ScenarioCView() {
                       <td className="px-3 py-2 text-slate-500">{d.status ? INVOICE_STATUS[d.status] ?? d.status : '—'}</td>
                       <td className="px-3 py-2 capitalize text-slate-500">{d.method || '—'}</td>
                       <td className="px-3 py-2 text-right">
-                        <DownloadBtn saleId={d.docType !== 'Factura' ? d.saleId : undefined} orderId={d.docType !== 'Factura' ? d.orderId : undefined} pdfUrl={d.pdfUrl} invoiceId={d.docType === 'Factura' ? d.invoiceId : undefined} />
+                        <DownloadBtn saleId={d.docType !== 'Factura' ? d.saleId : undefined} orderId={d.docType !== 'Factura' ? d.orderId : undefined} onlineOrderId={d.docType !== 'Factura' ? d.onlineOrderId : undefined} pdfUrl={d.pdfUrl} invoiceId={d.docType === 'Factura' ? d.invoiceId : undefined} />
                       </td>
                     </tr>
                   ))}
@@ -849,11 +852,12 @@ function ApInvoicesCard({ title, tag, rows, footnote, intra = false }: {
 // Pestaña Clientes · 347: cuánto se ha facturado/cobrado a cada cliente y cuánto
 // ha facturado cada proveedor en el año, con desglose trimestral (el 347 se
 // declara por trimestres) y marca sobre los que superan los 3.005,06 €.
-function ThirdPartiesTab({ year, clients, suppliers, intra }: {
+function ThirdPartiesTab({ year, clients, suppliers, intra, onClientClick }: {
   year: number
   clients: ThirdPartyRow[]
   suppliers: ThirdPartyRow[]
   intra: ThirdPartyRow[]
+  onClientClick: (row: ThirdPartyRow) => void
 }) {
   const [side, setSide] = useState<'clientes' | 'proveedores'>('clientes')
   const [query, setQuery] = useState('')
@@ -896,9 +900,11 @@ function ThirdPartiesTab({ year, clients, suppliers, intra }: {
           totalLabel="Facturado año"
           extraLabel="Cobros sin factura"
           rows={clients.filter(match)}
+          onRowClick={onClientClick}
           footnote="Facturado = facturas emitidas del año (IVA incluido, criterio del 347), con su desglose por trimestre. «Cobros sin
           factura» son los tickets y cobros de sastrería del escenario C sin factura asociada: no van al 347, pero sirven para ver el
-          volumen real por cliente. En dorado, los clientes que superan los 3.005,06 € facturados (declarables en el 347)."
+          volumen real por cliente. En dorado, los clientes que superan los 3.005,06 € facturados (declarables en el 347). Pincha en
+          un cliente para ver su facturación y su libro mayor; pincha en una cabecera para ordenar."
         />
       ) : (
         <div className="space-y-5">

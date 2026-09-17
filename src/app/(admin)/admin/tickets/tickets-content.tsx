@@ -32,7 +32,7 @@ import { Badge } from '@/components/ui/badge'
 import { Loader2, FileDown, Receipt, ChevronLeft, ChevronRight, FileText, Gift, Trash2, AlertTriangle, Pencil, X, CreditCard, Plus, Package, Scissors, ExternalLink, StickyNote, Globe } from 'lucide-react'
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils'
 import { listTickets, listSastreriaTickets, getSaleForTicket, previewSaleDeletion, deleteSaleCompletely, updateSaleClientNotes, updateSalePayments, previewSaleEdit, editSaleLines, searchProductsForPos } from '@/actions/pos'
-import { listOnlineTickets } from '@/actions/online-orders'
+import { listOnlineTickets, getOnlineOrderTicketData } from '@/actions/online-orders'
 import { PaymentHistory } from '@/components/payments/payment-history'
 import { listClients } from '@/actions/clients'
 import { createInvoiceFromSaleAction, generateInvoicePdfAction, cancelInvoiceAction } from '@/actions/accounting'
@@ -369,7 +369,24 @@ export function TicketsContent() {
     }
   }
 
-  // Pestaña Online: el documento de la venta es su factura de la serie W.
+  // Pestaña Online: el documento de la venta es su ticket CLP-T (mig 286).
+  const handleDownloadOnlineTicket = async (orderId: string) => {
+    setDownloadingId(orderId)
+    try {
+      const res = await getOnlineOrderTicketData(orderId)
+      if (!res.success || !res.data) {
+        toast.error('error' in res ? res.error : 'Error al generar el ticket')
+        return
+      }
+      await generateTicketPdf(res.data)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al generar el ticket')
+    } finally {
+      setDownloadingId(null)
+    }
+  }
+
+  // Pestaña Online, pedidos anteriores a sep-2026: su documento es la factura W.
   const handleDownloadInvoicePdf = async (invoiceId: string) => {
     setDownloadingId(invoiceId)
     try {
@@ -986,7 +1003,7 @@ export function TicketsContent() {
                     <TableHead>Total</TableHead>
                     <TableHead>Pago</TableHead>
                     <TableHead>Estado</TableHead>
-                    <TableHead>Factura</TableHead>
+                    <TableHead>Documento</TableHead>
                     <TableHead className="w-[240px]">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1034,19 +1051,33 @@ export function TicketsContent() {
                           )}
                         </TableCell>
                         <TableCell className="text-sm">
-                          {row.invoice_number ? (
+                          {row.ticket_ref ? (
+                            <span className="font-mono" title="Ticket de la venta online">{row.ticket_ref}</span>
+                          ) : row.invoice_number ? (
                             <span className={cn('font-mono', row.invoice_status === 'cancelled' && 'line-through text-muted-foreground')}
                               title={row.invoice_status === 'cancelled' ? 'Factura anulada' : undefined}>
                               {row.invoice_number}
                             </span>
                           ) : (
                             <span className="text-amber-700 text-xs flex items-center gap-1">
-                              <AlertTriangle className="h-3 w-3" /> Sin factura
+                              <AlertTriangle className="h-3 w-3" /> Sin ticket ni factura
                             </span>
                           )}
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-wrap gap-1.5 items-center">
+                            {row.ticket_ref && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="gap-1"
+                                disabled={downloadingId === row.id}
+                                onClick={() => handleDownloadOnlineTicket(row.id)}
+                              >
+                                {downloadingId === row.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileDown className="h-3 w-3" />}
+                                Ticket
+                              </Button>
+                            )}
                             {row.invoice_id && row.invoice_status !== 'cancelled' && can('accounting.manage_invoices') && (
                               <Button
                                 variant="outline"
