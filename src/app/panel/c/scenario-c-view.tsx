@@ -19,9 +19,13 @@ import { Tabs, Kpis, QuarterTable, MonthVatTable, MONTH_NAMES, MonthlyFullExpand
 const thisYear = new Date().getFullYear()
 const n2 = (n: number) => Number((Number(n) || 0).toFixed(2))
 
+// Fecha desde la que manda la factura (DOC_RULE_START en actions/ops.ts), para
+// explicar en pantalla por qué hay documentos informativos que no suman.
+const DOC_RULE_LABEL = '1 de julio de 2026'
+
 const METRICS: [string, keyof AccountingView][] = [
-  ['Facturación', 'income'],
-  ['Gastos', 'expenses'],
+  ['Ventas', 'income'],
+  ['Compras', 'expenses'],
   ['Resultado', 'profit'],
   ['IVA repercutido', 'ivaRepercutido'],
   ['IVA soportado', 'ivaSoportado'],
@@ -30,13 +34,16 @@ const METRICS: [string, keyof AccountingView][] = [
 
 // Documento de ingreso de la pestaña Facturas: factura emitida o ticket sin factura
 type IncomeDoc = {
-  docType: 'Factura' | 'Ticket' | 'Sastrería'
+  docType: 'Factura' | 'Ticket' | 'Sastrería' | 'Reserva' | 'Abono'
   number: string
   client: string
   date: string
   base: number
   vat: number
   total: number
+  counted: boolean              // false = documento informativo (no suma; ver nota al pie)
+  collected?: number            // cobrado (facturas ligadas a ticket/pedido/reserva)
+  pending?: number              // pendiente de cobro
   status?: string
   method?: string
   saleId?: string
@@ -212,31 +219,46 @@ export function ScenarioCView() {
 
   useEffect(() => { load() }, [load])
 
-  // Ingresos de la pestaña Facturas: todas las facturas emitidas + tickets/cobros
-  // sin factura. Si un ticket o pedido tiene factura, solo figura la factura.
+  // VENTAS de la pestaña Facturas. Manda el documento: la factura emitida es la
+  // venta (con su abono si sustituye a algo ya declarado en un trimestre
+  // cerrado) y, sin factura, cuenta el ticket o el cobro. Las facturas antiguas
+  // ligadas a un ticket/pedido/reserva se declararon por sus cobros: se listan
+  // como informativas y NO suman, para que el total cuadre con Resumen y Mensual.
   const incomeDocs = useMemo<IncomeDoc[]>(() => {
     if (!data) return []
-    const billedSales = new Set(data.invoices.filter((f) => f.saleId).map((f) => f.saleId))
-    const billedOrders = new Set(data.invoices.filter((f) => f.orderId).map((f) => f.orderId))
+    const byId = new Map(data.invoices.map((f) => [f.id, f]))
     const docs: IncomeDoc[] = data.invoices.map((f) => ({
       docType: 'Factura', number: f.number, client: f.client, date: f.date,
       base: f.base, vat: f.vat, total: f.total,
+      counted: f.counted, collected: f.collected, pending: f.pending,
       status: f.status, method: f.method, saleId: f.saleId, orderId: f.orderId, invoiceId: f.id,
       origin: f.origin, provenance: f.originKinds.length ? f.originKinds : ['manual'], pdfUrl: f.pdfUrl,
     }))
     for (const m of data.ledger) {
+      if (m.type === 'Abono') {
+        const f = m.invoiceId ? byId.get(m.invoiceId) : undefined
+        docs.push({
+          docType: 'Abono',
+          number: f?.number ?? '',
+          client: m.client ?? '',
+          date: m.date,
+          base: m.base, vat: m.vat, total: m.total, counted: true,
+          origin: f?.origin,
+          provenance: f?.originKinds.length ? f.originKinds : ['manual'],
+        })
+        continue
+      }
       if (m.total <= 0) continue
-      if (m.type !== 'Ticket' && m.type !== 'Sastrería') continue
-      if (m.saleId && billedSales.has(m.saleId)) continue
-      if (m.orderId && billedOrders.has(m.orderId)) continue
+      if (m.type !== 'Ticket' && m.type !== 'Sastrería' && m.type !== 'Reserva') continue
       docs.push({
-        docType: m.type as 'Ticket' | 'Sastrería',
-        number: m.concept.replace(/^(Ticket|Sastrería)\s+/, ''),
+        docType: m.type as 'Ticket' | 'Sastrería' | 'Reserva',
+        number: m.concept.replace(/^(Ticket|Sastrería|Reserva)\s+/, ''),
         client: m.client ?? '',
         date: m.date,
         base: m.base,
         vat: m.vat,
         total: m.total,
+        counted: true,
         saleId: m.saleId,
         orderId: m.orderId,
         onlineOrderId: m.onlineOrderId,
@@ -423,8 +445,10 @@ export function ScenarioCView() {
         Tipo: d.docType, 'Nº': d.number,
         Procedencia: d.provenance.map((p) => PROVENANCE[p].label).join(' + '), Referencia: d.origin ?? '',
         Cliente: d.client, Fecha: d.date,
-        Base: n2(d.base), 'Tipo IVA %': docRate(d.base, d.vat) ?? 'mixto', IVA: n2(d.vat), 'Retención': 0,
-        Total: n2(d.total), Estado: d.status ? INVOICE_STATUS[d.status] ?? d.status : '', Pago: d.method ?? '',
+        Base: n2(d.base), 'Tipo IVA %': docRate(d.base, d.vat) ?? 'mixto', IVA: n2(d.vat),
+        Total: n2(d.total), Cobrado: d.collected ?? '', Pendiente: d.pending ?? '',
+        Cuenta: d.counted ? 'SÍ' : 'Informativa',
+        Estado: d.status ? INVOICE_STATUS[d.status] ?? d.status : '', Pago: d.method ?? '',
       })) },
       { name: 'Facturas gastos', rows: apDomestic.map((f) => ({
         'Nº': f.number, Proveedor: f.supplier, CIF: f.cif ?? '', Fecha: f.date,
@@ -829,8 +853,9 @@ export function ScenarioCView() {
                     <th className="text-left px-3 py-3">Fecha</th>
                     <th className="text-right px-3 py-3">Base</th>
                     <th className="text-right px-3 py-3">IVA</th>
-                    <th className="text-right px-3 py-3">Retención</th>
                     <th className="text-right px-3 py-3">Total</th>
+                    <th className="text-right px-3 py-3">Cobrado</th>
+                    <th className="text-right px-3 py-3">Pendiente</th>
                     <th className="text-left px-3 py-3">Estado</th>
                     <th className="text-left px-3 py-3">Pago</th>
                     <th className="text-right px-3 py-3">PDF</th>
@@ -838,9 +863,13 @@ export function ScenarioCView() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredIncomeDocs.length === 0 ? (
-                    <tr><td colSpan={13} className="px-3 py-8 text-center text-slate-400">Sin documentos de ingreso.</td></tr>
+                    <tr><td colSpan={14} className="px-3 py-8 text-center text-slate-400">Sin documentos de ingreso.</td></tr>
                   ) : filteredIncomeDocs.map((d, i) => (
-                    <tr key={i} className={selInc.has(docKey(d)) ? 'bg-sky-50/60' : 'hover:bg-slate-50/50'}>
+                    <tr
+                      key={i}
+                      className={selInc.has(docKey(d)) ? 'bg-sky-50/60' : d.counted ? 'hover:bg-slate-50/50' : 'bg-slate-50/40 text-slate-400'}
+                      title={d.counted ? undefined : 'Informativa: esta venta se declaró por sus cobros, así que no suma en el total'}
+                    >
                       <td className="w-8 pl-3 py-2">
                         {canDownloadDoc(d) && (
                           <input
@@ -870,8 +899,19 @@ export function ScenarioCView() {
                       <td className="px-3 py-2 text-right tabular-nums">
                         {eur(d.vat)} <span className="text-[10px] text-slate-400">({rateLabel(d.base, d.vat)})</span>
                       </td>
-                      <td className="px-3 py-2 text-right text-slate-300">—</td>
                       <td className="px-3 py-2 text-right font-medium tabular-nums">{eur(d.total)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {d.collected === undefined
+                          ? <span className="text-slate-300">—</span>
+                          : <span className={d.collected > 0 ? 'text-emerald-700' : 'text-slate-400'}>{eur(d.collected)}</span>}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {d.pending === undefined
+                          ? <span className="text-slate-300">—</span>
+                          : d.pending > 0.004
+                            ? <span className="font-medium text-amber-700">{eur(d.pending)}</span>
+                            : <span className="text-slate-400">{eur(0)}</span>}
+                      </td>
                       <td className="px-3 py-2 text-slate-500">{d.status ? INVOICE_STATUS[d.status] ?? d.status : '—'}</td>
                       <td className="px-3 py-2 capitalize text-slate-500">{d.method || '—'}</td>
                       <td className="px-3 py-2 text-right">
@@ -879,23 +919,33 @@ export function ScenarioCView() {
                       </td>
                     </tr>
                   ))}
-                  {filteredIncomeDocs.length > 0 && (
-                    <tr className={TOTAL_ROW}>
-                      <td className="px-3 py-2.5" colSpan={6}>TOTAL ingresos ({filteredIncomeDocs.length} documentos)</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums">{eur(filteredIncomeDocs.reduce((s, d) => s + d.base, 0))}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums">{eur(filteredIncomeDocs.reduce((s, d) => s + d.vat, 0))}</td>
-                      <td className="px-3 py-2.5 text-right text-slate-400">—</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums">{eur(filteredIncomeDocs.reduce((s, d) => s + d.total, 0))}</td>
-                      <td colSpan={3} />
-                    </tr>
-                  )}
+                  {filteredIncomeDocs.length > 0 && (() => {
+                    const counted = filteredIncomeDocs.filter((d) => d.counted)
+                    const info = filteredIncomeDocs.length - counted.length
+                    return (
+                      <tr className={TOTAL_ROW}>
+                        <td className="px-3 py-2.5" colSpan={6}>
+                          TOTAL ventas ({counted.length} documentos)
+                          {info > 0 && <span className="ml-1 font-normal text-slate-400">· {info} informativa{info === 1 ? '' : 's'} sin sumar</span>}
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums">{eur(counted.reduce((s, d) => s + d.base, 0))}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums">{eur(counted.reduce((s, d) => s + d.vat, 0))}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums">{eur(counted.reduce((s, d) => s + d.total, 0))}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums">{eur(counted.reduce((s, d) => s + (d.collected ?? 0), 0))}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums">{eur(counted.reduce((s, d) => s + (d.pending ?? 0), 0))}</td>
+                        <td colSpan={3} />
+                      </tr>
+                    )
+                  })()}
                 </tbody>
               </table>
               <p className="border-t p-3 text-xs text-slate-400">
-                Tickets y facturas del escenario C, desglosados en base imponible + IVA (con su tipo). Las facturas emitidas no llevan
-                retención de IRPF (actividad no sujeta), por eso la columna va vacía. Si un ticket o pedido tiene factura emitida, solo
-                figura la factura (sin duplicar). El total suma los documentos listados por su importe completo: puede desviarse
-                ligeramente del Resumen C con documentos de cobro parcial.
+                Ventas del escenario C, en base imponible + IVA (con su tipo). Manda el documento: una factura emitida es la venta, en su
+                fecha; lo que no se factura cuenta por su ticket o su cobro. Cuando una factura sustituye a algo ya declarado en un
+                trimestre anterior, aparece además su <strong>abono</strong> en negativo, con la fecha de la factura, para no tocar aquel
+                trimestre. Las filas en gris son informativas: ventas anteriores al {DOC_RULE_LABEL} que se declararon por sus cobros, así
+                que no suman. Cobrado y pendiente salen de los cobros de cada factura; en las facturas sueltas no hay ese dato («—»).
+                Así el total cuadra con el Resumen y con el Mensual.
               </p>
             </div>
           ) : (

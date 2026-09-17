@@ -622,6 +622,7 @@ export const TYPE_BADGE: Record<string, string> = {
   'Sastrería': 'bg-violet-50 text-violet-700',
   Reserva: 'bg-amber-50 text-amber-700',
   Factura: 'bg-blue-50 text-blue-700',
+  Abono: 'bg-orange-50 text-orange-700',
   'Factura recibida': 'bg-red-50 text-red-700',
   Compra: 'bg-red-50 text-red-700',
   Gasto: 'bg-red-50 text-red-700',

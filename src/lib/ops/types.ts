@@ -62,6 +62,7 @@ export type LedgerMovement = {
   vat: number
   total: number           // con signo: + ingreso, − gasto
   saleId?: string
+  invoiceId?: string      // factura emitida (venta o abono) → dedup con el listado
   orderId?: string        // pedido de sastrería → PDF de ticket de pedido
   onlineOrderId?: string  // pedido online con ticket (mig 286) → PDF de ticket
   pdfUrl?: string         // PDF ya generado (facturas)
@@ -133,6 +134,12 @@ export type InvoiceLite = {
   origin?: string               // a qué va asociada: "Ticket CLP-…", "Pedidos PIN-… · Reserva RSV-…", "Web WEB-…"
   originKinds: InvoiceOriginKind[] // vacío = factura manual (sin ticket/pedido/reserva/web)
   pdfUrl?: string
+  // ¿Cuenta como VENTA del escenario? Desde DOC_RULE_START manda la factura, así
+  // que sí; las anteriores ligadas a ticket/pedido/reserva se declararon por sus
+  // cobros y figuran como documento informativo (no suman).
+  counted: boolean
+  collected?: number            // cobrado de esta factura (cobros ligados del año); undefined = sin datos
+  pending?: number              // total − cobrado
 }
 
 // Factura recibida de proveedor (gastos del escenario C)
