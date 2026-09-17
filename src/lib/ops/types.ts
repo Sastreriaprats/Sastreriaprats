@@ -109,7 +109,11 @@ export type ViewB = {
   depositedCount: number
 }
 
+// De dónde sale una factura emitida (puede ser más de uno: pedidos + reservas)
+export type InvoiceOriginKind = 'ticket' | 'pedido' | 'reserva' | 'web'
+
 export type InvoiceLite = {
+  id: string
   number: string
   client: string
   nif?: string                  // NIF del cliente (para el 347)
@@ -121,6 +125,8 @@ export type InvoiceLite = {
   method: string
   saleId?: string               // factura de un ticket → dedup en C
   orderId?: string              // factura de un pedido de sastrería → dedup en C
+  origin?: string               // a qué va asociada: "Ticket CLP-…", "Pedidos PIN-… · Reserva RSV-…", "Web WEB-…"
+  originKinds: InvoiceOriginKind[] // vacío = factura manual (sin ticket/pedido/reserva/web)
   pdfUrl?: string
 }
 

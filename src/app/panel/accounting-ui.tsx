@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { TrendingUp, TrendingDown, Wallet, Receipt, Percent, Hash, Landmark, Download, Loader2, ChevronDown, ChevronRight, type LucideIcon } from 'lucide-react'
-import { getTicketData, getOrderTicketData, getApInvoicePdfUrl } from '@/actions/ops'
+import { getTicketData, getOrderTicketData, getApInvoicePdfUrl, getIssuedInvoicePdfUrls } from '@/actions/ops'
 import { generateTicketPdf } from '@/components/pos/ticket-pdf'
 import { generateTailoringOrderTicketPdf, type TailoringTicketOrder } from '@/lib/pdf/tailoring-order-ticket'
 import type { AccountingView, MovementRow, LedgerMovement } from '@/lib/ops/types'
@@ -167,9 +167,10 @@ export function QuarterTable({ view, variant, retentions }: { view: AccountingVi
   )
 }
 
-export function DownloadBtn({ saleId, orderId, pdfUrl, apPath }: { saleId?: string; orderId?: string; pdfUrl?: string; apPath?: string }) {
+// `invoiceId` (solo escenario C): factura emitida sin PDF guardado → se genera al pulsar.
+export function DownloadBtn({ saleId, orderId, pdfUrl, apPath, invoiceId }: { saleId?: string; orderId?: string; pdfUrl?: string; apPath?: string; invoiceId?: string }) {
   const [loading, setLoading] = useState(false)
-  if (!saleId && !orderId && !pdfUrl && !apPath) return <span className="text-slate-300">—</span>
+  if (!saleId && !orderId && !pdfUrl && !apPath && !invoiceId) return <span className="text-slate-300">—</span>
   const go = async () => {
     setLoading(true)
     try {
@@ -188,6 +189,11 @@ export function DownloadBtn({ saleId, orderId, pdfUrl, apPath }: { saleId?: stri
         const res = await getApInvoicePdfUrl(apPath)
         if (!res.ok) { toast.error('PDF no disponible'); return }
         window.open(res.data.url, '_blank', 'noopener')
+      } else if (invoiceId) {
+        const res = await getIssuedInvoicePdfUrls([invoiceId])
+        const url = res.ok ? res.data[0]?.url : null
+        if (!url) { toast.error('PDF no disponible'); return }
+        window.open(url, '_blank', 'noopener')
       }
     } catch {
       toast.error('No se pudo generar el PDF')

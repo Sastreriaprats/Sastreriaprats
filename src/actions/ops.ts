@@ -3,6 +3,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
 import { loadReservationPayments } from '@/lib/accounting/reservation-payments'
+import { generateInvoicePdf } from '@/lib/pdf/invoice-pdf'
 import { getViewerAccess, assertScope, assertCanManage, type ViewerAccess } from '@/lib/ops/access'
 import { seal, open, dedupTag } from '@/lib/ops/crypto'
 import {
@@ -12,7 +13,7 @@ import {
 } from '@/lib/ops/db'
 import type {
   CashEntryPayload, CashEntry, AccountingView, MonthPoint, QuarterRow, MovementRow, LedgerMovement, ViewB, ViewC,
-  MovementKind, DepositPayload, DepositItemPayload, DepositRow, ApInvoiceLite, VatRateRow,
+  MovementKind, DepositPayload, DepositItemPayload, DepositRow, ApInvoiceLite, VatRateRow, InvoiceOriginKind,
 } from '@/lib/ops/types'
 
 const r2 = (n: number) => Math.round(n * 100) / 100
@@ -501,6 +502,58 @@ async function loadDeposits(): Promise<DepositRow[]> {
   return out.sort((a, b) => b.date.localeCompare(a.date))
 }
 
+// Origen de cada factura emitida (id → tipos + texto): el ticket (nº oficial
+// CLP), los pedidos y reservas que cubre (puentes N:M, no el escalar espejo, que
+// solo guarda uno) o el pedido web. Sin origen (factura manual) → fuera del mapa.
+type InvoiceSource = { text: string; kinds: InvoiceOriginKind[] }
+async function loadInvoiceSources(admin: ReturnType<typeof createAdminClient>, invoices: Record<string, unknown>[]) {
+  const ids = invoices.map((x) => String(x.id))
+  const saleIds = [...new Set(invoices.map((x) => x.sale_id).filter(Boolean).map(String))]
+  const onlineIds = [...new Set(invoices.map((x) => x.online_order_id).filter(Boolean).map(String))]
+  if (ids.length === 0) return new Map<string, InvoiceSource>()
+  const [{ data: orders }, { data: reservations }, { data: sales }, { data: clp }, { data: online }] = await Promise.all([
+    admin.from('invoice_tailoring_orders').select('invoice_id, tailoring_orders(order_number)').in('invoice_id', ids),
+    admin.from('invoice_reservations').select('invoice_id, product_reservations(reservation_number)').in('invoice_id', ids),
+    saleIds.length ? admin.from('sales').select('id, ticket_number').in('id', saleIds) : Promise.resolve({ data: [] }),
+    saleIds.length ? admin.from('cash_internal_tickets').select('sale_id, ref').eq('source', 'sale').in('sale_id', saleIds) : Promise.resolve({ data: [] }),
+    onlineIds.length ? admin.from('online_orders').select('id, order_number').in('id', onlineIds) : Promise.resolve({ data: [] }),
+  ])
+  const group = (rows: unknown[] | null, embed: string, field: string) => {
+    const m = new Map<string, string[]>()
+    for (const r of (rows ?? []) as Record<string, unknown>[]) {
+      const num = String(((r[embed] as Record<string, unknown> | null)?.[field] as string) ?? '')
+      if (!num) continue
+      const k = String(r.invoice_id)
+      m.set(k, [...(m.get(k) ?? []), num].sort())
+    }
+    return m
+  }
+  const orderNums = group(orders, 'tailoring_orders', 'order_number')
+  const resNums = group(reservations, 'product_reservations', 'reservation_number')
+  const ticketRef = new Map<string, string>()
+  for (const s of (sales ?? []) as Record<string, unknown>[]) ticketRef.set(String(s.id), String(s.ticket_number ?? ''))
+  for (const t of (clp ?? []) as Record<string, unknown>[]) ticketRef.set(String(t.sale_id), String(t.ref))
+  const onlineNum = new Map<string, string>()
+  for (const o of (online ?? []) as Record<string, unknown>[]) onlineNum.set(String(o.id), String(o.order_number ?? ''))
+
+  const out = new Map<string, InvoiceSource>()
+  for (const x of invoices) {
+    const id = String(x.id)
+    const parts: string[] = []
+    const kinds: InvoiceOriginKind[] = []
+    const ticket = x.sale_id ? ticketRef.get(String(x.sale_id)) : undefined
+    if (ticket) { parts.push(`Ticket ${ticket}`); kinds.push('ticket') }
+    const os = orderNums.get(id)
+    if (os?.length) { parts.push(`${os.length > 1 ? 'Pedidos' : 'Pedido'} ${os.join(', ')}`); kinds.push('pedido') }
+    const rs = resNums.get(id)
+    if (rs?.length) { parts.push(`${rs.length > 1 ? 'Reservas' : 'Reserva'} ${rs.join(', ')}`); kinds.push('reserva') }
+    const web = x.online_order_id ? onlineNum.get(String(x.online_order_id)) : undefined
+    if (web) { parts.push(`Web ${web}`); kinds.push('web') }
+    if (parts.length) out.set(id, { text: parts.join(' · '), kinds })
+  }
+  return out
+}
+
 // ===========================================================================
 // CAPA C — escenario sin efectivo (A − cobros efectivo). NO se persiste.
 // ===========================================================================
@@ -524,11 +577,12 @@ export async function getViewC(year: number) {
 
     // Facturas emitidas del año (documentos fiscales; se ven en C)
     const { data: inv } = await admin.from('invoices')
-      .select('id, invoice_number, client_name, client_nif, invoice_date, subtotal, tax_amount, total, status, payment_method, sale_id, tailoring_order_id, pdf_url')
+      .select('id, invoice_number, client_name, client_nif, invoice_date, subtotal, tax_amount, total, status, payment_method, sale_id, tailoring_order_id, online_order_id, pdf_url')
       .eq('invoice_type', 'issued')
       .gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`)
       .not('status', 'in', '(draft,cancelled)')
       .order('invoice_date', { ascending: false })
+    const sources = await loadInvoiceSources(admin, (inv ?? []) as Record<string, unknown>[])
     // En C NO puede figurar nada cobrado en efectivo: fuera las facturas cuyo
     // cobro es 100% efectivo sin ingresar al banco (venta efectiva, pedido con
     // todos los cobros en efectivo, o factura suelta cobrada en efectivo). Lo
@@ -564,6 +618,9 @@ export async function getViewC(year: number) {
           method: cleanMethod(x.payment_method),
           saleId: x.sale_id ? String(x.sale_id) : undefined,
           orderId: x.tailoring_order_id ? String(x.tailoring_order_id) : undefined,
+          id: String(x.id),
+          origin: sources.get(String(x.id))?.text,
+          originKinds: sources.get(String(x.id))?.kinds ?? [],
           pdfUrl: x.pdf_url ? String(x.pdf_url) : undefined,
         }
       })
@@ -640,6 +697,55 @@ export async function getApInvoicePdfUrl(attachmentPath: string) {
     const { data, error } = await admin.storage.from('supplier-invoices').createSignedUrl(path, 3600)
     if (error || !data?.signedUrl) return fail('No se pudo abrir el archivo')
     return ok({ url: data.signedUrl })
+  } catch { return fail() }
+}
+
+// ---------------------------------------------------------------------------
+// DESCARGA EN GRUPO (escenario C). El cliente pide por lotes pequeños y monta
+// el ZIP en el navegador.
+// ---------------------------------------------------------------------------
+
+// Facturas EMITIDAS: URL del PDF; si la factura aún no lo tiene (pdf_url se
+// vacía al editarla), se genera y sube como hace Contabilidad al abrirla.
+// Solo emitidas vigentes (nunca borradores ni anuladas).
+export async function getIssuedInvoicePdfUrls(invoiceIds: string[]) {
+  try {
+    await assertScope('C')
+    const ids = [...new Set(invoiceIds)].slice(0, 25)
+    if (ids.length === 0) return ok([] as { id: string; number: string; url: string | null }[])
+    const admin = createAdminClient()
+    const { data } = await admin.from('invoices')
+      .select('id, invoice_number, pdf_url')
+      .in('id', ids)
+      .eq('invoice_type', 'issued')
+      .not('status', 'in', '(draft,cancelled)')
+    const out: { id: string; number: string; url: string | null }[] = []
+    for (const r of (data ?? []) as Record<string, unknown>[]) {
+      let url = (r.pdf_url as string | null) || null
+      if (!url) {
+        try { url = await generateInvoicePdf(String(r.id)) } catch { url = null }
+      }
+      out.push({ id: String(r.id), number: String(r.invoice_number ?? ''), url })
+    }
+    return ok(out)
+  } catch { return fail() }
+}
+
+// Facturas RECIBIDAS: signed URLs (1h) de sus adjuntos, en un solo viaje.
+export async function getApInvoicePdfUrls(attachmentPaths: string[]) {
+  try {
+    await assertScope('C')
+    const publicMarker = '/storage/v1/object/public/supplier-invoices/'
+    const paths = attachmentPaths.slice(0, 200)
+      .map((p) => (p.includes(publicMarker) ? p.split(publicMarker)[1] : p))
+    const valid = paths.filter(Boolean)
+    if (valid.length === 0) return ok([] as (string | null)[])
+    const admin = createAdminClient()
+    const { data, error } = await admin.storage.from('supplier-invoices').createSignedUrls(valid, 3600)
+    if (error) return fail('No se pudieron firmar los archivos')
+    const byPath = new Map((data ?? []).map((d) => [d.path, d.signedUrl || null]))
+    // Mismo orden que la entrada; null = archivo no disponible
+    return ok(paths.map((p) => (p ? byPath.get(p) ?? null : null)))
   } catch { return fail() }
 }
 

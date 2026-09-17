@@ -1,12 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { toast } from 'sonner'
+import { ChevronDown, ChevronRight, Download, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { getViewC } from '@/actions/ops'
-import type { ViewC, AccountingView, ApInvoiceLite, VatRateRow } from '@/lib/ops/types'
+import { getViewC, getIssuedInvoicePdfUrls, getApInvoicePdfUrls } from '@/actions/ops'
+import type { ViewC, AccountingView, ApInvoiceLite, VatRateRow, InvoiceOriginKind } from '@/lib/ops/types'
 import { downloadExcelMulti } from '@/lib/excel/export'
+import { downloadZip, extFromUrl, type ZipItem } from '../bulk-download'
 import { Tabs, Kpis, QuarterTable, MonthlyFullExpandable, LedgerTable, DownloadBtn, TYPE_BADGE, TOTAL_ROW, PageHeader, YearSelect, eur, MONTH_LABELS, groupByMonth, monthKey } from '../accounting-ui'
 
 const thisYear = new Date().getFullYear()
@@ -34,7 +36,50 @@ type IncomeDoc = {
   method?: string
   saleId?: string
   orderId?: string
+  invoiceId?: string
+  origin?: string   // factura: ticket/pedidos/reservas/web a los que va asociada
+  provenance: Provenance[]
   pdfUrl?: string
+}
+
+// Procedencia de un documento de ingreso: de qué sale la factura (manual = hecha
+// a mano, sin ticket/pedido/reserva/web) o "sin factura" (ticket/cobro sin facturar)
+type Provenance = InvoiceOriginKind | 'manual' | 'sin_factura'
+const PROVENANCE: Record<Provenance, { label: string; cls: string }> = {
+  ticket: { label: 'Ticket', cls: 'bg-sky-50 text-sky-700 ring-sky-200' },
+  pedido: { label: 'Pedido', cls: 'bg-violet-50 text-violet-700 ring-violet-200' },
+  reserva: { label: 'Reserva', cls: 'bg-amber-50 text-amber-700 ring-amber-200' },
+  web: { label: 'Web', cls: 'bg-emerald-50 text-emerald-700 ring-emerald-200' },
+  manual: { label: 'Manual', cls: 'bg-slate-100 text-slate-600 ring-slate-200' },
+  sin_factura: { label: 'Sin factura', cls: 'bg-white text-slate-400 ring-slate-200' },
+}
+const INVOICE_STATUS: Record<string, string> = {
+  issued: 'Emitida', paid: 'Cobrada', partially_paid: 'Cobro parcial', overdue: 'Vencida',
+  rectified: 'Rectificada', sent: 'Enviada',
+}
+
+// Orden de las listas de Facturas (ingresos y gastos)
+type SortKey = 'date_desc' | 'date_asc' | 'number_asc' | 'number_desc' | 'name_asc' | 'name_desc' | 'total_desc' | 'total_asc'
+const SORT_OPTIONS: [SortKey, string][] = [
+  ['date_desc', 'Fecha (recientes primero)'],
+  ['date_asc', 'Fecha (antiguas primero)'],
+  ['number_asc', 'Nº (ascendente)'],
+  ['number_desc', 'Nº (descendente)'],
+  ['name_asc', 'Cliente/proveedor (A-Z)'],
+  ['name_desc', 'Cliente/proveedor (Z-A)'],
+  ['total_desc', 'Total (mayor primero)'],
+  ['total_asc', 'Total (menor primero)'],
+]
+function sortDocs<T>(rows: T[], key: SortKey, get: (r: T) => { date: string; number: string; name: string; total: number }) {
+  const [field, dir] = key.split('_') as ['date' | 'number' | 'name' | 'total', 'asc' | 'desc']
+  const sign = dir === 'asc' ? 1 : -1
+  return [...rows].sort((ra, rb) => {
+    const a = get(ra), b = get(rb)
+    const cmp = field === 'total' ? a.total - b.total
+      : field === 'date' ? a.date.localeCompare(b.date)
+      : a[field].localeCompare(b[field], 'es', { numeric: true, sensitivity: 'base' })
+    return cmp * sign || b.date.localeCompare(a.date)
+  })
 }
 
 // Agregado anual por tercero (cliente o proveedor) para el modelo 347/349
@@ -52,6 +97,23 @@ const THRESHOLD_347 = 3005.06
 
 const inRange = (date: string, from: string, to: string) =>
   (!from || date >= from) && (!to || date <= to)
+
+// Buscador libre de Movimientos y Facturas. Busca el texto en proveedor/cliente,
+// nº, concepto, CIF y notas (sin distinguir mayúsculas ni acentos) y, si lo
+// escrito es una cifra ("176", "1.234,56", "350 €"), también en los importes.
+const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+function makeMatcher(query: string) {
+  const q = fold(query.trim())
+  if (!q) return null
+  const digits = q.replace(/[€\s]/g, '')
+  // "1.234,56" → "1234.56"; "176,5" → "176.5"; "1234.56" se queda igual
+  const normalized = digits.includes(',') ? digits.replace(/\./g, '').replace(',', '.') : digits
+  const isAmount = /^-?\d+(\.\d{1,2})?$/.test(normalized)
+  const needle = normalized.replace(/^-/, '')
+  return (texts: (string | undefined)[], amounts: number[]) =>
+    texts.some((t) => !!t && fold(t).includes(q)) ||
+    (isAmount && amounts.some((n) => Math.abs(Number(n) || 0).toFixed(2).includes(needle)))
+}
 
 const quarterOf = (date: string) => Math.ceil(Number(date.slice(5, 7)) / 3)
 const qPeriod = (year: number, q: number) => `${String((q - 1) * 3 + 1).padStart(2, '0')}/${year} – ${String(q * 3).padStart(2, '0')}/${year}`
@@ -79,6 +141,15 @@ export function ScenarioCView() {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [docSide, setDocSide] = useState<'ingresos' | 'gastos'>('ingresos')
+  // Buscador (texto o importe) y filtro por proveedor (Movimientos y Facturas)
+  const [query, setQuery] = useState('')
+  const [supplier, setSupplier] = useState('')
+  const matcher = useMemo(() => makeMatcher(query), [query])
+  // Facturas: filtro por procedencia (solo ingresos), orden y descarga en grupo
+  const [provenance, setProvenance] = useState<Provenance | ''>('')
+  const [sortKey, setSortKey] = useState<SortKey>('date_desc')
+  const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null)
+  const hasFilter = !!(fromDate || toDate || query.trim() || supplier || provenance)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -98,7 +169,8 @@ export function ScenarioCView() {
     const docs: IncomeDoc[] = data.invoices.map((f) => ({
       docType: 'Factura', number: f.number, client: f.client, date: f.date,
       base: f.base, vat: f.vat, total: f.total,
-      status: f.status, method: f.method, saleId: f.saleId, orderId: f.orderId, pdfUrl: f.pdfUrl,
+      status: f.status, method: f.method, saleId: f.saleId, orderId: f.orderId, invoiceId: f.id,
+      origin: f.origin, provenance: f.originKinds.length ? f.originKinds : ['manual'], pdfUrl: f.pdfUrl,
     }))
     for (const m of data.ledger) {
       if (m.total <= 0) continue
@@ -115,22 +187,48 @@ export function ScenarioCView() {
         total: m.total,
         saleId: m.saleId,
         orderId: m.orderId,
+        provenance: ['sin_factura'],
       })
     }
     return docs.sort((a, b) => b.date.localeCompare(a.date))
   }, [data])
 
-  const filteredLedger = useMemo(
-    () => (data?.ledger ?? []).filter((m) => inRange(m.date, fromDate, toDate)),
-    [data, fromDate, toDate],
+  // Proveedores del año (desplegable del filtro), por orden alfabético
+  const supplierOptions = useMemo(
+    () => [...new Set((data?.apInvoices ?? []).map((f) => f.supplier.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es')),
+    [data],
   )
+
+  // Con proveedor elegido, Movimientos muestra solo sus facturas recibidas
+  const filteredLedger = useMemo(
+    () => (data?.ledger ?? []).filter((m) =>
+      inRange(m.date, fromDate, toDate) &&
+      (!supplier || (m.type === 'Factura recibida' && (m.client ?? '').trim() === supplier)) &&
+      (!matcher || matcher([m.concept, m.client, m.type], [m.base, m.vat, m.total]))),
+    [data, fromDate, toDate, supplier, matcher],
+  )
+  // El filtro de proveedor no aplica a ingresos (ahí se busca por cliente con el buscador)
   const filteredIncomeDocs = useMemo(
-    () => incomeDocs.filter((d) => inRange(d.date, fromDate, toDate)),
-    [incomeDocs, fromDate, toDate],
+    () => sortDocs(
+      incomeDocs.filter((d) =>
+        inRange(d.date, fromDate, toDate) &&
+        (!provenance || d.provenance.includes(provenance)) &&
+        (!matcher || matcher([d.number, d.client, d.docType, d.method, d.origin], [d.base, d.vat, d.total]))),
+      sortKey,
+      (d) => ({ date: d.date, number: d.number, name: d.client, total: d.total }),
+    ),
+    [incomeDocs, fromDate, toDate, provenance, matcher, sortKey],
   )
   const filteredApInvoices = useMemo(
-    () => (data?.apInvoices ?? []).filter((f) => inRange(f.date, fromDate, toDate)).sort((a, b) => b.date.localeCompare(a.date)),
-    [data, fromDate, toDate],
+    () => sortDocs(
+      (data?.apInvoices ?? []).filter((f) =>
+        inRange(f.date, fromDate, toDate) &&
+        (!supplier || f.supplier.trim() === supplier) &&
+        (!matcher || matcher([f.number, f.supplier, f.cif, f.note], [f.base, f.vat, f.total, f.retentionAmount]))),
+      sortKey,
+      (f) => ({ date: f.date, number: f.number, name: f.supplier, total: f.total }),
+    ),
+    [data, fromDate, toDate, supplier, matcher, sortKey],
   )
   // Facturas recibidas partidas: nacionales/resto vs intracomunitarias (CIF-IVA de otro país UE)
   const apDomestic = useMemo(() => filteredApInvoices.filter((f) => !f.isIntraEU), [filteredApInvoices])
@@ -217,8 +315,8 @@ export function ScenarioCView() {
     return [...map.values()].sort((a, b) => b.total - a.total)
   }, [data])
 
-  // Con el filtro Desde/Hasta activo se exporta SOLO el detalle del rango
-  // (movimientos y facturas); sin filtro, el informe anual completo.
+  // Con algún filtro activo (fechas, buscador o proveedor) se exporta SOLO el
+  // detalle filtrado (movimientos y facturas); sin filtro, el informe anual completo.
   const onExcel = async () => {
     if (!data) return
     const detailSheets = [
@@ -227,9 +325,11 @@ export function ScenarioCView() {
         Base: n2(m.base), IVA: n2(m.vat), Total: n2(m.total),
       })) },
       { name: 'Facturas ingresos', rows: filteredIncomeDocs.map((d) => ({
-        Tipo: d.docType, 'Nº': d.number, Cliente: d.client, Fecha: d.date,
+        Tipo: d.docType, 'Nº': d.number,
+        Procedencia: d.provenance.map((p) => PROVENANCE[p].label).join(' + '), Referencia: d.origin ?? '',
+        Cliente: d.client, Fecha: d.date,
         Base: n2(d.base), 'Tipo IVA %': docRate(d.base, d.vat) ?? 'mixto', IVA: n2(d.vat), 'Retención': 0,
-        Total: n2(d.total), Estado: d.status ?? '', Pago: d.method ?? '',
+        Total: n2(d.total), Estado: d.status ? INVOICE_STATUS[d.status] ?? d.status : '', Pago: d.method ?? '',
       })) },
       { name: 'Facturas gastos', rows: apDomestic.map((f) => ({
         'Nº': f.number, Proveedor: f.supplier, CIF: f.cif ?? '', Fecha: f.date,
@@ -243,8 +343,8 @@ export function ScenarioCView() {
         Notas: f.note ?? '',
       })) },
     ]
-    if (fromDate || toDate) {
-      await downloadExcelMulti(detailSheets, `escenario-c-${fromDate || 'inicio'}-a-${toDate || 'fin'}`)
+    if (hasFilter) {
+      await downloadExcelMulti(detailSheets, `escenario-c-${fromDate || 'inicio'}-a-${toDate || 'fin'}${query.trim() || supplier || provenance ? '-filtrado' : ''}`)
       return
     }
     await downloadExcelMulti([
@@ -290,15 +390,90 @@ export function ScenarioCView() {
     ], `escenario-c-${year}`)
   }
 
-  const DateRange = (
+  const clearFilters = () => { setFromDate(''); setToDate(''); setQuery(''); setSupplier(''); setProvenance('') }
+
+  // Descarga en un ZIP de las facturas que se están viendo (con filtros y orden).
+  // Ingresos: facturas emitidas (los tickets/cobros sin factura no son factura).
+  // Gastos: adjuntos de las facturas de proveedor que lo tengan.
+  const bulkIncome = useMemo(() => filteredIncomeDocs.filter((d) => d.docType === 'Factura' && d.invoiceId), [filteredIncomeDocs])
+  const bulkExpense = useMemo(() => filteredApInvoices.filter((f) => f.attachmentPath), [filteredApInvoices])
+  const bulkCount = docSide === 'ingresos' ? bulkIncome.length : bulkExpense.length
+  const onBulkDownload = async () => {
+    if (bulk || bulkCount === 0) return
+    if (bulkCount > 150 && !window.confirm(`Vas a descargar ${bulkCount} archivos en un ZIP. Puede tardar varios minutos. ¿Continuar?`)) return
+    const range = fromDate || toDate ? `${fromDate || 'inicio'}-a-${toDate || 'fin'}` : String(year)
+    setBulk({ done: 0, total: bulkCount })
+    try {
+      let items: ZipItem[]
+      if (docSide === 'ingresos') {
+        // Las que no tienen PDF guardado se generan en servidor, por lotes
+        const missing = bulkIncome.filter((d) => !d.pdfUrl).map((d) => d.invoiceId!)
+        const urls = new Map<string, string | null>()
+        for (let i = 0; i < missing.length; i += 5) {
+          const res = await getIssuedInvoicePdfUrls(missing.slice(i, i + 5))
+          if (res.ok) for (const r of res.data) urls.set(r.id, r.url)
+        }
+        items = bulkIncome.map((d) => ({
+          name: `${d.number} ${d.client}.pdf`,
+          url: d.pdfUrl || urls.get(d.invoiceId!) || null,
+        }))
+      } else {
+        const urls: (string | null)[] = []
+        for (let i = 0; i < bulkExpense.length; i += 200) {
+          const res = await getApInvoicePdfUrls(bulkExpense.slice(i, i + 200).map((f) => f.attachmentPath!))
+          urls.push(...(res.ok ? res.data : bulkExpense.slice(i, i + 200).map(() => null)))
+        }
+        items = bulkExpense.map((f, i) => ({
+          name: `${f.date} ${f.supplier} ${f.number}${extFromUrl(f.attachmentPath)}`,
+          url: urls[i] ?? null,
+        }))
+      }
+      const { ok, failed } = await downloadZip(
+        items,
+        `facturas-${docSide === 'ingresos' ? 'emitidas' : 'recibidas'}-C-${range}`,
+        (done, total) => setBulk({ done, total }),
+      )
+      if (failed.length) toast.warning(`${ok} descargadas · ${failed.length} sin archivo (lista dentro del ZIP)`)
+      else toast.success(`${ok} facturas descargadas`)
+    } catch {
+      toast.error('No se pudo preparar la descarga')
+    } finally {
+      setBulk(null)
+    }
+  }
+
+  // Barra de filtros de Movimientos y Facturas. `withSupplier` = mostrar el
+  // desplegable de proveedor (no tiene sentido en Facturas → Ingresos).
+  // Se invoca como función (no como <Componente/>) para que el input no se
+  // desmonte en cada tecla y no pierda el foco.
+  const filtersBar = (withSupplier: boolean, placeholder: string, extra?: ReactNode) => (
     <div className="flex flex-wrap items-center gap-2">
+      <Input
+        type="search"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder={placeholder}
+        className="h-8 w-full sm:w-72"
+      />
+      {withSupplier && (
+        <select
+          value={supplier}
+          onChange={(e) => setSupplier(e.target.value)}
+          className="h-8 max-w-full rounded-md border border-input bg-white px-2 text-sm text-slate-700 sm:max-w-[16rem]"
+          aria-label="Filtrar por proveedor"
+        >
+          <option value="">Todos los proveedores</option>
+          {supplierOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      )}
+      {extra}
       <label className="text-xs text-slate-500">Desde</label>
       <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="h-8 w-40" />
       <label className="text-xs text-slate-500">Hasta</label>
       <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="h-8 w-40" />
-      {(fromDate || toDate) && (
-        <button onClick={() => { setFromDate(''); setToDate('') }} className="text-xs text-slate-500 underline hover:text-slate-700">
-          Quitar filtro
+      {hasFilter && (
+        <button onClick={clearFilters} className="text-xs text-slate-500 underline hover:text-slate-700">
+          Quitar filtros
         </button>
       )}
     </div>
@@ -313,16 +488,16 @@ export function ScenarioCView() {
         <YearSelect
           value={year}
           years={[thisYear, thisYear - 1, thisYear - 2]}
-          onChange={(y) => { setYear(y); setFromDate(''); setToDate('') }}
+          onChange={(y) => { setYear(y); clearFilters() }}
         />
         <Button
           variant="outline"
           size="sm"
           disabled={!data}
           onClick={onExcel}
-          title={fromDate || toDate ? 'Exporta solo los movimientos y facturas del rango filtrado' : 'Exporta el informe anual completo'}
+          title={hasFilter ? 'Exporta solo los movimientos y facturas filtrados' : 'Exporta el informe anual completo'}
         >
-          {fromDate || toDate ? 'Exportar Excel (filtro)' : 'Exportar Excel'}
+          {hasFilter ? 'Exportar Excel (filtro)' : 'Exportar Excel'}
         </Button>
       </PageHeader>
 
@@ -385,7 +560,13 @@ export function ScenarioCView() {
         </div>
       ) : tab === 'movimientos' ? (
         <div className="space-y-3">
-          {DateRange}
+          {filtersBar(true, 'Buscar concepto, cliente, proveedor o importe…')}
+          {hasFilter && (
+            <p className="text-xs text-slate-500">
+              {filteredLedger.length} movimientos · ingresos {eur(filteredLedger.reduce((s, m) => s + (m.total > 0 ? m.total : 0), 0))}
+              {' '}· gastos {eur(-filteredLedger.reduce((s, m) => s + (m.total < 0 ? m.total : 0), 0))}
+            </p>
+          )}
           <LedgerTable rows={filteredLedger} />
         </div>
       ) : tab === 'facturas' ? (
@@ -400,8 +581,57 @@ export function ScenarioCView() {
                 { key: 'gastos', label: 'Gastos' },
               ]}
             />
-            {DateRange}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onBulkDownload}
+              disabled={!!bulk || bulkCount === 0}
+              title={docSide === 'ingresos'
+                ? 'Descarga en un ZIP las facturas emitidas que se ven en la lista (los tickets y cobros sin factura no se incluyen)'
+                : 'Descarga en un ZIP los PDF de las facturas de proveedor que se ven en la lista'}
+            >
+              {bulk
+                ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Descargando {bulk.done}/{bulk.total}…</>
+                : <><Download className="mr-1.5 h-3.5 w-3.5" />Descargar {bulkCount} {bulkCount === 1 ? 'factura' : 'facturas'} (ZIP)</>}
+            </Button>
           </div>
+          {(() => {
+            const sortSelect = (
+              <select
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value as SortKey)}
+                className="h-8 max-w-full rounded-md border border-input bg-white px-2 text-sm text-slate-700"
+                aria-label="Ordenar"
+              >
+                {SORT_OPTIONS.map(([k, label]) => <option key={k} value={k}>Ordenar: {label}</option>)}
+              </select>
+            )
+            return docSide === 'gastos'
+              ? filtersBar(true, 'Buscar proveedor, nº, CIF, nota o importe…', sortSelect)
+              : filtersBar(false, 'Buscar cliente, nº, ticket/pedido o importe…', (
+                <>
+                  <select
+                    value={provenance}
+                    onChange={(e) => setProvenance(e.target.value as Provenance | '')}
+                    className="h-8 max-w-full rounded-md border border-input bg-white px-2 text-sm text-slate-700"
+                    aria-label="Filtrar por procedencia"
+                  >
+                    <option value="">Toda procedencia</option>
+                    {(Object.keys(PROVENANCE) as Provenance[]).map((p) => (
+                      <option key={p} value={p}>{p === 'sin_factura' ? 'Sin factura (tickets y cobros)' : `Factura de ${PROVENANCE[p].label.toLowerCase()}`}</option>
+                    ))}
+                  </select>
+                  {sortSelect}
+                </>
+              ))
+          })()}
+          {hasFilter && (
+            <p className="text-xs text-slate-500">
+              {docSide === 'ingresos'
+                ? `${filteredIncomeDocs.length} documentos · ${eur(filteredIncomeDocs.reduce((s, d) => s + d.total, 0))}`
+                : `${filteredApInvoices.length} facturas · ${eur(filteredApInvoices.reduce((s, f) => s + f.total, 0))}`}
+            </p>
+          )}
 
           {docSide === 'ingresos' ? (
             <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-x-auto">
@@ -410,6 +640,7 @@ export function ScenarioCView() {
                   <tr>
                     <th className="text-left px-3 py-3">Tipo</th>
                     <th className="text-left px-3 py-3">Nº</th>
+                    <th className="text-left px-3 py-3">Procedencia</th>
                     <th className="text-left px-3 py-3">Cliente</th>
                     <th className="text-left px-3 py-3">Fecha</th>
                     <th className="text-right px-3 py-3">Base</th>
@@ -423,13 +654,21 @@ export function ScenarioCView() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredIncomeDocs.length === 0 ? (
-                    <tr><td colSpan={11} className="px-3 py-8 text-center text-slate-400">Sin documentos de ingreso.</td></tr>
+                    <tr><td colSpan={12} className="px-3 py-8 text-center text-slate-400">Sin documentos de ingreso.</td></tr>
                   ) : filteredIncomeDocs.map((d, i) => (
                     <tr key={i} className="hover:bg-slate-50/50">
                       <td className="px-3 py-2">
                         <span className={`rounded px-1.5 py-0.5 text-xs ${TYPE_BADGE[d.docType] ?? 'bg-slate-100 text-slate-600'}`}>{d.docType}</span>
                       </td>
                       <td className="px-3 py-2 font-mono text-xs text-slate-700">{d.number}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-1">
+                          {d.provenance.map((p) => (
+                            <span key={p} className={`rounded px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${PROVENANCE[p].cls}`}>{PROVENANCE[p].label}</span>
+                          ))}
+                        </div>
+                        {d.origin && <div className="mt-0.5 max-w-[16rem] font-mono text-[11px] leading-snug text-slate-500">{d.origin.replace(/^(Ticket|Pedidos?|Reservas?|Web)\s+/, '')}</div>}
+                      </td>
                       <td className="px-3 py-2">{d.client || <span className="text-slate-300">—</span>}</td>
                       <td className="px-3 py-2 text-slate-500">{d.date}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{eur(d.base)}</td>
@@ -438,16 +677,16 @@ export function ScenarioCView() {
                       </td>
                       <td className="px-3 py-2 text-right text-slate-300">—</td>
                       <td className="px-3 py-2 text-right font-medium tabular-nums">{eur(d.total)}</td>
-                      <td className="px-3 py-2 capitalize text-slate-500">{d.status ?? '—'}</td>
+                      <td className="px-3 py-2 text-slate-500">{d.status ? INVOICE_STATUS[d.status] ?? d.status : '—'}</td>
                       <td className="px-3 py-2 capitalize text-slate-500">{d.method || '—'}</td>
                       <td className="px-3 py-2 text-right">
-                        <DownloadBtn saleId={d.docType !== 'Factura' ? d.saleId : undefined} orderId={d.docType !== 'Factura' ? d.orderId : undefined} pdfUrl={d.pdfUrl} />
+                        <DownloadBtn saleId={d.docType !== 'Factura' ? d.saleId : undefined} orderId={d.docType !== 'Factura' ? d.orderId : undefined} pdfUrl={d.pdfUrl} invoiceId={d.docType === 'Factura' ? d.invoiceId : undefined} />
                       </td>
                     </tr>
                   ))}
                   {filteredIncomeDocs.length > 0 && (
                     <tr className={TOTAL_ROW}>
-                      <td className="px-3 py-2.5" colSpan={4}>TOTAL ingresos ({filteredIncomeDocs.length} documentos)</td>
+                      <td className="px-3 py-2.5" colSpan={5}>TOTAL ingresos ({filteredIncomeDocs.length} documentos)</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{eur(filteredIncomeDocs.reduce((s, d) => s + d.base, 0))}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{eur(filteredIncomeDocs.reduce((s, d) => s + d.vat, 0))}</td>
                       <td className="px-3 py-2.5 text-right text-slate-400">—</td>
