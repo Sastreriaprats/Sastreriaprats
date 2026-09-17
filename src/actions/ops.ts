@@ -12,7 +12,7 @@ import {
   listAccess, grantAccess, revokeAccess, type Scope,
 } from '@/lib/ops/db'
 import type {
-  CashEntryPayload, CashEntry, AccountingView, MonthPoint, QuarterRow, MovementRow, LedgerMovement, ViewB, ViewC,
+  CashEntryPayload, CashEntry, AccountingView, MonthPoint, QuarterRow, VatMonthRow, MovementRow, LedgerMovement, ViewB, ViewC,
   MovementKind, DepositPayload, DepositItemPayload, DepositRow, ApInvoiceLite, VatRateRow, InvoiceOriginKind,
 } from '@/lib/ops/types'
 
@@ -33,9 +33,15 @@ export async function getMyAccess(): Promise<{ scopes: Scope[]; canManage: boole
 // Partimos las ventas por payment_method: cash vs resto. Gastos/soportado = de A.
 // ===========================================================================
 type QMap = Record<number, { base: number; vat: number; count: number }>
-type Bucket = { income: number; vat: number; count: number; monthly: Record<string, number>; quarters: QMap }
+// MMap: mismo acumulado que QMap pero por mes ('YYYY-MM'); sus meses suman su trimestre.
+type MMap = Record<string, { base: number; vat: number; count: number }>
+type Bucket = { income: number; vat: number; count: number; monthly: Record<string, number>; quarters: QMap; monthVat: MMap }
 const emptyQ = (): QMap => ({ 1: { base: 0, vat: 0, count: 0 }, 2: { base: 0, vat: 0, count: 0 }, 3: { base: 0, vat: 0, count: 0 }, 4: { base: 0, vat: 0, count: 0 } })
-const emptyBucket = (): Bucket => ({ income: 0, vat: 0, count: 0, monthly: {}, quarters: emptyQ() })
+const emptyBucket = (): Bucket => ({ income: 0, vat: 0, count: 0, monthly: {}, quarters: emptyQ(), monthVat: {} })
+const addM = (m: MMap, month: string, base: number, vat: number) => {
+  const cell = (m[month] ??= { base: 0, vat: 0, count: 0 })
+  cell.base += base; cell.vat += vat; cell.count += 1
+}
 
 async function readAllSales(admin: ReturnType<typeof createAdminClient>, start: string, end: string) {
   const out: Record<string, unknown>[] = []
@@ -204,6 +210,7 @@ async function computeYear(year: number) {
     bk.income += base; bk.vat += vat; bk.count += 1
     bk.monthly[month] = (bk.monthly[month] || 0) + base
     bk.quarters[q].base += base; bk.quarters[q].vat += vat; bk.quarters[q].count += 1
+    addM(bk.monthVat, month, base, vat)
   }
 
   // Ingresos por TICKETS. Cada venta se reparte entre efectivo (capa B) y
@@ -333,15 +340,19 @@ async function computeYear(year: number) {
   let expenses = 0, vatPaidSummary = 0
   const expMonthly: Record<string, number> = {}
   const apQ = emptyQ()
+  const apM: MMap = {}
 
   // Desglose del IVA soportado por tipo impositivo. Las facturas CON líneas
   // aportan base y tipo reales por línea; las de solo cabecera derivan el tipo
   // de vat/base aproximándolo al tipo español más cercano (0/4/10/21).
-  const rateAgg: Record<number, { base: number[]; vat: number[] }> = {}
-  const addRate = (rate: number, q: number, base: number, vat: number) => {
-    const r = (rateAgg[rate] ??= { base: [0, 0, 0, 0], vat: [0, 0, 0, 0] })
+  const rateAgg: Record<number, { base: number[]; vat: number[]; mBase: number[]; mVat: number[] }> = {}
+  const addRate = (rate: number, month: number, base: number, vat: number) => {
+    const r = (rateAgg[rate] ??= { base: [0, 0, 0, 0], vat: [0, 0, 0, 0], mBase: Array(12).fill(0), mVat: Array(12).fill(0) })
+    const q = Math.ceil(month / 3)
     r.base[q - 1] += base
     r.vat[q - 1] += vat
+    r.mBase[month - 1] += base
+    r.mVat[month - 1] += vat
   }
   // Tipos de IVA presentes en cada factura con líneas (para mostrar el tipo del
   // documento en el listado: un único tipo → ese; varios → null = "varios").
@@ -349,8 +360,8 @@ async function computeYear(year: number) {
   for (const l of apLines) {
     const inv = l.ap_supplier_invoices as Record<string, unknown> | null
     const d = String(inv?.invoice_date ?? '')
-    const q = Math.ceil(Number(d.slice(5, 7)) / 3)
-    if (q >= 1 && q <= 4) addRate(Number(l.tax_rate) || 0, q, Number(l.base) || 0, Number(l.tax_amount) || 0)
+    const mo = Number(d.slice(5, 7))
+    if (mo >= 1 && mo <= 12) addRate(Number(l.tax_rate) || 0, mo, Number(l.base) || 0, Number(l.tax_amount) || 0)
     const iid = String(l.supplier_invoice_id)
     if (!ratesByInvoice.has(iid)) ratesByInvoice.set(iid, new Set())
     ratesByInvoice.get(iid)!.add(Number(l.tax_rate) || 0)
@@ -368,6 +379,7 @@ async function computeYear(year: number) {
     vatPaidSummary += vat
     expMonthly[m] = (expMonthly[m] || 0) + base
     apQ[q].base += base; apQ[q].vat += vat; apQ[q].count += 1
+    addM(apM, m, base, vat)
     // Tipo de IVA del documento: de sus líneas si las tiene (varios → null);
     // sin líneas, el tipo español más cercano al cociente IVA/base.
     const derivedRate = (() => {
@@ -377,7 +389,7 @@ async function computeYear(year: number) {
     let vatRate: number | null = derivedRate
     const lineRates = ratesByInvoice.get(String(x.id))
     if (lineRates) vatRate = lineRates.size === 1 ? [...lineRates][0] : null
-    else addRate(derivedRate, q, base, vat)
+    else addRate(derivedRate, Number(d.slice(5, 7)), base, vat)
     const supplier = String(x.supplier_name ?? '')
     const num = String(x.invoice_number ?? '')
     const cif = String(x.supplier_cif ?? '').trim() || undefined
@@ -404,13 +416,14 @@ async function computeYear(year: number) {
     .map(([rate, v]) => ({
       rate: Number(rate),
       byQuarter: v.base.map((b, i) => ({ base: r2(b), vat: r2(v.vat[i]) })),
+      byMonth: v.mBase.map((b, i) => ({ base: r2(b), vat: r2(v.mVat[i]) })),
       base: r2(v.base.reduce((s, n) => s + n, 0)),
       vat: r2(v.vat.reduce((s, n) => s + n, 0)),
     }))
     .sort((a, b) => b.rate - a.rate)
 
   return {
-    cash, noncash, expenses, vatPaidSummary, expMonthly, apQ, cashMoves, incomeLedger, expenseLedger, apInvoices,
+    cash, noncash, expenses, vatPaidSummary, expMonthly, apQ, apM, cashMoves, incomeLedger, expenseLedger, apInvoices,
     vatByRate, depositedYearTotal, depositedYearCount,
     cashOnlySaleIds, ordersSeen, ordersWithC, cashOnlyInvoiceIds,
   }
@@ -438,6 +451,21 @@ function buildQuarters(year: number, salesQ: QMap, purchQ: QMap): QuarterRow[] {
   }
   return out
 }
+function buildMonthsVat(year: number, salesM: MMap, purchM: MMap): VatMonthRow[] {
+  const out: VatMonthRow[] = []
+  const zero = { base: 0, vat: 0, count: 0 }
+  for (let m = 1; m <= 12; m++) {
+    const month = `${year}-${String(m).padStart(2, '0')}`
+    const s = salesM[month] ?? zero, p = purchM[month] ?? zero
+    out.push({
+      month,
+      baseSales: r2(s.base), ivaRepercutido: r2(s.vat),
+      basePurchases: r2(p.base), ivaSoportado: r2(p.vat),
+      resultado: r2(s.vat - p.vat), salesCount: s.count, purchasesCount: p.count,
+    })
+  }
+  return out
+}
 
 // ===========================================================================
 // CAPA B — contabilidad en efectivo (cobros 100% efectivo) + pagos de control
@@ -457,6 +485,7 @@ export async function getViewB(year: number) {
       ivaRepercutido: r2(c.cash.vat), ivaSoportado: 0, vatToPay: r2(c.cash.vat),
       monthly: months(year, c.cash.monthly, {}),
       quarters: buildQuarters(year, c.cash.quarters, emptyQ()),
+      monthlyVat: buildMonthsVat(year, c.cash.monthVat, {}),
       salesCount: c.cash.count,
     }
     const ein = entries.filter((e) => e.direction === 'in')
@@ -568,6 +597,7 @@ export async function getViewC(year: number) {
       ivaRepercutido: r2(c.noncash.vat), ivaSoportado: r2(c.vatPaidSummary), vatToPay: r2(c.noncash.vat - c.vatPaidSummary),
       monthly: months(year, c.noncash.monthly, c.expMonthly),
       quarters: buildQuarters(year, c.noncash.quarters, c.apQ),
+      monthlyVat: buildMonthsVat(year, c.noncash.monthVat, c.apM),
       salesCount: c.noncash.count,
     }
     const admin = createAdminClient()

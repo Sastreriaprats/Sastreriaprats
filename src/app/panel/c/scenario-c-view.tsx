@@ -9,7 +9,7 @@ import { getViewC, getIssuedInvoicePdfUrls, getApInvoicePdfUrls } from '@/action
 import type { ViewC, AccountingView, ApInvoiceLite, VatRateRow, InvoiceOriginKind } from '@/lib/ops/types'
 import { downloadExcelMulti } from '@/lib/excel/export'
 import { downloadZip, extFromUrl, type ZipItem } from '../bulk-download'
-import { Tabs, Kpis, QuarterTable, MonthlyFullExpandable, LedgerTable, DownloadBtn, TYPE_BADGE, TOTAL_ROW, PageHeader, YearSelect, eur, MONTH_LABELS, groupByMonth, monthKey } from '../accounting-ui'
+import { Tabs, Kpis, QuarterTable, MonthVatTable, MONTH_NAMES, MonthlyFullExpandable, LedgerTable, DownloadBtn, TYPE_BADGE, TOTAL_ROW, PageHeader, YearSelect, eur, MONTH_LABELS, groupByMonth, monthKey } from '../accounting-ui'
 
 const thisYear = new Date().getFullYear()
 const n2 = (n: number) => Number((Number(n) || 0).toFixed(2))
@@ -149,6 +149,8 @@ export function ScenarioCView() {
   const [provenance, setProvenance] = useState<Provenance | ''>('')
   const [sortKey, setSortKey] = useState<SortKey>('date_desc')
   const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null)
+  // Pestaña IVA: desglose por trimestre o por mes
+  const [ivaPeriod, setIvaPeriod] = useState<'trimestres' | 'meses'>('trimestres')
   const hasFilter = !!(fromDate || toDate || query.trim() || supplier || provenance)
 
   const load = useCallback(async () => {
@@ -242,6 +244,12 @@ export function ScenarioCView() {
   const retentionsByQuarter = useMemo(() => {
     const arr = [0, 0, 0, 0]
     for (const f of retentionInvoices) arr[quarterOf(f.date) - 1] += f.retentionAmount
+    return arr.map(n2)
+  }, [retentionInvoices])
+  // Ídem por mes (índice 0..11 = enero..diciembre)
+  const retentionsByMonth = useMemo(() => {
+    const arr = Array(12).fill(0) as number[]
+    for (const f of retentionInvoices) arr[Number(f.date.slice(5, 7)) - 1] += f.retentionAmount
     return arr.map(n2)
   }, [retentionInvoices])
 
@@ -356,12 +364,25 @@ export function ScenarioCView() {
         'Base compras': n2(q.basePurchases), 'IVA soportado': n2(q.ivaSoportado), 'Resultado IVA': n2(q.resultado),
         'Retenciones': n2(retentionsByQuarter[i]), 'Total a liquidar': n2(q.resultado + retentionsByQuarter[i]),
       })) },
+      { name: 'IVA mensual C', rows: data.C.monthlyVat.map((m, i) => ({
+        Trimestre: `T${Math.ceil((i + 1) / 3)}`, Mes: MONTH_NAMES[i], 'Base ventas': n2(m.baseSales), 'IVA repercutido': n2(m.ivaRepercutido),
+        'Base compras': n2(m.basePurchases), 'IVA soportado': n2(m.ivaSoportado), 'Resultado IVA': n2(m.resultado),
+        'Retenciones': n2(retentionsByMonth[i]), 'Total a liquidar': n2(m.resultado + retentionsByMonth[i]),
+      })) },
       { name: 'IVA soportado por tipo', rows: [1, 2, 3, 4].flatMap((q) =>
         data.vatByRate
           .filter((r) => r.byQuarter[q - 1].base !== 0 || r.byQuarter[q - 1].vat !== 0)
           .map((r) => ({
             Trimestre: `T${q}`, 'Tipo IVA %': r.rate,
             Base: n2(r.byQuarter[q - 1].base), 'Cuota IVA': n2(r.byQuarter[q - 1].vat),
+          }))
+      ) },
+      { name: 'IVA soportado tipo (mes)', rows: MONTH_NAMES.flatMap((mes, i) =>
+        data.vatByRate
+          .filter((r) => r.byMonth[i].base !== 0 || r.byMonth[i].vat !== 0)
+          .map((r) => ({
+            Trimestre: `T${Math.ceil((i + 1) / 3)}`, Mes: mes, 'Tipo IVA %': r.rate,
+            Base: n2(r.byMonth[i].base), 'Cuota IVA': n2(r.byMonth[i].vat),
           }))
       ) },
       { name: 'Retenciones', rows: retentionInvoices.map((f) => ({
@@ -506,7 +527,7 @@ export function ScenarioCView() {
         onChange={setTab}
         tabs={[
           { key: 'resumen', label: 'Resumen' },
-          { key: 'iva', label: 'IVA trimestral' },
+          { key: 'iva', label: 'IVA' },
           { key: 'retenciones', label: 'Retenciones' },
           { key: 'mensual', label: 'Mensual' },
           { key: 'movimientos', label: 'Movimientos' },
@@ -548,8 +569,19 @@ export function ScenarioCView() {
         </div>
       ) : tab === 'iva' ? (
         <div className="space-y-5">
-          <QuarterTable view={data.C} variant="full" retentions={retentionsByQuarter} />
-          <VatByRateTable rows={data.vatByRate} />
+          <Tabs
+            variant="segmented"
+            active={ivaPeriod}
+            onChange={(k) => setIvaPeriod(k as 'trimestres' | 'meses')}
+            tabs={[
+              { key: 'trimestres', label: 'Por trimestre' },
+              { key: 'meses', label: 'Por mes' },
+            ]}
+          />
+          {ivaPeriod === 'meses'
+            ? <MonthVatTable view={data.C} variant="full" retentions={retentionsByMonth} />
+            : <QuarterTable view={data.C} variant="full" retentions={retentionsByQuarter} />}
+          <VatByRateTable rows={data.vatByRate} byMonth={ivaPeriod === 'meses'} />
         </div>
       ) : tab === 'retenciones' ? (
         <RetentionsTab year={year} invoices={retentionInvoices} />
@@ -976,12 +1008,18 @@ function ThirdPartyTable({ title, tag, nameLabel, totalLabel, extraLabel, rows, 
 // Desglose del IVA soportado por tipo impositivo (0/10/21…) y trimestre.
 // Las facturas registradas con líneas usan su desglose real; las de solo
 // cabecera derivan el tipo del cociente IVA/base.
-function VatByRateTable({ rows }: { rows: VatRateRow[] }) {
-  const cells = [1, 2, 3, 4].flatMap((q) =>
-    rows
-      .filter((r) => r.byQuarter[q - 1].base !== 0 || r.byQuarter[q - 1].vat !== 0)
-      .map((r) => ({ q, rate: r.rate, base: r.byQuarter[q - 1].base, vat: r.byQuarter[q - 1].vat })),
-  )
+function VatByRateTable({ rows, byMonth = false }: { rows: VatRateRow[]; byMonth?: boolean }) {
+  // `group` = etiqueta de la primera columna (T1… o Enero…); solo se pinta en la
+  // primera fila de cada grupo.
+  const cells = byMonth
+    ? MONTH_NAMES.flatMap((mes, i) =>
+      rows
+        .filter((r) => r.byMonth[i].base !== 0 || r.byMonth[i].vat !== 0)
+        .map((r) => ({ group: mes, rate: r.rate, base: r.byMonth[i].base, vat: r.byMonth[i].vat })))
+    : [1, 2, 3, 4].flatMap((q) =>
+      rows
+        .filter((r) => r.byQuarter[q - 1].base !== 0 || r.byQuarter[q - 1].vat !== 0)
+        .map((r) => ({ group: `T${q}`, rate: r.rate, base: r.byQuarter[q - 1].base, vat: r.byQuarter[q - 1].vat })))
   const totBase = rows.reduce((s, r) => s + r.base, 0)
   const totVat = rows.reduce((s, r) => s + r.vat, 0)
   return (
@@ -993,7 +1031,7 @@ function VatByRateTable({ rows }: { rows: VatRateRow[] }) {
       <table className="w-full text-sm">
         <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
           <tr>
-            <th className="text-left px-4 py-2.5">Trimestre</th>
+            <th className="text-left px-4 py-2.5">{byMonth ? 'Mes' : 'Trimestre'}</th>
             <th className="text-left px-4 py-2.5">Tipo</th>
             <th className="text-right px-4 py-2.5">Base</th>
             <th className="text-right px-4 py-2.5">Cuota IVA</th>
@@ -1004,7 +1042,7 @@ function VatByRateTable({ rows }: { rows: VatRateRow[] }) {
             <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-400">Sin facturas recibidas.</td></tr>
           ) : cells.map((c, i) => (
             <tr key={i} className="hover:bg-slate-50/60">
-              <td className="px-4 py-2.5 font-semibold text-slate-700">{i === 0 || cells[i - 1].q !== c.q ? `T${c.q}` : ''}</td>
+              <td className="px-4 py-2.5 font-semibold text-slate-700">{i === 0 || cells[i - 1].group !== c.group ? c.group : ''}</td>
               <td className="px-4 py-2.5 text-slate-600">{pct(c.rate)}</td>
               <td className="px-4 py-2.5 text-right tabular-nums">{eur(c.base)}</td>
               <td className="px-4 py-2.5 text-right tabular-nums">{eur(c.vat)}</td>

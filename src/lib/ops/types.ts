@@ -29,6 +29,9 @@ export type QuarterRow = {
   purchasesCount: number
 }
 
+// Mismo desglose que QuarterRow pero por mes ('2026-01'…'2026-12').
+export type VatMonthRow = Omit<QuarterRow, 'quarter' | 'period'> & { month: string }
+
 // Tipo de origen de un cobro en efectivo (para depósitos bancarios y PDF)
 export type MovementKind = 'sale' | 'order_payment' | 'reservation_payment' | 'invoice' | 'manual'
 
@@ -73,6 +76,7 @@ export type AccountingView = {
   vatToPay: number
   monthly: MonthPoint[]
   quarters: QuarterRow[]
+  monthlyVat: VatMonthRow[]
   salesCount: number
 }
 
@@ -151,6 +155,7 @@ export type ApInvoiceLite = {
 export type VatRateRow = {
   rate: number                  // 21 | 10 | 4 | 0…
   byQuarter: { base: number; vat: number }[]
+  byMonth: { base: number; vat: number }[]   // [0..11] = enero..diciembre
   base: number                  // total año
   vat: number
 }

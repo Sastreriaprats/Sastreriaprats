@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { toast } from 'sonner'
 import { TrendingUp, TrendingDown, Wallet, Receipt, Percent, Hash, Landmark, Download, Loader2, ChevronDown, ChevronRight, type LucideIcon } from 'lucide-react'
 import { getTicketData, getOrderTicketData, getApInvoicePdfUrl, getIssuedInvoicePdfUrls } from '@/actions/ops'
@@ -161,6 +161,82 @@ export function QuarterTable({ view, variant, retentions }: { view: AccountingVi
         <p className="border-t p-3 text-xs text-slate-400">
           Total a liquidar = resultado de IVA (modelo 303) + retenciones de IRPF de facturas recibidas (modelos 111/115).
           Las retenciones se pagan siempre, aunque el IVA del trimestre salga a compensar.
+        </p>
+      )}
+    </TableShell>
+  )
+}
+
+// IVA por MES con subtotal de cada trimestre (las filas de subtotal salen de
+// view.quarters, que suman exactamente sus tres meses). `retentions`: índice
+// 0..11 = enero..diciembre; mismas columnas que QuarterTable.
+export const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+export function MonthVatTable({ view, variant, retentions }: { view: AccountingView; variant: 'cash' | 'full'; retentions?: number[] }) {
+  const cash = variant === 'cash'
+  const hasRet = !cash && retentions !== undefined
+  const retM = (i: number) => retentions?.[i] ?? 0
+  const retQ = (q: number) => retM(q * 3) + retM(q * 3 + 1) + retM(q * 3 + 2)
+  const tot = view.quarters.reduce((a, q, i) => ({
+    bs: a.bs + q.baseSales, rep: a.rep + q.ivaRepercutido, bp: a.bp + q.basePurchases, sop: a.sop + q.ivaSoportado,
+    ret: a.ret + retQ(i),
+  }), { bs: 0, rep: 0, bp: 0, sop: 0, ret: 0 })
+  const cells = (r: { baseSales: number; ivaRepercutido: number; basePurchases: number; ivaSoportado: number; resultado: number }, ret: number, strong: boolean) => (
+    <>
+      <td className={TDR}>{eur(r.baseSales)}</td>
+      <td className={TDR}>{eur(r.ivaRepercutido)}</td>
+      {!cash && <td className={TDR}>{eur(r.basePurchases)}</td>}
+      {!cash && <td className={TDR}>{eur(r.ivaSoportado)}</td>}
+      <td className={`${TDR} ${!hasRet && strong ? 'font-semibold' : ''}`}>{eur(cash ? r.ivaRepercutido : r.resultado)}</td>
+      {hasRet && <td className={TDR}>{eur(ret)}</td>}
+      {hasRet && <td className={`${TDR} ${strong ? 'font-semibold' : ''}`}>{eur(r.resultado + ret)}</td>}
+    </>
+  )
+  return (
+    <TableShell>
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50">
+          <tr>
+            <th className={TH}>Mes</th>
+            <th className={THR}>Base ventas</th>
+            <th className={THR}>IVA repercutido</th>
+            {!cash && <th className={THR}>Base compras</th>}
+            {!cash && <th className={THR}>IVA soportado</th>}
+            <th className={THR}>{cash ? 'IVA efectivo' : hasRet ? 'Resultado IVA' : 'Resultado'}</th>
+            {hasRet && <th className={THR}>Retenciones</th>}
+            {hasRet && <th className={THR}>Total a liquidar</th>}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {view.quarters.map((q, qi) => (
+            <Fragment key={q.quarter}>
+              {view.monthlyVat.slice(qi * 3, qi * 3 + 3).map((m, k) => (
+                <tr key={m.month} className="hover:bg-slate-50/60">
+                  <td className={`${TD} text-slate-700`}>{MONTH_NAMES[qi * 3 + k]}</td>
+                  {cells(m, retM(qi * 3 + k), false)}
+                </tr>
+              ))}
+              <tr className="bg-slate-50/80 font-semibold text-slate-800">
+                <td className={TD}>Total {q.quarter} <span className="font-normal text-slate-400">({q.period})</span></td>
+                {cells(q, retQ(qi), true)}
+              </tr>
+            </Fragment>
+          ))}
+          <tr className={TOTAL_ROW}>
+            <td className={TD}>TOTAL año</td>
+            <td className={TDR}>{eur(tot.bs)}</td>
+            <td className={TDR}>{eur(tot.rep)}</td>
+            {!cash && <td className={TDR}>{eur(tot.bp)}</td>}
+            {!cash && <td className={TDR}>{eur(tot.sop)}</td>}
+            <td className={TDR}>{eur(cash ? tot.rep : tot.rep - tot.sop)}</td>
+            {hasRet && <td className={TDR}>{eur(tot.ret)}</td>}
+            {hasRet && <td className={TDR}>{eur(tot.rep - tot.sop + tot.ret)}</td>}
+          </tr>
+        </tbody>
+      </table>
+      {hasRet && (
+        <p className="border-t p-3 text-xs text-slate-400">
+          Desglose mensual informativo: el modelo 303 y los 111/115 se presentan por trimestre (filas de total). Las retenciones
+          van por la fecha de la factura recibida.
         </p>
       )}
     </TableShell>
