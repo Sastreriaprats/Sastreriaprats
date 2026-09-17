@@ -23,6 +23,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Switch } from '@/components/ui/switch'
+import { Checkbox } from '@/components/ui/checkbox'
 import { PaymentMethodBadge } from '@/components/ui/payment-method-badge'
 import { generateCashSessionReport } from '@/lib/pdf/cash-session-report'
 import {
@@ -43,6 +44,7 @@ import { formatCurrency, formatDate, cn, normalizeSearchTerm } from '@/lib/utils
 import { useInvoiceSources, InvoiceSourcesSection } from './invoice-sources'
 import { formatClientAddress } from '@/lib/clients/format'
 import { downloadExcel, downloadExcelMulti } from '@/lib/excel/export'
+import { downloadZip, type ZipItem } from '@/app/panel/bulk-download'
 import { toast } from 'sonner'
 import { usePermissions } from '@/hooks/use-permissions'
 import { updateWithdrawal, deleteWithdrawal, updateCashSessionClose, updateCashSessionOpening, reopenCashSession, deleteCashSession } from '@/actions/pos'
@@ -653,6 +655,65 @@ export function InvoicesTab({ editId, onEditConsumed }: { editId: string | null;
     await downloadExcel(data, `facturas${range}`, 'Facturas')
   }
 
+  // ─── Selección múltiple para descargar PDFs en ZIP ─────────────────────────
+  // Se guarda la fila entera (no solo el id) para que la selección sobreviva a
+  // cambiar filtros o fechas: se pueden juntar facturas de varios periodos.
+  const [selected, setSelected] = useState<Map<string, InvoiceRow>>(new Map())
+  const [zipping, setZipping] = useState(false)
+  const allVisibleSelected = filteredInvoices.length > 0 && filteredInvoices.every(inv => selected.has(inv.id))
+  const selectedTotal = [...selected.values()].reduce((sum, inv) => sum + (Number(inv.total) || 0), 0)
+
+  const toggleInvoice = (inv: InvoiceRow, checked: boolean) => {
+    setSelected(prev => {
+      const next = new Map(prev)
+      if (checked) next.set(inv.id, inv)
+      else next.delete(inv.id)
+      return next
+    })
+  }
+  const toggleAllVisible = (checked: boolean) => {
+    setSelected(prev => {
+      const next = new Map(prev)
+      for (const inv of filteredInvoices) {
+        if (checked) next.set(inv.id, inv)
+        else next.delete(inv.id)
+      }
+      return next
+    })
+  }
+
+  const handleDownloadSelected = async () => {
+    const invoices = [...selected.values()]
+    if (invoices.length === 0) return
+    setZipping(true)
+    const toastId = toast.loading(`Preparando PDFs 0/${invoices.length}…`)
+    try {
+      // 1) Generar/actualizar el PDF de cada factura (misma acción que "Descargar").
+      const items: ZipItem[] = new Array(invoices.length)
+      let done = 0, next = 0
+      const worker = async () => {
+        while (next < invoices.length) {
+          const i = next++
+          const inv = invoices[i]
+          const name = inv.status === 'draft' ? `factura-borrador-${inv.id.slice(0, 8)}.pdf` : `factura-${inv.invoice_number}.pdf`
+          const res = await generateInvoicePdfAction(inv.id).catch(() => null)
+          items[i] = { name, url: res?.success ? res.data.url : null }
+          toast.loading(`Preparando PDFs ${++done}/${invoices.length}…`, { id: toastId })
+        }
+      }
+      await Promise.all(Array.from({ length: Math.min(3, invoices.length) }, worker))
+      // 2) Bajarlos y empaquetarlos en el navegador.
+      const { ok, failed } = await downloadZip(items, `facturas-${new Date().toISOString().slice(0, 10)}`, (d, t) =>
+        toast.loading(`Descargando ${d}/${t}…`, { id: toastId }))
+      if (failed.length) toast.warning(`${ok} PDF descargados · ${failed.length} sin descargar (ver _no_descargadas.txt en el ZIP)`, { id: toastId })
+      else toast.success(`${ok} factura${ok === 1 ? '' : 's'} descargada${ok === 1 ? '' : 's'}`, { id: toastId })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al descargar las facturas', { id: toastId })
+    } finally {
+      setZipping(false)
+    }
+  }
+
   const openDialog = () => {
     setSelectedClient(null)
     setDialogOpen(true)
@@ -819,11 +880,37 @@ export function InvoicesTab({ editId, onEditConsumed }: { editId: string | null;
         <Button onClick={openDialog}><Plus className="h-4 w-4 mr-1" /> Nueva factura</Button>
       </div>
 
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+          <span className="text-sm text-blue-900">
+            <span className="font-semibold">{selected.size}</span> factura{selected.size === 1 ? '' : 's'} seleccionada{selected.size === 1 ? '' : 's'}
+            {' · '}Total: <span className="font-semibold tabular-nums">{formatCurrency(selectedTotal)}</span>
+          </span>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setSelected(new Map())} disabled={zipping}>
+              Quitar selección
+            </Button>
+            <Button size="sm" className="bg-blue-700 hover:bg-blue-800" onClick={handleDownloadSelected} disabled={zipping}>
+              {zipping ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
+              Descargar PDFs (ZIP)
+            </Button>
+          </div>
+        </div>
+      )}
+
       {loading ? <Spinner /> : (
         <div className="rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10">
+                  <Checkbox
+                    checked={allVisibleSelected}
+                    onCheckedChange={(checked) => toggleAllVisible(checked === true)}
+                    disabled={filteredInvoices.length === 0}
+                    aria-label="Seleccionar todas las facturas visibles"
+                  />
+                </TableHead>
                 <TableHead>Número</TableHead>
                 <TableHead>Cliente</TableHead>
                 <TableHead>Fecha</TableHead>
@@ -834,9 +921,9 @@ export function InvoicesTab({ editId, onEditConsumed }: { editId: string | null;
             </TableHeader>
             <TableBody>
               {filteredInvoices.length === 0 ? (
-                <TableRow><TableCell colSpan={6} className="text-center py-12 text-muted-foreground">Sin facturas</TableCell></TableRow>
+                <TableRow><TableCell colSpan={7} className="text-center py-12 text-muted-foreground">Sin facturas</TableCell></TableRow>
               ) : filteredInvoices.map(inv => (
-                <InvoiceTableRow key={inv.id} inv={inv} onRefresh={load} autoOpenEditId={editId} onEditConsumed={onEditConsumed} />
+                <InvoiceTableRow key={inv.id} inv={inv} onRefresh={load} autoOpenEditId={editId} onEditConsumed={onEditConsumed} selected={selected.has(inv.id)} onSelectedChange={(checked) => toggleInvoice(inv, checked)} />
               ))}
             </TableBody>
           </Table>
@@ -1122,7 +1209,7 @@ export function InvoicesTab({ editId, onEditConsumed }: { editId: string | null;
   )
 }
 
-function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { inv: InvoiceRow; onRefresh: () => void; autoOpenEditId?: string | null; onEditConsumed?: () => void }) {
+function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed, selected, onSelectedChange }: { inv: InvoiceRow; onRefresh: () => void; autoOpenEditId?: string | null; onEditConsumed?: () => void; selected?: boolean; onSelectedChange?: (checked: boolean) => void }) {
   const supabase = useMemo(() => createClient(), [])
   const { can, isSuperAdmin } = usePermissions()
   const [loadingPdf, setLoadingPdf] = useState(false)
@@ -1491,7 +1578,14 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed }: { i
 
   return (
     <>
-      <TableRow>
+      <TableRow data-state={selected ? 'selected' : undefined}>
+        <TableCell>
+          <Checkbox
+            checked={!!selected}
+            onCheckedChange={(checked) => onSelectedChange?.(checked === true)}
+            aria-label={`Seleccionar factura ${inv.invoice_number}`}
+          />
+        </TableCell>
         <TableCell className="font-mono font-medium">{inv.invoice_number}</TableCell>
         <TableCell>{inv.client_name}</TableCell>
         <TableCell className="text-muted-foreground">{formatDate(inv.invoice_date)}</TableCell>
