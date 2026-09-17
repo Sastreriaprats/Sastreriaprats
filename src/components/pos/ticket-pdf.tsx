@@ -532,6 +532,32 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
       margin: [0, 4, 0, 2] as [number, number, number, number],
     })
   }
+  // Venta cobrada solo en parte (pago a plazos): el ticket debe decir lo que se
+  // ha entregado y lo que queda, o el cliente se lleva un ticket que parece
+  // saldado. Sin lista de pagos se asume cobrada (comportamiento previo).
+  const paymentsList = data.payments ?? []
+  const amountPaid = paymentsList.length > 0
+    ? Math.min(Number(data.sale.total), paymentsList.reduce((s, p) => s + (Number(p.amount) || 0), 0))
+    : Number(data.sale.total)
+  const amountPending = Math.round((Number(data.sale.total) - amountPaid) * 100) / 100
+  if (!giftMode && amountPending > 0.009) {
+    content.push(
+      {
+        columns: [
+          { text: 'Pagado:', fontSize: FONT_BODY },
+          { text: fmt(amountPaid), fontSize: FONT_BODY, alignment: 'right' },
+        ],
+        margin: [0, 0, 0, 2] as [number, number, number, number],
+      },
+      {
+        columns: [
+          { text: 'PENDIENTE:', fontSize: FONT_HEAD, bold: true },
+          { text: fmt(amountPending), fontSize: FONT_HEAD, bold: true, alignment: 'right' },
+        ],
+        margin: [0, 0, 0, 4] as [number, number, number, number],
+      },
+    )
+  }
   if (giftMode || totalArticles > 0) {
     content.push(
       {
