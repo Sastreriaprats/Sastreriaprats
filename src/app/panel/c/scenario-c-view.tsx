@@ -1,15 +1,19 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Download, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { getViewC, getIssuedInvoicePdfUrls, getApInvoicePdfUrls } from '@/actions/ops'
+import { getViewC, getIssuedInvoicePdfUrls, getApInvoicePdfUrls, getTicketData, getOrderTicketData, getOnlineTicketData } from '@/actions/ops'
+import { generateTicketPdf } from '@/components/pos/ticket-pdf'
+import { generateTailoringOrderTicketPdf } from '@/lib/pdf/tailoring-order-ticket'
 import type { ViewC, AccountingView, ApInvoiceLite, VatRateRow, InvoiceOriginKind } from '@/lib/ops/types'
 import { downloadExcelMulti } from '@/lib/excel/export'
 import { downloadZip, extFromUrl, type ZipItem } from '../bulk-download'
 import { ClientLedgerDialog, buildClientDetail, type ClientDetailTarget } from './client-ledger-dialog'
+import { SupplierLedgerDialog, buildSupplierDetail, type SupplierDetailTarget } from './supplier-ledger-dialog'
+import { ISP_RATE, isIsp, ispVat } from './intra-isp'
 import { Tabs, Kpis, QuarterTable, MonthVatTable, MONTH_NAMES, MonthlyFullExpandable, LedgerTable, DownloadBtn, TYPE_BADGE, TOTAL_ROW, PageHeader, YearSelect, eur, MONTH_LABELS, groupByMonth, monthKey } from '../accounting-ui'
 
 const thisYear = new Date().getFullYear()
@@ -42,6 +46,38 @@ type IncomeDoc = {
   origin?: string  // factura: ticket/pedidos/reservas/web a los que va asociada
   provenance: Provenance[]
   pdfUrl?: string
+}
+
+// Clave estable de un documento de ingreso (para marcarlo en la descarga): la
+// factura por su id; el resto, por el documento que hay detrás y su fecha (un
+// mismo pedido puede tener varios cobros en la lista).
+const docKey = (d: IncomeDoc) =>
+  d.invoiceId ? `inv:${d.invoiceId}`
+    : d.saleId ? `sale:${d.saleId}`
+      : d.onlineOrderId ? `web:${d.onlineOrderId}`
+        : d.orderId ? `order:${d.orderId}:${d.date}`
+          : `${d.docType}:${d.number}:${d.date}`
+// Se puede descargar si hay factura o un ticket/pedido del que sacar el PDF
+const canDownloadDoc = (d: IncomeDoc) => !!(d.invoiceId || d.saleId || d.orderId || d.onlineOrderId)
+
+// PDF de un ticket o cobro de sastrería: no existe guardado, se arma en el
+// navegador con los mismos datos que el botón de descarga de su fila.
+async function buildDocPdfBlob(d: IncomeDoc): Promise<Blob | null> {
+  try {
+    if (d.saleId) {
+      const res = await getTicketData(d.saleId)
+      return res.ok ? ((await generateTicketPdf(res.data as never, 'blob')) as Blob) : null
+    }
+    if (d.onlineOrderId) {
+      const res = await getOnlineTicketData(d.onlineOrderId)
+      return res.ok ? ((await generateTicketPdf(res.data as never, 'blob')) as Blob) : null
+    }
+    if (d.orderId) {
+      const res = await getOrderTicketData(d.orderId)
+      return res.ok ? ((await generateTailoringOrderTicketPdf(res.data as never, 'blob')) as Blob) : null
+    }
+  } catch { /* documento sin PDF: lo lista el ZIP como no descargado */ }
+  return null
 }
 
 // Procedencia de un documento de ingreso: de qué sale la factura (manual = hecha
@@ -120,15 +156,6 @@ function makeMatcher(query: string) {
 
 const quarterOf = (date: string) => Math.ceil(Number(date.slice(5, 7)) / 3)
 
-// Adquisiciones intracomunitarias con INVERSIÓN DEL SUJETO PASIVO: el proveedor
-// UE factura sin IVA y la empresa autorrepercute el IVA español (devengado,
-// 303 casillas 10-11) y lo deduce a la vez (36-37 bienes corrientes / 28-29
-// servicios): efecto neto cero en el resultado, pero debe figurar en ambos lados.
-// Si el proveedor UE ya factura con IVA (p.ej. Adobe vía OSS) no hay ISP.
-// Tipo general del 21 %: el de los tejidos, avíos y servicios que se compran.
-const ISP_RATE = 21
-const isIsp = (f: ApInvoiceLite) => f.isIntraEU && Math.abs(f.vat) < 0.005
-const ispVat = (f: ApInvoiceLite) => n2((f.base * ISP_RATE) / 100)
 // Fila del desglose de IVA soportado por tipo; `isp` = adquisiciones intracomunitarias
 type VatRowView = VatRateRow & { isp?: boolean }
 const rateText = (r: { rate: number; isp?: boolean }) => (r.isp ? `ISP intracomunitaria ${pct(r.rate)}` : pct(r.rate))
@@ -168,8 +195,9 @@ export function ScenarioCView() {
   // Facturas elegidas a mano para el ZIP: ids de factura emitida / adjuntos de proveedor
   const [selInc, setSelInc] = useState<Set<string>>(new Set())
   const [selExp, setSelExp] = useState<Set<string>>(new Set())
-  // Cliente abierto en el modal de facturación + libro mayor
+  // Tercero abierto en el modal de facturación + libro mayor
   const [clientTarget, setClientTarget] = useState<ClientDetailTarget | null>(null)
+  const [supplierTarget, setSupplierTarget] = useState<SupplierDetailTarget | null>(null)
   // Pestaña IVA: desglose por trimestre o por mes
   const [ivaPeriod, setIvaPeriod] = useState<'trimestres' | 'meses'>('trimestres')
   const hasFilter = !!(fromDate || toDate || query.trim() || supplier || provenance)
@@ -485,14 +513,20 @@ export function ScenarioCView() {
     return buildClientDetail(clientTarget, data.invoices, data.ledger, noInvoiceDocs)
   }, [data, incomeDocs, clientTarget])
 
-  // Descarga en un ZIP: las facturas MARCADAS si hay alguna; si no, todas las
+  // Detalle del proveedor abierto (facturas recibidas, pagos y saldo pendiente)
+  const supplierDetail = useMemo(
+    () => (data && supplierTarget ? buildSupplierDetail(supplierTarget, data.apInvoices) : null),
+    [data, supplierTarget],
+  )
+
+  // Descarga en un ZIP: los documentos MARCADOS si hay alguno; si no, todos los
   // que se están viendo (con filtros y orden).
-  // Ingresos: facturas emitidas (los tickets/cobros sin factura no son factura).
+  // Ingresos: facturas (PDF guardado) y tickets/cobros (el PDF se genera aquí).
   // Gastos: adjuntos de las facturas de proveedor que lo tengan.
-  const visibleIncome = useMemo(() => filteredIncomeDocs.filter((d) => d.docType === 'Factura' && d.invoiceId), [filteredIncomeDocs])
+  const visibleIncome = useMemo(() => filteredIncomeDocs.filter(canDownloadDoc), [filteredIncomeDocs])
   const visibleExpense = useMemo(() => filteredApInvoices.filter((f) => f.attachmentPath), [filteredApInvoices])
   const bulkIncome = useMemo(
-    () => (selInc.size ? incomeDocs.filter((d) => d.docType === 'Factura' && d.invoiceId && selInc.has(d.invoiceId)) : visibleIncome),
+    () => (selInc.size ? incomeDocs.filter((d) => canDownloadDoc(d) && selInc.has(docKey(d))) : visibleIncome),
     [selInc, incomeDocs, visibleIncome],
   )
   const bulkExpense = useMemo(
@@ -508,23 +542,28 @@ export function ScenarioCView() {
   }
   const onBulkDownload = async () => {
     if (bulk || bulkCount === 0) return
-    if (bulkCount > 150 && !window.confirm(`Vas a descargar ${bulkCount} archivos en un ZIP. Puede tardar varios minutos. ¿Continuar?`)) return
+    // Los tickets y cobros se generan uno a uno en el navegador: avisar si son muchos
+    const generated = docSide === 'ingresos' ? bulkIncome.filter((d) => !d.invoiceId).length : 0
+    if ((bulkCount > 150 || generated > 60) && !window.confirm(`Vas a descargar ${bulkCount} documentos en un ZIP${generated ? ` (${generated} tickets o cobros se generan al vuelo)` : ''}. Puede tardar varios minutos. ¿Continuar?`)) return
     const range = fromDate || toDate ? `${fromDate || 'inicio'}-a-${toDate || 'fin'}` : String(year)
     setBulk({ done: 0, total: bulkCount })
     try {
       let items: ZipItem[]
       if (docSide === 'ingresos') {
-        // Las que no tienen PDF guardado se generan en servidor, por lotes
-        const missing = bulkIncome.filter((d) => !d.pdfUrl).map((d) => d.invoiceId!)
+        // Facturas sin PDF guardado: se genera en servidor, por lotes
+        const missing = bulkIncome.filter((d) => d.invoiceId && !d.pdfUrl).map((d) => d.invoiceId!)
         const urls = new Map<string, string | null>()
         for (let i = 0; i < missing.length; i += 5) {
           const res = await getIssuedInvoicePdfUrls(missing.slice(i, i + 5))
           if (res.ok) for (const r of res.data) urls.set(r.id, r.url)
         }
-        items = bulkIncome.map((d) => ({
-          name: `${d.number} ${d.client}.pdf`,
-          url: d.pdfUrl || urls.get(d.invoiceId!) || null,
-        }))
+        items = bulkIncome.map((d) => {
+          const name = `${d.date} ${d.number} ${d.client}`.trim() + '.pdf'
+          // Factura: PDF guardado (o recién generado). Ticket o cobro de
+          // sastrería: no hay PDF, se arma en el navegador con sus datos.
+          if (d.invoiceId) return { name, url: d.pdfUrl || urls.get(d.invoiceId) || null }
+          return { name, blob: () => buildDocPdfBlob(d) }
+        })
       } else {
         const urls: (string | null)[] = []
         for (let i = 0; i < bulkExpense.length; i += 200) {
@@ -538,7 +577,7 @@ export function ScenarioCView() {
       }
       const { ok, failed } = await downloadZip(
         items,
-        `facturas-${docSide === 'ingresos' ? 'emitidas' : 'recibidas'}-C-${range}`,
+        `${docSide === 'ingresos' ? 'documentos-ingresos' : 'facturas-recibidas'}-C-${range}`,
         (done, total) => setBulk({ done, total }),
       )
       if (failed.length) toast.warning(`${ok} descargadas · ${failed.length} sin archivo (lista dentro del ZIP)`)
@@ -666,10 +705,11 @@ export function ScenarioCView() {
             ]}
           />
           {ivaPeriod === 'meses'
-            ? <MonthVatTable view={data.C} variant="full" retentions={retentionsByMonth} />
-            : <QuarterTable view={data.C} variant="full" retentions={retentionsByQuarter} />}
+            ? <MonthVatTable view={data.C} variant="full" retentions={retentionsByMonth} ledger={data.ledger} />
+            : <QuarterTable view={data.C} variant="full" retentions={retentionsByQuarter} ledger={data.ledger} />}
+          <p className="text-xs text-slate-400">Pincha en un trimestre o en un mes para ver todos sus documentos con su base y su cuota de IVA.</p>
           {isp.count > 0 && <IntraIspCard view={data.C} isp={isp} byMonth={ivaPeriod === 'meses'} />}
-          <VatByRateTable rows={vatRows} byMonth={ivaPeriod === 'meses'} />
+          <VatByRateTable rows={vatRows} byMonth={ivaPeriod === 'meses'} invoices={data.apInvoices} />
         </div>
       ) : tab === 'retenciones' ? (
         <RetentionsTab year={year} invoices={retentionInvoices} />
@@ -716,17 +756,17 @@ export function ScenarioCView() {
                 onClick={onBulkDownload}
                 disabled={!!bulk || bulkCount === 0}
                 title={selectedCount > 0
-                  ? 'Descarga en un ZIP solo las facturas marcadas'
+                  ? 'Descarga en un ZIP solo los documentos marcados'
                   : docSide === 'ingresos'
-                    ? 'Descarga en un ZIP las facturas emitidas que se ven en la lista (marca casillas para elegir solo algunas; los tickets y cobros sin factura no se incluyen)'
+                    ? 'Descarga en un ZIP los documentos que se ven en la lista: facturas, tickets y cobros de sastrería (marca casillas para elegir solo algunos)'
                     : 'Descarga en un ZIP los PDF de las facturas de proveedor que se ven en la lista (marca casillas para elegir solo algunas)'}
               >
                 {bulk
                   ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Descargando {bulk.done}/{bulk.total}…</>
                   : <><Download className="mr-1.5 h-3.5 w-3.5" />
                     {selectedCount > 0
-                      ? `Descargar ${bulkCount} ${bulkCount === 1 ? 'seleccionada' : 'seleccionadas'} (ZIP)`
-                      : `Descargar ${bulkCount === 1 ? 'la visible' : `las ${bulkCount} visibles`} (ZIP)`}
+                      ? `Descargar ${bulkCount} ${bulkCount === 1 ? 'seleccionado' : 'seleccionados'} (ZIP)`
+                      : `Descargar ${bulkCount === 1 ? 'el visible' : `los ${bulkCount} visibles`} (ZIP)`}
                   </>}
               </Button>
             </div>
@@ -776,10 +816,10 @@ export function ScenarioCView() {
                   <tr>
                     <th className="w-8 pl-3 py-3">
                       <SelectAllBox
-                        ids={visibleIncome.map((d) => d.invoiceId!)}
+                        ids={visibleIncome.map(docKey)}
                         selected={selInc}
                         onChange={(ids, on) => setSelInc((s) => toggleIn(s, ids, on))}
-                        label="Marcar todas las facturas visibles"
+                        label="Marcar todos los documentos visibles"
                       />
                     </th>
                     <th className="text-left px-3 py-3">Tipo</th>
@@ -800,13 +840,13 @@ export function ScenarioCView() {
                   {filteredIncomeDocs.length === 0 ? (
                     <tr><td colSpan={13} className="px-3 py-8 text-center text-slate-400">Sin documentos de ingreso.</td></tr>
                   ) : filteredIncomeDocs.map((d, i) => (
-                    <tr key={i} className={d.invoiceId && selInc.has(d.invoiceId) ? 'bg-sky-50/60' : 'hover:bg-slate-50/50'}>
+                    <tr key={i} className={selInc.has(docKey(d)) ? 'bg-sky-50/60' : 'hover:bg-slate-50/50'}>
                       <td className="w-8 pl-3 py-2">
-                        {d.docType === 'Factura' && d.invoiceId && (
+                        {canDownloadDoc(d) && (
                           <input
                             type="checkbox"
-                            checked={selInc.has(d.invoiceId)}
-                            onChange={(e) => setSelInc((s) => toggleIn(s, [d.invoiceId!], e.target.checked))}
+                            checked={selInc.has(docKey(d))}
+                            onChange={(e) => setSelInc((s) => toggleIn(s, [docKey(d)], e.target.checked))}
                             aria-label={`Marcar ${d.number}`}
                             className="h-4 w-4 cursor-pointer accent-prats-navy"
                           />
@@ -893,9 +933,11 @@ export function ScenarioCView() {
           suppliers={suppliers347}
           intra={suppliersIntra}
           onClientClick={(r) => setClientTarget({ key: r.key, name: r.name, nif: r.nif })}
+          onSupplierClick={(r) => setSupplierTarget({ key: r.key, name: r.name, nif: r.nif })}
         />
       )}
       <ClientLedgerDialog year={year} target={clientTarget} detail={clientDetail} onClose={() => setClientTarget(null)} />
+      <SupplierLedgerDialog year={year} target={supplierTarget} detail={supplierDetail} onClose={() => setSupplierTarget(null)} />
     </div>
   )
 }
@@ -1062,12 +1104,13 @@ function SelectAllBox({ ids, selected, onChange, label }: {
 // Pestaña Clientes · 347: cuánto se ha facturado/cobrado a cada cliente y cuánto
 // ha facturado cada proveedor en el año, con desglose trimestral (el 347 se
 // declara por trimestres) y marca sobre los que superan los 3.005,06 €.
-function ThirdPartiesTab({ year, clients, suppliers, intra, onClientClick }: {
+function ThirdPartiesTab({ year, clients, suppliers, intra, onClientClick, onSupplierClick }: {
   year: number
   clients: ThirdPartyRow[]
   suppliers: ThirdPartyRow[]
   intra: ThirdPartyRow[]
   onClientClick: (row: ThirdPartyRow) => void
+  onSupplierClick: (row: ThirdPartyRow) => void
 }) {
   const [side, setSide] = useState<'clientes' | 'proveedores'>('clientes')
   const [query, setQuery] = useState('')
@@ -1125,9 +1168,11 @@ function ThirdPartiesTab({ year, clients, suppliers, intra, onClientClick }: {
             totalLabel="Total año (con IVA)"
             extraLabel="IRPF retenido"
             rows={suppliers.filter(match)}
+            onRowClick={onSupplierClick}
             footnote="Volumen anual por proveedor: base + IVA de sus facturas recibidas (criterio del 347), por trimestre. En dorado, los
             que superan los 3.005,06 €. Ojo: las operaciones con retención de IRPF (profesionales, alquileres) ya se declaran en los
-            modelos 190/180 y no se incluyen en el 347."
+            modelos 190/180 y no se incluyen en el 347. Pincha en un proveedor para ver sus facturas y su libro mayor; pincha en una
+            cabecera para ordenar."
           />
           <ThirdPartyTable
             title="Proveedores intracomunitarios (349)"
@@ -1136,8 +1181,10 @@ function ThirdPartiesTab({ year, clients, suppliers, intra, onClientClick }: {
             totalLabel="Base año"
             rows={intra.filter(match)}
             noThreshold
+            onRowClick={onSupplierClick}
             footnote="Adquisiciones intracomunitarias por proveedor, en BASE imponible (criterio del modelo 349, que no tiene umbral
-            mínimo). Estas operaciones van al 349, no al 347."
+            mínimo). Estas operaciones van al 349, no al 347, y llevan inversión del sujeto pasivo. Pincha en un proveedor para ver el
+            detalle."
           />
         </div>
       )}
@@ -1263,7 +1310,14 @@ function ThirdPartyTable({ title, tag, nameLabel, totalLabel, extraLabel, rows: 
 // Desglose del IVA soportado por tipo impositivo (0/10/21…) y trimestre.
 // Las facturas registradas con líneas usan su desglose real; las de solo
 // cabecera derivan el tipo del cociente IVA/base.
-function VatByRateTable({ rows, byMonth = false }: { rows: VatRowView[]; byMonth?: boolean }) {
+function VatByRateTable({ rows, byMonth = false, invoices = [] }: { rows: VatRowView[]; byMonth?: boolean; invoices?: ApInvoiceLite[] }) {
+  const [open, setOpen] = useState<string | null>(null)
+  // Facturas de ese periodo y ese tipo (las de varios tipos no encajan en ninguna fila)
+  const detailFor = (group: string, rate: number, isp?: boolean) => invoices.filter((f) => {
+    const mi = Number(f.date.slice(5, 7)) - 1
+    const inPeriod = byMonth ? MONTH_NAMES[mi] === group : `T${Math.ceil((mi + 1) / 3)}` === group
+    return inPeriod && (isp ? isIsp(f) : !isIsp(f) && f.vatRate === rate)
+  }).sort((a, b) => a.date.localeCompare(b.date))
   // `group` = etiqueta de la primera columna (T1… o Enero…); solo se pinta en la
   // primera fila de cada grupo.
   const cells = byMonth
@@ -1295,14 +1349,69 @@ function VatByRateTable({ rows, byMonth = false }: { rows: VatRowView[]; byMonth
         <tbody className="divide-y divide-slate-100">
           {cells.length === 0 ? (
             <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-400">Sin facturas recibidas.</td></tr>
-          ) : cells.map((c, i) => (
-            <tr key={i} className="hover:bg-slate-50/60">
-              <td className="px-4 py-2.5 font-semibold text-slate-700">{i === 0 || cells[i - 1].group !== c.group ? c.group : ''}</td>
-              <td className={`px-4 py-2.5 ${c.isp ? 'text-indigo-700' : 'text-slate-600'}`}>{rateText(c)}</td>
-              <td className="px-4 py-2.5 text-right tabular-nums">{eur(c.base)}</td>
-              <td className="px-4 py-2.5 text-right tabular-nums">{eur(c.vat)}</td>
-            </tr>
-          ))}
+          ) : cells.map((c, i) => {
+            const key = `${c.group}·${c.isp ? 'isp' : c.rate}`
+            const rowsDetail = open === key ? detailFor(c.group, c.rate, c.isp) : []
+            return (
+              <Fragment key={key}>
+                <tr className="cursor-pointer hover:bg-slate-50/60" onClick={() => setOpen((o) => (o === key ? null : key))}>
+                  <td className="px-4 py-2.5 font-semibold text-slate-700">{i === 0 || cells[i - 1].group !== c.group ? c.group : ''}</td>
+                  <td className={`px-4 py-2.5 ${c.isp ? 'text-indigo-700' : 'text-slate-600'}`}>
+                    {open === key
+                      ? <ChevronDown className="mr-1 inline h-3.5 w-3.5 text-slate-400" />
+                      : <ChevronRight className="mr-1 inline h-3.5 w-3.5 text-slate-400" />}
+                    {rateText(c)}
+                  </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{eur(c.base)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{eur(c.vat)}</td>
+                </tr>
+                {open === key && (
+                  <tr>
+                    <td colSpan={4} className="bg-slate-50/60 p-3">
+                      <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+                        <div className="flex items-baseline justify-between border-b border-slate-200 px-3 py-2">
+                          <span className="text-xs font-semibold text-prats-navy">Facturas recibidas · {c.group} · {rateText(c)}</span>
+                          <span className="text-[11px] text-slate-500">{rowsDetail.length} facturas</span>
+                        </div>
+                        {rowsDetail.length === 0 ? (
+                          <p className="px-3 py-4 text-center text-xs text-slate-400">
+                            Sin facturas con ese tipo exacto (las de varios tipos se reparten por líneas y no salen aquí).
+                          </p>
+                        ) : (
+                          <table className="w-full text-xs">
+                            <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
+                              <tr>
+                                <th className="px-2 py-1.5 text-left">Fecha</th>
+                                <th className="px-2 py-1.5 text-left">Nº</th>
+                                <th className="px-2 py-1.5 text-left">Proveedor</th>
+                                <th className="px-2 py-1.5 text-right">Base</th>
+                                <th className="px-2 py-1.5 text-right">Cuota IVA</th>
+                                <th className="px-2 py-1.5 text-right">Total</th>
+                                <th className="px-2 py-1.5 text-right">PDF</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {rowsDetail.map((f) => (
+                                <tr key={f.id} className="hover:bg-slate-50/60">
+                                  <td className="whitespace-nowrap px-2 py-1.5 text-slate-500">{f.date}</td>
+                                  <td className="whitespace-nowrap px-2 py-1.5 font-mono text-slate-700">{f.number}</td>
+                                  <td className="px-2 py-1.5 text-slate-600">{f.supplier}</td>
+                                  <td className="px-2 py-1.5 text-right tabular-nums">{eur(f.base)}</td>
+                                  <td className="px-2 py-1.5 text-right tabular-nums">{eur(c.isp ? ispVat(f) : f.vat)}</td>
+                                  <td className="px-2 py-1.5 text-right font-medium tabular-nums">{eur(f.total)}</td>
+                                  <td className="px-2 py-1.5 text-right"><DownloadBtn apPath={f.attachmentPath} /></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            )
+          })}
           {cells.length > 0 && (
             <tr className={TOTAL_ROW}>
               <td className="px-4 py-2.5" colSpan={2}>TOTAL año</td>

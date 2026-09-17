@@ -137,6 +137,7 @@ export type InvoiceLite = {
 
 // Factura recibida de proveedor (gastos del escenario C)
 export type ApInvoiceLite = {
+  id: string
   number: string
   supplier: string
   cif?: string                  // NIF/CIF del proveedor (para 347/349 e intracomunitarias)
@@ -148,6 +149,8 @@ export type ApInvoiceLite = {
   retentionAmount: number       // importe retenido (se ingresa a Hacienda, no al proveedor)
   total: number                 // total del documento: base + IVA − retención
   isIntraEU: boolean            // proveedor intracomunitario (CIF-IVA de otro país UE)
+  status: string                // 'pagada' | 'pendiente'
+  payments: { date: string; amount: number }[] // pagos hechos (sin método: en C no figura)
   attachmentPath?: string       // path en el bucket supplier-invoices (PDF adjunto)
   note?: string                 // nota de la factura (ap_supplier_invoices.notes), visible en C
 }

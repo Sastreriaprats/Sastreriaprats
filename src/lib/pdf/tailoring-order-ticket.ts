@@ -58,7 +58,8 @@ function getStoreConfig(order: TailoringTicketOrder) {
   return STORE_PDF_CONFIGS.pinzon
 }
 
-export async function generateTailoringOrderTicketPdf(order: TailoringTicketOrder): Promise<void> {
+// `mode` 'blob': devuelve el PDF en vez de descargarlo (para el ZIP del panel C).
+export async function generateTailoringOrderTicketPdf(order: TailoringTicketOrder, mode: 'download' | 'blob' = 'download'): Promise<Blob | void> {
   const orderLines = order.tailoring_order_lines ?? []
   const total = Number(order.total ?? 0)
   const totalPaid = Number(order.total_paid ?? 0)
@@ -113,7 +114,7 @@ export async function generateTailoringOrderTicketPdf(order: TailoringTicketOrde
     payments.push({ payment_method: 'card', amount: total })
   }
 
-  await generateTicketPdf({
+  return await generateTicketPdf({
     sale: {
       ticket_number: String(order.order_number ?? 'pedido'),
       created_at: order.created_at ?? new Date().toISOString(),
@@ -130,5 +131,5 @@ export async function generateTailoringOrderTicketPdf(order: TailoringTicketOrde
     clientCode: getClientCode(order),
     storeAddress: storeConfig.address,
     storePhones: storeConfig.phones,
-  })
+  }, mode)
 }

@@ -265,7 +265,9 @@ function truncate(str: string, max: number): string {
   return str.slice(0, max - 1) + '…'
 }
 
-export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 'print' = 'download', diag?: PrintDiag): Promise<void> {
+// `mode`: 'download' guarda el PDF, 'print' lo manda a imprimir y 'blob' lo
+// devuelve sin tocar el navegador (para empaquetar varios en un ZIP).
+export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 'print' | 'blob' = 'download', diag?: PrintDiag): Promise<Blob | void> {
   const pdfMake = (await import('pdfmake/build/pdfmake')).default
   const vfsModule = await import('pdfmake/build/vfs_fonts')
   const vfs = (vfsModule as { default?: Record<string, string> }).default
@@ -645,6 +647,9 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
   const pdf = pdfMake.createPdf(docDef as Parameters<typeof pdfMake.createPdf>[0])
 
   const fileName = `${giftMode ? 'ticket-regalo' : 'ticket'}-${data.sale.internal_ref ?? data.sale.ticket_number}.pdf`
+  // Mismo camino que la impresión: getBuffer(), NO getBlob (se cuelga en algunos
+  // navegadores, ver getPdfBlobViaBuffer).
+  if (mode === 'blob') return await getPdfBlobViaBuffer(pdf as unknown as PdfBufferDoc)
   if (mode === 'print') {
     await printPdfDoc(pdf as unknown as PdfBufferDoc, fileName, diag)
   } else {
@@ -654,12 +659,12 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
 
 /** Genera el ticket PDF y abre el diálogo de impresión del navegador */
 export async function printTicketPdf(data: TicketPdfData, diag?: PrintDiag): Promise<void> {
-  return generateTicketPdf(data, 'print', diag)
+  await generateTicketPdf(data, 'print', diag)
 }
 
 /** Imprime un ticket regalo (sin precios) */
 export async function printGiftTicketPdf(data: TicketPdfData, diag?: PrintDiag): Promise<void> {
-  return generateTicketPdf({ ...data, giftMode: true }, 'print', diag)
+  await generateTicketPdf({ ...data, giftMode: true }, 'print', diag)
 }
 
 // ============================================================

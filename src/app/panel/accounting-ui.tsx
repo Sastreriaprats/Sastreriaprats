@@ -107,10 +107,15 @@ export const TOTAL_ROW = 'border-t-[3px] border-double border-slate-300 bg-slate
 // `retentions` (opcional, solo variant 'full'): retenciones de IRPF a ingresar
 // por trimestre (índice 0..3 = T1..T4). Añade las columnas Retenciones y
 // Total a liquidar (resultado de IVA + retenciones = lo que se paga a Hacienda).
-export function QuarterTable({ view, variant, retentions }: { view: AccountingView; variant: 'cash' | 'full'; retentions?: number[] }) {
+// `ledger` (opcional): con él, cada trimestre se despliega al pincharlo y muestra
+// todos sus movimientos (ingresos y facturas recibidas) con su base e IVA.
+export function QuarterTable({ view, variant, retentions, ledger }: { view: AccountingView; variant: 'cash' | 'full'; retentions?: number[]; ledger?: LedgerMovement[] }) {
   const cash = variant === 'cash'
   const hasRet = !cash && retentions !== undefined
   const retQ = (i: number) => retentions?.[i] ?? 0
+  const [open, setOpen] = useState<string | null>(null)
+  const cols = 5 + (cash ? 0 : 2) + (hasRet ? 2 : 0)
+  const monthsOfQuarter = (i: number) => view.monthlyVat.slice(i * 3, i * 3 + 3).map((m) => m.month)
   const tot = view.quarters.reduce((a, q, i) => ({
     bs: a.bs + q.baseSales, rep: a.rep + q.ivaRepercutido, bp: a.bp + q.basePurchases, sop: a.sop + q.ivaSoportado,
     ret: a.ret + retQ(i),
@@ -133,17 +138,34 @@ export function QuarterTable({ view, variant, retentions }: { view: AccountingVi
         </thead>
         <tbody className="divide-y divide-slate-100">
           {view.quarters.map((q, i) => (
-            <tr key={q.quarter} className="hover:bg-slate-50/60">
-              <td className={`${TD} font-semibold text-slate-700`}>{q.quarter}</td>
-              <td className={`${TD} text-slate-500`}>{q.period}</td>
-              <td className={TDR}>{eur(q.baseSales)}</td>
-              <td className={TDR}>{eur(q.ivaRepercutido)}</td>
-              {!cash && <td className={TDR}>{eur(q.basePurchases)}</td>}
-              {!cash && <td className={TDR}>{eur(q.ivaSoportado)}</td>}
-              <td className={`${TDR} ${hasRet ? '' : 'font-semibold'}`}>{eur(cash ? q.ivaRepercutido : q.resultado)}</td>
-              {hasRet && <td className={TDR}>{eur(retQ(i))}</td>}
-              {hasRet && <td className={`${TDR} font-semibold`}>{eur(q.resultado + retQ(i))}</td>}
-            </tr>
+            <Fragment key={q.quarter}>
+              <tr
+                className={`hover:bg-slate-50/60 ${ledger ? 'cursor-pointer' : ''}`}
+                onClick={ledger ? () => setOpen((o) => (o === q.quarter ? null : q.quarter)) : undefined}
+              >
+                <td className={`${TD} font-semibold text-slate-700`}>
+                  {ledger && (open === q.quarter
+                    ? <ChevronDown className="mr-1 inline h-3.5 w-3.5 text-slate-400" />
+                    : <ChevronRight className="mr-1 inline h-3.5 w-3.5 text-slate-400" />)}
+                  {q.quarter}
+                </td>
+                <td className={`${TD} text-slate-500`}>{q.period}</td>
+                <td className={TDR}>{eur(q.baseSales)}</td>
+                <td className={TDR}>{eur(q.ivaRepercutido)}</td>
+                {!cash && <td className={TDR}>{eur(q.basePurchases)}</td>}
+                {!cash && <td className={TDR}>{eur(q.ivaSoportado)}</td>}
+                <td className={`${TDR} ${hasRet ? '' : 'font-semibold'}`}>{eur(cash ? q.ivaRepercutido : q.resultado)}</td>
+                {hasRet && <td className={TDR}>{eur(retQ(i))}</td>}
+                {hasRet && <td className={`${TDR} font-semibold`}>{eur(q.resultado + retQ(i))}</td>}
+              </tr>
+              {ledger && open === q.quarter && (
+                <tr>
+                  <td colSpan={cols} className="bg-slate-50/60 p-3">
+                    <VatPeriodDetail ledger={ledger} months={monthsOfQuarter(i)} title={`Detalle de ${q.quarter} (${q.period})`} />
+                  </td>
+                </tr>
+              )}
+            </Fragment>
           ))}
           <tr className={TOTAL_ROW}>
             <td className={TD} colSpan={2}>TOTAL año</td>
@@ -171,10 +193,12 @@ export function QuarterTable({ view, variant, retentions }: { view: AccountingVi
 // view.quarters, que suman exactamente sus tres meses). `retentions`: índice
 // 0..11 = enero..diciembre; mismas columnas que QuarterTable.
 export const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
-export function MonthVatTable({ view, variant, retentions }: { view: AccountingView; variant: 'cash' | 'full'; retentions?: number[] }) {
+export function MonthVatTable({ view, variant, retentions, ledger }: { view: AccountingView; variant: 'cash' | 'full'; retentions?: number[]; ledger?: LedgerMovement[] }) {
   const cash = variant === 'cash'
   const hasRet = !cash && retentions !== undefined
   const retM = (i: number) => retentions?.[i] ?? 0
+  const [open, setOpen] = useState<string | null>(null)
+  const cols = 4 + (cash ? 0 : 2) + (hasRet ? 2 : 0)
   const retQ = (q: number) => retM(q * 3) + retM(q * 3 + 1) + retM(q * 3 + 2)
   const tot = view.quarters.reduce((a, q, i) => ({
     bs: a.bs + q.baseSales, rep: a.rep + q.ivaRepercutido, bp: a.bp + q.basePurchases, sop: a.sop + q.ivaSoportado,
@@ -210,15 +234,51 @@ export function MonthVatTable({ view, variant, retentions }: { view: AccountingV
           {view.quarters.map((q, qi) => (
             <Fragment key={q.quarter}>
               {view.monthlyVat.slice(qi * 3, qi * 3 + 3).map((m, k) => (
-                <tr key={m.month} className="hover:bg-slate-50/60">
-                  <td className={`${TD} text-slate-700`}>{MONTH_NAMES[qi * 3 + k]}</td>
-                  {cells(m, retM(qi * 3 + k), false)}
-                </tr>
+                <Fragment key={m.month}>
+                  <tr
+                    className={`hover:bg-slate-50/60 ${ledger ? 'cursor-pointer' : ''}`}
+                    onClick={ledger ? () => setOpen((o) => (o === m.month ? null : m.month)) : undefined}
+                  >
+                    <td className={`${TD} text-slate-700`}>
+                      {ledger && (open === m.month
+                        ? <ChevronDown className="mr-1 inline h-3.5 w-3.5 text-slate-400" />
+                        : <ChevronRight className="mr-1 inline h-3.5 w-3.5 text-slate-400" />)}
+                      {MONTH_NAMES[qi * 3 + k]}
+                    </td>
+                    {cells(m, retM(qi * 3 + k), false)}
+                  </tr>
+                  {ledger && open === m.month && (
+                    <tr>
+                      <td colSpan={cols} className="bg-slate-50/60 p-3">
+                        <VatPeriodDetail ledger={ledger} months={[m.month]} title={`Detalle de ${MONTH_NAMES[qi * 3 + k]}`} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
-              <tr className="bg-slate-50/80 font-semibold text-slate-800">
-                <td className={TD}>Total {q.quarter} <span className="font-normal text-slate-400">({q.period})</span></td>
+              <tr
+                className={`bg-slate-50/80 font-semibold text-slate-800 ${ledger ? 'cursor-pointer' : ''}`}
+                onClick={ledger ? () => setOpen((o) => (o === q.quarter ? null : q.quarter)) : undefined}
+              >
+                <td className={TD}>
+                  {ledger && (open === q.quarter
+                    ? <ChevronDown className="mr-1 inline h-3.5 w-3.5 text-slate-400" />
+                    : <ChevronRight className="mr-1 inline h-3.5 w-3.5 text-slate-400" />)}
+                  Total {q.quarter} <span className="font-normal text-slate-400">({q.period})</span>
+                </td>
                 {cells(q, retQ(qi), true)}
               </tr>
+              {ledger && open === q.quarter && (
+                <tr>
+                  <td colSpan={cols} className="bg-slate-50/60 p-3">
+                    <VatPeriodDetail
+                      ledger={ledger}
+                      months={view.monthlyVat.slice(qi * 3, qi * 3 + 3).map((m) => m.month)}
+                      title={`Detalle de ${q.quarter} (${q.period})`}
+                    />
+                  </td>
+                </tr>
+              )}
             </Fragment>
           ))}
           <tr className={TOTAL_ROW}>
@@ -240,6 +300,74 @@ export function MonthVatTable({ view, variant, retentions }: { view: AccountingV
         </p>
       )}
     </TableShell>
+  )
+}
+
+// Detalle de un periodo del IVA: todos los documentos que forman sus cifras,
+// separados en ingresos (IVA repercutido) y facturas recibidas (soportado), con
+// su base, su cuota y el enlace a cada documento.
+function VatPeriodDetail({ ledger, months, title }: { ledger: LedgerMovement[]; months: string[]; title: string }) {
+  const rows = ledger.filter((m) => months.includes(m.date.slice(0, 7)))
+  // Por TIPO, no por signo: un abono de proveedor tiene importe positivo y sigue
+  // siendo una factura recibida (si no, se colaría en los ingresos).
+  const isExpense = (m: LedgerMovement) => m.type === 'Factura recibida'
+  const income = rows.filter((m) => !isExpense(m)).sort((a, b) => a.date.localeCompare(b.date))
+  const expense = rows.filter(isExpense).sort((a, b) => a.date.localeCompare(b.date))
+  // Con signo: los abonos restan (así los totales cuadran con la tabla de IVA)
+  const sum = (arr: LedgerMovement[], k: 'base' | 'vat') => arr.reduce((s, m) => s + m[k], 0)
+  const block = (label: string, arr: LedgerMovement[], baseLabel: string, vatLabel: string) => (
+    <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+      <div className="flex items-baseline justify-between border-b border-slate-200 px-3 py-2">
+        <span className="text-xs font-semibold text-prats-navy">{label}</span>
+        <span className="text-[11px] text-slate-500">
+          {arr.length} docs · {baseLabel} {eur(sum(arr, 'base'))} · {vatLabel} {eur(sum(arr, 'vat'))}
+        </span>
+      </div>
+      {arr.length === 0 ? (
+        <p className="px-3 py-4 text-center text-xs text-slate-400">Sin documentos.</p>
+      ) : (
+        <table className="w-full text-xs">
+          <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
+            <tr>
+              <th className="px-2 py-1.5 text-left">Fecha</th>
+              <th className="px-2 py-1.5 text-left">Tipo</th>
+              <th className="px-2 py-1.5 text-left">Concepto</th>
+              <th className="px-2 py-1.5 text-left">Cliente/Proveedor</th>
+              <th className="px-2 py-1.5 text-right">Base</th>
+              <th className="px-2 py-1.5 text-right">Cuota IVA</th>
+              <th className="px-2 py-1.5 text-right">Total</th>
+              <th className="px-2 py-1.5 text-right">PDF</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {arr.map((m, i) => (
+              <tr key={i} className="hover:bg-slate-50/60">
+                <td className="whitespace-nowrap px-2 py-1.5 text-slate-500">{m.date}</td>
+                <td className="whitespace-nowrap px-2 py-1.5 text-slate-600">{m.type}</td>
+                <td className="px-2 py-1.5 text-slate-700">{m.concept}</td>
+                <td className="px-2 py-1.5 text-slate-600">{m.client ?? '—'}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{eur(m.base)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{eur(m.vat)}</td>
+                <td className="px-2 py-1.5 text-right font-medium tabular-nums">{eur(Math.abs(m.total))}</td>
+                <td className="px-2 py-1.5 text-right">
+                  <DownloadBtn saleId={m.saleId} orderId={m.orderId} onlineOrderId={m.onlineOrderId} pdfUrl={m.pdfUrl} apPath={m.apPath} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+  return (
+    <div className="space-y-3">
+      <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{title}</p>
+      {block('Ingresos (IVA repercutido)', income, 'base', 'IVA')}
+      {block('Facturas recibidas (IVA soportado)', expense, 'base', 'IVA')}
+      <p className="text-[11px] text-slate-400">
+        Los totales pueden diferir de la fila en unos céntimos: aquí cada documento va redondeado y la fila suma sin redondear.
+      </p>
+    </div>
   )
 }
 

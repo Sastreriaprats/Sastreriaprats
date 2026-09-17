@@ -2,7 +2,9 @@
 // empaqueta en un ZIP en el navegador (sin pasar el binario por el servidor).
 import { zipSync } from 'fflate'
 
-export type ZipItem = { name: string; url: string | null }
+// Cada archivo llega por URL (facturas, adjuntos) o se genera al vuelo en el
+// navegador (tickets y cobros, que no tienen PDF guardado).
+export type ZipItem = { name: string; url?: string | null; blob?: () => Promise<Blob | null> }
 
 // Nombre de archivo seguro y sin repetir dentro del ZIP
 function uniqueName(raw: string, used: Set<string>) {
@@ -36,10 +38,18 @@ export async function downloadZip(
     while (next < items.length) {
       const it = items[next++]
       try {
-        if (!it.url) throw new Error('sin archivo')
-        const res = await fetch(it.url)
-        if (!res.ok) throw new Error(String(res.status))
-        files[uniqueName(it.name, used)] = new Uint8Array(await res.arrayBuffer())
+        let buf: ArrayBuffer
+        if (it.blob) {
+          const b = await it.blob()
+          if (!b) throw new Error('sin archivo')
+          buf = await b.arrayBuffer()
+        } else {
+          if (!it.url) throw new Error('sin archivo')
+          const res = await fetch(it.url)
+          if (!res.ok) throw new Error(String(res.status))
+          buf = await res.arrayBuffer()
+        }
+        files[uniqueName(it.name, used)] = new Uint8Array(buf)
       } catch {
         failed.push(it.name)
       }

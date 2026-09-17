@@ -420,9 +420,10 @@ async function computeYear(year: number) {
       apPath: attachment,
     })
     apInvoices.push({
-      number: num, supplier, cif, date: d.slice(0, 10), base: r2(base), vat: r2(vat), vatRate,
+      id: String(x.id), number: num, supplier, cif, date: d.slice(0, 10), base: r2(base), vat: r2(vat), vatRate,
       retentionRate: r2(retRate), retentionAmount: r2(ret), total: r2(docTotal),
       isIntraEU: isIntraEUCif(cif), attachmentPath: attachment, note,
+      status: String(x.status ?? ''), payments: [],
     })
   }
 
@@ -597,6 +598,27 @@ async function loadInvoiceSources(admin: ReturnType<typeof createAdminClient>, i
   return out
 }
 
+// Pagos de cada factura recibida (fecha e importe), para el saldo pendiente del
+// proveedor en su detalle. El MÉTODO no viaja al escenario: en C no figura cómo
+// se paga. Muta las facturas recibidas que recibe.
+async function attachApPayments(admin: ReturnType<typeof createAdminClient>, apInvoices: ApInvoiceLite[]) {
+  const ids = apInvoices.map((f) => f.id).filter(Boolean)
+  if (ids.length === 0) return
+  const byInvoice = new Map<string, { date: string; amount: number }[]>()
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data } = await admin.from('ap_supplier_invoice_payments')
+      .select('supplier_invoice_id, payment_date, amount')
+      .in('supplier_invoice_id', ids.slice(i, i + 200))
+    for (const p of (data ?? []) as Record<string, unknown>[]) {
+      const k = String(p.supplier_invoice_id)
+      byInvoice.set(k, [...(byInvoice.get(k) ?? []), { date: String(p.payment_date ?? '').slice(0, 10), amount: r2(Number(p.amount) || 0) }])
+    }
+  }
+  for (const f of apInvoices) {
+    f.payments = (byInvoice.get(f.id) ?? []).sort((a, b) => a.date.localeCompare(b.date))
+  }
+}
+
 // ===========================================================================
 // CAPA C — escenario sin efectivo (A − cobros efectivo). NO se persiste.
 // ===========================================================================
@@ -668,6 +690,8 @@ export async function getViewC(year: number) {
           pdfUrl: x.pdf_url ? String(x.pdf_url) : undefined,
         }
       })
+
+    await attachApPayments(admin, c.apInvoices)
 
     return ok({ C, ledger: ledger.slice(0, 5000), invoices, apInvoices: c.apInvoices, vatByRate: c.vatByRate } as ViewC)
   } catch { return fail() }
