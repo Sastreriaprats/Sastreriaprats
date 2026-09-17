@@ -718,11 +718,6 @@ export type VatQuarterRow = {
   salesCount: number
   /** Nº de facturas recibidas que contribuyeron al trimestre. */
   purchasesCount: number
-  /** Desglose del IVA repercutido por procedencia (suman ivaRepercutido). */
-  ivaTickets: number
-  ivaCobrosSastreria: number
-  ivaCobrosReservas: number
-  ivaFacturasPropias: number
 }
 
 export const getVatQuarterly = protectedAction<
@@ -771,12 +766,11 @@ export const getVatQuarterly = protectedAction<
     const byQuarter: Record<number, {
       baseSales: number; ivaRepercutido: number; basePurchases: number; ivaSoportado: number
       salesCount: number; purchasesCount: number
-      ivaTickets: number; ivaCobrosSastreria: number; ivaCobrosReservas: number; ivaFacturasPropias: number
     }> = {
-      1: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0, salesCount: 0, purchasesCount: 0, ivaTickets: 0, ivaCobrosSastreria: 0, ivaCobrosReservas: 0, ivaFacturasPropias: 0 },
-      2: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0, salesCount: 0, purchasesCount: 0, ivaTickets: 0, ivaCobrosSastreria: 0, ivaCobrosReservas: 0, ivaFacturasPropias: 0 },
-      3: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0, salesCount: 0, purchasesCount: 0, ivaTickets: 0, ivaCobrosSastreria: 0, ivaCobrosReservas: 0, ivaFacturasPropias: 0 },
-      4: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0, salesCount: 0, purchasesCount: 0, ivaTickets: 0, ivaCobrosSastreria: 0, ivaCobrosReservas: 0, ivaFacturasPropias: 0 },
+      1: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0, salesCount: 0, purchasesCount: 0 },
+      2: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0, salesCount: 0, purchasesCount: 0 },
+      3: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0, salesCount: 0, purchasesCount: 0 },
+      4: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0, salesCount: 0, purchasesCount: 0 },
     }
     for (const x of sales) {
       const d = x.created_at
@@ -793,7 +787,6 @@ export const getVatQuarterly = protectedAction<
         const iva = (Number(x.tax_amount) || 0) * proportion
         byQuarter[q].baseSales += base
         byQuarter[q].ivaRepercutido += iva
-        byQuarter[q].ivaTickets += iva
         byQuarter[q].salesCount += 1
       }
     }
@@ -809,7 +802,6 @@ export const getVatQuarterly = protectedAction<
         const base = amount * ratio
         byQuarter[q].baseSales += base
         byQuarter[q].ivaRepercutido += amount - base
-        byQuarter[q].ivaCobrosSastreria += amount - base
         byQuarter[q].salesCount += 1
       }
     }
@@ -817,7 +809,6 @@ export const getVatQuarterly = protectedAction<
       const q = quarterFromMonth(Number(p.paymentDate.slice(5, 7)))
       byQuarter[q].baseSales += p.base
       byQuarter[q].ivaRepercutido += p.vat
-      byQuarter[q].ivaCobrosReservas += p.vat
       byQuarter[q].salesCount += 1
     }
     for (const x of otherInvoices) {
@@ -826,7 +817,6 @@ export const getVatQuarterly = protectedAction<
         const q = quarterFromMonth(Number(String(d).slice(5, 7)))
         byQuarter[q].baseSales += Number(x.subtotal) || 0
         byQuarter[q].ivaRepercutido += Number(x.tax_amount) || 0
-        byQuarter[q].ivaFacturasPropias += Number(x.tax_amount) || 0
         byQuarter[q].salesCount += 1
       }
     }
@@ -859,10 +849,6 @@ export const getVatQuarterly = protectedAction<
         resultado: v.ivaRepercutido - v.ivaSoportado,
         salesCount: v.salesCount,
         purchasesCount: v.purchasesCount,
-        ivaTickets: v.ivaTickets,
-        ivaCobrosSastreria: v.ivaCobrosSastreria,
-        ivaCobrosReservas: v.ivaCobrosReservas,
-        ivaFacturasPropias: v.ivaFacturasPropias,
       })
     }
     const totalRepercutido = quarters.reduce((s, x) => s + x.ivaRepercutido, 0)
@@ -885,16 +871,7 @@ export type VatInvoiceIssuedRow = {
   irpf_amount: number
   total: number
   status: string
-  origen: 'ticket' | 'sastrería' | 'reserva' | 'online' | 'presupuesto' | 'manual'
-  /**
-   * true = la factura documenta una venta cuyo IVA ya se declara por otra vía
-   * (el ticket, o los cobros del pedido/reserva). Su IVA NO suma al 303.
-   */
-  iva_ya_declarado: boolean
-  /** Documento(s) que cubre: "Ticket …", "Pedido PIN-…", "Reserva RSV-…". */
-  sustituye: string
-  /** Dónde está declarado su IVA, p. ej. "T3 2026 (ticket del 17/09/2026)". */
-  iva_declarado_en: string
+  origen: 'ticket' | 'sastrería' | 'presupuesto' | 'manual'
 }
 export type VatInvoiceReceivedRow = {
   trimestre: string
@@ -941,7 +918,7 @@ export const getVatQuarterlyDetail = protectedAction<
     const [issuedData, receivedData] = await Promise.all([
       readAllPaged((f, t) => ctx.adminClient
         .from('invoices')
-        .select('invoice_number, invoice_date, client_name, client_nif, subtotal, tax_rate, tax_amount, irpf_rate, irpf_amount, total, status, sale_id, tailoring_order_id, reservation_id, online_order_id, is_rectifying, id')
+        .select('invoice_number, invoice_date, client_name, client_nif, subtotal, tax_rate, tax_amount, irpf_rate, irpf_amount, total, status, sale_id, tailoring_order_id, id')
         .gte('invoice_date', yearStart)
         .lte('invoice_date', yearEnd)
         .not('status', 'in', '(draft,cancelled)')
@@ -965,10 +942,9 @@ export const getVatQuarterlyDetail = protectedAction<
       id: string; invoice_number?: string; invoice_date?: string; client_name?: string; client_nif?: string | null
       subtotal?: number; tax_rate?: number; tax_amount?: number; irpf_rate?: number; irpf_amount?: number
       total?: number; status?: string; sale_id?: string | null; tailoring_order_id?: string | null
-      reservation_id?: string | null; online_order_id?: string | null; is_rectifying?: boolean | null
     }>
     const issuedWithoutSourceIds = issuedRows
-      .filter(r => !r.sale_id && !r.tailoring_order_id && !r.reservation_id)
+      .filter(r => !r.sale_id && !r.tailoring_order_id)
       .map(r => r.id)
     const estimateInvoiceIds = new Set<string>()
     if (issuedWithoutSourceIds.length > 0) {
@@ -981,95 +957,12 @@ export const getVatQuarterlyDetail = protectedAction<
       }
     }
 
-    // ── Facturas cuyo IVA ya está declarado por otra vía ──
-    // Ticket: el IVA va en el trimestre de la VENTA. Pedido / reserva: en el de
-    // cada COBRO. Resolvemos el documento y esos trimestres para que el Excel
-    // diga qué cubre cada factura y dónde se declaró, y no se sume dos veces.
-    const fmtEs = (d: string) => d.split('-').reverse().join('/')
-    const qYear = (d: string) => `T${quarterFromMonth(Number(d.slice(5, 7)))} ${d.slice(0, 4)}`
-    const chunk = (arr: string[], n = 200) =>
-      Array.from({ length: Math.ceil(arr.length / n) }, (_, k) => arr.slice(k * n, (k + 1) * n))
-    const addTo = (m: Map<string, Set<string>>, k: string, v: string) => {
-      if (!m.has(k)) m.set(k, new Set())
-      m.get(k)!.add(v)
-    }
-
-    const saleIds = [...new Set(issuedRows.map(r => r.sale_id).filter((x): x is string => !!x))]
-    const saleInfo = new Map<string, { ticket: string; day: string }>()
-    for (const c of chunk(saleIds)) {
-      const { data } = await ctx.adminClient.from('sales').select('id, ticket_number, created_at').in('id', c)
-      for (const x of (data ?? []) as Array<{ id: string; ticket_number?: string | null; created_at?: string | null }>) {
-        saleInfo.set(x.id, { ticket: x.ticket_number ?? '', day: madridDay(x.created_at) })
-      }
-    }
-
-    // Pedidos y reservas: puente N:M (mig 269) + espejo escalar de la factura.
-    const ordersByInvoice = new Map<string, Set<string>>()
-    const reservationsByInvoice = new Map<string, Set<string>>()
-    for (const r of issuedRows) {
-      if (r.tailoring_order_id) addTo(ordersByInvoice, r.id, r.tailoring_order_id)
-      if (r.reservation_id) addTo(reservationsByInvoice, r.id, r.reservation_id)
-    }
-    const linkedIds = issuedRows.filter(r => r.tailoring_order_id || r.reservation_id).map(r => r.id)
-    for (const c of chunk(linkedIds)) {
-      const [{ data: ito }, { data: ir }] = await Promise.all([
-        ctx.adminClient.from('invoice_tailoring_orders').select('invoice_id, tailoring_order_id').in('invoice_id', c),
-        ctx.adminClient.from('invoice_reservations').select('invoice_id, reservation_id').in('invoice_id', c),
-      ])
-      for (const x of (ito ?? []) as Array<{ invoice_id: string; tailoring_order_id: string }>) addTo(ordersByInvoice, x.invoice_id, x.tailoring_order_id)
-      for (const x of (ir ?? []) as Array<{ invoice_id: string; reservation_id: string }>) addTo(reservationsByInvoice, x.invoice_id, x.reservation_id)
-    }
-    const orderIds = [...new Set([...ordersByInvoice.values()].flatMap(set => [...set]))]
-    const reservationIds = [...new Set([...reservationsByInvoice.values()].flatMap(set => [...set]))]
-    const docNumber = new Map<string, string>()
-    const paymentDays = new Map<string, string[]>() // id pedido/reserva → fechas de cobro
-    const addPayment = (id: string, day?: string | null) => {
-      if (day) paymentDays.set(id, [...(paymentDays.get(id) ?? []), day])
-    }
-    for (const c of chunk(orderIds)) {
-      const [{ data: o }, pays] = await Promise.all([
-        ctx.adminClient.from('tailoring_orders').select('id, order_number').in('id', c),
-        readAllPaged((f, t) => ctx.adminClient.from('tailoring_order_payments').select('id, tailoring_order_id, payment_date').in('tailoring_order_id', c).order('id', { ascending: true }).range(f, t)),
-      ])
-      for (const x of (o ?? []) as Array<{ id: string; order_number?: string }>) docNumber.set(x.id, x.order_number ?? '')
-      for (const p of pays as Array<{ tailoring_order_id: string; payment_date?: string }>) addPayment(p.tailoring_order_id, p.payment_date)
-    }
-    for (const c of chunk(reservationIds)) {
-      const [{ data: rs }, pays] = await Promise.all([
-        ctx.adminClient.from('product_reservations').select('id, reservation_number').in('id', c),
-        readAllPaged((f, t) => ctx.adminClient.from('product_reservation_payments').select('id, product_reservation_id, payment_date').in('product_reservation_id', c).order('id', { ascending: true }).range(f, t)),
-      ])
-      for (const x of (rs ?? []) as Array<{ id: string; reservation_number?: string }>) docNumber.set(x.id, x.reservation_number ?? '')
-      for (const p of pays as Array<{ product_reservation_id: string; payment_date?: string }>) addPayment(p.product_reservation_id, p.payment_date)
-    }
-    const quartersOfPayments = (ids: string[]) => {
-      const qs = [...new Set(ids.flatMap(id => paymentDays.get(id) ?? []).sort().map(qYear))]
-      return qs.length ? `Con sus cobros: ${qs.join(', ')}` : 'Aún sin cobros: se declara al cobrar'
-    }
-
     const invoicesIssued: VatInvoiceIssuedRow[] = issuedRows.map((r) => {
       let origen: VatInvoiceIssuedRow['origen']
-      let sustituye = ''
-      let ivaDeclaradoEn = ''
-      const orders = [...(ordersByInvoice.get(r.id) ?? [])]
-      const reservations = [...(reservationsByInvoice.get(r.id) ?? [])]
-      if (r.sale_id) {
-        origen = 'ticket'
-        const s = saleInfo.get(r.sale_id)
-        sustituye = `Ticket ${s?.ticket || '—'}`
-        ivaDeclaradoEn = s?.day ? `${qYear(s.day)} (ticket del ${fmtEs(s.day)})` : 'Trimestre del ticket'
-      } else if (orders.length || reservations.length) {
-        origen = orders.length ? 'sastrería' : 'reserva'
-        sustituye = [
-          ...orders.map(id => `Pedido ${docNumber.get(id) || '—'}`),
-          ...reservations.map(id => `Reserva ${docNumber.get(id) || '—'}`),
-        ].join(', ')
-        ivaDeclaradoEn = quartersOfPayments([...orders, ...reservations])
-      } else if (r.online_order_id) origen = 'online'
+      if (r.sale_id) origen = 'ticket'
+      else if (r.tailoring_order_id) origen = 'sastrería'
       else if (estimateInvoiceIds.has(r.id)) origen = 'presupuesto'
       else origen = 'manual'
-      // Una rectificativa (serie R) de esas facturas hereda el vínculo: tampoco suma.
-      if (sustituye && r.is_rectifying) sustituye = `Rectifica factura de ${sustituye}`
       return {
         trimestre: quarterTag(r.invoice_date),
         invoice_number: String(r.invoice_number ?? ''),
@@ -1084,10 +977,6 @@ export const getVatQuarterlyDetail = protectedAction<
         total: Number(r.total) || 0,
         status: String(r.status ?? ''),
         origen,
-        // Mismo criterio que getVatQuarterly, que las deja fuera del IVA repercutido.
-        iva_ya_declarado: !!(r.sale_id || r.tailoring_order_id || r.reservation_id),
-        sustituye,
-        iva_declarado_en: ivaDeclaradoEn,
       }
     })
 
@@ -1979,18 +1868,6 @@ async function nextSeriesNumber(
 const nextInvoiceNumber = (adminClient: AdminClient) =>
   nextSeriesNumber(adminClient, 'invoices', 'invoice_number', 'F')
 
-// Serie FT: facturas completas que SUSTITUYEN a un ticket (factura simplificada)
-// ya declarado. Su IVA está en el trimestre de la venta, nunca en el de la
-// factura; ir en serie propia hace imposible sumarlas al 303 por descuido
-// (equivale al tipo F3 de Verifactu/SII). `like 'F2026-%'` no casa con
-// 'FT2026-…', así que la serie F sigue correlativa por su cuenta.
-const nextTicketInvoiceNumber = (adminClient: AdminClient) =>
-  nextSeriesNumber(adminClient, 'invoices', 'invoice_number', 'FT')
-
-/** YYYY-MM-DD en hora de Madrid (created_at viene en UTC). */
-const madridDay = (iso: string | null | undefined): string =>
-  iso ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid' }).format(new Date(iso)) : ''
-
 /**
  * Sincroniza los puentes factura↔pedidos y factura↔reservas (mig 269).
  * Solo actúa sobre el puente cuyo array llega DEFINIDO: `undefined` deja el
@@ -2173,7 +2050,7 @@ export const createInvoiceFromSaleAction = protectedAction<
       }
     }
 
-    const invoice_number = await nextTicketInvoiceNumber(ctx.adminClient)
+    const invoice_number = await nextInvoiceNumber(ctx.adminClient)
 
     const subtotal = Number((sale as { subtotal?: number }).subtotal ?? 0)
     const taxAmount = Number((sale as { tax_amount?: number }).tax_amount ?? 0)
@@ -2184,20 +2061,21 @@ export const createInvoiceFromSaleAction = protectedAction<
     dueDate.setDate(dueDate.getDate() + 15)
 
     // Fecha de OPERACIÓN: la del ticket. La factura se expide hoy (invoice_date),
-    // que es lo que mantiene correlativa la serie FT; la venta y su IVA son del
-    // día del ticket (RD 1619/2012 art. 6.1.f). La referencia al ticket
-    // sustituido va SIEMPRE, aunque sea el mismo día: identifica qué venta
-    // declarada cubre la factura. Va en las notas, que el PDF ya imprime.
-    const saleDay = madridDay((sale as { created_at?: string }).created_at)
+    // que es lo que mantiene correlativa la serie F; pero si la venta fue otro día
+    // hay que hacerla constar (RD 1619/2012 art. 6.1.f) — si no, una venta atrasada
+    // (mig 253) o un ticket facturado días después aparenta ser de hoy. Va en las
+    // notas, que el PDF ya imprime.
+    const saleDay = String((sale as { created_at?: string }).created_at ?? '').slice(0, 10)
     const ticketNumber = (sale as { ticket_number?: string }).ticket_number ?? ''
-    const saleDayEs = saleDay.split('-').reverse().join('/')
-    const operationNote = `Factura emitida en sustitución de la factura simplificada${ticketNumber ? ` (ticket ${ticketNumber})` : ''}${saleDay ? ` del ${saleDayEs}` : ''}. Fecha de operación: ${saleDayEs || '—'}.`
+    const operationNote = saleDay && saleDay !== today
+      ? `Fecha de operación: ${saleDay.split('-').reverse().join('/')}${ticketNumber ? ` · Ticket ${ticketNumber}` : ''}`
+      : null
 
     const { data: inv, error } = await ctx.adminClient
       .from('invoices')
       .insert({
         invoice_number,
-        invoice_series: 'FT',
+        invoice_series: 'F',
         invoice_type: 'issued',
         client_id: clientId,
         client_name: clientName,

@@ -3161,40 +3161,27 @@ function VatTab() {
       const resumenRows: Record<string, unknown>[] = qs.map(q => ({
         'Trimestre': q.quarter,
         'Periodo': q.period,
-        'Nº operaciones de venta': q.salesCount,
+        'Nº facturas emitidas': q.salesCount,
         'Base ventas': q.baseImponibleSales,
-        'IVA repercutido (303)': q.ivaRepercutido,
-        '  · de tickets TPV': q.ivaTickets,
-        '  · de cobros de sastrería': q.ivaCobrosSastreria,
-        '  · de cobros de reservas': q.ivaCobrosReservas,
-        '  · de facturas con IVA propio': q.ivaFacturasPropias,
+        'IVA repercutido': q.ivaRepercutido,
         'Nº facturas recibidas': q.purchasesCount,
         'Base compras': q.baseImponiblePurchases,
         'IVA soportado': q.ivaSoportado,
         'Resultado': q.resultado,
       }))
-      const sum = (k: 'ivaTickets' | 'ivaCobrosSastreria' | 'ivaCobrosReservas' | 'ivaFacturasPropias') =>
-        qs.reduce((s, q) => s + q[k], 0)
       resumenRows.push({
         'Trimestre': 'TOTAL',
         'Periodo': String(year),
-        'Nº operaciones de venta': totalSalesCount,
+        'Nº facturas emitidas': totalSalesCount,
         'Base ventas': baseSalesTotal,
-        'IVA repercutido (303)': totalRepercutido,
-        '  · de tickets TPV': sum('ivaTickets'),
-        '  · de cobros de sastrería': sum('ivaCobrosSastreria'),
-        '  · de cobros de reservas': sum('ivaCobrosReservas'),
-        '  · de facturas con IVA propio': sum('ivaFacturasPropias'),
+        'IVA repercutido': totalRepercutido,
         'Nº facturas recibidas': totalPurchCount,
         'Base compras': basePurchTotal,
         'IVA soportado': totalSoportado,
         'Resultado': totalRepercutido - totalSoportado,
       })
 
-      // Las facturas emitidas van en DOS hojas con totales separados. Las que
-      // cubren un ticket (serie FT), un pedido o una reserva tienen su IVA ya
-      // declarado con el ticket o con los cobros: sumarlas al 303 lo duplicaría.
-      const emitidaRow = (r: typeof invoicesIssued[number]) => ({
+      const emitidasRows: Record<string, unknown>[] = invoicesIssued.map(r => ({
         'Trimestre': r.trimestre,
         'Nº factura': r.invoice_number,
         'Fecha': r.invoice_date,
@@ -3208,37 +3195,19 @@ function VatTab() {
         'Total': r.total,
         'Estado': r.status,
         'Origen': r.origen,
-      })
-      const totalRow = (rows: typeof invoicesIssued, label: string, extra: Record<string, unknown> = {}) => ({
-        'Trimestre': label, 'Nº factura': '', 'Fecha': '', 'Cliente': '', 'NIF': '',
-        'Base': rows.reduce((s, r) => s + r.subtotal, 0),
-        'IVA %': '',
-        'IVA €': rows.reduce((s, r) => s + r.tax_amount, 0),
-        'IRPF %': '',
-        'IRPF €': rows.reduce((s, r) => s + r.irpf_amount, 0),
-        'Total': rows.reduce((s, r) => s + r.total, 0),
-        'Estado': '', 'Origen': '',
-        ...extra,
-      })
-      const propias = invoicesIssued.filter(r => !r.iva_ya_declarado)
-      const yaDeclaradas = invoicesIssued.filter(r => r.iva_ya_declarado)
-      const propiasRows: Record<string, unknown>[] = propias.map(emitidaRow)
-      if (propiasRows.length > 0) propiasRows.push(totalRow(propias, 'TOTAL (incluido en el 303)'))
-      const yaDeclaradasRows: Record<string, unknown>[] = yaDeclaradas.map(r => ({
-        ...emitidaRow(r),
-        'Corresponde a': r.sustituye,
-        'IVA declarado en': r.iva_declarado_en,
       }))
-      if (yaDeclaradasRows.length > 0) {
-        yaDeclaradasRows.push(totalRow(yaDeclaradas, 'TOTAL — NO SUMAR AL 303', { 'Corresponde a': '', 'IVA declarado en': '' }))
+      if (emitidasRows.length > 0) {
+        emitidasRows.push({
+          'Trimestre': 'TOTAL', 'Nº factura': '', 'Fecha': '', 'Cliente': '', 'NIF': '',
+          'Base': invoicesIssued.reduce((s, r) => s + r.subtotal, 0),
+          'IVA %': '',
+          'IVA €': invoicesIssued.reduce((s, r) => s + r.tax_amount, 0),
+          'IRPF %': '',
+          'IRPF €': invoicesIssued.reduce((s, r) => s + r.irpf_amount, 0),
+          'Total': invoicesIssued.reduce((s, r) => s + r.total, 0),
+          'Estado': '', 'Origen': '',
+        })
       }
-      const leemeRows: Record<string, unknown>[] = [
-        { 'Cómo leer este Excel': `IVA repercutido del modelo 303: usar SOLO la hoja "Resumen" (columna "IVA repercutido (303)").` },
-        { 'Cómo leer este Excel': 'Ya incluye los tickets del TPV, los cobros de pedidos de sastrería y de reservas, y las facturas con IVA propio.' },
-        { 'Cómo leer este Excel': `Hoja "Emitidas IVA propio": facturas cuyo IVA se declara por la propia factura (ya sumado en el Resumen).` },
-        { 'Cómo leer este Excel': `Hoja "Emitidas IVA ya declarado": facturas que sustituyen a un ticket (serie FT) o documentan un pedido o una reserva.` },
-        { 'Cómo leer este Excel': 'Su IVA ya se declaró con el ticket (trimestre de la venta) o con cada cobro. Son informativas: NO sumarlas al 303.' },
-      ]
 
       const recibidasRows: Record<string, unknown>[] = invoicesReceived.map(r => ({
         'Trimestre': r.trimestre,
@@ -3267,10 +3236,8 @@ function VatTab() {
       }
 
       await downloadExcelMulti([
-        { name: 'Léeme', rows: leemeRows },
         { name: 'Resumen', rows: resumenRows },
-        { name: 'Emitidas IVA propio', rows: propiasRows },
-        { name: 'Emitidas IVA ya declarado', rows: yaDeclaradasRows },
+        { name: 'Facturas emitidas', rows: emitidasRows },
         { name: 'Facturas recibidas', rows: recibidasRows },
       ], `iva-trimestral-${year}`)
       toast.success('Excel descargado')
@@ -3387,8 +3354,7 @@ function VatTab() {
 
           <div className="text-[11px] text-muted-foreground space-y-1 px-1">
             <p>Columna <strong>Facturas</strong>: nº de tickets de ventas · nº de facturas de proveedor en el trimestre.</p>
-            <p><strong>Base ventas</strong>: importe sin IVA de tickets, cobros de pedidos y reservas, y facturas con IVA propio (modelo 303 casilla 01).</p>
-            <p>Las facturas hechas desde un <strong>ticket (serie FT)</strong>, un pedido o una reserva <strong>no suman</strong>: su IVA ya está en el ticket (trimestre de la venta) o en cada cobro. En el Excel van en una hoja aparte, marcadas como «NO SUMAR».</p>
+            <p><strong>Base ventas</strong>: importe sin IVA de tickets cobrados (modelo 303 casilla 01).</p>
             <p><strong>IVA repercutido</strong>: IVA que cobras a tus clientes (casilla 03).</p>
             <p><strong>Base compras</strong>: importe sin IVA de facturas recibidas (casilla 28).</p>
             <p><strong>IVA soportado</strong>: IVA que pagas a tus proveedores y te puedes deducir (casilla 29).</p>
