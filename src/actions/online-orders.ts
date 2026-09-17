@@ -321,6 +321,10 @@ export interface OnlineOrderDetail {
   created_at: string
   client_id: string | null
   shipping_address: unknown
+  /** Nº de ticket CLP-T (mig 286). */
+  ticket_ref: string | null
+  /** Datos fiscales si el cliente pidió factura en el checkout (mig 287). */
+  billing: unknown
   shipping_tracking_number: string | null
   shipping_carrier: string | null
   shipped_at: string | null
@@ -342,7 +346,8 @@ export const getOnlineOrderDetail = protectedAction<string, OnlineOrderDetail | 
       .select(`
         id, order_number, status, total, subtotal, shipping_cost,
         payment_method, paid_at, created_at, client_id,
-        shipping_address, shipping_tracking_number, shipping_carrier,
+        shipping_address, ticket_ref, billing,
+        shipping_tracking_number, shipping_carrier,
         shipped_at, delivered_at, cancelled_at, cancellation_reason, notes
       `)
       .eq('id', orderId)

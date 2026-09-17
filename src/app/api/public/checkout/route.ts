@@ -6,6 +6,7 @@ import { generateRedsysOrder } from '@/lib/payments/redsys'
 import { computeShipping } from '@/lib/shipping'
 import { countryName } from '@/lib/countries'
 import { escapeLikePattern, pickPreferredClient } from '@/lib/clients/email-lookup'
+import { validateBilling, type OnlineBilling } from '@/lib/online/billing'
 
 // Día 'YYYY-MM-DD' en hora de MADRID. Las columnas valid_from/valid_until son
 // DATE y se comparan como cadena; sacar "hoy" con toISOString() lo pasaba a UTC
@@ -32,6 +33,15 @@ export async function POST(request: NextRequest) {
 
     if (!items?.length || !customer?.email) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
+    }
+
+    // Factura (mig 287): solo si el cliente la pide, y con TODOS los datos
+    // fiscales. Sin ella el pedido lleva ticket (mig 286).
+    let billing: OnlineBilling | null = null
+    if (body.billing) {
+      const checked = validateBilling(body.billing)
+      if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: 400 })
+      billing = checked.billing
     }
 
     const admin = createAdminClient()
@@ -244,6 +254,7 @@ export async function POST(request: NextRequest) {
         order_number: orderNumber,
         client_id: clientId || '',
         customer: JSON.stringify(customer),
+        billing: billing ? JSON.stringify(billing) : '',
         shipping_cost: String(effectiveShipping),
         tax_amount: String(taxAmount),
         total: String(total),
@@ -269,6 +280,7 @@ export async function POST(request: NextRequest) {
       order_number: orderNumber,
       client_id: clientId,
       customer,
+      billing,
       order_lines: orderLines,
       subtotal,
       tax_amount: taxAmount,
@@ -309,6 +321,7 @@ export async function POST(request: NextRequest) {
       total,
       payment_method: 'demo',
       shipping_address: customer,
+      billing,
       locale: locale || 'es',
       paid_at: new Date().toISOString(),
     }).select('id').single()

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { deductOnlineOrderStock } from '@/lib/stock/online-order-stock'
-import { createOnlineOrderJournalEntry, createOnlineOrderTicket } from '@/actions/accounting-triggers'
+import { createOnlineOrderJournalEntry, createOnlineOrderDocument } from '@/actions/accounting-triggers'
 import { sendOrderConfirmation } from '@/lib/email/transactional'
 import { notifyNewOnlineOrder } from '@/lib/notifications/create-notification'
 import Stripe from 'stripe'
@@ -53,6 +53,8 @@ export async function POST(request: NextRequest) {
         if (meta.order_lines && orderNumber) {
           const clientId = meta.client_id || null
           const customer = meta.customer ? (JSON.parse(meta.customer) as Record<string, unknown>) : {}
+          // Datos fiscales si pidió factura en el checkout (mig 287).
+          const billing = meta.billing ? (JSON.parse(meta.billing) as Record<string, unknown>) : null
           const orderLines = JSON.parse(meta.order_lines) as Array<{
             variant_id: string
             product_name: string
@@ -90,6 +92,7 @@ export async function POST(request: NextRequest) {
             total,
             payment_method: 'stripe',
             shipping_address: customer,
+            billing,
             paid_at: new Date().toISOString(),
             stripe_session_id: session.id,
             stripe_payment_intent: (session.payment_intent as string) || null,
@@ -124,10 +127,10 @@ export async function POST(request: NextRequest) {
             .then((r) => { if (!r.ok) console.error('[Stripe webhook] asiento:', r.error) })
             .catch((e) => console.error('[Stripe webhook] asiento:', e))
 
-          // Ticket CLP-T del pedido (mig 286; antes, factura W automática).
-          await createOnlineOrderTicket(order.id)
-            .then((r) => { if (!r.ok) console.error('[Stripe webhook] ticket:', r.error) })
-            .catch((e) => console.error('[Stripe webhook] ticket:', e))
+          // Ticket CLP-T (mig 286) o factura W si la pidió con sus datos (287).
+          await createOnlineOrderDocument(order.id)
+            .then((r) => { if (!r.ok) console.error('[Stripe webhook] documento:', r.error) })
+            .catch((e) => console.error('[Stripe webhook] documento:', e))
 
           try {
             await notifyNewOnlineOrder(orderNumber, total)
@@ -178,10 +181,10 @@ export async function POST(request: NextRequest) {
             .then((r) => { if (!r.ok) console.error('[Stripe webhook] asiento:', r.error) })
             .catch((e) => console.error('[Stripe webhook] asiento:', e))
 
-          // Ticket CLP-T del pedido (mig 286; antes, factura W automática).
-          await createOnlineOrderTicket(orderId)
-            .then((r) => { if (!r.ok) console.error('[Stripe webhook] ticket:', r.error) })
-            .catch((e) => console.error('[Stripe webhook] ticket:', e))
+          // Ticket CLP-T (mig 286) o factura W si la pidió con sus datos (287).
+          await createOnlineOrderDocument(orderId)
+            .then((r) => { if (!r.ok) console.error('[Stripe webhook] documento:', r.error) })
+            .catch((e) => console.error('[Stripe webhook] documento:', e))
 
           try {
             const sessionTotal = (session.amount_total || 0) / 100

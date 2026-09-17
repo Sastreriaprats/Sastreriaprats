@@ -4,7 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { deductOnlineOrderStock } from '@/lib/stock/online-order-stock'
-import { createOnlineOrderJournalEntry, createOnlineOrderTicket } from '@/actions/accounting-triggers'
+import { createOnlineOrderJournalEntry, createOnlineOrderDocument } from '@/actions/accounting-triggers'
 import { sendOrderConfirmation } from '@/lib/email/transactional'
 import { notifyNewOnlineOrder } from '@/lib/notifications/create-notification'
 import {
@@ -94,6 +94,8 @@ export async function POST(request: NextRequest) {
         payment_method: 'redsys',
         redsys_order_code: dsOrder,
         shipping_address: customer,
+        // Datos fiscales si pidió factura en el checkout (mig 287).
+        billing: pending.billing ?? null,
         locale: pending.locale || 'es',
         paid_at: new Date().toISOString(),
       })
@@ -152,11 +154,12 @@ export async function POST(request: NextRequest) {
       .then((r) => { if (!r.ok) console.error('[redsys webhook] asiento:', r.error) })
       .catch((e) => console.error('[redsys webhook] asiento:', e))
 
-    // Ticket CLP-T (mig 286; antes, factura W automática). Si falla no bloquea
-    // el pedido: la RPC es idempotente y se puede volver a lanzar.
-    await createOnlineOrderTicket(order.id)
-      .then((r) => { if (!r.ok) console.error('[redsys webhook] ticket:', r.error) })
-      .catch((e) => console.error('[redsys webhook] ticket:', e))
+    // Documento de la venta: ticket CLP-T (mig 286) o factura W si el cliente
+    // la pidió con sus datos fiscales (mig 287). Si falla no bloquea el pedido:
+    // es idempotente y se puede volver a lanzar.
+    await createOnlineOrderDocument(order.id)
+      .then((r) => { if (!r.ok) console.error('[redsys webhook] documento:', r.error) })
+      .catch((e) => console.error('[redsys webhook] documento:', e))
 
     try {
       await notifyNewOnlineOrder(pending.order_number, Number(pending.total) || 0)

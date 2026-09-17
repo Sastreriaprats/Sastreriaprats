@@ -9,8 +9,9 @@ import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Loader2, Lock, ShoppingBag, Truck, Store, AlertCircle, Tag, X } from 'lucide-react'
+import { Loader2, Lock, ShoppingBag, Truck, Store, AlertCircle, Tag, X, ReceiptText } from 'lucide-react'
 import { COUNTRY_CODES, countryName, sortByCountryName, toCountryCode } from '@/lib/countries'
+import { EMPTY_BILLING, validateBilling, type OnlineBilling } from '@/lib/online/billing'
 import { AcceptedCards } from './accepted-cards'
 import { useCart } from '@/components/providers/cart-provider'
 import { toast } from 'sonner'
@@ -46,6 +47,11 @@ export function CheckoutContent() {
     first_name: '', last_name: '', email: '', phone: '',
     address: '', city: '', postal_code: '', province: '', country: 'ES',
   })
+
+  // Factura: solo se emite si el cliente la pide y rellena TODOS sus datos
+  // fiscales. Si no, el pedido lleva ticket.
+  const [wantsInvoice, setWantsInvoice] = useState(false)
+  const [billing, setBilling] = useState<OnlineBilling>(EMPTY_BILLING)
 
   // Descuento
   const [discountInput, setDiscountInput] = useState('')
@@ -213,6 +219,14 @@ export function CheckoutContent() {
       }
     }
 
+    if (wantsInvoice) {
+      const checked = validateBilling(billing)
+      if (!checked.ok) {
+        toast.error(checked.error)
+        return
+      }
+    }
+
     const customerPayload = deliveryMethod === 'store'
       ? { ...form, address: 'Recoger en tienda', city: '', postal_code: '', province: '' }
       : form
@@ -230,6 +244,7 @@ export function CheckoutContent() {
             product_name: i.product_name,
           })),
           customer: customerPayload,
+          billing: wantsInvoice ? billing : null,
           payment_method: 'redsys',
           shipping_cost: shippingCost,
           delivery_method: deliveryMethod,
@@ -439,6 +454,121 @@ export function CheckoutContent() {
             </div>
           </section>
           )}
+
+          {/* Factura: por defecto el pedido lleva ticket. */}
+          <section>
+            <h2 className="text-lg font-semibold text-prats-navy mb-4 flex items-center gap-2">
+              <ReceiptText className="h-5 w-5" />Factura
+            </h2>
+            <div className="flex items-start gap-2.5">
+              <Checkbox
+                id="checkout-wants-invoice"
+                checked={wantsInvoice}
+                onCheckedChange={v => {
+                  const on = v === true
+                  setWantsInvoice(on)
+                  // Al activarla, partimos de la dirección de envío ya escrita.
+                  if (on) {
+                    setBilling(prev => ({
+                      ...prev,
+                      name: prev.name || [form.first_name, form.last_name].filter(Boolean).join(' '),
+                      address: prev.address || form.address,
+                      postal_code: prev.postal_code || form.postal_code,
+                      city: prev.city || form.city,
+                      province: prev.province || form.province,
+                      country: prev.country || form.country || 'ES',
+                    }))
+                  }
+                }}
+                className="mt-0.5"
+              />
+              <Label htmlFor="checkout-wants-invoice" className="text-sm font-normal leading-snug text-gray-600 cursor-pointer">
+                Necesito factura
+                <span className="block text-xs text-gray-400">
+                  Si no la marcas, recibirás el ticket de compra. Para la factura hay que rellenar todos los datos fiscales.
+                </span>
+              </Label>
+            </div>
+
+            {wantsInvoice && (
+              <div className="mt-4 space-y-4 rounded-xl border border-gray-200 p-4">
+                <div className="space-y-1">
+                  <Label className="text-xs" htmlFor="billing-name">Nombre completo o razón social *</Label>
+                  <Input
+                    id="billing-name"
+                    value={billing.name}
+                    onChange={e => setBilling(p => ({ ...p, name: e.target.value }))}
+                    className="h-11"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs" htmlFor="billing-tax-id">NIF / CIF *</Label>
+                  <Input
+                    id="billing-tax-id"
+                    value={billing.tax_id}
+                    onChange={e => setBilling(p => ({ ...p, tax_id: e.target.value.toUpperCase() }))}
+                    className="h-11 uppercase"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs" htmlFor="billing-address">Dirección fiscal *</Label>
+                  <Input
+                    id="billing-address"
+                    value={billing.address}
+                    onChange={e => setBilling(p => ({ ...p, address: e.target.value }))}
+                    className="h-11"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <Label className="text-xs" htmlFor="billing-postal-code">Código postal *</Label>
+                    <Input
+                      id="billing-postal-code"
+                      value={billing.postal_code}
+                      onChange={e => setBilling(p => ({ ...p, postal_code: e.target.value }))}
+                      className="h-11"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs" htmlFor="billing-city">Ciudad *</Label>
+                    <Input
+                      id="billing-city"
+                      value={billing.city}
+                      onChange={e => setBilling(p => ({ ...p, city: e.target.value }))}
+                      className="h-11"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <Label className="text-xs" htmlFor="billing-province">Provincia *</Label>
+                    <Input
+                      id="billing-province"
+                      value={billing.province}
+                      onChange={e => setBilling(p => ({ ...p, province: e.target.value }))}
+                      className="h-11"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs" htmlFor="billing-country">País *</Label>
+                    <Select
+                      value={billing.country || 'ES'}
+                      onValueChange={v => setBilling(p => ({ ...p, country: v }))}
+                    >
+                      <SelectTrigger id="billing-country" className="h-11">
+                        <SelectValue placeholder="Selecciona país" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-72">
+                        {sortByCountryName(COUNTRY_CODES).map(code => (
+                          <SelectItem key={code} value={code}>{countryName(code)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
 
         </div>
 

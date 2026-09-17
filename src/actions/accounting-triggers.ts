@@ -9,6 +9,7 @@ import 'server-only'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { toCountryCode, countryName } from '@/lib/countries'
 import { resolveInvoiceParty } from '@/lib/clients/format'
+import { readStoredBilling } from '@/lib/online/billing'
 
 /** Cuentas usadas en asientos automáticos. Código -> { name, level, account_type } */
 const REQUIRED_ACCOUNTS: Record<string, { name: string; level: number; account_type: string }> = {
@@ -389,10 +390,36 @@ export async function createOnlineOrderTicket(onlineOrderId: string): Promise<{ 
 }
 
 /**
+ * Documento de un pedido online recién cobrado (lo llaman los webhooks):
+ * FACTURA W si el cliente la pidió en el checkout con sus datos fiscales
+ * (`online_orders.billing`, mig 287); TICKET CLP-T en cualquier otro caso.
+ */
+export async function createOnlineOrderDocument(onlineOrderId: string): Promise<{ ok: boolean; kind?: 'invoice' | 'ticket'; number?: string; error?: string; skipped?: boolean }> {
+  try {
+    const admin = createAdminClient()
+    const { data: order, error } = await admin
+      .from('online_orders')
+      .select('billing')
+      .eq('id', onlineOrderId)
+      .maybeSingle()
+    if (error || !order) return { ok: false, error: 'Pedido online no encontrado' }
+    if (readStoredBilling((order as { billing?: unknown }).billing)) {
+      const r = await createOnlineOrderInvoice(onlineOrderId)
+      return { ok: r.ok, kind: 'invoice', number: r.invoiceNumber, error: r.error, skipped: r.skipped }
+    }
+    const r = await createOnlineOrderTicket(onlineOrderId)
+    return { ok: r.ok, kind: 'ticket', number: r.ticketRef, error: r.error, skipped: r.skipped }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Error desconocido'
+    return { ok: false, error: msg }
+  }
+}
+
+/**
  * Emite la factura de un pedido online pagado (serie W, W2026-0001…).
- * Hasta sep-2026 la llamaban los webhooks al confirmar el cobro; desde la mig
- * 286 el pedido lleva TICKET (createOnlineOrderTicket) y esta función queda
- * para facturar a petición del cliente o para el backfill.
+ * Desde sep-2026 solo la emite createOnlineOrderDocument cuando el cliente pidió
+ * factura en el checkout (mig 287), con sus datos fiscales; el resto de pedidos
+ * lleva TICKET (createOnlineOrderTicket, mig 286). También sirve al backfill.
  *
  * - Idempotente: si ya existe factura vigente para el pedido, la devuelve
  *   (los webhooks reintentan; además la protege el índice único parcial
@@ -412,7 +439,7 @@ export async function createOnlineOrderInvoice(onlineOrderId: string): Promise<{
 
     const { data: order, error: orderError } = await admin
       .from('online_orders')
-      .select('id, order_number, status, subtotal, tax_amount, shipping_cost, total, client_id, shipping_address, paid_at, created_at')
+      .select('id, order_number, status, subtotal, tax_amount, shipping_cost, total, client_id, shipping_address, billing, paid_at, created_at')
       .eq('id', onlineOrderId)
       .single()
     if (orderError || !order) return { ok: false, error: 'Pedido online no encontrado' }
@@ -420,7 +447,8 @@ export async function createOnlineOrderInvoice(onlineOrderId: string): Promise<{
     const o = order as {
       order_number?: string; status?: string; subtotal?: number; tax_amount?: number
       shipping_cost?: number; total?: number; client_id?: string | null
-      shipping_address?: Record<string, unknown> | null; paid_at?: string | null; created_at?: string | null
+      shipping_address?: Record<string, unknown> | null; billing?: unknown
+      paid_at?: string | null; created_at?: string | null
     }
     if (!['paid', 'shipped', 'delivered'].includes(String(o.status))) {
       return { ok: true, skipped: true } // no facturamos pedidos no cobrados/cancelados
@@ -513,13 +541,28 @@ export async function createOnlineOrderInvoice(onlineOrderId: string): Promise<{
       clientNif = party.nif
     }
     clientName = clientName || 'Cliente tienda online'
-    const clientCountry = toCountryCode(String(addr.country ?? ''))
-    const addressParts = [
+    let clientCountry = toCountryCode(String(addr.country ?? ''))
+    let addressParts = [
       String(addr.address ?? '').trim(),
       [String(addr.postal_code ?? '').trim(), String(addr.city ?? '').trim()].filter(Boolean).join(' '),
       String(addr.province ?? '').trim(),
       clientCountry ? countryName(clientCountry) : '',
     ].filter(Boolean)
+
+    // Datos fiscales que el cliente rellenó al pedir factura (mig 287): mandan
+    // sobre la ficha y la dirección de envío.
+    const billing = readStoredBilling(o.billing)
+    if (billing) {
+      clientName = billing.name
+      clientNif = billing.tax_id
+      clientCountry = toCountryCode(billing.country) ?? clientCountry
+      addressParts = [
+        billing.address,
+        `${billing.postal_code} ${billing.city}`.trim(),
+        billing.province,
+        clientCountry ? countryName(clientCountry) : '',
+      ].filter(Boolean)
+    }
 
     const paidDate = String(o.paid_at ?? o.created_at ?? new Date().toISOString()).slice(0, 10)
     const seriesYear = Number(paidDate.slice(0, 4))

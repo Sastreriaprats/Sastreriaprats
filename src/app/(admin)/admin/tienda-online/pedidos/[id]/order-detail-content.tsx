@@ -32,6 +32,8 @@ import {
   type OnlineOrderLineRow,
 } from '@/actions/online-orders'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { countryName } from '@/lib/countries'
+import { readStoredBilling } from '@/lib/online/billing'
 import { PaymentMethodBadge } from '@/components/ui/payment-method-badge'
 
 const STATUS_LABELS: Record<string, string> = {
@@ -295,6 +297,7 @@ export function AdminOrderDetailContent() {
   }
 
   const shippingAddress = parseAddress(order.shipping_address)
+  const billingData = readStoredBilling(order.billing)
   const orderClosed = ['cancelled', 'refunded'].includes(order.status)
   const hasActiveLines = order.lines.some((l) => l.status === 'active')
 
@@ -477,6 +480,36 @@ export function AdminOrderDetailContent() {
         </Card>
 
         <div className="space-y-6">
+          {/* Documento de la venta: ticket (mig 286) o factura si el cliente la
+              pidió en el checkout con sus datos fiscales (mig 287). */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Documento</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm space-y-1">
+              {billingData ? (
+                <>
+                  <p className="font-medium">Factura solicitada</p>
+                  <p>{billingData.name}</p>
+                  <p className="text-muted-foreground">{billingData.tax_id}</p>
+                  <p className="text-muted-foreground">{billingData.address}</p>
+                  <p className="text-muted-foreground">
+                    {billingData.postal_code} {billingData.city}
+                    {billingData.province && `, ${billingData.province}`}
+                  </p>
+                  <p className="text-muted-foreground">{countryName(billingData.country)}</p>
+                </>
+              ) : order.ticket_ref ? (
+                <>
+                  <p className="font-medium">Ticket</p>
+                  <p className="font-mono">{order.ticket_ref}</p>
+                </>
+              ) : (
+                <p className="text-muted-foreground">Sin documento todavía.</p>
+              )}
+            </CardContent>
+          </Card>
+
           {order.client && (
             <Card>
               <CardHeader>
