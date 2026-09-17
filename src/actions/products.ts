@@ -2897,6 +2897,12 @@ export const getProductMovementHistory = protectedAction<{ productId: string }, 
             if (!first_reception_at || m.created_at < first_reception_at) first_reception_at = m.created_at
           }
           break
+        case 'reservation_release':
+          // Recoger una reserva saca la prenda con 'reservation_release' referenciado
+          // al ticket (rpc_create_sale): es una venta. Las cancelaciones no llevan
+          // reference_type='sale' y no mueven quantity.
+          if (m.reference_type !== 'sale') break
+        // falls through
         case 'sale':
           total_sold += qty
           if (!last_sale_at || m.created_at > last_sale_at) last_sale_at = m.created_at

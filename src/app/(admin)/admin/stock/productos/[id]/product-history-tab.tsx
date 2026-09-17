@@ -48,8 +48,13 @@ function buildDetail(m: ProductMovementHistory['movements'][number]): string {
       return `Traspaso${m.reason ? ` — ${m.reason}` : ''}`
     case 'reservation':
       return 'Reserva'
-    case 'reservation_release':
-      return 'Liberación reserva'
+    case 'reservation_release': {
+      // Con reference_type='sale' es la recogida de la reserva en caja (venta).
+      if (m.reference_type !== 'sale') return 'Liberación reserva'
+      const ref = m.ticket_number ? `Venta ${m.ticket_number}` : 'Venta'
+      const res = m.reason?.match(/RSV-\d{4}-\d+/)?.[0]
+      return `${ref}${res ? ` (recogida ${res})` : ' (recogida reserva)'} — ${m.client_name || 'Sin cliente'}`
+    }
     case 'initial':
       return 'Stock inicial'
     case 'inventory':
@@ -181,6 +186,8 @@ export function ProductHistoryTab({ productId }: { productId: string }) {
                   {filteredMovements.map((m) => {
                     const badge = (m.movement_type === 'sale' && m.reference_type === 'online_order')
                       ? { label: 'Venta online', className: 'bg-cyan-100 text-cyan-800 border-cyan-200' }
+                      : (m.movement_type === 'reservation_release' && m.reference_type === 'sale')
+                      ? { label: 'Venta (reserva)', className: TYPE_BADGE.sale.className }
                       : (TYPE_BADGE[m.movement_type] ?? { label: m.movement_type, className: 'bg-slate-100 text-slate-700 border-slate-200' })
                     const qtyClass = m.quantity > 0 ? 'text-emerald-700' : m.quantity < 0 ? 'text-red-700' : ''
                     const sign = m.quantity > 0 ? '+' : ''
