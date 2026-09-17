@@ -648,6 +648,8 @@ export function InvoicesTab({ editId, onEditConsumed }: { editId: string | null;
       'Cliente': inv.client_name,
       'Fecha': inv.invoice_date,
       'Total': Number(inv.total) || 0,
+      'Cobrado': inv.collected ?? '',
+      'Pendiente': inv.pending ?? '',
       'Estado': INVOICE_STATUS[inv.status]?.label ?? inv.status,
       'Enviada': inv.sent_to_client ? 'Sí' : 'No',
     }))
@@ -915,13 +917,14 @@ export function InvoicesTab({ editId, onEditConsumed }: { editId: string | null;
                 <TableHead>Cliente</TableHead>
                 <TableHead>Fecha</TableHead>
                 <TableHead className="text-right">Total</TableHead>
+                <TableHead className="text-right">Cobro</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead className="w-24">Acciones</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredInvoices.length === 0 ? (
-                <TableRow><TableCell colSpan={7} className="text-center py-12 text-muted-foreground">Sin facturas</TableCell></TableRow>
+                <TableRow><TableCell colSpan={8} className="text-center py-12 text-muted-foreground">Sin facturas</TableCell></TableRow>
               ) : filteredInvoices.map(inv => (
                 <InvoiceTableRow key={inv.id} inv={inv} onRefresh={load} autoOpenEditId={editId} onEditConsumed={onEditConsumed} selected={selected.has(inv.id)} onSelectedChange={(checked) => toggleInvoice(inv, checked)} />
               ))}
@@ -1590,6 +1593,19 @@ function InvoiceTableRow({ inv, onRefresh, autoOpenEditId, onEditConsumed, selec
         <TableCell>{inv.client_name}</TableCell>
         <TableCell className="text-muted-foreground">{formatDate(inv.invoice_date)}</TableCell>
         <TableCell className="text-right font-semibold">{formatCurrency(inv.total)}</TableCell>
+        {/* Cobro: cuánto se ha cobrado de esta factura y qué queda pendiente.
+            "—" = sin dato (factura suelta o anterior al criterio por documento). */}
+        <TableCell className="text-right text-xs">
+          {inv.collected === null ? (
+            <span className="text-muted-foreground">—</span>
+          ) : (inv.pending ?? 0) > 0.004 ? (
+            <span className="font-medium text-amber-600" title={`Cobrado ${formatCurrency(inv.collected)}`}>
+              Pendiente {formatCurrency(inv.pending ?? 0)}
+            </span>
+          ) : (
+            <span className="text-emerald-600">Cobrada</span>
+          )}
+        </TableCell>
         <TableCell>
           <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${s.className}`}>{s.label}</span>
           {hasPartialRect && (

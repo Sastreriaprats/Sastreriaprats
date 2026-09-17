@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
 import { loadReservationPayments } from '@/lib/accounting/reservation-payments'
 import { loadOnlineTicketIncome } from '@/lib/accounting/online-ticket-income'
+import { loadInvoiceSalesPlan, type InvoiceSaleDoc } from '@/lib/accounting/invoice-sales'
 import { buildOnlineTicketPdfData } from '@/lib/online/online-ticket-pdf-data'
 import { generateInvoicePdf } from '@/lib/pdf/invoice-pdf'
 import { getViewerAccess, assertScope, assertCanManage, type ViewerAccess } from '@/lib/ops/access'
@@ -21,19 +22,6 @@ import type {
 const r2 = (n: number) => Math.round(n * 100) / 100
 const ok = <T,>(data: T) => ({ ok: true as const, data })
 const fail = (msg = 'No encontrado') => ({ ok: false as const, error: msg })
-
-// ---------------------------------------------------------------------------
-// CRITERIO DE VENTA: desde esta fecha manda el DOCUMENTO (decisión del asesor,
-// sep-2026). Una factura emitida es la venta, en su fecha, con su IVA; el
-// ticket/cobro que sustituye deja de contar. Si lo que sustituye ya se declaró
-// en un TRIMESTRE anterior no se puede tocar (Rafa ya lo presentó): aquel
-// trimestre se queda como está y en la fecha de la factura entra un ABONO
-// automático por lo ya declarado, de modo que el año suma cada euro una vez.
-// Las facturas anteriores a esta fecha ligadas a ticket/pedido/reserva siguen
-// sin contar (su dinero se declaró por los cobros), para no mover lo presentado.
-// ---------------------------------------------------------------------------
-const DOC_RULE_START = '2026-07-01'
-const quarterKey = (date: string) => `${date.slice(0, 4)}-${Math.ceil(Number(date.slice(5, 7)) / 3)}`
 
 // ---------------------------------------------------------------------------
 // Acceso del viewer (seguro de exponer: [] si no autorizado). Para el menú/UI.
@@ -155,63 +143,13 @@ async function readApInvoiceLines(admin: ReturnType<typeof createAdminClient>, y
   return out
 }
 
-// Factura emitida que cuenta como VENTA del escenario, con lo que sustituye.
-// `covered*` = cobros ligados vistos este año (para saber qué parte es efectivo
-// y cuánto se ha cobrado); `declared*` = lo que ya se declaró en un trimestre
-// anterior y que la factura tiene que abonar en su fecha.
-type DocInvoice = {
-  id: string
-  date: string
-  linked: boolean               // ligada a ticket/pedido/reserva (false = factura suelta)
-  number: string
-  client?: string
-  pdfUrl?: string
-  paymentMethod: string
-  base: number
-  vat: number
-  total: number
-  coveredTotal: number
-  coveredCash: number
-  collected: number
-  declaredCash: { base: number; vat: number }
-  declaredNc: { base: number; vat: number }
-}
-
-// Pedidos y reservas de cada factura: columnas escalares + tablas puente
-// (`invoice_tailoring_orders` / `invoice_reservations`, varias fuentes por
-// factura). Devuelve invoice_id → ids de sus pedidos y reservas.
-async function loadInvoiceLinkIds(admin: ReturnType<typeof createAdminClient>, invoices: Record<string, unknown>[]) {
-  const out = new Map<string, { orders: Set<string>; reservations: Set<string> }>()
-  const cell = (invoiceId: string) => {
-    let c = out.get(invoiceId)
-    if (!c) { c = { orders: new Set(), reservations: new Set() }; out.set(invoiceId, c) }
-    return c
-  }
-  for (const x of invoices) {
-    const id = String(x.id)
-    if (x.tailoring_order_id) cell(id).orders.add(String(x.tailoring_order_id))
-    if (x.reservation_id) cell(id).reservations.add(String(x.reservation_id))
-  }
-  const ids = invoices.map((x) => String(x.id))
-  for (let i = 0; i < ids.length; i += 200) {
-    const chunk = ids.slice(i, i + 200)
-    const [{ data: orders }, { data: reservations }] = await Promise.all([
-      admin.from('invoice_tailoring_orders').select('invoice_id, tailoring_order_id').in('invoice_id', chunk),
-      admin.from('invoice_reservations').select('invoice_id, reservation_id').in('invoice_id', chunk),
-    ])
-    for (const r of (orders ?? []) as Record<string, unknown>[]) cell(String(r.invoice_id)).orders.add(String(r.tailoring_order_id))
-    for (const r of (reservations ?? []) as Record<string, unknown>[]) cell(String(r.invoice_id)).reservations.add(String(r.reservation_id))
-  }
-  return out
-}
-
 async function computeYear(year: number) {
   const admin = createAdminClient()
   const start = `${year}-01-01`, end = `${year}-12-31T23:59:59`
   // Lecturas independientes en paralelo. `deposited` = cobros ya ingresados al
   // banco: salen de B y pasan a C (A = B + C se mantiene). Si esa lectura falla,
   // computeYear falla entero: mejor sin datos que contar doble en B.
-  const [sales, cashFrac, tailoringPayments, cobroBaseBySale, reservationPayments, deposited, { data: apInv }, apLines, { data: clpRows }, { data: stInvRaw }, onlineTickets] = await Promise.all([
+  const [sales, cashFrac, tailoringPayments, cobroBaseBySale, reservationPayments, deposited, { data: apInv }, apLines, { data: clpRows }, plan, onlineTickets] = await Promise.all([
     readAllSales(admin, start, end),
     readCashFractions(admin, start, end),
     readAllTailoringPayments(admin, year),
@@ -231,68 +169,17 @@ async function computeYear(year: number) {
     // Mapa venta -> nº de ticket oficial (CLP)
     admin.from('cash_internal_tickets')
       .select('sale_id, ref').eq('source', 'sale').eq('year', year),
-    // TODAS las facturas emitidas del año (con sus enlaces). Cuáles cuentan como
-    // venta y cuáles no lo decide DOC_RULE_START, más abajo.
-    admin.from('invoices')
-      .select('id, invoice_number, client_name, subtotal, tax_amount, total, payment_method, invoice_date, pdf_url, online_order_id, sale_id, tailoring_order_id, reservation_id')
-      .eq('invoice_type', 'issued')
-      .not('status', 'in', '(draft,cancelled)')
-      .gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`),
+    // Facturas emitidas que cuentan como venta + cobros a los que sustituyen
+    // (criterio "manda la factura", compartido con la contabilidad normal).
+    loadInvoiceSalesPlan(admin, `${year}-01-01`, `${year}-12-31`),
     // Pedidos online con TICKET (mig 286): ya no tienen factura W.
     loadOnlineTicketIncome(admin, `${year}-01-01`, `${year}-12-31`),
   ])
-  // La factura W de un pedido con ticket no suma: el ingreso va por el ticket.
-  const issuedInvoices = ((stInvRaw ?? []) as Record<string, unknown>[])
-    .filter((x) => !(x.online_order_id && onlineTickets.ticketedOrderIds.has(String(x.online_order_id))))
-  // Enlaces factura → pedidos/reservas: columnas escalares (una sola fuente) +
-  // tablas puente (varios pedidos/reservas en una misma factura).
-  const invoiceLinks = await loadInvoiceLinkIds(admin, issuedInvoices)
+  // Facturas que cuentan como venta y cobros a los que sustituyen: regla única
+  // compartida con la contabilidad normal (invoice-sales.ts). La factura W de un
+  // pedido con ticket no suma: el ingreso va por el ticket.
+  const docInvoices = plan.docs.filter((d) => !(d.onlineOrderId && onlineTickets.ticketedOrderIds.has(d.onlineOrderId)))
 
-  // Facturas que SÍ cuentan como venta (ver DOC_RULE_START) y a qué cobros
-  // sustituyen. La más antigua manda si dos facturas comparten una fuente.
-  const docInvoices: DocInvoice[] = []
-  const docBySale = new Map<string, DocInvoice>()
-  const docByOrder = new Map<string, DocInvoice>()
-  const docByReservation = new Map<string, DocInvoice>()
-  const claim = (map: Map<string, DocInvoice>, key: string, d: DocInvoice) => {
-    const cur = map.get(key)
-    if (!cur || d.date < cur.date) map.set(key, d)
-  }
-  for (const x of issuedInvoices) {
-    const id = String(x.id)
-    const date = String(x.invoice_date ?? '').slice(0, 10)
-    if (!date) continue
-    const links = invoiceLinks.get(id)
-    const saleId = x.sale_id ? String(x.sale_id) : undefined
-    const orderIds = links?.orders ?? new Set<string>()
-    const reservationIds = links?.reservations ?? new Set<string>()
-    const linked = !!saleId || orderIds.size > 0 || reservationIds.size > 0
-    // Régimen viejo (antes del corte): manda el cobro, la factura no suma.
-    if (linked && date < DOC_RULE_START) continue
-    const total = Number(x.total) || 0
-    const vat = Number(x.tax_amount) || 0
-    const d: DocInvoice = {
-      id, date, linked,
-      number: String(x.invoice_number ?? ''),
-      client: String(x.client_name ?? '') || undefined,
-      pdfUrl: String(x.pdf_url ?? '') || undefined,
-      paymentMethod: String(x.payment_method ?? ''),
-      base: Number(x.subtotal) || (total - vat),
-      vat, total,
-      coveredTotal: 0, coveredCash: 0, collected: 0,
-      declaredCash: { base: 0, vat: 0 }, declaredNc: { base: 0, vat: 0 },
-    }
-    docInvoices.push(d)
-    if (saleId) claim(docBySale, saleId, d)
-    for (const o of orderIds) claim(docByOrder, o, d)
-    for (const r of reservationIds) claim(docByReservation, r, d)
-  }
-
-  // ¿Sustituye esta factura al cobro, o el cobro ya se declaró en un trimestre
-  // cerrado? Mismo trimestre (o cobro posterior) → lo sustituye y el cobro no
-  // cuenta. Trimestre anterior → el cobro se queda y la factura lleva su abono.
-  const replacedByInvoice = (paymentDate: string, d: DocInvoice) =>
-    quarterKey(paymentDate) === quarterKey(d.date) || paymentDate >= d.date
   const clpMap: Record<string, string> = {}
   for (const r of (clpRows ?? []) as Record<string, unknown>[]) {
     if (r.sale_id) clpMap[String(r.sale_id)] = String(r.ref)
@@ -332,6 +219,8 @@ async function computeYear(year: number) {
   // (sale_payments). Una venta mixta aporta su parte de efectivo a B y el resto
   // a C, de modo que A = B + C sigue cuadrando exactamente.
   for (const x of sales) {
+    // Ticket ya facturado: la venta es la factura (el plan la cuenta abajo).
+    if (plan.skipSaleIds.has(String(x.id))) continue
     const total = Number(x.total) || 0
     const returned = Number(x.total_returned) || 0
     const subtotal = Number(x.subtotal) || 0
@@ -357,17 +246,6 @@ async function computeYear(year: number) {
     if (fr > 0 && takeDeposited('sale', sid, (base + vat) * fr)) fr = 0
     const cashBase = base * fr, cashVat = vat * fr
     const ncBase = base - cashBase, ncVat = vat - cashVat
-    // ¿Este ticket está facturado con el criterio nuevo? Entonces la venta es la
-    // factura: o lo sustituye (no cuenta) o queda declarado y lleva su abono.
-    const dinv = docBySale.get(sid)
-    if (dinv) {
-      dinv.coveredTotal += base + vat
-      dinv.coveredCash += cashBase + cashVat
-      dinv.collected += Math.max(0, total - returned)
-      if (replacedByInvoice(created.slice(0, 10), dinv)) continue
-      dinv.declaredCash.base += cashBase; dinv.declaredCash.vat += cashVat
-      dinv.declaredNc.base += ncBase; dinv.declaredNc.vat += ncVat
-    }
     const ref = clpMap[sid] ?? String(x.ticket_number ?? '')
     if (cashBase > 0.0001) {
       addIncome(true, cashBase, cashVat, month, q)
@@ -385,6 +263,8 @@ async function computeYear(year: number) {
   // prorrateando subtotal/total del pedido. Se reparten cash/noncash por
   // payment_method, igual que los tickets: efectivo → capa B; resto → C.
   for (const p of tailoringPayments) {
+    // Cobro ya facturado: la venta es la factura (el plan la cuenta abajo).
+    if (plan.skipOrderPaymentIds.has(String((p as any).id ?? ''))) continue
     const amount = Number((p as any).amount) || 0
     const order = ((p as any).tailoring_order as Record<string, unknown>) || {}
     const oTotal = Number((order as any).total) || 0
@@ -400,17 +280,7 @@ async function computeYear(year: number) {
     let isCash = (p as any).payment_method === 'cash'
     // Cobro en efectivo ya ingresado al banco → pasa al escenario C.
     if (isCash && takeDeposited('order_payment', pid, amount)) isCash = false
-    // Pedido facturado con el criterio nuevo: manda la factura (ver arriba).
     const orderId = String((order as any).id ?? '') || undefined
-    const dinvOrder = orderId ? docByOrder.get(orderId) : undefined
-    if (dinvOrder) {
-      dinvOrder.coveredTotal += amount
-      dinvOrder.coveredCash += isCash ? amount : 0
-      dinvOrder.collected += amount
-      if (replacedByInvoice(d.slice(0, 10), dinvOrder)) continue
-      const bucket = isCash ? dinvOrder.declaredCash : dinvOrder.declaredNc
-      bucket.base += base; bucket.vat += vat
-    }
     addIncome(isCash, base, vat, month, q)
     const num = String((order as any).order_number ?? '')
     const concept = num ? `Sastrería ${num}` : 'Cobro sastrería'
@@ -429,20 +299,12 @@ async function computeYear(year: number) {
   // `sales`: el ticket de recogida solo lleva lo pendiente. Efectivo → capa B;
   // resto → C, igual que los cobros de sastrería.
   for (const p of reservationPayments) {
+    // Señal ya facturada: la venta es la factura (el plan la cuenta abajo).
+    if (plan.skipReservationPaymentIds.has(p.id)) continue
     const month = p.paymentDate.slice(0, 7)
     const q = Math.ceil(Number(p.paymentDate.slice(5, 7)) / 3)
     let isCash = p.method === 'cash'
     if (isCash && takeDeposited('reservation_payment', p.id, p.amount)) isCash = false
-    // Reserva facturada con el criterio nuevo: manda la factura (ver arriba).
-    const dinvRes = docByReservation.get(p.reservationId)
-    if (dinvRes) {
-      dinvRes.coveredTotal += p.amount
-      dinvRes.coveredCash += isCash ? p.amount : 0
-      dinvRes.collected += p.amount
-      if (replacedByInvoice(p.paymentDate, dinvRes)) continue
-      const bucket = isCash ? dinvRes.declaredCash : dinvRes.declaredNc
-      bucket.base += p.base; bucket.vat += p.vat
-    }
     addIncome(isCash, p.base, p.vat, month, q)
     const concept = `Reserva ${p.reservationNumber}`
     const client = p.clientName || undefined
@@ -473,25 +335,26 @@ async function computeYear(year: number) {
   for (const d of docInvoices) {
     const month = d.date.slice(0, 7)
     const q = Math.ceil(Number(d.date.slice(5, 7)) / 3)
+    // Factura que no aporta ingreso (su importe lo lleva el pedido): se queda
+    // como documento informativo, igual que las anteriores al corte.
+    if (Math.abs(d.incomeBase) < 0.0001 && Math.abs(d.incomeVat) < 0.0001) continue
     countedInvoiceIds.add(d.id)
     if (d.linked) invoiceCollected.set(d.id, r2(d.collected))
     // Fracción en efectivo: de los cobros ligados; en las sueltas, del método
     // de pago del documento (y un depósito bancario la pasa al escenario C).
-    let fr = 0
-    if (d.linked) {
-      fr = d.coveredTotal > 0.0001 ? Math.min(1, Math.max(0, d.coveredCash / d.coveredTotal)) : 0
-    } else if (d.paymentMethod === 'cash') {
-      fr = takeDeposited('invoice', d.id, d.base + d.vat) ? 0 : 1
+    let fr = d.linked ? d.cashShare : 0
+    if (!d.linked && d.paymentMethod === 'cash') {
+      fr = takeDeposited('invoice', d.id, d.incomeBase + d.incomeVat) ? 0 : 1
     }
-    const cashBase = d.base * fr, cashVat = d.vat * fr
-    const ncBase = d.base - cashBase, ncVat = d.vat - cashVat
+    const cashBase = d.incomeBase * fr, cashVat = d.incomeVat * fr
+    const ncBase = d.incomeBase - cashBase, ncVat = d.incomeVat - cashVat
     if (Math.abs(cashBase) > 0.0001 || Math.abs(cashVat) > 0.0001) {
       addIncome(true, cashBase, cashVat, month, q)
-      cashMoves.push({ kind: 'invoice', invoiceId: d.id, pdfUrl: d.pdfUrl, date: d.date, ref: d.number, concept: `Factura ${d.number}`, method: 'efectivo', client: d.client, base: r2(cashBase), vat: r2(cashVat), total: r2(cashBase + cashVat) })
+      cashMoves.push({ kind: 'invoice', invoiceId: d.id, pdfUrl: d.pdfUrl, date: d.date, ref: d.number, concept: `Factura ${d.number}`, method: 'efectivo', client: d.clientName ?? undefined, base: r2(cashBase), vat: r2(cashVat), total: r2(cashBase + cashVat) })
     }
     if (Math.abs(ncBase) > 0.0001 || Math.abs(ncVat) > 0.0001) {
       addIncome(false, ncBase, ncVat, month, q)
-      incomeLedger.push({ date: d.date, type: 'Factura', concept: `Factura ${d.number}`, client: d.client, base: r2(ncBase), vat: r2(ncVat), total: r2(ncBase + ncVat), pdfUrl: d.pdfUrl, invoiceId: d.id })
+      incomeLedger.push({ date: d.date, type: 'Factura', concept: `Factura ${d.number}`, client: d.clientName ?? undefined, base: r2(ncBase), vat: r2(ncVat), total: r2(ncBase + ncVat), pdfUrl: d.pdfUrl, invoiceId: d.id })
       invoiceCountedAmounts.set(d.id, { base: r2(ncBase), vat: r2(ncVat), total: r2(ncBase + ncVat) })
     } else {
       // Nada que declarar aquí: la factura entera se cobró en efectivo (capa B).
@@ -499,14 +362,17 @@ async function computeYear(year: number) {
     }
     // ABONO de lo ya declarado en un trimestre anterior (no se toca aquel
     // trimestre: el abono entra con la fecha de la factura, IVA incluido).
-    for (const dec of [{ isCash: true, ...d.declaredCash }, { isCash: false, ...d.declaredNc }]) {
+    for (const dec of [
+      { isCash: true, base: d.declared.cashBase, vat: d.declared.cashVat },
+      { isCash: false, base: d.declared.ncBase, vat: d.declared.ncVat },
+    ]) {
       if (Math.abs(dec.base) < 0.0001 && Math.abs(dec.vat) < 0.0001) continue
       addIncome(dec.isCash, -dec.base, -dec.vat, month, q)
       const concept = `Abono de lo ya declarado · factura ${d.number}`
       if (dec.isCash) {
-        cashMoves.push({ kind: 'invoice', invoiceId: d.id, date: d.date, ref: d.number, concept, method: 'efectivo', client: d.client, base: r2(-dec.base), vat: r2(-dec.vat), total: r2(-(dec.base + dec.vat)) })
+        cashMoves.push({ kind: 'invoice', invoiceId: d.id, date: d.date, ref: d.number, concept, method: 'efectivo', client: d.clientName ?? undefined, base: r2(-dec.base), vat: r2(-dec.vat), total: r2(-(dec.base + dec.vat)) })
       } else {
-        incomeLedger.push({ date: d.date, type: 'Abono', concept, client: d.client, base: r2(-dec.base), vat: r2(-dec.vat), total: r2(-(dec.base + dec.vat)), invoiceId: d.id })
+        incomeLedger.push({ date: d.date, type: 'Abono', concept, client: d.clientName ?? undefined, base: r2(-dec.base), vat: r2(-dec.vat), total: r2(-(dec.base + dec.vat)), invoiceId: d.id })
       }
     }
   }

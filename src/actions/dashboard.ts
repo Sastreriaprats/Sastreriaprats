@@ -5,6 +5,7 @@ import { success, failure } from '@/lib/errors'
 import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
 import { loadReservationPayments } from '@/lib/accounting/reservation-payments'
 import { loadOnlineTicketIncome } from '@/lib/accounting/online-ticket-income'
+import { loadInvoiceSalesPlan } from '@/lib/accounting/invoice-sales'
 import { readAllPaged } from '@/lib/server/paged'
 
 interface DashboardStats {
@@ -55,7 +56,7 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
         stockRes,
         supplierRes,
         fittingsRes,
-        onlineInvRows,
+        invoicePlan,
         cobroBaseBySale,
         reservationPayments,
         onlineTickets,
@@ -63,7 +64,7 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
         readAllPaged<{ id?: string; total?: number; subtotal?: number; tax_amount?: number; total_returned?: number; created_at?: string }>((f, t) =>
           admin.from('sales').select('id, total, subtotal, tax_amount, total_returned, created_at').gte('created_at', `${lastMonthStart}T00:00:00`).lte('created_at', todayEnd).in('status', ['completed', 'partially_returned']).order('created_at', { ascending: true }).range(f, t)),
         readAllPaged((f, t) =>
-          admin.from('tailoring_order_payments').select('amount, payment_date, tailoring_order:tailoring_orders(subtotal, total)').gte('payment_date', lastMonthStart).lte('payment_date', today).order('payment_date', { ascending: true }).range(f, t)),
+          admin.from('tailoring_order_payments').select('id, amount, payment_date, tailoring_order:tailoring_orders(subtotal, total)').gte('payment_date', lastMonthStart).lte('payment_date', today).order('payment_date', { ascending: true }).range(f, t)),
         admin.from('tailoring_orders').select('id, status, estimated_delivery_date').not('status', 'in', '("delivered","cancelled")'),
         admin.from('clients').select('id', { count: 'exact', head: true }).eq('is_active', true),
         admin.from('clients').select('id', { count: 'exact', head: true }).eq('is_active', true).gte('created_at', `${monthStart}T00:00:00`),
@@ -71,12 +72,10 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
         admin.from('stock_levels').select('id', { count: 'exact', head: true }).not('min_stock', 'is', null).lte('available', 0),
         admin.from('supplier_due_dates').select('amount, due_date').eq('is_paid', false),
         admin.from('tailoring_fittings').select('id', { count: 'exact', head: true }).eq('scheduled_date', today).eq('status', 'scheduled'),
-        // Facturas emitidas que son ingreso por sí mismas: tienda online (serie
-        // W) + sueltas; excluidas las ligadas a ticket/pedido/reserva (ya
-        // contadas por sus cobros). Mismo criterio que Contabilidad; subtotal
-        // ya es base sin IVA.
-        readAllPaged<{ subtotal?: number; invoice_date?: string; online_order_id?: string | null }>((f, t) =>
-          admin.from('invoices').select('subtotal, invoice_date, online_order_id').eq('invoice_type', 'issued').is('sale_id', null).is('tailoring_order_id', null).is('reservation_id', null).not('status', 'in', '(draft,cancelled)').gte('invoice_date', lastMonthStart).lte('invoice_date', today).order('invoice_date', { ascending: true }).range(f, t)),
+        // Ventas por documento: desde el corte manda la factura emitida y el
+        // ticket/cobro al que sustituye deja de contar (invoice-sales.ts).
+        // Mismo criterio que Contabilidad, para que la tarjeta cuadre.
+        loadInvoiceSalesPlan(admin, lastMonthStart, today),
         // Cobros de pedido embebidos en tickets: se restan a la venta para no
         // duplicar el total con tailoring_order_payments (mismo criterio que Contabilidad).
         loadPedidoCobroBaseBySale(admin, `${lastMonthStart}T00:00:00`, todayEnd),
@@ -129,6 +128,7 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
       let avgTicketSum = 0
       let avgTicketCount = 0
       for (const row of salesRows || []) {
+        if (invoicePlan.skipSaleIds.has(String(row.id))) continue
         const date = (row.created_at as string).split('T')[0]
         const base = netSaleBase(row)
         if (date === today) salesToday += base
@@ -140,6 +140,7 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
         if (date >= lastMonthStart && date < monthStart) salesLastMonth += base
       }
       for (const p of tailoringPayRows || []) {
+        if (invoicePlan.skipOrderPaymentIds.has(String((p as { id?: string }).id))) continue
         const date = ((p as { payment_date?: string }).payment_date as string).split('T')[0]
         const base = netPayBase(p)
         if (date === today) salesToday += base
@@ -147,6 +148,7 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
         if (date >= lastMonthStart && date < monthStart) salesLastMonth += base
       }
       for (const p of reservationPayments) {
+        if (invoicePlan.skipReservationPaymentIds.has(p.id)) continue
         if (p.paymentDate === today) salesToday += p.base
         if (p.paymentDate >= monthStart) salesThisMonth += p.base
         if (p.paymentDate >= lastMonthStart && p.paymentDate < monthStart) salesLastMonth += p.base
@@ -156,11 +158,12 @@ export const getDashboardStats = protectedAction<string | undefined, DashboardSt
         if (o.date >= monthStart) salesThisMonth += o.base
         if (o.date >= lastMonthStart && o.date < monthStart) salesLastMonth += o.base
       }
-      for (const inv of onlineInvRows || []) {
+      for (const inv of invoicePlan.docs) {
         // Factura W de un pedido con ticket: ya contado arriba.
-        if (inv.online_order_id && onlineTickets.ticketedOrderIds.has(String(inv.online_order_id))) continue
-        const date = String(inv.invoice_date ?? '').split('T')[0]
-        const base = Number(inv.subtotal) || 0
+        if (inv.onlineOrderId && onlineTickets.ticketedOrderIds.has(inv.onlineOrderId)) continue
+        const date = inv.date
+        // La factura suma y, si abona algo ya declarado, resta ese abono.
+        const base = inv.incomeBase - (inv.declared.cashBase + inv.declared.ncBase)
         if (date === today) salesToday += base
         if (date >= monthStart) salesThisMonth += base
         if (date >= lastMonthStart && date < monthStart) salesLastMonth += base
@@ -237,13 +240,12 @@ export const getSalesChartData = protectedAction<void, { date: string; label: st
       // Mismo criterio que la tarjeta "Ventas mes" y Contabilidad: base neta de
       // TPV (sales) + cobros de sastrería backoffice (tailoring_order_payments),
       // para que el total del gráfico cuadre con el KPI.
-      const [sales, tailoringPays, onlineInvs, cobroBaseBySale, reservationPayments, onlineTickets] = await Promise.all([
+      const [sales, tailoringPays, invoicePlan, cobroBaseBySale, reservationPayments, onlineTickets] = await Promise.all([
         readAllPaged<{ id?: string; total?: number; subtotal?: number; total_returned?: number; created_at?: string }>((f, t) =>
           admin.from('sales').select('id, total, subtotal, total_returned, created_at').gte('created_at', `${monthStart}T00:00:00`).lte('created_at', `${today}T23:59:59`).in('status', ['completed', 'partially_returned']).order('created_at').range(f, t)),
         readAllPaged((f, t) =>
-          admin.from('tailoring_order_payments').select('amount, payment_date, tailoring_order:tailoring_orders(subtotal, total)').gte('payment_date', monthStart).lte('payment_date', today).range(f, t)),
-        readAllPaged<{ subtotal?: number; invoice_date?: string; online_order_id?: string | null }>((f, t) =>
-          admin.from('invoices').select('subtotal, invoice_date, online_order_id').eq('invoice_type', 'issued').is('sale_id', null).is('tailoring_order_id', null).is('reservation_id', null).not('status', 'in', '(draft,cancelled)').gte('invoice_date', monthStart).lte('invoice_date', today).order('invoice_date').range(f, t)),
+          admin.from('tailoring_order_payments').select('id, amount, payment_date, tailoring_order:tailoring_orders(subtotal, total)').gte('payment_date', monthStart).lte('payment_date', today).range(f, t)),
+        loadInvoiceSalesPlan(admin, monthStart, today),
         loadPedidoCobroBaseBySale(admin, `${monthStart}T00:00:00`, `${today}T23:59:59`),
         loadReservationPayments(admin, monthStart, today),
         loadOnlineTicketIncome(admin, monthStart, today),
@@ -258,6 +260,7 @@ export const getSalesChartData = protectedAction<void, { date: string; label: st
         dailyMap[date] = 0
       }
       for (const sale of sales || []) {
+        if (invoicePlan.skipSaleIds.has(String(sale.id))) continue
         const day = (sale.created_at as string).split('T')[0]
         if (dailyMap[day] !== undefined) {
           const total = Number(sale.total) || 0
@@ -269,7 +272,8 @@ export const getSalesChartData = protectedAction<void, { date: string; label: st
         }
       }
       for (const p of tailoringPays || []) {
-        const pr = p as { payment_date?: string; amount?: number; tailoring_order?: { subtotal?: number; total?: number } }
+        const pr = p as { id?: string; payment_date?: string; amount?: number; tailoring_order?: { subtotal?: number; total?: number } }
+        if (invoicePlan.skipOrderPaymentIds.has(String(pr.id))) continue
         const day = (pr.payment_date as string).split('T')[0]
         if (dailyMap[day] !== undefined) {
           const amount = Number(pr.amount) || 0
@@ -280,15 +284,17 @@ export const getSalesChartData = protectedAction<void, { date: string; label: st
         }
       }
       for (const p of reservationPayments) {
+        if (invoicePlan.skipReservationPaymentIds.has(p.id)) continue
         if (dailyMap[p.paymentDate] !== undefined) dailyMap[p.paymentDate] += p.base
       }
       for (const o of onlineTickets.rows) {
         if (dailyMap[o.date] !== undefined) dailyMap[o.date] += o.base
       }
-      for (const inv of onlineInvs || []) {
-        if (inv.online_order_id && onlineTickets.ticketedOrderIds.has(String(inv.online_order_id))) continue
-        const day = String(inv.invoice_date ?? '').split('T')[0]
-        if (dailyMap[day] !== undefined) dailyMap[day] += Number(inv.subtotal) || 0
+      for (const inv of invoicePlan.docs) {
+        if (inv.onlineOrderId && onlineTickets.ticketedOrderIds.has(inv.onlineOrderId)) continue
+        if (dailyMap[inv.date] !== undefined) {
+          dailyMap[inv.date] += inv.incomeBase - (inv.declared.cashBase + inv.declared.ncBase)
+        }
       }
 
       const entries = Object.entries(dailyMap).sort(([a], [b]) => a.localeCompare(b))

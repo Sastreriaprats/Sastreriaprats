@@ -52,18 +52,41 @@ export async function loadReservationPayments(
   toDate: string,
   opts: { storeId?: string | null } = {},
 ): Promise<ReservationPaymentIncome[]> {
-  const from = fromDate.slice(0, 10)
-  const to = toDate.slice(0, 10)
+  return loadPayments(admin, (q) => {
+    let out = q.gte('payment_date', fromDate.slice(0, 10)).lte('payment_date', toDate.slice(0, 10))
+    if (opts.storeId) out = out.eq('product_reservations.store_id', opts.storeId)
+    return out
+  })
+}
+
+/**
+ * Pagos de esas reservas, sin filtro de fecha. Lo usa el criterio "manda la
+ * factura" (invoice-sales.ts): una factura puede cubrir señales de cualquier
+ * fecha, incluso de otro trimestre.
+ */
+export async function loadReservationPaymentsFor(
+  admin: AdminClient,
+  reservationIds: string[],
+): Promise<ReservationPaymentIncome[]> {
+  const out: ReservationPaymentIncome[] = []
+  for (let i = 0; i < reservationIds.length; i += 100) {
+    const chunk = reservationIds.slice(i, i + 100)
+    out.push(...await loadPayments(admin, (q) => q.in('product_reservation_id', chunk)))
+  }
+  return out
+}
+
+async function loadPayments(
+  admin: AdminClient,
+  narrow: (q: any) => any,
+): Promise<ReservationPaymentIncome[]> {
   const rows: any[] = []
   for (let offset = 0; ; offset += PAGE) {
-    let q = admin
+    const q = narrow(admin
       .from('product_reservation_payments')
-      .select('id, product_reservation_id, payment_date, payment_method, amount, product_reservations!inner(reservation_number, store_id, employee_id, stores(name), clients(full_name))')
-      .gte('payment_date', from)
-      .lte('payment_date', to)
+      .select('id, product_reservation_id, payment_date, payment_method, amount, product_reservations!inner(reservation_number, store_id, employee_id, stores(name), clients(full_name))'))
       .order('id', { ascending: true })
       .range(offset, offset + PAGE - 1)
-    if (opts.storeId) q = q.eq('product_reservations.store_id', opts.storeId)
     const { data, error } = await q
     if (error) throw new Error(error.message || 'Error al consultar pagos de reserva')
     const batch = (data ?? []) as any[]

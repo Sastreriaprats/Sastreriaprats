@@ -13,6 +13,7 @@ import { formatClientAddress, resolveInvoiceParty } from '@/lib/clients/format'
 import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
 import { loadReservationPayments } from '@/lib/accounting/reservation-payments'
 import { loadOnlineTicketIncome } from '@/lib/accounting/online-ticket-income'
+import { loadInvoiceSalesPlan } from '@/lib/accounting/invoice-sales'
 import { readAllPaged } from '@/lib/server/paged'
 import { toLocalISODate } from '@/lib/dates'
 
@@ -51,7 +52,7 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
     const start = `${fromDate}T00:00:00`
     const end = `${toDate}T23:59:59`
 
-    const [sales, purchasesRaw, invoicesRes, tailoringPayments, storesRes, pendOrdersRows, pendSalesRows, pendDueRows, otherInvoicesRaw, cobroBaseBySale, reservationPayments, onlineTickets] = await Promise.all([
+    const [sales, purchasesRaw, invoicesRes, tailoringPayments, storesRes, pendOrdersRows, pendSalesRows, pendDueRows, invoicePlan, cobroBaseBySale, reservationPayments, onlineTickets] = await Promise.all([
       // Ventas de TPV (boutique + TPV + sastrería-POS). Paginado: sin esto, un año
       // con >1000 tickets se truncaba silenciosamente e infravaloraba ingresos.
       readAllPaged((f, t) => ctx.adminClient.from('sales').select('id, total, total_returned, subtotal, tax_amount, created_at, store_id').gte('created_at', start).lte('created_at', end).in('status', ['completed', 'partially_returned']).order('created_at', { ascending: true }).range(f, t)),
@@ -66,7 +67,7 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
       // no están en `sales`; y no se solapan con `invoices` (que aquí no se
       // suman, sólo se listan), por lo que no hay doble conteo. Fecha contable:
       // payment_date (el cobro real), no created_at (el registro en sistema).
-      readAllPaged((f, t) => ctx.adminClient.from('tailoring_order_payments').select('amount, payment_date, tailoring_order:tailoring_orders(subtotal, total, store_id)').gte('payment_date', fromDate).lte('payment_date', toDate).order('payment_date', { ascending: true }).range(f, t)),
+      readAllPaged((f, t) => ctx.adminClient.from('tailoring_order_payments').select('id, amount, payment_date, tailoring_order:tailoring_orders(subtotal, total, store_id)').gte('payment_date', fromDate).lte('payment_date', toDate).order('payment_date', { ascending: true }).range(f, t)),
       // Catálogo de tiendas: para que toda tienda activa salga en el desglose
       // (aunque tenga 0 movimientos) y para resolver nombres. Dinámico: una
       // tienda nueva aparece automáticamente.
@@ -76,14 +77,12 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
       readAllPaged((f, t) => ctx.adminClient.from('sales').select('total, amount_paid').in('payment_status', ['pending', 'partial']).range(f, t)),
       // Previsión: gastos de proveedor por pagar (cuotas de vencimiento sin pagar).
       readAllPaged((f, t) => ctx.adminClient.from('ap_supplier_invoice_due_dates').select('amount, is_paid').eq('is_paid', false).range(f, t)),
-      // Facturas emitidas que son ingreso POR SÍ MISMAS: las de la tienda online
-      // (serie W, online_order_id) y las sueltas (p. ej. comisión Tax Free de
-      // Innova). Se EXCLUYEN las ligadas a ticket (sale_id), pedido de sastrería
-      // (tailoring_order_id) o reserva (reservation_id): esos cobros ya se
-      // cuentan arriba vía sales/tailoring_order_payments → evita doble conteo.
-      // subtotal/tax_amount ya vienen como base sin IVA + IVA. Fecha contable:
-      // invoice_date. Mismo criterio que el escenario C (computeYear en ops.ts).
-      readAllPaged((f, t) => ctx.adminClient.from('invoices').select('subtotal, tax_amount, invoice_date, online_order_id, store_id').eq('invoice_type', 'issued').is('sale_id', null).is('tailoring_order_id', null).is('reservation_id', null).not('status', 'in', '(draft,cancelled)').gte('invoice_date', fromDate).lte('invoice_date', toDate).order('invoice_date', { ascending: true }).range(f, t)),
+      // VENTAS POR DOCUMENTO: desde el corte manda la factura emitida (esté
+      // cobrada o no) y el ticket/cobro al que sustituye deja de contar; si lo
+      // sustituido ya se declaró en un trimestre anterior, la factura lleva su
+      // abono. La regla vive en invoice-sales.ts y la comparten las dos
+      // contabilidades (el escenario C usa el mismo plan en ops.ts).
+      loadInvoiceSalesPlan(ctx.adminClient, fromDate, toDate),
       // Base de cobros de pedido de sastrería embebidos en tickets: se resta al
       // ticket (netSale) para no duplicar el total con `tailoring_order_payments`.
       loadPedidoCobroBaseBySale(ctx.adminClient, start, end),
@@ -95,8 +94,12 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
       loadOnlineTicketIncome(ctx.adminClient, fromDate, toDate),
     ])
     // Una factura W de un pedido con ticket no suma: el ingreso va por el ticket.
-    const otherInvoices = otherInvoicesRaw.filter((x: Record<string, unknown>) =>
-      !((x as any).online_order_id && onlineTickets.ticketedOrderIds.has(String((x as any).online_order_id))))
+    const invoiceSales = invoicePlan.docs.filter((d) => !(d.onlineOrderId && onlineTickets.ticketedOrderIds.has(d.onlineOrderId)))
+    // Lo ya declarado en un trimestre anterior que la factura abona (en negativo).
+    const declaredOf = (d: { declared: { cashBase: number; ncBase: number; cashVat: number; ncVat: number } }) => ({
+      base: d.declared.cashBase + d.declared.ncBase,
+      vat: d.declared.cashVat + d.declared.ncVat,
+    })
     const onlineTicketRows = onlineTickets.rows
 
     // Excluimos proformas (no son facturas reales).
@@ -134,19 +137,25 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
       return { netBase: base, netVat: amount - base }
     }
 
-    const otherInvBase = otherInvoices.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).subtotal) || 0), 0)
-    const otherInvVat = otherInvoices.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).tax_amount) || 0), 0)
+    // Ventas facturadas: la factura suma y su abono resta, ambos en su fecha.
+    const otherInvBase = invoiceSales.reduce((s, d) => s + d.incomeBase - declaredOf(d).base, 0)
+    const otherInvVat = invoiceSales.reduce((s, d) => s + d.incomeVat - declaredOf(d).vat, 0)
+
+    // Cobros que ya cuenta su factura (ver invoicePlan): no suman por su lado.
+    const liveSales = sales.filter((x: Record<string, unknown>) => !invoicePlan.skipSaleIds.has(String((x as any).id)))
+    const livePayments = tailoringPayments.filter((p: Record<string, unknown>) => !invoicePlan.skipOrderPaymentIds.has(String((p as any).id)))
+    const liveReservationPayments = reservationPayments.filter((p) => !invoicePlan.skipReservationPaymentIds.has(p.id))
 
     const income =
-      sales.reduce((s: number, x: Record<string, unknown>) => s + netSale(x).netBase, 0) +
-      tailoringPayments.reduce((s: number, p: Record<string, unknown>) => s + netTailoringPayment(p).netBase, 0) +
-      reservationPayments.reduce((s, p) => s + p.base, 0) +
+      liveSales.reduce((s: number, x: Record<string, unknown>) => s + netSale(x).netBase, 0) +
+      livePayments.reduce((s: number, p: Record<string, unknown>) => s + netTailoringPayment(p).netBase, 0) +
+      liveReservationPayments.reduce((s, p) => s + p.base, 0) +
       onlineTicketRows.reduce((s, o) => s + o.base, 0) +
       otherInvBase
     const vatCollected =
-      sales.reduce((s: number, x: Record<string, unknown>) => s + netSale(x).netVat, 0) +
-      tailoringPayments.reduce((s: number, p: Record<string, unknown>) => s + netTailoringPayment(p).netVat, 0) +
-      reservationPayments.reduce((s, p) => s + p.vat, 0) +
+      liveSales.reduce((s: number, x: Record<string, unknown>) => s + netSale(x).netVat, 0) +
+      livePayments.reduce((s: number, p: Record<string, unknown>) => s + netTailoringPayment(p).netVat, 0) +
+      liveReservationPayments.reduce((s, p) => s + p.vat, 0) +
       onlineTicketRows.reduce((s, o) => s + o.vat, 0) +
       otherInvVat
     const expenses = purchases.reduce((s: number, x: Record<string, unknown>) => s + (Number((x as any).amount) || 0), 0)
@@ -164,7 +173,7 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
         mm++; if (mm > 12) { mm = 1; yy++ }
       }
     }
-    for (const x of sales) {
+    for (const x of liveSales) {
       const d = (x as any).created_at
       if (d) {
         const key = d.slice(0, 7)
@@ -172,7 +181,7 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
         byMonth[key].income += netSale(x).netBase
       }
     }
-    for (const p of tailoringPayments) {
+    for (const p of livePayments) {
       const d = (p as any).payment_date
       if (d) {
         const key = d.slice(0, 7)
@@ -180,7 +189,7 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
         byMonth[key].income += netTailoringPayment(p).netBase
       }
     }
-    for (const p of reservationPayments) {
+    for (const p of liveReservationPayments) {
       const key = p.paymentDate.slice(0, 7)
       if (!byMonth[key]) byMonth[key] = { income: 0, expenses: 0 }
       byMonth[key].income += p.base
@@ -190,13 +199,10 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
       if (!byMonth[key]) byMonth[key] = { income: 0, expenses: 0 }
       byMonth[key].income += o.base
     }
-    for (const x of otherInvoices) {
-      const d = (x as any).invoice_date
-      if (d) {
-        const key = String(d).slice(0, 7)
-        if (!byMonth[key]) byMonth[key] = { income: 0, expenses: 0 }
-        byMonth[key].income += Number((x as any).subtotal) || 0
-      }
+    for (const d of invoiceSales) {
+      const key = d.date.slice(0, 7)
+      if (!byMonth[key]) byMonth[key] = { income: 0, expenses: 0 }
+      byMonth[key].income += d.incomeBase - declaredOf(d).base
     }
     for (const x of purchases) {
       const d = (x as any).invoice_date
@@ -237,16 +243,16 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
     // Toda tienda activa aparece, aunque tenga 0 (incl. tiendas nuevas).
     for (const s of stores) if (s.is_active) bucket(String(s.id))
 
-    for (const x of sales) {
+    for (const x of liveSales) {
       const sid = (x as any).store_id ? String((x as any).store_id) : NO_STORE
       bucket(sid).income += netSale(x).netBase
     }
-    for (const p of tailoringPayments) {
+    for (const p of livePayments) {
       const order = ((p as any).tailoring_order as Record<string, unknown>) || {}
       const sid = (order as any).store_id ? String((order as any).store_id) : NO_STORE
       bucket(sid).income += netTailoringPayment(p).netBase
     }
-    for (const p of reservationPayments) {
+    for (const p of liveReservationPayments) {
       bucket(p.storeId ?? NO_STORE).income += p.base
     }
     for (const x of purchases) {
@@ -257,12 +263,10 @@ export const getAccountingSummary = protectedAction<{ from: string; to: string }
     // mezclarla con "Sin asignar". Las facturas sueltas van a su tienda si la
     // tienen, y si no a "Sin asignar".
     const ONLINE_STORE = '__online__'
-    for (const x of otherInvoices) {
-      const base = Number((x as any).subtotal) || 0
-      if (base === 0) continue
-      const key = (x as any).online_order_id
-        ? ONLINE_STORE
-        : (x as any).store_id ? String((x as any).store_id) : NO_STORE
+    for (const d of invoiceSales) {
+      const base = d.incomeBase - declaredOf(d).base
+      if (Math.abs(base) < 0.0001) continue
+      const key = d.onlineOrderId ? ONLINE_STORE : d.storeId ?? NO_STORE
       bucket(key).income += base
     }
     for (const o of onlineTicketRows) bucket(ONLINE_STORE).income += o.base
@@ -331,6 +335,11 @@ export type InvoiceRow = {
   sale_id: string | null
   tailoring_order_id: string | null
   reservation_id: string | null
+  // Cobro de la factura, calculado de sus cobros ligados (ticket, pedidos,
+  // reservas). null = sin dato: facturas sueltas o anteriores al criterio por
+  // documento, cuyo dinero se declaró por los cobros.
+  collected: number | null
+  pending: number | null
 }
 
 export const getInvoices = protectedAction<
@@ -360,6 +369,13 @@ export const getInvoices = protectedAction<
     }
 
     const { data } = await q
+    // Cobrado por factura: lo calcula el plan de ventas por documento a partir
+    // de los cobros ligados (invoice-sales.ts), porque `amount_paid` no se
+    // mantiene al día. Solo las facturas del criterio nuevo tienen dato.
+    const dates = (data || []).map((r: Record<string, unknown>) => String(r.invoice_date ?? '')).filter(Boolean).sort()
+    const collectedBy = dates.length
+      ? (await loadInvoiceSalesPlan(ctx.adminClient, dates[0], dates[dates.length - 1])).collectedByInvoice
+      : new Map<string, number>()
     return success((data || []).map((r: Record<string, unknown>) => ({
       id: String(r.id),
       invoice_number: String(r.invoice_number ?? ''),
@@ -385,6 +401,10 @@ export const getInvoices = protectedAction<
       sale_id: (r.sale_id as string) ?? null,
       tailoring_order_id: (r.tailoring_order_id as string) ?? null,
       reservation_id: (r.reservation_id as string) ?? null,
+      collected: collectedBy.has(String(r.id)) ? (collectedBy.get(String(r.id)) ?? 0) : null,
+      pending: collectedBy.has(String(r.id))
+        ? Math.round(((Number(r.total) || 0) - (collectedBy.get(String(r.id)) ?? 0)) * 100) / 100
+        : null,
     })))
   }
 )
@@ -753,18 +773,19 @@ export const getVatQuarterly = protectedAction<
     // factura, independientemente del estado de pago.
     // Paginado con readAllPaged: sin esto, un año con >1000 filas en cualquiera
     // de estas tablas truncaba el IVA de los últimos trimestres en silencio.
-    const [salesRows, purchasesRows, tailoringPaymentsRows, otherInvoicesRows, cobroBaseBySale, reservationPayments, onlineTickets] = await Promise.all([
+    const [salesRows, purchasesRows, tailoringPaymentsRows, invoicePlan, cobroBaseBySale, reservationPayments, onlineTickets] = await Promise.all([
       readAllPaged((f, t) => ctx.adminClient.from('sales').select('id, total, total_returned, subtotal, tax_amount, created_at').gte('created_at', yearStart).lte('created_at', yearEnd).in('status', ['completed', 'partially_returned']).order('created_at', { ascending: true }).range(f, t)),
       readAllPaged((f, t) => ctx.adminClient.from('ap_supplier_invoices').select('amount, tax_amount, invoice_date').eq('is_proforma', false).gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`).order('invoice_date', { ascending: true }).range(f, t)),
       // Cobros de sastrería (backoffice): mismo criterio que el Resumen. amount
       // bruto → base/IVA prorrateando subtotal/total del pedido. Fecha contable:
       // payment_date. No se solapan con `sales` ni con `invoices` (que aquí no
       // se suman), por lo que no hay doble conteo.
-      readAllPaged((f, t) => ctx.adminClient.from('tailoring_order_payments').select('amount, payment_date, tailoring_order:tailoring_orders(subtotal, total)').gte('payment_date', `${year}-01-01`).lte('payment_date', `${year}-12-31`).order('payment_date', { ascending: true }).range(f, t)),
-      // Facturas emitidas que son ingreso por sí mismas (online serie W +
-      // sueltas), mismo criterio que el Resumen: se excluyen las ligadas a
-      // ticket/pedido/reserva porque esos cobros ya se cuentan → sin doble conteo.
-      readAllPaged((f, t) => ctx.adminClient.from('invoices').select('subtotal, tax_amount, invoice_date, online_order_id').eq('invoice_type', 'issued').is('sale_id', null).is('tailoring_order_id', null).is('reservation_id', null).not('status', 'in', '(draft,cancelled)').gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`).order('invoice_date', { ascending: true }).range(f, t)),
+      readAllPaged((f, t) => ctx.adminClient.from('tailoring_order_payments').select('id, amount, payment_date, tailoring_order:tailoring_orders(subtotal, total)').gte('payment_date', `${year}-01-01`).lte('payment_date', `${year}-12-31`).order('payment_date', { ascending: true }).range(f, t)),
+      // Ventas por DOCUMENTO: desde el corte el IVA se devenga con la factura
+      // emitida (esté cobrada o no) y el cobro al que sustituye deja de contar;
+      // lo declarado en un trimestre anterior se abona en la fecha de la
+      // factura. Misma regla que el Resumen y que el escenario C.
+      loadInvoiceSalesPlan(ctx.adminClient, `${year}-01-01`, `${year}-12-31`),
       // Base de los cobros de pedido embebidos en tickets: esa parte del ticket
       // va al 0% (la cuota ya era correcta) pero su BASE no debe declararse dos
       // veces (aquí como ticket y otra vez como cobro de sastrería).
@@ -777,10 +798,10 @@ export const getVatQuarterly = protectedAction<
     ])
     const sales = salesRows as Array<{ id?: string; total?: number; total_returned?: number; subtotal?: number; tax_amount?: number; created_at?: string }>
     const purchases = purchasesRows as Array<{ amount?: number; tax_amount?: number; invoice_date?: string }>
-    const tailoringPayments = tailoringPaymentsRows as Array<{ amount?: number; payment_date?: string; tailoring_order?: { subtotal?: number; total?: number } }>
+    const tailoringPayments = (tailoringPaymentsRows as Array<{ id?: string; amount?: number; payment_date?: string; tailoring_order?: { subtotal?: number; total?: number } }>)
+      .filter((p) => !invoicePlan.skipOrderPaymentIds.has(String(p.id)))
     // Las facturas W de pedidos con ticket no suman: el IVA va por el ticket.
-    const otherInvoices = (otherInvoicesRows as Array<{ subtotal?: number; tax_amount?: number; invoice_date?: string; online_order_id?: string | null }>)
-      .filter((x) => !(x.online_order_id && onlineTickets.ticketedOrderIds.has(String(x.online_order_id))))
+    const invoiceSales = invoicePlan.docs.filter((d) => !(d.onlineOrderId && onlineTickets.ticketedOrderIds.has(d.onlineOrderId)))
 
     const quarterFromMonth = (m: number) => Math.ceil(m / 3) as 1 | 2 | 3 | 4
     const byQuarter: Record<number, {
@@ -793,6 +814,8 @@ export const getVatQuarterly = protectedAction<
       4: { baseSales: 0, ivaRepercutido: 0, basePurchases: 0, ivaSoportado: 0, salesCount: 0, purchasesCount: 0 },
     }
     for (const x of sales) {
+      // Ticket ya facturado: el IVA lo devenga la factura.
+      if (invoicePlan.skipSaleIds.has(String(x.id))) continue
       const d = x.created_at
       if (d) {
         const month = Number(d.slice(5, 7))
@@ -826,6 +849,7 @@ export const getVatQuarterly = protectedAction<
       }
     }
     for (const p of reservationPayments) {
+      if (invoicePlan.skipReservationPaymentIds.has(p.id)) continue
       const q = quarterFromMonth(Number(p.paymentDate.slice(5, 7)))
       byQuarter[q].baseSales += p.base
       byQuarter[q].ivaRepercutido += p.vat
@@ -837,13 +861,18 @@ export const getVatQuarterly = protectedAction<
       byQuarter[q].ivaRepercutido += o.vat
       byQuarter[q].salesCount += 1
     }
-    for (const x of otherInvoices) {
-      const d = x.invoice_date
-      if (d) {
-        const q = quarterFromMonth(Number(String(d).slice(5, 7)))
-        byQuarter[q].baseSales += Number(x.subtotal) || 0
-        byQuarter[q].ivaRepercutido += Number(x.tax_amount) || 0
-        byQuarter[q].salesCount += 1
+    for (const d of invoiceSales) {
+      const q = quarterFromMonth(Number(d.date.slice(5, 7)))
+      byQuarter[q].baseSales += d.incomeBase
+      byQuarter[q].ivaRepercutido += d.incomeVat
+      byQuarter[q].salesCount += 1
+      // Abono de lo ya declarado en un trimestre anterior, con la fecha de la
+      // factura: aquel trimestre no se toca y el año suma cada euro una vez.
+      const decBase = d.declared.cashBase + d.declared.ncBase
+      const decVat = d.declared.cashVat + d.declared.ncVat
+      if (Math.abs(decBase) > 0.0001 || Math.abs(decVat) > 0.0001) {
+        byQuarter[q].baseSales -= decBase
+        byQuarter[q].ivaRepercutido -= decVat
       }
     }
     for (const x of purchases) {
