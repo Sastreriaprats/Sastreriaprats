@@ -52,6 +52,16 @@ export const updateReservationSchema = z.object({
   expires_at: z.string().datetime().optional().nullable(),
 })
 
+// Precio pactado de los artículos de una reserva (precios especiales de
+// Joaquín). Va aparte de updateReservationSchema porque exige otro permiso.
+export const updateReservationPricesSchema = z.object({
+  id: z.string().uuid(),
+  lines: z.array(z.object({
+    line_id: z.string().uuid(),
+    unit_price: z.number().min(0, 'El precio no puede ser negativo').max(999999),
+  })).min(1, 'No hay artículos que actualizar'),
+})
+
 export const cancelReservationSchema = z.object({
   id: z.string().uuid(),
   reason: z.string().max(300).optional().nullable(),
@@ -96,6 +106,7 @@ export const listReservationsSchema = z.object({
 export type CreateReservationInput = z.infer<typeof createReservationSchema>
 export type ReservationLineInput = z.infer<typeof reservationLineInputSchema>
 export type UpdateReservationInput = z.infer<typeof updateReservationSchema>
+export type UpdateReservationPricesInput = z.infer<typeof updateReservationPricesSchema>
 export type CancelReservationInput = z.infer<typeof cancelReservationSchema>
 export type ReactivateReservationInput = z.infer<typeof reactivateReservationSchema>
 export type CancelReservationLineInput = z.infer<typeof cancelReservationLineSchema>

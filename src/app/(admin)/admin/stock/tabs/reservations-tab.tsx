@@ -24,6 +24,7 @@ import {
   reactivateReservation,
   cancelReservationLine,
   updateReservation,
+  updateReservationPrices,
   fulfillReservationLine,
   addReservationPayment,
 } from '@/actions/reservations'
@@ -33,6 +34,7 @@ import { generateReservationPdf, printReservationPdf, type ReservationTicketData
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
 import { createPrintReporter } from '@/lib/client-telemetry'
 import type { ReservationPaymentMethod } from '@/lib/validations/reservations'
+import { usePermissions } from '@/hooks/use-permissions'
 
 const PAGE_SIZE = 20
 
@@ -112,6 +114,14 @@ function getClientName(c: Reservation['client']): string {
   return c.full_name || [c.first_name, c.last_name].filter(Boolean).join(' ') || c.client_code || '—'
 }
 
+/**
+ * Artículos a los que se les puede cambiar el precio: los que siguen vivos. Una
+ * línea entregada ya está facturada en su ticket y una cancelada no cuenta.
+ */
+function editablePriceLines(r: Reservation): ReservationLine[] {
+  return (r.lines || []).filter((l) => l.status === 'active' || l.status === 'pending_stock')
+}
+
 function getLineDescription(ln: ReservationLine): string {
   const name = ln.product_variant?.product?.name || '—'
   const variantBits = [ln.product_variant?.size ? `T.${ln.product_variant.size}` : null, ln.product_variant?.color].filter(Boolean).join(' · ')
@@ -127,6 +137,7 @@ function getTotalQuantity(r: Reservation): number {
 
 export function ReservationsTab() {
   const router = useRouter()
+  const { can } = usePermissions()
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [total, setTotal] = useState(0)
   // Página 0-based persistida en la URL. Clave propia 'rpage': este tab se monta
@@ -157,6 +168,8 @@ export function ReservationsTab() {
   const [editReason, setEditReason] = useState('')
   const [editExpires, setEditExpires] = useState('')
   const [editSubmitting, setEditSubmitting] = useState(false)
+  // Precio pactado por artículo (texto del input, id de línea → precio)
+  const [editPrices, setEditPrices] = useState<Record<string, string>>({})
 
   const [cancelTarget, setCancelTarget] = useState<Reservation | null>(null)
   const [cancelReasonInput, setCancelReasonInput] = useState('')
@@ -307,11 +320,27 @@ export function ReservationsTab() {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
+  // Cambiar el precio pactado va con su propio permiso (mig 288): editar notas
+  // o fecha lo puede hacer cualquier vendedor, tocar el precio no.
+  const canEditPrices = can('reservations.edit_price')
+  // Total que quedará con los precios escritos (las líneas canceladas no suman).
+  const editPricesTotal = editing
+    ? editablePriceLines(editing).reduce((acc, l) => {
+        const raw = Number(editPrices[l.id] ?? l.unit_price)
+        const unit = Number.isFinite(raw) ? raw : Number(l.unit_price) || 0
+        return acc + unit * Number(l.quantity || 0)
+      }, 0)
+    : 0
+
   const openEdit = (r: Reservation) => {
     setEditing(r)
     setEditNotes(r.notes ?? '')
     setEditReason(r.reason ?? '')
     setEditExpires(r.expires_at ? r.expires_at.slice(0, 10) : '')
+    // Precios de los artículos vivos: se editan solo con `reservations.edit_price`.
+    const prices: Record<string, string> = {}
+    for (const l of editablePriceLines(r)) prices[l.id] = String(Number(l.unit_price ?? 0).toFixed(2))
+    setEditPrices(prices)
   }
 
   const saveEdit = async () => {
@@ -325,6 +354,21 @@ export function ReservationsTab() {
         expires_at: editExpires ? new Date(editExpires).toISOString() : null,
       })
       if (!res.success) { toast.error(res.error || 'No se pudo actualizar la reserva'); return }
+      // Los precios van en su propia llamada: otro permiso y sus propias reglas.
+      const changed = canEditPrices
+        ? editablePriceLines(editing)
+            .map((l) => ({ line_id: l.id, unit_price: Number(editPrices[l.id] ?? l.unit_price), before: Number(l.unit_price) || 0 }))
+            .filter((l) => Number.isFinite(l.unit_price) && l.unit_price >= 0 && Math.abs(l.unit_price - l.before) > 0.005)
+            .map(({ line_id, unit_price }) => ({ line_id, unit_price }))
+        : []
+      if (changed.length) {
+        const priceRes = await updateReservationPrices({ id: editing.id, lines: changed })
+        if (!priceRes.success) { toast.error(priceRes.error || 'No se pudo cambiar el precio'); return }
+        toast.success(`Precio actualizado · nuevo total ${formatCurrency(priceRes.data.total)}`)
+        setEditing(null)
+        fetchData()
+        return
+      }
       toast.success('Reserva actualizada')
       setEditing(null)
       fetchData()
@@ -1044,6 +1088,35 @@ export function ReservationsTab() {
               <Label>Notas internas</Label>
               <Textarea rows={3} value={editNotes} onChange={(e) => setEditNotes(e.target.value)} maxLength={500} />
             </div>
+            {canEditPrices && editing && editablePriceLines(editing).length > 0 && (
+              <div className="space-y-2 rounded-md border p-3">
+                <Label>Precio pactado</Label>
+                {editablePriceLines(editing).map((l) => (
+                  <div key={l.id} className="flex items-center gap-2">
+                    <span className="flex-1 truncate text-sm" title={getLineDescription(l)}>{getLineDescription(l)}</span>
+                    <span className="text-xs text-muted-foreground shrink-0">{l.quantity} ×</span>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      inputMode="decimal"
+                      className="h-8 w-28 text-right"
+                      value={editPrices[l.id] ?? ''}
+                      onChange={(e) => setEditPrices((prev) => ({ ...prev, [l.id]: e.target.value }))}
+                    />
+                  </div>
+                ))}
+                <div className="flex items-center justify-between border-t pt-2 text-sm">
+                  <span className="text-muted-foreground">Nuevo total</span>
+                  <span className="font-semibold tabular-nums">{formatCurrency(editPricesTotal)}</span>
+                </div>
+                {Number(editing.total_paid) > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Ya cobrado {formatCurrency(Number(editing.total_paid))}: el total no puede quedar por debajo.
+                  </p>
+                )}
+              </div>
+            )}
             <p className="text-xs text-muted-foreground">
               Para cambiar productos o cantidades, cancela la reserva y crea una nueva.
             </p>

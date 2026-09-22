@@ -7,6 +7,7 @@ import { resolveClientIdsForSearch } from '@/lib/server/query-helpers'
 import {
   createReservationSchema,
   updateReservationSchema,
+  updateReservationPricesSchema,
   cancelReservationSchema,
   reactivateReservationSchema,
   cancelReservationLineSchema,
@@ -15,6 +16,7 @@ import {
   addReservationPaymentSchema,
   type CreateReservationInput,
   type UpdateReservationInput,
+  type UpdateReservationPricesInput,
   type CancelReservationInput,
   type ReactivateReservationInput,
   type CancelReservationLineInput,
@@ -320,6 +322,91 @@ export const updateReservation = protectedAction<UpdateReservationInput, { id: s
       id: input.id,
       auditEntityId: String(input.id),
       auditDescription: `Reserva ${reservation_number}`,
+    })
+  }
+)
+
+/**
+ * Cambia el PRECIO pactado de los artículos de una reserva (precios especiales:
+ * petición de Teresa, sep-2026). Solo toca `unit_price`/`line_total` de las
+ * líneas vivas; el trigger `fn_recalc_reservation_header` recalcula el total de
+ * la reserva, el estado de pago y lo pendiente.
+ *
+ * Reglas:
+ * - Las líneas ya entregadas o canceladas no se tocan (su precio es histórico:
+ *   la entregada ya está en un ticket).
+ * - El nuevo total no puede quedar por debajo de lo ya cobrado, para no dejar
+ *   la reserva con un pago mayor que su importe.
+ * - Permiso propio (`reservations.edit_price`, mig 288): editar notas o fecha
+ *   lo puede hacer cualquier vendedor, tocar el precio no.
+ */
+export const updateReservationPrices = protectedAction<UpdateReservationPricesInput, { id: string; total: number; auditEntityId: string; auditDescription: string }>(
+  {
+    permission: 'reservations.edit_price',
+    auditModule: 'reservations',
+    auditAction: 'update',
+    auditEntity: 'product_reservation',
+    revalidate: ['/admin/stock'],
+  },
+  async (ctx, rawInput) => {
+    const input = updateReservationPricesSchema.parse(rawInput)
+
+    const { data: reservation, error: rErr } = await ctx.adminClient
+      .from('product_reservations')
+      .select('id, reservation_number, status, total, total_paid')
+      .eq('id', input.id)
+      .maybeSingle()
+    if (rErr) return failure(rErr.message || 'Error al leer la reserva', 'INTERNAL')
+    if (!reservation) return failure('Reserva no encontrada', 'NOT_FOUND')
+    if (reservation.status === 'cancelled') return failure('La reserva está cancelada', 'VALIDATION')
+    if (reservation.status === 'fulfilled') return failure('La reserva ya se ha entregado: el precio está en el ticket', 'VALIDATION')
+
+    const { data: linesData, error: lErr } = await ctx.adminClient
+      .from('product_reservation_lines')
+      .select('id, quantity, unit_price, line_total, status')
+      .eq('reservation_id', input.id)
+    if (lErr) return failure(lErr.message || 'Error al leer los artículos', 'INTERNAL')
+    const lines = (linesData ?? []) as Array<{ id: string; quantity: number; unit_price: number; line_total: number; status: string }>
+
+    const editable = new Map(lines.filter((l) => l.status === 'active' || l.status === 'pending_stock').map((l) => [String(l.id), l]))
+    const changes: Array<{ line: { id: string; quantity: number; unit_price: number }; unitPrice: number; lineTotal: number }> = []
+    for (const req of input.lines) {
+      const line = editable.get(req.line_id)
+      if (!line) return failure('Alguno de los artículos ya está entregado o cancelado: recarga la pantalla', 'VALIDATION')
+      const unitPrice = Math.round(req.unit_price * 100) / 100
+      const lineTotal = Math.round(unitPrice * Number(line.quantity) * 100) / 100
+      if (Math.abs(unitPrice - Number(line.unit_price)) < 0.005) continue
+      changes.push({ line, unitPrice, lineTotal })
+    }
+    if (!changes.length) return failure('No has cambiado ningún precio', 'VALIDATION')
+
+    // Total que quedará: líneas vivas con su precio nuevo (las canceladas no suman).
+    const changed = new Map(changes.map((c) => [String(c.line.id), c.lineTotal]))
+    const newTotal = lines
+      .filter((l) => l.status !== 'cancelled')
+      .reduce((sum, l) => sum + (changed.get(String(l.id)) ?? (Number(l.line_total) || 0)), 0)
+    const paid = Number(reservation.total_paid) || 0
+    if (newTotal + 0.005 < paid) {
+      return failure(`El total (${newTotal.toFixed(2)} €) no puede ser menor que lo ya cobrado (${paid.toFixed(2)} €)`, 'VALIDATION')
+    }
+
+    for (const c of changes) {
+      const { error } = await ctx.adminClient
+        .from('product_reservation_lines')
+        .update({ unit_price: c.unitPrice, line_total: c.lineTotal })
+        .eq('id', c.line.id)
+      if (error) return failure(error.message || 'Error al guardar el precio', 'INTERNAL')
+    }
+
+    const oldTotal = Number(reservation.total) || 0
+    const detail = changes
+      .map((c) => `${Number(c.line.unit_price).toFixed(2)} € → ${c.unitPrice.toFixed(2)} €`)
+      .join(' · ')
+    return success({
+      id: input.id,
+      total: Math.round(newTotal * 100) / 100,
+      auditEntityId: String(input.id),
+      auditDescription: `Reserva ${reservation.reservation_number}: precio ${oldTotal.toFixed(2)} € → ${newTotal.toFixed(2)} € (${detail})`,
     })
   }
 )
