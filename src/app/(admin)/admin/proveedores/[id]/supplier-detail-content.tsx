@@ -189,10 +189,10 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
   const [selectedTailoringLabel, setSelectedTailoringLabel] = useState('')
   const [fabricSearchForLine, setFabricSearchForLine] = useState<string | null>(null)
   const [fabricSearchQuery, setFabricSearchQuery] = useState('')
-  const [fabricSearchResults, setFabricSearchResults] = useState<{ id: string; fabric_code: string | null; name: string }[]>([])
+  const [fabricSearchResults, setFabricSearchResults] = useState<{ id: string; fabric_code: string | null; name: string; supplier_reference: string | null; price_per_meter: number | null }[]>([])
   const [productSearchForLine, setProductSearchForLine] = useState<string | null>(null)
   const [productSearchQuery, setProductSearchQuery] = useState('')
-  const [productSearchResults, setProductSearchResults] = useState<{ id: string; sku: string; name: string; main_image_url: string | null; images: string[] | null }[]>([])
+  const [productSearchResults, setProductSearchResults] = useState<{ id: string; sku: string; name: string; supplier_reference: string | null; cost_price: number | null; main_image_url: string | null; images: string[] | null }[]>([])
   const [newFabricForLine, setNewFabricForLine] = useState<string | null>(null)
   const [newFabricForm, setNewFabricForm] = useState({ name: '', fabric_code: '', reference: '', unit: 'meters' })
   const fabricSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1417,7 +1417,17 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                                     {fabricSearchResults.map((f) => (
                                       <li key={f.id}>
                                         <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-muted"
-                                          onClick={() => { updateOrderLine(line.tempId, { fabric_id: f.id, description: f.name }); setFabricSearchForLine(null); setFabricSearchQuery('') }}>
+                                          onClick={() => {
+                                            // Igual que en productos: referencia y precio por metro de la ficha del tejido
+                                            updateOrderLine(line.tempId, {
+                                              fabric_id: f.id,
+                                              description: f.name,
+                                              reference: f.supplier_reference?.trim() || f.fabric_code || '',
+                                              unit_price: f.price_per_meter != null ? String(f.price_per_meter) : '',
+                                            })
+                                            setFabricSearchForLine(null)
+                                            setFabricSearchQuery('')
+                                          }}>
                                           {f.fabric_code ? `${f.fabric_code} — ` : ''}{f.name}
                                         </button>
                                       </li>
@@ -1498,7 +1508,15 @@ export function SupplierDetailContent({ supplier }: { supplier: any }) {
                                         <li key={p.id}>
                                           <button type="button" className="w-full min-w-[300px] px-3 py-1.5 text-left hover:bg-muted flex items-center gap-3"
                                             onClick={async () => {
-                                              updateOrderLine(line.tempId, { product_id: p.id, description: p.name, image_url: img || null })
+                                              // Referencia y precio salen de la ficha del producto
+                                              // (referencia de proveedor y coste); se pueden cambiar a mano.
+                                              updateOrderLine(line.tempId, {
+                                                product_id: p.id,
+                                                description: p.name,
+                                                image_url: img || null,
+                                                reference: p.supplier_reference?.trim() || p.sku || '',
+                                                unit_price: p.cost_price != null ? String(p.cost_price) : '',
+                                              })
                                               setProductSearchForLine(null)
                                               setProductSearchQuery('')
                                               await loadProductVariants(p.id, line.tempId)

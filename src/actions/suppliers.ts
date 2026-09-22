@@ -24,14 +24,14 @@ export const listSupplierOrders = protectedAction<void, any[]>(
 /** Busca tejidos de un proveedor por nombre (ilike). */
 export const searchSupplierFabrics = protectedAction<
   { supplierId: string; query?: string },
-  { id: string; name: string; fabric_code: string | null; unit: string | null }[]
+  { id: string; name: string; fabric_code: string | null; supplier_reference: string | null; price_per_meter: number | null; unit: string | null }[]
 >(
   { permission: 'suppliers.view' },
   async (ctx, { supplierId, query }) => {
     if (!supplierId?.trim()) return success([])
     let q = ctx.adminClient
       .from('fabrics')
-      .select('id, name, fabric_code, unit')
+      .select('id, name, fabric_code, supplier_reference, price_per_meter, unit')
       .eq('supplier_id', supplierId.trim())
       .eq('is_active', true)
       .order('name', { ascending: true })
@@ -41,14 +41,14 @@ export const searchSupplierFabrics = protectedAction<
     }
     const { data, error } = await q
     if (error) return failure(error.message)
-    return success((data ?? []) as { id: string; name: string; fabric_code: string | null; unit: string | null }[])
+    return success((data ?? []) as { id: string; name: string; fabric_code: string | null; supplier_reference: string | null; price_per_meter: number | null; unit: string | null }[])
   }
 )
 
 /** Busca productos para pedido a proveedor: primero los del proveedor, luego el resto. */
 export const searchSupplierProducts = protectedAction<
   { supplierId: string; query?: string },
-  { id: string; name: string; sku: string; cost_price: number | null; main_image_url: string | null; images: string[] | null; supplier_id: string | null }[]
+  { id: string; name: string; sku: string; supplier_reference: string | null; cost_price: number | null; main_image_url: string | null; images: string[] | null; supplier_id: string | null }[]
 >(
   { permission: 'suppliers.view' },
   async (ctx, { supplierId, query }) => {
@@ -58,7 +58,7 @@ export const searchSupplierProducts = protectedAction<
     // Buscar en TODOS los productos activos (no filtrar por supplier_id)
     let q = ctx.adminClient
       .from('products')
-      .select('id, name, sku, cost_price, main_image_url, images, supplier_id')
+      .select('id, name, sku, supplier_reference, cost_price, main_image_url, images, supplier_id')
       .eq('is_active', true)
       .order('name', { ascending: true })
       .limit(30)
@@ -69,7 +69,7 @@ export const searchSupplierProducts = protectedAction<
 
     const { data, error } = await q
     if (error) return failure(error.message)
-    const rows = (data ?? []) as { id: string; name: string; sku: string; cost_price: number | null; main_image_url: string | null; images: string[] | null; supplier_id: string | null }[]
+    const rows = (data ?? []) as { id: string; name: string; sku: string; supplier_reference: string | null; cost_price: number | null; main_image_url: string | null; images: string[] | null; supplier_id: string | null }[]
 
     // Ordenar: primero los del proveedor actual, luego el resto
     const sid = supplierId.trim()

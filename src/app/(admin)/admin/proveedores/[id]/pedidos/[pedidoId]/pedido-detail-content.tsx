@@ -288,13 +288,15 @@ export function PedidoDetailContent({
     }])
   }
 
-  async function addProductLine(p: { id: string; name: string; sku: string; cost_price: number | null }) {
+  // Referencia y precio salen de la ficha del producto (referencia de proveedor
+  // y coste); se pueden cambiar a mano en la propia línea.
+  async function addProductLine(p: { id: string; name: string; sku: string; supplier_reference?: string | null; cost_price: number | null }) {
     const variants = await loadVariants(p.id)
     setEditLines((prev) => [...prev, {
       key: makeKey(), id: null, type: 'product',
       fabric_id: null, product_id: p.id,
       product_variant_id: variants.length === 1 ? variants[0].id : null,
-      description: p.name, reference: p.sku || '', quantity: '1', unit: 'unidades',
+      description: p.name, reference: p.supplier_reference?.trim() || p.sku || '', quantity: '1', unit: 'unidades',
       unit_price: p.cost_price != null ? String(p.cost_price) : '', quantity_received: '0', prevReceived: 0,
     }])
     setAddSearchType(null)
@@ -302,12 +304,12 @@ export function PedidoDetailContent({
     setAddSearchResults([])
   }
 
-  function addFabricLine(f: { id: string; name: string; fabric_code: string | null; unit: string | null }) {
+  function addFabricLine(f: { id: string; name: string; fabric_code: string | null; supplier_reference?: string | null; price_per_meter?: number | null; unit: string | null }) {
     setEditLines((prev) => [...prev, {
       key: makeKey(), id: null, type: 'fabric',
       fabric_id: f.id, product_id: null, product_variant_id: null,
-      description: f.name, reference: f.fabric_code || '', quantity: '1', unit: f.unit || 'metros',
-      unit_price: '', quantity_received: '0', prevReceived: 0,
+      description: f.name, reference: f.supplier_reference?.trim() || f.fabric_code || '', quantity: '1', unit: f.unit || 'metros',
+      unit_price: f.price_per_meter != null ? String(f.price_per_meter) : '', quantity_received: '0', prevReceived: 0,
     }])
     setAddSearchType(null)
     setAddSearchQuery('')
