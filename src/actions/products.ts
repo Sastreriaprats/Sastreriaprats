@@ -1219,11 +1219,11 @@ export async function getPendingTransfersCount() {
 }
 
 export const listTransferCandidates = protectedAction<
-  { warehouseId: string; category?: 'all' | 'sastreria' | 'boutique' | 'tejidos'; search?: string; limit?: number },
+  { warehouseId: string; category?: 'all' | 'sastreria' | 'boutique' | 'tejidos'; season?: string | null; brand?: string | null; search?: string; limit?: number },
   any[]
 >(
   { permission: ['products.view', 'stock.view'], auditModule: 'stock' },
-  async (ctx, { warehouseId, category = 'all', search, limit = 300 }) => {
+  async (ctx, { warehouseId, category = 'all', season, brand, search, limit = 300 }) => {
     if (!warehouseId) return failure('Almacén de origen obligatorio', 'VALIDATION')
     const max = Math.min(Math.max(Number(limit) || 300, 1), 1500)
 
@@ -1257,7 +1257,7 @@ export const listTransferCandidates = protectedAction<
         .from('product_variants')
         .select(`
           id, variant_sku, product_id, is_active,
-          products!inner(id, sku, name, product_type, is_active)
+          products!inner(id, sku, name, product_type, season, brand, is_active)
         `)
         .in('id', batch)
         .eq('is_active', true)
@@ -1276,6 +1276,8 @@ export const listTransferCandidates = protectedAction<
         product_sku: v.products?.sku || '',
         product_name: v.products?.name || '',
         product_type: v.products?.product_type || '',
+        season: v.products?.season || '',
+        brand: v.products?.brand || '',
         available: stockMap.get(String(v.id)) || 0,
       }))
       .filter((r: any) => r.available > 0)
@@ -1285,6 +1287,11 @@ export const listTransferCandidates = protectedAction<
         if (category === 'sastreria') return !['boutique', 'tailoring_fabric'].includes(r.product_type)
         return true
       })
+      // Temporada y marca: un traspaso masivo casi nunca es "todo el almacén",
+      // es "la temporada que sale" o "la marca que se retira" (petición de
+      // Mónica, 22-sep-2026: el masivo solo dejaba acotar por categoría).
+      .filter((r: any) => (season ? r.season === season : true))
+      .filter((r: any) => (brand ? r.brand === brand : true))
       .filter((r: any) => {
         if (!s) return true
         return normalizeSearchTerm(`${r.product_name} ${r.product_sku} ${r.variant_sku}`).includes(s)
@@ -1292,6 +1299,26 @@ export const listTransferCandidates = protectedAction<
       .sort((a: any, b: any) => `${a.product_name} ${a.variant_sku}`.localeCompare(`${b.product_name} ${b.variant_sku}`))
 
     return success(rows.slice(0, max))
+  }
+)
+
+/**
+ * Temporadas y marcas con producto activo. Lo usan el traspaso masivo y el alta
+ * de inventario para acotar sin tener que mover el almacén entero.
+ */
+export const listSeasonsAndBrands = protectedAction<void, { seasons: string[]; brands: string[] }>(
+  { permission: ['products.view', 'stock.view'], auditModule: 'stock' },
+  async (ctx) => {
+    const rows = await readAllPaged<{ season: string | null; brand: string | null }>((f, t) => ctx.adminClient
+      .from('products')
+      .select('season, brand')
+      .eq('is_active', true)
+      .order('id', { ascending: true })
+      .range(f, t), 'listSeasonsAndBrands')
+
+    const seasons = [...new Set(rows.map((r) => (r.season || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+    const brands = [...new Set(rows.map((r) => (r.brand || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+    return success({ seasons, brands })
   }
 )
 
@@ -1404,8 +1431,15 @@ export const searchTransferProducts = protectedAction<
           stocks,
         }
       })
-      .filter((r) => r.available > 0)
-      .sort((a, b) => `${a.product_name} ${a.variant_sku}`.localeCompare(`${b.product_name} ${b.variant_sku}`))
+      // NO se filtra por `available > 0`: escondiendo lo que está a 0 en origen,
+      // escanear una talla agotada decía "sin resultados" y el vendedor lo leía
+      // como "ese producto no existe" (caso Isma, 18-sep-2026). Ahora sale, con
+      // su stock real, y la UI lo muestra marcado y sin poder añadirlo.
+      .sort((a, b) => {
+        // Primero lo que sí se puede traspasar.
+        if ((a.available > 0) !== (b.available > 0)) return a.available > 0 ? -1 : 1
+        return `${a.product_name} ${a.variant_sku}`.localeCompare(`${b.product_name} ${b.variant_sku}`)
+      })
       .slice(0, max)
 
     return success(rows)

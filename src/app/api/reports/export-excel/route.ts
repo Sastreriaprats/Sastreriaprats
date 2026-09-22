@@ -13,6 +13,7 @@ const TAB_TITLES: Record<string, string> = {
   products: 'PRODUCTOS',
   clients: 'CLIENTES Y HORARIOS',
   expenses: 'GASTOS',
+  partners: 'INFORME PARA SOCIOS',
 }
 
 export async function POST(request: NextRequest) {
@@ -29,6 +30,7 @@ export async function POST(request: NextRequest) {
     storeFilterName, channelLabel, taxLabel,
     salesData, compareData, topProducts, clientsData,
     storeSales, employeeData, employeeStores, timePatternData, expensesData, expensesComparison,
+    partnersData,
   } = body
 
   const activeTab: string = typeof tab === 'string' && TAB_TITLES[tab] ? tab : 'store-sales'
@@ -54,6 +56,7 @@ export async function POST(request: NextRequest) {
       break
     case 'employees': sectionEmployees(rows, employeeData, employeeStores); break
     case 'expenses': sectionExpenses(rows, expensesData, expensesComparison); break
+    case 'partners': sectionPartners(rows, partnersData); break
   }
 
   const ws = XLSX.utils.aoa_to_sheet(rows)
@@ -287,5 +290,94 @@ function sectionExpenses(rows: Row[], data: AnyRec | null, comparison: AnyRec | 
     for (const t of recent) {
       rows.push([String(t.date ?? ''), String(t.category ?? ''), String(t.description ?? ''), num(t.total)])
     }
+  }
+}
+
+const CHANNEL_ES: Record<string, string> = { boutique: 'Boutique', sastreria: 'Sastrería', online: 'Online' }
+
+/**
+ * Informe para socios: un bloque por mes con ventas por tienda y canal (cobradas
+ * y sin cobrar), cobros de otros meses, gastos y beneficio.
+ */
+function sectionPartners(rows: Row[], partnersData: AnyRec | null | undefined) {
+  if (!partnersData) { rows.push(['Sin datos para el periodo']); return }
+  const totals = (partnersData.totals ?? {}) as AnyRec
+  rows.push(['RESUMEN DEL PERIODO'])
+  rows.push(['Ventas', Number(totals.sales ?? 0)])
+  rows.push(['  · Cobradas', Number(totals.collected ?? 0)])
+  rows.push(['  · Sin cobrar', Number(totals.pending ?? 0)])
+  rows.push(['Cobrado de ventas de otros meses', Number(totals.other_months ?? 0)])
+  rows.push(['Señales de reserva (anticipos)', Number(totals.reservation_advances ?? 0)])
+  rows.push(['Tarjetas regalo vendidas (a cuenta)', Number(totals.gift_cards ?? 0)])
+  rows.push(['Gastos', Number(totals.expenses ?? 0)])
+  rows.push(['BENEFICIO', Number(totals.profit ?? 0)])
+  rows.push([])
+
+  const months = Array.isArray(partnersData.months) ? (partnersData.months as AnyRec[]) : []
+  for (const m of months) {
+    const mTotals = (m.totals ?? {}) as AnyRec
+    const mRows = Array.isArray(m.rows) ? (m.rows as AnyRec[]) : []
+    const other = (m.other_months ?? {}) as AnyRec
+    const otherRows = Array.isArray(other.rows) ? (other.rows as AnyRec[]) : []
+    const expenses = (m.expenses ?? {}) as AnyRec
+    const expenseRows = Array.isArray(expenses.rows) ? (expenses.rows as AnyRec[]) : []
+    const advances = (m.reservation_advances ?? {}) as AnyRec
+    const gifts = (m.gift_cards ?? {}) as AnyRec
+    const hasActivity = mRows.length || otherRows.length || Number(expenses.total ?? 0)
+      || Number(advances.total ?? 0) || Number(gifts.total ?? 0)
+    if (!hasActivity) continue
+
+    rows.push([String(m.label ?? m.key ?? '').toUpperCase()])
+    rows.push(['Tienda', 'Canal', 'Nº', 'Venta del mes', 'Cobrado', 'Sin cobrar'])
+    for (const r of mRows) {
+      rows.push([
+        r.channel === 'online' ? 'Tienda online' : String(r.store_name ?? ''),
+        CHANNEL_ES[String(r.channel)] ?? String(r.channel ?? ''),
+        Number(r.count ?? 0),
+        Number(r.sales ?? 0),
+        Number(r.collected ?? 0),
+        Number(r.pending ?? 0),
+      ])
+    }
+    rows.push(['TOTAL VENTAS DEL MES', '', '', Number(mTotals.sales ?? 0), Number(mTotals.collected ?? 0), Number(mTotals.pending ?? 0)])
+    rows.push([])
+
+    rows.push(['COBRADO ESTE MES DE VENTAS DE OTROS MESES (no suma a las ventas del mes)'])
+    if (otherRows.length === 0) {
+      rows.push(['Sin cobros de otros meses'])
+    } else {
+      rows.push(['Mes de la venta', 'Tienda', 'Canal', 'Cobrado ahora'])
+      for (const r of otherRows) {
+        rows.push([
+          String(r.origin_month ?? ''),
+          String(r.store_name ?? ''),
+          CHANNEL_ES[String(r.channel)] ?? String(r.channel ?? ''),
+          Number(r.amount ?? 0),
+        ])
+      }
+      rows.push(['TOTAL DE OTROS MESES', '', '', Number(other.total ?? 0)])
+    }
+    if (Number(advances.total ?? 0) > 0) {
+      rows.push(['Señales de reserva cobradas (anticipos, aún no son venta)', Number(advances.total ?? 0)])
+    }
+    if (Number(gifts.total ?? 0) > 0) {
+      rows.push(['Tarjetas regalo vendidas (a cuenta, aún no son venta)', Number(gifts.total ?? 0)])
+    }
+    rows.push([])
+
+    rows.push(['GASTOS DEL MES (facturas de proveedor con fecha del mes)'])
+    if (expenseRows.length === 0) {
+      rows.push(['Sin facturas de proveedor'])
+    } else {
+      rows.push(['Tienda', 'Facturas', 'Importe'])
+      for (const r of expenseRows) {
+        rows.push([String(r.store_name ?? ''), Number(r.count ?? 0), Number(r.amount ?? 0)])
+      }
+      rows.push(['TOTAL GASTOS', Number(expenses.count ?? 0), Number(expenses.total ?? 0)])
+    }
+    rows.push([])
+    rows.push(['BENEFICIO DEL MES', Number(m.profit ?? 0)])
+    rows.push([])
+    rows.push([])
   }
 }

@@ -30,7 +30,7 @@ type ListResult<T> = { data: T[]; total: number; page: number; pageSize: number 
 const RESERVATION_SELECT = `
   id, reservation_number, client_id, store_id,
   quantity, unit_price, total, total_paid, payment_status,
-  status, notes, reason, expires_at,
+  status, delivery_status, department, notes, reason, expires_at,
   cancelled_at, cancelled_reason,
   created_by, employee_id, created_at, updated_at,
   client:clients ( id, client_code, full_name, first_name, last_name, phone ),
@@ -81,6 +81,29 @@ export const listReservations = protectedAction<ListReservationsInput, ListResul
     // paginación seguirían contando las pagadas y el Excel las arrastraría.
     if (input.excludePaid) {
       query = query.neq('payment_status', 'paid')
+    }
+    if (input.department) query = query.eq('department', input.department)
+    if (input.delivery) query = query.eq('delivery_status', input.delivery)
+    // Vista combinada pago + entrega (petición de Mónica, 22-sep-2026): saber de
+    // un vistazo quién tiene el género en casa sin pagar y quién lo tiene aquí.
+    // Se filtra en SERVIDOR para que el contador, la paginación y el Excel
+    // hablen de lo mismo que la tabla.
+    if (input.situation) {
+      const cancelled = ['cancelled', 'expired']
+      switch (input.situation) {
+        case 'en_tienda_sin_pagar':
+          query = query.eq('delivery_status', 'pending').neq('payment_status', 'paid').not('status', 'in', `(${cancelled.join(',')})`)
+          break
+        case 'en_casa_sin_pagar':
+          query = query.in('delivery_status', ['partial', 'delivered']).neq('payment_status', 'paid')
+          break
+        case 'pagada_sin_recoger':
+          query = query.eq('delivery_status', 'pending').eq('payment_status', 'paid').not('status', 'in', `(${cancelled.join(',')})`)
+          break
+        case 'cumplida':
+          query = query.eq('delivery_status', 'delivered').eq('payment_status', 'paid')
+          break
+      }
     }
     if (input.clientId) query = query.eq('client_id', input.clientId)
     if (input.storeId) query = query.eq('store_id', input.storeId)
@@ -218,6 +241,16 @@ export const createReservation = protectedAction<CreateReservationInput, CreateR
     const result = data as CreateReservationResult | null
     if (!result?.id) return failure('Respuesta inválida del servidor', 'INTERNAL')
 
+    // `department` es solo clasificación (boutique/sastrería) y la RPC no lo
+    // recibe: se marca aquí en vez de reescribir rpc_create_reservation entera.
+    // El dinero de la reserva sigue entrando SIEMPRE por boutique.
+    if (input.department && input.department !== 'boutique') {
+      await ctx.adminClient
+        .from('product_reservations')
+        .update({ department: input.department })
+        .eq('id', result.id)
+    }
+
     return success({
       id: result.id,
       reservation_number: result.reservation_number,
@@ -308,6 +341,8 @@ export const updateReservation = protectedAction<UpdateReservationInput, { id: s
     if (input.notes !== undefined) updates.notes = input.notes
     if (input.reason !== undefined) updates.reason = input.reason
     if (input.expires_at !== undefined) updates.expires_at = input.expires_at
+    if (input.department !== undefined) updates.department = input.department
+    if (input.store_id !== undefined) updates.store_id = input.store_id
 
     const { data, error } = await ctx.adminClient
       .from('product_reservations')

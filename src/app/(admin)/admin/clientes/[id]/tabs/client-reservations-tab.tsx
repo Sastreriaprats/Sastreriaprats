@@ -7,14 +7,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Loader2, ShoppingBag } from 'lucide-react'
 import { listReservations } from '@/actions/reservations'
 import { formatCurrency, formatDate } from '@/lib/utils'
-
-const STATUS_BADGE: Record<string, { label: string; className: string }> = {
-  active:        { label: 'Activa',            className: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
-  pending_stock: { label: 'Pendiente stock',   className: 'bg-amber-100 text-amber-800 border-amber-200' },
-  fulfilled:     { label: 'Cumplida',          className: 'bg-sky-100 text-sky-800 border-sky-200' },
-  cancelled:     { label: 'Cancelada',         className: 'bg-slate-100 text-slate-700 border-slate-200' },
-  expired:       { label: 'Expirada',          className: 'bg-rose-100 text-rose-800 border-rose-200' },
-}
+// Mismo estado combinado (pago × entrega) que el listado de Reservas, para que
+// la ficha del cliente no diga "Activa" de una reserva ya cobrada o ya entregada.
+import { getReservationSituation, getReservationDeliveryLabel } from '@/lib/reservations/situation'
 
 function summarizeLines(lines: any[] | undefined): { text: string; units: number } {
   if (!Array.isArray(lines) || lines.length === 0) return { text: '—', units: 0 }
@@ -72,7 +67,7 @@ export function ClientReservationsTab({ clientId }: { clientId: string }) {
         <TableBody>
           {reservations.map((r: any) => {
             const summary = summarizeLines(r.lines)
-            const badge = STATUS_BADGE[r.status] ?? { label: r.status ?? '—', className: 'bg-gray-100 text-gray-700' }
+            const badge = getReservationSituation(r)
             const pending = Math.max(0, Number(r.total ?? 0) - Number(r.total_paid ?? 0))
             return (
               <TableRow
@@ -87,6 +82,9 @@ export function ClientReservationsTab({ clientId }: { clientId: string }) {
                 <TableCell className="text-right">{summary.units}</TableCell>
                 <TableCell>
                   <Badge className={`text-xs border ${badge.className}`} variant="outline">{badge.label}</Badge>
+                  <div className="text-[11px] text-muted-foreground mt-0.5">
+                    {getReservationDeliveryLabel(r.delivery_status)}
+                  </div>
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="text-sm font-medium">{formatCurrency(Number(r.total ?? 0))}</div>

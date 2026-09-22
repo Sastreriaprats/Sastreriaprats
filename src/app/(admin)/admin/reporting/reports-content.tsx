@@ -11,10 +11,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { getPartnersReport, type PartnersReport } from '@/actions/partners-report'
+import { PartnersTab } from './partners-tab'
 import {
   TrendingUp, TrendingDown, DollarSign, Users, ShoppingBag, Scissors,
   BarChart3, FileSpreadsheet, FileText, Loader2, Store, UserCog, Clock, Wallet,
-  Flame, Star, Receipt, Layers,
+  Flame, Star, Receipt, Layers, Landmark,
 } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
 import { getSalesReport, getComparePeriods, getTopProducts, getClientsAnalytics, getClientsAdvancedAnalytics, getStoreSalesReport, getSalesByEmployee, getSalesByTimePattern, getExpensesReport, getExpensesComparison, type ReportChannel, type TaxMode, type ClientsAdvancedAnalytics, type StoreSalesReport, type StoreSalesStoreRow, type TailoringCategoryKey } from '@/actions/reports'
@@ -132,6 +134,7 @@ export function ReportsContent() {
   const [employeeCommissions, setEmployeeCommissions] = useState<EmployeeCommission[]>([])
   const [groupBonuses, setGroupBonuses] = useState<GroupBonusResult[]>([])
   const [timePatternData, setTimePatternData] = useState<TimePatternData | null>(null)
+  const [partnersData, setPartnersData] = useState<PartnersReport | null>(null)
   const [expensesData, setExpensesData] = useState<ExpensesData | null>(null)
   const [expensesComparison, setExpensesComparison] = useState<ExpensesComparison | null>(null)
   const [isExporting, setIsExporting] = useState(false)
@@ -176,7 +179,7 @@ export function ReportsContent() {
       const prevStartStr = prevStart.toISOString().split('T')[0]
       const prevEndStr = prevEnd.toISOString().split('T')[0]
 
-      const [salesRes, compareRes, productsRes, clientsRes, clientsAdvRes, storeSalesRes, employeeRes, timeRes, expensesRes, expCompRes, commissionsRes] = await Promise.all([
+      const [salesRes, compareRes, productsRes, clientsRes, clientsAdvRes, storeSalesRes, employeeRes, timeRes, expensesRes, expCompRes, commissionsRes, partnersRes] = await Promise.all([
         getSalesReport({ start_date: start, end_date: end, store_id: storeId, channel, group_by: groupBy, tax_mode }),
         getComparePeriods({
           current_start: start, current_end: end,
@@ -194,6 +197,9 @@ export function ReportsContent() {
         getExpensesReport({ start_date: start, end_date: end, tax_mode }),
         getExpensesComparison({ current_start: start, current_end: end, previous_start: prevStartStr, previous_end: prevEndStr, tax_mode }),
         getEmployeeCommissions({ start_date: start, end_date: end }),
+        // Informe para socios: por DEVENGO y mes a mes, distinto criterio que el
+        // resto de pestañas (que miden sastrería por cobros). Va aparte a propósito.
+        getPartnersReport({ start_date: start, end_date: end, tax_mode }),
       ])
 
       if (salesRes.success) setSalesData(salesRes.data)
@@ -207,6 +213,7 @@ export function ReportsContent() {
       if (expensesRes.success) setExpensesData(expensesRes.data)
       if (expCompRes.success) setExpensesComparison(expCompRes.data)
       if (commissionsRes.success) { setEmployeeCommissions(commissionsRes.data.employees); setGroupBonuses(commissionsRes.data.groupBonuses) }
+      if (partnersRes.success) setPartnersData(partnersRes.data)
     } catch (err) {
       console.error('[ReportsContent fetchAll]', err)
       toast.error('Error al cargar los informes')
@@ -343,6 +350,7 @@ export function ReportsContent() {
     clientsData,
     clientsAdvanced,
     storeSales,
+    partnersData,
     employeeData,
     employeeStores: storeFilter === 'all' ? employeeStores : null,
     timePatternData,
@@ -606,6 +614,7 @@ export function ReportsContent() {
               <TabsTrigger value="products" className="gap-1"><ShoppingBag className="h-4 w-4" /> 3 · Productos</TabsTrigger>
               <TabsTrigger value="clients" className="gap-1"><Users className="h-4 w-4" /> 4 · Clientes y horarios</TabsTrigger>
               <TabsTrigger value="expenses" className="gap-1"><Wallet className="h-4 w-4" /> 5 · Gastos</TabsTrigger>
+              <TabsTrigger value="partners" className="gap-1"><Landmark className="h-4 w-4" /> 6 · Socios</TabsTrigger>
             </TabsList>
 
             <div className="mt-6">
@@ -691,6 +700,7 @@ export function ReportsContent() {
               </TabsContent>
               <TabsContent value="employees"><EmployeeTab data={employeeData} storeBreakdown={employeeStoreBreakdown} stores={storeFilter === 'all' ? employeeStores : null} commissions={employeeCommissions} groupBonuses={groupBonuses} /></TabsContent>
               <TabsContent value="expenses"><ExpensesTab data={expensesData} comparison={expensesComparison} /></TabsContent>
+              <TabsContent value="partners"><PartnersTab data={partnersData} /></TabsContent>
             </div>
           </Tabs>
         </>

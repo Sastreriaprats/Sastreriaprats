@@ -940,6 +940,11 @@ export const productReservations = pgTable('product_reservations', {
   totalPaid: decimal('total_paid', { precision: 12, scale: 2 }).default('0').notNull(),
   paymentStatus: text('payment_status').default('pending').notNull(),
   status: reservationStatusEnum('status').default('active').notNull(),
+  // Migración 289. `department` solo clasifica (boutique/sastreria): el dinero de
+  // una reserva entra siempre por boutique. `deliveryStatus` lo calcula el
+  // trigger fn_recalc_reservation_header a partir del estado de las líneas.
+  department: text('department').default('boutique').notNull(),
+  deliveryStatus: text('delivery_status').default('pending').notNull(),
   notes: text('notes'),
   reason: text('reason'),
   expiresAt: timestamp('expires_at', { withTimezone: true }),
@@ -1043,17 +1048,25 @@ export const supplierDeliveryNoteLines = pgTable('supplier_delivery_note_lines',
 
 export const inventories = pgTable('inventories', {
   id: uuid('id').primaryKey().defaultRandom(),
+  reference: varchar('reference', { length: 30 }),
   warehouseId: uuid('warehouse_id').notNull().references(() => warehouses.id, { onDelete: 'restrict' }),
   inventoryType: text('inventory_type').default('full'),
   categoryFilter: uuid('category_filter').references(() => productCategories.id, { onDelete: 'set null' }),
+  seasonFilter: text('season_filter'),
+  brandFilter: text('brand_filter'),
   status: text('status').default('in_progress'),
   totalItemsCounted: integer('total_items_counted').default(0),
   totalDifferences: integer('total_differences').default(0),
   totalValueDifference: decimal('total_value_difference', { precision: 12, scale: 2 }).default('0.00'),
+  totalUnitsExpected: integer('total_units_expected').default(0).notNull(),
+  totalUnitsCounted: integer('total_units_counted').default(0).notNull(),
   startedBy: uuid('started_by').references(() => profiles.id, { onDelete: 'set null' }),
   completedBy: uuid('completed_by').references(() => profiles.id, { onDelete: 'set null' }),
   startedAt: timestamp('started_at', { withTimezone: true }).defaultNow(),
   completedAt: timestamp('completed_at', { withTimezone: true }),
+  // Cuándo se dejó el stock igual a lo contado (null = el recuento es solo informe).
+  appliedAt: timestamp('applied_at', { withTimezone: true }),
+  appliedBy: uuid('applied_by').references(() => profiles.id, { onDelete: 'set null' }),
   notes: text('notes'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -1063,13 +1076,21 @@ export const inventoryLines = pgTable('inventory_lines', {
   id: uuid('id').primaryKey().defaultRandom(),
   inventoryId: uuid('inventory_id').notNull().references(() => inventories.id, { onDelete: 'cascade' }),
   productVariantId: uuid('product_variant_id').notNull().references(() => productVariants.id, { onDelete: 'restrict' }),
-  expectedQuantity: integer('expected_quantity').notNull(),
+  expectedQuantity: integer('expected_quantity').default(0).notNull(),
   countedQuantity: integer('counted_quantity'),
+  // GENERADA en la BD (counted_quantity - expected_quantity): NUNCA escribirla,
+  // ni en INSERT ni en UPDATE. Ver [[columnas-generadas-insert]].
   difference: integer('difference'),
+  // Coste congelado al abrir el inventario, para valorar la diferencia aunque
+  // luego cambie la ficha del producto.
+  unitCost: decimal('unit_cost', { precision: 10, scale: 2 }),
+  // Contada y NO esperada en este almacén: el descuadre que hay que mirar.
+  wasExtra: boolean('was_extra').default(false).notNull(),
   reason: text('reason'),
   countedBy: uuid('counted_by').references(() => profiles.id, { onDelete: 'set null' }),
   countedAt: timestamp('counted_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
 // ========== TABLAS 003b: PEDIDOS DE SASTRERÍA ==========

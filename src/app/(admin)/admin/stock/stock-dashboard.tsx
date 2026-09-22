@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Package, AlertTriangle, TrendingDown, Truck, Plus, Warehouse, ArrowLeftRight, ClipboardList, Download, Loader2, Bookmark } from 'lucide-react'
+import { Package, AlertTriangle, TrendingDown, Truck, Plus, Warehouse, ArrowLeftRight, ClipboardList, Download, Loader2, Bookmark, ScanBarcode } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -18,9 +18,10 @@ import { FabricsTab } from './tabs/fabrics-tab'
 import { WarehousesTab } from './tabs/warehouses-tab'
 import { TransfersTab } from './tabs/transfers-tab'
 import { ReservationsTab } from './tabs/reservations-tab'
+import { InventoriesTab } from './tabs/inventories-tab'
 import { AlbaranesContent } from '../almacen/albaranes/albaranes-content'
 
-const VALID_TABS = ['productos', 'almacenes', 'tejidos', 'movimientos', 'traspasos', 'reservas', 'albaranes']
+const VALID_TABS = ['productos', 'almacenes', 'tejidos', 'movimientos', 'traspasos', 'reservas', 'inventario', 'albaranes']
 
 export function StockDashboard() {
   const router = useRouter()
@@ -217,6 +218,7 @@ export function StockDashboard() {
               <Badge variant="destructive" className="ml-1 h-4 min-w-4 px-1 text-[10px]">{pendingReservationsCount}</Badge>
             )}
           </TabsTrigger>
+          <TabsTrigger value="inventario" className="gap-1"><ScanBarcode className="h-4 w-4" /> Inventario</TabsTrigger>
           <TabsTrigger value="albaranes" className="gap-1"><ClipboardList className="h-4 w-4" /> Albaranes</TabsTrigger>
         </TabsList>
         <div className="mt-6">
@@ -229,6 +231,9 @@ export function StockDashboard() {
           </TabsContent>
           <TabsContent value="reservas">
             <ReservationsTab />
+          </TabsContent>
+          <TabsContent value="inventario">
+            <InventoriesTab />
           </TabsContent>
           <TabsContent value="albaranes">
             <AlbaranesContent />

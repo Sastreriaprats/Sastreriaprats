@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFoo
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Loader2, Plus, ChevronLeft, ChevronRight, X, Check, Pencil, Bookmark, Clock, Printer, Euro, Banknote, CreditCard, Smartphone, ArrowRightLeft, Eye, RotateCcw, FileText, Download } from 'lucide-react'
+import { Loader2, Plus, ChevronLeft, ChevronRight, X, Check, Pencil, Bookmark, Clock, Printer, Euro, Banknote, CreditCard, Smartphone, ArrowRightLeft, Eye, RotateCcw, FileText, Download, Home, Store, PackageCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import { todayLocalISODate } from '@/lib/dates'
@@ -29,11 +29,17 @@ import {
   addReservationPayment,
 } from '@/actions/reservations'
 import { createInvoiceFromReservationAction } from '@/actions/accounting'
+import { listPhysicalWarehouses } from '@/actions/products'
+import {
+  getReservationSituation,
+  getReservationDeliveryLabel,
+  RESERVATION_DEPARTMENT_LABELS,
+} from '@/lib/reservations/situation'
 import { ReservationFormDialog } from '@/components/reservations/reservation-form-dialog'
 import { generateReservationPdf, printReservationPdf, type ReservationTicketData } from '@/components/pos/ticket-pdf'
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
 import { createPrintReporter } from '@/lib/client-telemetry'
-import type { ReservationPaymentMethod } from '@/lib/validations/reservations'
+import type { ReservationPaymentMethod, ReservationDepartment } from '@/lib/validations/reservations'
 import { usePermissions } from '@/hooks/use-permissions'
 
 const PAGE_SIZE = 20
@@ -45,6 +51,25 @@ const STATUS_LABELS: Record<string, string> = {
   fulfilled: 'Cumplidas',
   cancelled: 'Canceladas',
   expired: 'Expiradas',
+}
+
+/**
+ * Filtro por SITUACIÓN = pago × entrega, que es como lo mira la tienda
+ * (petición de Mónica, 22-sep-2026). Va aparte del filtro de estado porque
+ * responde a otra pregunta: "¿quién nos debe dinero y dónde está el género?".
+ */
+const SITUATION_LABELS: Record<string, string> = {
+  all: 'Cualquier situación',
+  en_tienda_sin_pagar: 'Sin pagar · producto en tienda',
+  en_casa_sin_pagar: 'Sin pagar · producto en casa del cliente',
+  pagada_sin_recoger: 'Pagada · pendiente de recoger',
+  cumplida: 'Cumplida (pagada y entregada)',
+}
+
+const DEPARTMENT_LABELS: Record<string, string> = {
+  all: 'Boutique y sastrería',
+  boutique: 'Boutique',
+  sastreria: 'Sastrería',
 }
 
 const STATUS_BADGE: Record<string, { label: string; className: string }> = {
@@ -77,6 +102,10 @@ type Reservation = {
   id: string
   reservation_number: string
   status: keyof typeof STATUS_BADGE
+  /** Situación del género (migración 289): 'pending' | 'partial' | 'delivered'. */
+  delivery_status?: 'pending' | 'partial' | 'delivered' | null
+  /** Clasificación boutique/sastrería. NO cambia a dónde va el dinero. */
+  department?: ReservationDepartment | null
   quantity: number | null
   total: number | string
   total_paid: number | string
@@ -150,6 +179,12 @@ export function ReservationsTab() {
   // Ocultar las ya cobradas: una reserva pagada sigue "activa" hasta que se
   // entrega, y para revisar lo pendiente de cobro estorban.
   const [excludePaid, setExcludePaid] = useState(false)
+  // Situación (pago × entrega), departamento y tienda: los tres filtran en
+  // SERVIDOR, para que el contador, la paginación y el Excel digan lo mismo.
+  const [situation, setSituation] = useState('all')
+  const [department, setDepartment] = useState('all')
+  const [storeFilter, setStoreFilter] = useState('all')
+  const [storeOptions, setStoreOptions] = useState<Array<{ id: string; name: string }>>([])
   const [exporting, setExporting] = useState(false)
   // ?rsearch= permite deep-link con el buscador precargado (p.ej. desde Cobros
   // pendientes: fila de reserva → esta pestaña filtrada por su número).
@@ -167,6 +202,8 @@ export function ReservationsTab() {
   const [editNotes, setEditNotes] = useState('')
   const [editReason, setEditReason] = useState('')
   const [editExpires, setEditExpires] = useState('')
+  const [editDepartment, setEditDepartment] = useState<ReservationDepartment>('boutique')
+  const [editStoreId, setEditStoreId] = useState<string>('')
   const [editSubmitting, setEditSubmitting] = useState(false)
   // Precio pactado por artículo (texto del input, id de línea → precio)
   const [editPrices, setEditPrices] = useState<Record<string, string>>({})
@@ -188,6 +225,11 @@ export function ReservationsTab() {
   const [invoicingId, setInvoicingId] = useState<string | null>(null)
 
   const [actioningLineId, setActioningLineId] = useState<string | null>(null)
+  // "El cliente se lo ha llevado": entrega el género de la reserva aunque no
+  // esté pagado (petición de Mónica, 22-sep-2026). Descuenta stock igual que la
+  // recogida normal y la deuda queda visible en la reserva (mig 263).
+  const [deliverTarget, setDeliverTarget] = useState<Reservation | null>(null)
+  const [delivering, setDelivering] = useState(false)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -196,6 +238,9 @@ export function ReservationsTab() {
         status: status as any,
         onlyPending: onlyPending || undefined,
         excludePaid: excludePaid || undefined,
+        situation: situation === 'all' ? undefined : (situation as any),
+        department: department === 'all' ? undefined : (department as any),
+        storeId: storeFilter === 'all' ? undefined : storeFilter,
         search: search.trim() || undefined,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
@@ -217,9 +262,26 @@ export function ReservationsTab() {
     } finally {
       setLoading(false)
     }
-  }, [page, status, onlyPending, excludePaid, search, dateFrom, dateTo])
+  }, [page, status, onlyPending, excludePaid, situation, department, storeFilter, search, dateFrom, dateTo])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  // Tiendas para el filtro: se derivan de los almacenes físicos, que es la misma
+  // fuente que usa el alta de reservas (no hay action propia de tiendas aquí).
+  useEffect(() => {
+    let cancelled = false
+    listPhysicalWarehouses()
+      .then((res) => {
+        if (cancelled || !res.success || !res.data) return
+        const seen = new Map<string, string>()
+        for (const w of res.data as Array<{ storeId?: string; storeName?: string }>) {
+          if (w.storeId && !seen.has(w.storeId)) seen.set(w.storeId, w.storeName || 'Tienda')
+        }
+        setStoreOptions([...seen].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)))
+      })
+      .catch(() => { /* el filtro de tienda es opcional: sin tiendas se oculta */ })
+    return () => { cancelled = true }
+  }, [])
 
   /**
    * Descarga a Excel TODO lo que cumple los filtros actuales, no solo la página
@@ -240,6 +302,9 @@ export function ReservationsTab() {
           status: status as any,
           onlyPending: onlyPending || undefined,
           excludePaid: excludePaid || undefined,
+          situation: situation === 'all' ? undefined : (situation as any),
+          department: department === 'all' ? undefined : (department as any),
+          storeId: storeFilter === 'all' ? undefined : storeFilter,
           search: search.trim() || undefined,
           dateFrom: dateFrom || undefined,
           dateTo: dateTo || undefined,
@@ -275,6 +340,9 @@ export function ReservationsTab() {
           'Pendiente (€)': Number(r.total ?? 0) - Number(r.total_paid ?? 0),
           'Estado de pago': PAYMENT_STATUS_BADGE[r.payment_status]?.label ?? r.payment_status,
           'Estado': STATUS_BADGE[r.status]?.label ?? r.status,
+          'Situación': getReservationSituation(r).label,
+          'Dónde está el producto': getReservationDeliveryLabel(r.delivery_status),
+          'Departamento': RESERVATION_DEPARTMENT_LABELS[r.department ?? 'boutique'] ?? 'Boutique',
           'Caduca': r.expires_at ? formatDate(r.expires_at) : '',
           'Vendedor': r.employee?.full_name || r.created_by_profile?.full_name || '',
           'Motivo': r.reason ?? '',
@@ -303,7 +371,9 @@ export function ReservationsTab() {
 
       // El nombre dice qué se está descargando: al abrirlo semanas después,
       // "reservas-activas" y "reservas-todas" no son lo mismo.
-      const sufijo = status === 'all' ? 'todas' : (STATUS_LABELS[status] ?? status).toLowerCase().replace(/\s+/g, '-')
+      const sufijo = situation !== 'all'
+        ? situation.replace(/_/g, '-')
+        : status === 'all' ? 'todas' : (STATUS_LABELS[status] ?? status).toLowerCase().replace(/\s+/g, '-')
       const nombre = `reservas-${sufijo}${excludePaid ? '-sin-pagadas' : ''}-${todayLocalISODate()}`
       await downloadExcelMulti([
         { name: 'Reservas', rows: cabecera },
@@ -337,6 +407,8 @@ export function ReservationsTab() {
     setEditNotes(r.notes ?? '')
     setEditReason(r.reason ?? '')
     setEditExpires(r.expires_at ? r.expires_at.slice(0, 10) : '')
+    setEditDepartment((r.department as ReservationDepartment) ?? 'boutique')
+    setEditStoreId(r.store?.id ?? '')
     // Precios de los artículos vivos: se editan solo con `reservations.edit_price`.
     const prices: Record<string, string> = {}
     for (const l of editablePriceLines(r)) prices[l.id] = String(Number(l.unit_price ?? 0).toFixed(2))
@@ -352,6 +424,8 @@ export function ReservationsTab() {
         notes: editNotes || null,
         reason: editReason || null,
         expires_at: editExpires ? new Date(editExpires).toISOString() : null,
+        department: editDepartment,
+        store_id: editStoreId || null,
       })
       if (!res.success) { toast.error(res.error || 'No se pudo actualizar la reserva'); return }
       // Los precios van en su propia llamada: otro permiso y sus propias reglas.
@@ -440,13 +514,40 @@ export function ReservationsTab() {
     try {
       const res = await fulfillReservationLine({ line_id: lineId, sale_id: null })
       if (!res.success) { toast.error(res.error || 'No se pudo marcar como cumplida'); return }
-      toast.success('Línea marcada como cumplida')
+      toast.success('Artículo entregado al cliente')
       fetchData()
     } catch (err) {
       console.error('Error marcando línea como cumplida:', err)
       toast.error('Error al marcar la línea como cumplida. Inténtalo de nuevo.')
     } finally {
       setActioningLineId(null)
+    }
+  }
+
+  const confirmDeliver = async () => {
+    if (!deliverTarget) return
+    const pendientes = (deliverTarget.lines || []).filter((l) => l.status === 'active')
+    if (pendientes.length === 0) { toast.error('No hay artículos pendientes de entregar'); return }
+    setDelivering(true)
+    try {
+      let ok = 0
+      for (const l of pendientes) {
+        const res = await fulfillReservationLine({ line_id: l.id, sale_id: null })
+        if (!res.success) { toast.error(res.error || 'No se pudo entregar un artículo'); break }
+        ok++
+      }
+      if (ok > 0) {
+        toast.success(ok === pendientes.length
+          ? 'Género entregado al cliente'
+          : `Entregados ${ok} de ${pendientes.length} artículos`)
+      }
+      setDeliverTarget(null)
+      fetchData()
+    } catch (err) {
+      console.error('Error entregando la reserva:', err)
+      toast.error('Error al entregar el género. Inténtalo de nuevo.')
+    } finally {
+      setDelivering(false)
     }
   }
 
@@ -616,6 +717,33 @@ export function ReservationsTab() {
               ))}
             </SelectContent>
           </Select>
+          <Select value={situation} onValueChange={(v) => { setSituation(v); setPage(0) }}>
+            <SelectTrigger className="w-64"><SelectValue placeholder="Situación" /></SelectTrigger>
+            <SelectContent>
+              {Object.entries(SITUATION_LABELS).map(([k, v]) => (
+                <SelectItem key={k} value={k}>{v}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={department} onValueChange={(v) => { setDepartment(v); setPage(0) }}>
+            <SelectTrigger className="w-44"><SelectValue placeholder="Departamento" /></SelectTrigger>
+            <SelectContent>
+              {Object.entries(DEPARTMENT_LABELS).map(([k, v]) => (
+                <SelectItem key={k} value={k}>{v}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {storeOptions.length > 1 && (
+            <Select value={storeFilter} onValueChange={(v) => { setStoreFilter(v); setPage(0) }}>
+              <SelectTrigger className="w-44"><SelectValue placeholder="Tienda" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas las tiendas</SelectItem>
+                {storeOptions.map((o) => (
+                  <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <div className="flex items-center gap-2">
             <Checkbox id="only-pending" checked={onlyPending} onCheckedChange={(v) => { setOnlyPending(Boolean(v)); setPage(0) }} />
             <Label htmlFor="only-pending" className="text-sm">Solo pendientes de stock</Label>
@@ -663,10 +791,11 @@ export function ReservationsTab() {
             <TableRow>
               <TableHead>Nº</TableHead>
               <TableHead>Cliente</TableHead>
+              <TableHead>Tienda</TableHead>
               <TableHead>Vendedor</TableHead>
               <TableHead>Productos</TableHead>
               <TableHead className="text-center">Uds</TableHead>
-              <TableHead>Estado</TableHead>
+              <TableHead>Situación</TableHead>
               <TableHead className="text-right">Total / Pagado</TableHead>
               <TableHead>Fecha</TableHead>
               <TableHead>Expira</TableHead>
@@ -676,19 +805,21 @@ export function ReservationsTab() {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={10} className="h-32 text-center">
+                <TableCell colSpan={11} className="h-32 text-center">
                   <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
                 </TableCell>
               </TableRow>
             ) : reservations.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
+                <TableCell colSpan={11} className="h-32 text-center text-muted-foreground">
                   Sin reservas
                 </TableCell>
               </TableRow>
             ) : reservations.map((r) => {
-              const badge = STATUS_BADGE[r.status] || { label: r.status, className: 'bg-slate-100 text-slate-700 border-slate-200' }
               const payBadge = PAYMENT_STATUS_BADGE[r.payment_status] || PAYMENT_STATUS_BADGE.pending
+              // Estado mostrado = pago × entrega: cobrar una reserva ya no la deja
+              // como "Activa" a secas, y se ve si el género está en casa del cliente.
+              const situationBadge = getReservationSituation(r)
               const totalNum = Number(r.total)
               const paidNum = Number(r.total_paid)
               const pendingNum = Math.max(0, totalNum - paidNum)
@@ -707,6 +838,15 @@ export function ReservationsTab() {
                   <TableCell className="align-top">
                     <div className="text-sm">{getClientName(r.client)}</div>
                     {r.client?.phone && <div className="text-xs text-muted-foreground font-mono">{r.client.phone}</div>}
+                  </TableCell>
+                  <TableCell className="align-top text-sm">
+                    <div className="flex items-center gap-1">
+                      <Store className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <span className="truncate">{r.store?.display_name || r.store?.name || '—'}</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {RESERVATION_DEPARTMENT_LABELS[r.department ?? 'boutique'] ?? 'Boutique'}
+                    </div>
                   </TableCell>
                   <TableCell className="align-top text-sm">
                     {r.employee?.full_name ?? r.created_by_profile?.full_name ?? '—'}
@@ -737,7 +877,7 @@ export function ReservationsTab() {
                                     size="sm"
                                     variant="ghost"
                                     className="h-6 w-6 p-0"
-                                    title="Marcar cumplida"
+                                    title="Entregar este artículo al cliente"
                                     disabled={actioningLineId !== null}
                                     onClick={() => markLineFulfilled(ln.id)}
                                   >
@@ -763,11 +903,16 @@ export function ReservationsTab() {
                   <TableCell className="text-center tabular-nums align-top">{getTotalQuantity(r)}</TableCell>
                   <TableCell className="align-top">
                     <div className="flex flex-col gap-1">
-                      <Badge variant="outline" className={`text-xs w-fit ${badge.className}`}>
-                        {r.status === 'pending_stock' && <Clock className="h-3 w-3 mr-0.5" />}
-                        {r.status === 'active' && <Bookmark className="h-3 w-3 mr-0.5" />}
-                        {badge.label}
+                      <Badge variant="outline" className={`text-xs w-fit ${situationBadge.className}`}>
+                        {situationBadge.key === 'pending_stock' && <Clock className="h-3 w-3 mr-0.5" />}
+                        {situationBadge.key === 'en_tienda_sin_pagar' && <Bookmark className="h-3 w-3 mr-0.5" />}
+                        {situationBadge.key === 'en_casa_sin_pagar' && <Home className="h-3 w-3 mr-0.5" />}
+                        {situationBadge.key === 'cumplida' && <PackageCheck className="h-3 w-3 mr-0.5" />}
+                        {situationBadge.label}
                       </Badge>
+                      {situationBadge.hint && (
+                        <span className="text-[11px] text-muted-foreground leading-tight">{situationBadge.hint}</span>
+                      )}
                       <Badge variant="outline" className={`text-xs w-fit ${payBadge.className}`}>
                         {payBadge.label}
                       </Badge>
@@ -808,6 +953,17 @@ export function ReservationsTab() {
                       {canPay && (
                         <Button size="sm" variant="outline" className="gap-1" onClick={() => openAddPayment(r)}>
                           <Euro className="h-3 w-3" /> Pago
+                        </Button>
+                      )}
+                      {activeLines.some((l) => l.status === 'active') && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-1"
+                          title="El cliente se lleva el género (aunque no esté pagado)"
+                          onClick={() => setDeliverTarget(r)}
+                        >
+                          <Home className="h-3 w-3" /> Entregar
                         </Button>
                       )}
                       {canEdit && (
@@ -883,7 +1039,7 @@ export function ReservationsTab() {
       <Dialog open={Boolean(viewing)} onOpenChange={(v) => { if (!v) setViewing(null) }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           {viewing && (() => {
-            const badge = STATUS_BADGE[viewing.status] || { label: viewing.status, className: 'bg-slate-100 text-slate-700 border-slate-200' }
+            const badge = getReservationSituation(viewing)
             const payBadge = PAYMENT_STATUS_BADGE[viewing.payment_status] || PAYMENT_STATUS_BADGE.pending
             const totalNum = Number(viewing.total)
             const paidNum = Number(viewing.total_paid)
@@ -905,12 +1061,17 @@ export function ReservationsTab() {
                 <div className="space-y-4 py-2">
                   <div className="flex flex-wrap gap-2">
                     <Badge variant="outline" className={`text-xs ${badge.className}`}>
-                      {viewing.status === 'pending_stock' && <Clock className="h-3 w-3 mr-0.5" />}
-                      {viewing.status === 'active' && <Bookmark className="h-3 w-3 mr-0.5" />}
+                      {badge.key === 'pending_stock' && <Clock className="h-3 w-3 mr-0.5" />}
+                      {badge.key === 'en_tienda_sin_pagar' && <Bookmark className="h-3 w-3 mr-0.5" />}
+                      {badge.key === 'en_casa_sin_pagar' && <Home className="h-3 w-3 mr-0.5" />}
+                      {badge.key === 'cumplida' && <PackageCheck className="h-3 w-3 mr-0.5" />}
                       {badge.label}
                     </Badge>
                     <Badge variant="outline" className={`text-xs ${payBadge.className}`}>
                       {payBadge.label}
+                    </Badge>
+                    <Badge variant="outline" className="text-xs">
+                      {getReservationDeliveryLabel(viewing.delivery_status)}
                     </Badge>
                   </div>
 
@@ -924,6 +1085,9 @@ export function ReservationsTab() {
                     <div className="rounded-md border bg-slate-50 px-3 py-2">
                       <div className="text-xs text-slate-500 uppercase tracking-wide">Tienda</div>
                       <div className="font-medium">{viewing.store?.display_name || viewing.store?.name || '—'}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {RESERVATION_DEPARTMENT_LABELS[viewing.department ?? 'boutique'] ?? 'Boutique'}
+                      </div>
                       <div className="text-xs text-muted-foreground mt-1">Creada: {formatDateTime(viewing.created_at)}</div>
                       {viewing.expires_at && <div className="text-xs text-muted-foreground">Expira: {formatDate(viewing.expires_at)}</div>}
                       {viewing.cancelled_at && <div className="text-xs text-rose-700">Cancelada: {formatDateTime(viewing.cancelled_at)}</div>}
@@ -1076,6 +1240,33 @@ export function ReservationsTab() {
             <DialogTitle>Editar reserva {editing?.reservation_number}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Tienda</Label>
+                <Select value={editStoreId} onValueChange={setEditStoreId}>
+                  <SelectTrigger><SelectValue placeholder="Sin tienda" /></SelectTrigger>
+                  <SelectContent>
+                    {storeOptions.map((o) => (
+                      <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Departamento</Label>
+                <Select value={editDepartment} onValueChange={(v) => setEditDepartment(v as ReservationDepartment)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="boutique">Boutique</SelectItem>
+                    <SelectItem value="sastreria">Sastrería</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground -mt-1">
+              El departamento solo clasifica la reserva: el dinero entra siempre por boutique,
+              también cuando se marca como sastrería.
+            </p>
             <div className="space-y-1">
               <Label>Motivo</Label>
               <Input value={editReason} onChange={(e) => setEditReason(e.target.value)} maxLength={200} />
@@ -1126,6 +1317,55 @@ export function ReservationsTab() {
             <Button onClick={saveEdit} disabled={editSubmitting} className="gap-1">
               {editSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
               Guardar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(deliverTarget)} onOpenChange={(v) => { if (!v && !delivering) setDeliverTarget(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Entregar el género — {deliverTarget?.reservation_number}</DialogTitle>
+          </DialogHeader>
+          {deliverTarget && (() => {
+            const pendiente = Math.max(0, Number(deliverTarget.total) - Number(deliverTarget.total_paid))
+            const lineas = (deliverTarget.lines || []).filter((l) => l.status === 'active')
+            return (
+              <div className="space-y-3 text-sm">
+                <p>
+                  El cliente se lleva {lineas.length === 1 ? 'el artículo' : `los ${lineas.length} artículos`} de
+                  esta reserva. Se descuenta del stock igual que en una recogida normal.
+                </p>
+                <ul className="rounded-md border p-2 space-y-1 text-xs">
+                  {lineas.map((l) => (
+                    <li key={l.id} className="flex justify-between gap-2">
+                      <span className="truncate">{getLineDescription(l)}</span>
+                      <span className="tabular-nums shrink-0">{l.quantity} ud.</span>
+                    </li>
+                  ))}
+                </ul>
+                {pendiente > 0 ? (
+                  <div className="rounded-md border border-red-200 bg-red-50 p-3 text-red-800">
+                    <p className="font-medium">Quedan {formatCurrency(pendiente)} sin cobrar.</p>
+                    <p className="text-xs mt-0.5">
+                      La reserva pasará a <strong>Entregada sin pagar</strong> y la deuda seguirá
+                      contando en la ficha del cliente. Sale en el listado filtrando por
+                      «Sin pagar · producto en casa del cliente».
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Está cobrada entera, así que quedará como <strong>Cumplida</strong>.
+                  </p>
+                )}
+              </div>
+            )
+          })()}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeliverTarget(null)} disabled={delivering}>Cancelar</Button>
+            <Button onClick={confirmDeliver} disabled={delivering} className="gap-1">
+              {delivering ? <Loader2 className="h-4 w-4 animate-spin" /> : <Home className="h-4 w-4" />}
+              Confirmar entrega
             </Button>
           </DialogFooter>
         </DialogContent>

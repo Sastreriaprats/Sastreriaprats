@@ -82,6 +82,9 @@ interface TicketLine {
   reservation_total?: number
   /** Importe ya pagado previamente en la reserva (no entra en caja hoy). */
   reservation_already_paid?: number
+  /** Vendedor que hizo la reserva: manda sobre el vendedor del ticket. */
+  reservation_employee_id?: string | null
+  reservation_employee_name?: string | null
 }
 
 interface Payment {
@@ -119,6 +122,8 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
   const integroSubmitRef = useRef(false)
 
   const [ticketLines, setTicketLines] = useState<TicketLine[]>([])
+  /** Última línea añadida con la pistola/buscador: va la primera y se resalta. */
+  const [lastScannedLineId, setLastScannedLineId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [isSearching, setIsSearching] = useState(false)
@@ -498,9 +503,16 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
           style: { background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d' },
         })
       }
-      setTicketLines(prev => prev.map(l =>
-        l.product_variant_id === variant.id ? { ...l, quantity: nextQty } : l
-      ))
+      // Lo último leído sube SIEMPRE a la primera línea (petición de Mónica,
+      // 22-sep-2026): con tickets largos, mirar al final para comprobar lo que
+      // acabas de pasar por la pistola es inviable.
+      setTicketLines(prev => {
+        const hit = prev.find(l => l.product_variant_id === variant.id)
+        if (!hit) return prev
+        const rest = prev.filter(l => l.product_variant_id !== variant.id)
+        return [{ ...hit, quantity: nextQty }, ...rest]
+      })
+      setLastScannedLineId(existing.id)
     } else {
       if (stock <= 0) {
         toast.warning(`⚠️ ${variantLabel} — Sin stock en esta tienda (disponible: 0)`, {
@@ -512,8 +524,9 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
       const priceOverride = Number(variant.price_override) || 0
       const priceWithTax = Number(variant.products.price_with_tax) || 0
       const price = priceOverride || priceWithTax
-      setTicketLines(prev => [...prev, {
-        id: crypto.randomUUID(),
+      const newLineId = crypto.randomUUID()
+      setTicketLines(prev => [{
+        id: newLineId,
         product_variant_id: variant.id,
         description: `${variant.products.name}${variant.size ? ` T.${variant.size}` : ''}${variant.color ? ` ${variant.color}` : ''}`,
         sku: variant.variant_sku,
@@ -525,7 +538,8 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
         cost_price: variant.products.cost_price || 0,
         image_url: variant.products.main_image_url,
         available_stock: stock,
-      }])
+      }, ...prev])
+      setLastScannedLineId(newLineId)
     }
     setSearchQuery('')
     setSearchResults([])
@@ -574,6 +588,8 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
     reservation_already_paid: number
     client_id: string | null
     client_name: string | null
+    reservation_employee_id: string | null
+    reservation_employee_name: string | null
   }>) => {
     if (!payloads || payloads.length === 0) return
 
@@ -611,6 +627,8 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
         reservation_number: p.reservation_number,
         reservation_total: p.reservation_total,
         reservation_already_paid: p.reservation_already_paid,
+        reservation_employee_id: p.reservation_employee_id,
+        reservation_employee_name: p.reservation_employee_name,
       })),
     ])
     toast.success(
@@ -739,6 +757,34 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
     }
   }
 
+  /**
+   * Vendedor impuesto por la reserva. Si el ticket lleva líneas de una reserva,
+   * la venta entera (incluidas las que se añadan de más al ampliarla) se
+   * atribuye al vendedor que hizo la reserva: no se puede cambiar en caja.
+   * Petición de Mónica (22-sep-2026), decidida por David el mismo día.
+   *
+   * Si conviven reservas de DISTINTOS vendedores no se impone ninguno: se deja
+   * elegir y cada línea de reserva conserva a su dueño por la mig 272.
+   */
+  const reservationSeller = (() => {
+    const owners = new Map<string, string>()
+    for (const l of ticketLines) {
+      if (l.reservation_id && l.reservation_employee_id) {
+        owners.set(l.reservation_employee_id, l.reservation_employee_name || '')
+      }
+    }
+    if (owners.size !== 1) return null
+    const [id, name] = [...owners][0]
+    return { id, name }
+  })()
+  const hasMixedReservationSellers = (() => {
+    const owners = new Set(
+      ticketLines.filter((l) => l.reservation_id && l.reservation_employee_id)
+        .map((l) => l.reservation_employee_id as string),
+    )
+    return owners.size > 1
+  })()
+
   const paymentDialogOpenedRef = useRef(false)
   useEffect(() => {
     if (showPayment && !paymentDialogOpenedRef.current) {
@@ -749,7 +795,7 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
       setPaymentTab('integro')
       setPaymentStep('salesperson')
       integroSubmitRef.current = false
-      setSelectedSalespersonId(profile?.id ?? null)
+      setSelectedSalespersonId(reservationSeller?.id ?? profile?.id ?? null)
       if (activeStoreId) {
         setPosEmployeesLoading(true)
         listPosEmployees({ store_id: activeStoreId })
@@ -1193,7 +1239,12 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
       toast.error('Selecciona quién realiza la venta')
       return
     }
-    setLastSaleSalespersonName(posEmployees.find((e) => e.id === salespersonId)?.full_name ?? profile?.fullName ?? null)
+    setLastSaleSalespersonName(
+      posEmployees.find((e) => e.id === salespersonId)?.full_name
+      ?? (reservationSeller?.id === salespersonId ? reservationSeller?.name : null)
+      ?? profile?.fullName
+      ?? null,
+    )
     cobroPaymentMethodRef.current = payments[0]?.payment_method ?? 'cash'
     let paymentsToSend: Payment[] = [...payments]
     if (usePartialFromInput) {
@@ -1573,7 +1624,12 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
                 const taxRate = line.tax_rate || 21
                 const ivaIncl = line.unit_price * taxRate / (100 + taxRate)
                 return (
-                <div key={line.id} className="group flex px-4 py-2 border-b border-slate-200 hover:bg-slate-50 items-center gap-3 text-sm grid grid-cols-[48px_90px_1fr_40px_1fr_90px_72px_80px_40px] gap-2">
+                <div
+                  key={line.id}
+                  className={`group flex px-4 py-2 border-b border-slate-200 hover:bg-slate-50 items-center gap-3 text-sm grid grid-cols-[48px_90px_1fr_40px_1fr_90px_72px_80px_40px] gap-2 ${
+                    line.id === lastScannedLineId ? 'bg-amber-50' : ''
+                  }`}
+                >
                   <div className="flex items-center gap-0">
                     <Button variant="ghost" size="icon" className="rounded-full w-6 h-6 bg-slate-100 hover:bg-slate-200 text-slate-600" onClick={() => updateLine(line.id, 'quantity', Math.max(1, line.quantity - 1))}><Minus className="h-2.5 w-2.5" /></Button>
                     <span className="w-5 text-center text-xs tabular-nums text-slate-700">{line.quantity}</span>
@@ -1890,7 +1946,11 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
               {posEmployeesLoading ? (
                 <div className="flex items-center justify-center gap-2 py-6 text-slate-500"><Loader2 className="h-5 w-5 animate-spin" /> Cargando empleados...</div>
               ) : (
-                <Select value={selectedSalespersonId ?? ''} onValueChange={(v) => setSelectedSalespersonId(v || null)}>
+                <Select
+                  value={selectedSalespersonId ?? ''}
+                  onValueChange={(v) => setSelectedSalespersonId(v || null)}
+                  disabled={Boolean(reservationSeller)}
+                >
                   <SelectTrigger className="w-full h-12 text-base border-slate-300 bg-white">
                     <SelectValue placeholder="Selecciona el vendedor" />
                   </SelectTrigger>
@@ -1901,8 +1961,24 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
                     {profile?.id && !posEmployees.some((e) => e.id === profile.id) && (
                       <SelectItem value={profile.id}>{profile.fullName ?? 'Yo'}</SelectItem>
                     )}
+                    {reservationSeller && !posEmployees.some((e) => e.id === reservationSeller.id) && (
+                      <SelectItem value={reservationSeller.id}>{reservationSeller.name || 'Vendedor de la reserva'}</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
+              )}
+              {reservationSeller && (
+                <p className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900">
+                  El ticket lleva artículos de una reserva: la venta se atribuye a{' '}
+                  <strong>{reservationSeller.name || 'quien hizo la reserva'}</strong>, que fue quien la
+                  hizo. No se puede cambiar, tampoco para lo que se añada de más.
+                </p>
+              )}
+              {hasMixedReservationSellers && (
+                <p className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-700">
+                  El ticket mezcla reservas de varios vendedores: elige quién cobra. Cada artículo
+                  reservado se le sigue contando a quien hizo su reserva.
+                </p>
               )}
               <Button
                 className="w-full h-12 rounded-xl bg-[#1B2A4A] hover:bg-[#243860] text-white font-bold"
@@ -1957,10 +2033,12 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
                   </div>
                 </button>
               </div>
-              <Button variant="ghost" size="sm" className="w-full gap-1.5 text-slate-500" onClick={() => setPaymentStep('salesperson')}>
-                <ChevronLeft className="h-4 w-4" />
-                Cambiar vendedor
-              </Button>
+              {!reservationSeller && (
+                <Button variant="ghost" size="sm" className="w-full gap-1.5 text-slate-500" onClick={() => setPaymentStep('salesperson')}>
+                  <ChevronLeft className="h-4 w-4" />
+                  Cambiar vendedor
+                </Button>
+              )}
             </div>
           ) : (
             /* Paso 2: contenido según el tipo elegido */
@@ -1973,9 +2051,16 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
               <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
                 <span className="text-slate-600">Vendedor:</span>
                 <span className="font-medium text-slate-800">
-                  {posEmployees.find((e) => e.id === selectedSalespersonId)?.full_name ?? (profile?.id === selectedSalespersonId ? profile?.fullName : null) ?? '—'}
+                  {posEmployees.find((e) => e.id === selectedSalespersonId)?.full_name
+                    ?? (reservationSeller?.id === selectedSalespersonId ? reservationSeller?.name : null)
+                    ?? (profile?.id === selectedSalespersonId ? profile?.fullName : null)
+                    ?? '—'}
                 </span>
-                <Button variant="ghost" size="sm" className="h-7 text-xs text-slate-500" onClick={() => setPaymentStep('salesperson')}>Cambiar</Button>
+                {reservationSeller ? (
+                  <span className="text-[11px] text-slate-500">vendedor de la reserva</span>
+                ) : (
+                  <Button variant="ghost" size="sm" className="h-7 text-xs text-slate-500" onClick={() => setPaymentStep('salesperson')}>Cambiar</Button>
+                )}
               </div>
 
               {paymentTab === 'integro' && (

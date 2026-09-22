@@ -4,6 +4,13 @@ export const reservationStatusSchema = z.enum([
   'active', 'pending_stock', 'fulfilled', 'cancelled', 'expired',
 ])
 
+/** Clasificación de la reserva. NO cambia a dónde va el dinero: una reserva
+ *  siempre ingresa por BOUTIQUE (petición de Mónica, 22-sep-2026). */
+export const reservationDepartmentSchema = z.enum(['boutique', 'sastreria'])
+
+/** Situación del género: si el cliente ya se lo llevó aunque no lo haya pagado. */
+export const reservationDeliveryStatusSchema = z.enum(['pending', 'partial', 'delivered'])
+
 export const reservationPaymentMethodSchema = z.enum([
   'cash', 'card', 'bizum', 'transfer', 'voucher',
 ])
@@ -26,6 +33,7 @@ export const createReservationSchema = z.object({
   client_id: z.string().uuid('Cliente obligatorio'),
   employee_id: z.string().uuid('Vendedor obligatorio'),
   store_id: z.string().uuid().optional().nullable(),
+  department: reservationDepartmentSchema.default('boutique'),
   cash_session_id: z.string().uuid().optional().nullable(),
   lines: z.array(reservationLineInputSchema).min(1, 'Añade al menos un producto'),
   notes: z.string().max(500).optional().nullable(),
@@ -50,6 +58,8 @@ export const updateReservationSchema = z.object({
   notes: z.string().max(500).optional().nullable(),
   reason: z.string().max(200).optional().nullable(),
   expires_at: z.string().datetime().optional().nullable(),
+  department: reservationDepartmentSchema.optional(),
+  store_id: z.string().uuid().optional().nullable(),
 })
 
 // Precio pactado de los artículos de una reserva (precios especiales de
@@ -95,6 +105,17 @@ export const listReservationsSchema = z.object({
    * quitarlas de en medio.
    */
   excludePaid: z.boolean().optional(),
+  department: reservationDepartmentSchema.optional(),
+  /** Situación del género (ver `delivery_status`, migración 289). */
+  delivery: reservationDeliveryStatusSchema.optional(),
+  /**
+   * Vista combinada pago + entrega, que es como lo mira la tienda:
+   *   en_tienda_sin_pagar  → el género sigue aquí y nos deben dinero
+   *   en_casa_sin_pagar    → se lo llevó el cliente y nos debe dinero
+   *   pagada_sin_recoger   → cobrada entera, el género sigue en tienda
+   *   cumplida             → cobrada y entregada
+   */
+  situation: z.enum(['en_tienda_sin_pagar', 'en_casa_sin_pagar', 'pagada_sin_recoger', 'cumplida']).optional(),
   search: z.string().optional(),
   /** Rango de fechas de CREACIÓN de la reserva (YYYY-MM-DD, inclusivo). */
   dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -114,5 +135,7 @@ export type FulfillReservationLineInput = z.infer<typeof fulfillReservationLineS
 export type ListReservationsInput = z.infer<typeof listReservationsSchema>
 export type ReservationStatus = z.infer<typeof reservationStatusSchema>
 export type ReservationPaymentMethod = z.infer<typeof reservationPaymentMethodSchema>
+export type ReservationDepartment = z.infer<typeof reservationDepartmentSchema>
+export type ReservationDeliveryStatus = z.infer<typeof reservationDeliveryStatusSchema>
 export type InitialReservationPayment = z.infer<typeof initialReservationPaymentSchema>
 export type AddReservationPaymentInput = z.infer<typeof addReservationPaymentSchema>

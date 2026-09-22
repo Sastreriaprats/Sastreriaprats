@@ -16,7 +16,7 @@ import { listClients } from '@/actions/clients'
 import { searchProductsForPos, listPosEmployees } from '@/actions/pos'
 import { listPhysicalWarehouses } from '@/actions/products'
 import { useAuth } from '@/components/providers/auth-provider'
-import type { ReservationPaymentMethod } from '@/lib/validations/reservations'
+import type { ReservationPaymentMethod, ReservationDepartment } from '@/lib/validations/reservations'
 import { formatCurrency } from '@/lib/utils'
 
 type ProductVariantResult = {
@@ -154,6 +154,14 @@ export function ReservationFormDialog({
   const [clientResults, setClientResults] = useState<ClientResult[]>([])
   const [clientSearching, setClientSearching] = useState(false)
 
+  // Tienda de la reserva. En TPV viene por prop; en admin se elegía "de rebote"
+  // por el almacén y no se veía en ningún sitio (queja de Mónica, 22-sep-2026),
+  // así que ahora es un desplegable propio que además filtra los almacenes.
+  const [pickedStoreId, setPickedStoreId] = useState<string | null>(null)
+  // Clasificación boutique/sastrería. Solo etiqueta: el dinero de una reserva
+  // entra siempre por boutique.
+  const [department, setDepartment] = useState<ReservationDepartment>('boutique')
+
   const [reason, setReason] = useState('')
   const [notes, setNotes] = useState('')
   const [expiresAt, setExpiresAt] = useState('')
@@ -167,8 +175,22 @@ export function ReservationFormDialog({
   // a una única tienda. Mientras el admin no haya elegido almacén,
   // effectiveStoreId es null y el resto del formulario queda bloqueado.
   const effectiveStoreId = storeId
+    ?? pickedStoreId
     ?? warehouseOptions.find((w) => w.id === warehouseId)?.storeId
     ?? null
+
+  // Tiendas disponibles (derivadas de los almacenes físicos, misma fuente).
+  const storeChoices = (() => {
+    const seen = new Map<string, string>()
+    for (const w of warehouseOptions) {
+      if (w.storeId && !seen.has(w.storeId)) seen.set(w.storeId, w.storeName || 'Tienda')
+    }
+    return [...seen].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+  })()
+
+  const visibleWarehouses = pickedStoreId
+    ? warehouseOptions.filter((w) => w.storeId === pickedStoreId)
+    : warehouseOptions
 
   const resetForm = useCallback(() => {
     setProductQuery('')
@@ -186,6 +208,8 @@ export function ReservationFormDialog({
     setPaymentMode('none')
     setPaymentMethod('cash')
     setPartialAmount('')
+    setPickedStoreId(null)
+    setDepartment('boutique')
   }, [defaultClientId, defaultClientName, lockClient])
 
   useEffect(() => {
@@ -379,6 +403,7 @@ export function ReservationFormDialog({
         client_id: clientId,
         employee_id: employeeId,
         store_id: effectiveStoreId ?? null,
+        department,
         cash_session_id: cashSessionId ?? null,
         lines: lines.map((l) => ({
           product_variant_id: l.variant.id,
@@ -528,16 +553,65 @@ export function ReservationFormDialog({
             </Select>
           </div>
 
+          {/* Tienda y departamento */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>Tienda</Label>
+              {allowWarehouseSelection ? (
+                <Select
+                  value={pickedStoreId || ''}
+                  onValueChange={(v) => {
+                    setPickedStoreId(v || null)
+                    // El almacén elegido puede ser de otra tienda: se limpia.
+                    const wh = warehouseOptions.find((w) => w.id === warehouseId)
+                    if (wh && wh.storeId !== v) setWarehouseId(null)
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={warehouseLoading ? 'Cargando...' : 'Selecciona tienda'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {storeChoices.map((o) => (
+                      <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <div className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm">
+                  {warehouseOptions.find((w) => w.storeId === storeId)?.storeName ?? 'Tienda actual'}
+                </div>
+              )}
+            </div>
+            <div className="space-y-1">
+              <Label>Departamento</Label>
+              <Select value={department} onValueChange={(v) => setDepartment(v as ReservationDepartment)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="boutique">Boutique</SelectItem>
+                  <SelectItem value="sastreria">Sastrería</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground -mt-2">
+            El departamento solo clasifica la reserva. Al convertirse en venta el ingreso va
+            siempre a <strong>boutique</strong>, también si la marcas como sastrería.
+          </p>
+
           {/* Almacén (solo admin) */}
           {allowWarehouseSelection && (
             <div className="space-y-1">
               <Label>Almacén</Label>
               <Select value={warehouseId || ''} onValueChange={(v) => setWarehouseId(v || null)}>
                 <SelectTrigger>
-                  <SelectValue placeholder={warehouseLoading ? 'Cargando...' : 'Selecciona almacén'} />
+                  <SelectValue placeholder={
+                    warehouseLoading ? 'Cargando...'
+                      : !pickedStoreId ? 'Selecciona una tienda primero'
+                        : 'Selecciona almacén'
+                  } />
                 </SelectTrigger>
                 <SelectContent>
-                  {warehouseOptions.map((w) => (
+                  {visibleWarehouses.map((w) => (
                     <SelectItem key={w.id} value={w.id}>
                       {w.name} {w.storeName ? `(${w.storeName})` : ''}
                     </SelectItem>

@@ -11,6 +11,7 @@ const TAB_TITLES: Record<string, string> = {
   products: 'Productos',
   clients: 'Clientes y horarios',
   expenses: 'Gastos',
+  partners: 'Informe para socios',
 }
 
 export async function POST(request: NextRequest) {
@@ -27,6 +28,7 @@ export async function POST(request: NextRequest) {
     storeFilterName, channelLabel, taxLabel,
     salesData, compareData, topProducts, clientsData,
     storeSales, employeeData, employeeStores, timePatternData, expensesData, expensesComparison,
+    partnersData,
   } = body
 
   const activeTab: string = typeof tab === 'string' && TAB_TITLES[tab] ? tab : 'store-sales'
@@ -53,6 +55,9 @@ export async function POST(request: NextRequest) {
       break
     case 'expenses':
       section = renderExpenses(expensesData, expensesComparison)
+      break
+    case 'partners':
+      section = renderPartners(partnersData)
       break
   }
 
@@ -456,4 +461,110 @@ function renderProvidersBreakdown(providers: AnyRec[]): string {
   return `<h2>Proveedores — por tipo de proveedor y factura</h2>
 ${blocks}
 <p style="margin-top:8px"><b>TOTAL proveedores: <span class="neg">${fmtEur(total)}</span></b></p>`
+}
+
+const PARTNER_CHANNEL_ES: Record<string, string> = { boutique: 'Boutique', sastreria: 'Sastrería', online: 'Online' }
+
+/**
+ * Informe para socios (petición de Mónica, 22-sep-2026): mes a mes, ventas
+ * reales por tienda y canal con lo cobrado y lo pendiente, cobros que vienen de
+ * otros meses, gastos del mes y beneficio.
+ */
+function renderPartners(data: AnyRec | null): string {
+  if (!data) return '<p>Sin datos para el periodo seleccionado.</p>'
+  const totals = (data.totals ?? {}) as AnyRec
+  const months = Array.isArray(data.months) ? (data.months as AnyRec[]) : []
+
+  let html = `
+  <h2>Resumen del periodo</h2>
+  <div class="kpi-grid">
+    <div class="kpi"><div class="kpi-value">${fmtEur(Number(totals.sales ?? 0))}</div><div class="kpi-label">Ventas</div></div>
+    <div class="kpi"><div class="kpi-value">${fmtEur(Number(totals.collected ?? 0))}</div><div class="kpi-label">Cobradas</div></div>
+    <div class="kpi"><div class="kpi-value">${fmtEur(Number(totals.pending ?? 0))}</div><div class="kpi-label">Sin cobrar</div></div>
+    <div class="kpi"><div class="kpi-value">${fmtEur(Number(totals.expenses ?? 0))}</div><div class="kpi-label">Gastos</div></div>
+  </div>
+  <div class="kpi-grid">
+    <div class="kpi"><div class="kpi-value">${fmtEur(Number(totals.other_months ?? 0))}</div><div class="kpi-label">Cobrado de otros meses</div></div>
+    <div class="kpi"><div class="kpi-value">${fmtEur(Number(totals.reservation_advances ?? 0))}</div><div class="kpi-label">Señales de reserva</div></div>
+    <div class="kpi"><div class="kpi-value">${fmtEur(Number(totals.profit ?? 0))}</div><div class="kpi-label">Beneficio</div></div>
+    <div class="kpi"><div class="kpi-value">${months.length}</div><div class="kpi-label">Meses</div></div>
+  </div>
+  <p style="font-size:10px;color:#6b7280">
+    Venta del mes = lo vendido con fecha de ese mes, cobrado o no. Los cobros de otros meses van aparte y no
+    suman a la venta del mes. Gastos = facturas de proveedor con fecha del mes; no incluyen nóminas ni
+    gastos que no entren como factura de proveedor.
+  </p>`
+
+  for (const m of months) {
+    const mTotals = (m.totals ?? {}) as AnyRec
+    const mRows = Array.isArray(m.rows) ? (m.rows as AnyRec[]) : []
+    const other = (m.other_months ?? {}) as AnyRec
+    const otherRows = Array.isArray(other.rows) ? (other.rows as AnyRec[]) : []
+    const expenses = (m.expenses ?? {}) as AnyRec
+    const expenseRows = Array.isArray(expenses.rows) ? (expenses.rows as AnyRec[]) : []
+    const advances = (m.reservation_advances ?? {}) as AnyRec
+    const gifts = (m.gift_cards ?? {}) as AnyRec
+    if (!mRows.length && !otherRows.length && !Number(expenses.total ?? 0)
+      && !Number(advances.total ?? 0) && !Number(gifts.total ?? 0)) continue
+
+    html += `<h2 style="text-transform:capitalize">${String(m.label ?? m.key ?? '')}</h2>`
+    html += `<table><thead><tr>
+      <th>Tienda</th><th>Canal</th><th style="text-align:center">Nº</th>
+      <th style="text-align:right">Venta del mes</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Sin cobrar</th>
+    </tr></thead><tbody>`
+    for (const r of mRows) {
+      html += `<tr>
+        <td>${r.channel === 'online' ? 'Tienda online' : String(r.store_name ?? '')}</td>
+        <td>${PARTNER_CHANNEL_ES[String(r.channel)] ?? String(r.channel ?? '')}</td>
+        <td style="text-align:center">${Number(r.count ?? 0)}</td>
+        <td style="text-align:right">${fmtEur(Number(r.sales ?? 0))}</td>
+        <td style="text-align:right">${fmtEur(Number(r.collected ?? 0))}</td>
+        <td style="text-align:right">${fmtEur(Number(r.pending ?? 0))}</td>
+      </tr>`
+    }
+    html += `<tr><td colspan="3"><strong>Total ventas del mes</strong></td>
+      <td style="text-align:right"><strong>${fmtEur(Number(mTotals.sales ?? 0))}</strong></td>
+      <td style="text-align:right"><strong>${fmtEur(Number(mTotals.collected ?? 0))}</strong></td>
+      <td style="text-align:right"><strong>${fmtEur(Number(mTotals.pending ?? 0))}</strong></td></tr>`
+    html += '</tbody></table>'
+
+    html += '<h3>Cobrado este mes de ventas de otros meses</h3>'
+    if (otherRows.length === 0) {
+      html += '<p style="font-size:11px;color:#6b7280">No ha entrado dinero de ventas de otros meses.</p>'
+    } else {
+      html += '<table><thead><tr><th>Mes de la venta</th><th>Tienda</th><th>Canal</th><th style="text-align:right">Cobrado ahora</th></tr></thead><tbody>'
+      for (const r of otherRows) {
+        html += `<tr>
+          <td>${String(r.origin_month ?? '')}</td>
+          <td>${String(r.store_name ?? '')}</td>
+          <td>${PARTNER_CHANNEL_ES[String(r.channel)] ?? String(r.channel ?? '')}</td>
+          <td style="text-align:right">${fmtEur(Number(r.amount ?? 0))}</td>
+        </tr>`
+      }
+      html += `<tr><td colspan="3"><strong>Total</strong></td><td style="text-align:right"><strong>${fmtEur(Number(other.total ?? 0))}</strong></td></tr>`
+      html += '</tbody></table>'
+    }
+    if (Number(advances.total ?? 0) > 0) {
+      html += `<p style="font-size:11px;color:#6b7280">Señales de reserva cobradas: ${fmtEur(Number(advances.total ?? 0))} (anticipos, todavía no son venta).</p>`
+    }
+    if (Number(gifts.total ?? 0) > 0) {
+      html += `<p style="font-size:11px;color:#6b7280">Tarjetas regalo vendidas: ${fmtEur(Number(gifts.total ?? 0))} (dinero a cuenta; la venta se cuenta al canjearlas).</p>`
+    }
+
+    html += '<h3>Gastos del mes</h3>'
+    if (expenseRows.length === 0) {
+      html += '<p style="font-size:11px;color:#6b7280">Sin facturas de proveedor con fecha de este mes.</p>'
+    } else {
+      html += '<table><thead><tr><th>Tienda</th><th style="text-align:center">Facturas</th><th style="text-align:right">Importe</th></tr></thead><tbody>'
+      for (const r of expenseRows) {
+        html += `<tr><td>${String(r.store_name ?? '')}</td><td style="text-align:center">${Number(r.count ?? 0)}</td><td style="text-align:right">${fmtEur(Number(r.amount ?? 0))}</td></tr>`
+      }
+      html += `<tr><td><strong>Total gastos</strong></td><td style="text-align:center"><strong>${Number(expenses.count ?? 0)}</strong></td><td style="text-align:right"><strong>${fmtEur(Number(expenses.total ?? 0))}</strong></td></tr>`
+      html += '</tbody></table>'
+    }
+
+    html += `<p style="font-size:14px;margin-top:10px"><strong>Beneficio del mes: ${fmtEur(Number(m.profit ?? 0))}</strong></p>`
+  }
+
+  return html
 }

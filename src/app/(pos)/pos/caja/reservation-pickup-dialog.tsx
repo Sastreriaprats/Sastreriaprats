@@ -47,6 +47,13 @@ export interface ReservationTicketLinePayload {
   reservation_already_paid: number
   client_id: string | null
   client_name: string | null
+  /**
+   * Vendedor que hizo la reserva. El ticket de recogida se atribuye a él, aunque
+   * cobre otro y aunque se amplíe con más artículos (decisión de David sobre la
+   * petición de Mónica del 22-sep-2026).
+   */
+  reservation_employee_id: string | null
+  reservation_employee_name: string | null
 }
 
 interface ReservationPickupDialogProps {
@@ -84,6 +91,8 @@ type ReservationRow = {
   created_at: string
   reason: string | null
   notes: string | null
+  employee_id?: string | null
+  employee?: { id: string; full_name?: string | null } | null
   client?: { id: string; full_name?: string | null; first_name?: string | null; last_name?: string | null; phone?: string | null; client_code?: string | null } | null
   store?: { id: string; name?: string | null; display_name?: string | null } | null
   lines?: ReservationLine[]
@@ -374,6 +383,8 @@ export function ReservationPickupDialog({
         reservation_already_paid: paid,
         client_id: selected.client?.id || null,
         client_name: clientName(selected.client ?? null),
+        reservation_employee_id: selected.employee?.id ?? selected.employee_id ?? null,
+        reservation_employee_name: selected.employee?.full_name ?? null,
       }
     })
 

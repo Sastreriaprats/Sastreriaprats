@@ -23,6 +23,7 @@ import {
   listTransferCandidates,
   searchTransferProducts,
   getStockTransferDetail,
+  listSeasonsAndBrands,
 } from '@/actions/products'
 import { createDeliveryNoteFromTransfer } from '@/actions/delivery-notes'
 import { useAuth } from '@/components/providers/auth-provider'
@@ -72,6 +73,13 @@ export function TransfersTab() {
   const [notes, setNotes] = useState('')
   const [isMassive, setIsMassive] = useState(false)
   const [massiveCategory, setMassiveCategory] = useState<'all' | 'sastreria' | 'boutique' | 'tejidos'>('all')
+  // El masivo solo dejaba acotar por categoría y se leía como "solo se puede
+  // traspasar por temporada" (queja de Mónica, 22-sep-2026). Ahora se puede
+  // cargar el almacén entero o acotar por temporada y/o marca.
+  const [massiveSeason, setMassiveSeason] = useState('all')
+  const [massiveBrand, setMassiveBrand] = useState('all')
+  const [seasonOptions, setSeasonOptions] = useState<string[]>([])
+  const [brandOptions, setBrandOptions] = useState<string[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [lines, setLines] = useState<TransferLine[]>([])
@@ -234,6 +242,8 @@ export function TransfersTab() {
     const result = await listTransferCandidates({
       warehouseId: fromWarehouseId,
       category: massiveCategory,
+      season: massiveSeason === 'all' ? null : massiveSeason,
+      brand: massiveBrand === 'all' ? null : massiveBrand,
       limit: 1200,
     })
     setLoadingCandidates(false)
@@ -275,6 +285,15 @@ export function TransfersTab() {
     }
     setSearchResults(result.data || [])
   }, [fromWarehouseId, searchTerm])
+
+  useEffect(() => {
+    if (!newOpen) return
+    listSeasonsAndBrands()
+      .then((res) => {
+        if (res.success && res.data) { setSeasonOptions(res.data.seasons); setBrandOptions(res.data.brands) }
+      })
+      .catch(() => { /* acotar por temporada/marca es opcional */ })
+  }, [newOpen])
 
   useEffect(() => {
     if (isMassive) return
@@ -327,6 +346,8 @@ export function TransfersTab() {
     setNotes('')
     setIsMassive(false)
     setMassiveCategory('all')
+    setMassiveSeason('all')
+    setMassiveBrand('all')
     setSearchTerm('')
     setSearchResults([])
     setLines([])
@@ -606,13 +627,13 @@ export function TransfersTab() {
                 setSearchTerm('')
               }}
             />
-            <span className="text-sm">Traspaso de temporada / masivo</span>
+            <span className="text-sm">Traspaso masivo (almacén entero o por temporada, marca o categoría)</span>
           </div>
 
           {isMassive ? (
             <div className="rounded-md border p-3 space-y-3">
               <div className="flex flex-wrap items-end gap-2">
-                <div className="space-y-1 min-w-[220px]">
+                <div className="space-y-1 min-w-[180px]">
                   <Label>Categoría</Label>
                   <Select value={massiveCategory} onValueChange={(v) => setMassiveCategory(v as any)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -624,11 +645,35 @@ export function TransfersTab() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="space-y-1 min-w-[180px]">
+                  <Label>Temporada</Label>
+                  <Select value={massiveSeason} onValueChange={setMassiveSeason}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todas</SelectItem>
+                      {seasonOptions.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1 min-w-[180px]">
+                  <Label>Marca</Label>
+                  <Select value={massiveBrand} onValueChange={setMassiveBrand}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todas</SelectItem>
+                      {brandOptions.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <Button variant="outline" onClick={loadMassiveProducts} disabled={loadingCandidates || !fromWarehouseId}>
                   {loadingCandidates ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
                   Cargar productos
                 </Button>
               </div>
+              <p className="text-xs text-muted-foreground">
+                Sin filtros se carga todo lo que tenga stock en el almacén de origen. Los filtros se
+                combinan entre sí; después puedes quitar líneas sueltas con las casillas.
+              </p>
             </div>
           ) : (
             <div className="rounded-md border p-3 space-y-3">
@@ -640,6 +685,20 @@ export function TransfersTab() {
                     onChange={(e) => setSearchTerm(e.target.value)}
                     placeholder="Nombre, SKU, variante o EAN (mín. 3 caracteres)"
                     disabled={!fromWarehouseId}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter') return
+                      e.preventDefault()
+                      // La pistola escribe el EAN y manda Enter: si hay una sola
+                      // coincidencia con stock, se añade sin tocar el ratón.
+                      const conStock = searchResults.filter((r: any) => Number(r.available) > 0)
+                      if (conStock.length === 1) {
+                        addManualLine(conStock[0])
+                        setSearchTerm('')
+                        setSearchResults([])
+                      } else if (searchResults.length === 1) {
+                        toast.warning(`${searchResults[0].product_name}: no queda stock en el almacén de origen`)
+                      }
+                    }}
                   />
                   <p className="text-xs text-muted-foreground">
                     {!fromWarehouseId
@@ -649,8 +708,8 @@ export function TransfersTab() {
                         : loadingSearch
                           ? 'Buscando…'
                           : searchTerm.trim().length >= 3 && searchResults.length === 0 && !loadingSearch
-                            ? 'Sin resultados con stock en el almacén origen.'
-                            : 'Se busca automáticamente mientras escribes.'}
+                            ? 'Ningún producto con ese texto o código. Si lo has escaneado, puede que esa talla no tenga EAN dado de alta: compruébalo en Stock → Códigos de barras.'
+                            : 'Se busca automáticamente mientras escribes. Con la pistola, Enter añade el artículo.'}
                   </p>
                 </div>
               </div>
@@ -668,7 +727,7 @@ export function TransfersTab() {
                     </TableHeader>
                     <TableBody>
                       {searchResults.map((r: any) => (
-                        <TableRow key={r.product_variant_id}>
+                        <TableRow key={r.product_variant_id} className={Number(r.available) ? undefined : 'opacity-60'}>
                           <TableCell>
                             <div className="font-medium">{r.product_name}</div>
                             <div className="text-xs text-muted-foreground font-mono">{r.product_sku}</div>
@@ -702,8 +761,17 @@ export function TransfersTab() {
                           <TableCell className="text-right">
                             {(() => {
                               const already = lines.find((l) => l.product_variant_id === r.product_variant_id)
+                              if (!Number(r.available)) {
+                                // El artículo EXISTE, lo que no hay es stock aquí. Antes ni
+                                // salía y se leía como "ese producto no existe".
+                                return (
+                                  <Badge variant="outline" className="bg-slate-100 text-slate-600 border-slate-200 text-[11px] font-normal">
+                                    Sin stock en el origen
+                                  </Badge>
+                                )
+                              }
                               return (
-                                <Button size="sm" variant="outline" onClick={() => addManualLine(r)} disabled={!r.available}>
+                                <Button size="sm" variant="outline" onClick={() => addManualLine(r)}>
                                   {already ? `Añadir otra (${already.quantity_requested})` : 'Añadir'}
                                 </Button>
                               )
