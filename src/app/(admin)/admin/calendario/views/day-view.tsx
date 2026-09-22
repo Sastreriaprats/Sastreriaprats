@@ -103,6 +103,7 @@ export function DayView({ currentDate, events, blocks, onSlotClick, onEventClick
                         <p className={cn('text-sm font-medium', event.status === 'cancelled' && 'line-through')}>{event.title}</p>
                         {event.client_name && <p className="text-xs opacity-80">{event.client_name}</p>}
                         {event.tailor_name && <p className="text-xs opacity-70">Sastre: {event.tailor_name}</p>}
+                        {event.store_name && <p className="text-xs opacity-70">{event.store_name}</p>}
                       </div>
                     )
                   })}
@@ -196,6 +197,7 @@ export function DayView({ currentDate, events, blocks, onSlotClick, onEventClick
                       {sc.icon && <span className={`shrink-0 ${e.status === 'completed' ? 'text-green-600' : 'text-red-500'}`}>{sc.icon}</span>}
                     </div>
                     {e.client_name && <p className="opacity-80">{e.client_name}</p>}
+                    {e.store_name && <p className="opacity-70 text-[10px]">{e.store_name}</p>}
                   </div>
                 )
               })}

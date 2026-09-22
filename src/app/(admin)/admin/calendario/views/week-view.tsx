@@ -190,6 +190,7 @@ export function WeekView({ currentDate, events, blocks, onSlotClick, onEventClic
                         {event.start_time.slice(0, 5)} {event.title}
                       </p>
                       {event.client_name && <p className="truncate opacity-80">{event.client_name}</p>}
+                      {event.store_name && <p className="truncate opacity-70 text-[10px]">{event.store_name}</p>}
                     </div>
                   )})}
                 </div>

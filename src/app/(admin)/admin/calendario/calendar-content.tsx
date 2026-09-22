@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ChevronLeft, ChevronRight, Loader2, Plus, ShieldBan, Trash2, CalendarOff, Search } from 'lucide-react'
 import { toast } from 'sonner'
-import { useAuth } from '@/components/providers/auth-provider'
 import { usePermissions } from '@/hooks/use-permissions'
 import { useIsMobile } from '@/hooks/use-is-mobile'
 import { listAppointments, findNextAppointmentByClient } from '@/actions/calendar'
@@ -64,7 +63,6 @@ const typeLabels: Record<string, string> = {
 
 export function CalendarContent() {
   const supabase = useMemo(() => createClient(), [])
-  const { activeStoreId } = useAuth()
   const { can } = usePermissions()
   const isMobile = useIsMobile()
   const [view, setView] = useState<'month' | 'week' | 'day' | 'agenda'>('week')
@@ -75,6 +73,13 @@ export function CalendarContent() {
   const [isLoading, setIsLoading] = useState(true)
   const [tailorFilter, setTailorFilter] = useState('all')
   const [tailors, setTailors] = useState<{ id: string; full_name: string }[]>([])
+  // El calendario arranca mostrando TODAS las tiendas. Antes heredaba en
+  // silencio la tienda confirmada al entrar (StoreGate de /sastre, /vendedor
+  // y /pos): las citas de otra tienda desaparecian sin aviso ni forma de
+  // verlas, mientras que en /admin -sin StoreGate- si se veian. De ahi que
+  // una misma cita estuviera para unos y no para otros.
+  const [storeFilter, setStoreFilter] = useState('all')
+  const [stores, setStores] = useState<{ id: string; name: string }[]>([])
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [selectedSlot, setSelectedSlot] = useState<{ date: string; time: string } | null>(null)
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
@@ -105,6 +110,28 @@ export function CalendarContent() {
     loadTailors()
     return () => { cancelled = true }
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadStores() {
+      try {
+        const { data } = await supabase
+          .from('stores')
+          .select('id, name, code')
+          .eq('is_active', true)
+          .order('name')
+        if (cancelled || !data) return
+        // La tienda online no tiene agenda presencial: fuera del selector.
+        setStores((data as { id: string; name: string; code: string | null }[])
+          .filter((st) => st.code !== 'WEB')
+          .map((st) => ({ id: st.id, name: st.name })))
+      } catch (err) {
+        console.error('[CalendarContent] loadStores error:', err)
+      }
+    }
+    loadStores()
+    return () => { cancelled = true }
+  }, [supabase])
 
   // En móvil la rejilla semanal queda comprimida: arrancamos en "Día" (un solo día) por defecto.
   useEffect(() => {
@@ -145,10 +172,10 @@ export function CalendarContent() {
         listAppointments({
           start_date: start,
           end_date: end,
-          store_id: activeStoreId || undefined,
+          store_id: storeFilter !== 'all' ? storeFilter : undefined,
           tailor_id: tailorFilter !== 'all' ? tailorFilter : undefined,
         }),
-        listScheduleBlocks({ from_date: start, to_date: end, store_id: activeStoreId || undefined }),
+        listScheduleBlocks({ from_date: start, to_date: end, store_id: storeFilter !== 'all' ? storeFilter : undefined }),
       ])
       setBlocks(blocksRes.success ? (blocksRes.data as ScheduleBlock[]) : [])
 
@@ -178,7 +205,7 @@ export function CalendarContent() {
     } finally {
       setIsLoading(false)
     }
-  }, [getDateRange, activeStoreId, tailorFilter])
+  }, [getDateRange, storeFilter, tailorFilter])
 
   useEffect(() => { fetchEvents() }, [fetchEvents])
 
@@ -297,6 +324,20 @@ export function CalendarContent() {
             )}
           </div>
 
+          {stores.length > 1 && (
+            <Select value={storeFilter} onValueChange={setStoreFilter}>
+              <SelectTrigger className="w-32 sm:w-40 h-9 sm:h-8 text-xs shrink-0">
+                <SelectValue placeholder="Todas las tiendas" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas las tiendas</SelectItem>
+                {stores.map(st => (
+                  <SelectItem key={st.id} value={st.id}>{st.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
           <Select value={tailorFilter} onValueChange={setTailorFilter}>
             <SelectTrigger className="w-32 sm:w-40 h-9 sm:h-8 text-xs shrink-0">
               <SelectValue placeholder="Todos los sastres" />
@@ -356,7 +397,7 @@ export function CalendarContent() {
             const result = await listAppointments({
               start_date: start,
               end_date: end,
-              store_id: activeStoreId || undefined,
+              store_id: storeFilter !== 'all' ? storeFilter : undefined,
             })
             if (result.success) {
               const fresh = (result.data as Record<string, unknown>[]).find(a => a.id === selectedEvent.id)

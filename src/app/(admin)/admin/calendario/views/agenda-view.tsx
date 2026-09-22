@@ -128,6 +128,9 @@ export function AgendaView({ events, onSlotClick, onEventClick }: {
                       {e.tailor_name && (
                         <p className="text-xs text-muted-foreground truncate">Sastre: {e.tailor_name}</p>
                       )}
+                      {e.store_name && (
+                        <p className="text-xs text-muted-foreground truncate">Tienda: {e.store_name}</p>
+                      )}
                     </div>
                   </button>
                 )
