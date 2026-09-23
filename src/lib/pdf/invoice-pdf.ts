@@ -129,7 +129,7 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
   const docTitle = isDraft ? 'BORRADOR' : isRectifying ? 'FACTURA RECTIFICATIVA' : 'FACTURA'
 
   // Para rectificativas: cargar referencia a la factura original (nº + fecha)
-  // para el bloque "Rectifica a F2026-XXXX (fecha) — Motivo: ...".
+  // para el bloque "Rectifica a F2026-XXXX (fecha)".
   let originalRef: { number: string; date: string } | null = null
   if (isRectifying && invoice.rectifies_invoice_id) {
     const { data: orig } = await admin
@@ -183,9 +183,11 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
               : 'Rectifica a factura previa',
             fontSize: 9, margin: [0, 3, 0, 0] as [number, number, number, number],
           },
-          ...(invoice.rectification_reason
-            ? [{ text: `Motivo: ${invoice.rectification_reason}`, fontSize: 9, italics: true, margin: [0, 2, 0, 0] as [number, number, number, number] }]
-            : []),
+          // El MOTIVO de la rectificación NO se imprime (petición de Mónica,
+          // 23-sep-2026): se escribe como nota interna ("...según Joaquín",
+          // fechas, nombres de compañeros) y el cliente no debe leerlo.
+          // Se sigue guardando en `invoices.rectification_reason` y se ve en la
+          // plataforma; lo único que cambia es que no sale en el papel.
         ],
         fillColor: '#faf5ff',
         margin: [10, 8, 10, 8] as [number, number, number, number],
