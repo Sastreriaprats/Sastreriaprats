@@ -171,34 +171,24 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
     return m ? `${m[3]}/${m[2]}/${m[1]}` : String(s)
   }
 
-  const referenceBlock: Content | null = isRectifying ? {
-    table: {
-      widths: ['*'],
-      body: [[{
-        stack: [
-          { text: 'FACTURA RECTIFICATIVA', fontSize: 10, bold: true, color: '#6b21a8' },
-          {
-            text: originalRef
-              ? `Rectifica a ${originalRef.number} (${formatDateES(originalRef.date)})`
-              : 'Rectifica a factura previa',
-            fontSize: 9, margin: [0, 3, 0, 0] as [number, number, number, number],
-          },
-          // El MOTIVO de la rectificación NO se imprime (petición de Mónica,
-          // 23-sep-2026): se escribe como nota interna ("...según Joaquín",
-          // fechas, nombres de compañeros) y el cliente no debe leerlo.
-          // Se sigue guardando en `invoices.rectification_reason` y se ve en la
-          // plataforma; lo único que cambia es que no sale en el papel.
-        ],
-        fillColor: '#faf5ff',
-        margin: [10, 8, 10, 8] as [number, number, number, number],
-      }]],
-    },
-    layout: {
-      hLineWidth: () => 0.5, vLineWidth: () => 0.5,
-      hLineColor: () => '#d8b4fe', vLineColor: () => '#d8b4fe',
-    },
-    margin: [0, 0, 0, 10] as [number, number, number, number],
-  } : null
+  // A qué factura rectifica: dato que identifica el documento, así que sigue
+  // impreso, pero como una referencia más (misma fila que Ticket / Pedido) en
+  // vez de en un recuadro destacado.
+  if (isRectifying) {
+    originRows.unshift({
+      label: 'Rectifica a:',
+      value: originalRef
+        ? `${originalRef.number} (${formatDateES(originalRef.date)})`
+        : 'Factura previa',
+    })
+  }
+
+  // NO hay cuadro de aviso en la rectificativa (petición de David, 23/24-sep-2026:
+  // «en las facturas y facturas rectificativas en el PDF no tiene que salir el
+  // motivo, el cuadro morado»). El motivo se sigue guardando en
+  // `invoices.rectification_reason` y se consulta en la plataforma, pero es una
+  // nota interna y no se imprime. La referencia a la factura rectificada —que sí
+  // identifica el documento— baja a la zona de datos, junto a Ticket/Pedido.
 
   const paymentBlock = buildSectionBox('CONDICIONES DE PAGO', [
     { text: 'Forma de pago:', margin: [8, 6, 8, 2] as [number, number, number, number], fontSize: 9, bold: true },
@@ -211,7 +201,6 @@ export async function generateInvoicePdf(invoiceId: string): Promise<string> {
   ])
 
   const bodyContent: Content[] = [
-    ...(referenceBlock ? [referenceBlock] : []),
     ...buildInfoSection({
       clientName: invoice.client_name,
       clientNif: invoice.client_nif,
