@@ -51,7 +51,7 @@ export function ClientTicketsTab({ clientId }: { clientId: string }) {
     try {
       const result = await getSaleForTicket(saleId)
       if (result.success && result.data) {
-        const { sale, lines, payments, clientName, clientCode, salespersonName } = result.data
+        const { sale, lines, payments, clientName, clientCode, salespersonName, returns } = result.data
         await generateTicketPdf({
           sale: {
             ticket_number: sale.ticket_number,
@@ -73,6 +73,7 @@ export function ClientTicketsTab({ clientId }: { clientId: string }) {
             line_total: l.line_total,
           })),
           payments,
+          returns,
           clientName,
           clientCode,
           attendedBy: salespersonName ?? null,

@@ -10,6 +10,8 @@ import { createSaleJournalEntry, createSaleReturnJournalEntry } from '@/actions/
 import { normalizeSearchTerm } from '@/lib/utils'
 import { formatClientAddress } from '@/lib/clients/format'
 import { resolveClientIdsForSearch } from '@/lib/server/query-helpers'
+import { loadSaleTicketReturns } from '@/lib/server/sale-ticket-returns'
+import type { TicketReturnPayload } from '@/components/pos/ticket-pdf'
 
 /**
  * Lista de empleados que pueden realizar ventas en una tienda.
@@ -502,6 +504,7 @@ export const getSaleForTicket = protectedAction<string, {
   clientCode: string | null
   storeName: string | null
   salespersonName: string | null
+  returns: TicketReturnPayload[]
 } | null>(
   { permission: 'pos.access', auditModule: 'pos' },
   async (ctx, saleId) => {
@@ -509,7 +512,7 @@ export const getSaleForTicket = protectedAction<string, {
       .from('sales')
       .select(`
         id, ticket_number, created_at, client_id, store_id, subtotal, discount_amount, discount_percentage,
-        tax_amount, total, payment_method, is_tax_free, status, notes,
+        tax_amount, total, total_returned, payment_method, is_tax_free, status, notes,
         stores(name),
         profiles!sales_salesperson_id_fkey(full_name)
       `)
@@ -543,6 +546,7 @@ export const getSaleForTicket = protectedAction<string, {
     const storeName = (sale.stores as { name?: string } | null)?.name ?? null
     const salesProfile = (sale as { profiles?: { full_name?: string } | { full_name?: string }[] | null }).profiles
     const salespersonName = (Array.isArray(salesProfile) ? salesProfile[0] : salesProfile)?.full_name ?? null
+    const returns = Number(sale.total_returned) > 0 ? await loadSaleTicketReturns(ctx.adminClient, saleId) : []
 
     return success({
       sale,
@@ -552,8 +556,15 @@ export const getSaleForTicket = protectedAction<string, {
       clientCode,
       storeName,
       salespersonName,
+      returns,
     })
   }
+)
+
+/** Devoluciones de una venta, para anotarlas al reimprimir su ticket desde el TPV. */
+export const getSaleTicketReturns = protectedAction<string, TicketReturnPayload[]>(
+  { permission: 'pos.access', auditModule: 'pos' },
+  async (ctx, saleId) => success(await loadSaleTicketReturns(ctx.adminClient, saleId))
 )
 
 // Tipos de venta TPV considerados "sastrería" (señal y pago final de un pedido).

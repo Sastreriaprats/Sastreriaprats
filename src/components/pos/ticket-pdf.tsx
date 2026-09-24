@@ -215,6 +215,20 @@ export interface TicketPaymentPayload {
   amount: number
 }
 
+/** Devolución posterior de (parte de) la venta, anotada al reimprimir el ticket. */
+export interface TicketReturnPayload {
+  created_at: string
+  /** 'voucher' (vale) · 'refund' (reintegro) · 'exchange' (cambio) */
+  return_type: string
+  refund_method?: string | null
+  total_returned: number
+  reason?: string | null
+  voucher_code?: string | null
+  /** Ticket de la venta nueva, si fue un cambio */
+  exchange_ref?: string | null
+  items: { description: string; quantity: number }[]
+}
+
 export interface TicketSalePayload {
   ticket_number: string
   internal_ref?: string | null
@@ -247,6 +261,8 @@ export interface TicketPdfData {
   giftMode?: boolean
   /** Título del documento en la cabecera (por defecto "Ticket") */
   docLabel?: string
+  /** Devoluciones hechas después de la venta (reimpresión desde listados/ficha) */
+  returns?: TicketReturnPayload[]
   /**
    * Ticket de un COBRO de pedido de sastrería (mig 291) o de RESERVA (mig 292):
    * estado del documento tras el cobro.
@@ -591,6 +607,64 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
       text: `Pago: ${payLabel}`,
       fontSize: FONT_BODY,
       margin: [0, 0, 0, data.orderSummary ? 6 : 12] as [number, number, number, number],
+    })
+  }
+  // Devoluciones posteriores: el ticket conserva la venta tal cual se hizo y aquí
+  // anota qué se devolvió, cuándo y cómo, y lo que queda. Sin este bloque un
+  // ticket con devolución se reimprimía como si estuviera intacto.
+  const returns = data.returns ?? []
+  if (!giftMode && returns.length > 0) {
+    const totalReturned = Math.round(returns.reduce((s, r) => s + (Number(r.total_returned) || 0), 0) * 100) / 100
+    const netTotal = Math.max(0, Math.round((Number(data.sale.total) - totalReturned) * 100) / 100)
+    const plural = returns.length > 1
+    content.push(
+      {
+        canvas: [{ type: 'line', x1: 0, y1: 0, x2: W_PT - 2 * MARGIN_PT, y2: 0, lineWidth: 0.5 }],
+        margin: [0, 0, 0, 6] as [number, number, number, number],
+      },
+      { text: plural ? 'DEVOLUCIONES' : 'DEVOLUCIÓN', fontSize: FONT_HEAD, bold: true, margin: [0, 0, 0, 4] as [number, number, number, number] },
+    )
+    for (const r of returns) {
+      const when = new Date(r.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      const how = r.return_type === 'voucher'
+        ? `Vale${r.voucher_code ? ' ' + r.voucher_code : ''}`
+        : r.return_type === 'refund'
+          ? `Reintegro${r.refund_method ? ' · ' + (PAYMENT_LABELS[r.refund_method] || r.refund_method) : ''}`
+          : r.return_type === 'exchange'
+            ? `Cambio${r.exchange_ref ? ' · ticket ' + r.exchange_ref : ''}`
+            : r.return_type
+      const rows: any[][] = [
+        [
+          { text: `${when} · ${how}`, fontSize: FONT_BODY, bold: true },
+          { text: '-' + fmt(Number(r.total_returned) || 0), fontSize: FONT_BODY, bold: true, alignment: 'right' },
+        ],
+        ...r.items.map((it) => [
+          { text: `${it.quantity} x ${it.description}`, fontSize: FONT_SMALL, color: '#555', colSpan: 2 },
+          {},
+        ]),
+      ]
+      if (r.reason) rows.push([{ text: `Motivo: ${r.reason}`, fontSize: FONT_SMALL, color: '#555', colSpan: 2 }, {}])
+      content.push({
+        table: { widths: ['*', 55], body: rows },
+        layout: 'noBorders',
+        margin: [0, 0, 0, 6] as [number, number, number, number],
+      })
+    }
+    if (plural) {
+      content.push({
+        columns: [
+          { text: 'Total devuelto:', fontSize: FONT_BODY },
+          { text: '-' + fmt(totalReturned), fontSize: FONT_BODY, alignment: 'right' },
+        ],
+        margin: [0, 0, 0, 2] as [number, number, number, number],
+      })
+    }
+    content.push({
+      columns: [
+        { text: plural ? 'TOTAL TRAS DEVOLUCIONES:' : 'TOTAL TRAS DEVOLUCIÓN:', fontSize: FONT_HEAD, bold: true },
+        { text: fmt(netTotal), fontSize: FONT_HEAD, bold: true, alignment: 'right', width: 60 },
+      ],
+      margin: [0, 0, 0, 12] as [number, number, number, number],
     })
   }
   // Ticket de un cobro de pedido: el importe de arriba es SOLO este cobro; aquí

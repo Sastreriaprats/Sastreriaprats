@@ -16,6 +16,7 @@ import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { PaymentMethodBadge } from '@/components/ui/payment-method-badge'
 import { generateTicketPdf } from '@/components/pos/ticket-pdf'
 import { createInvoiceFromSaleAction, generateInvoicePdfAction, updateInvoiceConceptsAction } from '@/actions/accounting'
+import { getSaleTicketReturns } from '@/actions/pos'
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
 import { toast } from 'sonner'
 
@@ -249,6 +250,9 @@ export function PosSummaryContent() {
       const { data: payments } = await supabase.from('sale_payments')
         .select('payment_method, amount')
         .eq('sale_id', sale.id)
+      const returnsRes = sale.status === 'partially_returned' || sale.status === 'fully_returned'
+        ? await getSaleTicketReturns(sale.id)
+        : null
       const storeConfig = getStorePdfData(storeName)
       await generateTicketPdf({
         sale: {
@@ -272,6 +276,7 @@ export function PosSummaryContent() {
           sku: l.sku || null,
         })),
         payments: (payments || []).map((p: any) => ({ payment_method: p.payment_method, amount: Number(p.amount) })),
+        returns: returnsRes?.success ? returnsRes.data : [],
         clientName: sale.clients?.full_name || null,
         attendedBy: (sale.profiles as any)?.full_name || null,
         storeAddress: storeConfig.address,

@@ -107,7 +107,7 @@ export function MisVentasContent() {
     try {
       const res = await getSaleForTicket(saleId)
       if (res.success && res.data) {
-        const { sale, lines, payments, clientName, clientCode, storeName, salespersonName } = res.data
+        const { sale, lines, payments, clientName, clientCode, storeName, salespersonName, returns } = res.data
         const storeConfig = getStorePdfData(storeName)
         await generateTicketPdf({
           sale: {
@@ -130,6 +130,7 @@ export function MisVentasContent() {
             line_total: l.line_total,
           })),
           payments,
+          returns,
           clientName,
           clientCode,
           attendedBy: salespersonName ?? null,
