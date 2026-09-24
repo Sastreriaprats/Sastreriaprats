@@ -7,6 +7,7 @@ import { loadOnlineTicketIncome } from '@/lib/accounting/online-ticket-income'
 import { loadInvoiceSalesPlan, type InvoiceSaleDoc } from '@/lib/accounting/invoice-sales'
 import { buildOnlineTicketPdfData } from '@/lib/online/online-ticket-pdf-data'
 import { buildOrderPaymentTicketPdfData } from '@/lib/orders/order-payment-ticket-data'
+import { buildReservationPaymentTicketPdfData } from '@/lib/reservations/payment-ticket-data'
 import { generateInvoicePdf } from '@/lib/pdf/invoice-pdf'
 import { getViewerAccess, assertScope, assertCanManage, type ViewerAccess } from '@/lib/ops/access'
 import { seal, open, dedupTag } from '@/lib/ops/crypto'
@@ -311,12 +312,17 @@ async function computeYear(year: number) {
     let isCash = p.method === 'cash'
     if (isCash && takeDeposited('reservation_payment', p.id, p.amount)) isCash = false
     addIncome(isCash, p.base, p.vat, month, q)
-    const concept = `Reserva ${p.reservationNumber}`
+    // Cobro con ticket propio (CLP-R, mig 292): el documento es ese ticket; el
+    // nº de reserva sigue en el concepto para poder casarlo. Antes la fila solo
+    // decía "Reserva RSV-…" y buscar por ticket no llevaba a ningún sitio.
+    const tn = p.ticketNumber ?? ''
+    const reservationPaymentId = tn ? p.id : undefined
+    const concept = tn ? `Reserva ${tn} (${p.reservationNumber})` : `Reserva ${p.reservationNumber}`
     const client = p.clientName || undefined
     if (isCash) {
-      cashMoves.push({ kind: 'reservation_payment', paymentId: p.id, date: p.paymentDate, ref: p.reservationNumber, concept, method: 'efectivo', client, base: r2(p.base), vat: r2(p.vat), total: r2(p.amount) })
+      cashMoves.push({ kind: 'reservation_payment', paymentId: p.id, reservationPaymentId, date: p.paymentDate, ref: tn || p.reservationNumber, concept, method: 'efectivo', client, base: r2(p.base), vat: r2(p.vat), total: r2(p.amount) })
     } else {
-      incomeLedger.push({ date: p.paymentDate, type: 'Reserva', concept, client, base: r2(p.base), vat: r2(p.vat), total: r2(p.amount) })
+      incomeLedger.push({ date: p.paymentDate, type: 'Reserva', concept, client, base: r2(p.base), vat: r2(p.vat), total: r2(p.amount), reservationPaymentId })
     }
   }
 
@@ -788,6 +794,19 @@ export async function getOnlineTicketData(onlineOrderId: string) {
     const a = await getViewerAccess()
     if (a.scopes.length === 0) return fail()
     const data = await buildOnlineTicketPdfData(createAdminClient(), onlineOrderId)
+    if (!data) return fail()
+    return ok(data)
+  } catch { return fail() }
+}
+
+// ---------------------------------------------------------------------------
+// Datos del ticket de UN cobro de RESERVA (serie CLP-R, mig 292) para su PDF.
+// ---------------------------------------------------------------------------
+export async function getReservationPaymentTicketData(paymentId: string) {
+  try {
+    const a = await getViewerAccess()
+    if (a.scopes.length === 0) return fail()
+    const data = await buildReservationPaymentTicketPdfData(createAdminClient(), paymentId)
     if (!data) return fail()
     return ok(data)
   } catch { return fail() }

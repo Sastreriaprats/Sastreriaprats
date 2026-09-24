@@ -19,6 +19,7 @@ import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import { todayLocalISODate } from '@/lib/dates'
 import { downloadExcelMulti } from '@/lib/excel/export'
 import {
+  getReservationPaymentTicket,
   listReservations,
   cancelReservation,
   reactivateReservation,
@@ -36,7 +37,7 @@ import {
   RESERVATION_DEPARTMENT_LABELS,
 } from '@/lib/reservations/situation'
 import { ReservationFormDialog } from '@/components/reservations/reservation-form-dialog'
-import { generateReservationPdf, printReservationPdf, type ReservationTicketData } from '@/components/pos/ticket-pdf'
+import { generateReservationPdf, printReservationPdf, generateTicketPdf, type ReservationTicketData } from '@/components/pos/ticket-pdf'
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
 import { createPrintReporter } from '@/lib/client-telemetry'
 import type { ReservationPaymentMethod, ReservationDepartment } from '@/lib/validations/reservations'
@@ -122,7 +123,7 @@ type Reservation = {
   employee?: { id: string; full_name?: string | null } | null
   created_by_profile?: { id: string; full_name?: string | null } | null
   lines?: ReservationLine[]
-  payments?: Array<{ id: string; payment_date: string; payment_method: string; amount: number | string; reference: string | null; notes: string | null; created_at: string }>
+  payments?: Array<{ id: string; payment_date: string; payment_method: string; amount: number | string; reference: string | null; notes: string | null; created_at: string; ticket_number?: string | null }>
 }
 
 const PAYMENT_METHOD_OPTIONS: Array<{ value: ReservationPaymentMethod; label: string; icon: React.ComponentType<{ className?: string }> }> = [
@@ -222,6 +223,7 @@ export function ReservationsTab() {
   const [paymentSubmitting, setPaymentSubmitting] = useState(false)
 
   const [printingId, setPrintingId] = useState<string | null>(null)
+  const [printingPaymentId, setPrintingPaymentId] = useState<string | null>(null)
   const [invoicingId, setInvoicingId] = useState<string | null>(null)
 
   const [actioningLineId, setActioningLineId] = useState<string | null>(null)
@@ -551,6 +553,28 @@ export function ReservationsTab() {
     }
   }
 
+  /**
+   * Imprime el ticket de UN cobro de la reserva (serie CLP-R, mig 292). Es el
+   * papel que acredita el dinero: el ticket de la recogida sale a 0 € cuando la
+   * reserva ya estaba pagada.
+   */
+  const handlePrintPaymentTicket = async (paymentId: string, mode: 'print' | 'download' = 'print') => {
+    setPrintingPaymentId(paymentId)
+    try {
+      const res = await getReservationPaymentTicket({ payment_id: paymentId })
+      if (!res.success || !res.data) {
+        toast.error((!res.success && res.error) || 'Este cobro no tiene ticket propio')
+        return
+      }
+      await generateTicketPdf(res.data, mode)
+    } catch (err) {
+      console.error('Error imprimiendo el ticket del cobro:', err)
+      toast.error('No se pudo generar el ticket del cobro')
+    } finally {
+      setPrintingPaymentId(null)
+    }
+  }
+
   const openAddPayment = (r: Reservation) => {
     setPaymentTarget(r)
     setPaymentMethod('cash')
@@ -576,7 +600,17 @@ export function ReservationsTab() {
         store_id: paymentTarget.store?.id ?? null,
       })
       if (!res.success) { toast.error(res.error || 'No se pudo registrar el pago'); return }
-      toast.success(`Pago registrado (${formatCurrency(amount)})`)
+      // El cobro ya tiene su ticket numerado propio (serie CLP-R, mig 292): es
+      // el papel que acredita el dinero, porque el ticket de la recogida sale a
+      // 0 € si la reserva queda pagada. Se ofrece sin quitar la impresión
+      // automática del resguardo de la reserva, que la tienda ya usa.
+      const newPaymentId = res.data?.id
+      toast.success(`Pago registrado (${formatCurrency(amount)})`, {
+        duration: 8000,
+        action: newPaymentId
+          ? { label: 'Ticket del cobro', onClick: () => { handlePrintPaymentTicket(newPaymentId) } }
+          : undefined,
+      })
       // Imprimir el ticket automáticamente reflejando el cobro recién hecho.
       // paymentTarget está obsoleto (no incluye este pago todavía), así que
       // construimos una copia con el pago añadido y total_paid actualizado.
@@ -1146,14 +1180,34 @@ export function ReservationsTab() {
                       </div>
                       <div className="rounded-md border divide-y text-sm">
                         {payments.map((p) => (
-                          <div key={p.id} className="flex items-center justify-between px-3 py-2">
-                            <div>
+                          <div key={p.id} className="flex items-center justify-between gap-2 px-3 py-2">
+                            <div className="min-w-0">
                               <div className="font-medium capitalize">{p.payment_method}</div>
                               <div className="text-xs text-muted-foreground">{formatDateTime(p.payment_date)}</div>
                               {p.reference && <div className="text-xs text-muted-foreground">Ref: {p.reference}</div>}
+                              {p.ticket_number && (
+                                <div className="text-xs font-mono text-muted-foreground">{p.ticket_number}</div>
+                              )}
                             </div>
-                            <div className="font-semibold tabular-nums text-emerald-700">
-                              {formatCurrency(Number(p.amount))}
+                            <div className="flex items-center gap-2 shrink-0">
+                              <div className="font-semibold tabular-nums text-emerald-700">
+                                {formatCurrency(Number(p.amount))}
+                              </div>
+                              {p.ticket_number && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 gap-1"
+                                  title={`Imprimir el ticket de este cobro (${p.ticket_number})`}
+                                  disabled={printingPaymentId === p.id}
+                                  onClick={() => handlePrintPaymentTicket(p.id)}
+                                >
+                                  {printingPaymentId === p.id
+                                    ? <Loader2 className="h-3 w-3 animate-spin" />
+                                    : <Printer className="h-3 w-3" />}
+                                  Ticket
+                                </Button>
+                              )}
                             </div>
                           </div>
                         ))}

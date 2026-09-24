@@ -247,8 +247,13 @@ export interface TicketPdfData {
   giftMode?: boolean
   /** Título del documento en la cabecera (por defecto "Ticket") */
   docLabel?: string
-  /** Ticket de un COBRO de pedido de sastrería (mig 291): estado del pedido tras el cobro */
+  /**
+   * Ticket de un COBRO de pedido de sastrería (mig 291) o de RESERVA (mig 292):
+   * estado del documento tras el cobro.
+   */
   orderSummary?: {
+    /** Cómo se llama el documento en el ticket. Por defecto "Pedido". */
+    label?: string
     orderNumber: string
     items?: string[]
     total: number
@@ -604,11 +609,11 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
         canvas: [{ type: 'line', x1: 0, y1: 0, x2: W_PT - 2 * MARGIN_PT, y2: 0, lineWidth: 0.5 }],
         margin: [0, 0, 0, 6] as [number, number, number, number],
       },
-      { text: `Pedido ${os.orderNumber}`, fontSize: FONT_BODY, bold: true, margin: [0, 0, 0, 1] as [number, number, number, number] },
+      { text: `${os.label ?? 'Pedido'} ${os.orderNumber}`, fontSize: FONT_BODY, bold: true, margin: [0, 0, 0, 1] as [number, number, number, number] },
       ...(os.items && os.items.length > 0
         ? [{ text: os.items.join(', '), fontSize: FONT_SMALL, color: '#555', margin: [0, 0, 0, 4] as [number, number, number, number] } as Content]
         : []),
-      row('Total pedido:', os.total),
+      row(`Total ${(os.label ?? 'Pedido').toLowerCase()}:`, os.total),
       row('Pagado:', os.paid),
       row('PENDIENTE:', os.pending, true, os.pending > 0.009 ? '#c00' : '#060'),
       { text: '', margin: [0, 0, 0, 8] as [number, number, number, number] },

@@ -37,6 +37,8 @@ export type ReservationPaymentIncome = {
   /** Quien hizo la reserva (misma atribución que el ticket de recogida, mig 245). */
   employeeId: string | null
   clientName: string | null
+  /** Nº de ticket propio del cobro (serie CLP-R, mig 292). */
+  ticketNumber: string | null
 }
 
 const DEFAULT_TAX_RATE = 21
@@ -84,7 +86,7 @@ async function loadPayments(
   for (let offset = 0; ; offset += PAGE) {
     const q = narrow(admin
       .from('product_reservation_payments')
-      .select('id, product_reservation_id, payment_date, payment_method, amount, product_reservations!inner(reservation_number, store_id, employee_id, stores(name), clients(full_name))'))
+      .select('id, product_reservation_id, payment_date, payment_method, amount, ticket_number, product_reservations!inner(reservation_number, store_id, employee_id, stores(name), clients(full_name))'))
       .order('id', { ascending: true })
       .range(offset, offset + PAGE - 1)
     const { data, error } = await q
@@ -140,6 +142,7 @@ async function loadPayments(
       storeName: store?.name ?? null,
       employeeId: res?.employee_id ?? null,
       clientName: client?.full_name ?? null,
+      ticketNumber: r.ticket_number ? String(r.ticket_number) : null,
     }
   })
 }

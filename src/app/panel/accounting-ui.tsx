@@ -3,7 +3,8 @@
 import { Fragment, useState } from 'react'
 import { toast } from 'sonner'
 import { TrendingUp, TrendingDown, Wallet, Receipt, Percent, Hash, Landmark, Download, Loader2, ChevronDown, ChevronRight, type LucideIcon } from 'lucide-react'
-import { getTicketData, getOrderTicketData, getOrderPaymentTicketData, getOnlineTicketData, getApInvoicePdfUrl, getIssuedInvoicePdfUrls } from '@/actions/ops'
+import { getTicketData, getOrderTicketData, getOrderPaymentTicketData,
+  getReservationPaymentTicketData, getOnlineTicketData, getApInvoicePdfUrl, getIssuedInvoicePdfUrls } from '@/actions/ops'
 import { generateTicketPdf } from '@/components/pos/ticket-pdf'
 import { generateTailoringOrderTicketPdf, type TailoringTicketOrder } from '@/lib/pdf/tailoring-order-ticket'
 import type { AccountingView, MovementRow, LedgerMovement } from '@/lib/ops/types'
@@ -350,7 +351,7 @@ function VatPeriodDetail({ ledger, months, title }: { ledger: LedgerMovement[]; 
                 <td className="px-2 py-1.5 text-right tabular-nums">{eur(m.vat)}</td>
                 <td className="px-2 py-1.5 text-right font-medium tabular-nums">{eur(Math.abs(m.total))}</td>
                 <td className="px-2 py-1.5 text-right">
-                  <DownloadBtn saleId={m.saleId} orderId={m.orderId} orderPaymentId={m.orderPaymentId} onlineOrderId={m.onlineOrderId} pdfUrl={m.pdfUrl} apPath={m.apPath} />
+                  <DownloadBtn saleId={m.saleId} orderId={m.orderId} orderPaymentId={m.orderPaymentId} reservationPaymentId={m.reservationPaymentId} onlineOrderId={m.onlineOrderId} pdfUrl={m.pdfUrl} apPath={m.apPath} />
                 </td>
               </tr>
             ))}
@@ -372,9 +373,9 @@ function VatPeriodDetail({ ledger, months, title }: { ledger: LedgerMovement[]; 
 }
 
 // `invoiceId` (solo escenario C): factura emitida sin PDF guardado → se genera al pulsar.
-export function DownloadBtn({ saleId, orderId, orderPaymentId, onlineOrderId, pdfUrl, apPath, invoiceId }: { saleId?: string; orderId?: string; orderPaymentId?: string; onlineOrderId?: string; pdfUrl?: string; apPath?: string; invoiceId?: string }) {
+export function DownloadBtn({ saleId, orderId, orderPaymentId, reservationPaymentId, onlineOrderId, pdfUrl, apPath, invoiceId }: { saleId?: string; orderId?: string; orderPaymentId?: string; reservationPaymentId?: string; onlineOrderId?: string; pdfUrl?: string; apPath?: string; invoiceId?: string }) {
   const [loading, setLoading] = useState(false)
-  if (!saleId && !orderId && !orderPaymentId && !onlineOrderId && !pdfUrl && !apPath && !invoiceId) return <span className="text-slate-300">—</span>
+  if (!saleId && !orderId && !orderPaymentId && !reservationPaymentId && !onlineOrderId && !pdfUrl && !apPath && !invoiceId) return <span className="text-slate-300">—</span>
   const go = async () => {
     setLoading(true)
     try {
@@ -386,6 +387,11 @@ export function DownloadBtn({ saleId, orderId, orderPaymentId, onlineOrderId, pd
       } else if (orderPaymentId) {
         // Ticket del COBRO (CLP-P): solo lo cobrado + estado del pedido.
         const res = await getOrderPaymentTicketData(orderPaymentId)
+        if (!res.ok) { toast.error('Ticket no disponible'); return }
+        await generateTicketPdf(res.data)
+      } else if (reservationPaymentId) {
+        // Ticket del COBRO de reserva (CLP-R): solo lo cobrado + estado de la reserva.
+        const res = await getReservationPaymentTicketData(reservationPaymentId)
         if (!res.ok) { toast.error('Ticket no disponible'); return }
         await generateTicketPdf(res.data)
       } else if (orderId) {
@@ -451,7 +457,7 @@ export function MovementsTable({ rows }: { rows: MovementRow[] }) {
               <td className={`${TD} capitalize text-slate-600`}>{m.method}</td>
               <td className={`${TD} text-slate-700`}>{m.client ?? <span className="text-slate-300">—</span>}</td>
               <td className={`${TDR} font-semibold`}>{eur(m.total)}</td>
-              <td className={`${TD} text-right`}><DownloadBtn saleId={m.saleId} orderId={m.orderId} orderPaymentId={m.orderPaymentId} pdfUrl={m.pdfUrl} /></td>
+              <td className={`${TD} text-right`}><DownloadBtn saleId={m.saleId} orderId={m.orderId} orderPaymentId={m.orderPaymentId} reservationPaymentId={m.reservationPaymentId} pdfUrl={m.pdfUrl} /></td>
             </tr>
           ))}
         </tbody>
@@ -530,7 +536,7 @@ export function MonthlyCashTable({ year, rows }: { year: number; rows: MovementR
                             <td className="px-2 py-1.5 capitalize text-slate-600">{m.method}</td>
                             <td className="px-2 py-1.5 text-slate-700">{m.client ?? '—'}</td>
                             <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{eur(m.total)}</td>
-                            <td className="px-2 py-1.5 text-right"><DownloadBtn saleId={m.saleId} orderId={m.orderId} orderPaymentId={m.orderPaymentId} pdfUrl={m.pdfUrl} /></td>
+                            <td className="px-2 py-1.5 text-right"><DownloadBtn saleId={m.saleId} orderId={m.orderId} orderPaymentId={m.orderPaymentId} reservationPaymentId={m.reservationPaymentId} pdfUrl={m.pdfUrl} /></td>
                           </tr>
                         ))}
                       </tbody>
@@ -606,7 +612,7 @@ export function MonthlyFullExpandable({ year, view, rows }: { year: number; view
                             <td className="px-2 py-1.5 text-slate-700">{m2.concept}</td>
                             <td className="px-2 py-1.5 text-slate-700">{m2.client ?? '—'}</td>
                             <td className={`px-2 py-1.5 text-right font-semibold tabular-nums ${m2.total >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{eur(m2.total)}</td>
-                            <td className="px-2 py-1.5 text-right"><DownloadBtn saleId={m2.saleId} orderId={m2.orderId} orderPaymentId={m2.orderPaymentId} onlineOrderId={m2.onlineOrderId} pdfUrl={m2.pdfUrl} apPath={m2.apPath} /></td>
+                            <td className="px-2 py-1.5 text-right"><DownloadBtn saleId={m2.saleId} orderId={m2.orderId} orderPaymentId={m2.orderPaymentId} reservationPaymentId={m2.reservationPaymentId} onlineOrderId={m2.onlineOrderId} pdfUrl={m2.pdfUrl} apPath={m2.apPath} /></td>
                           </tr>
                         ))}
                       </tbody>
@@ -663,7 +669,7 @@ export function LedgerTable({ rows }: { rows: LedgerMovement[] }) {
               <td className={TDR}>{eur(m.base)}</td>
               <td className={TDR}>{eur(m.vat)}</td>
               <td className={`${TDR} font-semibold ${m.total >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{eur(m.total)}</td>
-              <td className={`${TD} text-right`}><DownloadBtn saleId={m.saleId} orderId={m.orderId} orderPaymentId={m.orderPaymentId} onlineOrderId={m.onlineOrderId} pdfUrl={m.pdfUrl} apPath={m.apPath} /></td>
+              <td className={`${TD} text-right`}><DownloadBtn saleId={m.saleId} orderId={m.orderId} orderPaymentId={m.orderPaymentId} reservationPaymentId={m.reservationPaymentId} onlineOrderId={m.onlineOrderId} pdfUrl={m.pdfUrl} apPath={m.apPath} /></td>
             </tr>
           ))}
         </tbody>

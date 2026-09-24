@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Download, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { getViewC, getIssuedInvoicePdfUrls, getApInvoicePdfUrls, getTicketData, getOrderTicketData, getOrderPaymentTicketData, getOnlineTicketData } from '@/actions/ops'
+import { getViewC, getIssuedInvoicePdfUrls, getApInvoicePdfUrls, getTicketData, getOrderTicketData, getOrderPaymentTicketData, getReservationPaymentTicketData, getOnlineTicketData } from '@/actions/ops'
 import { generateTicketPdf } from '@/components/pos/ticket-pdf'
 import { generateTailoringOrderTicketPdf } from '@/lib/pdf/tailoring-order-ticket'
 import type { ViewC, AccountingView, ApInvoiceLite, VatRateRow, InvoiceOriginKind } from '@/lib/ops/types'
@@ -49,6 +49,7 @@ type IncomeDoc = {
   saleId?: string
   orderId?: string
   orderPaymentId?: string
+  reservationPaymentId?: string
   onlineOrderId?: string
   invoiceId?: string
   origin?: string  // factura: ticket/pedidos/reservas/web a los que va asociada
@@ -64,10 +65,11 @@ const docKey = (d: IncomeDoc) =>
     : d.saleId ? `sale:${d.saleId}`
       : d.onlineOrderId ? `web:${d.onlineOrderId}`
         : d.orderPaymentId ? `orderpay:${d.orderPaymentId}`
+        : d.reservationPaymentId ? `resvpay:${d.reservationPaymentId}`
         : d.orderId ? `order:${d.orderId}:${d.date}`
           : `${d.docType}:${d.number}:${d.date}`
 // Se puede descargar si hay factura o un ticket/pedido del que sacar el PDF
-const canDownloadDoc = (d: IncomeDoc) => !!(d.invoiceId || d.saleId || d.orderId || d.onlineOrderId)
+const canDownloadDoc = (d: IncomeDoc) => !!(d.invoiceId || d.saleId || d.orderId || d.onlineOrderId || d.reservationPaymentId)
 
 // PDF de un ticket o cobro de sastrería: no existe guardado, se arma en el
 // navegador con los mismos datos que el botón de descarga de su fila.
@@ -83,6 +85,10 @@ async function buildDocPdfBlob(d: IncomeDoc): Promise<Blob | null> {
     }
     if (d.orderPaymentId) {
       const res = await getOrderPaymentTicketData(d.orderPaymentId)
+      return res.ok ? ((await generateTicketPdf(res.data, 'blob')) as Blob) : null
+    }
+    if (d.reservationPaymentId) {
+      const res = await getReservationPaymentTicketData(d.reservationPaymentId)
       return res.ok ? ((await generateTicketPdf(res.data, 'blob')) as Blob) : null
     }
     if (d.orderId) {
@@ -268,6 +274,7 @@ export function ScenarioCView() {
         saleId: m.saleId,
         orderId: m.orderId,
         orderPaymentId: m.orderPaymentId,
+        reservationPaymentId: m.reservationPaymentId,
         onlineOrderId: m.onlineOrderId,
         provenance: ['sin_factura'],
       })
@@ -922,7 +929,7 @@ export function ScenarioCView() {
                       <td className="px-3 py-2 text-slate-500">{d.status ? INVOICE_STATUS[d.status] ?? d.status : '—'}</td>
                       <td className="px-3 py-2 capitalize text-slate-500">{d.method || '—'}</td>
                       <td className="px-3 py-2 text-right">
-                        <DownloadBtn saleId={d.docType !== 'Factura' ? d.saleId : undefined} orderId={d.docType !== 'Factura' ? d.orderId : undefined} orderPaymentId={d.docType !== 'Factura' ? d.orderPaymentId : undefined} onlineOrderId={d.docType !== 'Factura' ? d.onlineOrderId : undefined} pdfUrl={d.pdfUrl} invoiceId={d.docType === 'Factura' ? d.invoiceId : undefined} />
+                        <DownloadBtn saleId={d.docType !== 'Factura' ? d.saleId : undefined} orderId={d.docType !== 'Factura' ? d.orderId : undefined} orderPaymentId={d.docType !== 'Factura' ? d.orderPaymentId : undefined} reservationPaymentId={d.docType !== 'Factura' ? d.reservationPaymentId : undefined} onlineOrderId={d.docType !== 'Factura' ? d.onlineOrderId : undefined} pdfUrl={d.pdfUrl} invoiceId={d.docType === 'Factura' ? d.invoiceId : undefined} />
                       </td>
                     </tr>
                   ))}

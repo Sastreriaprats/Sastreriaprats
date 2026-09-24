@@ -4,6 +4,9 @@ import { protectedAction } from '@/lib/server/action-wrapper'
 import { success, failure } from '@/lib/errors'
 import { normalizeSearchTerm } from '@/lib/utils'
 import { resolveClientIdsForSearch } from '@/lib/server/query-helpers'
+import { serializeForServerAction } from '@/lib/server/serialize'
+import { buildReservationPaymentTicketPdfData } from '@/lib/reservations/payment-ticket-data'
+import type { TicketPdfData } from '@/components/pos/ticket-pdf'
 import {
   createReservationSchema,
   updateReservationSchema,
@@ -45,7 +48,7 @@ const RESERVATION_SELECT = `
     ),
     warehouse:warehouses ( id, code, name )
   ),
-  payments:product_reservation_payments ( id, payment_date, payment_method, amount, reference, notes, created_at ),
+  payments:product_reservation_payments ( id, payment_date, payment_method, amount, reference, notes, created_at, ticket_number ),
   created_by_profile:profiles!product_reservations_created_by_fkey ( id, full_name ),
   employee:profiles!product_reservations_employee_id_fkey ( id, full_name )
 `
@@ -673,5 +676,21 @@ export const getMainWarehouseForStore = protectedAction<{ storeId: string }, { i
       .maybeSingle()
     if (error) return failure(error.message || 'Error al buscar almacén', 'INTERNAL')
     return success((data ?? null) as any)
+  }
+)
+
+/**
+ * Datos del ticket de UN cobro de reserva (serie CLP-R, mig 292) para
+ * imprimirlo. Gemela de `getOrderPaymentTicket` para los cobros de pedido.
+ *
+ * Existe porque el ticket de la RECOGIDA sale a 0 € cuando la reserva ya estaba
+ * pagada, y hasta ahora no había ningún papel que acreditara el cobro.
+ */
+export const getReservationPaymentTicket = protectedAction<{ payment_id: string }, TicketPdfData>(
+  { permission: 'reservations.view' },
+  async (ctx, { payment_id }) => {
+    const data = await buildReservationPaymentTicketPdfData(ctx.adminClient, payment_id)
+    if (!data) return failure('Este cobro no tiene ticket propio')
+    return success(serializeForServerAction(data))
   }
 )

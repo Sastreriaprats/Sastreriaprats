@@ -26,6 +26,7 @@ export type NoInvoiceDoc = {
   saleId?: string
   orderId?: string
   orderPaymentId?: string
+  reservationPaymentId?: string
 }
 
 export type ClientDetailTarget = { key: string; name: string; nif?: string }
@@ -37,7 +38,7 @@ type MayorRow = {
   debe: number
   haber: number
   saldo: number
-  pdf: { saleId?: string; orderId?: string; orderPaymentId?: string; pdfUrl?: string; invoiceId?: string }
+  pdf: { saleId?: string; orderId?: string; orderPaymentId?: string; reservationPaymentId?: string; pdfUrl?: string; invoiceId?: string }
 }
 
 // Detalle de un cliente del escenario C: sus facturas, los cobros de C que
@@ -89,7 +90,7 @@ export function buildClientDetail(
       date: p.m.date, order: 1, doc: p.m.concept.replace(/^(Ticket|Sastrería|Reserva)\s+/, ''),
       concept: `Cobro ${p.m.type.toLowerCase()} · aplicado a ${p.invoiceNumbers.join(', ')}`,
       debe: 0, haber: p.m.total,
-      pdf: { saleId: p.m.saleId, orderId: p.m.orderId, orderPaymentId: p.m.orderPaymentId },
+      pdf: { saleId: p.m.saleId, orderId: p.m.orderId, orderPaymentId: p.m.orderPaymentId, reservationPaymentId: p.m.reservationPaymentId },
     })
   }
   for (const d of noInvoice) {
@@ -97,7 +98,7 @@ export function buildClientDetail(
       date: d.date, order: 2, doc: d.number,
       concept: `${d.docType} sin factura (cargo y cobro)`,
       debe: d.total, haber: d.total,
-      pdf: { saleId: d.saleId, orderId: d.orderId, orderPaymentId: d.orderPaymentId },
+      pdf: { saleId: d.saleId, orderId: d.orderId, orderPaymentId: d.orderPaymentId, reservationPaymentId: d.reservationPaymentId },
     })
   }
   entries.sort((a, b) => a.date.localeCompare(b.date) || a.order - b.order)
@@ -268,7 +269,7 @@ export function ClientLedgerDialog({ year, target, detail, onClose }: {
                             <td className={TDR}>{eur(d.base)}</td>
                             <td className={TDR}>{eur(d.vat)}</td>
                             <td className={`${TDR} font-medium`}>{eur(d.total)}</td>
-                            <td className={`${TD} text-right`}><DownloadBtn saleId={d.saleId} orderId={d.orderId} orderPaymentId={d.orderPaymentId} /></td>
+                            <td className={`${TD} text-right`}><DownloadBtn saleId={d.saleId} orderId={d.orderId} orderPaymentId={d.orderPaymentId} reservationPaymentId={d.reservationPaymentId} /></td>
                           </tr>
                         ))}
                         <tr className={TOTAL_ROW}>
