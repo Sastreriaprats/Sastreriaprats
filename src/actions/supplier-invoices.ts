@@ -9,6 +9,7 @@ import {
   computeDueDate,
   earliestInstallmentDate,
   replaceInvoiceInstallments,
+  rederiveDueDatesFifo,
 } from '@/lib/server/supplier-payments'
 
 const PERMISSION = 'supplier_invoices.manage'
@@ -71,6 +72,11 @@ export type ApSupplierInvoiceRow = {
   rectifies_invoice_id?: string | null
   rectification_reason?: string | null
   is_proforma?: boolean
+  /** Solo en proformas: factura definitiva a la que se ha asociado (mig 293). */
+  final_invoice_id?: string | null
+  final_invoice_number?: string | null
+  /** Solo en facturas: proformas asociadas a ella. */
+  linked_proformas?: Array<{ id: string; invoice_number: string }>
 }
 
 export type ApSupplierInvoiceInput = {
@@ -349,7 +355,41 @@ export const listSupplierInvoices = protectedAction<
       notes: r.notes != null ? String(r.notes) : null,
       attachment_url: r.attachment_url != null ? String(r.attachment_url) : null,
       created_at: String(r.created_at ?? ''),
-    }))
+      // Sin estos flags la lista no distinguía proformas ni abonos: se podían marcar
+      // como pagadas en lote y, al editarlas, el formulario las guardaba como factura.
+      is_rectifying: r.is_rectifying === true,
+      rectifies_invoice_id: r.rectifies_invoice_id != null ? String(r.rectifies_invoice_id) : null,
+      rectification_reason: r.rectification_reason != null ? String(r.rectification_reason) : null,
+      is_proforma: r.is_proforma === true,
+      final_invoice_id: r.final_invoice_id != null ? String(r.final_invoice_id) : null,
+    })) as ApSupplierInvoiceRow[]
+
+    // Vínculo proforma ↔ factura definitiva (mig 293), en los dos sentidos. Se
+    // resuelve fuera del filtro de la lista: la factura asociada puede no estar en
+    // la página (otro rango de fechas, otro estado).
+    const { data: linkedProformas } = await ctx.adminClient
+      .from(TABLE)
+      .select('id, invoice_number, final_invoice_id')
+      .not('final_invoice_id', 'is', null)
+    const proformasByInvoice = new Map<string, Array<{ id: string; invoice_number: string }>>()
+    for (const p of (linkedProformas || []) as { id: string; invoice_number: string; final_invoice_id: string }[]) {
+      const arr = proformasByInvoice.get(p.final_invoice_id) ?? []
+      arr.push({ id: String(p.id), invoice_number: String(p.invoice_number ?? '') })
+      proformasByInvoice.set(p.final_invoice_id, arr)
+    }
+    const finalIds = [...proformasByInvoice.keys()]
+    const finalNumberById = new Map<string, string>()
+    if (finalIds.length > 0) {
+      const { data: finals } = await ctx.adminClient.from(TABLE).select('id, invoice_number').in('id', finalIds)
+      for (const f of (finals || []) as { id: string; invoice_number: string }[]) {
+        finalNumberById.set(String(f.id), String(f.invoice_number ?? ''))
+      }
+    }
+    for (const r of list) {
+      if (r.final_invoice_id) r.final_invoice_number = finalNumberById.get(r.final_invoice_id) ?? null
+      const pf = proformasByInvoice.get(r.id)
+      if (pf) r.linked_proformas = pf
+    }
 
     // Fallback informativo del tipo de pago: para las facturas SIN payment_method
     // propio, tomamos el de la ficha del proveedor (su forma de pago habitual) solo
@@ -853,10 +893,16 @@ export const updateSupplierInvoiceAction = protectedAction<ApSupplierInvoiceInpu
     // era dejar rastro de por qué se toca algo ya cobrado.
     const { data: current } = await ctx.adminClient
       .from(TABLE)
-      .select('status, is_rectifying, total_amount, invoice_number')
+      .select('status, is_rectifying, total_amount, invoice_number, final_invoice_id')
       .eq('id', id)
       .maybeSingle()
-    const currentRow = current as { status?: string; is_rectifying?: boolean; total_amount?: number | string; invoice_number?: string } | null
+    const currentRow = current as { status?: string; is_rectifying?: boolean; total_amount?: number | string; invoice_number?: string; final_invoice_id?: string | null } | null
+    if (currentRow?.final_invoice_id && rest.is_proforma !== true) {
+      return failure(
+        'Esta proforma está asociada a una factura. Quita la asociación antes de convertirla en factura.',
+        'VALIDATION',
+      )
+    }
     const wasPaid = currentRow?.status === 'pagada'
     const correctionReason = (rest.correction_reason ?? '').trim()
     if (wasPaid && correctionReason.length < 10) {
@@ -1509,6 +1555,229 @@ export const deleteSupplierInvoiceAction = protectedAction<{ id: string }, { aud
       auditDescription: invoiceNumber
         ? `Factura ${invoiceNumber}${supplierName ? ` · ${supplierName}` : ''} eliminada`
         : 'Eliminar Factura de proveedor',
+    })
+  }
+)
+
+// ─── Proforma → factura definitiva (mig 293) ─────────────────────────────────
+
+export type ProformaLinkCandidate = {
+  id: string
+  invoice_number: string
+  invoice_date: string
+  total_amount: number
+  paid: number
+  status: string
+}
+
+type ProformaHeader = {
+  id: string
+  invoice_number: string
+  supplier_id: string | null
+  supplier_name: string | null
+  is_proforma: boolean
+  is_rectifying?: boolean
+  final_invoice_id: string | null
+  total_amount?: number | string
+}
+
+const sameSupplier = (
+  a: { supplier_id: string | null; supplier_name: string | null },
+  b: { supplier_id: string | null; supplier_name: string | null },
+) => {
+  if (a.supplier_id && b.supplier_id) return a.supplier_id === b.supplier_id
+  return normalizeSearchTerm(a.supplier_name ?? '') === normalizeSearchTerm(b.supplier_name ?? '')
+}
+
+const sumPaid = async (adminClient: AdminClient, invoiceId: string) => {
+  const { data } = await adminClient
+    .from('ap_supplier_invoice_payments')
+    .select('amount')
+    .eq('supplier_invoice_id', invoiceId)
+  return Math.round((data || []).reduce((s: number, p: { amount: number | null }) => s + Number(p.amount ?? 0), 0) * 100) / 100
+}
+
+/** Facturas del mismo proveedor a las que se puede asociar una proforma. */
+export const listInvoicesForProformaLink = protectedAction<{ proformaId: string }, ProformaLinkCandidate[]>(
+  { permission: PERMISSION, auditModule: 'accounting' },
+  async (ctx, { proformaId }) => {
+    const { data: pf } = await ctx.adminClient
+      .from(TABLE)
+      .select('id, supplier_id, supplier_name')
+      .eq('id', proformaId)
+      .maybeSingle()
+    if (!pf) return failure('La proforma no existe', 'NOT_FOUND')
+    const proforma = pf as { id: string; supplier_id: string | null; supplier_name: string | null }
+
+    let q = ctx.adminClient
+      .from(TABLE)
+      .select('id, invoice_number, invoice_date, total_amount, status')
+      .eq('is_proforma', false)
+      .eq('is_rectifying', false)
+      .order('invoice_date', { ascending: false })
+      .limit(200)
+    q = proforma.supplier_id
+      ? q.eq('supplier_id', proforma.supplier_id)
+      : q.ilike('supplier_name', proforma.supplier_name ?? '')
+    const { data, error } = await q
+    if (error) return failure(error.message)
+
+    const rows = (data || []) as Array<{ id: string; invoice_number: string; invoice_date: string; total_amount: number | string; status: string }>
+    const paidById = new Map<string, number>()
+    if (rows.length > 0) {
+      const { data: pays } = await ctx.adminClient
+        .from('ap_supplier_invoice_payments')
+        .select('supplier_invoice_id, amount')
+        .in('supplier_invoice_id', rows.map((r) => r.id))
+      for (const p of (pays || []) as { supplier_invoice_id: string; amount: number | null }[]) {
+        paidById.set(p.supplier_invoice_id, (paidById.get(p.supplier_invoice_id) ?? 0) + Number(p.amount ?? 0))
+      }
+    }
+    return success(rows.map((r) => ({
+      id: String(r.id),
+      invoice_number: String(r.invoice_number ?? ''),
+      invoice_date: String(r.invoice_date ?? ''),
+      total_amount: Number(r.total_amount ?? 0),
+      paid: Math.round((paidById.get(r.id) ?? 0) * 100) / 100,
+      status: String(r.status ?? 'pendiente'),
+    })))
+  }
+)
+
+/**
+ * Asocia una proforma a su factura definitiva. Los pagos que tuviera la proforma
+ * (anticipos) se trasladan a la factura, recordando su origen para poder deshacerlo;
+ * el trigger ap_sipay_recalc re-deriva el estado de las dos cabeceras.
+ */
+export const linkProformaToInvoiceAction = protectedAction<
+  { proformaId: string; invoiceId: string },
+  { auditEntityId: string; auditDescription: string; movedPayments: number; movedAmount: number }
+>(
+  {
+    permission: PERMISSION,
+    auditModule: 'accounting',
+    auditAction: 'update',
+    auditEntity: 'supplier_invoice',
+  },
+  async (ctx, { proformaId, invoiceId }) => {
+    if (!proformaId || !invoiceId) return failure('Faltan la proforma o la factura', 'VALIDATION')
+    if (proformaId === invoiceId) return failure('Una proforma no puede asociarse a sí misma', 'VALIDATION')
+
+    const { data: both, error: readErr } = await ctx.adminClient
+      .from(TABLE)
+      .select('id, invoice_number, supplier_id, supplier_name, is_proforma, is_rectifying, final_invoice_id, total_amount')
+      .in('id', [proformaId, invoiceId])
+    if (readErr) return failure(readErr.message)
+    const headers = (both || []) as ProformaHeader[]
+    const pf = headers.find((r) => r.id === proformaId)
+    const inv = headers.find((r) => r.id === invoiceId)
+    if (!pf) return failure('La proforma no existe', 'NOT_FOUND')
+    if (!inv) return failure('La factura no existe', 'NOT_FOUND')
+    if (!pf.is_proforma) return failure(`${pf.invoice_number} no es una proforma`, 'VALIDATION')
+    if (pf.final_invoice_id) return failure('La proforma ya está asociada a una factura. Quita esa asociación primero.', 'VALIDATION')
+    if (inv.is_proforma) return failure('Hay que asociarla a una factura, no a otra proforma', 'VALIDATION')
+    if (inv.is_rectifying) return failure('No se puede asociar una proforma a un abono', 'VALIDATION')
+    if (!sameSupplier(pf, inv)) return failure('La factura es de otro proveedor', 'VALIDATION')
+
+    const { data: pfPays, error: paysErr } = await ctx.adminClient
+      .from('ap_supplier_invoice_payments')
+      .select('id, amount, manual_transaction_id')
+      .eq('supplier_invoice_id', proformaId)
+    if (paysErr) return failure(paysErr.message)
+    const pays = (pfPays || []) as { id: string; amount: number | null; manual_transaction_id: string | null }[]
+    const movedAmount = Math.round(pays.reduce((s, p) => s + Number(p.amount ?? 0), 0) * 100) / 100
+
+    if (pays.length > 0) {
+      const invPending = Math.round((Number(inv.total_amount ?? 0) - (await sumPaid(ctx.adminClient, invoiceId))) * 100) / 100
+      if (movedAmount > invPending + 0.01) {
+        return failure(
+          `Lo pagado con la proforma (${movedAmount.toFixed(2)} €) supera lo pendiente de la factura ${inv.invoice_number} (${invPending.toFixed(2)} €).`,
+          'VALIDATION',
+        )
+      }
+      const { error: moveErr } = await ctx.adminClient
+        .from('ap_supplier_invoice_payments')
+        .update({ supplier_invoice_id: invoiceId, moved_from_proforma_id: proformaId })
+        .in('id', pays.map((p) => p.id))
+      if (moveErr) return failure(moveErr.message || 'No se pudieron trasladar los pagos')
+
+      // El gasto espejo de cada pago sigue a su factura (informe de gastos por factura).
+      const mtIds = pays.map((p) => p.manual_transaction_id).filter((x): x is string => !!x)
+      if (mtIds.length > 0) {
+        await ctx.adminClient.from('manual_transactions').update({ ap_supplier_invoice_id: invoiceId }).in('id', mtIds)
+      }
+      await rederiveDueDatesFifo(ctx.adminClient, invoiceId)
+    }
+
+    const { error: linkErr } = await ctx.adminClient
+      .from(TABLE)
+      .update({ final_invoice_id: invoiceId, updated_at: new Date().toISOString() })
+      .eq('id', proformaId)
+    if (linkErr) return failure(linkErr.message || 'No se pudo asociar la proforma')
+
+    return success({
+      auditEntityId: proformaId,
+      auditDescription: `Proforma ${pf.invoice_number} asociada a la factura ${inv.invoice_number}${pf.supplier_name ? ` · ${pf.supplier_name}` : ''}${pays.length > 0 ? ` (pagos trasladados: ${movedAmount.toFixed(2)} €)` : ''}`,
+      movedPayments: pays.length,
+      movedAmount,
+    })
+  }
+)
+
+/** Deshace la asociación: los pagos que vinieron de la proforma vuelven a ella. */
+export const unlinkProformaAction = protectedAction<
+  { proformaId: string },
+  { auditEntityId: string; auditDescription: string; movedPayments: number }
+>(
+  {
+    permission: PERMISSION,
+    auditModule: 'accounting',
+    auditAction: 'update',
+    auditEntity: 'supplier_invoice',
+  },
+  async (ctx, { proformaId }) => {
+    const { data } = await ctx.adminClient
+      .from(TABLE)
+      .select('id, invoice_number, supplier_id, supplier_name, is_proforma, final_invoice_id')
+      .eq('id', proformaId)
+      .maybeSingle()
+    const pf = data as ProformaHeader | null
+    if (!pf) return failure('La proforma no existe', 'NOT_FOUND')
+    if (!pf.final_invoice_id) return failure('La proforma no está asociada a ninguna factura', 'VALIDATION')
+    const invoiceId = pf.final_invoice_id
+
+    const { data: movedRaw, error: paysErr } = await ctx.adminClient
+      .from('ap_supplier_invoice_payments')
+      .select('id, manual_transaction_id')
+      .eq('moved_from_proforma_id', proformaId)
+      .eq('supplier_invoice_id', invoiceId)
+    if (paysErr) return failure(paysErr.message)
+    const moved = (movedRaw || []) as { id: string; manual_transaction_id: string | null }[]
+
+    if (moved.length > 0) {
+      const { error: backErr } = await ctx.adminClient
+        .from('ap_supplier_invoice_payments')
+        .update({ supplier_invoice_id: proformaId, moved_from_proforma_id: null })
+        .in('id', moved.map((p) => p.id))
+      if (backErr) return failure(backErr.message || 'No se pudieron devolver los pagos a la proforma')
+      const mtIds = moved.map((p) => p.manual_transaction_id).filter((x): x is string => !!x)
+      if (mtIds.length > 0) {
+        await ctx.adminClient.from('manual_transactions').update({ ap_supplier_invoice_id: proformaId }).in('id', mtIds)
+      }
+      await rederiveDueDatesFifo(ctx.adminClient, invoiceId)
+    }
+
+    const { data: inv } = await ctx.adminClient.from(TABLE).select('invoice_number').eq('id', invoiceId).maybeSingle()
+    const { error } = await ctx.adminClient
+      .from(TABLE)
+      .update({ final_invoice_id: null, updated_at: new Date().toISOString() })
+      .eq('id', proformaId)
+    if (error) return failure(error.message)
+
+    return success({
+      auditEntityId: proformaId,
+      auditDescription: `Proforma ${pf.invoice_number} desasociada de la factura ${(inv as { invoice_number?: string } | null)?.invoice_number ?? ''}${pf.supplier_name ? ` · ${pf.supplier_name}` : ''}`,
+      movedPayments: moved.length,
     })
   }
 )

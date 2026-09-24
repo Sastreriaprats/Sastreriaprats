@@ -63,6 +63,8 @@ import {
   Package,
   X,
   Undo2,
+  Link2,
+  Unlink,
 } from 'lucide-react'
 import { CreditNoteDialog } from './credit-note-dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -84,6 +86,10 @@ import {
   getSupplierInvoiceDeliveryNoteIds,
   getSupplierInvoiceLines,
   listSupplierInvoiceInstallments,
+  listInvoicesForProformaLink,
+  linkProformaToInvoiceAction,
+  unlinkProformaAction,
+  type ProformaLinkCandidate,
   type ApSupplierInvoiceRow,
   type ApSupplierInvoiceInput,
   type SupplierInvoicesKpis,
@@ -227,6 +233,15 @@ export function SupplierInvoicesContent() {
   const [correcting, setCorrecting] = useState(false)
   const [correctionReason, setCorrectionReason] = useState('')
   const [hideProformas, setHideProformas] = useState(false)
+  // Proforma en edición ya asociada a su factura: el flag no se puede quitar.
+  const [editingFinalInvoiceNumber, setEditingFinalInvoiceNumber] = useState<string | null>(null)
+  // Asociar una proforma a su factura definitiva (mig 293).
+  const [linkTarget, setLinkTarget] = useState<ApSupplierInvoiceRow | null>(null)
+  const [linkCandidates, setLinkCandidates] = useState<ProformaLinkCandidate[]>([])
+  const [linkCandidatesLoading, setLinkCandidatesLoading] = useState(false)
+  const [linkInvoiceId, setLinkInvoiceId] = useState('')
+  const [linking, setLinking] = useState(false)
+  const [unlinkTarget, setUnlinkTarget] = useState<ApSupplierInvoiceRow | null>(null)
 
   const [form, setForm] = useState({
     supplier_id: '',
@@ -426,6 +441,10 @@ export function SupplierInvoicesContent() {
         'Total': Number(row.total_amount) || 0,
         'Pagado': paid,
         'Pendiente': pendiente,
+        'Tipo': row.is_proforma ? 'Proforma' : row.is_rectifying ? 'Abono' : 'Factura',
+        'Asociada a': row.is_proforma
+          ? (row.final_invoice_number ?? '')
+          : (row.linked_proformas ?? []).map((p) => p.invoice_number).join(', '),
         'Estado': STATUS_BADGE[row.status]?.label ?? row.status,
         'Método Pago': (row.payment_method ? (PAYMENT_METHOD_LABEL[row.payment_method] ?? row.payment_method) : (row.supplier_payment_method ? (PAYMENT_METHOD_LABEL[row.supplier_payment_method] ?? row.supplier_payment_method) : '')),
       }
@@ -458,6 +477,7 @@ export function SupplierInvoicesContent() {
   const openCreate = () => {
     setEditingId(null)
     setEditingIsRectifying(false)
+    setEditingFinalInvoiceNumber(null)
     setEditingIsPaid(false)
     setCorrecting(false)
     setCorrectionReason('')
@@ -493,6 +513,7 @@ export function SupplierInvoicesContent() {
   const openEdit = async (row: ApSupplierInvoiceRow) => {
     setEditingId(row.id)
     setEditingIsRectifying(row.is_rectifying === true)
+    setEditingFinalInvoiceNumber(row.final_invoice_id ? (row.final_invoice_number ?? '') : null)
     setEditingIsPaid(row.status === 'pagada')
     setCorrecting(false)
     setCorrectionReason('')
@@ -968,6 +989,56 @@ export function SupplierInvoicesContent() {
     }
   }
 
+  // ─── Proforma → factura definitiva ──────────────────────────────────────────
+  const openLink = async (row: ApSupplierInvoiceRow) => {
+    setLinkTarget(row)
+    setLinkInvoiceId('')
+    setLinkCandidates([])
+    setLinkCandidatesLoading(true)
+    const r = await listInvoicesForProformaLink({ proformaId: row.id })
+    setLinkCandidatesLoading(false)
+    if (r.success) setLinkCandidates(r.data)
+    else toast.error(r.error || 'No se pudieron cargar las facturas del proveedor')
+  }
+
+  const runLink = async () => {
+    if (!linkTarget || !linkInvoiceId) return
+    setLinking(true)
+    const r = await linkProformaToInvoiceAction({ proformaId: linkTarget.id, invoiceId: linkInvoiceId })
+    setLinking(false)
+    if (r.success) {
+      toast.success(
+        r.data.movedPayments > 0
+          ? `Proforma asociada · ${formatCurrency(r.data.movedAmount)} pagados pasan a la factura`
+          : 'Proforma asociada a la factura',
+      )
+      setLinkTarget(null)
+      loadList()
+      loadKpis()
+    } else {
+      toast.error(r.error || 'No se pudo asociar la proforma')
+    }
+  }
+
+  const runUnlink = async () => {
+    if (!unlinkTarget) return
+    setLinking(true)
+    const r = await unlinkProformaAction({ proformaId: unlinkTarget.id })
+    setLinking(false)
+    if (r.success) {
+      toast.success(
+        r.data.movedPayments > 0
+          ? 'Asociación quitada · los pagos vuelven a la proforma'
+          : 'Asociación quitada',
+      )
+      setUnlinkTarget(null)
+      loadList()
+      loadKpis()
+    } else {
+      toast.error(r.error || 'No se pudo quitar la asociación')
+    }
+  }
+
   return (
     <div className="space-y-6 p-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -1148,6 +1219,7 @@ export function SupplierInvoicesContent() {
                 </TableHead>
                 <TableHead>Proveedor</TableHead>
                 <TableHead>Nº factura</TableHead>
+                <TableHead>Tipo</TableHead>
                 <TableHead>Fecha factura</TableHead>
                 <TableHead>Vencimiento</TableHead>
                 <TableHead className="text-right">Total</TableHead>
@@ -1171,6 +1243,7 @@ export function SupplierInvoicesContent() {
                   ? (PAYMENT_METHOD_LABEL[effectivePm] ?? effectivePm)
                   : null
                 const selectable = !row.is_proforma && pending > 0
+                const isLinkedProforma = row.is_proforma === true && !!row.final_invoice_id
                 return (
                   <TableRow key={row.id} data-state={selectedIds.has(row.id) ? 'selected' : undefined}>
                     <TableCell>
@@ -1187,19 +1260,41 @@ export function SupplierInvoicesContent() {
                         <span className="text-xs text-muted-foreground block">{row.supplier_cif}</span>
                       )}
                     </TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {row.invoice_number}
-                      {row.is_rectifying && (
-                        <span className="ml-2 inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-100 text-rose-700 align-middle">Abono</span>
+                    <TableCell className="font-mono text-sm">{row.invoice_number}</TableCell>
+                    <TableCell>
+                      {row.is_proforma ? (
+                        <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">Proforma</span>
+                      ) : row.is_rectifying ? (
+                        <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-rose-100 text-rose-700">Abono</span>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">Factura</span>
+                      )}
+                      {row.is_proforma && row.final_invoice_id && (
+                        <span className="block text-xs text-muted-foreground mt-0.5" title="Factura definitiva asociada">
+                          → Fact. <span className="font-mono">{row.final_invoice_number || '—'}</span>
+                        </span>
+                      )}
+                      {!row.is_proforma && (row.linked_proformas?.length ?? 0) > 0 && (
+                        <span className="block text-xs text-amber-700 mt-0.5" title="Proformas asociadas a esta factura">
+                          Proforma <span className="font-mono">{row.linked_proformas!.map((p) => p.invoice_number).join(', ')}</span>
+                        </span>
                       )}
                     </TableCell>
                     <TableCell className="text-muted-foreground">{formatDate(row.invoice_date)}</TableCell>
                     <TableCell className="text-muted-foreground">{formatDate(row.due_date)}</TableCell>
                     <TableCell className="text-right font-semibold tabular-nums">{formatCurrency(row.total_amount)}</TableCell>
-                    <TableCell className="text-right tabular-nums text-green-600">{formatCurrency(paid)}</TableCell>
-                    <TableCell className={`text-right tabular-nums font-semibold ${pending > 0 ? 'text-amber-600' : 'text-muted-foreground'}`}>
-                      {formatCurrency(pending)}
-                    </TableCell>
+                    {isLinkedProforma ? (
+                      <TableCell colSpan={2} className="text-right text-xs text-muted-foreground">
+                        Se paga con la factura
+                      </TableCell>
+                    ) : (
+                      <>
+                        <TableCell className="text-right tabular-nums text-green-600">{formatCurrency(paid)}</TableCell>
+                        <TableCell className={`text-right tabular-nums font-semibold ${pending > 0 ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                          {formatCurrency(pending)}
+                        </TableCell>
+                      </>
+                    )}
                     <TableCell className="text-sm">
                       {paymentLabel ? (
                         <span
@@ -1213,9 +1308,14 @@ export function SupplierInvoicesContent() {
                       )}
                     </TableCell>
                     <TableCell>
-                      {row.is_proforma ? (
-                        <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
-                          Proforma
+                      {isLinkedProforma ? (
+                        <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">
+                          Asociada
+                        </span>
+                      ) : row.is_proforma ? (
+                        // Una proforma no es deuda: sin "Vencida", solo si está pagada o no.
+                        <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${(STATUS_BADGE[row.status] ?? STATUS_BADGE.pendiente).className}`}>
+                          {(STATUS_BADGE[row.status] ?? STATUS_BADGE.pendiente).label}
                         </span>
                       ) : (
                         <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${badge.className}`}>
@@ -1245,16 +1345,41 @@ export function SupplierInvoicesContent() {
                             <FileText className="h-3.5 w-3.5" />
                           </Button>
                         )}
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 text-amber-600"
-                          onClick={() => openPaymentDialog(row)}
-                          title={pending > 0 ? 'Registrar pago' : 'Ver pagos'}
-                        >
-                          <CreditCard className="h-3.5 w-3.5" />
-                        </Button>
-                        {!row.is_rectifying && (
+                        {/* Proforma asociada: sus pagos ya están en la factura; se paga desde ella. */}
+                        {!isLinkedProforma && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 text-amber-600"
+                            onClick={() => openPaymentDialog(row)}
+                            title={pending > 0 ? 'Registrar pago' : 'Ver pagos'}
+                          >
+                            <CreditCard className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        {row.is_proforma && !row.final_invoice_id && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 text-amber-700"
+                            onClick={() => openLink(row)}
+                            title="Asociar a su factura definitiva"
+                          >
+                            <Link2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        {isLinkedProforma && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 text-amber-700"
+                            onClick={() => setUnlinkTarget(row)}
+                            title={`Quitar la asociación con la factura ${row.final_invoice_number ?? ''}`}
+                          >
+                            <Unlink className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        {!row.is_rectifying && !row.is_proforma && (
                           <Button
                             size="sm"
                             variant="ghost"
@@ -1284,26 +1409,29 @@ export function SupplierInvoicesContent() {
               })}
             </TableBody>
             {(() => {
-              const totalBruto = rows.reduce((s, r) => s + Number(r.amount ?? 0), 0)
-              const totalIva = rows.reduce((s, r) => s + Number(r.tax_amount ?? 0), 0)
-              const totalIrpf = rows.reduce((s, r) => s + Number(r.retention_amount ?? 0), 0)
-              const totalFacturado = rows.reduce((s, r) => s + r.total_amount, 0)
-              const totalPagado = rows.reduce((s, r) => s + (paidMap[r.id] ?? 0), 0)
-              const totalPendiente = rows.reduce(
+              // La proforma asociada ya está representada por su factura (y sus pagos, trasladados):
+              // contarla también duplicaría el total y el pendiente.
+              const footRows = rows.filter((r) => !(r.is_proforma && r.final_invoice_id))
+              const totalBruto = footRows.reduce((s, r) => s + Number(r.amount ?? 0), 0)
+              const totalIva = footRows.reduce((s, r) => s + Number(r.tax_amount ?? 0), 0)
+              const totalIrpf = footRows.reduce((s, r) => s + Number(r.retention_amount ?? 0), 0)
+              const totalFacturado = footRows.reduce((s, r) => s + r.total_amount, 0)
+              const totalPagado = footRows.reduce((s, r) => s + (paidMap[r.id] ?? 0), 0)
+              const totalPendiente = footRows.reduce(
                 (s, r) => s + Math.max(0, Math.round((r.total_amount - (paidMap[r.id] ?? 0)) * 100) / 100),
                 0,
               )
               return (
                 <TableFooter className="bg-muted/60">
                   <TableRow className="font-normal">
-                    <TableCell colSpan={5} className="text-right text-muted-foreground">
+                    <TableCell colSpan={6} className="text-right text-muted-foreground">
                       Base imponible
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{formatCurrency(totalBruto)}</TableCell>
                     <TableCell colSpan={5}></TableCell>
                   </TableRow>
                   <TableRow className="font-normal">
-                    <TableCell colSpan={5} className="text-right text-muted-foreground">
+                    <TableCell colSpan={6} className="text-right text-muted-foreground">
                       IVA
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{formatCurrency(totalIva)}</TableCell>
@@ -1311,7 +1439,7 @@ export function SupplierInvoicesContent() {
                   </TableRow>
                   {totalIrpf > 0 && (
                     <TableRow className="font-normal">
-                      <TableCell colSpan={5} className="text-right text-muted-foreground">
+                      <TableCell colSpan={6} className="text-right text-muted-foreground">
                         IRPF retenido
                       </TableCell>
                       <TableCell className="text-right tabular-nums">−{formatCurrency(totalIrpf)}</TableCell>
@@ -1319,8 +1447,8 @@ export function SupplierInvoicesContent() {
                     </TableRow>
                   )}
                   <TableRow className="font-semibold border-t-2">
-                    <TableCell colSpan={5} className="text-right">
-                      Totales ({rows.length} factura{rows.length === 1 ? '' : 's'})
+                    <TableCell colSpan={6} className="text-right">
+                      Totales ({footRows.length} factura{footRows.length === 1 ? '' : 's'})
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{formatCurrency(totalFacturado)}</TableCell>
                     <TableCell className="text-right tabular-nums text-green-700">{formatCurrency(totalPagado)}</TableCell>
@@ -1534,7 +1662,7 @@ export function SupplierInvoicesContent() {
                 <label className="flex items-start gap-2 cursor-pointer">
                   <Checkbox
                     checked={form.is_proforma}
-                    disabled={editingIsRectifying}
+                    disabled={editingIsRectifying || editingFinalInvoiceNumber !== null}
                     onCheckedChange={(checked) => setForm((f) => ({ ...f, is_proforma: checked === true }))}
                     className="mt-0.5"
                   />
@@ -1542,11 +1670,14 @@ export function SupplierInvoicesContent() {
                     <span className="text-sm font-medium">Es proforma (sin validez fiscal)</span>
                     <p className="text-xs text-muted-foreground">
                       {editingId
-                        ? 'Desmarcar la convierte en la factura definitiva: empezará a contar para IVA y deuda, y se generarán sus cuotas de pago.'
-                        : 'Una proforma no cuenta para IVA ni contabilidad, ni genera vencimientos, hasta que la conviertas en factura real.'}
+                        ? 'Desmarcar la convierte en la factura definitiva: empezará a contar para IVA y deuda, y se generarán sus cuotas de pago. Si la factura real llega aparte, regístrala como factura nueva y asóciale esta proforma desde la lista.'
+                        : 'Una proforma no cuenta para IVA ni contabilidad, ni genera vencimientos. Cuando llegue la factura real, podrás asociársela desde la lista.'}
                     </p>
                     {editingIsRectifying && (
                       <p className="text-xs text-rose-600">No disponible: esta factura es un abono.</p>
+                    )}
+                    {editingFinalInvoiceNumber !== null && (
+                      <p className="text-xs text-amber-700">Asociada a la factura {editingFinalInvoiceNumber}. Quita la asociación para poder cambiarla.</p>
                     )}
                   </div>
                 </label>
@@ -2027,6 +2158,117 @@ export function SupplierInvoicesContent() {
         onOpenChange={(open) => { if (!open) setCreditNoteTarget(null) }}
         onCreated={() => { loadList(); loadKpis() }}
       />
+
+      {/* Asociar proforma a su factura definitiva */}
+      <Dialog open={!!linkTarget} onOpenChange={(open) => { if (!open && !linking) setLinkTarget(null) }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Asociar proforma a su factura</DialogTitle>
+          </DialogHeader>
+          {linkTarget && (() => {
+            const pfPaid = paidMap[linkTarget.id] ?? 0
+            const chosen = linkCandidates.find((c) => c.id === linkInvoiceId) ?? null
+            const chosenPending = chosen ? Math.round((chosen.total_amount - chosen.paid) * 100) / 100 : 0
+            const exceeds = chosen !== null && pfPaid > chosenPending + 0.01
+            return (
+              <div className="space-y-4">
+                <div className="rounded-md border bg-amber-50/50 border-amber-200 p-3 text-sm">
+                  <p>
+                    Proforma <span className="font-mono font-medium">{linkTarget.invoice_number}</span> · {linkTarget.supplier_name}
+                  </p>
+                  <p className="text-muted-foreground text-xs mt-0.5">
+                    {formatDate(linkTarget.invoice_date)} · {formatCurrency(linkTarget.total_amount)}
+                    {pfPaid > 0 && <> · pagado {formatCurrency(pfPaid)}</>}
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Factura definitiva del proveedor</Label>
+                  {linkCandidatesLoading ? (
+                    <div className="flex justify-center py-6">
+                      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : linkCandidates.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No hay facturas de este proveedor. Registra primero la factura real con «Nueva factura» y vuelve a asociarla.
+                    </p>
+                  ) : (
+                    <Command className="border rounded-md">
+                      <CommandInput placeholder="Buscar por nº de factura o importe…" />
+                      <CommandList className="max-h-64">
+                        <CommandEmpty>Ninguna factura coincide.</CommandEmpty>
+                        <CommandGroup>
+                          {linkCandidates.map((c) => {
+                            const pending = Math.round((c.total_amount - c.paid) * 100) / 100
+                            return (
+                              <CommandItem
+                                key={c.id}
+                                value={`${c.invoice_number} ${c.total_amount.toFixed(2)} ${c.id}`}
+                                onSelect={() => setLinkInvoiceId(c.id)}
+                              >
+                                <Check className={`h-4 w-4 mr-2 ${linkInvoiceId === c.id ? 'opacity-100' : 'opacity-0'}`} />
+                                <span className="font-mono">{c.invoice_number}</span>
+                                <span className="ml-2 text-xs text-muted-foreground">{formatDate(c.invoice_date)}</span>
+                                <span className="ml-auto text-right tabular-nums text-sm">
+                                  {formatCurrency(c.total_amount)}
+                                  <span className="block text-[11px] text-muted-foreground">
+                                    {pending > 0 ? `pendiente ${formatCurrency(pending)}` : 'pagada'}
+                                  </span>
+                                </span>
+                              </CommandItem>
+                            )
+                          })}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  )}
+                </div>
+
+                {pfPaid > 0 && (
+                  <p className={`text-xs ${exceeds ? 'text-destructive' : 'text-muted-foreground'}`}>
+                    {exceeds
+                      ? `Lo pagado con la proforma (${formatCurrency(pfPaid)}) supera lo pendiente de esa factura (${formatCurrency(chosenPending)}).`
+                      : `Lo ya pagado con la proforma (${formatCurrency(pfPaid)}) se aplicará a la factura, para no pagarlo dos veces.`}
+                  </p>
+                )}
+
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setLinkTarget(null)} disabled={linking}>
+                    Cancelar
+                  </Button>
+                  <Button onClick={runLink} disabled={!linkInvoiceId || linking || exceeds}>
+                    {linking ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Link2 className="h-4 w-4 mr-1" />}
+                    Asociar
+                  </Button>
+                </DialogFooter>
+              </div>
+            )
+          })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Quitar asociación proforma ↔ factura */}
+      <AlertDialog open={!!unlinkTarget} onOpenChange={(open) => { if (!open && !linking) setUnlinkTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Quitar la asociación?</AlertDialogTitle>
+            <AlertDialogDescription>
+              La proforma {unlinkTarget?.invoice_number} dejará de estar asociada a la factura {unlinkTarget?.final_invoice_number}.
+              Si al asociarla se trasladaron pagos, vuelven a la proforma y la factura recupera su pendiente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={linking}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); runUnlink() }}
+              disabled={linking}
+            >
+              {linking ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
+              Quitar asociación
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Modal Importar CSV */}
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
