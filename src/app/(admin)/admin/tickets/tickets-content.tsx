@@ -86,6 +86,8 @@ type SaleEditLine = {
   unit_price: string
   discount_percentage: string
   tax_rate: number
+  /** Coste de la línea original; null en las añadidas al editar */
+  cost_price: number | null
 }
 
 type SaleEditPreview = {
@@ -294,6 +296,7 @@ export function TicketsContent() {
         await generateTicketPdf({
           sale: {
             ticket_number: sale.ticket_number,
+            internal_ref: sale.internal_ref ?? null,
             created_at: sale.created_at,
             client_id: sale.client_id,
             subtotal: sale.subtotal,
@@ -567,7 +570,7 @@ export function TicketsContent() {
   }
 
   // ── Editar líneas (E3) ──
-  const mapLinesForRpc = (lines: SaleEditLine[]) => lines.map((l) => ({
+  const mapLinesForRpc = (lines: SaleEditLine[]) => lines.map((l, i) => ({
     product_variant_id: l.product_variant_id,
     description: l.description,
     sku: l.sku,
@@ -575,6 +578,8 @@ export function TicketsContent() {
     unit_price: parseFloat(String(l.unit_price).replace(',', '.')) || 0,
     discount_percentage: parseFloat(String(l.discount_percentage).replace(',', '.')) || 0,
     tax_rate: l.tax_rate,
+    cost_price: l.cost_price,
+    sort_order: i,
   }))
 
   const openLines = async (row: DeleteRow) => {
@@ -593,7 +598,7 @@ export function TicketsContent() {
       if (res.success && res.data) {
         const d = res.data as {
           sale: { store_id?: string | null; discount_percentage?: number }
-          lines: { product_variant_id?: string | null; description: string; sku?: string | null; quantity: number; unit_price: number; discount_percentage?: number; tax_rate?: number }[]
+          lines: { product_variant_id?: string | null; description: string; sku?: string | null; quantity: number; unit_price: number; discount_percentage?: number; tax_rate?: number; cost_price?: number | null }[]
           payments: { amount: number }[]
         }
         setSaleStoreId(d.sale.store_id ?? null)
@@ -607,6 +612,7 @@ export function TicketsContent() {
           unit_price: String(l.unit_price),
           discount_percentage: String(l.discount_percentage ?? 0),
           tax_rate: Number(l.tax_rate ?? 21),
+          cost_price: l.cost_price != null ? Number(l.cost_price) : null,
         }))
         setEditLines(mapped)
         const pv = await previewSaleEdit({ saleId: row.id, lines: mapLinesForRpc(mapped), discount: { discount_percentage: Number(d.sale.discount_percentage ?? 0) } })
@@ -622,7 +628,7 @@ export function TicketsContent() {
   const addProductLine = (p: { id: string; description: string; sku: string | null; unit_price: number; tax_rate: number }) => {
     setEditLines((prev) => [...prev, {
       product_variant_id: p.id, description: p.description, sku: p.sku,
-      quantity: '1', unit_price: String(p.unit_price), discount_percentage: '0', tax_rate: p.tax_rate,
+      quantity: '1', unit_price: String(p.unit_price), discount_percentage: '0', tax_rate: p.tax_rate, cost_price: null,
     }])
     setProdQuery('')
     setProdResults([])
@@ -1614,7 +1620,7 @@ export function TicketsContent() {
                   </div>
                 )}
                 <Button type="button" variant="outline" size="sm" className="gap-1"
-                  onClick={() => setEditLines((prev) => [...prev, { product_variant_id: null, description: '', sku: null, quantity: '1', unit_price: '0', discount_percentage: '0', tax_rate: 21 }])}>
+                  onClick={() => setEditLines((prev) => [...prev, { product_variant_id: null, description: '', sku: null, quantity: '1', unit_price: '0', discount_percentage: '0', tax_rate: 21, cost_price: null }])}>
                   <Plus className="h-3 w-3" /> Añadir línea libre
                 </Button>
               </div>

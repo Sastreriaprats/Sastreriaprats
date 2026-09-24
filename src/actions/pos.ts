@@ -520,14 +520,28 @@ export const getSaleForTicket = protectedAction<string, {
       .single()
     if (error || !sale) return success(null)
 
-    const { data: lines } = await ctx.adminClient
-      .from('sale_lines')
-      .select('description, quantity, unit_price, discount_percentage, line_total')
-      .eq('sale_id', saleId)
-    const { data: payments } = await ctx.adminClient
-      .from('sale_payments')
-      .select('payment_method, amount')
-      .eq('sale_id', saleId)
+    const [{ data: lines }, { data: payments }, { data: clp }] = await Promise.all([
+      // "Editar líneas" parte de estas líneas: sin product_variant_id, sku,
+      // tax_rate y cost_price, rpc_edit_sale_lines devolvía el stock de todo el
+      // ticket sin volver a descontarlo, perdía las referencias y el coste, y
+      // ponía el IVA al 21%.
+      ctx.adminClient
+        .from('sale_lines')
+        .select('product_variant_id, description, sku, quantity, unit_price, discount_percentage, tax_rate, line_total, cost_price, sort_order')
+        .eq('sale_id', saleId)
+        .order('sort_order', { ascending: true }),
+      ctx.adminClient
+        .from('sale_payments')
+        .select('payment_method, amount')
+        .eq('sale_id', saleId),
+      // Nº de ticket oficial (serie CLP): sin él la reimpresión salía con el TICK.
+      ctx.adminClient
+        .from('cash_internal_tickets')
+        .select('ref')
+        .eq('source', 'sale')
+        .eq('sale_id', saleId)
+        .limit(1),
+    ])
 
     let clientName: string | null = null
     let clientCode: string | null = null
@@ -549,7 +563,7 @@ export const getSaleForTicket = protectedAction<string, {
     const returns = Number(sale.total_returned) > 0 ? await loadSaleTicketReturns(ctx.adminClient, saleId) : []
 
     return success({
-      sale,
+      sale: { ...sale, internal_ref: (clp?.[0] as { ref?: string } | undefined)?.ref ?? null },
       lines: lines ?? [],
       payments: payments ?? [],
       clientName,
@@ -1874,6 +1888,7 @@ type SaleEditLineInput = {
   discount_percentage?: number
   tax_rate?: number
   cost_price?: number | null
+  sort_order?: number
 }
 type SaleEditDiscount = { discount_percentage?: number; discount_code?: string | null }
 

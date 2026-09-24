@@ -55,6 +55,7 @@ export function ClientTicketsTab({ clientId }: { clientId: string }) {
         await generateTicketPdf({
           sale: {
             ticket_number: sale.ticket_number,
+            internal_ref: sale.internal_ref ?? null,
             created_at: sale.created_at,
             client_id: sale.client_id,
             subtotal: sale.subtotal,

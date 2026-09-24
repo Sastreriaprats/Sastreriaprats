@@ -250,6 +250,12 @@ export function PosSummaryContent() {
       const { data: payments } = await supabase.from('sale_payments')
         .select('payment_method, amount')
         .eq('sale_id', sale.id)
+      // Nº de ticket oficial (serie CLP); el TICK queda como localizador.
+      const { data: clp } = await supabase.from('cash_internal_tickets')
+        .select('ref')
+        .eq('source', 'sale')
+        .eq('sale_id', sale.id)
+        .limit(1)
       const returnsRes = sale.status === 'partially_returned' || sale.status === 'fully_returned'
         ? await getSaleTicketReturns(sale.id)
         : null
@@ -257,6 +263,7 @@ export function PosSummaryContent() {
       await generateTicketPdf({
         sale: {
           ticket_number: sale.ticket_number,
+          internal_ref: clp?.[0]?.ref ?? null,
           created_at: sale.created_at || new Date().toISOString(),
           client_id: sale.clients?.full_name ? undefined : null,
           subtotal: Number(sale.subtotal ?? 0),
