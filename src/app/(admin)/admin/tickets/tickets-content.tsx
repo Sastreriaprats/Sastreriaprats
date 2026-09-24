@@ -36,6 +36,7 @@ import { listOnlineTickets, getOnlineOrderTicketData } from '@/actions/online-or
 import { PaymentHistory } from '@/components/payments/payment-history'
 import { listClients } from '@/actions/clients'
 import { createInvoiceFromSaleAction, generateInvoicePdfAction, cancelInvoiceAction } from '@/actions/accounting'
+import { getOrderPaymentTicket } from '@/actions/payments'
 import { generateTicketPdf } from '@/components/pos/ticket-pdf'
 import { getStorePdfData } from '@/lib/pdf/pdf-company'
 import { usePermissions } from '@/hooks/use-permissions'
@@ -366,6 +367,23 @@ export function TicketsContent() {
       toast.error(e instanceof Error ? e.message : 'No se pudo anular la factura')
     } finally {
       setCancellingInvoice(false)
+    }
+  }
+
+  // Pestaña Sastrería: ticket propio del cobro de pedido (serie CLP-P, mig 291).
+  const handleDownloadOrderPaymentTicket = async (paymentId: string) => {
+    setDownloadingId(paymentId)
+    try {
+      const res = await getOrderPaymentTicket({ payment_id: paymentId })
+      if (!res.success || !res.data) {
+        toast.error('error' in res ? res.error : 'Error al generar el ticket')
+        return
+      }
+      await generateTicketPdf(res.data)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al generar el ticket')
+    } finally {
+      setDownloadingId(null)
     }
   }
 
@@ -922,7 +940,12 @@ export function TicketsContent() {
                     const isPayment = row.kind === 'order_payment'
                     return (
                       <TableRow key={`${row.kind}-${row.id}`}>
-                        <TableCell className="font-mono">{row.number}</TableCell>
+                        <TableCell className="font-mono">
+                          <div>{row.number}</div>
+                          {isPayment && row.ticket_number && (
+                            <div className="text-[10px] text-muted-foreground">{row.ticket_number}</div>
+                          )}
+                        </TableCell>
                         <TableCell className="text-sm text-muted-foreground">{formatDateTime(row.created_at)}</TableCell>
                         <TableCell>
                           <Badge
@@ -971,6 +994,19 @@ export function TicketsContent() {
                                   Factura
                                 </Button>
                               </>
+                            ) : isPayment && (row.ticket_number || row.sale_id) ? (
+                              // Cobro con ticket propio CLP-P; si se cobró en el TPV, su ticket es el de la venta.
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="gap-1"
+                                disabled={downloadingId === row.id || downloadingId === row.sale_id}
+                                onClick={() => row.ticket_number ? handleDownloadOrderPaymentTicket(row.id) : handleDownloadPdf(row.sale_id)}
+                                title={row.ticket_number ? `Ticket ${row.ticket_number}` : 'Cobrado en un ticket del TPV'}
+                              >
+                                {downloadingId === row.id || downloadingId === row.sale_id ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileDown className="h-3 w-3" />}
+                                Descargar
+                              </Button>
                             ) : null}
                             {row.order_id && (
                               <Button

@@ -749,7 +749,7 @@ export const listSastreriaTickets = protectedAction<{
     // 2) Cobros de pedido (backoffice)
     let paymentsQuery = ctx.adminClient
       .from('tailoring_order_payments')
-      .select('id, amount, payment_method, created_at, created_by, tailoring_order_id, tailoring_orders(order_number, client_id, stores(name))')
+      .select('id, amount, payment_method, created_at, created_by, tailoring_order_id, ticket_number, sale_id, tailoring_orders(order_number, client_id, stores(name))')
       .order('created_at', { ascending: false })
       .range(0, CAP - 1)
     if (fromTs) paymentsQuery = paymentsQuery.gte('created_at', fromTs)
@@ -829,7 +829,9 @@ export const listSastreriaTickets = protectedAction<{
         salesperson_name: p.created_by ? (profilesMap[p.created_by] ?? null) : null,
         store_name: (p.tailoring_orders?.stores as any)?.name ?? null,
         order_id: p.tailoring_order_id ?? null,
-        sale_id: null,
+        // Ticket del cobro: CLP-P propio (mig 291) o, si se cobró en el TPV, el de esa venta.
+        ticket_number: p.ticket_number ?? null,
+        sale_id: p.sale_id ?? null,
       }
     })
 
