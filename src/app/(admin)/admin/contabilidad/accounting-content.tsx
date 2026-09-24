@@ -3319,30 +3319,56 @@ function VatTab() {
         })
       }
 
-      const recibidasRows: Record<string, unknown>[] = invoicesReceived.map(r => ({
-        'Trimestre': r.trimestre,
-        'Nº factura': r.invoice_number,
-        'Fecha': r.invoice_date,
-        'Proveedor': r.supplier_name,
-        'NIF': r.supplier_cif ?? '',
-        'Base': r.amount,
-        'IVA €': r.tax_amount,
-        'IVA % calculado': r.iva_pct_calculado ?? '',
-        'Retención IRPF': r.retention_amount,
-        'Total': r.total_amount,
-        'Estado pago': r.status,
-        'Fecha pago': r.payment_date ?? '',
-      }))
+      // Desglose por tipo de IVA (petición de David, 24-sep-2026). Una factura
+      // puede mezclar tipos (Mercadona: 10% + 21%), y antes se mostraba un único
+      // "IVA % calculado" = cuota/base, que daba porcentajes inexistentes como
+      // el 17,83%. Ahora hay una pareja de columnas Base/Cuota por cada tipo que
+      // aparezca en el año, y la columna "IVA %" dice "Varios" cuando mezcla.
+      const tiposIva = [...new Set(invoicesReceived.flatMap(r => r.breakdown.map(b => b.tax_rate)))]
+        .sort((a, b) => b - a)
+      const cuotaDe = (r: typeof invoicesReceived[number], rate: number) =>
+        r.breakdown.find(b => b.tax_rate === rate)
+      const colBase = (rate: number) => `Base ${rate}%`
+      const colCuota = (rate: number) => `Cuota ${rate}%`
+
+      const recibidasRows: Record<string, unknown>[] = invoicesReceived.map(r => {
+        const row: Record<string, unknown> = {
+          'Trimestre': r.trimestre,
+          'Nº factura': r.invoice_number,
+          'Fecha': r.invoice_date,
+          'Proveedor': r.supplier_name,
+          'NIF': r.supplier_cif ?? '',
+        }
+        for (const rate of tiposIva) {
+          const b = cuotaDe(r, rate)
+          row[colBase(rate)] = b ? b.base : ''
+          row[colCuota(rate)] = b ? b.tax_amount : ''
+        }
+        row['Base total'] = r.amount
+        row['IVA €'] = r.tax_amount
+        row['IVA %'] = r.iva_pct_calculado === null ? 'Varios' : r.iva_pct_calculado
+        row['Retención IRPF'] = r.retention_amount
+        row['Total'] = r.total_amount
+        row['Estado pago'] = r.status
+        row['Fecha pago'] = r.payment_date ?? ''
+        return row
+      })
       if (recibidasRows.length > 0) {
-        recibidasRows.push({
+        const totalRow: Record<string, unknown> = {
           'Trimestre': 'TOTAL', 'Nº factura': '', 'Fecha': '', 'Proveedor': '', 'NIF': '',
-          'Base': invoicesReceived.reduce((s, r) => s + r.amount, 0),
-          'IVA €': invoicesReceived.reduce((s, r) => s + r.tax_amount, 0),
-          'IVA % calculado': '',
-          'Retención IRPF': invoicesReceived.reduce((s, r) => s + r.retention_amount, 0),
-          'Total': invoicesReceived.reduce((s, r) => s + r.total_amount, 0),
-          'Estado pago': '', 'Fecha pago': '',
-        })
+        }
+        for (const rate of tiposIva) {
+          totalRow[colBase(rate)] = invoicesReceived.reduce((s, r) => s + (cuotaDe(r, rate)?.base ?? 0), 0)
+          totalRow[colCuota(rate)] = invoicesReceived.reduce((s, r) => s + (cuotaDe(r, rate)?.tax_amount ?? 0), 0)
+        }
+        totalRow['Base total'] = invoicesReceived.reduce((s, r) => s + r.amount, 0)
+        totalRow['IVA €'] = invoicesReceived.reduce((s, r) => s + r.tax_amount, 0)
+        totalRow['IVA %'] = ''
+        totalRow['Retención IRPF'] = invoicesReceived.reduce((s, r) => s + r.retention_amount, 0)
+        totalRow['Total'] = invoicesReceived.reduce((s, r) => s + r.total_amount, 0)
+        totalRow['Estado pago'] = ''
+        totalRow['Fecha pago'] = ''
+        recibidasRows.push(totalRow)
       }
 
       await downloadExcelMulti([

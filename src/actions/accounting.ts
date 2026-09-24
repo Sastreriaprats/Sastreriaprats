@@ -14,7 +14,7 @@ import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
 import { loadReservationPayments } from '@/lib/accounting/reservation-payments'
 import { loadOnlineTicketIncome } from '@/lib/accounting/online-ticket-income'
 import { loadInvoiceSalesPlan } from '@/lib/accounting/invoice-sales'
-import { readAllPaged } from '@/lib/server/paged'
+import { readAllPaged, readAllByIds } from '@/lib/server/paged'
 import { toLocalISODate } from '@/lib/dates'
 
 /** Una fila del desglose por tienda. storeId null → gastos sin tienda asignada. */
@@ -928,6 +928,9 @@ export type VatInvoiceIssuedRow = {
   status: string
   origen: 'ticket' | 'sastrería' | 'presupuesto' | 'manual'
 }
+/** Una base y su cuota para un tipo de IVA concreto dentro de una factura. */
+export type VatRateBreakdown = { tax_rate: number; base: number; tax_amount: number }
+
 export type VatInvoiceReceivedRow = {
   trimestre: string
   invoice_number: string
@@ -936,7 +939,15 @@ export type VatInvoiceReceivedRow = {
   supplier_cif: string | null
   amount: number
   tax_amount: number
+  /**
+   * Tipo de IVA de la factura. Es el tipo REAL cuando la factura lleva uno solo
+   * y `null` cuando mezcla varios (ahí manda `breakdown`). Antes se calculaba
+   * dividiendo cuota entre base, y una factura con dos tipos mostraba un
+   * porcentaje que no existe (Mercadona 10% + 21% salía al 17,83%).
+   */
   iva_pct_calculado: number | null
+  /** Desglose por tipo, de `ap_supplier_invoice_lines`. Una entrada por tipo. */
+  breakdown: VatRateBreakdown[]
   total_amount: number
   retention_amount: number
   status: string
@@ -981,7 +992,7 @@ export const getVatQuarterlyDetail = protectedAction<
         .range(f, t)),
       readAllPaged((f, t) => ctx.adminClient
         .from('ap_supplier_invoices')
-        .select('invoice_number, invoice_date, supplier_name, supplier_cif, amount, tax_amount, total_amount, retention_amount, status, payment_date')
+        .select('id, invoice_number, invoice_date, supplier_name, supplier_cif, amount, tax_amount, total_amount, retention_amount, status, payment_date')
         .eq('is_proforma', false) // las proformas no entran en el libro de facturas recibidas
         .gte('invoice_date', yearStart)
         .lte('invoice_date', yearEnd)
@@ -1035,14 +1046,59 @@ export const getVatQuarterlyDetail = protectedAction<
       }
     })
 
+    // Desglose por tipo de IVA (petición de David, 24-sep-2026): una factura con
+    // varios tipos tiene que enseñar la base y la cuota de CADA uno. Las líneas
+    // viven en `ap_supplier_invoice_lines`; las facturas antiguas cargadas solo
+    // por cabecera no tienen líneas y se sintetiza una con su tipo real.
+    const receivedIds = ((receivedRes.data || []) as Array<{ id?: string }>)
+      .map((r) => String(r.id ?? '')).filter(Boolean)
+    const linesByInvoice = new Map<string, VatRateBreakdown[]>()
+    if (receivedIds.length > 0) {
+      const lineRows = await readAllByIds<{ supplier_invoice_id: string; base: number; tax_rate: number; tax_amount: number }>(
+        receivedIds,
+        (chunk) => ctx.adminClient
+          .from('ap_supplier_invoice_lines')
+          .select('supplier_invoice_id, base, tax_rate, tax_amount')
+          .in('supplier_invoice_id', chunk),
+        'getVatBooks.apLines',
+      )
+      // Varias líneas del mismo tipo se agrupan: el libro quiere una fila por TIPO.
+      for (const l of lineRows) {
+        const key = String(l.supplier_invoice_id)
+        const rate = Number(l.tax_rate) || 0
+        const list = linesByInvoice.get(key) ?? []
+        const hit = list.find((x) => x.tax_rate === rate)
+        if (hit) {
+          hit.base += Number(l.base) || 0
+          hit.tax_amount += Number(l.tax_amount) || 0
+        } else {
+          list.push({ tax_rate: rate, base: Number(l.base) || 0, tax_amount: Number(l.tax_amount) || 0 })
+        }
+        linesByInvoice.set(key, list)
+      }
+      for (const list of linesByInvoice.values()) {
+        list.sort((a, b) => b.tax_rate - a.tax_rate)
+        for (const x of list) {
+          x.base = Math.round(x.base * 100) / 100
+          x.tax_amount = Math.round(x.tax_amount * 100) / 100
+        }
+      }
+    }
+
     const invoicesReceived: VatInvoiceReceivedRow[] = ((receivedRes.data || []) as Array<{
+      id?: string
       invoice_number?: string; invoice_date?: string; supplier_name?: string; supplier_cif?: string | null
       amount?: number; tax_amount?: number; total_amount?: number; retention_amount?: number
       status?: string; payment_date?: string | null
     }>).map((r) => {
       const base = Number(r.amount) || 0
       const iva = Number(r.tax_amount) || 0
-      const ivaPct = base > 0 ? Math.round((iva / base * 100) * 100) / 100 : null
+      const fromLines = linesByInvoice.get(String(r.id ?? '')) ?? []
+      // Sin líneas (facturas cargadas solo por cabecera): se deduce el tipo, que
+      // en ese caso SÍ es fiable porque solo puede haber uno.
+      const breakdown: VatRateBreakdown[] = fromLines.length > 0
+        ? fromLines
+        : [{ tax_rate: base > 0 ? Math.round((iva / base) * 100) : 0, base, tax_amount: iva }]
       return {
         trimestre: quarterTag(r.invoice_date),
         invoice_number: String(r.invoice_number ?? ''),
@@ -1051,7 +1107,8 @@ export const getVatQuarterlyDetail = protectedAction<
         supplier_cif: r.supplier_cif ?? null,
         amount: base,
         tax_amount: iva,
-        iva_pct_calculado: ivaPct,
+        iva_pct_calculado: breakdown.length === 1 ? breakdown[0].tax_rate : null,
+        breakdown,
         total_amount: Number(r.total_amount) || 0,
         retention_amount: Number(r.retention_amount) || 0,
         status: String(r.status ?? ''),
