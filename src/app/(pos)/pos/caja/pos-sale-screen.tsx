@@ -877,6 +877,8 @@ export function PosSaleScreen({ session, onCloseCash, initialCobro, onSwitchStor
                 payment_method: orderMethod,
                 amount: item.amount,
                 storeId: activeStoreId ?? undefined,
+                // Cobrado en este ticket: no genera ticket CLP-P propio (mig 291).
+                sale_id: newSaleId ?? undefined,
               })
               if (res?.success !== true) toast.error(res && 'error' in res ? res.error : 'Error al registrar pago en pedido')
             } else if (item.entity_type === 'alteration') {

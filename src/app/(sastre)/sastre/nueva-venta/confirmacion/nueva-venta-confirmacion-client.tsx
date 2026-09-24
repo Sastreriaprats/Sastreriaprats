@@ -9,6 +9,9 @@ import { generateFichaForLine, generateFichaForLineCamiseria } from '@/lib/pdf/f
 import { isLineCamiseria } from '@/lib/orders/line-groups'
 import { generateTicketBoutiquePDF } from '@/lib/pdf/ticket-boutique'
 import { generateTailoringOrderTicketPdf } from '@/lib/pdf/tailoring-order-ticket'
+import { getOrderPaymentTicket } from '@/actions/payments'
+import { printTicketPdf } from '@/components/pos/ticket-pdf'
+import { toast } from 'sonner'
 
 function getClientName(order: any): string {
   const c = order?.clients
@@ -100,6 +103,20 @@ export function NuevaVentaConfirmacionClient({ orderId }: { orderId: string }) {
     setPdfLoading('ticket')
     try {
       await generateTicketBoutiquePDF(order)
+    } finally {
+      setPdfLoading(null)
+    }
+  }
+
+  // Ticket de la entrega a cuenta (serie CLP-P, mig 291): solo el importe cobrado
+  // + total del pedido / pagado / pendiente. Es el que va a Hacienda.
+  const paymentTickets = ((order?.tailoring_order_payments ?? []) as any[]).filter((p) => p?.ticket_number)
+  const handlePrintPaymentTicket = async (paymentId: string) => {
+    setPdfLoading(`pay-${paymentId}`)
+    try {
+      const res = await getOrderPaymentTicket({ payment_id: paymentId })
+      if (!res.success) { toast.error(res.error ?? 'Ticket no disponible'); return }
+      await printTicketPdf(res.data)
     } finally {
       setPdfLoading(null)
     }
@@ -198,14 +215,26 @@ export function NuevaVentaConfirmacionClient({ orderId }: { orderId: string }) {
               {pdfLoading === 'ticket' ? 'Generando...' : 'Imprimir ticket boutique'}
             </Button>
           )}
+          {paymentTickets.map((p: any) => (
+            <Button
+              key={p.id}
+              type="button"
+              className="bg-[#c9a96e] text-[#0a0f1e] hover:bg-[#b8935a] font-semibold px-6 py-3 rounded-lg w-full gap-2 min-h-[48px] justify-center"
+              onClick={() => handlePrintPaymentTicket(p.id)}
+              disabled={!!pdfLoading}
+            >
+              <Printer className="h-5 w-5" />
+              {pdfLoading === `pay-${p.id}` ? 'Generando...' : `Imprimir ticket de la entrega a cuenta (${p.ticket_number})`}
+            </Button>
+          ))}
           <Button
             type="button"
-            className="bg-[#c9a96e] text-[#0a0f1e] hover:bg-[#b8935a] font-semibold px-6 py-3 rounded-lg w-full gap-2 min-h-[48px] justify-center"
+            className="bg-[#1a2744] text-white border border-[#2a3a5c] hover:bg-[#243255] font-semibold px-6 py-3 rounded-lg w-full gap-2 min-h-[48px] justify-center"
             onClick={handlePrintTicketGlobal}
             disabled={!!pdfLoading}
           >
             <Printer className="h-5 w-5" />
-            {pdfLoading === 'ticket-global' ? 'Generando...' : 'Imprimir ticket del pedido'}
+            {pdfLoading === 'ticket-global' ? 'Generando...' : 'Imprimir resguardo del pedido'}
           </Button>
           <Button
             type="button"

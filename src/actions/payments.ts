@@ -7,6 +7,8 @@ import { serializeForServerAction } from '@/lib/server/serialize'
 import { resolveClientIdsForSearch } from '@/lib/server/query-helpers'
 import { normalizeSearchTerm } from '@/lib/utils'
 import { ALTERATION_DEBT_SINCE } from '@/lib/alterations/debt-cutoff'
+import { buildOrderPaymentTicketPdfData } from '@/lib/orders/order-payment-ticket-data'
+import type { TicketPdfData } from '@/components/pos/ticket-pdf'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,6 +27,10 @@ export interface OrderPayment {
   /** Nombre del usuario que registró el cobro (profiles.full_name) */
   created_by_name: string | null
   created_at: string
+  /** Nº de ticket del cobro (serie CLP-P, mig 291). NULL si se cobró en un ticket del TPV. */
+  ticket_number: string | null
+  /** Venta del TPV en cuyo ticket se cobró (su ticket es el de la venta). */
+  sale_id: string | null
 }
 
 export interface AddOrderPaymentInput {
@@ -36,6 +42,8 @@ export interface AddOrderPaymentInput {
   notes?: string
   next_payment_date?: string
   storeId?: string
+  /** Cobro hecho dentro de un ticket del TPV: no genera ticket propio. */
+  sale_id?: string
 }
 
 export interface UpdateOrderPaymentInput {
@@ -70,7 +78,7 @@ export const getOrderPayments = protectedAction<{ tailoring_order_id: string }, 
     try {
       const { data, error } = await ctx.adminClient
         .from('tailoring_order_payments')
-        .select('id, tailoring_order_id, payment_date, payment_method, amount, reference, notes, next_payment_date, created_by, created_at')
+        .select('id, tailoring_order_id, payment_date, payment_method, amount, reference, notes, next_payment_date, created_by, created_at, ticket_number, sale_id')
         .eq('tailoring_order_id', tailoring_order_id)
         .order('payment_date', { ascending: false })
         .limit(100)
@@ -121,6 +129,7 @@ export const addOrderPayment = protectedAction<AddOrderPaymentInput, OrderPaymen
       p_next_payment_date: input.next_payment_date ?? null,
       p_store_id: input.storeId ?? null,
       p_user_id: ctx.userId,
+      p_sale_id: input.sale_id ?? null,
     })
 
     if (rpcError) return failure(rpcError.message)
@@ -132,6 +141,16 @@ export const addOrderPayment = protectedAction<AddOrderPaymentInput, OrderPaymen
     const auditDescription = `Pago ${Number(input.amount).toFixed(2)}€ · Pedido ${result.order_number} · Método: ${methodLabel}`
 
     return success(serializeForServerAction({ ...result, auditDescription }))
+  }
+)
+
+/** Datos del ticket de UN cobro de pedido (serie CLP-P) para imprimirlo. */
+export const getOrderPaymentTicket = protectedAction<{ payment_id: string }, TicketPdfData>(
+  { permission: 'orders.view' },
+  async (ctx, { payment_id }) => {
+    const data = await buildOrderPaymentTicketPdfData(ctx.adminClient, payment_id)
+    if (!data) return failure('Este cobro no tiene ticket propio')
+    return success(serializeForServerAction(data))
   }
 )
 

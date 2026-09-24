@@ -12,7 +12,7 @@ const n2 = (n: number) => Number((Number(n) || 0).toFixed(2))
 // Referencias de documento (CLP-T-2026-0042, TICK-2026-0046, PIN-2026-0101,
 // RSV-2026-0044, WEL-2026-0005, WEB-MRAT2YPC…) que aparecen en el origen de una
 // factura y en el concepto de un cobro: sirven para casar cobro ↔ factura.
-const REF_RE = /\b(?:[A-Z]{3,4}(?:-[ET])?-\d{4}-\d{4}|WEB-[A-Z0-9]+)\b/g
+const REF_RE = /\b(?:[A-Z]{3,4}(?:-[ETP])?-\d{4}-\d{4}|WEB-[A-Z0-9]+)\b/g
 const refsOf = (s?: string) => new Set((s ?? '').toUpperCase().match(REF_RE) ?? [])
 
 // Documento de ingreso sin factura (ticket o cobro de sastrería del escenario C)
@@ -25,6 +25,7 @@ export type NoInvoiceDoc = {
   total: number
   saleId?: string
   orderId?: string
+  orderPaymentId?: string
 }
 
 export type ClientDetailTarget = { key: string; name: string; nif?: string }
@@ -36,7 +37,7 @@ type MayorRow = {
   debe: number
   haber: number
   saldo: number
-  pdf: { saleId?: string; orderId?: string; pdfUrl?: string; invoiceId?: string }
+  pdf: { saleId?: string; orderId?: string; orderPaymentId?: string; pdfUrl?: string; invoiceId?: string }
 }
 
 // Detalle de un cliente del escenario C: sus facturas, los cobros de C que
@@ -88,7 +89,7 @@ export function buildClientDetail(
       date: p.m.date, order: 1, doc: p.m.concept.replace(/^(Ticket|Sastrería|Reserva)\s+/, ''),
       concept: `Cobro ${p.m.type.toLowerCase()} · aplicado a ${p.invoiceNumbers.join(', ')}`,
       debe: 0, haber: p.m.total,
-      pdf: { saleId: p.m.saleId, orderId: p.m.orderId },
+      pdf: { saleId: p.m.saleId, orderId: p.m.orderId, orderPaymentId: p.m.orderPaymentId },
     })
   }
   for (const d of noInvoice) {
@@ -96,7 +97,7 @@ export function buildClientDetail(
       date: d.date, order: 2, doc: d.number,
       concept: `${d.docType} sin factura (cargo y cobro)`,
       debe: d.total, haber: d.total,
-      pdf: { saleId: d.saleId, orderId: d.orderId },
+      pdf: { saleId: d.saleId, orderId: d.orderId, orderPaymentId: d.orderPaymentId },
     })
   }
   entries.sort((a, b) => a.date.localeCompare(b.date) || a.order - b.order)
@@ -267,7 +268,7 @@ export function ClientLedgerDialog({ year, target, detail, onClose }: {
                             <td className={TDR}>{eur(d.base)}</td>
                             <td className={TDR}>{eur(d.vat)}</td>
                             <td className={`${TDR} font-medium`}>{eur(d.total)}</td>
-                            <td className={`${TD} text-right`}><DownloadBtn saleId={d.saleId} orderId={d.orderId} /></td>
+                            <td className={`${TD} text-right`}><DownloadBtn saleId={d.saleId} orderId={d.orderId} orderPaymentId={d.orderPaymentId} /></td>
                           </tr>
                         ))}
                         <tr className={TOTAL_ROW}>

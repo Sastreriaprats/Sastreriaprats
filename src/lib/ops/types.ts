@@ -39,6 +39,7 @@ export type MovementRow = {
   kind: MovementKind
   saleId?: string         // venta TPV → PDF de ticket
   orderId?: string        // pedido de sastrería → PDF de ticket de pedido
+  orderPaymentId?: string // cobro de sastrería con ticket CLP-P (mig 291) → PDF de ese cobro
   paymentId?: string      // id del cobro de sastrería o de la señal de reserva (item de depósito)
   invoiceId?: string      // id de la factura (item de depósito)
   pdfUrl?: string         // PDF ya generado (facturas)
@@ -64,6 +65,7 @@ export type LedgerMovement = {
   saleId?: string
   invoiceId?: string      // factura emitida (venta o abono) → dedup con el listado
   orderId?: string        // pedido de sastrería → PDF de ticket de pedido
+  orderPaymentId?: string // cobro de sastrería con ticket CLP-P (mig 291) → PDF de ese cobro
   onlineOrderId?: string  // pedido online con ticket (mig 286) → PDF de ticket
   pdfUrl?: string         // PDF ya generado (facturas)
   apPath?: string        // adjunto de factura recibida (bucket supplier-invoices)

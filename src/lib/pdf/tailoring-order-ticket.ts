@@ -1,6 +1,7 @@
 /**
- * Genera el PDF tipo ticket del pedido de sastrería.
+ * Genera el PDF RESGUARDO del pedido de sastrería (no es un ticket de cobro).
  * Muestra todas las líneas, totales, lo pagado y lo pendiente.
+ * El ticket de cada cobro (serie CLP-P, mig 291) es order-payment-ticket-data.ts.
  */
 
 import { STORE_PDF_CONFIGS } from '@/lib/pdf/pdf-company'
@@ -127,6 +128,7 @@ export async function generateTailoringOrderTicketPdf(order: TailoringTicketOrde
     },
     lines,
     payments,
+    docLabel: 'Resguardo pedido',
     clientName: getClientName(order),
     clientCode: getClientCode(order),
     storeAddress: storeConfig.address,

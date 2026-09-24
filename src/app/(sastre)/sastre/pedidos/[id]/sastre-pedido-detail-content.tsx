@@ -316,7 +316,7 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
         </CardContent>
       </Card>
 
-      {/* Ticket global */}
+      {/* Resguardo del pedido (no es ticket de cobro: cada cobro tiene el suyo en Pagos) */}
       <Button
         className="bg-[#c9a96e]/15 border border-[#c9a96e]/30 text-[#c9a96e] hover:bg-[#c9a96e]/25 gap-2"
         disabled={pdfLoadingId === 'ticket-global'}
@@ -325,7 +325,7 @@ export function SastrePedidoDetailContent({ order: orderProp }: { order: any }) 
           try { await generateTailoringOrderTicketPdf(order) } finally { setPdfLoadingId(null) }
         }}
       >
-        {pdfLoadingId === 'ticket-global' ? 'Generando...' : 'Imprimir ticket del pedido'}
+        {pdfLoadingId === 'ticket-global' ? 'Generando...' : 'Imprimir resguardo del pedido'}
       </Button>
 
       {/* Piezas del pedido */}

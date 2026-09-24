@@ -479,7 +479,7 @@ export const getOrder = protectedAction<string, any>(
     // tenía de dónde sacarla y estampaba "Tarjeta" por defecto.
     const { data: orderPaymentsRows } = await admin
       .from('tailoring_order_payments')
-      .select('payment_method, amount, payment_date')
+      .select('id, payment_method, amount, payment_date, ticket_number')
       .eq('tailoring_order_id', orderId)
       .order('payment_date', { ascending: false })
     order.tailoring_order_payments = orderPaymentsRows ?? []

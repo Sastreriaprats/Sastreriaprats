@@ -245,6 +245,17 @@ export interface TicketPdfData {
   storePhones?: string | null
   /** Si true, se genera un ticket regalo: sin precios, descuentos ni totales */
   giftMode?: boolean
+  /** Título del documento en la cabecera (por defecto "Ticket") */
+  docLabel?: string
+  /** Ticket de un COBRO de pedido de sastrería (mig 291): estado del pedido tras el cobro */
+  orderSummary?: {
+    orderNumber: string
+    items?: string[]
+    total: number
+    /** Pagado hasta este cobro, incluido */
+    paid: number
+    pending: number
+  }
 }
 
 function fmt(value: number): string {
@@ -256,6 +267,7 @@ const PAYMENT_LABELS: Record<string, string> = {
   card: 'Tarjeta',
   bizum: 'Bizum',
   transfer: 'Transferencia',
+  check: 'Cheque',
   voucher: 'Vale',
   mixed: 'Varios',
 }
@@ -344,7 +356,7 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
         widths: ['*', 50],
         body: [
           [
-            { text: `Ticket ${data.sale.internal_ref ?? data.sale.ticket_number}`, fontSize: FONT_BODY, bold: true },
+            { text: `${data.docLabel ?? 'Ticket'} ${data.sale.internal_ref ?? data.sale.ticket_number}`, fontSize: FONT_BODY, bold: true },
             { text: dateStr, fontSize: FONT_BODY, alignment: 'right' },
           ],
           [
@@ -560,7 +572,7 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
       },
     )
   }
-  if (giftMode || totalArticles > 0) {
+  if (giftMode || (totalArticles > 0 && !data.orderSummary)) {
     content.push(
       {
         text: `Artículos: ${totalArticles}`,
@@ -573,8 +585,34 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
     content.push({
       text: `Pago: ${payLabel}`,
       fontSize: FONT_BODY,
-      margin: [0, 0, 0, 12] as [number, number, number, number],
+      margin: [0, 0, 0, data.orderSummary ? 6 : 12] as [number, number, number, number],
     })
+  }
+  // Ticket de un cobro de pedido: el importe de arriba es SOLO este cobro; aquí
+  // el estado del pedido tras él (para la tienda y para el cliente).
+  const os = data.orderSummary
+  if (!giftMode && os) {
+    const row = (label: string, value: number, strong = false, color?: string): Content => ({
+      columns: [
+        { text: label, fontSize: strong ? FONT_HEAD : FONT_BODY, bold: strong, color },
+        { text: fmt(value), fontSize: strong ? FONT_HEAD : FONT_BODY, bold: strong, color, alignment: 'right' },
+      ],
+      margin: [0, 0, 0, 2] as [number, number, number, number],
+    })
+    content.push(
+      {
+        canvas: [{ type: 'line', x1: 0, y1: 0, x2: W_PT - 2 * MARGIN_PT, y2: 0, lineWidth: 0.5 }],
+        margin: [0, 0, 0, 6] as [number, number, number, number],
+      },
+      { text: `Pedido ${os.orderNumber}`, fontSize: FONT_BODY, bold: true, margin: [0, 0, 0, 1] as [number, number, number, number] },
+      ...(os.items && os.items.length > 0
+        ? [{ text: os.items.join(', '), fontSize: FONT_SMALL, color: '#555', margin: [0, 0, 0, 4] as [number, number, number, number] } as Content]
+        : []),
+      row('Total pedido:', os.total),
+      row('Pagado:', os.paid),
+      row('PENDIENTE:', os.pending, true, os.pending > 0.009 ? '#c00' : '#060'),
+      { text: '', margin: [0, 0, 0, 8] as [number, number, number, number] },
+    )
   }
   content.push(
     {
@@ -646,7 +684,8 @@ export async function generateTicketPdf(data: TicketPdfData, mode: 'download' | 
 
   const pdf = pdfMake.createPdf(docDef as Parameters<typeof pdfMake.createPdf>[0])
 
-  const fileName = `${giftMode ? 'ticket-regalo' : 'ticket'}-${data.sale.internal_ref ?? data.sale.ticket_number}.pdf`
+  const docSlug = giftMode ? 'ticket-regalo' : (data.docLabel ?? 'ticket').toLowerCase().replace(/\s+/g, '-')
+  const fileName = `${docSlug}-${data.sale.internal_ref ?? data.sale.ticket_number}.pdf`
   // Mismo camino que la impresión: getBuffer(), NO getBlob (se cuelga en algunos
   // navegadores, ver getPdfBlobViaBuffer).
   if (mode === 'blob') return await getPdfBlobViaBuffer(pdf as unknown as PdfBufferDoc)

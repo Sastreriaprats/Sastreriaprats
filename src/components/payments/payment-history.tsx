@@ -16,7 +16,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
-  Plus, Loader2, CreditCard, Banknote, ArrowRightLeft, FileText, Trash2, CalendarClock, Pencil,
+  Plus, Loader2, CreditCard, Banknote, ArrowRightLeft, FileText, Trash2, CalendarClock, Pencil, Printer,
   AlertTriangle, Store,
 } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -24,11 +24,12 @@ import { toast } from 'sonner'
 import { useActiveStore } from '@/hooks/use-store'
 import { usePermissions } from '@/hooks/use-permissions'
 import {
-  getOrderPayments, addOrderPayment, deleteOrderPayment, updateOrderPayment,
+  getOrderPayments, addOrderPayment, deleteOrderPayment, updateOrderPayment, getOrderPaymentTicket,
   getSalePayments, addSalePayment, deleteSalePayment, updateSalePayment,
   type OrderPayment, type PaymentMethod,
 } from '@/actions/payments'
 import { checkCashSessionOpen } from '@/actions/pos'
+import { printTicketPdf } from '@/components/pos/ticket-pdf'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -95,6 +96,22 @@ export function PaymentHistory({
   // Columna "Registrado por": quién registró el cobro (created_by del pago), NO el
   // vendedor de la venta. Solo pedidos de sastrería (sale_payments no guarda created_by).
   const showSeller = entityType === 'tailoring_order'
+  // Ticket propio de cada cobro de pedido (serie CLP-P, mig 291).
+  const showTicket = entityType === 'tailoring_order'
+  const [printingId, setPrintingId] = useState<string | null>(null)
+  async function printPaymentTicket(paymentId: string) {
+    setPrintingId(paymentId)
+    try {
+      const res = await getOrderPaymentTicket({ payment_id: paymentId })
+      if (!res.success) { toast.error(res.error ?? 'Ticket no disponible'); return }
+      await printTicketPdf(res.data)
+    } catch (e) {
+      console.error('[PaymentHistory] ticket:', e)
+      toast.error('No se pudo generar el ticket')
+    } finally {
+      setPrintingId(null)
+    }
+  }
   // El boton de registrar cobro solo se ofrece a quien la accion se lo va a
   // permitir: antes se pintaba siempre y el cobro moria en "Sin permisos".
   const canRegisterPayment = entityType === 'sale'
@@ -211,7 +228,16 @@ export function PaymentHistory({
       }
 
       if (result.success) {
-        toast.success('Pago registrado correctamente')
+        const newPaymentId = entityType === 'tailoring_order' ? (result.data as { id?: string; ticket_number?: string | null })?.id : undefined
+        const newTicket = entityType === 'tailoring_order' ? (result.data as { ticket_number?: string | null })?.ticket_number : null
+        if (newPaymentId && newTicket) {
+          toast.success(`Pago registrado · Ticket ${newTicket}`, {
+            duration: 15000,
+            action: { label: 'Imprimir ticket', onClick: () => { void printPaymentTicket(newPaymentId) } },
+          })
+        } else {
+          toast.success('Pago registrado correctamente')
+        }
         setDialogOpen(false)
         resetForm()
         await loadPayments()
@@ -372,6 +398,9 @@ export function PaymentHistory({
                 <TableHead className={variant === 'sastre' ? 'text-xs text-right text-white/50' : 'text-xs text-right'}>Importe</TableHead>
                 <TableHead className={variant === 'sastre' ? 'text-xs text-white/50' : 'text-xs'}>Referencia</TableHead>
                 <TableHead className={variant === 'sastre' ? 'text-xs text-white/50' : 'text-xs'}>Próximo pago</TableHead>
+                {showTicket && (
+                  <TableHead className={variant === 'sastre' ? 'text-xs text-white/50' : 'text-xs'}>Ticket</TableHead>
+                )}
                 {showActions && (
                   <TableHead className={canEditPayment ? 'w-20' : 'w-10'} />
                 )}
@@ -425,6 +454,27 @@ export function PaymentHistory({
                       </span>
                     ) : '—'}
                   </TableCell>
+                  {showTicket && (
+                    <TableCell className={variant === 'sastre' ? 'py-3 px-4 text-xs' : 'text-xs'}>
+                      {p.ticket_number ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className={`h-7 px-2 gap-1.5 text-xs ${variant === 'sastre' ? 'text-white/80 hover:text-white' : ''}`}
+                          disabled={printingId === p.id}
+                          onClick={() => printPaymentTicket(p.id)}
+                          title="Imprimir el ticket de este cobro"
+                        >
+                          {printingId === p.id
+                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            : <Printer className="h-3.5 w-3.5" />}
+                          {p.ticket_number}
+                        </Button>
+                      ) : p.sale_id ? (
+                        <span className={variant === 'sastre' ? 'text-white/40' : 'text-muted-foreground'}>En ticket del TPV</span>
+                      ) : '—'}
+                    </TableCell>
+                  )}
                   {showActions && (
                     <TableCell className={variant === 'sastre' ? 'py-3 px-4' : ''}>
                       <div className="flex items-center justify-end gap-1">

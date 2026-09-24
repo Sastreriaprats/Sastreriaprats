@@ -6,6 +6,7 @@ import { loadReservationPayments } from '@/lib/accounting/reservation-payments'
 import { loadOnlineTicketIncome } from '@/lib/accounting/online-ticket-income'
 import { loadInvoiceSalesPlan, type InvoiceSaleDoc } from '@/lib/accounting/invoice-sales'
 import { buildOnlineTicketPdfData } from '@/lib/online/online-ticket-pdf-data'
+import { buildOrderPaymentTicketPdfData } from '@/lib/orders/order-payment-ticket-data'
 import { generateInvoicePdf } from '@/lib/pdf/invoice-pdf'
 import { getViewerAccess, assertScope, assertCanManage, type ViewerAccess } from '@/lib/ops/access'
 import { seal, open, dedupTag } from '@/lib/ops/crypto'
@@ -66,7 +67,7 @@ async function readAllTailoringPayments(admin: ReturnType<typeof createAdminClie
   const out: Record<string, unknown>[] = []
   for (let from = 0; ; from += 1000) {
     const { data } = await admin.from('tailoring_order_payments')
-      .select('id,amount,payment_date,payment_method,tailoring_order:tailoring_orders(id,order_number,subtotal,total,client:clients(full_name))')
+      .select('id,amount,payment_date,payment_method,ticket_number,tailoring_order:tailoring_orders(id,order_number,subtotal,total,client:clients(full_name))')
       .gte('payment_date', `${year}-01-01`).lte('payment_date', `${year}-12-31`)
       .order('payment_date', { ascending: true })
       .range(from, from + 999)
@@ -283,15 +284,19 @@ async function computeYear(year: number) {
     const orderId = String((order as any).id ?? '') || undefined
     addIncome(isCash, base, vat, month, q)
     const num = String((order as any).order_number ?? '')
-    const concept = num ? `Sastrería ${num}` : 'Cobro sastrería'
+    // Cobro con ticket propio (CLP-P, mig 291): el documento es ese ticket; el
+    // nº de pedido sigue en el concepto para casarlo con su factura.
+    const tn = (p as any).ticket_number ? String((p as any).ticket_number) : ''
+    const orderPaymentId = tn ? pid : undefined
+    const concept = tn ? `Sastrería ${tn} (pedido ${num})` : num ? `Sastrería ${num}` : 'Cobro sastrería'
     if (orderId) {
       ordersSeen.add(orderId)
       if (!isCash) ordersWithC.add(orderId)
     }
     if (isCash) {
-      cashMoves.push({ kind: 'order_payment', paymentId: pid, orderId, date: d.slice(0, 10), ref: num, concept, method: 'efectivo', client, base: r2(base), vat: r2(vat), total: r2(base + vat) })
+      cashMoves.push({ kind: 'order_payment', paymentId: pid, orderId, orderPaymentId, date: d.slice(0, 10), ref: tn || num, concept, method: 'efectivo', client, base: r2(base), vat: r2(vat), total: r2(base + vat) })
     } else {
-      incomeLedger.push({ date: d.slice(0, 10), type: 'Sastrería', concept, client, base: r2(base), vat: r2(vat), total: r2(base + vat), orderId })
+      incomeLedger.push({ date: d.slice(0, 10), type: 'Sastrería', concept, client, base: r2(base), vat: r2(vat), total: r2(base + vat), orderId, orderPaymentId })
     }
   }
 
@@ -783,6 +788,19 @@ export async function getOnlineTicketData(onlineOrderId: string) {
     const a = await getViewerAccess()
     if (a.scopes.length === 0) return fail()
     const data = await buildOnlineTicketPdfData(createAdminClient(), onlineOrderId)
+    if (!data) return fail()
+    return ok(data)
+  } catch { return fail() }
+}
+
+// ---------------------------------------------------------------------------
+// Datos del ticket de UN cobro de sastrería (serie CLP-P, mig 291) para su PDF.
+// ---------------------------------------------------------------------------
+export async function getOrderPaymentTicketData(paymentId: string) {
+  try {
+    const a = await getViewerAccess()
+    if (a.scopes.length === 0) return fail()
+    const data = await buildOrderPaymentTicketPdfData(createAdminClient(), paymentId)
     if (!data) return fail()
     return ok(data)
   } catch { return fail() }
