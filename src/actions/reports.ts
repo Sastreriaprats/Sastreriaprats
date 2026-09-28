@@ -2031,6 +2031,60 @@ export const getSalesByTimePattern = protectedAction<
   }
 )
 
+// ── Gastos sin IVA ────────────────────────────────────────────────────────────
+// El pago de una factura de proveedor queda en manual_transactions con
+// amount = total = lo pagado CON IVA y tax_amount a 0 (supplier-invoice-payments.ts),
+// así que su "amount" NO es base: "Sin IVA" devolvía el importe con IVA. Ahora se le
+// quita al pago la parte de IVA de su factura, en proporción a lo pagado; vale igual
+// para cuotas, abonos, portes y retenciones. Un gasto sin factura enlazada (caja) no
+// tiene cuota que quitar y se queda como está.
+type ExpenseInvoice = {
+  invoice_number: string
+  supplier_name: string
+  supplier_id: string | null
+  invoice_date: string
+  tax_amount: number
+  total_amount: number
+}
+
+async function loadExpenseInvoices(
+  admin: { from: (table: string) => any },
+  ids: string[],
+): Promise<Map<string, ExpenseInvoice>> {
+  const map = new Map<string, ExpenseInvoice>()
+  // Por bloques: un rango de un año pasa de mil facturas y un .in() con todas no
+  // cabe en la URL. Un fallo aquí no puede quedar en silencio: sin la factura, el
+  // pago volvería a contar con IVA.
+  for (let i = 0; i < ids.length; i += 80) {
+    const { data, error } = await admin
+      .from('ap_supplier_invoices')
+      .select('id, invoice_number, supplier_name, supplier_id, invoice_date, tax_amount, total_amount')
+      .in('id', ids.slice(i, i + 80))
+    if (error) throw new Error(`[loadExpenseInvoices] ${error.message ?? 'error leyendo facturas'}`)
+    for (const r of (data ?? []) as any[]) {
+      map.set(String(r.id), {
+        invoice_number: String(r.invoice_number ?? ''),
+        supplier_name: String(r.supplier_name ?? ''),
+        supplier_id: r.supplier_id ?? null,
+        invoice_date: String(r.invoice_date ?? ''),
+        tax_amount: Number(r.tax_amount) || 0,
+        total_amount: Number(r.total_amount) || 0,
+      })
+    }
+  }
+  return map
+}
+
+const expenseValue = (tx: any, net: boolean, invoices: Map<string, ExpenseInvoice>): number => {
+  if (!net) return Number(tx.total) || 0
+  const inv = tx.ap_supplier_invoice_id ? invoices.get(String(tx.ap_supplier_invoice_id)) : undefined
+  if (!inv || inv.total_amount === 0) return Number(tx.amount) || 0
+  return (Number(tx.total) || 0) * (1 - inv.tax_amount / inv.total_amount)
+}
+
+const expenseInvoiceIds = (rows: any[]): string[] =>
+  [...new Set(rows.map((tx) => tx.ap_supplier_invoice_id).filter(Boolean).map(String))]
+
 export const getExpensesReport = protectedAction<
   { start_date: string; end_date: string; tax_mode?: TaxMode },
   {
@@ -2078,7 +2132,8 @@ export const getExpensesReport = protectedAction<
     const extractionIds = new Set((extr ?? []).map((r: any) => r.id as string))
     const expenses = (data || []).filter((tx: any) => !tx.withdrawal_id || !extractionIds.has(tx.withdrawal_id))
 
-    const valueOf = (tx: any) => net ? (Number(tx.amount) || 0) : (Number(tx.total) || 0)
+    const invoiceMap = await loadExpenseInvoices(ctx.adminClient, expenseInvoiceIds(expenses))
+    const valueOf = (tx: any) => expenseValue(tx, net, invoiceMap)
 
     const categories: Record<string, { count: number; total: number }> = {}
     for (const tx of expenses) {
@@ -2103,15 +2158,6 @@ export const getExpensesReport = protectedAction<
     // Vía manual_transactions.ap_supplier_invoice_id -> ap_supplier_invoices.supplier_id
     // -> suppliers.supplier_types. Los pagos sin enlace caen en "Sin clasificar".
     const providerExpenses = expenses.filter((tx: any) => (tx.category as string) === 'proveedores')
-    const invoiceIds = [...new Set(providerExpenses.map((tx: any) => tx.ap_supplier_invoice_id).filter(Boolean) as string[])]
-    const invoiceMap = new Map<string, { invoice_number: string; supplier_name: string; supplier_id: string | null; invoice_date: string }>()
-    if (invoiceIds.length > 0) {
-      const { data: invs } = await ctx.adminClient
-        .from('ap_supplier_invoices').select('id, invoice_number, supplier_name, supplier_id, invoice_date').in('id', invoiceIds)
-      for (const i of (invs ?? []) as any[]) {
-        invoiceMap.set(String(i.id), { invoice_number: String(i.invoice_number ?? ''), supplier_name: String(i.supplier_name ?? ''), supplier_id: i.supplier_id ?? null, invoice_date: String(i.invoice_date ?? '') })
-      }
-    }
     const supplierIds = [...new Set([...invoiceMap.values()].map((v) => v.supplier_id).filter(Boolean) as string[])]
     // Tipo de gasto del proveedor (campo "Tipo de gasto" de la ficha, suppliers.expense_type:
     // general | alquiler | compras). El desglose del informe se agrupa por aquí.
@@ -2179,7 +2225,6 @@ export const getExpensesComparison = protectedAction<
   { permission: 'reports.view', auditModule: 'reports' },
   async (ctx, { current_start, current_end, previous_start, previous_end, tax_mode = 'with_tax' }) => {
     const net = tax_mode === 'without_tax'
-    const cols = net ? 'amount' : 'total'
     // Excluir retiradas 'extraccion' (no son gasto) — igual que getExpensesReport.
     // Paginado por el mismo motivo: un Set incompleto dejaría pasar extracciones.
     const extr = await readAllPaged<any>((f, t) => ctx.adminClient
@@ -2191,15 +2236,19 @@ export const getExpensesComparison = protectedAction<
     // menos gasto del real en rangos largos, igual que el informe.
     const [currentRows, previousRows] = await Promise.all([
       readAllPaged<any>((f, t) => ctx.adminClient.from('manual_transactions')
-        .select(`${cols}, withdrawal_id`).eq('type', 'expense').gte('date', current_start).lte('date', current_end)
+        .select('amount, total, withdrawal_id, ap_supplier_invoice_id').eq('type', 'expense').gte('date', current_start).lte('date', current_end)
         .order('id', { ascending: true }).range(f, t), 'getExpensesComparison.current'),
       readAllPaged<any>((f, t) => ctx.adminClient.from('manual_transactions')
-        .select(`${cols}, withdrawal_id`).eq('type', 'expense').gte('date', previous_start).lte('date', previous_end)
+        .select('amount, total, withdrawal_id, ap_supplier_invoice_id').eq('type', 'expense').gte('date', previous_start).lte('date', previous_end)
         .order('id', { ascending: true }).range(f, t), 'getExpensesComparison.previous'),
     ])
+    // Sin IVA hace falta la cuota de la factura de cada pago (ver expenseValue).
+    const invoiceMap = net
+      ? await loadExpenseInvoices(ctx.adminClient, expenseInvoiceIds([...(currentRows || []), ...(previousRows || [])]))
+      : new Map<string, ExpenseInvoice>()
     const sumField = (rows: any[] | null) => (rows || [])
       .filter((t: any) => !t.withdrawal_id || !extractionIds.has(t.withdrawal_id))
-      .reduce((s, t) => s + (Number(net ? t.amount : t.total) || 0), 0)
+      .reduce((s, t) => s + expenseValue(t, net, invoiceMap), 0)
     const current = sumField(currentRows)
     const previous = sumField(previousRows)
     const change = previous === 0 ? (current > 0 ? 100 : 0) : ((current - previous) / previous) * 100
