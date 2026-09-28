@@ -282,58 +282,63 @@ export const listSupplierInvoices = protectedAction<
 >(
   { permission: PERMISSION, auditModule: 'accounting' },
   async (ctx, { status, supplierSearch, dateFrom, dateTo, paymentMethod }) => {
-    let q = ctx.adminClient
-      .from(TABLE)
-      .select('*')
-      .order('invoice_date', { ascending: false })
+    // Constructor por página: sin filtros la tabla ya ronda las 1.000 facturas (tope
+    // de PostgREST) y el listado perdía las más antiguas sin avisar.
+    const build = () => {
+      let q = ctx.adminClient
+        .from(TABLE)
+        .select('*')
+        .order('invoice_date', { ascending: false })
+        .order('id', { ascending: true })
 
-    if (status === 'vencida') {
-      q = q.in('status', ['pendiente', 'parcial']).lt('due_date', new Date().toISOString().slice(0, 10))
-    } else if (status && status !== 'all') {
-      q = q.eq('status', status)
-    }
-    if (supplierSearch && supplierSearch.trim()) {
-      // Si el término completo es un número (admite "15,20", "15.20", "1.520,00" o "15 €"),
-      // se busca también por importe total, además de por nº factura/proveedor.
-      let amountTerm = supplierSearch.trim().replace(/[€\s]/g, '')
-      if (amountTerm.includes(',')) amountTerm = amountTerm.replace(/\./g, '').replace(',', '.')
-      if (/^\d+(\.\d{1,2})?$/.test(amountTerm)) {
-        const n = Number(amountTerm)
-        if (amountTerm.includes('.')) {
-          // Con decimales: importe exacto (o coincidencia en nº factura).
-          q = q.or(`total_amount.eq.${n},search_text.ilike.%${amountTerm}%`)
+      if (status === 'vencida') {
+        q = q.in('status', ['pendiente', 'parcial']).lt('due_date', new Date().toISOString().slice(0, 10))
+      } else if (status && status !== 'all') {
+        q = q.eq('status', status)
+      }
+      if (supplierSearch && supplierSearch.trim()) {
+        // Si el término completo es un número (admite "15,20", "15.20", "1.520,00" o "15 €"),
+        // se busca también por importe total, además de por nº factura/proveedor.
+        let amountTerm = supplierSearch.trim().replace(/[€\s]/g, '')
+        if (amountTerm.includes(',')) amountTerm = amountTerm.replace(/\./g, '').replace(',', '.')
+        if (/^\d+(\.\d{1,2})?$/.test(amountTerm)) {
+          const n = Number(amountTerm)
+          if (amountTerm.includes('.')) {
+            // Con decimales: importe exacto (o coincidencia en nº factura).
+            q = q.or(`total_amount.eq.${n},search_text.ilike.%${amountTerm}%`)
+          } else {
+            // Entero: cualquier total n,xx (15 encuentra 15,20) o nº factura que lo contenga.
+            q = q.or(`and(total_amount.gte.${n},total_amount.lt.${n + 1}),search_text.ilike.%${amountTerm}%`)
+          }
         } else {
-          // Entero: cualquier total n,xx (15 encuentra 15,20) o nº factura que lo contenga.
-          q = q.or(`and(total_amount.gte.${n},total_amount.lt.${n + 1}),search_text.ilike.%${amountTerm}%`)
-        }
-      } else {
-        // Multi-palabra: cada token (AND) sobre search_text (unaccent: nº factura +
-        // supplier_name, mig 142). El número va incluido → buscar por nº sigue casando.
-        const normalized = normalizeSearchTerm(supplierSearch)
-        for (const token of normalized.split(/\s+/).filter(Boolean)) {
-          q = q.ilike('search_text', `%${token}%`)
+          // Multi-palabra: cada token (AND) sobre search_text (unaccent: nº factura +
+          // supplier_name, mig 142). El número va incluido → buscar por nº sigue casando.
+          const normalized = normalizeSearchTerm(supplierSearch)
+          for (const token of normalized.split(/\s+/).filter(Boolean)) {
+            q = q.ilike('search_text', `%${token}%`)
+          }
         }
       }
-    }
-    // Filtro por rango = fecha de EMISIÓN (invoice_date), el criterio contable.
-    // El vencimiento (due_date) solo manda en el estado "vencida" (arriba) y en
-    // el calendario de pagos (getSupplierPaymentCalendar), no en este listado.
-    if (dateFrom) q = q.gte('invoice_date', dateFrom)
-    if (dateTo) q = q.lte('invoice_date', dateTo)
-    if (paymentMethod && paymentMethod !== 'all') {
-      if (paymentMethod === 'none') {
-        q = q.is('payment_method', null)
-      } else {
-        // Tolerante a slug + etiqueta histórica (ver PAYMENT_METHOD_ALIASES).
-        const aliases = PAYMENT_METHOD_ALIASES[paymentMethod] ?? [paymentMethod]
-        q = q.in('payment_method', aliases)
+      // Filtro por rango = fecha de EMISIÓN (invoice_date), el criterio contable.
+      // El vencimiento (due_date) solo manda en el estado "vencida" (arriba) y en
+      // el calendario de pagos (getSupplierPaymentCalendar), no en este listado.
+      if (dateFrom) q = q.gte('invoice_date', dateFrom)
+      if (dateTo) q = q.lte('invoice_date', dateTo)
+      if (paymentMethod && paymentMethod !== 'all') {
+        if (paymentMethod === 'none') {
+          q = q.is('payment_method', null)
+        } else {
+          // Tolerante a slug + etiqueta histórica (ver PAYMENT_METHOD_ALIASES).
+          const aliases = PAYMENT_METHOD_ALIASES[paymentMethod] ?? [paymentMethod]
+          q = q.in('payment_method', aliases)
+        }
       }
+      return q
     }
 
-    const { data, error } = await q
-    if (error) return failure(error.message)
+    const data = await readAllPaged<Record<string, unknown>>((f, t) => build().range(f, t), 'listSupplierInvoices')
 
-    const list = (data || []).map((r: Record<string, unknown>) => ({
+    const list = data.map((r: Record<string, unknown>) => ({
       id: String(r.id),
       store_id: r.store_id != null ? String(r.store_id) : null,
       supplier_id: r.supplier_id != null ? String(r.supplier_id) : null,

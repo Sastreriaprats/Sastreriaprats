@@ -9,6 +9,7 @@ import {
   type SupplierPaymentMethod,
 } from '@/lib/constants/supplier-payment-methods'
 import { rederiveDueDatesFifo } from '@/lib/server/supplier-payments'
+import { readAllPaged } from '@/lib/server/paged'
 
 const PERMISSION = 'supplier_invoices.manage'
 const TABLE = 'ap_supplier_invoice_payments'
@@ -741,13 +742,22 @@ export const getSupplierInvoicesPaidMap = protectedAction<
   async (ctx, { invoice_ids }) => {
     const ids = (invoice_ids || []).filter(Boolean)
     if (ids.length === 0) return success({} as Record<string, number>)
-    const { data, error } = await ctx.adminClient
-      .from(TABLE)
-      .select('supplier_invoice_id, amount')
-      .in('supplier_invoice_id', ids)
-    if (error) return failure(error.message)
+    // Por tandas: el listado manda ya ~1.000 ids (la URL de .in() se desborda) y los
+    // pagos de todas ellas pasan del tope de 1.000 filas de PostgREST.
+    const CHUNK = 150
+    const data: { supplier_invoice_id: string; amount: number | null }[] = []
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK)
+      const rows = await readAllPaged<{ supplier_invoice_id: string; amount: number | null }>((f, t) => ctx.adminClient
+        .from(TABLE)
+        .select('supplier_invoice_id, amount')
+        .in('supplier_invoice_id', chunk)
+        .order('id', { ascending: true })
+        .range(f, t), 'getSupplierInvoicesPaidMap')
+      data.push(...rows)
+    }
     const result: Record<string, number> = {}
-    for (const p of (data || []) as any[]) {
+    for (const p of data) {
       const key = String(p.supplier_invoice_id)
       result[key] = (result[key] ?? 0) + Number(p.amount ?? 0)
     }
