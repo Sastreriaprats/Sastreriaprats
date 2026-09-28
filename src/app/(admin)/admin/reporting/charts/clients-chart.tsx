@@ -1,7 +1,7 @@
 'use client'
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Users, UserPlus, UserCheck, Trophy, Store, Sparkles, Repeat, Calendar } from 'lucide-react'
+import { Users, UserPlus, UserCheck, Trophy, Store, Calendar } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import type { ClientsAdvancedAnalytics } from '@/actions/reports'
 import { clientSourceLabel, assignSourceColors } from '@/lib/clients/sources'
@@ -192,11 +192,10 @@ export function ClientsChart({
         </Card>
       </div>
 
-      {/* ── Fila 2: Por tienda + Nuevos vs antiguos ────────────────────── */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <ClientsByStoreCard advanced={advanced} />
-        <NewVsReturningCard advanced={advanced} />
-      </div>
+      {/* ── Fila 2: Por tienda. «Nuevos vs antiguos» se sustituyó por la sección
+          «Clientes nuevos y reincidentes» (client-retention-section.tsx), con la
+          definición de la tienda (2ª compra) y la base anterior. ─────────── */}
+      <ClientsByStoreCard advanced={advanced} />
 
       {/* ── Fila 3: Serie temporal ─────────────────────────────────────── */}
       <ClientsByDayCard advanced={advanced} />
@@ -290,61 +289,6 @@ function ClientsByStoreCard({ advanced }: { advanced: ClientsAdvancedAnalytics |
             )}
             <p className="text-[10px] text-muted-foreground -mt-1">
               Un cliente que compra en varias tiendas cuenta en cada una; la suma puede superar el total único del periodo.
-            </p>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-function NewVsReturningCard({ advanced }: { advanced: ClientsAdvancedAnalytics | null }) {
-  if (!advanced) {
-    return (
-      <Card>
-        <CardHeader><CardTitle className="text-base flex items-center gap-2"><Repeat className="h-4 w-4" /> Nuevos vs antiguos</CardTitle></CardHeader>
-        <CardContent><p className="text-sm text-muted-foreground text-center py-6">Cargando…</p></CardContent>
-      </Card>
-    )
-  }
-  const { new_count, returning_count, total } = advanced.new_vs_returning
-  const newPct = total > 0 ? Math.round((new_count / total) * 100) : 0
-  const retPct = total > 0 ? 100 - newPct : 0
-
-  return (
-    <Card>
-      <CardHeader><CardTitle className="text-base flex items-center gap-2"><Repeat className="h-4 w-4" /> Nuevos vs antiguos</CardTitle></CardHeader>
-      <CardContent>
-        {total === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-6">Sin clientes en el periodo.</p>
-        ) : (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex items-center gap-3 p-3 rounded-xl bg-purple-50 border border-purple-100">
-                <Sparkles className="h-7 w-7 text-purple-600 shrink-0" />
-                <div>
-                  <p className="text-[11px] text-muted-foreground">Nuevos</p>
-                  <p className="text-xl font-bold">{new_count}
-                    <span className="text-xs font-normal text-muted-foreground ml-1">{newPct}%</span>
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 p-3 rounded-xl bg-blue-50 border border-blue-100">
-                <Users className="h-7 w-7 text-blue-600 shrink-0" />
-                <div>
-                  <p className="text-[11px] text-muted-foreground">Antiguos</p>
-                  <p className="text-xl font-bold">{returning_count}
-                    <span className="text-xs font-normal text-muted-foreground ml-1">{retPct}%</span>
-                  </p>
-                </div>
-              </div>
-            </div>
-            <div className="h-3 rounded-full overflow-hidden flex bg-gray-100">
-              <div className="bg-purple-500 transition-all" style={{ width: `${newPct}%` }} title={`Nuevos: ${new_count}`} />
-              <div className="bg-blue-500 transition-all" style={{ width: `${retPct}%` }} title={`Antiguos: ${returning_count}`} />
-            </div>
-            <p className="text-[10px] text-muted-foreground">
-              Nuevo = primera compra (sales + sastrería) cae dentro del periodo. Antiguo = ya había comprado antes.
             </p>
           </div>
         )}

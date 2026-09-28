@@ -74,7 +74,7 @@ function garmentAbbrev(line: RefLine): string {
  * que escribe la ficha del sastre; un guion normal podría formar parte del
  * nombre de la prenda.
  */
-function groupLabelOf(line: RefLine): string | null {
+export function groupLabelOf(line: RefLine): string | null {
   const cfg = (line.configuration ?? {}) as Record<string, unknown>
   const label = String(cfg.prendaLabel ?? '').trim()
   const m = label.match(/\s*(?:—|–)\s*(.+)$/)

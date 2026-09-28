@@ -24,6 +24,8 @@ export const createProductSchema = z.object({
   supplier_id: z.string().uuid().optional().nullable(),
   supplier_reference: z.string().optional().nullable(),
   color: z.string().optional().nullable(),
+  // Código del catálogo de colores (mig 294). null = sin color.
+  color_code: coerceOptionalNumber.pipe(z.number().int().optional().nullable()),
   material: z.string().optional().nullable(),
   barcode: z.string().optional().nullable().transform(v => (v == null || v === '' ? null : v)),
   min_stock_alert: coerceOptionalNumber.pipe(z.number().min(0).optional().nullable()).transform((v) => (v != null ? Math.round(v) : v)),

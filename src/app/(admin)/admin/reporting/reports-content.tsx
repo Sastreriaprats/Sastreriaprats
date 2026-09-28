@@ -26,6 +26,9 @@ import { getEmployeeCommissions, type EmployeeCommission, type GroupBonusResult 
 import { SalesChart } from './charts/sales-chart'
 import { TopProductsChart } from './charts/top-products-chart'
 import { ClientsChart } from './charts/clients-chart'
+import { ProductMixView } from './product-mix-view'
+import { TailoringGarmentsTab } from './tailoring-garments-tab'
+import { ClientRetentionSection } from './client-retention-section'
 import { formatCurrency, normalizeSearchTerm } from '@/lib/utils'
 import { toast } from 'sonner'
 import { toLocalISODate, todayLocalISODate } from '@/lib/dates'
@@ -125,6 +128,9 @@ export function ReportsContent() {
   // Modo de la pestaña Productos: histórico total del producto (por defecto) o
   // acotado al periodo/tienda del filtro superior (petición Mónica: temporadas).
   const [productScope, setProductScope] = useState<'historic' | 'period'>('historic')
+  // Productos: listado por producto (histórico o periodo) o unidades agrupadas
+  // por tipología / color (siempre del periodo del filtro).
+  const [productView, setProductView] = useState<'product' | 'category' | 'color'>('product')
   const [clientsData, setClientsData] = useState<ClientsData | null>(null)
   const [clientsAdvanced, setClientsAdvanced] = useState<ClientsAdvancedAnalytics | null>(null)
   const [storeSales, setStoreSales] = useState<StoreSalesReport | null>(null)
@@ -615,82 +621,113 @@ export function ReportsContent() {
               <TabsTrigger value="clients" className="gap-1"><Users className="h-4 w-4" /> 4 · Clientes y horarios</TabsTrigger>
               <TabsTrigger value="expenses" className="gap-1"><Wallet className="h-4 w-4" /> 5 · Gastos</TabsTrigger>
               <TabsTrigger value="partners" className="gap-1"><Landmark className="h-4 w-4" /> 6 · Socios</TabsTrigger>
+              <TabsTrigger value="tailoring-garments" className="gap-1"><Scissors className="h-4 w-4" /> 7 · Prendas sastrería</TabsTrigger>
             </TabsList>
 
             <div className="mt-6">
               <TabsContent value="store-sales"><StoreSalesTab data={storeSales} salesData={salesData} isFiltered={storeFilter !== 'all'} /></TabsContent>
               <TabsContent value="products">
-                {/* Alcance del informe: toda la vida del producto o el periodo del
-                    filtro superior (petición Mónica: revisar la temporada al cerrarla). */}
-                <div className="inline-flex rounded-lg border p-0.5 mb-3">
-                  <button
-                    type="button"
-                    onClick={() => setProductScope('historic')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${productScope === 'historic' ? 'bg-prats-navy text-white' : 'text-muted-foreground hover:text-foreground'}`}
-                  >
-                    Histórico total
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setProductScope('period')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${productScope === 'period' ? 'bg-prats-navy text-white' : 'text-muted-foreground hover:text-foreground'}`}
-                  >
-                    Periodo del filtro
-                  </button>
+                <div className="inline-flex rounded-lg border p-0.5 mb-3 mr-3">
+                  {([['product', 'Por producto'], ['category', 'Por tipología'], ['color', 'Por color']] as const).map(([v, label]) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setProductView(v)}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${productView === v ? 'bg-prats-navy text-white' : 'text-muted-foreground hover:text-foreground'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
-                {productScope === 'historic' ? (
-                  <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 mb-4 text-xs text-amber-900">
-                    <Layers className="h-4 w-4 shrink-0 mt-0.5" />
-                    <p>
-                      <strong>Histórico total del producto.</strong> Compradas, vendidas y rentabilidad
-                      son de toda la vida del producto: <strong>no</strong> dependen del filtro de fechas ni de tienda de arriba
-                      (sí del modo IVA). El stock inicial se cargó de una vez, por eso se mide siempre completo.
-                      Cambia a &laquo;Periodo del filtro&raquo; para acotar las ventas a las fechas de arriba.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 mb-4 text-xs text-sky-900">
-                    <Layers className="h-4 w-4 shrink-0 mt-0.5" />
-                    <p>
-                      <strong>Periodo del filtro.</strong> Vendidas, facturación y margen son SOLO las ventas
-                      entre {dateRange.start} y {dateRange.end}{storeFilter !== 'all' ? ` en ${activeStoreName}` : ''} (ideal para
-                      revisar una temporada). El catálogo completo sigue listado &mdash;lo no vendido en el periodo sale a cero&mdash;,
-                      el <strong>stock es el actual de hoy</strong> y &laquo;Compradas&raquo; se oculta (no hay registro de entradas por periodo).
-                    </p>
-                  </div>
-                )}
-                <div className="flex flex-wrap items-center gap-2 mb-4">
-                  <Input
-                    placeholder="Buscar producto (varias palabras) o SKU..."
-                    value={productSearch}
-                    onChange={(e) => setProductSearch(e.target.value)}
-                    className="max-w-sm"
+                {productView !== 'product' ? (
+                  <ProductMixView
+                    mode={productView}
+                    startDate={dateRange.start}
+                    endDate={dateRange.end}
+                    storeId={storeFilter === 'all' ? undefined : storeFilter}
+                    storeName={activeStoreName}
                   />
-                  <Select value={productCategoryFilter} onValueChange={setProductCategoryFilter}>
-                    <SelectTrigger className="w-56">
-                      <SelectValue placeholder="Categoría" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todas las categorías</SelectItem>
-                      <SelectItem value="none">Sin categoría</SelectItem>
-                      {productCategories.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {`${' '.repeat((c.level ?? 0) * 3)}${c.name}`}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {(productSearch || productCategoryFilter !== 'all') && (
-                    <span className="text-xs text-muted-foreground">
-                      {filteredProducts.length} producto{filteredProducts.length !== 1 ? 's' : ''}
-                    </span>
+                ) : (
+                <>
+                  {/* Alcance del informe: toda la vida del producto o el periodo del
+                      filtro superior (petición Mónica: revisar la temporada al cerrarla). */}
+                  <div className="inline-flex rounded-lg border p-0.5 mb-3">
+                    <button
+                      type="button"
+                      onClick={() => setProductScope('historic')}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${productScope === 'historic' ? 'bg-prats-navy text-white' : 'text-muted-foreground hover:text-foreground'}`}
+                    >
+                      Histórico total
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setProductScope('period')}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${productScope === 'period' ? 'bg-prats-navy text-white' : 'text-muted-foreground hover:text-foreground'}`}
+                    >
+                      Periodo del filtro
+                    </button>
+                  </div>
+                  {productScope === 'historic' ? (
+                    <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 mb-4 text-xs text-amber-900">
+                      <Layers className="h-4 w-4 shrink-0 mt-0.5" />
+                      <p>
+                        <strong>Histórico total del producto.</strong> Compradas, vendidas y rentabilidad
+                        son de toda la vida del producto: <strong>no</strong> dependen del filtro de fechas ni de tienda de arriba
+                        (sí del modo IVA). El stock inicial se cargó de una vez, por eso se mide siempre completo.
+                        Cambia a &laquo;Periodo del filtro&raquo; para acotar las ventas a las fechas de arriba.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 mb-4 text-xs text-sky-900">
+                      <Layers className="h-4 w-4 shrink-0 mt-0.5" />
+                      <p>
+                        <strong>Periodo del filtro.</strong> Vendidas, facturación y margen son SOLO las ventas
+                        entre {dateRange.start} y {dateRange.end}{storeFilter !== 'all' ? ` en ${activeStoreName}` : ''} (ideal para
+                        revisar una temporada). El catálogo completo sigue listado &mdash;lo no vendido en el periodo sale a cero&mdash;,
+                        el <strong>stock es el actual de hoy</strong> y &laquo;Compradas&raquo; se oculta (no hay registro de entradas por periodo).
+                      </p>
+                    </div>
                   )}
-                </div>
-                <TopProductsChart products={filteredProducts} periodMode={productScope === 'period'} />
+                  <div className="flex flex-wrap items-center gap-2 mb-4">
+                    <Input
+                      placeholder="Buscar producto (varias palabras) o SKU..."
+                      value={productSearch}
+                      onChange={(e) => setProductSearch(e.target.value)}
+                      className="max-w-sm"
+                    />
+                    <Select value={productCategoryFilter} onValueChange={setProductCategoryFilter}>
+                      <SelectTrigger className="w-56">
+                        <SelectValue placeholder="Categoría" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todas las categorías</SelectItem>
+                        <SelectItem value="none">Sin categoría</SelectItem>
+                        {productCategories.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {`${' '.repeat((c.level ?? 0) * 3)}${c.name}`}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {(productSearch || productCategoryFilter !== 'all') && (
+                      <span className="text-xs text-muted-foreground">
+                        {filteredProducts.length} producto{filteredProducts.length !== 1 ? 's' : ''}
+                      </span>
+                    )}
+                  </div>
+                  <TopProductsChart products={filteredProducts} periodMode={productScope === 'period'} />
+                </>
+                )}
               </TabsContent>
               <TabsContent value="clients">
                 {/* Informe 4 de Mónica: clientes + hora más vendida y día de la semana, juntos. */}
                 <div className="space-y-8">
+                  <ClientRetentionSection
+                    startDate={dateRange.start}
+                    endDate={dateRange.end}
+                    storeId={storeFilter === 'all' ? undefined : storeFilter}
+                    storeName={activeStoreName}
+                  />
                   <ClientsChart data={clientsData} advanced={clientsAdvanced} showByStore={showStoreBreakdown} />
                   <div>
                     <h3 className="text-base font-semibold mb-3 flex items-center gap-2"><Clock className="h-4 w-4" /> Por hora y día de la semana</h3>
@@ -701,6 +738,14 @@ export function ReportsContent() {
               <TabsContent value="employees"><EmployeeTab data={employeeData} storeBreakdown={employeeStoreBreakdown} stores={storeFilter === 'all' ? employeeStores : null} commissions={employeeCommissions} groupBonuses={groupBonuses} /></TabsContent>
               <TabsContent value="expenses"><ExpensesTab data={expensesData} comparison={expensesComparison} /></TabsContent>
               <TabsContent value="partners"><PartnersTab data={partnersData} /></TabsContent>
+              <TabsContent value="tailoring-garments">
+                <TailoringGarmentsTab
+                  startDate={dateRange.start}
+                  endDate={dateRange.end}
+                  storeId={storeFilter === 'all' ? undefined : storeFilter}
+                  storeName={activeStoreName}
+                />
+              </TabsContent>
             </div>
           </Tabs>
         </>

@@ -13,7 +13,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -36,6 +38,7 @@ import { createProductAction, updateProductAction, createVariantAction, updateVa
 import { listCollectionNames } from '@/actions/product-taxonomies'
 import { listSeasons, type SeasonRow } from '@/actions/seasons'
 import { listSizeGuideOptions, type SizeGuideListItem } from '@/actions/size-guides'
+import { listProductColors, type ProductColor } from '@/actions/product-colors'
 import { formatCurrency } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import { SIZE_TEMPLATES, variantSkuFromSize } from '@/lib/constants-sizes'
@@ -182,10 +185,13 @@ export function ProductForm({
     web_tags: [] as string[],
     tagInput: '',
     color: '',
+    // Código del catálogo de colores (mig 294) como texto para el Select; '' = sin color.
+    color_code: '',
     material: '',
     size_guide_id: '' as string,
   })
   const [sizeGuideOptions, setSizeGuideOptions] = useState<SizeGuideListItem[]>([])
+  const [colorOptions, setColorOptions] = useState<ProductColor[]>([])
   const [variants, setVariants] = useState<VariantRow[]>([])
   const [showAddVariant, setShowAddVariant] = useState(false)
   const [variantForm, setVariantForm] = useState({ size: '', color: '', variant_sku: '', stock_inicial: 0 })
@@ -261,6 +267,7 @@ export function ProductForm({
     listCollectionNames().then(r => { if (!cancelled && r.success) setCollectionOptions(r.data) })
     listSeasons().then(r => { if (!cancelled && r.success) setSeasonOptions(r.data) })
     listSizeGuideOptions().then(r => { if (!cancelled && r.success) setSizeGuideOptions(r.data) })
+    listProductColors().then(r => { if (!cancelled && r.success) setColorOptions(r.data) })
     return () => { cancelled = true }
   }, [])
 
@@ -301,6 +308,7 @@ export function ProductForm({
       web_tags: Array.isArray(initialProduct.web_tags) ? initialProduct.web_tags : [],
       tagInput: '',
       color: initialProduct.color ?? '',
+      color_code: initialProduct.color_code != null ? String(initialProduct.color_code) : '',
       material: initialProduct.material ?? '',
       size_guide_id: initialProduct.size_guide_id ?? '',
     })
@@ -741,7 +749,12 @@ export function ProductForm({
       web_title: web.web_title.trim() || null,
       web_description: web.web_description.trim() || null,
       web_tags: web.web_tags.length ? web.web_tags : undefined,
-      color: web.color || undefined,
+      // El color sale del catálogo: se guarda el código (para el informe) y el
+      // nombre en `color` (lo que ya leían la web y las etiquetas). null lo borra.
+      color_code: web.color_code ? Number(web.color_code) : null,
+      color: web.color_code
+        ? (colorOptions.find((c) => String(c.code) === web.color_code)?.name ?? web.color) || null
+        : null,
       material: web.material || undefined,
       size_guide_id: web.size_guide_id && web.size_guide_id.trim() ? web.size_guide_id : null,
       images: images.length ? images : undefined,
@@ -1313,10 +1326,38 @@ export function ProductForm({
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Color</Label>
-                  <Input
-                    value={web.color}
-                    onChange={(e) => setWeb((w) => ({ ...w, color: e.target.value }))}
-                  />
+                  {/* Catálogo cerrado (mig 294): el informe de Productos agrupa por
+                      este código y por su familia (la centena). */}
+                  <Select
+                    value={web.color_code || 'none'}
+                    onValueChange={(v) => setWeb((w) => ({ ...w, color_code: v === 'none' ? '' : v }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Sin color" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-80">
+                      <SelectItem value="none">Sin color</SelectItem>
+                      {[...new Set(colorOptions.map((c) => c.family))].map((family) => (
+                        <SelectGroup key={family}>
+                          <SelectLabel>{family}</SelectLabel>
+                          {colorOptions.filter((c) => c.family === family).map((c) => (
+                            <SelectItem key={c.code} value={String(c.code)}>
+                              <span className="inline-flex items-center gap-2">
+                                <span
+                                  className="h-3.5 w-3.5 rounded-sm border shrink-0"
+                                  style={c.hex
+                                    ? { backgroundColor: c.hex }
+                                    : { background: 'linear-gradient(90deg,#D9C4A0,#3A6EA5,#4A7C59,#B8644A,#D9A0B8,#E3BE4F)' }}
+                                />
+                                <span className="tabular-nums text-muted-foreground">{c.code}</span>
+                                {c.name}
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label>Material</Label>

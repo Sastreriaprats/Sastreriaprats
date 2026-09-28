@@ -84,8 +84,9 @@ Tabla "cash_withdrawals": cash_session_id, amount, reason, withdrawn_at (retirad
 - Roles: user_roles -> roles; tiendas asignadas: user_stores (user_id, store_id, is_primary).
 
 ## Stock / productos
-- "products": id, sku, name, product_type ('boutique'|'tailoring_fabric'|'accessory'|'service'|'alteration'), base_price, tax_rate, is_active, min_stock_alert.
-- "product_variants": id, product_id -> products.id, size (talla), color, variant_sku, barcode.
+- "products": id, sku, name, product_type ('boutique'|'tailoring_fabric'|'accessory'|'service'|'alteration'), base_price, tax_rate, is_active, min_stock_alert, category_id -> product_categories.id (tipología; product_categories: id, name, parent_id), color_code -> product_colors.code.
+- "product_colors": code (100, 302…; la centena es la familia), name, family ('Azules', 'Blancos y neutros'…). El color de un producto es products.color_code; product_variants.color NO se usa (va vacío).
+- "product_variants": id, product_id -> products.id, size (talla), variant_sku, barcode.
 - "stock_levels": product_variant_id -> product_variants.id, warehouse_id -> warehouses.id, quantity (físico), reserved, available (=quantity-reserved), min_stock.
 - "warehouses": id, store_id -> stores.id (para stock por tienda: stock_levels JOIN warehouses JOIN stores).
 - Para "stock de X prenda": JOIN products p -> product_variants v -> stock_levels s; filtra p.name/p.sku ILIKE '%X%'.
