@@ -160,6 +160,7 @@ export type ApInvoiceLite = {
   retentionAmount: number       // importe retenido (se ingresa a Hacienda, no al proveedor)
   total: number                 // total del documento: base + IVA − retención
   isIntraEU: boolean            // proveedor intracomunitario (CIF-IVA de otro país UE)
+  regime: 'nacional' | 'intra' | 'extra' // por el prefijo del CIF y, sin prefijo, por el país de la ficha
   status: string                // 'pagada' | 'pendiente'
   payments: { date: string; amount: number }[] // pagos hechos (sin método: en C no figura)
   attachmentPath?: string       // path en el bucket supplier-invoices (PDF adjunto)

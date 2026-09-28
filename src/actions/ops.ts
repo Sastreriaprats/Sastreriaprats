@@ -1,6 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
+import { readAllPaged } from '@/lib/server/paged'
 import { loadPedidoCobroBaseBySale } from '@/lib/accounting/pedido-cobro-lines'
 import { loadReservationPayments } from '@/lib/accounting/reservation-payments'
 import { loadOnlineTicketIncome } from '@/lib/accounting/online-ticket-income'
@@ -126,6 +127,32 @@ const isIntraEUCif = (cif: unknown) => {
   return /^[A-Z]{2}/.test(c) && EU_VAT_PREFIXES.has(c.slice(0, 2))
 }
 
+// País del proveedor (texto libre de la ficha) → UE / España / resto. Solo se usa
+// cuando el CIF no trae prefijo de país (proveedores extranjeros dados de alta
+// sin NIF-IVA): sin esto, un proveedor italiano o de Singapur salía como nacional.
+const normCountry = (s: unknown) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase()
+const SPAIN_NAMES = new Set(['', 'espana', 'spain', 'es'])
+const EU_COUNTRY_NAMES = new Set([
+  'alemania', 'germany', 'austria', 'belgica', 'belgium', 'bulgaria', 'chipre', 'cyprus', 'croacia', 'croatia',
+  'dinamarca', 'denmark', 'eslovaquia', 'slovakia', 'eslovenia', 'slovenia', 'estonia', 'finlandia', 'finland',
+  'francia', 'france', 'grecia', 'greece', 'hungria', 'hungary', 'irlanda', 'ireland', 'italia', 'italy',
+  'letonia', 'latvia', 'lituania', 'lithuania', 'luxemburgo', 'luxembourg', 'malta', 'paises bajos', 'holanda',
+  'netherlands', 'polonia', 'poland', 'portugal', 'republica checa', 'chequia', 'czech republic', 'czechia',
+  'rumania', 'romania', 'suecia', 'sweden',
+])
+
+/** Régimen del proveedor para el IVA: nacional, intracomunitario (UE) o extracomunitario. */
+const supplierRegime = (cif: unknown, country: unknown): 'nacional' | 'intra' | 'extra' => {
+  const c = String(cif ?? '').trim().toUpperCase()
+  if (isIntraEUCif(c)) return 'intra'
+  // Prefijo de dos letras que no es ES ni UE (GB, CH, US…): extranjero fuera de la UE.
+  if (/^[A-Z]{2}[0-9A-Z]/.test(c) && !c.startsWith('ES')) return 'extra'
+  const k = normCountry(country)
+  if (EU_COUNTRY_NAMES.has(k)) return 'intra'
+  if (!SPAIN_NAMES.has(k)) return 'extra'
+  return 'nacional'
+}
+
 // Líneas (base + tipo de IVA) de las facturas recibidas del año, para el
 // desglose del IVA soportado por tipo impositivo.
 async function readApInvoiceLines(admin: ReturnType<typeof createAdminClient>, year: number) {
@@ -163,10 +190,13 @@ async function computeYear(year: number) {
     loadReservationPayments(admin, `${year}-01-01`, `${year}-12-31`),
     listDepositTags(),
     // Gastos / IVA soportado = FACTURAS RECIBIDAS (ap_supplier_invoices)
-    admin.from('ap_supplier_invoices')
-      .select('id, invoice_number, supplier_name, supplier_cif, amount, tax_amount, retention_rate, retention_amount, invoice_date, attachment_url, notes')
+    // Paginado: las facturas recibidas del año ya rondan el tope de 1.000 filas.
+    readAllPaged<Record<string, unknown>>((f, t) => admin.from('ap_supplier_invoices')
+      .select('id, invoice_number, supplier_name, supplier_cif, amount, tax_amount, retention_rate, retention_amount, invoice_date, attachment_url, notes, suppliers(country)')
       .eq('is_proforma', false)
-      .gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`),
+      .gte('invoice_date', `${year}-01-01`).lte('invoice_date', `${year}-12-31`)
+      .order('id', { ascending: true })
+      .range(f, t), 'getViewC.apInvoices').then((data) => ({ data })),
     readApInvoiceLines(admin, year),
     // Mapa venta -> nº de ticket oficial (CLP)
     admin.from('cash_internal_tickets')
@@ -447,6 +477,8 @@ async function computeYear(year: number) {
     const supplier = String(x.supplier_name ?? '')
     const num = String(x.invoice_number ?? '')
     const cif = String(x.supplier_cif ?? '').trim() || undefined
+    const supplierRow = (Array.isArray(x.suppliers) ? x.suppliers[0] : x.suppliers) as { country?: string | null } | null | undefined
+    const regime = supplierRegime(cif, supplierRow?.country)
     const attachment = typeof x.attachment_url === 'string' && x.attachment_url.trim() ? x.attachment_url.trim() : undefined
     const note = typeof x.notes === 'string' && x.notes.trim() ? x.notes.trim() : undefined
     // Total del DOCUMENTO: la retención se resta del pago al proveedor
@@ -462,7 +494,7 @@ async function computeYear(year: number) {
     apInvoices.push({
       id: String(x.id), number: num, supplier, cif, date: d.slice(0, 10), base: r2(base), vat: r2(vat), vatRate,
       retentionRate: r2(retRate), retentionAmount: r2(ret), total: r2(docTotal),
-      isIntraEU: isIntraEUCif(cif), attachmentPath: attachment, note,
+      isIntraEU: regime === 'intra', regime, attachmentPath: attachment, note,
       status: String(x.status ?? ''), payments: [],
     })
   }

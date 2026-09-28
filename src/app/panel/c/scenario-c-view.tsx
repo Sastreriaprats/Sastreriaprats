@@ -13,7 +13,7 @@ import { downloadExcelMulti } from '@/lib/excel/export'
 import { downloadZip, extFromUrl, type ZipItem } from '../bulk-download'
 import { ClientLedgerDialog, buildClientDetail, type ClientDetailTarget } from './client-ledger-dialog'
 import { SupplierLedgerDialog, buildSupplierDetail, type SupplierDetailTarget } from './supplier-ledger-dialog'
-import { ISP_RATE, isIsp, ispVat } from './intra-isp'
+import { ISP_RATE, isIsp, ispVat, vatRegimeTag, type VatRegimeTag } from './intra-isp'
 import { Tabs, Kpis, QuarterTable, MonthVatTable, MONTH_NAMES, MonthlyFullExpandable, LedgerTable, DownloadBtn, TYPE_BADGE, TOTAL_ROW, PageHeader, YearSelect, eur, MONTH_LABELS, groupByMonth, monthKey } from '../accounting-ui'
 
 const thisYear = new Date().getFullYear()
@@ -466,13 +466,14 @@ export function ScenarioCView() {
       })) },
       { name: 'Facturas gastos', rows: apDomestic.map((f) => ({
         'Nº': f.number, Proveedor: f.supplier, CIF: f.cif ?? '', Fecha: f.date,
+        'Tipo de IVA': vatRegimeTag(f).label,
         Base: n2(f.base), 'Tipo IVA %': f.vatRate ?? 'varios', IVA: n2(f.vat),
         'Tipo retención %': n2(f.retentionRate), 'Retención': n2(f.retentionAmount), Total: n2(f.total),
         Notas: f.note ?? '',
       })) },
       { name: 'Facturas intracomunitarias', rows: apIntraEU.map((f) => ({
         'Nº': f.number, Proveedor: f.supplier, 'NIF-IVA': f.cif ?? '', Fecha: f.date,
-        Base: n2(f.base), 'Régimen': isIsp(f) ? `ISP ${ISP_RATE}%` : 'Con IVA',
+        Base: n2(f.base), 'Tipo de IVA': vatRegimeTag(f).label,
         'Cuota autorrepercutida (devengada y deducible)': isIsp(f) ? ispVat(f) : 0,
         'IVA facturado': n2(f.vat), 'Total pagado': n2(f.total),
         Notas: f.note ?? '',
@@ -1037,15 +1038,14 @@ function ApInvoicesCard({ title, tag, rows, footnote, intra = false, selected, o
             <th className="text-left px-3 py-3">Proveedor</th>
             <th className="text-left px-3 py-3">Fecha</th>
             <th className="text-right px-3 py-3">Base</th>
+            <th className="text-left px-3 py-3">Tipo de IVA</th>
             {intra ? (
               <>
-                <th className="text-left px-3 py-3">Régimen</th>
                 <th className="text-right px-3 py-3" title="IVA que se autorrepercute (devengado) y se deduce a la vez en el 303">Cuota autorrep.</th>
                 <th className="text-right px-3 py-3">IVA facturado</th>
               </>
             ) : (
               <>
-                <th className="text-right px-3 py-3">Tipo IVA</th>
                 <th className="text-right px-3 py-3">IVA</th>
                 <th className="text-right px-3 py-3">Retención</th>
               </>
@@ -1081,19 +1081,14 @@ function ApInvoicesCard({ title, tag, rows, footnote, intra = false, selected, o
                 </td>
                 <td className="px-3 py-2 text-slate-500">{f.date}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{eur(f.base)}</td>
+                <td className="px-3 py-2"><VatRegimeBadge tag={vatRegimeTag(f)} /></td>
                 {intra ? (
                   <>
-                    <td className="px-3 py-2">
-                      {isp
-                        ? <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200">ISP {pct(ISP_RATE)}</span>
-                        : <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 ring-1 ring-inset ring-slate-200" title="El proveedor factura con IVA: no hay inversión del sujeto pasivo">Con IVA ({f.vatRate === null ? 'varios' : pct(f.vatRate)})</span>}
-                    </td>
                     <td className="px-3 py-2 text-right tabular-nums">{isp ? eur(ispVat(f)) : <span className="text-slate-300">—</span>}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{f.vat !== 0 ? eur(f.vat) : <span className="text-slate-300">—</span>}</td>
                   </>
                 ) : (
                   <>
-                    <td className="px-3 py-2 text-right text-slate-500">{f.vatRate === null ? 'varios' : pct(f.vatRate)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{eur(f.vat)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       {f.retentionAmount !== 0
@@ -1138,6 +1133,21 @@ function ApInvoicesCard({ title, tag, rows, footnote, intra = false, selected, o
       </table>
       <p className="border-t p-3 text-xs text-slate-400">{footnote}</p>
     </div>
+  )
+}
+
+const REGIME_TONE: Record<VatRegimeTag['tone'], string> = {
+  intra: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
+  extra: 'bg-amber-50 text-amber-800 ring-amber-200',
+  nacional: 'bg-slate-100 text-slate-700 ring-slate-200',
+  exenta: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+}
+
+function VatRegimeBadge({ tag }: { tag: VatRegimeTag }) {
+  return (
+    <span className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${REGIME_TONE[tag.tone]}`}>
+      {tag.label}
+    </span>
   )
 }
 
