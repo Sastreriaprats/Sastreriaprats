@@ -459,10 +459,12 @@ export const getSupplierVencimientosKpis = protectedAction<
     in30.setDate(in30.getDate() + 30)
     const in30Str = in30.toISOString().slice(0, 10)
 
-    const { data: cuotas, error: cuotasErr } = await ctx.adminClient
+    // Paginado: las cuotas pasan ya de las 1.000 filas (tope de PostgREST).
+    const cuotas = await readAllPaged<{ amount: number; due_date: string; is_paid: boolean; paid_at: string | null }>((f, t) => ctx.adminClient
       .from(DUE_DATES_TABLE)
       .select('amount, due_date, is_paid, paid_at')
-    if (cuotasErr) return failure(cuotasErr.message)
+      .order('id', { ascending: true })
+      .range(f, t), 'getSupplierVencimientosKpis')
 
     let totalPendiente = 0
     let totalVencidas = 0
@@ -518,7 +520,9 @@ export const listSupplierVencimientos = protectedAction<
   { permission: PERMISSION, auditModule: 'accounting' },
   async (ctx, { search, status = 'all', onlyOverdue = false }) => {
     // 1. Traemos cuotas con su factura embebida.
-    const { data: cuotas, error: cuotasErr } = await ctx.adminClient
+    // Paginado: con .limit(1000) y orden por vencimiento ascendente, al pasar de
+    // 1.000 cuotas se perdían las que vencen más tarde (las pendientes).
+    const cuotas = await readAllPaged<any>((f, t) => ctx.adminClient
       .from(DUE_DATES_TABLE)
       .select(`
         id, supplier_invoice_id, due_date, amount, sort_order, is_paid, paid_at, payment_method, created_at,
@@ -527,8 +531,8 @@ export const listSupplierVencimientos = protectedAction<
         )
       `)
       .order('due_date', { ascending: true })
-      .limit(1000)
-    if (cuotasErr) return failure(cuotasErr.message)
+      .order('id', { ascending: true })
+      .range(f, t), 'listSupplierVencimientos')
 
     // Tokens AND sin acentos: "mainetti factura 22" encuentra sin exigir orden.
     const searchTokens = normalizeSearchTerm((search ?? '').trim()).split(/\s+/).filter(Boolean)
