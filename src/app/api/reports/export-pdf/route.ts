@@ -470,6 +470,17 @@ const PARTNER_CHANNEL_ES: Record<string, string> = { boutique: 'Boutique', sastr
  * reales por tienda y canal con lo cobrado y lo pendiente, cobros que vienen de
  * otros meses, gastos del mes y beneficio.
  */
+/** Gastos por categoría de gasto (mig 295); "Sin categoría" llega ya al final. */
+function renderPartnerCategoryTable(rows: AnyRec[], total: number): string {
+  let html = '<table><thead><tr><th>Categoría</th><th style="text-align:center">Facturas</th><th style="text-align:right">Importe</th></tr></thead><tbody>'
+  for (const c of rows) {
+    html += `<tr><td>${escapeHtml(String(c.name ?? ''))}</td><td style="text-align:center">${Number(c.count ?? 0)}</td><td style="text-align:right">${fmtEur(Number(c.amount ?? 0))}</td></tr>`
+  }
+  const count = rows.reduce((a, c) => a + (Number(c.count) || 0), 0)
+  html += `<tr><td><strong>Total gastos</strong></td><td style="text-align:center"><strong>${count}</strong></td><td style="text-align:right"><strong>${fmtEur(total)}</strong></td></tr>`
+  return html + '</tbody></table>'
+}
+
 function renderPartners(data: AnyRec | null): string {
   if (!data) return '<p>Sin datos para el periodo seleccionado.</p>'
   const totals = (data.totals ?? {}) as AnyRec
@@ -494,6 +505,12 @@ function renderPartners(data: AnyRec | null): string {
     suman a la venta del mes. Gastos = facturas de proveedor con fecha del mes; no incluyen nóminas ni
     gastos que no entren como factura de proveedor.
   </p>`
+
+  const periodCategories = Array.isArray(data.expenses_by_category) ? (data.expenses_by_category as AnyRec[]) : []
+  if (periodCategories.length > 0 && months.length > 1) {
+    html += '<h3>Gastos del periodo por categoría</h3>'
+    html += renderPartnerCategoryTable(periodCategories, Number(totals.expenses ?? 0))
+  }
 
   for (const m of months) {
     const mTotals = (m.totals ?? {}) as AnyRec
@@ -561,6 +578,8 @@ function renderPartners(data: AnyRec | null): string {
       }
       html += `<tr><td><strong>Total gastos</strong></td><td style="text-align:center"><strong>${Number(expenses.count ?? 0)}</strong></td><td style="text-align:right"><strong>${fmtEur(Number(expenses.total ?? 0))}</strong></td></tr>`
       html += '</tbody></table>'
+      const byCategory = Array.isArray(expenses.by_category) ? (expenses.by_category as AnyRec[]) : []
+      if (byCategory.length > 0) html += renderPartnerCategoryTable(byCategory, Number(expenses.total ?? 0))
     }
 
     html += `<p style="font-size:14px;margin-top:10px"><strong>Beneficio del mes: ${fmtEur(Number(m.profit ?? 0))}</strong></p>`

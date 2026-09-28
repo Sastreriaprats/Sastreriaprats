@@ -36,6 +36,8 @@ import { loadReservationPayments } from '@/lib/accounting/reservation-payments'
  *
  * GASTOS = facturas de proveedor recibidas con fecha del mes
  * (`ap_supplier_invoices`, sin proformas), el mismo criterio que Contabilidad.
+ * Se desglosan por la categoría de gasto de cada factura (mig 295), que se pone
+ * desde este mismo informe: por eso devuelve también la lista de facturas.
  * NO incluye nóminas, alquileres ni nada que no entre como factura de proveedor:
  * la pantalla lo avisa para que nadie lea el beneficio como un resultado fiscal.
  *
@@ -75,6 +77,26 @@ export type PartnerExpenseRow = {
   count: number
 }
 
+/** Gasto de un mes agrupado por categoría (mig 295). `code` nulo = sin categoría. */
+export type PartnerExpenseCategoryRow = {
+  code: string | null
+  name: string
+  amount: number
+  count: number
+}
+
+/** Una factura de proveedor del mes, para verla y ponerle categoría desde el informe. */
+export type PartnerExpenseInvoice = {
+  id: string
+  invoice_date: string
+  invoice_number: string
+  supplier_id: string | null
+  supplier_name: string
+  store_name: string
+  amount: number
+  category: string | null
+}
+
 export type PartnerMonth = {
   /** YYYY-MM */
   key: string
@@ -85,7 +107,14 @@ export type PartnerMonth = {
   reservation_advances: { total: number; count: number }
   /** Tarjetas regalo vendidas: dinero cobrado que aún no es venta de género. */
   gift_cards: { total: number; count: number }
-  expenses: { rows: PartnerExpenseRow[]; by_supplier: Array<{ supplier: string; amount: number }>; total: number; count: number }
+  expenses: {
+    rows: PartnerExpenseRow[]
+    by_supplier: Array<{ supplier: string; amount: number }>
+    by_category: PartnerExpenseCategoryRow[]
+    invoices: PartnerExpenseInvoice[]
+    total: number
+    count: number
+  }
   profit: number
   /** Dinero realmente entrado en el mes (ventas del mes cobradas + otros meses + señales). */
   cash_in: number
@@ -106,6 +135,8 @@ export type PartnersReport = {
     expenses: number
     profit: number
   }
+  /** Gastos del periodo completo por categoría. */
+  expenses_by_category: PartnerExpenseCategoryRow[]
 }
 
 const MONTH_NAMES = [
@@ -162,6 +193,7 @@ export const getPartnersReport = protectedAction<
       orderPayments,
       reservationPays,
       expenseRows,
+      categoriesRes,
     ] = await Promise.all([
       ctx.adminClient
         .from('stores')
@@ -228,12 +260,20 @@ export const getPartnersReport = protectedAction<
       // Gastos: facturas recibidas del periodo (sin proformas), como Contabilidad.
       readAllPaged<any>((f, t) => ctx.adminClient
         .from('ap_supplier_invoices')
-        .select('id, invoice_date, store_id, supplier_name, amount, tax_amount, total_amount, is_proforma')
+        .select('id, invoice_date, invoice_number, store_id, supplier_id, supplier_name, amount, tax_amount, total_amount, is_proforma, expense_category')
         .eq('is_proforma', false)
         .gte('invoice_date', start_date)
         .lte('invoice_date', end_date)
         .order('invoice_date', { ascending: true })
+        // Desempate estable para el paginado: hay muchas facturas el mismo día.
+        .order('id', { ascending: true })
         .range(f, t), 'partners.expenses'),
+
+      // Nombres de las categorías de gasto (mig 295), incluidas las desactivadas:
+      // una factura puede conservar una categoría que ya no se ofrece.
+      ctx.adminClient
+        .from('expense_categories')
+        .select('code, name'),
     ])
 
     const storeNames = new Map<string, string>()
@@ -258,7 +298,7 @@ export const getPartnersReport = protectedAction<
           other_months: { rows: [], total: 0 },
           reservation_advances: { total: 0, count: 0 },
           gift_cards: { total: 0, count: 0 },
-          expenses: { rows: [], by_supplier: [], total: 0, count: 0 },
+          expenses: { rows: [], by_supplier: [], by_category: [], invoices: [], total: 0, count: 0 },
           profit: 0,
           cash_in: 0,
         }
@@ -399,8 +439,13 @@ export const getPartnersReport = protectedAction<
     }
 
     // ── Gastos ──────────────────────────────────────────────────────────────
+    const categoryNames = new Map<string, string>()
+    for (const c of ((categoriesRes as any).data ?? []) as any[]) categoryNames.set(String(c.code), String(c.name))
+    const categoryName = (code: string | null) => (code ? (categoryNames.get(code) ?? code) : 'Sin categoría')
     const expenseAcc = new Map<string, PartnerExpenseRow>()
     const supplierAcc = new Map<string, { supplier: string; amount: number }>()
+    const categoryAcc = new Map<string, PartnerExpenseCategoryRow>()
+    const periodCategoryAcc = new Map<string | null, PartnerExpenseCategoryRow>()
     for (const inv of expenseRows) {
       const key = monthKey(inv.invoice_date)
       if (!key) continue
@@ -428,9 +473,30 @@ export const getPartnersReport = protectedAction<
       srow.amount += amount
       supplierAcc.set(sk, srow)
 
+      const cat: string | null = inv.expense_category ? String(inv.expense_category) : null
+      const ck = `${key}|${cat ?? ''}`
+      const crow = categoryAcc.get(ck) ?? { code: cat, name: categoryName(cat), amount: 0, count: 0 }
+      crow.amount += amount
+      crow.count += 1
+      categoryAcc.set(ck, crow)
+      const prow = periodCategoryAcc.get(cat) ?? { code: cat, name: categoryName(cat), amount: 0, count: 0 }
+      prow.amount += amount
+      prow.count += 1
+      periodCategoryAcc.set(cat, prow)
+
       const m = ensureMonth(key)
       m.expenses.total += amount
       m.expenses.count += 1
+      m.expenses.invoices.push({
+        id: String(inv.id),
+        invoice_date: String(inv.invoice_date),
+        invoice_number: String(inv.invoice_number ?? ''),
+        supplier_id: inv.supplier_id ? String(inv.supplier_id) : null,
+        supplier_name: supplier,
+        store_name: inv.store_id ? storeName(inv.store_id) : 'Sin asignar',
+        amount,
+        category: cat,
+      })
     }
 
     // ── Volcar los acumuladores en cada mes ─────────────────────────────────
@@ -454,6 +520,13 @@ export const getPartnersReport = protectedAction<
       const m = ensureMonth(k.split('|')[0])
       m.expenses.by_supplier.push(row)
     }
+    for (const [k, row] of categoryAcc) {
+      const m = ensureMonth(k.split('|')[0])
+      m.expenses.by_category.push(row)
+    }
+    // Por importe; "Sin categoría" siempre al final: es lo que queda por clasificar.
+    const byCategoryOrder = (a: PartnerExpenseCategoryRow, b: PartnerExpenseCategoryRow) =>
+      (a.code === null ? 1 : 0) - (b.code === null ? 1 : 0) || b.amount - a.amount
 
     const CHANNEL_ORDER: Record<PartnerChannel, number> = { boutique: 0, sastreria: 1, online: 2 }
     const out = [...months.values()].sort((a, b) => a.key.localeCompare(b.key))
@@ -462,6 +535,9 @@ export const getPartnersReport = protectedAction<
       m.other_months.rows.sort((a, b) => a.origin_month.localeCompare(b.origin_month) || a.store_name.localeCompare(b.store_name))
       m.expenses.rows.sort((a, b) => b.amount - a.amount)
       m.expenses.by_supplier.sort((a, b) => b.amount - a.amount)
+      m.expenses.by_category.sort(byCategoryOrder)
+      m.expenses.invoices.sort((a, b) =>
+        a.invoice_date.localeCompare(b.invoice_date) || a.supplier_name.localeCompare(b.supplier_name))
       m.profit = m.totals.sales - m.expenses.total
       m.cash_in = m.totals.collected + m.other_months.total + m.reservation_advances.total + m.gift_cards.total
     }
@@ -477,6 +553,8 @@ export const getPartnersReport = protectedAction<
       profit: acc.profit + m.profit,
     }), { sales: 0, collected: 0, pending: 0, other_months: 0, reservation_advances: 0, gift_cards: 0, expenses: 0, profit: 0 })
 
-    return success({ tax_mode, start_date, end_date, months: out, totals })
+    const expenses_by_category = [...periodCategoryAcc.values()].sort(byCategoryOrder)
+
+    return success({ tax_mode, start_date, end_date, months: out, totals, expenses_by_category })
   },
 )

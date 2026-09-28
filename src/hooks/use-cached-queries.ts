@@ -54,6 +54,44 @@ export function useClientCategories() {
   }
 }
 
+// ─── useExpenseCategories ────────────────────────────────────────────────────
+
+export type ExpenseCategoryRow = {
+  code: string
+  name: string
+  sort_order: number
+  is_active: boolean
+}
+
+/**
+ * Categorías de gasto de las facturas de proveedor (mig 295), editables en
+ * Configuración. Trae también las inactivas para poner nombre a una factura que
+ * aún conserva una; los desplegables ofrecen solo `active`.
+ */
+export function useExpenseCategories() {
+  const supabase = useMemo(() => createClient(), [])
+  const query = useQuery({
+    queryKey: ['expense-categories'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('expense_categories')
+        .select('code, name, sort_order, is_active')
+        .order('sort_order')
+      if (error) throw error
+      return (data ?? []) as ExpenseCategoryRow[]
+    },
+  })
+  const all = query.data ?? []
+  return {
+    all,
+    active: all.filter((c) => c.is_active),
+    labelOf: (code: string | null | undefined) =>
+      code ? (all.find((c) => c.code === code)?.name ?? code) : 'Sin categoría',
+    isLoading: query.isLoading,
+    refetch: query.refetch,
+  }
+}
+
 // ─── useGarmentTypes ─────────────────────────────────────────────────────────
 
 export type GarmentTypeRow = {

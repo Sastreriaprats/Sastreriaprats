@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/components/providers/auth-provider'
-import { Users, Shield, Store, Shirt, UserCog, Target, Layers, CalendarDays, Ruler, Percent, Truck, Tags } from 'lucide-react'
+import { Users, Shield, Store, Shirt, UserCog, Target, Layers, CalendarDays, Ruler, Percent, Truck, Tags, Receipt } from 'lucide-react'
 import { UsersSection } from './sections/users-section'
 import { RolesSection } from './sections/roles-section'
 import { StoresSection } from './sections/stores-section'
@@ -16,6 +16,7 @@ import { SeasonsSection } from './sections/seasons-section'
 import { SizeGuidesSection } from './sections/size-guides-section'
 import { ShippingSection } from './sections/shipping-section'
 import { ClientCategoriesSection } from './sections/client-categories-section'
+import { ExpenseCategoriesSection } from './sections/expense-categories-section'
 
 // Cada pestaña acepta cualquiera de los posibles códigos de permiso que puedan existir
 // según la migración activa (001 usa nombres distintos a 010).
@@ -92,6 +93,12 @@ const ALL_TABS = [
     icon: Tags,
     perms: ['clients.edit', 'config.edit', 'config.view', 'config.access'],
   },
+  {
+    value: 'expense-categories',
+    label: 'Categorías de gasto',
+    icon: Receipt,
+    perms: ['supplier_invoices.manage', 'config.edit'],
+  },
   // La pestaña "Parámetros" se retiró: nadie lee system_config (el IVA vive en las
   // líneas, la serie en nextSeriesNumber, el fondo de caja en stores y el envío
   // gratis en shipping_zones), así que editarla daba un "guardado" falso.
@@ -161,6 +168,7 @@ export function ConfigTabs({ activeTab }: { activeTab: string }) {
         <TabsContent value="seasons"><SeasonsSection /></TabsContent>
         <TabsContent value="size-guides"><SizeGuidesSection /></TabsContent>
         <TabsContent value="client-categories"><ClientCategoriesSection /></TabsContent>
+        <TabsContent value="expense-categories"><ExpenseCategoriesSection /></TabsContent>
       </div>
     </Tabs>
   )

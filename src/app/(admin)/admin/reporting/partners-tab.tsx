@@ -1,11 +1,21 @@
 'use client'
 
+import { useState } from 'react'
+import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Store, Scissors, Globe, TrendingDown, Wallet, Info } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Store, Scissors, Globe, TrendingDown, Wallet, Info, ChevronDown, ChevronUp, Tags } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
-import type { PartnersReport, PartnerChannel, PartnerMonth } from '@/actions/partners-report'
+import { usePermissions } from '@/hooks/use-permissions'
+import { useExpenseCategories } from '@/hooks/use-cached-queries'
+import { setSupplierInvoiceExpenseCategory } from '@/actions/expense-categories'
+import type {
+  PartnersReport, PartnerChannel, PartnerMonth, PartnerExpenseCategoryRow, PartnerExpenseInvoice,
+} from '@/actions/partners-report'
 
 /**
  * Informe para socios: ventas reales del mes por tienda y canal, con lo cobrado
@@ -37,7 +47,166 @@ function monthLabelFromKey(key: string): string {
   return `${names[Number(m) - 1] ?? m} ${y}`
 }
 
-function MonthBlock({ month }: { month: PartnerMonth }) {
+const NO_CATEGORY = '__none__'
+
+function ExpensesByCategoryTable({ rows, total, count }: {
+  rows: PartnerExpenseCategoryRow[]
+  total: number
+  count: number
+}) {
+  return (
+    <div className="rounded-lg border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Categoría</TableHead>
+            <TableHead className="text-center">Facturas</TableHead>
+            <TableHead className="text-right">Importe</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((r) => (
+            <TableRow key={r.code ?? NO_CATEGORY}>
+              <TableCell className={`text-sm ${r.code === null ? 'italic text-amber-700' : ''}`}>{r.name}</TableCell>
+              <TableCell className="text-center tabular-nums text-sm">{r.count}</TableCell>
+              <TableCell className="text-right tabular-nums">{formatCurrency(r.amount)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+        <TableFooter>
+          <TableRow>
+            <TableCell className="font-semibold">Total gastos</TableCell>
+            <TableCell className="text-center tabular-nums">{count}</TableCell>
+            <TableCell className="text-right tabular-nums font-bold text-red-600">{formatCurrency(total)}</TableCell>
+          </TableRow>
+        </TableFooter>
+      </Table>
+    </div>
+  )
+}
+
+/**
+ * Facturas de proveedor del mes, con su categoría de gasto editable (mig 295).
+ * Al elegir una, el aviso ofrece aplicarla a todas las del proveedor que aún
+ * no tienen categoría y a las que entren a partir de ahora.
+ */
+function ExpenseInvoicesTable({ invoices, onChanged }: {
+  invoices: PartnerExpenseInvoice[]
+  onChanged?: () => void
+}) {
+  const { can } = usePermissions()
+  const canEdit = can('supplier_invoices.manage')
+  const categories = useExpenseCategories()
+  const [onlyUncategorized, setOnlyUncategorized] = useState(false)
+  // Cambio optimista mientras se recarga el informe.
+  const [overrides, setOverrides] = useState<Record<string, string | null>>({})
+  const [savingId, setSavingId] = useState<string | null>(null)
+
+  const categoryOf = (inv: PartnerExpenseInvoice) => (inv.id in overrides ? overrides[inv.id] : inv.category)
+  const visible = onlyUncategorized ? invoices.filter((inv) => !categoryOf(inv)) : invoices
+
+  const applyToSupplier = async (inv: PartnerExpenseInvoice, code: string) => {
+    const res = await setSupplierInvoiceExpenseCategory({ invoice_id: inv.id, category: code, apply_to_supplier: true })
+    if (!res.success) { toast.error(res.error); return }
+    toast.success(`«${categories.labelOf(code)}» puesta en ${res.data.updated} factura(s) de ${inv.supplier_name}. Las nuevas la tendrán ya puesta.`)
+    onChanged?.()
+  }
+
+  const handleChange = async (inv: PartnerExpenseInvoice, value: string) => {
+    const code = value === NO_CATEGORY ? null : value
+    setOverrides((o) => ({ ...o, [inv.id]: code }))
+    setSavingId(inv.id)
+    const res = await setSupplierInvoiceExpenseCategory({ invoice_id: inv.id, category: code })
+    setSavingId(null)
+    if (!res.success) {
+      setOverrides((o) => { const n = { ...o }; delete n[inv.id]; return n })
+      toast.error(res.error)
+      return
+    }
+    if (code && inv.supplier_id) {
+      toast.success(`Factura ${inv.invoice_number}: ${categories.labelOf(code)}`, {
+        description: `¿Poner la misma en todas las de ${inv.supplier_name} que no tienen categoría, y en las nuevas?`,
+        duration: 10000,
+        action: { label: 'Aplicar a todas', onClick: () => { void applyToSupplier(inv, code) } },
+      })
+    } else {
+      toast.success(`Factura ${inv.invoice_number}: ${categories.labelOf(code)}`)
+    }
+    onChanged?.()
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <Switch checked={onlyUncategorized} onCheckedChange={setOnlyUncategorized} aria-label="Solo las que no tienen categoría" />
+        <span className="text-sm">Solo las que no tienen categoría</span>
+      </div>
+      <div className="rounded-lg border max-h-[520px] overflow-y-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Fecha</TableHead>
+              <TableHead>Proveedor</TableHead>
+              <TableHead>Nº factura</TableHead>
+              <TableHead>Tienda</TableHead>
+              <TableHead className="text-right">Importe</TableHead>
+              <TableHead className="w-60">Categoría</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {visible.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="h-16 text-center text-muted-foreground">
+                  Todas las facturas del mes tienen categoría.
+                </TableCell>
+              </TableRow>
+            ) : visible.map((inv) => {
+              const current = categoryOf(inv)
+              // Una categoría desactivada que la factura aún conserva se sigue mostrando.
+              const options = current && !categories.active.some((c) => c.code === current)
+                ? [...categories.active, { code: current, name: categories.labelOf(current), sort_order: 999, is_active: false }]
+                : categories.active
+              return (
+                <TableRow key={inv.id}>
+                  <TableCell className="text-sm tabular-nums whitespace-nowrap">{inv.invoice_date.split('-').reverse().join('/')}</TableCell>
+                  <TableCell className="text-sm">{inv.supplier_name}</TableCell>
+                  <TableCell className="text-sm font-mono">{inv.invoice_number}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{inv.store_name}</TableCell>
+                  <TableCell className="text-right tabular-nums">{formatCurrency(inv.amount)}</TableCell>
+                  <TableCell>
+                    {canEdit ? (
+                      <Select
+                        value={current ?? NO_CATEGORY}
+                        onValueChange={(v) => { void handleChange(inv, v) }}
+                        disabled={savingId === inv.id}
+                      >
+                        <SelectTrigger className={`h-8 text-xs ${current ? '' : 'text-amber-700 border-amber-300'}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={NO_CATEGORY} className="text-xs italic">Sin categoría</SelectItem>
+                          {options.map((c) => (
+                            <SelectItem key={c.code} value={c.code} className="text-xs">{c.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <span className={`text-sm ${current ? '' : 'italic text-amber-700'}`}>{categories.labelOf(current)}</span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  )
+}
+
+function MonthBlock({ month, onChanged }: { month: PartnerMonth; onChanged?: () => void }) {
+  const [showInvoices, setShowInvoices] = useState(false)
+  const uncategorized = month.expenses.invoices.filter((i) => !i.category).length
   const hasActivity =
     month.rows.length > 0 ||
     month.other_months.rows.length > 0 ||
@@ -220,7 +389,12 @@ function MonthBlock({ month }: { month: PartnerMonth }) {
         {month.expenses.total === 0 ? (
           <p className="text-sm text-muted-foreground">Sin facturas de proveedor con fecha de este mes.</p>
         ) : (
-          <div className="grid gap-3 lg:grid-cols-2">
+          <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+            <ExpensesByCategoryTable
+              rows={month.expenses.by_category}
+              total={month.expenses.total}
+              count={month.expenses.count}
+            />
             <div className="rounded-lg border">
               <Table>
                 <TableHeader>
@@ -268,6 +442,21 @@ function MonthBlock({ month }: { month: PartnerMonth }) {
             </div>
           </div>
         )}
+        {month.expenses.invoices.length > 0 && (
+          <div className="space-y-2">
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowInvoices((v) => !v)}>
+              <Tags className="h-4 w-4" />
+              {showInvoices ? 'Ocultar las facturas' : `Ver las ${month.expenses.invoices.length} facturas`}
+              {uncategorized > 0 && (
+                <Badge variant="outline" className="ml-1 text-[10px] bg-amber-50 text-amber-800 border-amber-200">
+                  {uncategorized} sin categoría
+                </Badge>
+              )}
+              {showInvoices ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </Button>
+            {showInvoices && <ExpenseInvoicesTable invoices={month.expenses.invoices} onChanged={onChanged} />}
+          </div>
+        )}
       </div>
 
       {/* Beneficio */}
@@ -283,7 +472,7 @@ function MonthBlock({ month }: { month: PartnerMonth }) {
   )
 }
 
-export function PartnersTab({ data }: { data: PartnersReport | null }) {
+export function PartnersTab({ data, onChanged }: { data: PartnersReport | null; onChanged?: () => void }) {
   if (!data) return <p className="text-center text-muted-foreground py-12">Sin datos para el periodo seleccionado</p>
 
   const visibleMonths = data.months.filter((m) =>
@@ -307,7 +496,8 @@ export function PartnersTab({ data }: { data: PartnersReport | null }) {
           <p>
             <strong>Gastos</strong> = facturas de proveedor con fecha del mes ({data.tax_mode === 'without_tax' ? 'base imponible, sin IVA' : 'con IVA'}).
             No incluyen nóminas, alquileres ni ningún gasto que no entre en la plataforma como factura de proveedor,
-            así que el beneficio es el margen de explotación, no el resultado contable.
+            así que el beneficio es el margen de explotación, no el resultado contable. En cada mes, «Ver las
+            facturas» permite ponerle a cada una su categoría de gasto.
           </p>
         </div>
       </div>
@@ -344,10 +534,25 @@ export function PartnersTab({ data }: { data: PartnersReport | null }) {
         </CardContent></Card>
       </div>
 
+      {visibleMonths.length > 1 && data.expenses_by_category.length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-sm font-semibold flex items-center gap-1.5">
+            <Tags className="h-4 w-4 text-muted-foreground" /> Gastos del periodo por categoría
+          </h4>
+          <div className="max-w-xl">
+            <ExpensesByCategoryTable
+              rows={data.expenses_by_category}
+              total={data.totals.expenses}
+              count={data.expenses_by_category.reduce((a, r) => a + r.count, 0)}
+            />
+          </div>
+        </div>
+      )}
+
       {visibleMonths.length === 0 ? (
         <p className="text-center text-muted-foreground py-12">Sin movimientos en el periodo seleccionado</p>
       ) : (
-        visibleMonths.map((m) => <MonthBlock key={m.key} month={m} />)
+        visibleMonths.map((m) => <MonthBlock key={m.key} month={m} onChanged={onChanged} />)
       )}
     </div>
   )

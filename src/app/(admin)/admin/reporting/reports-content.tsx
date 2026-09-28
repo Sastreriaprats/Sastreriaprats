@@ -230,6 +230,13 @@ export function ReportsContent() {
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
+  // Tras poner la categoría a una factura en Socios solo se recarga ese informe,
+  // en silencio: recargarlo todo parpadearía y tardaría varios segundos.
+  const reloadPartners = useCallback(async () => {
+    const res = await getPartnersReport({ start_date: dateRange.start, end_date: dateRange.end, tax_mode: taxMode })
+    if (res.success) setPartnersData(res.data)
+  }, [dateRange, taxMode])
+
   const setPreset = (preset: string) => {
     const now = new Date()
     let start: Date
@@ -737,7 +744,7 @@ export function ReportsContent() {
               </TabsContent>
               <TabsContent value="employees"><EmployeeTab data={employeeData} storeBreakdown={employeeStoreBreakdown} stores={storeFilter === 'all' ? employeeStores : null} commissions={employeeCommissions} groupBonuses={groupBonuses} /></TabsContent>
               <TabsContent value="expenses"><ExpensesTab data={expensesData} comparison={expensesComparison} /></TabsContent>
-              <TabsContent value="partners"><PartnersTab data={partnersData} /></TabsContent>
+              <TabsContent value="partners"><PartnersTab data={partnersData} onChanged={reloadPartners} /></TabsContent>
               <TabsContent value="tailoring-garments">
                 <TailoringGarmentsTab
                   startDate={dateRange.start}

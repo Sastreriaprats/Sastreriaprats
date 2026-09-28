@@ -313,6 +313,15 @@ function sectionPartners(rows: Row[], partnersData: AnyRec | null | undefined) {
   rows.push(['BENEFICIO', Number(totals.profit ?? 0)])
   rows.push([])
 
+  const periodCategories = Array.isArray(partnersData.expenses_by_category) ? (partnersData.expenses_by_category as AnyRec[]) : []
+  if (periodCategories.length > 0) {
+    rows.push(['GASTOS DEL PERIODO POR CATEGORÍA'])
+    rows.push(['Categoría', 'Facturas', 'Importe'])
+    for (const c of periodCategories) rows.push([String(c.name ?? ''), Number(c.count ?? 0), Number(c.amount ?? 0)])
+    rows.push(['TOTAL GASTOS', periodCategories.reduce((a, c) => a + (Number(c.count) || 0), 0), Number(totals.expenses ?? 0)])
+    rows.push([])
+  }
+
   const months = Array.isArray(partnersData.months) ? (partnersData.months as AnyRec[]) : []
   for (const m of months) {
     const mTotals = (m.totals ?? {}) as AnyRec
@@ -374,6 +383,12 @@ function sectionPartners(rows: Row[], partnersData: AnyRec | null | undefined) {
         rows.push([String(r.store_name ?? ''), Number(r.count ?? 0), Number(r.amount ?? 0)])
       }
       rows.push(['TOTAL GASTOS', Number(expenses.count ?? 0), Number(expenses.total ?? 0)])
+      const byCategory = Array.isArray(expenses.by_category) ? (expenses.by_category as AnyRec[]) : []
+      if (byCategory.length > 0) {
+        rows.push([])
+        rows.push(['Categoría', 'Facturas', 'Importe'])
+        for (const c of byCategory) rows.push([String(c.name ?? ''), Number(c.count ?? 0), Number(c.amount ?? 0)])
+      }
     }
     rows.push([])
     rows.push(['BENEFICIO DEL MES', Number(m.profit ?? 0)])
