@@ -25,6 +25,7 @@ import { preparePhotoForUpload } from '@/lib/image/prepare-photo-upload'
 import { createClient } from '@/lib/supabase/client'
 import { fuzzyFilterSort } from '@/lib/utils'
 import { isLineCamiseria } from '@/lib/orders/line-groups'
+import { garmentFamily } from '@/lib/measurements/garment-prefixes'
 
 type OfficialOption = { id: string; name: string; specialty?: string | null }
 
@@ -50,11 +51,14 @@ interface SectionProps {
  */
 function detectType(line: any, cfg: Cfg): 'pantalon' | 'chaleco' | 'camiseria' | 'americana' {
   if (isLineCamiseria({ ...line, configuration: cfg })) return 'camiseria'
+  // La familia traduce las prendas sin ficha propia a la suya: el pantalón de
+  // smoking (slug `smoking_trouser`, sin "pantalon" en el nombre) caía en la de
+  // americana y no dejaba rellenar bragueta, pliegues ni bolsillos.
   const slug = String((cfg.prendaSlug as string) ?? (cfg.prenda as string) ?? '').trim().toLowerCase()
-  if (slug.includes('pantalon')) return 'pantalon'
+  if (slug.includes('pantalon') || garmentFamily(slug) === 'pantalon') return 'pantalon'
   if (slug === 'chaleco') return 'chaleco'
   const garment = (line?.garment_types?.code ?? line?.garment_types?.name ?? '').toString().toLowerCase()
-  if (garment.includes('pantal')) return 'pantalon'
+  if (garment.includes('pantal') || garmentFamily(garment) === 'pantalon') return 'pantalon'
   if (garment.includes('chaleco')) return 'chaleco'
   return 'americana'
 }

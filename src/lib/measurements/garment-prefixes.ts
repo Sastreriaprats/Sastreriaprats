@@ -34,6 +34,18 @@ const FAMILIA_MEDIDAS: Record<string, string> = {
 }
 
 /**
+ * Familia de una prenda: la prenda "base" cuya ficha y medidas le tocan
+ * (smoking_trouser → 'pantalon', chaque → 'americana'). Sin equivalencia, el
+ * propio slug. Sirve para decidir qué ficha abrir y qué imprimir: comparar el
+ * slug a pelo con 'pantalon' dejaba el pantalón de smoking con la ficha de
+ * americana.
+ */
+export function garmentFamily(prendaSlug: string): string {
+  const slug = (prendaSlug || '').trim().toLowerCase()
+  return FAMILIA_MEDIDAS[slug] ?? slug
+}
+
+/**
  * Prefijos a probar, en orden de preferencia:
  *   1. el de la propia prenda (si alguien tomó medidas específicas ahí),
  *   2. el de la pestaña en la que se mide esa prenda,

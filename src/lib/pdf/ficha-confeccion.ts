@@ -6,7 +6,7 @@
 import type { Content } from 'pdfmake'
 import { getOrderStatusLabel } from '@/lib/utils'
 import { getLineRef, getLineRefSuffix, type RefLine } from '@/lib/orders/line-refs'
-import { buildMedidasPrefixes } from '@/lib/measurements/garment-prefixes'
+import { buildMedidasPrefixes, garmentFamily } from '@/lib/measurements/garment-prefixes'
 import { isLineCamiseria as isLineCamiseriaShared } from '@/lib/orders/line-groups'
 
 /** Tipo del documento para pdfmake (no exportado por @types/pdfmake). */
@@ -80,10 +80,17 @@ function getClientName(order: FichaConfeccionOrder): string {
   return [first, last].filter(Boolean).join(' ') || '—'
 }
 
+/** Slugs cuyo nombre no sale bien troceando por '_' (salía "Smoking Trouser"). */
+const PRENDA_LABELS: Record<string, string> = {
+  smoking_jacket: 'Chaqueta Smoking',
+  smoking_trouser: 'Pantalón Smoking',
+}
+
 function slugToPrendaLabel(slug: string): string {
   if (!slug || typeof slug !== 'string') return '—'
   const trimmed = slug.trim()
   if (!trimmed) return '—'
+  if (PRENDA_LABELS[trimmed]) return PRENDA_LABELS[trimmed]
   return trimmed
     .split('_')
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
@@ -265,7 +272,9 @@ function resolvePrendaSlug(config: Record<string, unknown>, garmentName?: string
 function buildDescripcionAndConfig(config: Record<string, unknown>, garmentName?: string | null): { descripcion: string; configuracion: string } {
   const partes: string[] = []
   const confParts: string[] = []
-  const slug = resolvePrendaSlug(config, garmentName)
+  // Por familia, no por slug a pelo: el pantalón de smoking (`smoking_trouser`)
+  // se imprimía como americana y su bragueta, pliegues… no salían nunca.
+  const slug = garmentFamily(resolvePrendaSlug(config, garmentName))
   const isPantalon = slug === 'pantalon'
   const isChaleco = slug === 'chaleco'
   const isAmericana = !isPantalon && !isChaleco
@@ -398,7 +407,11 @@ function getFichaFromOrder(order: FichaConfeccionOrder): Record<string, unknown>
   // (se miden en "Americana"), así que buscar solo por `chaque_` dejaba la
   // ficha sin medidas.
   const medidasPrefixes = buildMedidasPrefixes(prendaSlug)
-  const medidasKeys = MEDIDAS_KEYS_POR_PRENDA[prendaSlug] ?? MEDIDAS_KEYS_POR_PRENDA['americana']
+  // Sin lista propia, un pantalón (el de smoking) usa la de pantalón: antes
+  // imprimía las de americana y se quedaba sin tiro, rodilla ni bajo. El resto
+  // de prendas sin lista (chaqué, teba, bata…) ya eran de la familia americana.
+  const medidasKeys = MEDIDAS_KEYS_POR_PRENDA[prendaSlug]
+    ?? (garmentFamily(prendaSlug) === 'pantalon' ? MEDIDAS_KEYS_POR_PRENDA['pantalon'] : MEDIDAS_KEYS_POR_PRENDA['americana'])
   const clientMeasValues = order.clientMeasurements?.values
   // Las medidas sin prefijo son las de camisería y comparten nombre con 6 de
   // las 9 de la americana (pecho, cintura, hombro…). En una prenda de
