@@ -1219,25 +1219,52 @@ export async function getPendingTransfersCount() {
 }
 
 export const listTransferCandidates = protectedAction<
-  { warehouseId: string; category?: 'all' | 'sastreria' | 'boutique' | 'tejidos'; season?: string | null; brand?: string | null; search?: string; limit?: number },
+  {
+    warehouseId: string; category?: 'all' | 'sastreria' | 'boutique' | 'tejidos'; season?: string | null; brand?: string | null; search?: string; limit?: number
+    /** Masivo POR PRODUCTO: todas las tallas con stock en origen de estos productos (petición de Isma, oct-2026). */
+    productIds?: string[]
+  },
   any[]
 >(
   { permission: ['products.view', 'stock.view'], auditModule: 'stock' },
-  async (ctx, { warehouseId, category = 'all', season, brand, search, limit = 300 }) => {
+  async (ctx, { warehouseId, category = 'all', season, brand, search, limit = 300, productIds }) => {
     if (!warehouseId) return failure('Almacén de origen obligatorio', 'VALIDATION')
     const max = Math.min(Math.max(Number(limit) || 300, 1), 1500)
+    const onlyProducts = (productIds ?? []).filter(Boolean)
 
-    // Paginado obligatorio: PostgREST corta en 1.000 filas y un almacén como
-    // Pinzón tiene más de 1.600 variantes con stock. Sin paginar el recorte
-    // ocurría ANTES de filtrar por categoría o por búsqueda, así que el filtro
-    // se aplicaba sobre un trozo arbitrario del almacén.
-    const levels = await readAllPaged<any>((from, to) => ctx.adminClient
-      .from('stock_levels')
-      .select('product_variant_id, quantity, reserved')
-      .eq('warehouse_id', warehouseId)
-      .gt('quantity', 0)
-      .order('product_variant_id', { ascending: true })
-      .range(from, to), 'listTransferCandidates.stock_levels')
+    let levels: any[]
+    if (onlyProducts.length) {
+      // Por producto: se leen solo sus variantes, no el almacén entero (se llama
+      // cada vez que se añade un producto al traspaso).
+      const { data: pv, error: pvErr } = await ctx.adminClient
+        .from('product_variants')
+        .select('id')
+        .in('product_id', onlyProducts)
+        .eq('is_active', true)
+      if (pvErr) return failure(pvErr.message || 'Error al cargar las tallas del producto', 'INTERNAL')
+      const ids = (pv ?? []).map((v: { id: string }) => v.id)
+      if (!ids.length) return success([])
+      const { data: lv, error: lvErr } = await ctx.adminClient
+        .from('stock_levels')
+        .select('product_variant_id, quantity, reserved')
+        .eq('warehouse_id', warehouseId)
+        .in('product_variant_id', ids)
+        .gt('quantity', 0)
+      if (lvErr) return failure(lvErr.message || 'Error al cargar el stock del producto', 'INTERNAL')
+      levels = lv ?? []
+    } else {
+      // Paginado obligatorio: PostgREST corta en 1.000 filas y un almacén como
+      // Pinzón tiene más de 1.600 variantes con stock. Sin paginar el recorte
+      // ocurría ANTES de filtrar por categoría o por búsqueda, así que el filtro
+      // se aplicaba sobre un trozo arbitrario del almacén.
+      levels = await readAllPaged<any>((from, to) => ctx.adminClient
+        .from('stock_levels')
+        .select('product_variant_id, quantity, reserved')
+        .eq('warehouse_id', warehouseId)
+        .gt('quantity', 0)
+        .order('product_variant_id', { ascending: true })
+        .range(from, to), 'listTransferCandidates.stock_levels')
+    }
 
     if (!levels.length) return success([])
 
@@ -1256,7 +1283,7 @@ export const listTransferCandidates = protectedAction<
       const { data: variants, error: variantError } = await ctx.adminClient
         .from('product_variants')
         .select(`
-          id, variant_sku, product_id, is_active,
+          id, variant_sku, size, product_id, is_active,
           products!inner(id, sku, name, product_type, season, brand, is_active)
         `)
         .in('id', batch)
@@ -1272,6 +1299,7 @@ export const listTransferCandidates = protectedAction<
       .map((v: any) => ({
         product_variant_id: v.id,
         variant_sku: v.variant_sku || '',
+        size: v.size || '',
         product_id: v.product_id,
         product_sku: v.products?.sku || '',
         product_name: v.products?.name || '',

@@ -84,6 +84,8 @@ export function TransfersTab() {
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [lines, setLines] = useState<TransferLine[]>([])
   const [lastAddedVariantId, setLastAddedVariantId] = useState<string | null>(null)
+  // Producto que se está añadiendo entero en el masivo (spinner del botón).
+  const [addingProductId, setAddingProductId] = useState<string | null>(null)
 
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -251,12 +253,10 @@ export function TransfersTab() {
       toast.error(result.error || 'No se pudieron cargar productos')
       return
     }
-    const loaded = (result.data || []).map((r: any) => ({
-      ...r,
-      quantity_requested: Number(r.available) || 0,
-      selected: true,
-    })) as TransferLine[]
-    setLines(loaded)
+    const loaded = result.data || []
+    // Se SUMA a lo que ya hubiera (p. ej. productos añadidos uno a uno): antes
+    // reemplazaba la lista entera.
+    mergeMassiveLines(loaded, false)
     // El servidor recorta a `limit`: avisar en vez de traspasar en silencio menos
     // referencias de las que hay con stock en el almacén de origen.
     if (loaded.length >= 1200) {
@@ -264,6 +264,63 @@ export function TransfersTab() {
     }
     if (!loaded.length) toast.warning('No hay productos con stock para ese filtro')
   }
+
+  // Masivo: cada variante entra con TODO su stock disponible en origen. Si ya
+  // estaba en la lista, se actualiza (vuelve a todo el disponible) en vez de duplicarla.
+  const mergeMassiveLines = (rows: any[], atTop: boolean) => {
+    setLines((prev) => {
+      const incoming = rows.map((r: any) => ({
+        product_variant_id: r.product_variant_id,
+        product_name: r.size ? `${r.product_name} · T.${r.size}` : r.product_name,
+        product_sku: r.product_sku,
+        variant_sku: r.variant_sku,
+        available: Number(r.available) || 0,
+        quantity_requested: Number(r.available) || 0,
+        selected: true,
+      })) as TransferLine[]
+      const ids = new Set(incoming.map((l) => l.product_variant_id))
+      const rest = prev.filter((l) => !ids.has(l.product_variant_id))
+      return atTop ? [...incoming, ...rest] : [...rest, ...incoming]
+    })
+  }
+
+  // Masivo POR PRODUCTO (petición de Isma, oct-2026): todas las tallas del
+  // producto con stock en el almacén de origen, de una vez.
+  const addProductAllSizes = async (productId: string, productName: string) => {
+    if (!fromWarehouseId) {
+      toast.error('Selecciona almacén origen')
+      return
+    }
+    setAddingProductId(productId)
+    const result = await listTransferCandidates({ warehouseId: fromWarehouseId, productIds: [productId], limit: 500 })
+    setAddingProductId(null)
+    if (!result.success) {
+      toast.error(result.error || 'No se pudo cargar el producto')
+      return
+    }
+    const rows = result.data || []
+    if (!rows.length) {
+      toast.warning(`${productName}: no tiene stock en el almacén de origen`)
+      return
+    }
+    mergeMassiveLines(rows, true)
+    const units = rows.reduce((s: number, r: any) => s + (Number(r.available) || 0), 0)
+    toast.success(`${productName}: ${rows.length} talla${rows.length === 1 ? '' : 's'}, ${units} ud${units === 1 ? '' : 's'}.`)
+  }
+
+  // Resultados de búsqueda agrupados por producto (vista del masivo).
+  const productGroups = (() => {
+    type ProductGroup = { product_id: string; product_name: string; product_sku: string; sizes: { size: string; available: number }[]; available: number }
+    const map = new Map<string, ProductGroup>()
+    for (const r of searchResults as any[]) {
+      const g: ProductGroup = map.get(r.product_id) ?? { product_id: r.product_id, product_name: r.product_name, product_sku: r.product_sku, sizes: [], available: 0 }
+      const a = Number(r.available) || 0
+      if (a > 0) g.sizes.push({ size: r.size || r.variant_sku || '—', available: a })
+      g.available += a
+      map.set(r.product_id, g)
+    }
+    return [...map.values()].sort((a, b) => (b.available > 0 ? 1 : 0) - (a.available > 0 ? 1 : 0) || a.product_name.localeCompare(b.product_name))
+  })()
 
   const loadSearchResults = useCallback(async () => {
     if (!fromWarehouseId) return
@@ -295,8 +352,9 @@ export function TransfersTab() {
       .catch(() => { /* acotar por temporada/marca es opcional */ })
   }, [newOpen])
 
+  // Búsqueda en los dos modos: en el normal se añade talla a talla; en el masivo,
+  // el producto entero.
   useEffect(() => {
-    if (isMassive) return
     const term = searchTerm.trim()
     if (term.length < 3 || !fromWarehouseId) {
       setSearchResults([])
@@ -304,7 +362,7 @@ export function TransfersTab() {
     }
     const timer = setTimeout(() => { loadSearchResults() }, 350)
     return () => clearTimeout(timer)
-  }, [searchTerm, fromWarehouseId, isMassive, loadSearchResults])
+  }, [searchTerm, fromWarehouseId, loadSearchResults])
 
   // Lo recién añadido va SIEMPRE al principio de la lista (y si la variante ya estaba,
   // suma una unidad y sube esa línea): con listas largas, añadir al final es inviable.
@@ -627,11 +685,90 @@ export function TransfersTab() {
                 setSearchTerm('')
               }}
             />
-            <span className="text-sm">Traspaso masivo (almacén entero o por temporada, marca o categoría)</span>
+            <span className="text-sm">Traspaso masivo (por producto, o el almacén entero por temporada, marca o categoría)</span>
           </div>
 
           {isMassive ? (
-            <div className="rounded-md border p-3 space-y-3">
+            <div className="rounded-md border p-3 space-y-4">
+              {/* Por producto: todas sus tallas con stock en origen, de una vez. */}
+              <div className="space-y-2">
+                <div className="space-y-1">
+                  <Label>Producto</Label>
+                  <Input
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Nombre, SKU o EAN (mín. 3 caracteres)"
+                    disabled={!fromWarehouseId}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter') return
+                      e.preventDefault()
+                      // Con la pistola: un único producto con stock → se añade entero.
+                      const conStock = productGroups.filter((g) => g.available > 0)
+                      if (conStock.length === 1) {
+                        addProductAllSizes(conStock[0].product_id, conStock[0].product_name)
+                        setSearchTerm('')
+                        setSearchResults([])
+                      }
+                    }}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {!fromWarehouseId
+                      ? 'Selecciona un almacén origen para buscar.'
+                      : loadingSearch
+                        ? 'Buscando…'
+                        : searchTerm.trim().length >= 3 && productGroups.length === 0
+                          ? 'Ningún producto con ese texto o código.'
+                          : 'Busca un producto y añádelo con todas sus tallas y todo su stock en origen. Puedes añadir varios.'}
+                  </p>
+                </div>
+                {productGroups.length > 0 ? (
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Producto</TableHead>
+                          <TableHead>Tallas con stock en origen</TableHead>
+                          <TableHead className="text-right">Uds.</TableHead>
+                          <TableHead className="text-right">Acción</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {productGroups.map((g) => (
+                          <TableRow key={g.product_id} className={g.available ? undefined : 'opacity-60'}>
+                            <TableCell>
+                              <div className="font-medium">{g.product_name}</div>
+                              <div className="text-xs text-muted-foreground font-mono">{g.product_sku}</div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-1">
+                                {g.sizes.length === 0 ? (
+                                  <span className="text-xs text-muted-foreground">Sin stock en el origen</span>
+                                ) : g.sizes.map((sz) => (
+                                  <Badge key={sz.size} variant="secondary" className="text-[11px] font-normal">{sz.size}: {sz.available}</Badge>
+                                ))}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">{g.available}</TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={!g.available || addingProductId === g.product_id}
+                                onClick={() => addProductAllSizes(g.product_id, g.product_name)}
+                              >
+                                {addingProductId === g.product_id ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Plus className="h-3.5 w-3.5 mr-1" />}
+                                Añadir todas las tallas
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="border-t pt-3 text-xs font-medium text-muted-foreground">O por filtros</div>
               <div className="flex flex-wrap items-end gap-2">
                 <div className="space-y-1 min-w-[180px]">
                   <Label>Categoría</Label>
@@ -672,7 +809,8 @@ export function TransfersTab() {
               </div>
               <p className="text-xs text-muted-foreground">
                 Sin filtros se carga todo lo que tenga stock en el almacén de origen. Los filtros se
-                combinan entre sí; después puedes quitar líneas sueltas con las casillas.
+                combinan entre sí y lo cargado se suma a lo que ya tengas en la lista; después puedes
+                quitar líneas sueltas con las casillas.
               </p>
             </div>
           ) : (
