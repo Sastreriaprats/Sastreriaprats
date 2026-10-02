@@ -831,6 +831,8 @@ export const products = pgTable('products', {
   webSlug: text('web_slug').unique(),
   webTitle: text('web_title'),
   webDescription: text('web_description'),
+  // Posición en la web, orden "Recomendados" (mig 296). NULL = sin colocar.
+  webSortOrder: integer('web_sort_order'),
   seoTitle: text('seo_title'),
   seoDescription: text('seo_description'),
   webTags: text('web_tags').array().default([]),

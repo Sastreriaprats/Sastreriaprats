@@ -28,7 +28,7 @@ async function getInitialProducts(slug: string): Promise<CatalogInitialData | un
   try {
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
     const res = await fetch(
-      `${baseUrl}/api/public/catalog?category=${encodeURIComponent(slug)}&page=1&sort=name`,
+      `${baseUrl}/api/public/catalog?category=${encodeURIComponent(slug)}&page=1&sort=featured`,
       { next: { revalidate: 300 } },
     )
     if (!res.ok) return undefined

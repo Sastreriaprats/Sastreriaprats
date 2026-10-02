@@ -5,10 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
-  ShoppingBag, Globe, Settings, Package, Mail, ExternalLink, Layout, BookOpen,
+  ShoppingBag, Globe, Settings, Package, Mail, ExternalLink, Layout, BookOpen, ArrowUpDown,
 } from 'lucide-react'
 import { HomeContentEditor } from './home-content-editor'
 import { OnlineOrdersList } from './online-orders-list'
+import { WebProductOrder } from './web-product-order'
 
 export function TiendaOnlineContent() {
   const router = useRouter()
@@ -27,6 +28,7 @@ export function TiendaOnlineContent() {
           <TabsTrigger value="dashboard" className="gap-1"><ShoppingBag className="h-4 w-4" /> Dashboard</TabsTrigger>
           <TabsTrigger value="pedidos" className="gap-1">Pedidos online</TabsTrigger>
           <TabsTrigger value="contenido-web" className="gap-1"><Layout className="h-4 w-4" /> Contenido Web</TabsTrigger>
+          <TabsTrigger value="orden-web" className="gap-1"><ArrowUpDown className="h-4 w-4" /> Orden en la web</TabsTrigger>
         </TabsList>
 
         <TabsContent value="dashboard" className="mt-6">
@@ -111,6 +113,10 @@ export function TiendaOnlineContent() {
 
         <TabsContent value="contenido-web" className="mt-6">
           <HomeContentEditor />
+        </TabsContent>
+
+        <TabsContent value="orden-web" className="mt-6">
+          {tab === 'orden-web' && <WebProductOrder />}
         </TabsContent>
       </Tabs>
     </div>

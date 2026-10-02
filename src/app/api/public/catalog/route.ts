@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { normalizeSearchTerm } from '@/lib/utils'
+import { getActiveSeasonSlugs, resolveCatalogCategoryIds, seasonOrFilter } from '@/lib/web/catalog-scope'
 
 // El catálogo público debe reflejar los cambios del admin de forma inmediata
 // (subir/cambiar imágenes, ajustar precios, marcar productos como visibles).
@@ -28,53 +29,16 @@ export async function GET(request: NextRequest) {
   const maxPrice = searchParams.get('max_price')
   const size = searchParams.get('size')
   const color = searchParams.get('color')
-  const sort = searchParams.get('sort') || 'name'
+  const sort = searchParams.get('sort') || 'featured'
   const page = parseInt(searchParams.get('page') || '1')
   const limit = 24
 
   const admin = createAdminClient()
 
-  // Filtrar por temporada: leemos los slugs de seasons activas y dentro de fechas.
-  // Los productos sin temporada (NULL o '') se muestran siempre.
-  const today = new Date().toISOString().slice(0, 10)
-  const { data: activeSeasonsRaw } = await admin
-    .from('seasons')
-    .select('slug, start_date, end_date')
-    .eq('is_active', true)
-  const activeSeasonSlugs = ((activeSeasonsRaw ?? []) as Array<{ slug: string; start_date: string | null; end_date: string | null }>)
-    .filter((r) => (!r.start_date || r.start_date <= today) && (!r.end_date || r.end_date >= today))
-    .map((r) => r.slug)
-
-  // Si hay filtro de categoría, buscar su ID + IDs del padre (si es subcategoría) + descendientes
-  let categoryIds: string[] | null = null
-  if (category) {
-    const { data: cat } = await admin
-      .from('product_categories')
-      .select('id, parent_id')
-      .eq('slug', category)
-      .single()
-    if (cat) {
-      categoryIds = [cat.id]
-      // Padre (si la categoría seleccionada es una subcategoría): así los productos
-      // asignados al padre también aparecen cuando se filtra por una de sus hijas.
-      if (cat.parent_id) categoryIds.push(cat.parent_id)
-      // Hijas directas
-      const { data: children } = await admin
-        .from('product_categories')
-        .select('id')
-        .eq('parent_id', cat.id)
-      if (children && children.length > 0) {
-        const childIds = children.map(c => c.id)
-        categoryIds.push(...childIds)
-        // Nietas (hijas de las hijas)
-        const { data: grandchildren } = await admin
-          .from('product_categories')
-          .select('id')
-          .in('parent_id', childIds)
-        if (grandchildren) categoryIds.push(...grandchildren.map(c => c.id))
-      }
-    }
-  }
+  // Temporada y categoría con el mismo criterio que Tienda Online → Orden en la
+  // web (catalog-scope.ts): lo que se ordena allí es exactamente lo que sale aquí.
+  const activeSeasonSlugs = await getActiveSeasonSlugs(admin)
+  const categoryIds = category ? await resolveCatalogCategoryIds(admin, category) : null
 
   let query = admin
     .from('products')
@@ -92,13 +56,7 @@ export async function GET(request: NextRequest) {
     .neq('main_image_url', '')
 
   // Productos sin temporada (NULL/'') siempre, más los que tengan slug en activos.
-  const seasonOrParts = ['season.is.null', 'season.eq.']
-  for (const slug of activeSeasonSlugs) {
-    // Escapar caracteres especiales del slug en el filtro PostgREST
-    const safe = slug.replace(/[(),]/g, '')
-    seasonOrParts.push(`season.eq.${safe}`)
-  }
-  query = query.or(seasonOrParts.join(','))
+  query = query.or(seasonOrFilter(activeSeasonSlugs))
 
   if (categoryIds && categoryIds.length > 0) query = query.in('category_id', categoryIds)
   if (search) {
@@ -117,7 +75,14 @@ export async function GET(request: NextRequest) {
   if (sort === 'price_asc') query = query.order('price_with_tax', { ascending: true })
   else if (sort === 'price_desc') query = query.order('price_with_tax', { ascending: false })
   else if (sort === 'newest') query = query.order('created_at', { ascending: false })
-  else query = query.order('name', { ascending: true })
+  else if (sort === 'name') query = query.order('name', { ascending: true })
+  // "Recomendados": el orden que fijan en Tienda Online → Orden en la web. Lo no
+  // colocado (NULL) va detrás, por nombre; con nada colocado es el A-Z de siempre.
+  // El id desempata para que la paginación no repita ni salte productos.
+  else query = query
+    .order('web_sort_order', { ascending: true, nullsFirst: false })
+    .order('name', { ascending: true })
+    .order('id', { ascending: true })
 
   query = query.range((page - 1) * limit, page * limit - 1)
 

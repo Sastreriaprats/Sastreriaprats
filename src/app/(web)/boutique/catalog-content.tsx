@@ -37,7 +37,8 @@ export function CatalogContent({
   const [isLoading, setIsLoading] = useState(!initialData)
   const skipFirstFetch = useRef(!!initialData)
   const [search, setSearch] = useState('')
-  const [sort, setSort] = useState('name')
+  // "Recomendados" = el orden de Tienda Online → Orden en la web (mig 296).
+  const [sort, setSort] = useState('featured')
   const [showSort, setShowSort] = useState(false)
   const [clientId, setClientId] = useState<string | null>(null)
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set())
@@ -128,6 +129,7 @@ export function CatalogContent({
     new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(price)
 
   const sortLabels: Record<string, string> = {
+    featured: 'Recomendados',
     name: 'Nombre A-Z',
     newest: 'Novedades',
     price_asc: 'Precio: menor a mayor',
