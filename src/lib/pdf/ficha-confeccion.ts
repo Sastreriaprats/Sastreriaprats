@@ -168,7 +168,7 @@ const LABELS_BOTONES: Record<string, string> = {
   '1fila_1': '1 Fila 1 botón',
   '1fila_2': '1 Fila 2 botones',
   '1fila_3para2': '1 Fila 3 para 2',
-  '2filas_6': '2 Filas 6 botones',
+  '2filas_6': '2 Filas 6 botones, 2 de adorno',
 }
 const LABELS_ABERTURAS: Record<string, string> = {
   '2aberturas': '2 Aberturas',
@@ -192,7 +192,7 @@ const LABELS_MANGA: Record<string, string> = {
   napolit: 'Manga napolitana',
   reborde: 'Manga reborde',
   sin_reborde: 'Manga sin reborde',
-  con_reborde: 'Con reborde',
+  con_reborde: 'Manga con reborde',
 }
 const LABELS_FORRO: Record<string, string> = {
   sin_forro: 'Sin forro',
@@ -218,6 +218,14 @@ const LABELS_PLIEGUES: Record<string, string> = {
   dos_pliegues: '2 pliegues',
   '1_pliegue': '1 pliegue',
   '2_pliegues': '2 pliegues',
+}
+
+/** Corte y bolsillo del chaleco: se imprimían con el código ("cartera", "vivo"). */
+const LABELS_CHALECO: Record<string, string> = {
+  recto: 'Recto',
+  cruzado: 'Cruzado',
+  cartera: 'Bols. cartera',
+  vivo: 'Bolsillo vivo',
 }
 
 function labelBotones(v: unknown): string {
@@ -305,7 +313,7 @@ function buildDescripcionAndConfig(config: Record<string, unknown>, garmentName?
     if (config.hTerminado) hombros.push(config.hTerminadoVal ? `H. terminado: ${config.hTerminadoVal}` : 'H. terminado')
     if (config.escote) hombros.push(config.escoteVal ? `escote: ${config.escoteVal}` : 'escote')
     if (config.sinHombreras) hombros.push('sin hombreras')
-    if (config.picado34) hombros.push('picado 3/4')
+    if (config.picado34) hombros.push('picado 3/4 todo')
     if (config.sinHombrera) hombros.push('sin hombrera')
     if (config.hombrerasTraseras) hombros.push('hombreras traseras')
     if (config.pocaHombrera) hombros.push('poca hombrera')
@@ -336,8 +344,14 @@ function buildDescripcionAndConfig(config: Record<string, unknown>, garmentName?
       partes.push(pl)
     }
     if (config.pVEnTrasero) partes.push('V en trasero')
-    if (config.pretina2Botones) partes.push('Pretina 2 botones')
-    if (config.pretinaCorrida) partes.push('Pretina corrida')
+    // Mismo texto que la opción que marca el sastre: la ficha recortaba
+    // "Pretina corrida a 13 y un pasador a 7 en pico" a "Pretina corrida" y
+    // perdía el tamaño de la de dos botones, que es lo que necesita el taller.
+    if (config.pretina2Botones) {
+      const tam = String(config.pretinaTamano ?? '').trim()
+      partes.push(`Pretina de dos botones en punta${tam ? ` de ${tam} cm` : ''}`)
+    }
+    if (config.pretinaCorrida) partes.push('Pretina corrida a 13 y un pasador a 7 en pico')
     if (config.pretinaReforzadaDelante) partes.push('Pretina reforzada por delante')
     if (config.pretinaReforzada) partes.push('Pretina reforzada')
     const bolsP: string[] = []
@@ -369,8 +383,8 @@ function buildDescripcionAndConfig(config: Record<string, unknown>, garmentName?
   }
 
   if (isChaleco) {
-    if (config.chalecoCorte) partes.push(config.chalecoCorte as string)
-    if (config.chalecoBolsillo) partes.push(config.chalecoBolsillo as string)
+    if (config.chalecoCorte) partes.push(LABELS_CHALECO[String(config.chalecoCorte).trim()] ?? String(config.chalecoCorte))
+    if (config.chalecoBolsillo) partes.push(LABELS_CHALECO[String(config.chalecoBolsillo).trim()] ?? String(config.chalecoBolsillo))
 
     // Configuración → separate field
     if (config.confF) confParts.push(`F ${config.confF}`)

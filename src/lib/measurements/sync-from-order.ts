@@ -14,7 +14,9 @@
  * se prueban en orden:
  *   1) match exacto por field.code
  *   2) versión camelCase del field.code (largo_manga → largoManga)
- *   3) fallbacks legacy conocidos (manga, frenPecho, contPecho, largo, …)
+ *   3) fallbacks legacy conocidos (manga, frenPecho, contPecho, largo, …),
+ *      SOLO en camisería: en una americana `manga` es el TIPO de manga
+ *      (con_reborde…) y pisaba el largo de manga del cliente.
  *
  * Las claves de OTRAS prendas en el registro 'body' se preservan (merge):
  * solo se actualiza el subset con prefijo de esta prenda.
@@ -64,11 +66,15 @@ interface MeasurementField {
 }
 
 /** Devuelve el primer valor no vacío de configuration entre las claves candidatas. */
-function pickValue(config: Record<string, unknown>, field: MeasurementField): unknown {
+function pickValue(config: Record<string, unknown>, field: MeasurementField, isCamiseria: boolean): unknown {
   const candidates = [
     field.code,
     snakeToCamel(field.code),
-    ...(FALLBACKS[field.code] ?? []),
+    // Los fallbacks son nombres antiguos de CAMISERÍA (mig.072). En sastrería
+    // `manga` es una opción de la prenda ("con_reborde") y `largo` no es el
+    // largo de cuerpo: aplicarlos a una americana escribía "con_reborde" en
+    // americana_largo_manga del cliente.
+    ...(isCamiseria ? (FALLBACKS[field.code] ?? []) : []),
   ]
   for (const k of candidates) {
     if (!(k in config)) continue
@@ -81,6 +87,9 @@ function pickValue(config: Record<string, unknown>, field: MeasurementField): un
       continue
     }
     if (typeof v === 'string' && v.trim() === '') continue
+    // Una medida numérica sin ningún dígito no es una medida ("con_reborde",
+    // "napolit"); sí se aceptan las anotaciones del sastre ("60/64", "+1 TOTAL").
+    if ((field.field_type === 'number' || field.field_type === 'decimal') && !/[0-9]/.test(String(v))) continue
     return v
   }
   return undefined
@@ -148,7 +157,7 @@ export async function syncOrderLineMeasurementsToClient(
     // 4. Extraer valores presentes en configuration
     const subValues: Record<string, string> = {}
     for (const field of fields as MeasurementField[]) {
-      const raw = pickValue(config, field)
+      const raw = pickValue(config, field, code === 'camiseria')
       if (raw === undefined) continue
       let value: string
       if (field.field_type === 'boolean') {
